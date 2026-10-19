@@ -2,12 +2,15 @@
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { createDoc as createAppDoc } from "./app-helpers.js";
-import { placeCaret, startHarness } from "./harness.js";
+import { authorizeBrowser, placeCaret, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 
 let started: Harness | null = null;
 
-test.beforeAll(async () => { started = await startHarness(); });
+test.beforeAll(async ({ browser }) => {
+  started = await startHarness();
+  await authorizeBrowser(browser);
+});
 test.afterAll(async () => {
   const running = started;
   started = null;

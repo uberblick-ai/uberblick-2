@@ -18,6 +18,7 @@ import {
   isDirectoryEntryDeleted,
   listDeletedDirectoryUuids,
   parseRoom,
+  parseWorkspaceId,
   roomForDoc,
   SETTINGS_SUFFIX,
 } from "@uberblick/schema";
@@ -27,9 +28,10 @@ import {
   SYNC_PROTOCOL_VERSION,
   wrapToken,
 } from "@uberblick/schema/protocol";
-import { HUB_CONFIG_PATH, hubAuthToken, hubUrl, resolveClientConfig } from "../config.js";
+import { HUB_CONFIG_PATH, hubAuthToken, hubUrl, resolveClientConfig, servedLocally } from "../config.js";
+import { localRoomToken } from "./local-session.js";
 import { getSetting, subscribeSettings } from "../settings.js";
-import { notifyTransient } from "../notifications.js";
+import { toast } from "sonner";
 import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "./token.js";
 import { WEB_CLIENT } from "./identity.js";
 import type { AwarenessUser } from "./identity.js";
@@ -219,26 +221,39 @@ async function signedAuthMessage(
       sub: subject,
       workspace,
       scope: "read-write",
-      // The served browser key or loopback secret signs directly; no kid.
+      // The loopback development secret signs directly; no kid.
       kid: null,
       lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
     }),
   );
 }
 
+/**
+ * A ub open page asks for a token with its session; direct loopback
+ * development signs its own. Null means this page holds no usable credential.
+ */
+async function authMessage(workspace: string, subject: string): Promise<string | null> {
+  const config = await resolveClientConfig();
+  if (config.servedWorkspaces !== undefined) {
+    if (!servedLocally(workspace)) return null;
+    const token = await localRoomToken(parseWorkspaceId(workspace).uuid, subject);
+    return token === null ? null : wrapToken(token);
+  }
+  const secret = hubAuthToken();
+  return secret === "" ? null : await signedAuthMessage(secret, workspace, subject);
+}
+
+const NO_CREDENTIAL =
+  `uberblick web: ${HUB_CONFIG_PATH} names no hubAuthToken and this page has no ub open session, so this client cannot authenticate`;
+
 /** Mint the protocol auth message shared by room and same-origin API requests. */
 export async function mintHubAuthMessage(
   workspace: string,
   subject: string,
 ): Promise<string> {
-  await resolveClientConfig();
-  const secret = hubAuthToken(workspace);
-  if (secret === "") {
-    throw new Error(
-      `uberblick web: ${HUB_CONFIG_PATH} carries no hubAuthToken, so this client cannot authenticate`,
-    );
-  }
-  return await signedAuthMessage(secret, workspace, subject);
+  const message = await authMessage(workspace, subject);
+  if (message === null) throw new Error(NO_CREDENTIAL);
+  return message;
 }
 
 /**
@@ -249,20 +264,17 @@ export async function mintHubAuthMessage(
 async function hubToken(room: string, identity: AwarenessUser): Promise<string> {
   const config = await resolveClientConfig();
   const workspace = parseRoom(room).workspaceId;
-  const secret = hubAuthToken(workspace);
-  setTokenMissing(workspace, secret === "");
-  if (secret === "") {
+  // Reconnects mint rather than replay tokens; both sources bound expiry.
+  const message = await authMessage(workspace, getSetting("presenceName") ?? identity.name);
+  setTokenMissing(workspace, message === null);
+  if (message === null) {
     // Hocuspocus resends tokens on open; force a bounded reconnect to retry
-    // missing config promptly. An exact local map with another usable key is
-    // settled: leave healthy workspaces on the shared socket uninterrupted.
-    if (config.servedWorkspaces === undefined ||
-      Object.values(config.servedWorkspaces).every((entry) => entry.browserKey === "")) dropSocket();
-    throw new Error(
-      `uberblick web: ${HUB_CONFIG_PATH} carries no hubAuthToken, so this client cannot authenticate`,
-    );
+    // missing config promptly. A ub open map is settled: leave healthy
+    // workspaces on the shared socket uninterrupted.
+    if (config.servedWorkspaces === undefined) dropSocket();
+    throw new Error(NO_CREDENTIAL);
   }
-  // signedAuthMessage bounds expiry; reconnects mint rather than replay tokens.
-  return await signedAuthMessage(secret, workspace, getSetting("presenceName") ?? identity.name);
+  return message;
 }
 
 export interface RoomStatus {
@@ -365,7 +377,7 @@ function settingsRefusalNotifier(uuid: string): (event: { payload: string }) => 
     if (notice === null || typeof notice !== "object" || !("type" in notice) ||
       notice.type !== "settings-reset" || !("message" in notice) || typeof notice.message !== "string") return;
     notified = true;
-    notifyTransient({ key: "workspace-settings-refused", message: notice.message, severity: "error" });
+    toast.error(notice.message, { id: "workspace-settings-refused" });
   };
 }
 

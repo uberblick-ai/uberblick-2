@@ -31,6 +31,16 @@ async function rig() {
 afterEach(async () => { vi.restoreAllMocks(); await cleanUp(); });
 
 describe("ub open: account projection", () => {
+  it("shows an expired device login as signed out without contacting the hub", async () => {
+    const { box, stored, binding } = await rig();
+    stored.credential.record.issuedAt = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    await writeHubLogin(ORIGIN, stored, box.env);
+    const fetch = vi.spyOn(globalThis, "fetch");
+    expect(requestDeviceLogin(binding)).toEqual({ state: "signed-out" });
+    expect(await requestAccount(binding, () => null, new AbortController().signal)).toEqual({ state: "signed-out" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("shows an old HMAC login as signed out without contacting the hub", async () => {
     const { box, binding } = await rig();
     const old = login();

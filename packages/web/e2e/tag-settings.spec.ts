@@ -134,7 +134,7 @@ test("Tags settings is address-selected and its catalog changes converge", async
   await expect(first.getByRole("button", { name: "Retire product" })).toBeFocused();
 
   await first
-    .getByRole("navigation", { name: "Settings" })
+    .getByRole("navigation", { name: "Workspace settings" })
     .getByRole("button", { name: "General" })
     .click();
   await expect(first).toHaveURL(
@@ -237,7 +237,7 @@ test("settings successes use shared notices and preserve native submission focus
   }
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Tags", exact: true }).click();
+  await page.getByRole("navigation", { name: "Workspace settings" }).getByRole("button", { name: "Tags", exact: true }).click();
   const field = page.getByLabel("Create a tag");
   const create = page.getByRole("button", { name: "Create", exact: true });
   const tag = `notice-${appearance}-${randomUUID().slice(0, 8)}`;
@@ -250,9 +250,8 @@ test("settings successes use shared notices and preserve native submission focus
   await expectSuccess(page, `Created “${tag}-two”.`);
   await expectSubmissionFocusRetained(page);
 
-  // With the preceding success dismissed, neither validation failure adds
+  // With the preceding success expired, neither validation failure adds
   // a notice. Field edits clear alerts; later lifecycle success does too.
-  await successNotice(page, `Created “${tag}-two”.`).locator("[data-close-button]").click();
   await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
   await field.fill("Invalid Name");
   await field.press("Enter");

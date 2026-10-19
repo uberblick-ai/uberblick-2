@@ -1,13 +1,16 @@
 import { credentialPrivateKey, deviceFetch as fetch } from "./device-credentials.js";
 import { issueCredential, mintDeviceRequestProof as mintRequestProof, renewCredential, type TestCredential as IssuedCredential } from "./device-credentials.js";
 import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as Y from "yjs";
+import { MANAGEMENT_OPERATIONS } from "../src/access-management.js";
 import { CredentialRegistry, type CredentialRenewal } from "../src/credentials.js";
 import type { HubLogRecord } from "../src/log.js";
 import type { MembershipRole } from "../src/memberships.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
-import { importCredentialKey, importRootSecret, mintToken, type RequestAction } from "@uberblick/schema/token";
+import { DEVICE_CREDENTIAL_LIFETIME_MS, importCredentialKey, importRootSecret, mintToken, readRequestAction, type RequestAction } from "@uberblick/schema/token";
 import { createClient, OTHER_WORKSPACE, removeTempDatabases, tempDatabasePath, TEST_SECRET, testRoom,
   type TestClient, token, waitForText, waitUntil, WORKSPACE } from "./helpers.js";
 
@@ -21,14 +24,14 @@ afterEach(async () => {
   removeTempDatabases();
 });
 
-async function rig(options: { loopback?: boolean; github?: boolean; githubFetch?: typeof fetch; githubNow?: () => number } = {}) {
+async function rig(options: { loopback?: boolean; github?: boolean; githubFetch?: typeof fetch; githubNow?: () => number; hubVersion?: string } = {}) {
   const logs: HubLogRecord[] = [];
   const github = vi.fn<typeof fetch>(options.githubFetch ?? (async () => { throw new Error("GitHub is unreachable"); }));
   const hub = await createHub({ address: options.loopback ? "127.0.0.1" : "0.0.0.0", port: 0,
     databasePath: tempDatabasePath(), authSecret: TEST_SECRET, log: record => logs.push(record),
     ...(options.github === false ? {} : { github: { clientId: "Iv1.0123456789abcdef", fetch: github,
       ...(options.githubNow === undefined ? {} : { now: options.githubNow }) } }),
-  });
+  }, options.hubVersion === undefined ? {} : { hubVersion: options.hubVersion });
   hubs.push(hub);
   return { hub, logs, github };
 }
@@ -81,7 +84,132 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function expireCredential(hub: Hub, credential: IssuedCredential): void {
+  const db = new DatabaseSync(hub.databasePath);
+  try {
+    db.prepare("UPDATE hub_credentials SET issued_at = ? WHERE id = ?")
+      .run(Date.now() - DEVICE_CREDENTIAL_LIFETIME_MS, credential.record.id);
+  } finally {
+    db.close();
+  }
+}
+
 describe("authenticated hub access management", () => {
+  it.each([undefined, "0.4.7"])("includes the optional release identity in signed-in device lists (%s)", async hubVersion => {
+    const { hub } = await rig(hubVersion === undefined ? {} : { hubVersion });
+    const owner = person(hub, "1234", "owner");
+    expect(await manage(hub, owner.issued, { operation: "list-devices" })).toEqual({ code: 200, result: {
+      status: "ok", ...(hubVersion === undefined ? {} : { hubVersion }), devices: [{
+        deviceId: owner.issued.record.deviceId, signedInAt: owner.issued.record.issuedAt, workspaces: [], current: true,
+      }],
+    } });
+  });
+
+  it("omits release identity from refusals and other successful management replies", async () => {
+    const { hub } = await rig({ hubVersion: "0.4.7" });
+    const owner = person(hub, "1234", "owner", [[WORKSPACE, "member"]]);
+    expect(await manage(hub, owner.issued, { operation: "own-role", workspaceId: WORKSPACE }))
+      .toEqual({ code: 200, result: { status: "ok", role: "member" } });
+    const action = { operation: "list-devices" } as const;
+    expect(await post(hub, {})).toEqual({ code: 400, result: { status: "invalid-request" } });
+    expect(await post(hub, envelope("not-a-device-proof", action)))
+      .toEqual({ code: 401, result: { status: "sign-in-required" } });
+    expect(await post(hub, envelope(await proof(owner.issued, action), action, SYNC_PROTOCOL_VERSION + 1)))
+      .toEqual({ code: 409, result: { status: "protocol-mismatch", reason: `protocol-mismatch:${SYNC_PROTOCOL_VERSION}` } });
+    hub.credentials!.revoke(owner.issued.record.id);
+    expect(await manage(hub, owner.issued, action)).toEqual({ code: 401, result: { status: "sign-in-required" } });
+
+    const unconfigured = await rig({ github: false, hubVersion: "0.4.7" });
+    expect(await post(unconfigured.hub, envelope("not-a-device-proof", action)))
+      .toEqual({ code: 503, result: { status: "not-configured" } });
+  });
+
+  it.each(Object.entries(MANAGEMENT_OPERATIONS).filter(([, declaration]) =>
+    declaration.target.some(field => field === "workspaceId")))
+  ("refuses cross-workspace %s identically while active and suspended without changing the target", async (operation, declaration) => {
+    const { hub, github } = await rig();
+    const actor = person(hub, "1201", "workspace-a-admin", [[WORKSPACE, "admin"]]);
+    const owner = person(hub, "1202", "hub-admin");
+    hub.hubAdmins!.grant(owner.principal.id);
+    expect(await manage(hub, owner.issued, { operation: "promote-workspace", workspaceId: OTHER_WORKSPACE, attemptId: randomUUID() }))
+      .toMatchObject({ code: 200, result: { status: "created" } });
+    const target = person(hub, "1203", "workspace-b-member", [[OTHER_WORKSPACE, "member"]]);
+    const values = { workspaceId: OTHER_WORKSPACE, attemptId: randomUUID(), principalId: target.principal.id,
+      deviceId: target.issued.record.deviceId, githubUsername: "new-account", githubAccountId: "5678" };
+    const fields = { operation, ...Object.fromEntries(declaration.target.map(field => [field, values[field]])) };
+    const action = readRequestAction({ ...fields, role: "member" }) ?? readRequestAction(fields);
+    if (action === null || action.operation === "renew-credential") throw new Error(`Missing valid fixture for ${operation}`);
+    const document = new Y.Doc();
+    document.getText("content").insert(0, "workspace B document");
+    const db = new DatabaseSync(hub.databasePath);
+    try {
+      db.prepare("INSERT INTO documents (name, data) VALUES (?, ?)").run(testRoom(OTHER_WORKSPACE), Y.encodeStateAsUpdate(document));
+      const snapshot = () => ({
+        memberships: db.prepare("SELECT * FROM hub_memberships WHERE workspace_id = ? ORDER BY principal_id").all(OTHER_WORKSPACE),
+        suspensions: db.prepare("SELECT * FROM hub_workspace_suspensions WHERE workspace_id = ?").all(OTHER_WORKSPACE),
+        promotions: db.prepare("SELECT * FROM hub_workspace_promotions WHERE workspace_id = ?").all(OTHER_WORKSPACE),
+        documents: db.prepare("SELECT name, hex(data) AS data FROM documents WHERE substr(name, 1, ?) = ? ORDER BY name")
+          .all(OTHER_WORKSPACE.length + 1, `${OTHER_WORKSPACE}/`),
+        credential: hub.credentials!.get(target.issued.record.id),
+      });
+      let activeAnswer: Awaited<ReturnType<typeof manage>> | undefined;
+      for (const status of ["active", "suspended"] as const) {
+        hub.hubAdmins!.setWorkspaceStatus(owner.principal.id, OTHER_WORKSPACE, status);
+        const before = snapshot();
+        const answer = await manage(hub, actor.issued, action);
+        expect(answer.code).toBe(403);
+        expect(snapshot()).toEqual(before);
+        if (activeAnswer === undefined) activeAnswer = answer;
+        else expect(answer).toEqual(activeAnswer);
+      }
+    } finally {
+      db.close();
+      document.destroy();
+    }
+    expect(github).not.toHaveBeenCalled();
+  });
+
+  it("replies with a refusal when a parsed operation has no declaration", async () => {
+    const { hub } = await rig();
+    const owner = person(hub, "1234", "owner");
+    const declaration = MANAGEMENT_OPERATIONS["list-devices"];
+    Reflect.deleteProperty(MANAGEMENT_OPERATIONS, "list-devices");
+    try {
+      expect(await manage(hub, owner.issued, { operation: "list-devices" }))
+        .toEqual({ code: 400, result: { status: "invalid-request" } });
+    } finally {
+      Object.defineProperty(MANAGEMENT_OPERATIONS, "list-devices", { value: declaration, enumerable: true, configurable: true, writable: true });
+    }
+  });
+
+  it("refuses expired device credentials for every management operation and omits them from device lists", async () => {
+    const { hub, github } = await rig();
+    const owner = person(hub, "1234", "owner", [[WORKSPACE, "admin"]]);
+    hub.hubAdmins!.grant(owner.principal.id);
+    const current = issueCredential(hub.credentials!, { principalId: owner.principal.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
+    expireCredential(hub, owner.issued);
+    const actions: Action[] = [
+      { operation: "list-devices" }, { operation: "revoke-device", deviceId: current.record.deviceId },
+      { operation: "own-role", workspaceId: WORKSPACE }, { operation: "list-members", workspaceId: WORKSPACE },
+      { operation: "change-role", workspaceId: WORKSPACE, principalId: owner.principal.id, role: "member" },
+      { operation: "remove-member", workspaceId: WORKSPACE, principalId: owner.principal.id },
+      { operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "new-account" },
+      { operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "5678" },
+      { operation: "promote-workspace", workspaceId: OTHER_WORKSPACE, attemptId: randomUUID() },
+      { operation: "own-hub-role" }, { operation: "list-hub-admins" }, { operation: "list-hub-workspaces" },
+      { operation: "remove-hub-admin", principalId: owner.principal.id },
+      { operation: "suspend-workspace", workspaceId: WORKSPACE }, { operation: "restore-workspace", workspaceId: WORKSPACE },
+    ];
+    for (const action of actions) {
+      expect(await manage(hub, owner.issued, action)).toEqual({ code: 401, result: { status: "sign-in-required" } });
+    }
+    expect(await manage(hub, current, { operation: "list-devices" })).toMatchObject({ code: 200, result: {
+      status: "ok", devices: [{ deviceId: current.record.deviceId, current: true }],
+    } });
+    expect(hub.credentials!.get(owner.issued.record.id)?.revokedAt).toBeNull();
+    expect(github).not.toHaveBeenCalled();
+  });
+
   it("accepts a device collected through public GitHub sign-in using the same principal and membership registries", async () => {
     let githubTime = Date.now();
     const githubFetch: typeof fetch = async input => {
@@ -360,7 +488,7 @@ describe("authenticated hub access management", () => {
   });
 
   // One change per mechanism: credential state, membership and the clock.
-  it.each(["revoke", "demote", "expire"] as const)("rechecks %s after asynchronous proof verification before acting", async change => {
+  it.each(["revoke", "demote", "expire", "credential expiry"] as const)("rechecks %s after asynchronous proof verification before acting", async change => {
     const { hub } = await rig();
     const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
     const backup = person(hub, "5678", "backup-admin", [[WORKSPACE, "admin"]]);
@@ -374,6 +502,7 @@ describe("authenticated hub access management", () => {
       if (change === "demote") hub.memberships!.changeRole({ workspaceId: WORKSPACE,
         principalId: admin.principal.id, actorPrincipalId: backup.principal.id, role: "member" });
       if (change === "expire") vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
+      if (change === "credential expiry") expireCredential(hub, admin.issued);
       return verified;
     });
     expect(await post(hub, envelope(presented, action))).toEqual(change === "demote"
@@ -420,6 +549,17 @@ describe("authenticated hub access management", () => {
       .toEqual({ code: 500, result: { status: "closure-failed", applied: true } });
     expect(hub.credentials!.get(member.issued.record.id)?.revokedAt).toBeTypeOf("number");
     await expect(connect(hub, testRoom(), await roomToken(member.issued)).denied).resolves.toBe("device-credential-refused");
+  });
+
+  it("keeps a committed role change's fencing failure distinct from access-ending closure failures", async () => {
+    const { hub } = await rig();
+    const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
+    const member = person(hub, "5678", "member", [[WORKSPACE, "member"]]);
+    hub.memberships!.onRoleChange(() => { throw new Error("post-commit fencing failure"); });
+    expect(await manage(hub, admin.issued, { operation: "change-role", workspaceId: WORKSPACE,
+      principalId: member.principal.id, role: "admin" }))
+      .toEqual({ code: 500, result: { status: "failed" } });
+    expect(hub.memberships!.roleFor(WORKSPACE, member.principal.id)).toBe("admin");
   });
 
   it.each(["revoke-device", "remove-member"] as const)("%s closes and fences exactly its remote live authority while local data and unrelated access survive", async operation => {
@@ -820,7 +960,7 @@ describe("direct GitHub account grants", () => {
   });
 
   describe.each(["resolve-account", "grant-member"] as const)("%s lookup authority", operation => {
-    it.each(["demote", "remove", "revoke", "replace", "expire"] as const)("rechecks %s after the provider await before any write", async change => {
+    it.each(["demote", "remove", "revoke", "replace", "expire", "credential expiry"] as const)("rechecks %s after the provider await before any write", async change => {
       const release = deferred<Response>();
       const { hub, github } = await rig({ githubFetch: () => release.promise });
       const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
@@ -844,6 +984,7 @@ describe("direct GitHub account grants", () => {
           expect((await renewCredential(hub.credentials!, renewal, hub.memberships!)).status).toBe("renewed");
         }
         if (change === "expire") vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
+        if (change === "credential expiry") expireCredential(hub, admin.issued);
       } finally {
         release.resolve(Response.json({ id: 9012, login: "new-account", type: "User" }));
         await request;
@@ -1092,10 +1233,13 @@ describe("workspace promotion authority", () => {
     expect(await manage(hub, owner.issued, { operation: "suspend-workspace", workspaceId: action.workspaceId }))
       .toMatchObject({ code: 200, result: { workspaceStatus: "suspended" } });
     hub.hubAdmins!.remove(owner.principal.id, actor.principal.id);
-    for (const attemptId of [action.attemptId, randomUUID()]) {
-      expect(await manage(hub, actor.issued, { ...action, attemptId })).toEqual({ code: 409,
-        result: { status: "workspace-suspended", workspaceId: action.workspaceId, attemptId } });
-    }
+    expect(await manage(hub, actor.issued, action)).toEqual({ code: 409,
+      result: { status: "workspace-suspended", workspaceId: action.workspaceId, attemptId: action.attemptId } });
+    const freshAttempt = { ...action, attemptId: randomUUID() };
+    expect(await manage(hub, actor.issued, freshAttempt)).toEqual({ code: 403,
+      result: { status: "hub-admin-required", workspaceId: action.workspaceId, attemptId: freshAttempt.attemptId } });
+    expect(await manage(hub, owner.issued, freshAttempt)).toEqual({ code: 409,
+      result: { status: "workspace-suspended", workspaceId: action.workspaceId, attemptId: freshAttempt.attemptId } });
     expect(hub.memberships!.roleFor(action.workspaceId, actor.principal.id)).toBe("admin");
     expect(await manage(hub, owner.issued, { operation: "restore-workspace", workspaceId: action.workspaceId }))
       .toMatchObject({ code: 200, result: { workspaceStatus: "active" } });

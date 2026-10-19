@@ -1,5 +1,67 @@
 import { expect, it } from "vitest";
-import { authenticationOrigin, assertHubTransport, hubTransportProblem, isLoopbackEndpoint, normalizeRemoteUrl } from "../src/remote-url.js";
+import { authenticationOrigin, assertHubTransport, hubIdentity, hubTransportProblem, isLoopbackEndpoint, normalizeRemoteUrl } from "../src/remote-url.js";
+
+it.each([
+  ["ws://LOCALHOST:4444/ws", "ws://localhost:4444/ws"],
+  ["WS://localhost:4444/ws", "ws://localhost:4444/ws"],
+  ["wss://hub.example:443/ws", "wss://hub.example/ws"],
+  ["ws://hub.example:80/ws", "ws://hub.example/ws"],
+  ["wss://hub.example", "wss://hub.example/"],
+  ["ws://127.1:4444/ws", "ws://127.0.0.1:4444/ws"],
+  ["ws://[0:0:0:0:0:0:0:1]:4444/ws", "ws://[::1]:4444/ws"],
+  ["wss://hub.example/a/../ws", "wss://hub.example/ws"],
+  ["wss://hub.example/%2e/ws", "wss://hub.example/ws"],
+])("shares one hub identity for %s and %s while preserving their explicit spelling", (left, right) => {
+  expect(hubIdentity(left)).toBe(hubIdentity(right));
+  expect(normalizeRemoteUrl(left)).toBe(left);
+  expect(normalizeRemoteUrl(right)).toBe(right);
+});
+
+it.each([
+  ["wss://hub.example/ws/", "wss://hub.example/ws"],
+  ["wss://hub.example/WS", "wss://hub.example/ws"],
+  ["wss://hub.example/w%73", "wss://hub.example/ws"],
+  ["wss://hub.example/w%7a", "wss://hub.example/w%7A"],
+  ["wss://hub.example.", "wss://hub.example"],
+  ["ws://localhost:4444/ws", "ws://127.0.0.1:4444/ws"],
+  ["ws://localhost:4444/ws", "ws://[::1]:4444/ws"],
+  ["ws://127.0.0.1:4444/ws", "ws://[::1]:4444/ws"],
+  ["ws://hub.example/ws", "wss://hub.example/ws"],
+  ["wss://hub.example:4444/ws", "wss://hub.example/ws"],
+])("keeps distinct handshake targets separate: %s and %s", (left, right) => {
+  expect(hubIdentity(left)).not.toBe(hubIdentity(right));
+});
+
+it.each([
+  ["Hub.Example:443", "wss://hub.example/ws"],
+  ["https://HUB.EXAMPLE:443", "wss://hub.example/ws"],
+  ["http://HUB.EXAMPLE:80/custom", "ws://hub.example/custom"],
+])("identifies an invented endpoint after normalization: %s", (endpoint, identity) => {
+  expect(hubIdentity(endpoint)).toBe(identity);
+});
+
+it.each([
+  ["Hub.Example:443", "https://hub.example"],
+  ["https://HUB.EXAMPLE:443", "https://hub.example"],
+  ["http://HUB.EXAMPLE:80/custom", "http://hub.example"],
+  ["WS://LOCALHOST:4444/ws", "http://localhost:4444"],
+  ["wss://Hub.Example:443/ws", "https://hub.example"],
+  ["ws://hub.example:80/ws", "http://hub.example"],
+  ["ws://hub.example:443/ws", "http://hub.example:443"],
+  ["wss://hub.example:80/ws", "https://hub.example:80"],
+  ["wss://hub.example:4444/ws", "https://hub.example:4444"],
+  ["wss://hub.example", "https://hub.example"],
+  ["wss://hub.example/", "https://hub.example"],
+  ["wss://hub.example/WS", "https://hub.example"],
+  ["wss://hub.example/w%73", "https://hub.example"],
+  ["wss://hub.example/%2e/ws", "https://hub.example"],
+  ["wss://hub.example.", "https://hub.example."],
+  ["ws://127.1:4444/ws", "http://127.0.0.1:4444"],
+  ["ws://[0:0:0:0:0:0:0:1]:4444/ws", "http://[::1]:4444"],
+  ["ws://localhost:4444/ws", "http://localhost:4444"],
+])("preserves the login origin for %s", (endpoint, origin) => {
+  expect(authenticationOrigin(endpoint)).toBe(origin);
+});
 
 it("uses endpoint host only and never treats wildcards as local", () => {
   expect(isLoopbackEndpoint("ws://127.4.3.2:1234/ws")).toBe(true);

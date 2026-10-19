@@ -11,6 +11,7 @@ import {
   type RequestProofClaims,
   type TokenClaims,
   type TokenFailure,
+  DEVICE_CREDENTIAL_LIFETIME_MS,
   clampToken,
   importCredentialPublicKey,
   inspectToken,
@@ -62,7 +63,8 @@ export type CredentialFailure =
   | "root-key"
   | "unknown-credential"
   | "revoked-credential"
-  | "replaced-credential";
+  | "replaced-credential"
+  | "expired-credential";
 
 export type CredentialVerification =
   | { record: CredentialRecord; claims: TokenClaims }
@@ -120,7 +122,7 @@ export class CredentialRegistry {
   private readonly revokeListeners = new Set<(credentialId: string) => void>();
 
   constructor(database: HubDatabase, private readonly hubAdmins = new HubAdminRegistry(database),
-    private readonly log: HubLogger = stderrLogger) {
+    private readonly log: HubLogger = stderrLogger, private readonly now: () => number = () => Date.now()) {
     const db = database.connection;
     this.db = db;
     revokeHmacCredentials(db);
@@ -135,7 +137,7 @@ export class CredentialRegistry {
       ON CONFLICT(proof) DO NOTHING
     `);
     this.deleteExpiredProofs = db.prepare("DELETE FROM hub_used_request_proofs WHERE expires_at < $now");
-    this.deleteExpiredProofs.run({ now: Math.floor(Date.now() / 1000) });
+    this.deleteExpiredProofs.run({ now: Math.floor(this.now() / 1000) });
     // CREATE IF NOT EXISTS leaves existing tables unchanged. Add nullable
     // columns without changing existing rows' issued/revoked meaning.
     if (!db.prepare("PRAGMA table_info(hub_credentials)").all()
@@ -179,6 +181,7 @@ export class CredentialRegistry {
       FROM hub_credentials AS current
       WHERE current.principal_id = $principalId
         AND current.revoked_at IS NULL AND current.replaced_at IS NULL
+        AND current.issued_at > $oldestIssuedAt
       ORDER BY current.device_id
     `);
     this.selectDeviceCredentials = db.prepare(`
@@ -213,7 +216,7 @@ export class CredentialRegistry {
       principalId: request.principalId,
       deviceId: request.deviceId,
       workspaces: this.hubAdmins.availableWorkspaces([...new Set(request.workspaces)]).sort(),
-      issuedAt: Date.now(),
+      issuedAt: this.now(),
       revokedAt: null,
       replacedAt: null,
     };
@@ -235,9 +238,17 @@ export class CredentialRegistry {
     return row === undefined ? null : recordFromRow(row);
   }
 
+  remainingLifetime(record: CredentialRecord): number {
+    return record.issuedAt + DEVICE_CREDENTIAL_LIFETIME_MS - this.now();
+  }
+
+  isExpired(record: CredentialRecord): boolean {
+    return this.remainingLifetime(record) <= 0;
+  }
+
   /** Principal-level management; only devices with a current credential exist here. */
   listDevices(principalId: string): DeviceRecord[] {
-    return this.selectDevices.all({ principalId }).map((row) => {
+    return this.selectDevices.all({ principalId, oldestIssuedAt: this.now() - DEVICE_CREDENTIAL_LIFETIME_MS }).map((row) => {
       const deviceName = sanitizeDeviceName(row.device_name);
       return {
         deviceId: row.device_id as string,
@@ -260,11 +271,11 @@ export class CredentialRegistry {
     const proof = await inspectRequestProof(
       await importCredentialPublicKey(row.public_key), token, request,
     );
-    if ("failure" in proof || clampToken(proof, Math.floor(Date.now() / 1000)) !== null) {
+    if ("failure" in proof || clampToken(proof, Math.floor(this.now() / 1000)) !== null) {
       return null;
     }
     const current = this.get(proof.kid);
-    if (current === null || current.revokedAt !== null || current.replacedAt !== null ||
+    if (current === null || current.revokedAt !== null || current.replacedAt !== null || this.isExpired(current) ||
       !this.consumeProof(token, proof)) return null;
     return { record: current, claims: proof };
   }
@@ -272,7 +283,7 @@ export class CredentialRegistry {
   private consumeProof(token: string, proof: RequestProofClaims): boolean {
     // Expiry itself is still admissible. Cleanup and the unique insert never
     // yield, so another request cannot consume the same proof between them.
-    this.deleteExpiredProofs.run({ now: Math.floor(Date.now() / 1000) });
+    this.deleteExpiredProofs.run({ now: Math.floor(this.now() / 1000) });
     switch (proof.operation) {
       case "own-role":
       case "list-members":
@@ -295,6 +306,7 @@ export class CredentialRegistry {
     if (record === null) return { failure: "unknown-credential" };
     if (record.revokedAt !== null) return { failure: "revoked-credential" };
     if (record.replacedAt !== null) return { failure: "replaced-credential" };
+    if (this.isExpired(record)) return { failure: "expired-credential" };
     const row = this.selectKey.get({ id: record.id });
     const keyBytes = row?.public_key;
     if (!(keyBytes instanceof Uint8Array)) {
@@ -302,7 +314,7 @@ export class CredentialRegistry {
     }
     const inspected = await inspectToken(await importCredentialPublicKey(keyBytes), token);
     if ("failure" in inspected) return { failure: inspected.failure };
-    const clampFailure = clampToken(inspected, Math.floor(Date.now() / 1000));
+    const clampFailure = clampToken(inspected, Math.floor(this.now() / 1000));
     if (clampFailure !== null) return { failure: clampFailure };
     // Both key import and signature verification yield. A revoke in either
     // interval must win over a signature that was already being checked.
@@ -310,6 +322,7 @@ export class CredentialRegistry {
     if (current === null) return { failure: "unknown-credential" };
     if (current.revokedAt !== null) return { failure: "revoked-credential" };
     if (current.replacedAt !== null) return { failure: "replaced-credential" };
+    if (this.isExpired(current)) return { failure: "expired-credential" };
     return { record: current, claims: inspected };
   }
 
@@ -326,7 +339,7 @@ export class CredentialRegistry {
     const proof = await inspectRequestProof(
       await importCredentialPublicKey(row.public_key), token, { operation: "renew-credential", publicKey: options.publicKey },
     );
-    if ("failure" in proof || clampToken(proof, Math.floor(Date.now() / 1000)) !== null) {
+    if ("failure" in proof || clampToken(proof, Math.floor(this.now() / 1000)) !== null) {
       return refusal;
     }
 
@@ -345,10 +358,14 @@ export class CredentialRegistry {
       if (current.replacedAt !== null) {
         const ids = this.selectDeviceCredentials.all({ principalId: current.principalId, deviceId: current.deviceId })
           .map((credential) => credential.id as string);
-        this.markDeviceRevoked.run({ principalId: current.principalId, deviceId: current.deviceId, revokedAt: Date.now() });
+        this.markDeviceRevoked.run({ principalId: current.principalId, deviceId: current.deviceId, revokedAt: this.now() });
         this.db.exec("COMMIT");
         exchanged = { reused: current, ids };
       } else {
+        if (this.isExpired(current)) {
+          this.db.exec("ROLLBACK");
+          return refusal;
+        }
         const workspaces = this.hubAdmins.availableWorkspaces(memberships.workspacesFor(current.principalId)).sort();
         if (options.ifWorkspacesChanged === true &&
           workspaces.length === current.workspaces.length &&
@@ -363,7 +380,7 @@ export class CredentialRegistry {
           ...(deviceName === undefined ? {} : { deviceName }),
           publicKey: Buffer.from(options.publicKey, "base64url"),
           workspaces });
-        this.markReplaced.run({ id: current.id, replacedAt: Date.now() });
+        this.markReplaced.run({ id: current.id, replacedAt: this.now() });
         this.db.exec("COMMIT");
         exchanged = { issued };
       }
@@ -405,7 +422,7 @@ export class CredentialRegistry {
    * the credential durably revoked rather than pretending to roll it back.
    */
   revoke(id: string): boolean {
-    const result = this.markRevoked.run({ id, revokedAt: Date.now() });
+    const result = this.markRevoked.run({ id, revokedAt: this.now() });
     const changed = result.changes !== 0;
     // A previous listener failure left the row revoked. Retrying must still
     // fence every connection before it can report success to its caller.
@@ -429,7 +446,7 @@ export class CredentialRegistry {
         this.db.exec("ROLLBACK");
         return false;
       }
-      this.markDeviceRevoked.run({ principalId, deviceId, revokedAt: Date.now() });
+      this.markDeviceRevoked.run({ principalId, deviceId, revokedAt: this.now() });
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");

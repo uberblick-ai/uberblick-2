@@ -15,6 +15,7 @@ import {
   getDirectoryEntry,
   getDirectoryMap,
   getMeta,
+  isCodeCheckOnlyTransaction,
   isDocId,
   readSyncedDocId,
   isProseBlockType,
@@ -454,7 +455,7 @@ export class Replicas {
 
     // Observe before replay so live updates during hydration are still logged.
     // LOG_ORIGIN avoids logging an already durable update twice.
-    doc.on("update", (payload: Uint8Array, origin: unknown) => {
+    doc.on("update", (payload: Uint8Array, origin: unknown, _doc: Y.Doc, transaction: Y.Transaction) => {
       if (origin === LOG_ORIGIN) {
         return;
       }
@@ -499,7 +500,8 @@ export class Replicas {
         log.warn("failed to catch up before indexing a document change", error);
         return;
       }
-      this.afterChange(replica, kind === "local");
+      // Checks refresh the stub cache without consuming an authored edit window.
+      this.afterChange(replica, kind === "local" && !isCodeCheckOnlyTransaction(transaction));
     });
 
     this.replicas.set(room, replica);

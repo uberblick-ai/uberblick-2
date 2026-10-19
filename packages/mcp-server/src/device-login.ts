@@ -8,12 +8,13 @@ import { SYNC_PROTOCOL_VERSION, isProtocolVersion, protocolSkew, readProtocolMis
 import { authenticationOrigin, hubTransportProblem } from "./remote-url.js";
 import { publishOwnerOnly } from "./safe-write.js";
 import { credentialsPath } from "./storage.js";
-import { generateCredentialKeyPair, importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS } from "@uberblick/schema/token";
+import { DEVICE_CREDENTIAL_LIFETIME_MS, generateCredentialKeyPair, importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS } from "@uberblick/schema/token";
 
 const REQUEST_MS = 10_000;
 const MAX_RESPONSE_BYTES = 65_536;
 /** Retryable outcomes are shared by rooms and processes for this long. */
 export const DEVICE_RENEWAL_COOLDOWN_MS = 30_000;
+export const DEVICE_CREDENTIAL_RENEWAL_AGE_MS = DEVICE_CREDENTIAL_LIFETIME_MS / 2;
 
 type FailureStatus = "sign-in-required" | "credential-store-refused" | "credential-store-unreadable"
   | "no-access" | "hub-down" | "renewal-unavailable" | "update-required";
@@ -64,7 +65,8 @@ export function readDeviceLogin(endpoint: string, _workspace: string, env: NodeJ
       fix: store.fix ?? `repair ${store.path}, then run ub auth login ${origin}` };
   }
   const login = store.logins[origin];
-  return login === undefined ? signIn(origin) : { status: "ready", origin, login };
+  return login === undefined || Date.now() - login.credential.record.issuedAt >= DEVICE_CREDENTIAL_LIFETIME_MS
+    ? signIn(origin) : { status: "ready", origin, login };
 }
 
 function sameCredential(a: StoredHubLogin, b: StoredHubLogin): boolean {
@@ -215,7 +217,8 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
   let current = readDeviceLogin(endpoint, workspace, env);
   if (current.status !== "ready") return current;
   const origin = current.origin;
-  const needsRenewal = (login: StoredHubLogin) => !login.credential.record.workspaces.includes(workspace) ||
+  const oldEnough = (login: StoredHubLogin) => Date.now() - login.credential.record.issuedAt >= DEVICE_CREDENTIAL_RENEWAL_AGE_MS;
+  const needsRenewal = (login: StoredHubLogin) => oldEnough(login) || !login.credential.record.workspaces.includes(workspace) ||
     (options.rejected !== undefined && sameCredential(login, options.rejected));
   if (!needsRenewal(current.login)) return current;
   const path = paths(origin, env);
@@ -236,6 +239,7 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
     const recorded = readOutcome(path.outcome);
     const cached = recorded?.fingerprint === fingerprint(current.login) ? recorded : null;
     if (cached !== null && cached.retryAt > Date.now() &&
+        !(cached.status === "renewed" && oldEnough(current.login)) &&
         !(options.membershipGranted && !current.login.credential.record.workspaces.includes(workspace))) {
       // Reuse replacements for old connections; cool down a new credential's
       // refusal to avoid repeatedly retiring other processes' working keys.
@@ -245,7 +249,7 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
     }
     const expected = current.login;
     const result = await renew(origin, expected,
-      !expected.credential.record.workspaces.includes(workspace) &&
+      !oldEnough(expected) && !expected.credential.record.workspaces.includes(workspace) &&
       (options.rejected === undefined || !sameCredential(expected, options.rejected)), options.signal);
     if (typeof result === "object" && "identity" in result) {
       try {

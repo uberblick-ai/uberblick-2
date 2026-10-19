@@ -70,12 +70,12 @@ describe("token auth", () => {
 
   it("rejects a room name that is not <workspace>/<uuid>", async () => {
     const rejected = client("bare-room-name", await token("read-write"));
-    await expect(rejected.denied).resolves.toBe("workspace-mismatch");
+    await expect(rejected.denied).resolves.toBe("room-name-invalid");
 
     // A slug-decorated spelling names no room either: the identity is the
     // uuid, and the token claim the hub compares against carries only that.
     const decorated = client(`uberblick-${testRoom()}`, await token("read-write"));
-    await expect(decorated.denied).resolves.toBe("workspace-mismatch");
+    await expect(decorated.denied).resolves.toBe("room-name-invalid");
   });
 
   it("rejects a token passed in the URL query string", async () => {

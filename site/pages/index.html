@@ -1,22 +1,30 @@
 <head>
-<title>Uberblick: local-first documents for people and agents</title>
-<meta name="description" content="A workspace for the plans, research and decisions behind your software. You write in a browser; your coding agent reads and edits the same documents over MCP.">
+<title>Uberblick · Local-first documents for people and agents</title>
+<meta name="description" content="A local-first workspace for the plans, research and decisions behind your software. People write in the browser; coding agents read and edit the same documents over MCP. Open source, on your computer, synced by a hub you run.">
 <link rel="stylesheet" href="/css/landing.css">
 </head>
-<div class="wrap">
-<header class="top"><a class="brand" href="/">uberblick<i></i></a><nav aria-label="Site"><a href="/" aria-current="page">Uberblick</a><a href="#usecases">Use cases</a><a href="#compare">Compare</a><a href="#docs">Docs</a><a href="https://agents.uberblick.ai">ub-agents</a><a href="https://skills.uberblick.ai">Skills</a></nav><a class="gh" href="https://github.com/uberblick-ai/uberblick-2">GitHub</a></header>
-
-<section class="hero">
+<div class="hero">
+  <p class="kicker">Local-first documents · MIT license</p>
   <h1>Local-first documents for people and agents.</h1>
   <p class="lede">A workspace for the plans, research and decisions behind your software. You write in a browser; your coding agent reads and edits the same documents over MCP. Everything is stored on your computer, and a hub syncs it to the people you share with.</p>
-  <div class="actions"><a class="button primary" href="#why">Why Uberblick</a><a class="button" href="#install">Install in four commands</a></div>
+  <div class="cta"><div class="tabs"><div class="tablist" role="tablist" aria-label="Install"><button role="tab" id="t-brew" aria-selected="true" aria-controls="p-brew" type="button">Homebrew</button><button role="tab" id="t-cc" aria-selected="false" aria-controls="p-cc" type="button">Claude Code</button><button role="tab" id="t-cx" aria-selected="false" aria-controls="p-cx" type="button">Codex</button></div><div class="panel sh" role="tabpanel" id="p-brew" aria-labelledby="t-brew"><code>brew install uberblick-ai/tap/uberblick</code><button class="copy" type="button">Copy</button></div><div class="panel sh" role="tabpanel" id="p-cc" aria-labelledby="t-cc" hidden><code>ub mcp install claude</code><button class="copy" type="button">Copy</button></div><div class="panel sh" role="tabpanel" id="p-cx" aria-labelledby="t-cx" hidden><code>ub mcp install codex</code><button class="copy" type="button">Copy</button></div></div><a href="#demo">See a document →</a></div>
+  <div class="stats"><div class="stat"><b>26</b><span>tools over MCP</span></div><div class="stat"><b>3</b><span>commands to install</span></div><div class="stat"><b>0</b><span>accounts to start</span></div><div class="stat"><b>1</b><span>container to share</span></div></div>
+</div>
+
+<section class="blk" id="why"><h2>The docs folder is where context goes to die.</h2>
+<p>Every team keeps the reasoning behind its code somewhere: a Markdown folder in the repo, a Notion space, a few notebooks. The folder goes stale because nobody reads it. The wiki is far from the code and farther from the agents. The notebook is one person's.</p>
+<p>Now most teams also have agents working in the same codebase, and they need the same context: what was decided, why, and what the numbers say. They don't need it in a chat window. They need it in a place they can search, read and edit, next to the people who wrote it.</p>
+<p>Uberblick is that place. One workspace of documents, on your computer, built MCP first: agents write most of it, and you review and adjust in the browser. Comments sit beside the text they are about. Decisions are records, not paragraphs. Numbers live in the document that explains them.</p>
 </section>
 
-<section class="frame wide" id="demo" aria-label="Uberblick, a demo of one document being edited by an agent and a person">
+<section class="blk" id="demo">
+<div class="blk-h"><h2>One document, edited by an agent and a person.</h2><a href="/use-cases/product-intent">How we build with it</a></div>
+<p class="blk-intro">A delivery report in our own product workspace. The agent writes the paragraph and the records; the chart on the page is the data. Comments sit beside the text.</p>
+<section class="frame" aria-label="Uberblick, a demo of one document being edited by an agent and a person">
   <div class="fbar"><span class="fdots" aria-hidden="true"><i></i><i></i><i></i></span><span class="furl">127.0.0.1:7777 · Uberblick product</span><button type="button" id="demoReplay">Replay</button></div>
   <div class="fbody">
     <aside class="fside">
-      <div class="fws"><span class="brand small-brand">uberblick<i></i></span><span>Uberblick product</span></div>
+      <div class="fws"><span class="brand">uberblick<i></i></span><span>Uberblick product</span></div>
       <div class="fgroup"><span class="flabel">Pinned</span><span class="frow" aria-current="page">Delivery report</span><span class="frow">Web UI: typography</span><span class="frow">Release plan 0.5</span></div>
       <div class="fgroup"><span class="flabel">Decisions</span><span class="frow">Where does the web UI use monospace?</span><span class="frow">What does the brand amber mark?</span></div>
       <div class="fgroup"><span class="frow">All documents</span></div>
@@ -49,98 +57,87 @@
     </aside>
   </div>
 </section>
-
-<div class="col">
-<section class="q" id="why"><h2>The docs folder is where context goes to die.</h2>
-<p>Every team keeps the reasoning behind its code somewhere: a Markdown folder in the repo, a Notion space, a few notebooks. The folder goes stale because nobody reads it. The wiki is far from the code and farther from the agents. The notebook is one person's.</p>
-<p>Now most teams also have agents working in the same codebase, and they need the same context: what was decided, why, and what the numbers say. They don't need it in a chat window. They need it in a place they can search, read and edit, next to the people who wrote it.</p>
-<p>Uberblick is that place. One workspace of documents, on your computer, built MCP first: agents write most of it, and you review and adjust in the browser. Comments sit beside the text they are about. Decisions are records, not paragraphs. Numbers live in the document that explains them.</p>
 </section>
 
-<section class="q" id="blocks"><h2>A document can hold more than prose.</h2>
-<p>The Markdown you already write, plus the blocks that never survive in a README. Data tables and line charts read records stored inside the document, so when an agent updates the records, the chart updates with them.</p>
-</section>
-</div>
-<section class="gallery wide" aria-label="Block types">
-  <figure class="mini" style="--bar: var(--bar-code)"><div class="art code"><i style="width:62%"></i><i style="width:38%;margin-left:12%"></i><i style="width:50%;margin-left:12%"></i><i style="width:20%"></i></div><figcaption>Code</figcaption></figure>
-  <figure class="mini" style="--bar: var(--bar-terminal)"><div class="art term"><span>$ ub open</span><span class="o">Editor at 127.0.0.1</span><span class="cur">$ <em></em></span></div><figcaption>Terminal demo</figcaption></figure>
-  <figure class="mini" style="--bar: var(--bar-chart)"><div class="art"><svg viewBox="0 0 120 56" aria-hidden="true"><path d="M6 48h66" class="ax"/><path d="M6 30h66M6 12h66" class="gr"/><polyline points="6,44 20,36 34,38 48,22 60,18 72,10" class="ln"/><circle cx="72" cy="10" r="2.5" class="pt"/><g transform="translate(100 30)"><circle r="18" class="pie-a"/><path d="M0 0 L0 -18 A18 18 0 0 1 17.1 5.6 Z" class="pie-b"/><path d="M0 0 L17.1 5.6 A18 18 0 0 1 -10.6 14.6 Z" class="pie-c"/></g></svg></div><figcaption>Charts</figcaption></figure>
-  <figure class="mini" style="--bar: var(--bar-chart)"><div class="art grid"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><figcaption>Data table</figcaption></figure>
-  <figure class="mini" style="--bar: var(--bar-decision)"><div class="art decision"><i style="width:70%"></i><b></b><i style="width:50%"></i></div><figcaption>Decision</figcaption></figure>
-  <figure class="mini" style="--bar: var(--bar-embed)"><div class="art embed"><svg viewBox="0 0 120 56" aria-hidden="true"><g transform="translate(14 8)"><rect x="0" y="0" width="13" height="13" rx="6.5" class="f1"/><rect x="0" y="13" width="13" height="13" rx="6.5" class="f2"/><rect x="0" y="26" width="13" height="13" rx="6.5" class="f3"/><rect x="13" y="0" width="13" height="13" rx="6.5" class="f4"/><circle cx="19.5" cy="19.5" r="6.5" class="f5"/></g><rect x="48" y="10" width="62" height="36" rx="3" class="shot"/><rect x="54" y="16" width="22" height="6" rx="1" class="sb"/><rect x="54" y="26" width="50" height="4" rx="1" class="sb"/><rect x="54" y="34" width="36" height="4" rx="1" class="sb"/></svg></div><figcaption>Embeds</figcaption></figure>
-  <figure class="mini" style="--bar: var(--bar-wire)"><div class="art"><svg viewBox="0 0 120 56" aria-hidden="true"><rect x="4" y="4" width="112" height="48" rx="2" class="wf"/><path d="M34 4v48" class="wl"/><rect x="9" y="10" width="18" height="3" class="wb"/><rect x="9" y="17" width="14" height="3" class="wb"/><rect x="9" y="24" width="16" height="3" class="wb"/><rect x="42" y="10" width="40" height="5" class="wb"/><rect x="42" y="20" width="66" height="3" class="wb"/><rect x="42" y="26" width="58" height="3" class="wb"/><rect x="42" y="36" width="24" height="9" rx="2" class="wbtn"/></svg></div><figcaption>Wireframes</figcaption></figure>
-</section>
-
-<div class="col">
-<section class="q" id="compare"><h2>Why not use Notion, Obsidian or Jupyter?</h2>
-<p>Use them for what they are best at: Notion for company-wide and non-engineering content, Obsidian for a personal knowledge base, Jupyter for reproducible analysis. Uberblick takes one idea from each and aims them at a small team of people and agents working on one codebase. <a href="/compare">Which tool fits your team?</a> has the full comparison.</p>
-</section>
-<section class="q" id="usecases"><h2>What teams use it for.</h2>
-<p>These are the jobs we built it around, and the ones we use it for ourselves. Each has its own page.</p>
-<div class="cases">
-  <a href="/use-cases/product-intent"><span class="t">Product intent that agents read before they build</span><span class="d">Pin the documents that say what the product should do. An agent loop reads them before it prepares, implements or reviews an issue. This is how Uberblick itself is built.</span></a>
-  <a href="/use-cases/decisions"><span class="t">Decisions that stay decided</span><span class="d">Record the answer once, with the reason and the issues it affects. The next person, or the next agent, finds it before reopening the question.</span></a>
-  <a href="/use-cases/reports"><span class="t">Reports with the numbers inside</span><span class="d">A daily delivery report writes its records into a document. The chart on the page is the data, not a screenshot of it.</span></a>
-  <a href="/use-cases/research"><span class="t">Research that doesn't get lost in chat</span><span class="d">An agent's findings land as a document in the workspace, linked from the plan, with your comments beside the parts you disagree with.</span></a>
+<section class="blk" id="mcp">
+<div class="blk-h"><h2>An opinionated MCP: agents read before they write.</h2><a href="/docs/agents">Agents over MCP</a></div>
+<p class="blk-intro">Tag the pages that matter as guidance. The server refuses every write from an agent that has not read them, and tells it which ones. No prompt engineering, no hoping.</p>
+<div class="flow" role="img" aria-label="An agent calls edit_block; the server refuses with guidance_required and lists the unread pages; the agent reads them with get_doc; the write is accepted for ten minutes of edits.">
+  <div class="step"><span class="k">1 · agent</span><b>Calls <code>edit_block</code></b><span>on a page in the workspace</span></div>
+  <span class="arr" aria-hidden="true"></span>
+  <div class="step no"><span class="k">2 · server</span><b>Refuses: <code>guidance_required</code></b><span>unread: Product principles, Web UI: typography</span></div>
+  <span class="arr" aria-hidden="true"></span>
+  <div class="step"><span class="k">3 · agent</span><b>Reads both with <code>get_doc</code></b><span>the same pages people pinned</span></div>
+  <span class="arr" aria-hidden="true"></span>
+  <div class="step ok"><span class="k">4 · server</span><b>Accepts the write</b><span>and every write for ten minutes</span></div>
 </div>
 </section>
 
-<section class="q" id="decision"><h2>A decision looks like this.</h2>
-<p>From our own product workspace. The answer is the first thing on the page; the reason and the links follow. When the question comes up again, a new record supersedes this one on the same topic.</p>
-<section class="block decision" aria-label="Example decision record"><div class="cap"><span>Decision · decided 10 October 2026</span><span>Uberblick product workspace</span></div>
-  <div class="body">
-    <h3>Where does the web UI use monospace?</h3>
-    <p class="answer">Only for text a person would paste somewhere: code, terminal output and ids in Settings. Everything else is set in the UI face.</p>
-    <p class="ui">Mono reads as machine output. Used for labels and timestamps it made the chrome look like a debug overlay and competed with real code blocks.</p>
-    <div class="links"><span>Links</span><a href="https://github.com/uberblick-ai/uberblick-2/issues/1551">uberblick-2#1551</a><span>Web UI: typography</span></div>
-  </div>
-</section>
+<section class="blk" id="ub-agents">
+<div class="blk-h"><h2>Works best with ub-agents.</h2><a href="https://agents.uberblick.ai">agents.uberblick.ai</a></div>
+<p class="blk-intro">Uberblick holds what the product should do. <a href="https://agents.uberblick.ai">ub-agents</a> is the loop that hands that to agents on GitHub: roles in a few lines of YAML, driven by labels, running on Actions with any agent and no server. Together they close the loop: every issue starts from the pages, and every pull request brings them up to date. It is how Uberblick itself is built.</p>
+<div class="flow loop" role="img" aria-label="An issue is filed; the preparer links the pages it depends on; the implementer reads them over MCP and builds; the pull request carries a corpus update; the pages stay true and the next issue starts from them.">
+  <div class="step"><span class="k">issue</span><b>Filed with pointers</b><span>to the pages it depends on</span></div>
+  <span class="arr" aria-hidden="true"></span>
+  <div class="step"><span class="k">implementer</span><b>Reads them over MCP</b><span>then builds against them</span></div>
+  <span class="arr" aria-hidden="true"></span>
+  <div class="step"><span class="k">reviewer</span><b>Checks the result</b><span>against the pages, not the issue</span></div>
+  <span class="arr" aria-hidden="true"></span>
+  <div class="step ok"><span class="k">pull request</span><b>Updates the page</b><span>which block, what it now says</span></div>
+  <span class="arr back" aria-hidden="true"></span>
+</div>
 </section>
 
-<section class="q" id="install"><h2>Install in four commands.</h2>
-<p>Homebrew on Apple Silicon macOS or Linux x86_64. No account, no server. The fourth command registers the MCP server with Claude Code; use <code>codex</code> for Codex.</p>
+<section class="blk" id="blocks">
+<div class="blk-h"><h2>What a document can hold.</h2><a href="/docs/custom-markdown">Custom Markdown</a></div>
+<p class="blk-intro">Markdown, plus the few additions that let an idea be drawn instead of described. Each one is text with a source form, so an agent can write it and a person can read it, and each ships as its own package.</p>
+<ul class="dir">
+  <li><a href="/docs/custom-markdown#ablauf"><span class="n">ablauf</span><span class="d">Flow diagrams as text where the author places the nodes and the renderer only draws.<span>Replaces Mermaid. Early; a <code>mermaid</code> fence is plain code today.</span></span></a></li>
+  <li><a href="/docs/custom-markdown#wireframe"><span class="n">wireframe</span><span class="d">A screen sketch in a few lines of text, drawn by the editor.<span>Format 0.x; it may still change.</span></span></a></li>
+  <li><a href="/docs/custom-markdown#chart"><span class="n">chart</span><span class="d">Line charts and data tables drawn from records stored in the document.<span>When an agent updates the records, the chart updates with them.</span></span></a></li>
+  <li><a href="/docs/custom-markdown#card"><span class="n">card</span><span class="d">A prose card with a label, a title, a footer and buttons.<span>For a recommendation, a warning or a next step an agent proposes.</span></span></a></li>
+  <li><a href="/docs/custom-markdown#figma"><span class="n">figma</span><span class="d">A Figma file, frame, prototype or board, with a caption.<span>Nothing contacts Figma until the reader opens it.</span></span></a></li>
+</ul>
 </section>
-</div>
-<section class="block terminal wide"><div class="cap"><span>Terminal</span><span class="capx"><button type="button" id="replay">Replay</button><button type="button" data-copy="brew install uberblick-ai/tap/uberblick
-mkdir uberblick-notes &amp;&amp; cd uberblick-notes
+
+<section class="blk" id="decision">
+<div class="blk-h"><h2>A decision looks like this.</h2><a href="/docs/decisions">Decisions</a></div>
+<p class="blk-intro">From our own product workspace, as the editor shows it. The answer is the first thing on the page and carries who decided it and when; the reason follows. When the question comes up again, a new record supersedes this one on the same topic, and the history stays.</p>
+<figure class="shot">
+  <div class="bar"><span><b>Where does the web UI use monospace?</b> · Uberblick product</span><span>decision</span></div>
+  <img class="l" src="/img/decision-light.png" width="1424" height="924" alt="A decision record in the Uberblick editor: the question as the title, an answer marked In force and decided by Ben, the reason below it, and a history row for the record.">
+  <img class="d" src="/img/decision-dark.png" width="1424" height="924" alt="The same decision record in dark mode.">
+</figure>
+</section>
+
+<section class="blk" id="install">
+<div class="blk-h"><h2>Start in three commands.</h2><a href="/docs/install">Install and update</a></div>
+<p class="blk-intro">Homebrew on Apple Silicon macOS or Linux x86_64, run in your repository's directory. No account, no server. The last command registers the MCP server with Claude Code; use <code>codex</code> for Codex. To share a workspace, run a hub on a computer the team can reach: one Docker release, see <a href="/docs/hub">Run a hub</a>.</p>
+<section class="block terminal"><div class="cap"><span>Terminal</span><span class="capx"><button type="button" id="replay">Replay</button><button type="button" data-copy="brew install uberblick-ai/tap/uberblick
 ub workspace create &quot;My Workspace&quot;
 ub open
 ub mcp install claude">Copy</button></span></div>
 <pre id="term"><span class="p">$</span> brew install uberblick-ai/tap/uberblick
-<span class="p">$</span> mkdir uberblick-notes &amp;&amp; cd uberblick-notes
 <span class="p">$</span> ub workspace create "My Workspace"
 <span class="p">$</span> ub open
 <span class="o">Editor at http://127.0.0.1:… Keep this terminal open.</span>
 
 <span class="c"># Second terminal, same directory</span>
 <span class="p">$</span> ub mcp install claude</pre></section>
-<div class="col">
-<p>To share a workspace, run a hub on a computer the team can reach. It is one Docker release; <a href="/docs/hub">Run a hub</a> walks through it.</p>
-
-<section class="q" id="docs"><h2>Docs</h2>
-<div class="doclinks">
-  <a href="/docs/install"><span class="t">Install and update</span><span class="d">Homebrew, <code>ub update</code>, where your files live.</span></a>
-  <a href="/docs/workspaces"><span class="t">Workspaces</span><span class="d">Create, select and switch; what <code>.uberblick.json</code> decides.</span></a>
-  <a href="/docs/editor"><span class="t">The editor</span><span class="d">Blocks, comments, the sidebar, document data.</span></a>
-  <a href="/docs/agents"><span class="t">Agents over MCP</span><span class="d">Install for Claude Code or Codex; the 25 tools and what each is for.</span></a>
-  <a href="/docs/decisions"><span class="t">Decisions</span><span class="d">Records, topics, superseding, linking issues.</span></a>
-  <a href="/docs/hub"><span class="t">Run a hub</span><span class="d">The Docker release, localhost, Tailscale (recommended) or a public host name; membership and <code>ub auth login</code>.</span></a>
-  <a href="/docs/cli"><span class="t">CLI reference</span><span class="d">Every <code>ub</code> command, with examples.</span></a>
-</div>
 </section>
-</div>
 
-<footer class="end"><span>Uberblick is open source under the MIT license.</span><nav><a href="https://github.com/uberblick-ai/uberblick-2">GitHub</a><a href="https://agents.uberblick.ai">ub-agents</a><a href="https://skills.uberblick.ai">Skills</a><a href="https://github.com/uberblick-ai/uberblick-2/blob/main/SECURITY.md">Security</a></nav></footer>
-</div>
-<div class="toast" role="status" aria-live="polite"></div>
+<section class="blk" id="changes">
+<div class="blk-h"><h2>Recent changes.</h2><a href="https://github.com/uberblick-ai/uberblick-2/tags">All releases</a></div>
+<ul class="changes">
+  <li><time>2026-10-16</time><span class="tag">Release</span><span>v0.4.5: Mermaid blocks removed in favour of ablauf, one Content-Security-Policy for the web app, Figma titles before the viewer loads, quiet <code>ub open</code> output with <code>--verbose</code>, simpler member management.</span></li>
+  <li><time>2026-10-14</time><span class="tag">Release</span><span>v0.4.4: the hub appoints the oldest workspace member when no admin exists, GitHub pills with the right issue icon, <code>mise run ci</code> runs the CI checks locally.</span></li>
+  <li><time>2026-10-12</time><span class="tag">Release</span><span>v0.4.3: native card blocks in the editor and over MCP, line chart panels, decisions with short answers and RFC discussions over MCP, table columns deleted from a top-edge menu.</span></li>
+  <li><time>2026-10-11</time><span class="tag">Release</span><span>v0.4.2: the corpus stays in step with merged code without erasing intent; the MCP docs explain when a decision record is useful.</span></li>
+  <li><time>2026-10-09</time><span class="tag">Release</span><span>v0.4.1: the client and the hub Docker image released together.</span></li>
+  <li><time>2026-10-06</time><span class="tag">Release</span><span>v0.4.0 on Homebrew.</span></li>
+</ul>
+</section>
 <script>
-const toast = document.querySelector('.toast');
-for (const b of document.querySelectorAll('[data-copy]')) b.addEventListener('click', async () => {
-  const t = b.getAttribute('data-copy');
-  try { await navigator.clipboard.writeText(t); toast.textContent = 'Copied'; }
-  catch { const r = document.createRange(); r.selectNodeContents(b.closest('.block').querySelector('pre')); getSelection().removeAllRanges(); getSelection().addRange(r); toast.textContent = 'Select and copy'; }
-  toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 1400);
-});
 (() => {
   const $ = id => document.getElementById(id);
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;

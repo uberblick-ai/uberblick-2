@@ -11,16 +11,42 @@ python3 -m http.server 8000 --directory site/out  # then open http://127.0.0.1:8
 ```
 
 - `pages/<path>.html` is the page served at `/<path>`: a `<head>` block with
-  the title, description and the page's own stylesheet, then the body.
-  `pages/index.html` is `/`; `pages/404.html` is the not-found page.
-- `static/` is copied as it is: `shared.css` (tokens, fonts, the block frame,
-  shared by the sibling sites), `css/` (one stylesheet per page kind), `fonts/`
-  (the web app's Geist and Fraunces files with their licences) and `_headers`.
+  the title, description and the page's own stylesheet, then the page's main
+  content. The build adds the shell every page shares (top bar with the newest
+  release tag, the docs sidebar, the "Who builds this" footer); the sidebar
+  links and the footer text live in `build.py`. `pages/index.html` is `/`;
+  `pages/404.html` is the not-found page.
+- `static/` is copied as it is: `shared.css` (the look the site shares with
+  agents.uberblick.ai and skills.uberblick.ai: IBM Plex from Google Fonts, the
+  violet accent, the shell, the block frame), `css/` (one stylesheet per page
+  kind), `fonts/` (the web app's Geist and Fraunces files with their licences,
+  used only by the landing page's demo frame, which shows the editor as it is),
+  the favicon and touch icon (the same files as the web app's in
+  `packages/web/public`) and `_headers`.
 - Links are root-relative, so serve the output rather than opening the files.
   The build lists links to pages that are not written yet.
 
-agents.uberblick.ai and skills.uberblick.ai link `https://uberblick.ai/shared.css`
-and keep only their own overrides and navigation, so the three sites read as
-one. After a change merges, Cloudflare Pages rebuilds from `main` with the build
-command `python3 site/build.py` and the output directory `site/out`; creating
-that project and pointing the domain at it is a maintainer step.
+The three sites share one layout and one footer text; agents.uberblick.ai and
+skills.uberblick.ai carry their own copies of the stylesheet until they switch
+to linking this one.
+
+## Deploying
+
+A Cloudflare Pages project connected to this repository builds the site from
+`main` on every push that touches `site/`. Its settings, all in the Pages
+dashboard, are a maintainer step; no token lives in the repository:
+
+| Setting | Value |
+| --- | --- |
+| Production branch | `main` |
+| Root directory | `site`, so Cloudflare's framework detection does not run against the pnpm workspace at the repository root, which it refuses to build |
+| Build command | `python3 build.py`, relative to the root directory |
+| Build output directory | `out`, relative to the root directory; a root directory also limits builds to pushes that change it |
+| Environment variable `SITE_URL` | the origin the project serves, for example `https://next.uberblick.ai`; omitted, the canonical links name `https://uberblick.ai` |
+| Environment variable `SITE_NOINDEX` | set to `1` on a host search engines should not index |
+| Custom domain | the host name; Cloudflare adds the DNS record when the zone is on Cloudflare, otherwise add a CNAME to the project's `pages.dev` host |
+
+The new site runs on next.uberblick.ai first, from a project with
+`SITE_URL=https://next.uberblick.ai` and `SITE_NOINDEX=1`; uberblick.ai stays as
+it is until the move. Pages serves `404.html` for unknown paths and redirects
+`/<path>.html` to `/<path>`, which is why the build writes extensionless pages.

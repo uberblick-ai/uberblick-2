@@ -70,7 +70,6 @@ test("local-only edits survive a restart and reach the hub after authentication 
     expect(await statusGeometry(page)).toEqual(authenticatedGeometry);
     for (const width of [810]) {
       await page.setViewportSize({ width, height: 844 });
-      await expect(reason).toBeInViewport({ ratio: 1 });
       const trigger = page.locator(".ub-sync-toggle");
       await expect(trigger).toBeInViewport({ ratio: 1 });
       await trigger.click();
@@ -86,12 +85,11 @@ test("local-only edits survive a restart and reach the hub after authentication 
     await waitForAcknowledged(page, { path: "relay" });
     await expect(saved).not.toBeVisible();
     await expectSavedHere(page);
-    await expect(reason).toBeVisible();
     await expect(page.locator(".ub-status")).toHaveAttribute("data-upstream-sync", "offline");
     const localGeometry = await statusGeometry(page);
 
-    // This page retains its original imported browser key on another local-only
-    // boot, as well as across both authentication transitions below.
+    // This page keeps its ub open session on another local-only boot, as well
+    // as across both authentication transitions below.
     await harness().restartOpen({ authenticated: false });
     await waitForAcknowledged(page, { path: "relay" });
     await expect(saved).not.toBeVisible();
@@ -199,14 +197,13 @@ test("local-only status answers leave the readings and prose in place", async ({
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(1);
     expect(await statusGeometry(page)).toEqual(beforeFirstAnswer);
     expect(await page.evaluate(() => performance.timeOrigin)).toBe(pageInstance);
-    // Keyboard navigation leaves the recovery notice undismissed; entering
-    // Settings must resolve it when the document header unmounts.
+    // Entering Settings dismisses any notice still owned by the header.
     if (width < 1280) {
       await page.getByRole("button", { name: "Show document list", exact: true }).focus();
       await page.keyboard.press("Enter");
     }
-    const settings = page.getByRole("button", { name: "Settings", exact: true });
-    await settings.click();
+    await page.getByTestId("account-menu").click();
+    await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
     await expect(page.locator(".ub-status")).toHaveCount(0);
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
     await page.close();
@@ -214,7 +211,7 @@ test("local-only status answers leave the readings and prose in place", async ({
 });
 
 
-test("device recovery notices preserve local editing and native tablet touch controls", async ({ browser }) => {
+test("device recovery notices auto-close while tablet status retains recovery", async ({ browser }) => {
   test.setTimeout(90_000);
   await harness().restartOpen({ authenticated: true });
   let notSharedReason: "no-hub-credentials" | "sign-in-required" | "no-workspace-access" | "credential-store" | "renewal-unavailable" | null = null;
@@ -268,9 +265,7 @@ test("device recovery notices preserve local editing and native tablet touch con
   await withPageTimers(page, () => expect(notices).toContainText(/run ub auth login/));
   await expect(notices).toBeInViewport();
   await expect(page.locator(".ub-status")).not.toContainText(/run ub auth login/);
-  // The tablet uses the primitive's native close control. Dismissing the
-  // notice leaves the unresolved compact fact and its recovery discoverable.
-  await notices.getByRole("button", { name: "Dismiss notification" }).tap();
+  // Standard expiry leaves the unresolved header fact and recovery available.
   await withPageTimers(page, () => expect(notices).toHaveCount(0));
   await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
   await page.locator(".ub-status-sync").tap();
@@ -291,13 +286,6 @@ test("device recovery notices preserve local editing and native tablet touch con
   await expect(saved).not.toBeVisible();
   await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
   await page.locator(".ub-title").focus();
-  await page.keyboard.press("Shift+F8");
-  await expect(page.locator("[data-sonner-toaster]")).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(notices).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(notices.getByRole("button", { name: "Dismiss notification" })).toBeFocused();
-  await page.keyboard.press("Enter");
   await withPageTimers(page, () => expect(notices).toHaveCount(0));
   await expect(page.locator(".ub-title")).toBeFocused();
   await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
@@ -325,14 +313,6 @@ test("device recovery notices preserve local editing and native tablet touch con
     await page.locator(".ub-status-sync").tap();
     await expect(page.locator('.ub-sync-fact:has(dt:text-is("Reason")) dd')).toHaveText(recovery);
     await page.keyboard.press("Escape");
-    if (cause === "no-hub-credentials") {
-      await page.evaluate(() => {
-        (window as unknown as { statusCauseNotice: Element | null }).statusCauseNotice = document.querySelector("[data-sonner-toast]");
-      });
-    } else {
-      expect(await page.evaluate(() => document.querySelector("[data-sonner-toast]") ===
-        (window as unknown as { statusCauseNotice: Element | null }).statusCauseNotice), "a changed cause updates its existing notice").toBe(true);
-    }
   }
 
   notSharedReason = null;

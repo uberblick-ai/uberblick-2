@@ -48,6 +48,7 @@ import { getBlocks, getWorkspaceMainRepository, getWorkspaceName, listTagCatalog
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { preview } from "vite";
 import type { PreviewServer } from "vite";
+import { LOCAL_SESSION_KEY } from "../src/collab/local-session.js";
 import { buildAppBundle, sharedAppBundle } from "./bundle.js";
 import { activateControl } from "./input-helpers.js";
 
@@ -117,12 +118,60 @@ function openEnvironment(runDir: string, bundleDir: string): NodeJS.ProcessEnv {
   return env;
 }
 
+/** Sessions of the `ub open` runs this worker serves, by origin. */
+const sessions = new Map<string, string>();
+const unauthorizedNewContext = new Map<Browser, Browser["newContext"]>();
+
+async function withSessions(context: BrowserContext): Promise<void> {
+  await context.addInitScript(({ entries, key }) => {
+    const session = new Map(entries).get(location.origin);
+    if (session !== undefined) localStorage.setItem(key, session);
+  }, { entries: [...sessions], key: LOCAL_SESSION_KEY });
+}
+
+/**
+ * A person opens the printed address once per browser; a test makes many
+ * fresh contexts. Each harness trades its launch secret once, and every
+ * context this browser holds or creates starts with that origin's session.
+ */
+export async function authorizeBrowser(browser: Browser): Promise<void> {
+  if (!unauthorizedNewContext.has(browser)) {
+    const create = browser.newContext.bind(browser);
+    unauthorizedNewContext.set(browser, create);
+    browser.once("disconnected", () => unauthorizedNewContext.delete(browser));
+    browser.newContext = async (options) => {
+      const context = await create(options);
+      await withSessions(context);
+      return context;
+    };
+  }
+  await Promise.all(browser.contexts().map(withSessions));
+}
+
+/** A context that has never opened the printed address. */
+export async function unauthorizedContext(browser: Browser, options?: BrowserContextOptions): Promise<BrowserContext> {
+  return await (unauthorizedNewContext.get(browser) ?? browser.newContext.bind(browser))(options);
+}
+
+async function tradeLaunch(appUrl: string, launch: string): Promise<string> {
+  const response = await fetch(new URL("api/session", appUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: new URL(appUrl).origin },
+    body: JSON.stringify({ launch }),
+  });
+  const session = (await response.json() as { session?: unknown }).session;
+  if (typeof session !== "string") throw new Error(`e2e: ub open refused its own launch secret (${response.status})`);
+  sessions.set(new URL(appUrl).origin, session);
+  await Promise.all([...unauthorizedNewContext.keys()].flatMap((browser) => browser.contexts().map(withSessions)));
+  return session;
+}
+
 async function startOpen(
   runDir: string,
   bundleDir: string,
   fixedPort?: number,
   projectDir = runDir,
-): Promise<{ child: ChildProcessWithoutNullStreams; appUrl: string }> {
+): Promise<{ child: ChildProcessWithoutNullStreams; appUrl: string; printed: string }> {
   for (let attempt = 1; attempt <= OPEN_ATTEMPTS; attempt += 1) {
     const port = fixedPort ?? await freePort();
     const child = spawn(process.execPath, [UB, "open", "--no-browser", "--port", String(port)], {
@@ -158,7 +207,12 @@ async function startOpen(
     if (timer !== undefined) clearTimeout(timer);
 
     if (outcome === "ready") {
-      return { child, appUrl: `http://127.0.0.1:${port}/` };
+      const printed = new RegExp(`^web {8}(http://127\\.0\\.0\\.1:${port}/#launch=[A-Za-z0-9_-]{43})$`, "m").exec(stdout)?.[1];
+      if (printed === undefined) {
+        await stopChild(child);
+        throw new Error(`e2e: ub open printed no launch address\nstdout:\n${stdout}`);
+      }
+      return { child, appUrl: `http://127.0.0.1:${port}/`, printed };
     }
     await stopChild(child);
     if (fixedPort === undefined && outcome === "exit" && stderr.includes(`port ${port} is in use`) && attempt < OPEN_ATTEMPTS) {
@@ -185,6 +239,8 @@ export interface Harness {
   changeCurrentWorkspaceRole(role: "member" | "admin"): void;
   /** Where the browser goes. This run's real `ub open` address. */
   readonly appUrl: string;
+  /** The address the latest `ub open` start printed; its launch secret is unused after a restart. */
+  printedUrl(): string;
   /** Same-origin bundle and socket proxy that bypasses the serving replica. */
   upstreamAppUrl(): Promise<string>;
   /**
@@ -560,6 +616,8 @@ export async function startHarness(options: {
     const serving = await startOpen(runDir, bundleDir);
     open = serving.child;
     const appUrl = serving.appUrl;
+    let printed = serving.printed;
+    await tradeLaunch(appUrl, new URL(printed).hash.slice("#launch=".length));
     console.log(`e2e timing: harness startup ${Math.round(performance.now() - startupStarted)} ms`);
 
     const stopHub = async (): Promise<void> => {
@@ -577,6 +635,7 @@ export async function startHarness(options: {
     return {
       ...(access === undefined ? {} : { access }),
       appUrl,
+      printedUrl: () => printed,
       async upstreamAppUrl() {
         upstreamPreview ??= preview({ configFile: false, root: packageRoot, logLevel: "error",
           build: { outDir: bundleDir }, preview: { port: 0, host: "127.0.0.1", strictPort: true,
@@ -652,16 +711,19 @@ export async function startHarness(options: {
         setStoredLogin(authenticated);
         const restarted = await startOpen(runDir, bundleDir, Number(new URL(appUrl).port));
         open = restarted.child;
+        printed = restarted.printed;
       },
       async startSecondOpen() {
         if (secondProject === null) throw new Error("e2e: the fixture has no second project");
         if (secondOpen !== null) throw new Error("e2e: the second project is already serving");
         const serving = await startOpen(runDir, bundleDir, undefined, secondProject);
         secondOpen = serving.child;
+        await tradeLaunch(serving.appUrl, new URL(serving.printed).hash.slice("#launch=".length));
         return {
           appUrl: serving.appUrl,
           async stop() {
             if (secondOpen === serving.child) secondOpen = null;
+            sessions.delete(new URL(serving.appUrl).origin);
             await stopChild(serving.child);
           },
         };
@@ -682,6 +744,7 @@ export async function startHarness(options: {
           await secondHub?.stop().catch(() => {});
           secondHub = null;
         } finally {
+          sessions.delete(new URL(appUrl).origin);
           rmSync(runDir, { recursive: true, force: true });
         }
       },

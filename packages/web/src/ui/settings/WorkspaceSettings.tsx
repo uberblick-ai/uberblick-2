@@ -20,7 +20,7 @@ import { endpointSourceLabel } from "../../config.js";
 import type { HubEndpoint, LocalServing } from "../../config.js";
 import type { RoomConnection } from "../../collab/rooms.js";
 import { writeToClipboard } from "../../editor/source-chrome.js";
-import { notifyTransient } from "../../notifications.js";
+import { toast } from "sonner";
 import { rawSyncState, useCalmSyncState } from "../status/calm.js";
 import { useDirectory, useRoomStatus } from "../hooks.js";
 import type { SettingsPage, Workspace } from "../route.js";
@@ -95,11 +95,10 @@ function GeneralSettings({
 
   const copyId = async (): Promise<void> => {
     const copied = await writeToClipboard(workspace.uuid);
-    notifyTransient({
-      key: "copy-workspace-id",
-      message: copied ? "Workspace ID copied" : "Couldn't copy the workspace ID. Try again in a browser with clipboard access.",
-      severity: copied ? "success" : "error",
-    });
+    toast[copied ? "success" : "error"](
+      copied ? "Workspace ID copied" : "Couldn't copy the workspace ID. Try again in a browser with clipboard access.",
+      { id: "copy-workspace-id" },
+    );
   };
 
   return (
@@ -200,7 +199,7 @@ function WorkspaceNameForm({
       const name = setWorkspaceName(connection.ydoc, draft);
       setDraft(name);
       setError(null);
-      notifyTransient({ key: "workspace-settings", message: `Saved “${name}”.`, severity: "success" });
+      toast.success(`Saved “${name}”.`, { id: "workspace-settings" });
     } catch (error) {
       setError(error instanceof Error ? error.message : "The workspace name is invalid.");
     }
@@ -276,11 +275,10 @@ function MainRepositoryForm({
       const repository = setWorkspaceMainRepository(connection.ydoc, draft);
       setDraft(repository ?? "");
       setError(null);
-      notifyTransient({
-        key: "workspace-settings",
-        message: repository === null ? "Main repository cleared." : `Saved main repository “${repository}”.`,
-        severity: "success",
-      });
+      toast.success(
+        repository === null ? "Main repository cleared." : `Saved main repository “${repository}”.`,
+        { id: "workspace-settings" },
+      );
     } catch (error) {
       setError(error instanceof Error ? error.message : "The main repository is invalid.");
     }
@@ -420,7 +418,7 @@ function TagSettings({
     }
     createTagCatalogEntry(connection.ydoc, draft);
     setError(null);
-    notifyTransient({ key: "workspace-settings", message: `Created “${draft}”.`, severity: "success" });
+    toast.success(`Created “${draft}”.`, { id: "workspace-settings" });
     setDraft("");
   };
 
@@ -430,11 +428,7 @@ function TagSettings({
     else restoreTagCatalogEntry(connection.ydoc, entry.id);
     setRefocus({ from: entry.state, at, moved: entry.id });
     setError(null);
-    notifyTransient({
-      key: "workspace-settings",
-      message: `${entry.state === "active" ? "Retired" : "Restored"} “${entry.name}”.`,
-      severity: "success",
-    });
+    toast.success(`${entry.state === "active" ? "Retired" : "Restored"} “${entry.name}”.`, { id: "workspace-settings" });
   };
 
   const list = (state: "active" | "retired", items: TagCatalogEntry[]) => (

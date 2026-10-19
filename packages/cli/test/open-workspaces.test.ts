@@ -1,4 +1,4 @@
-/** Several recorded replicas share one browser server, with separate authority and sync. */
+/** Several replicas share one browser server, with separate authority and sync. */
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HocuspocusProvider } from "@hocuspocus/provider";
@@ -29,7 +29,7 @@ afterEach(cleanUp);
 
 interface BrowserConfig {
   workspaces: string[];
-  servedWorkspaces: Record<string, { name: string | null; browserKey: string; remoteHubUrl: string | null }>;
+  servedWorkspaces: Record<string, { name: string | null; remoteHubUrl: string | null }>;
 }
 
 async function config(app: Running): Promise<BrowserConfig> {
@@ -138,7 +138,7 @@ describe("ub open: this machine's workspaces", () => {
     expect(readFileSync(path, "utf8")).toBe(`${key}\n`);
   });
 
-  it("offers only recorded replicas, keeps the startup workspace first and leaves project bindings alone", async () => {
+  it("offers existing replicas, keeps the startup workspace first and leaves project bindings alone", async () => {
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
     const secondaryPort = await freePort();
@@ -151,11 +151,12 @@ describe("ub open: this machine's workspaces", () => {
     const app = await open(box, ["--port", String(await freePort())], env);
     try {
       const document = await config(app);
-      expect(document.workspaces).toEqual([WORKSPACE, SECOND, LOCAL]);
+      expect(document.workspaces).toEqual([WORKSPACE, UNKNOWN, SECOND, LOCAL]);
       expect(document.servedWorkspaces).toEqual({
-        [WORKSPACE]: { name: null, browserKey: localBrowserKey(WORKSPACE, box.env), remoteHubUrl: FIRST_REMOTE },
-        [SECOND]: { name: null, browserKey: localBrowserKey(SECOND, box.env), remoteHubUrl: secondaryHub },
-        [LOCAL]: { name: null, browserKey: localBrowserKey(LOCAL, box.env), remoteHubUrl: null },
+        [WORKSPACE]: { name: null, remoteHubUrl: FIRST_REMOTE },
+        [UNKNOWN]: { name: null, remoteHubUrl: null },
+        [SECOND]: { name: null, remoteHubUrl: secondaryHub },
+        [LOCAL]: { name: null, remoteHubUrl: null },
       });
       const selected = await browser(app, box, SECOND, directoryRoom(SECOND));
       const local = await browser(app, box, LOCAL, directoryRoom(LOCAL));
@@ -170,7 +171,7 @@ describe("ub open: this machine's workspaces", () => {
       expect((await get(app.url)).status).toBe(200);
       expect((await config(app)).workspaces[0]).toBe(WORKSPACE);
       expect(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")).toBe(binding);
-      const status = await runUbAsync(["workspace", "status"], box);
+      const status = await runUbAsync(["status"], box);
       expect(status.status, status.output).toBe(0);
       expect(status.stdout).toContain(WORKSPACE);
       expect(status.stdout).not.toContain(SECOND);
@@ -266,14 +267,27 @@ describe("ub open: this machine's workspaces", () => {
     } finally { for (const tab of tabs) tab.close(); expect((await app.interrupt()).status).toBe(0); }
   });
 
-  it("makes an older unrecorded replica switchable after its first local bound open", async () => {
+  it("offers an unrecorded replica as local before it has a project binding", async () => {
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
     await seed(box, SECOND, "Older replica");
     const binding = readFileSync(join(box.cwd, ".uberblick.json"), "utf8");
     let app = await open(box, ["--port", String(await freePort())], env);
     try {
-      expect((await config(app)).workspaces).toEqual([WORKSPACE]);
+      const offered = await config(app);
+      expect(offered.workspaces).toEqual([WORKSPACE, SECOND]);
+      expect(offered.servedWorkspaces[SECOND]!.remoteHubUrl).toBeNull();
+      expect(readWorkspaceHub(SECOND, box.env)).toBeUndefined();
+      const selected = await browser(app, box, SECOND, roomForDoc(SECOND, DOC));
+      try {
+        await waitUntil("unrecorded local replica", () => selected.provider.isSynced);
+        expect(getBlocks(selected.document)[0]?.text).toBe("Older replica local text");
+        const auth = await headers(box, SECOND);
+        expect(await (await fetch(`${app.url}api/status`, { headers: auth })).json())
+          .toMatchObject({ notSharedReason: "no-hub-credentials", caughtUp: false });
+        expect(await (await fetch(`${app.url}api/account`, { headers: auth })).json())
+          .toEqual({ state: "signed-out" });
+      } finally { selected.close(); }
       expect((await app.interrupt()).status).toBe(0);
       const cwd = join(box.cwd, "older-project");
       mkdirSync(cwd);

@@ -127,7 +127,7 @@ function button(host: ParentNode, label: string): HTMLButtonElement {
 }
 
 function openActions(host: HTMLElement): void {
-  host.querySelector(".ub-actions-trigger")?.dispatchEvent(
+  host.querySelector('button[aria-label="Document actions"]')?.dispatchEvent(
     new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
   );
 }

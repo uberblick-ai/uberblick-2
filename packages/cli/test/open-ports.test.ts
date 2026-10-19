@@ -57,7 +57,7 @@ describe("ub open: hub, ports and serving role", () => {
       expect(statSync(path).mode & 0o777).toBe(0o600);
       expect(app.stdout()).toBe(
         (verbose ? `secret     created ${path} (0600)\n` : "") +
-        `web        ${app.url}\n` +
+        `web        ${app.printed}\n` +
         (verbose ? `hub        ${hubUrl} (started here)\n` : "") +
         `workspace  ${WORKSPACE} (http://127.0.0.1:${new URL(hubUrl).port})\n\n` +
         "Ctrl-C to stop.\n",
@@ -194,7 +194,7 @@ describe("ub open: hub, ports and serving role", () => {
     const recording = (): string =>
       existsSync(browser.opened) ? readFileSync(browser.opened, "utf8") : "";
     await waitUntil("the browser to record the allocated URL", () => recording().endsWith("\n"));
-    expect(recording().trim()).toBe(app.url);
+    expect(recording().trim()).toBe(app.printed);
 
     // The serving role is acquired before binding: even with both the store
     // and port held, the original store refusal still wins.
@@ -228,7 +228,7 @@ describe("ub open: hub, ports and serving role", () => {
       .toMatchObject({ hubUrl: "ws://127.0.0.1:13379" });
     await waitUntil("the browser to record the default URL", () =>
       existsSync(browser.opened) && readFileSync(browser.opened, "utf8").endsWith("\n"));
-    expect(readFileSync(browser.opened, "utf8").trim()).toBe(app.url);
+    expect(readFileSync(browser.opened, "utf8").trim()).toBe(app.printed);
     const other = configured();
     const collision = await openFails(other.box, [], other.env);
     expect(collision.status).toBe(1);
@@ -274,7 +274,7 @@ describe("ub open: hub, ports and serving role", () => {
     expect(app.url).toBe(`http://127.0.0.1:${webPort}/`);
     const configuration = await (await get(`${app.url}uberblick-config.json`)).text();
     expect(configuration).not.toContain(SECRET);
-    expect(JSON.parse(configuration).hubAuthToken).toBe(localBrowserKey(WORKSPACE, box.env));
+    expect(configuration).not.toContain(localBrowserKey(WORKSPACE, box.env));
     expect(app.stdout() + app.stderr()).not.toContain(localBrowserKey(WORKSPACE, box.env));
     expect(await (await get(app.url)).text()).toContain("<title>uberblick</title>");
     expect(await (await get(`${app.url}assets/app.js`)).text()).toContain("marker");
@@ -283,7 +283,7 @@ describe("ub open: hub, ports and serving role", () => {
     // directory room on — which is what the document list hydrates from.
     expect(await hubAnswers(box, hubUrl)).toBe(true);
     expect(app.stdout()).toBe(
-      `web        ${app.url}\n` +
+      `web        ${app.printed}\n` +
       `workspace  ${WORKSPACE} (http://127.0.0.1:${hubPort})\n\n` +
       "Ctrl-C to stop.\n",
     );
@@ -301,7 +301,7 @@ describe("ub open: hub, ports and serving role", () => {
       "the `BROWSER` command to record the URL it was handed",
       () => recording().endsWith("\n"),
     );
-    expect(recording().trim()).toBe(app.url);
+    expect(recording().trim()).toBe(app.printed);
 
     expect((await app.interrupt()).status).toBe(0);
   });
@@ -318,7 +318,7 @@ describe("ub open: hub, ports and serving role", () => {
     // Nothing was started: a bind of the occupied port would have failed with
     // EADDRINUSE and taken the command down before it ever served.
     expect(app.stdout()).toBe(
-      `web        ${app.url}\n` +
+      `web        ${app.printed}\n` +
       `workspace  ${WORKSPACE} (http://127.0.0.1:${hub.port})\n\n` +
       "Ctrl-C to stop.\n",
     );

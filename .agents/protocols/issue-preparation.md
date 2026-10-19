@@ -74,7 +74,9 @@ uncertain assumption and confirming or refuting observation. A bounded negative 
 the eventual feature is not its deliverable.
 
 On every route, apply [library and custom-mechanism choices](delivery-policy.md#library-and-custom-mechanism-choices).
-Raise a needed protected dependency choice during preparation.
+Raise during preparation any [tier-3 trigger](delivery-policy.md#merge-policy--the-rules-are-the-authority-not-a-session)
+that grounding shows the contract will fire and no person's answer covers,
+such as a protected dependency or a sync-protocol change that fences released clients.
 
 Set the existing `Effort` field to your best tentative XS/S/M/L/XL estimate using
 [the field operation](run-operations.md#effort-field). Reassess on feedback and

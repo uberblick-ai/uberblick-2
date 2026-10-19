@@ -823,10 +823,15 @@ textarea.ub-title {
 }
 
 /* Tags give up width before the actions target. */
-.ub-document-actions {
+.ub-document-controls {
   flex: none;
   display: inline-flex;
   margin-left: auto;
+}
+
+.ub-document-actions {
+  flex: none;
+  display: inline-flex;
 }
 
 /* Keep compact paint at the column edge; retain the menu's vertical anchor. */
@@ -1436,6 +1441,25 @@ h6.ub-heading {
   position: relative;
   min-width: 120px;
 }
+
+.ub-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.ub-table th, .ub-table td { overflow-wrap: anywhere; }
+
+.ub-table .column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  bottom: -1px;
+  width: 4px;
+  background: var(--muted-foreground);
+  pointer-events: none;
+}
+
+.ub-editor .resize-cursor, .ub-editor .resize-cursor * { cursor: col-resize; }
 
 .ub-table p {
   margin: 0;

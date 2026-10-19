@@ -1,6 +1,7 @@
 /** The browser-side client for `ub open`'s local search and status endpoints. */
 
 import { mintHubAuthMessage } from "../collab/rooms.js";
+import { localSessionHeaders } from "../collab/local-session.js";
 
 export interface DocumentSearchStatus {
   readonly caughtUp: boolean;
@@ -113,6 +114,7 @@ export function createDocumentSearchClient(
         headers: {
           Accept: "application/json",
           Authorization: `Bearer ${await mintHubAuthMessage(workspace, subject)}`,
+          ...await localSessionHeaders(),
         },
         signal,
       }),

@@ -42,7 +42,7 @@ describe.skipIf(process.getuid === undefined)("project binding ownership", () =>
   });
 
   it.each([
-    ["status"], ["workspace", "status"], ["workspace", "list"],
+    ["status"], ["workspace", "list"],
     ["data", "get", first], ["auth", "login"], ["auth", "status"],
     ["mcp", "install", "codex", "--print"], ["doctor", "--json"],
   ])("names the ignored path when %j has no binding left", async (...argv) => {
@@ -54,6 +54,20 @@ describe.skipIf(process.getuid === undefined)("project binding ownership", () =>
     expect(result.output).toContain("another user owns it");
     expect(result.output).not.toContain("no .uberblick.json here");
     expect(readFileSync(path, "utf8")).toContain(first);
+  });
+
+  it.each([false, true])("lists without warning or setup text when an unowned binding is skipped (json: %s)", async (json) => {
+    const box = unboundSandbox({
+      projectBinding: { workspaceId: first, hubUrl: null },
+      userConfig: { workspace: first, hubUrl: "wss://legacy.example.test/ws" },
+    });
+    const path = join(box.cwd, ".uberblick.json");
+    unowned.add(path);
+    const result = await runInProcess(["workspace", "list", ...(json ? ["--json"] : [])], box);
+    expect(result.status, result.output).toBe(0);
+    expect(result.stderr).toBe(`No workspace selected. Ignoring ${path}: another user owns it.\n`);
+    expect(result.stdout).toBe(json ? "[]\n"
+      : "no workspaces on this machine — run `ub workspace create <name>` to create one\n");
   });
 
   it.each([["mcp", "serve"], ["open"]])("refuses %j with the ignored-file diagnostic before opening a workspace", async (...argv) => {

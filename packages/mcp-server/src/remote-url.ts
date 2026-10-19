@@ -98,6 +98,11 @@ export function normalizeRemoteUrl(value: string): string {
   return url.invented ? formatRemoteUrl(url) : url.text;
 }
 
+/** Canonical WebSocket target for comparisons and admission keys, never display. */
+export function hubIdentity(endpoint: string): string {
+  return new URL(normalizeRemoteUrl(endpoint)).href;
+}
+
 /** Validate before composing a diagnostic, without changing stored origins. */
 export function hubTransportProblem(
   endpoint: string,
@@ -165,7 +170,7 @@ export function parseJoinTarget(value: string): {
 
 /** Canonical identity for login storage, without rewriting a binding. */
 export function authenticationOrigin(hub: string): string {
-  const url = new URL(normalizeRemoteUrl(hub));
+  const url = new URL(hubIdentity(hub));
   url.protocol = url.protocol === "wss:" ? "https:" : "http:";
   return url.origin;
 }

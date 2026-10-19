@@ -8,14 +8,15 @@ import { Popover } from "../src/ui/shadcn/popover.js";
 import { SyncDot } from "../src/ui/status/SyncDot.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { NotSharedReason } from "../src/shell/document-search.js";
-import { notifyTransient } from "../src/notifications.js";
+import { toast } from "sonner";
 
 const copy = vi.hoisted(() => vi.fn(async () => true));
 vi.mock("../src/editor/source-chrome.js", async (original) => ({
   ...await original<object>(), writeToClipboard: copy,
 }));
-vi.mock("../src/notifications.js", async (original) => ({
-  ...await original<object>(), notifyTransient: vi.fn(),
+vi.mock("sonner", async (original) => ({
+  ...await original<typeof import("sonner")>(),
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), dismiss: vi.fn() },
 }));
 
 const ROOM = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4/doc";
@@ -39,7 +40,7 @@ function fixture(patch: Partial<RoomStatus> = {}) {
   } };
 }
 
-beforeEach(() => { vi.useFakeTimers(); copy.mockClear(); vi.mocked(notifyTransient).mockClear(); });
+beforeEach(() => { vi.useFakeTimers(); copy.mockClear(); vi.mocked(toast.success).mockClear(); vi.mocked(toast.error).mockClear(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 function settle() { act(() => void vi.advanceTimersByTime(5_000)); }
 
@@ -83,12 +84,33 @@ describe("the edited row", () => {
     expect(revision.querySelector(".ub-doc-id")?.textContent).toBe("e9faf4df");
     await act(async () => revision.click());
     expect(copy).toHaveBeenCalledWith("e9faf4df1234abcd");
-    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: "Revision copied", severity: "success" });
+    expect(toast.success).toHaveBeenLastCalledWith("Revision copied", { id: "clipboard" });
     copy.mockResolvedValueOnce(false);
     await act(async () => revision.click());
-    expect(notifyTransient).toHaveBeenLastCalledWith({
-      key: "clipboard", message: "Couldn't copy the revision. Try again in a browser with clipboard access.", severity: "error",
-    });
+    expect(toast.error).toHaveBeenLastCalledWith("Couldn't copy the revision. Try again in a browser with clipboard access.", { id: "clipboard" });
+  });
+
+  it("separates a visible decisions link from preceding status text without a leading or orphan dot", () => {
+    const current = fixture();
+    const stamp = Date.now() - 120_000;
+    const link = <a href="#decisions">1 decision in force</a>;
+    const view = render(<StatusLine connection={current.connection} presence={[]} lastUpdated={stamp} statusLink={link} />);
+    const text = () => view.container.querySelector(".ub-status-left")?.textContent;
+    expect(text()).toBe("Edited 2 minutes ago · 1 decision in force");
+    expect(within(view.container).getByRole("link", { name: "1 decision in force" }).textContent).toBe("1 decision in force");
+    for (const lastUpdated of [undefined, Number.NaN]) {
+      view.rerender(<StatusLine connection={current.connection} presence={[]} lastUpdated={lastUpdated} statusLink={link} />);
+      expect(text()).toBe("1 decision in force");
+    }
+    current.change({ connected: false, synced: false, writable: false });
+    settle();
+    expect(text()).toBe("not saved · 1 decision in force");
+    current.change({ connected: true, synced: true, writable: true });
+    settle();
+    for (const statusLink of [undefined, null, false]) {
+      view.rerender(<StatusLine connection={current.connection} presence={[]} lastUpdated={stamp} statusLink={statusLink} />);
+      expect(text()).toBe("Edited 2 minutes ago");
+    }
   });
 });
 

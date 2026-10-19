@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactElement } from "react";
 import type { LocalServing } from "../../config.js";
 import { parseWorkspaceId } from "@uberblick/schema";
-import { notifyTransient } from "../../notifications.js";
+import { toast } from "sonner";
 import { createWorkspaceAccessClient } from "../../shell/workspace-access.js";
 import type { AccessAction, AccessAnswer, AccessMember, AccessRole } from "../../shell/workspace-access.js";
 import type { Workspace } from "../route.js";
@@ -151,7 +151,7 @@ export function AccessSettings({ workspace, serving, subject, verifiedHandle }: 
     // An acknowledged self-removal stays acknowledged when its fresh read
     // loses workspace membership.
     if (action.operation === "change-role" && applied) {
-      notifyTransient({ key: "workspace-role", message: "Role changed", severity: "success" });
+      toast.success("Role changed", { id: "workspace-role" });
     } else setFeedback({ applied, text });
     await refresh(signal);
     if (!signal.aborted) setBusy(false);

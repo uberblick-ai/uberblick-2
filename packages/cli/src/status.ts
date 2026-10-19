@@ -1,8 +1,10 @@
+import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { isGithubUsername } from "@uberblick/schema/github-identity";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { hubDatabasePath } from "./hub-config.js";
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
+import { sanitizeHubVersion } from "@uberblick/mcp-server/management-client";
 import { authenticationOrigin, hubTransportProblem } from "@uberblick/mcp-server/remote-url";
 import { collectSyncStatus, formatHubFailure, openWorkspaceReplicas, readStoredSyncStatus, readWorkspaceName } from "@uberblick/mcp-server";
 import type { McpConfig, SyncStatus, WorkspaceReplicaSet } from "@uberblick/mcp-server";
@@ -32,11 +34,12 @@ export interface StorageReport {
   workspace: string;
 }
 
-/** Diagnostic input retained for `ub workspace status`, separate from public JSON. */
+/** Diagnostic reading, separate from the public status JSON. */
 export interface StatusReport {
   binding: ProjectBinding;
   projectConfig: string | null;
   version: string;
+  hubVersion?: string | null;
   /** The workspace id as configured — the spelling its owner typed. */
   workspace: string;
   /** Bare identity for room names, token claims and database paths; no display slug. */
@@ -94,22 +97,6 @@ export async function readSyncStatus(
   }
 }
 
-/**
- * Read store cuts and pending markers together: a peer can clear a marker
- * before this replica applies its cut, and counts alone miss attach drain.
- */
-export function workspaceCaughtUp(replicas: WorkspaceReplicaSet["replicas"]): boolean {
-  const attached = replicas.attachedReplicas();
-  const snapshot = replicas.store.syncSnapshot(
-    attached.map(({ room, lastSeq }) => ({ room, throughSeq: lastSeq })),
-  );
-  return replicas.persistenceError() === null &&
-    replicas.sync.state().status === "connected" &&
-    !replicas.sync.isDraining() &&
-    snapshot.pendingRooms.length === 0 &&
-    attached.every(({ room }) => !snapshot.unappliedRooms.has(room) && replicas.isRoomQuiet(room));
-}
-
 export interface UnboundStatusReport {
   version: string;
   workspace: null;
@@ -121,18 +108,14 @@ export interface UnboundStatusReport {
   message: string;
 }
 
-/**
- * Keep name and acknowledgement metadata outside the diagnostic report.
- * Workspace status also reads stored accounts for shared-secret hubs.
- */
+/** Keep workspace name and recent devices outside the diagnostic report. */
 export async function statusReport(
-  options: { env?: NodeJS.ProcessEnv; cwd?: string; workspaceStatus?: boolean } = {},
+  options: { env?: NodeJS.ProcessEnv; cwd?: string } = {},
 ): Promise<{
   report: StatusReport | UnboundStatusReport;
   warnings: string[];
   accountOrigin?: string;
   workspaceName?: string | null;
-  caughtUp?: boolean;
   recentDevices?: RecentDevice[] | null;
 }> {
   const resolved = resolveConfig(options);
@@ -152,33 +135,30 @@ export async function statusReport(
   }
   const transport = hubTransportProblem(config.hubUrl, resolved.env);
   const stored = bindingProblem === undefined ? undefined : readStoredSyncStatus(config.databasePath, config.workspaceId);
-  let caughtUp = false;
-  const [sync, recentDevices] = await Promise.all([
-    stored === undefined ? readSyncStatus(config, options.workspaceStatus === true
-      ? replicas => { caughtUp = workspaceCaughtUp(replicas); } : undefined) : {
+  const [sync, deviceReading] = await Promise.all([
+    stored === undefined ? readSyncStatus(config) : {
       hub: { status: "disabled", url: null, protocolVersion: SYNC_PROTOCOL_VERSION },
       rooms: [], unsyncedChanges: stored.pendingRooms.length, pendingRooms: stored.pendingRooms,
       lastSync: stored.lastSync === null ? null : new Date(stored.lastSync).toISOString().replace(/\.\d{3}Z$/, "Z"),
       inFlightUpdates: 0, logEntries: stored.logEntries, persistence: null,
     } satisfies Partial<SyncStatus>,
-    bindingProblem !== undefined || options.workspaceStatus === true || config.deviceLogin === undefined || transport !== null ? null
+    bindingProblem !== undefined || config.deviceLogin === undefined || transport !== null ? null
       : requestRecentDevices({ ...resolved.binding, env: resolved.env }, AbortSignal.timeout(Math.floor(config.connectTimeoutMs))),
   ]);
   // Read the stored account without login or renewal, even after a hub refusal.
-  const deviceLogin = bindingProblem !== undefined || config.deviceLogin === undefined &&
-    !(options.workspaceStatus === true && resolved.binding.hubUrl !== null)
+  const deviceLogin = bindingProblem !== undefined || config.deviceLogin === undefined
     ? undefined : readDeviceLogin(config.hubUrl, config.workspaceId, resolved.env);
   const accountOrigin = resolved.binding.hubUrl === null ? undefined : deviceLogin?.origin;
   return {
     warnings: resolved.warnings,
-    recentDevices,
+    recentDevices: deviceReading?.devices ?? null,
     workspaceName: readWorkspaceName(config.databasePath, config.workspaceId),
-    ...(options.workspaceStatus === true ? { caughtUp } : {}),
     ...(accountOrigin === undefined ? {} : { accountOrigin }),
     report: {
       binding: resolved.binding,
       projectConfig: resolved.paths.projectConfig,
       version: cliVersion(),
+      hubVersion: deviceReading?.hubVersion ?? null,
       workspace: resolved.env.WORKSPACE_ID ?? config.workspaceId,
       workspaceUuid: config.workspaceId,
       hubUrl: config.hubUrl,
@@ -242,7 +222,10 @@ function lastSyncAge(lastSync: string | null): string {
 export interface ShortStatusReport {
   workspace: { id: string; name: string | null };
   hub: string | null;
+  version: { client: string; hub: string | null };
   account: StatusReport["account"];
+  chosenBy: { source: "project-config" | "environment"; path: string | null };
+  storedIn: string;
   connection: {
     state: "connected" | "refused" | "failed";
     cause: NonNullable<SyncStatus["hub"]["cause"]> | null;
@@ -263,6 +246,17 @@ function connectionState(report: StatusReport): NonNullable<ShortStatusReport["c
   if (report.hub.status === "connected") return "connected";
   if (report.hub.status === "auth-failed" || report.hub.status === "update-required") return "refused";
   return "failed";
+}
+
+function workspaceSelection(report: StatusReport): ShortStatusReport["chosenBy"] {
+  return report.sources.workspace === "project config" && report.projectConfig !== null
+    ? { source: "project-config", path: report.projectConfig }
+    : { source: "environment", path: null };
+}
+
+function statusVersion(report: StatusReport): ShortStatusReport["version"] {
+  return { client: report.version, hub: report.binding.hubUrl !== null && connectionState(report) === "connected"
+    ? sanitizeHubVersion(report.hubVersion) ?? null : null };
 }
 
 export function shortStatusReport(
@@ -316,7 +310,10 @@ export function shortStatusReport(
   return {
     workspace: { id: report.workspaceUuid, name: workspaceName },
     hub: origin,
+    version: statusVersion(report),
     account: origin === null ? null : report.account,
+    chosenBy: workspaceSelection(report),
+    storedIn: resolve(report.databasePath),
     connection: origin === null && report.bindingProblem === undefined ? null : {
       state,
       cause: recorded ? hub.cause ?? null : null,
@@ -377,6 +374,8 @@ export function renderStatus(
   let text = field("workspace", short.workspace.name === null
     ? short.workspace.id : `${short.workspace.name} (${short.workspace.id})`);
   text += field("hub", short.hub ?? "local, this computer only");
+  text += field("version", `client ${short.version.client}` +
+    (short.connection === null ? "" : `, hub ${short.version.hub ?? "unknown"}`));
   if (short.hub === null) {
     text += field("account", "none needed for a local workspace");
   } else if (short.account !== null) {
@@ -384,6 +383,9 @@ export function renderStatus(
   } else if (accountOrigin !== undefined) {
     text += field("account", `not signed in to ${short.hub}`);
   }
+  text += field("chosen by", short.chosenBy.path === null
+    ? "environment" : `project config in ${dirname(short.chosenBy.path)}`);
+  text += field("stored in", short.storedIn);
   if (short.hub !== null || report.bindingProblem !== undefined) {
     text += field("connection", connectionText(report));
     text += field("pending", short.pending.count === 0
@@ -408,7 +410,7 @@ export const STATUS_OPTIONS = {
 
 export const STATUS_HELP = `usage: ub status [--json]
 
-Show whether this project's work is syncing: workspace, hub, sign-in, pending changes and problems.
+Show this project's workspace, selection source, local storage and sync status.
 
 options:
   --json            the same report as JSON on stdout, for scripts

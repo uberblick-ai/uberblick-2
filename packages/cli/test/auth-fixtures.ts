@@ -134,7 +134,7 @@ export async function serve(handler: (request: IncomingMessage, response: Server
   return { server, origin: `http://127.0.0.1:${address.port}` };
 }
 
-export async function rig(workspaces: string[] = [], configured = true, initializeDefaultWorkspace = false, deviceCredentials = false, protocolVersion?: number) {
+export async function rig(workspaces: string[] = [], configured = true, initializeDefaultWorkspace = false, deviceCredentials = false, protocolVersion?: number, hubVersion?: string) {
   const box = sandbox();
   const github = new GithubFake();
   const logs: unknown[] = [];
@@ -144,7 +144,8 @@ export async function rig(workspaces: string[] = [], configured = true, initiali
       authSecret: SIGNING_SECRET, port: 0, databasePath, log: (line) => logs.push(line),
       ...(protocolVersion === undefined ? {} : { protocolVersion }),
       ...(configured ? { github: { clientId: "Iv23AbCdEF0123456789", fetch: github.fetch } } : {}),
-    }, { initializeDefaultWorkspace, ...(deviceCredentials ? { deviceCredentials: true } : {}) });
+    }, { initializeDefaultWorkspace, ...(deviceCredentials ? { deviceCredentials: true } : {}),
+      ...(hubVersion === undefined ? {} : { hubVersion }) });
     hubs.push(hub);
     return hub;
   };

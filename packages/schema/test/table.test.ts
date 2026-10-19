@@ -37,6 +37,10 @@ function legacy(doc: Y.Doc, source: string): string {
   return id;
 }
 
+function setCellWidth(cell: Y.XmlElement, value: unknown): void {
+  (cell as unknown as { setAttribute(name: string, value: unknown): void }).setAttribute("colwidth", value);
+}
+
 describe("structured table contract", () => {
   it("writes canonical TableKit nodes with same-id retyping and no opening repair", () => {
     const doc = seeded();
@@ -69,6 +73,67 @@ describe("structured table contract", () => {
       expect(tableCellText(tableRows(element(doc, id))[0]![0]!)?.toDelta()).toEqual([{ insert: cell }]);
       doc.destroy();
     }
+  });
+
+  it("accepts only native single positive finite column widths without admitting other cell shapes", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "table", text: GFM });
+    const table = element(doc, id);
+    const cell = tableRows(table)[0]![0]!;
+    expect(isSupportedTable(table)).toBe(true);
+    for (const value of [null, [120], [240.5]]) {
+      setCellWidth(cell, value);
+      expect(isSupportedTable(table)).toBe(true);
+    }
+    for (const value of [120, "120", "[120]", [], [0], [-1], ["120"], [Number.NaN], [Infinity], [-Infinity], [120, 240], {}]) {
+      setCellWidth(cell, value);
+      expect(isSupportedTable(table)).toBe(false);
+    }
+    setCellWidth(cell, [240]);
+    cell.setAttribute("foreign", "value");
+    expect(isSupportedTable(table)).toBe(false);
+    cell.removeAttribute("foreign");
+    (cell as unknown as { setAttribute(name: string, value: unknown): void }).setAttribute("colspan", 2);
+    expect(isSupportedTable(table)).toBe(false);
+    doc.destroy();
+  });
+
+  it("omits saved widths from text and Markdown while mapped edits preserve retained widths and marked cells", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "table", text: GFM });
+    const table = element(doc, id);
+    const cells = tableRows(table);
+    const beta = tableCellText(cells[2]![0]!)!;
+    beta.format(0, beta.length, { bold: {}, link: { href: "https://example.test" }, comment: { threadId: UUID } });
+    const before = getBlockText(doc, id);
+    const markdown = exportMarkdown(doc, { frontmatter: false });
+    for (const row of cells) {
+      setCellWidth(row[0]!, [245.5]);
+      setCellWidth(row[1]!, [160]);
+    }
+    expect(isSupportedTable(table)).toBe(true);
+    expect(getBlockText(doc, id)).toBe(before);
+    expect(exportMarkdown(doc, { frontmatter: false })).toBe(markdown);
+    editBlock(doc, id, before, before.replace("Alpha", "Alpine"));
+    const expanded = writeGfmTable([
+      ["Name", "New", "Count"], ["Alpine", "x", "1"],
+      ["Inserted", "y", "3"], [parseGfmTable(before)!.rows[1]![0]!, "z", "2"],
+    ]);
+    editBlock(doc, id, getBlockText(doc, id), expanded, { tableMapping: { rows: [0, 1, null, 2], columns: [0, null, 1] } });
+    const mapped = tableRows(table);
+    for (const [oldRow, newRow] of [[0, 0], [1, 1], [2, 3]] as const) {
+      expect(mapped[newRow]![0]).toBe(cells[oldRow]![0]);
+      expect(mapped[newRow]![2]).toBe(cells[oldRow]![1]);
+      expect(mapped[newRow]![0]!.getAttributes().colwidth).toEqual([245.5]);
+      expect(mapped[newRow]![2]!.getAttributes().colwidth).toEqual([160]);
+    }
+    expect(mapped.every((row) => row[1]!.getAttributes().colwidth === undefined)).toBe(true);
+    expect(mapped[2]!.every((cell) => cell.getAttributes().colwidth === undefined)).toBe(true);
+    expect(tableCellText(mapped[3]![0]!)).toBe(beta);
+    expect(beta.toDelta()).toEqual([{ insert: "Beta", attributes: { bold: {}, link: { href: "https://example.test" }, comment: { threadId: UUID } } }]);
+    expect(getBlockText(doc, id)).toBe(expanded);
+    expect(isSupportedTable(table)).toBe(true);
+    doc.destroy();
   });
 
   it("refuses non-table writes, extra blocks and new table threads without an update", () => {

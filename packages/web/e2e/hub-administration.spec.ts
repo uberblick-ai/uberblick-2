@@ -113,7 +113,8 @@ test.describe("a hub administrator with no workspace membership", () => {
     await expect(page.getByText(/hub refused access/i)).toBeVisible();
     await expect(table).toHaveCount(0);
     await expect(page.getByRole("region", { name: "Hub", exact: true })).toHaveCount(0);
-    await page.getByRole("button", { name: "Preferences", exact: true }).click();
+    await page.getByTestId("account-menu").click();
+    await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
     await expect(page.getByRole("button", { name: "Admins", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Workspaces", exact: true })).toHaveCount(0);
   });

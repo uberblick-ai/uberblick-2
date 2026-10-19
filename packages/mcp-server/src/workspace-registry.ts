@@ -2,7 +2,7 @@
 import { lstatSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { normalizeRemoteUrl } from "./remote-url.js";
+import { hubIdentity, normalizeRemoteUrl } from "./remote-url.js";
 import { resolveStorage } from "./storage.js";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { acquireInitLock } from "./init-lock.js";
@@ -40,7 +40,7 @@ function readRegistry(env: NodeJS.ProcessEnv): { path: string; text: string | nu
   }
 }
 
-/** Undefined means unknown; it must never be interpreted as local. */
+/** Undefined means no record; callers must check for an existing replica before using a hub selection. */
 export function readWorkspaceHub(id: string, env: NodeJS.ProcessEnv = process.env): string | null | undefined {
   return readRegistry(env).hubs[parseWorkspaceId(id).uuid];
 }
@@ -49,12 +49,7 @@ export function recordedWorkspaceIds(env: NodeJS.ProcessEnv = process.env): stri
   return Object.keys(readRegistry(env).hubs);
 }
 
-function sameHub(left: string | null, right: string | null): boolean {
-  return left === null || right === null ? left === right
-    : new URL(normalizeRemoteUrl(left)).href === new URL(normalizeRemoteUrl(right)).href;
-}
-
-function hasReplica(id: string, env: NodeJS.ProcessEnv): boolean {
+export function hasWorkspaceReplica(id: string, env: NodeJS.ProcessEnv = process.env): boolean {
   const uuid = parseWorkspaceId(id).uuid;
   const paths = [defaultWorkspaceDatabasePath(id, env)];
   if (env.UBERBLICK_DB?.trim()) paths.push(env.UBERBLICK_DB.trim());
@@ -110,9 +105,11 @@ export function assertWorkspaceBinding(
 ): boolean {
   const recorded = readWorkspaceHub(binding.workspaceId, env);
   if (recorded !== undefined) {
-    if (!sameHub(recorded, binding.hubUrl)) throw new WorkspaceBindingMismatch(binding, recorded, source);
+    const matches = recorded === null || binding.hubUrl === null
+      ? recorded === binding.hubUrl : hubIdentity(recorded) === hubIdentity(binding.hubUrl);
+    if (!matches) throw new WorkspaceBindingMismatch(binding, recorded, source);
     return true;
-  } else if (binding.hubUrl !== null && hasReplica(binding.workspaceId, env)) {
+  } else if (binding.hubUrl !== null && hasWorkspaceReplica(binding.workspaceId, env)) {
     throw new WorkspaceBindingMismatch(binding, undefined, source);
   }
   return false;
@@ -160,7 +157,7 @@ export function withWorkspaceBindings<T>(
   for (const binding of bindings) {
     const id = parseWorkspaceId(binding.workspaceId).uuid;
     const hub = binding.hubUrl === null ? null : normalizeRemoteUrl(binding.hubUrl);
-    if (hubs[id] === undefined && id !== replace && hub !== null && hasReplica(id, env)) {
+    if (hubs[id] === undefined && id !== replace && hub !== null && hasWorkspaceReplica(id, env)) {
       throw new WorkspaceBindingMismatch(binding, undefined, source);
     }
     if (hubs[id] === undefined || id === replace) {

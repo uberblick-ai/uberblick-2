@@ -29,6 +29,7 @@ import { openWorkspaceReplicas } from "./workspace-replicas.js";
 import type { HubState } from "./sync.js";
 import { HubSync } from "./sync.js";
 import { closeResources } from "./close-resources.js";
+import { hubIdentity } from "./remote-url.js";
 
 /**
  * Bridges move a whole corpus over potentially slow links, so their finite
@@ -48,11 +49,12 @@ export function bridgeConfig(
   overrides: { hubUrl?: string; authSecret?: string | null } = {},
 ): McpConfig {
   const hubUrl = overrides.hubUrl ?? config.hubUrl;
+  const sameHub = hubIdentity(hubUrl) === hubIdentity(config.hubUrl);
   // An endpoint override also changes which authority can admit us. Preserve
   // an explicit stricter loopback fixture, but never carry a remote login to
   // a loopback override or a signing secret to a remote override.
   const authEnv = { ...(config.authEnv ?? config.deviceLogin?.env ?? process.env) };
-  if (hubUrl !== config.hubUrl) delete authEnv.HUB_ADMISSION;
+  if (!sameHub) delete authEnv.HUB_ADMISSION;
   const remote = usesDeviceLogin(hubUrl, authEnv);
   const { deviceLogin, ...rest } = config;
   return {
@@ -61,7 +63,7 @@ export function bridgeConfig(
     localWorkspace: false,
     authEnv,
     ...(remote ? { deviceLogin: deviceLogin ?? {} }
-      : hubUrl === config.hubUrl && deviceLogin !== undefined ? { deviceLogin } : {}),
+      : sameHub && deviceLogin !== undefined ? { deviceLogin } : {}),
     authSecret: remote ? null :
       overrides.authSecret === undefined ? config.authSecret : overrides.authSecret,
     connectTimeoutMs: BRIDGE_CONNECT_TIMEOUT_MS,

@@ -829,6 +829,8 @@ Host-only first-admin setup grants workspace administration only.
 
 A claim made by someone else cannot be recovered in place. There is no operator
 override, administrator recovery or supported way to reopen claiming. The resulting membership admits that account's device credentials to its default workspace.
+A fresh hub has nothing to lose, so start over instead: run
+`sh bin/remote-compose.sh down --volumes`, then `up` again and claim it.
 
 `GET /auth/claim-state` needs no credential and changes nothing. It reports
 only `unclaimed` and `canClaim`, the latter requiring configured GitHub sign-in.
@@ -836,6 +838,12 @@ It reveals no workspace UUID, name, account, member or credential. A failed
 read or an older hub is never reported as unclaimed by `ub auth login`.
 
 Device renewal is `POST /auth/credential/renew`, beside those sign-in routes.
+Each device credential lasts 30 days from its stored `issued_at` in epoch
+milliseconds. At that age the hub refuses room admission, management requests
+and renewal, and closes and fences rooms already admitted under it. Management
+and renewal answer `sign-in-required`. There is no grace period: run
+`ub auth login` again. Expired rows remain as device history. Root-secret
+loopback admission and the separate 24-hour hub browser sessions stay unchanged.
 The device creates a fresh Ed25519 key pair before each sign-in or renewal and
 keeps its private key in its owner-only credential store. Sign-in start,
 collection and cancellation carry the same `publicKey`; no sign-in reply
@@ -864,8 +872,12 @@ Renewal needs no GitHub approval or GitHub connection. It retires the presented
 credential and returns `renewed` with `credential: {record, workspaceNames?}` once, for the
 same principal and device and its current memberships in active workspaces,
 including none. Suspended workspaces stay out of issued snapshots.
+Remote clients renew once the stored `issuedAt` is 15 days old, including
+long-running MCP and `ub open` processes that stay connected. This age-triggered
+renewal is unconditional even when available workspaces have not changed.
 It grants no membership. Retirement closes and fences any rooms admitted under
-the old credential on a remote hub. The hub stores only each credential's public
+the old credential on a remote hub, so the device's open rooms reconnect once
+per renewal. The hub stores only each credential's public
 key; a database or backup copy cannot sign room tokens or management proofs.
 Both a `complete` sign-in collection and a `renewed` reply can include names
 from the issued workspaces' hub `_settings` rooms. Loaded rooms supply their
@@ -880,11 +892,12 @@ until then, and promotion initially shows the UUID alone. Conditional renewal
 with unchanged available workspaces still returns only `{status: "unchanged"}`.
 A fresh, valid renewal proof under an already-replaced credential revokes every
 credential for that principal and device, closes their rooms, logs the reuse
-without key or token material, and returns `already-replaced`. A replay of an
+without key or token material, and returns `already-replaced`, regardless of
+that credential's age. A replay of an
 already-spent proof revokes nothing. Room and management requests using a
 replaced credential are refused and revoke nothing, so a process holding a
 token minted just before another process renewed cannot sign the device out.
-Unknown, revoked or unverifiable credentials return `sign-in-required`, revealing
+Unknown, revoked, expired or unverifiable credentials return `sign-in-required`, revealing
 no identity or workspace. If the replacement answer is lost, sign in again:
 the credential cannot be collected a second time.
 Malformed requests return `invalid-request`, version skew returns
@@ -906,14 +919,16 @@ signing-secret admission and need no GitHub, membership or login.
 ### Manage members and devices
 
 The terminal route to member management is `ub workspace member`:
-`add <github-handle> [--role admin|member]`, `list [--json]`,
+`add <github-handle> [--role admin|member] [--yes]`, `list [--json]`,
 `role <member> <admin|member>` and `remove <member>`. These use the project's
 binding, including `UB_WORKSPACE_ID`/`UB_HUB_URL`, and this machine's stored
 device login. Missing workspace scope or a rejected credential triggers one
 renewal without GitHub approval; the commands never start a sign-in or change
-the binding. Add resolves the handle and requires an explicit yes at a terminal
-prompt naming the hub origin, workspace UUID, resolved login, permanent
-account ID and role. The confirmed account ID is granted. Existing members
+the binding. Add resolves the handle before confirmation. Without `--yes`, a
+terminal prompt names the hub origin, workspace UUID, resolved login, permanent
+account ID and role; it defaults to no and only `y` or `yes` grants access.
+`--yes` confirms the grant without a prompt in terminals and scripts, and is
+required without a terminal. The confirmed account ID is granted. Existing members
 keep their roles. Role and remove match the current list by case-insensitive
 login or account ID and refuse ambiguous matches. Removal ends that account's
 workspace access on every device, revokes no devices and leaves other
@@ -1000,7 +1015,10 @@ copies remain usable. Issued credentials omit suspended workspaces. A refused
 device renews once, then conditional checks leave its credential and healthy
 rooms alone until restore makes access available again. Restore lets the same
 members discover access through renewal without another sign-in or grant.
-Loopback hubs using the local signing secret do not use this administration.
+A standalone hub bound to a loopback address admits rooms using its local
+signing secret, even with GitHub sign-in configured. This is an accepted limit:
+memberships, suspension and device revocation do not govern those rooms.
+Released Docker hubs bind `0.0.0.0` and are unaffected.
 
 Both hub lists use bounded pages. Omit `cursor` for the first request, then
 sign each returned opaque `nextCursor` in the next request until it is null.
@@ -1044,7 +1062,9 @@ credential naming no workspace. Workspace admins have no authority over
 another person's devices. Device rows contain `deviceId`, `signedInAt`
 (epoch milliseconds of that device's sign-in, preserved through renewal),
 `workspaces` (its current credential's limits), and `current` (whether it is
-making the request). Only devices with a current credential appear.
+making the request). Only devices with a current, unexpired credential appear
+in `list-devices`, user menu → Devices and `ub auth logout --all-devices`.
+Expired credentials remain as history and are omitted from these lists.
 Revocation retires every credential of that device, including a replacement
 from a racing renewal. Its other devices keep working. Revoking the requesting
 device succeeds, then its future proofs are refused. An authorized retry
@@ -1570,11 +1590,13 @@ sh bin/remote-compose.sh start hub
 
 Only start the hub after restore reports success. To restore a backup kept on
 the host, including one made by an older `bin/hub-backup.sh`, stream it through
-standard input. `-T` keeps the container terminal from changing binary input:
+standard input. `-T` keeps the container terminal from changing binary input;
+`--yes` confirms any access changes because this route has no terminal for a
+confirmation prompt:
 
 ```sh
 sh bin/remote-compose.sh stop hub
-sh bin/remote-compose.sh run --rm -T hub ub-hub restore - < ~/uberblick-hub-backup.sqlite
+sh bin/remote-compose.sh run --rm -T hub ub-hub restore --yes - < ~/uberblick-hub-backup.sqlite
 sh bin/remote-compose.sh start hub
 ```
 
@@ -1595,11 +1617,34 @@ are worth restoring even before the first document exists. A missing, corrupt
 or empty backup leaves the volume untouched. A running hub also refuses the
 restore and names `docker compose stop hub`.
 
+Before replacing the database, restore compares its private access records
+with the live database. It lists device revocations, workspace member removals
+and hub-admin removals that the backup would undo, showing each account's
+GitHub login and account ID, the device name or UUID, and the workspace for a
+membership. The list contains no keys or tokens. If the list is empty, restore
+says that no revocations or removals would be undone and proceeds without
+asking.
+
+When the list is not empty, answer yes at the terminal or pass `--yes` to
+proceed. A no, an interrupted prompt or no terminal without `--yes` exits 1
+and leaves the live database unchanged. Without a terminal, the message names
+the command to rerun with `--yes`.
+
+If the live database is absent, including in an empty `hub-data` volume, or
+cannot be opened and read, restore says that newer device revocations,
+workspace member removals and hub-admin removals cannot be determined and
+proceeds without asking. Both this warning and a non-empty list print the
+steps to restore the access restrictions after starting the hub:
+
+- Each account revokes its own lost devices again through user menu → Devices
+  or `ub auth logout --all-devices <hub>`.
+- Workspace admins remove members again through `ub workspace member remove`
+  or Workspace settings → Members.
+- Hub admins remove hub admins again through Hub → Admins.
+
 Opening a restored backup made before the device-created-key upgrade revokes
 its HMAC device credentials and removes their keys. Every computer and unattended
-agent host must then run `ub auth login <hub-origin>` again. Restoring any
-backup restores its recorded access state, including previously revoked
-devices or removed members; it does not add rollback protection.
+agent host must then run `ub auth login <hub-origin>` again.
 
 A rollback journal beside `hub.sqlite` refuses restore. Let SQLite recover it
 by opening the database cleanly, then stop the hub and retry; never delete the

@@ -44,8 +44,8 @@ function readInput(request: IncomingMessage): Promise<string | null> {
   });
 }
 
-/** Reuse the hub's target rules, with an exact and smaller local operation set. */
-export async function readAccessAction(request: IncomingMessage): Promise<ManagementAction | null> {
+/** A bounded JSON object body, or null for any other request. */
+export async function readJsonObject(request: IncomingMessage): Promise<Record<string, unknown> | null> {
   if (request.headers["content-type"]?.split(";")[0] !== "application/json") return null;
   if (Number(request.headers["content-length"] ?? 0) > MAX_INPUT_BYTES) return null;
   try {
@@ -53,7 +53,17 @@ export async function readAccessAction(request: IncomingMessage): Promise<Manage
     if (input === null) return null;
     const body: unknown = JSON.parse(input);
     if (body === null || typeof body !== "object" || Array.isArray(body)) return null;
-    const fields = body as Record<string, unknown>;
+    return body as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/** Reuse the hub's target rules, with an exact and smaller local operation set. */
+export async function readAccessAction(request: IncomingMessage): Promise<ManagementAction | null> {
+  const fields = await readJsonObject(request);
+  if (fields === null) return null;
+  try {
     const action = readRequestAction(fields);
     if (action === null || action.operation === "renew-credential" || action.operation === "promote-workspace" ||
       Object.keys(fields).some(field => !Object.hasOwn(action, field))) return null;

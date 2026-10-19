@@ -29,6 +29,7 @@ import type { DirectoryEntry, DocMeta, SidebarGroup } from "@uberblick/schema";
 import { acquireRoom } from "../collab/rooms.js";
 import type { RoomConnection, RoomStatus } from "../collab/rooms.js";
 import { resolveClientConfig } from "../config.js";
+import { localSession, localSessionMissing, subscribeLocalSession } from "../collab/local-session.js";
 import { getSetting, subscribeSettings } from "../settings.js";
 import type { Settings } from "../settings.js";
 import { parseRemoteAwareness } from "../collab/remote-awareness.js";
@@ -61,6 +62,15 @@ export function useHubEndpoint(): boolean {
     };
   }, []);
   return ready;
+}
+
+/** A ub open page without a session it accepts; other routes never have one. */
+export function useLocalSessionMissing(servedLocally: boolean): boolean {
+  const missing = useSyncExternalStore(subscribeLocalSession, localSessionMissing);
+  useEffect(() => {
+    if (servedLocally) void localSession();
+  }, [servedLocally]);
+  return servedLocally && missing;
 }
 
 /**

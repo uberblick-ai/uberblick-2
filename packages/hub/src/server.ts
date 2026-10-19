@@ -7,7 +7,7 @@ import type {
 } from "@hocuspocus/server";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Server } from "@hocuspocus/server";
-import { isRoomNameWithinBounds, parseRoom } from "@uberblick/schema";
+import { parseRoom } from "@uberblick/schema";
 import type { HubConfig } from "./config.js";
 import {
   DEFAULT_HOST,
@@ -19,6 +19,7 @@ import type { HubLogger } from "./log.js";
 import type { CredentialContext } from "./credential-admission.js";
 import { hocuspocusLogger, stderrLogger } from "./log.js";
 import { HubDatabase, isEphemeralDatabase } from "./persistence.js";
+import { isAdmissibleRoom } from "./admissible-room.js";
 import { DeletedRooms } from "./deleted-rooms.js";
 import {
   isProtocolVersion,
@@ -228,7 +229,7 @@ export async function createRoomAuthenticator(options: {
     const { documentName, requestHeaders, requestParameters, connectionConfig } = payload;
     // Attribute each rejection to its peer without exposing token contents.
     const peer = resolvePeer(requestHeaders);
-    if (!isRoomNameWithinBounds(documentName)) {
+    if (!isAdmissibleRoom(documentName)) {
       options.log({ event: "hub.auth.rejected", peer: peer.address,
         proxied: peer.proxied, cause: "room-name-invalid" });
       throw new AuthError("room-name-invalid", "room name exceeds admission bounds");
@@ -353,7 +354,7 @@ function roomWorkspace(room: string): string | null {
 
 function unconfiguredRoomAuthenticator(protocolVersion: number, log: HubLogger): RoomAuthenticator {
   return async payload => {
-    if (!isRoomNameWithinBounds(payload.documentName)) {
+    if (!isAdmissibleRoom(payload.documentName)) {
       log({ event: "hub.auth.rejected", cause: "room-name-invalid" });
       throw new AuthError("room-name-invalid", "room name exceeds admission bounds");
     }

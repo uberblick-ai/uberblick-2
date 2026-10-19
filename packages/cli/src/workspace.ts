@@ -1,4 +1,5 @@
 import { createWorkspaceCommand } from "./workspace-create.js";
+import { forkWorkspaceCommand } from "./workspace-fork.js";
 import { promoteWorkspaceCommand } from "./workspace-promote.js";
 import { parseJoinTarget, useRemoteWorkspace } from "./remote.js";
 import { assertHubTransport } from "@uberblick/mcp-server/remote-url";
@@ -13,7 +14,7 @@ import { parseWorkspaceId } from "@uberblick/schema";
 import type { Origin } from "./config.js";
 import { migrateHubAdmissions, resolveConfig, writeHubAdmission } from "./config.js";
 import { type ProjectBinding, resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
-import { forgetWorkspace, readWorkspaceHub, recordedWorkspaceIds, workspaceRegistryPath } from "./workspace-registry.js";
+import { forgetWorkspace, hasWorkspaceReplica, readWorkspaceHub, recordedWorkspaceIds, workspaceRegistryPath } from "./workspace-registry.js";
 import { takeHelp } from "./help.js";
 import { workspaceMemberCommand } from "./workspace-member.js";
 import type { InitLock } from "./init-lock.js";
@@ -22,18 +23,17 @@ import type { Io } from "./io.js";
 import { processIo, shellArgument } from "./io.js";
 import { describeFsError } from "./safe-write.js";
 import { ORIGIN_LABELS } from "./status.js";
-import { workspaceStatusCommand } from "./workspace-status.js";
 import { fillMainRepositoryFromOrigin } from "./workspace-main-repository.js";
 
 export const WORKSPACE_HELP = `usage: ub workspace [command]
 
 commands:
-  status                      the workspace in use, its selection, storage and sync
   create <name>               create and select a separate local-only workspace
+  fork                        copy this workspace independently and select the local copy
   promote <hub>               upload, verify and connect this local workspace
   member <command>            grant workspace access and manage members
   list [--json]               workspaces this machine has a database for
-  use <link|id>               fetch a shared workspace or select a recorded one
+  use <link|id>               fetch a shared workspace or select a local replica
   remove <id|prefix> [--yes]  delete this computer's copy of a workspace
 
 options:
@@ -67,24 +67,28 @@ interface InForce {
   origin: Origin;
   hubUrl: string | null;
   warnings: string[];
+  selectionNote: string | null;
 }
 
-/** Match workspace status's selection and source without opening the database. */
+/** Read the current selection and source without opening the database. */
 function inForce(options: { env?: NodeJS.ProcessEnv } = {}): InForce {
-  const resolved = resolveConfig(options);
+  const resolved = resolveConfig({ ...options, warnLegacySelection: false });
   const configured = resolved.env.WORKSPACE_ID ?? null;
   return {
     configured,
     uuid: configured === null ? null : parseWorkspaceId(configured).uuid,
     origin: resolved.origins.workspace,
     hubUrl: resolved.binding?.hubUrl ?? null,
-    warnings: resolved.bindingProblem === undefined ? resolved.warnings : [...resolved.warnings, resolved.bindingProblem],
+    warnings: resolved.warnings,
+    selectionNote: configured !== null ? null : resolved.bindingProblem === undefined
+      ? "No workspace selected (no .uberblick.json found)."
+      : `No workspace selected. ${resolved.bindingProblem}`,
   };
 }
 
 export function listWorkspaces(
   options: { env?: NodeJS.ProcessEnv } = {},
-): { entries: WorkspaceEntry[]; warnings: string[] } {
+): { entries: WorkspaceEntry[]; warnings: string[]; selectionNote: string | null } {
   const env = options.env ?? process.env;
   const current = inForce(options);
 
@@ -118,7 +122,7 @@ export function listWorkspaces(
       databasePath,
     };
   });
-  return { entries, warnings: current.warnings };
+  return { entries, warnings: current.warnings, selectionNote: current.selectionNote };
 }
 
 function warn(io: Io, warnings: readonly string[]): void {
@@ -251,10 +255,11 @@ with the one currently in force marked. Shows names from readable local replicas
 without changing them or connecting to a hub. A workspace that exists elsewhere
 but has never been opened here is not listed unless configured.
 
-The last field is the hub this machine recorded, local for an explicit local
-record, or hub unknown when no record exists. It can differ from the hub in
-force for the active workspace. JSON adds hub: the stored endpoint, "local",
-or "unknown".
+The last field is the hub this machine recorded, or local for a replica with
+no hub record. A known hub stays recorded even when unavailable. If the configured
+workspace has neither replica nor record, its selected hub or local is shown.
+Recorded hubs can differ from the active selection. JSON adds hub: the endpoint
+or "local". Listing never records an association or reconnects a replica.
 
 options:
   --json            the same list as JSON on stdout, for a script to read
@@ -277,25 +282,29 @@ function listCommand(argv: string[], io: Io): number {
     return 2;
   }
 
-  let listed: { entries: (WorkspaceEntry & { hub: string })[]; warnings: string[] };
+  let listed: { entries: (WorkspaceEntry & { hub: string })[]; warnings: string[]; selectionNote: string | null };
   try {
     const inventory = listWorkspaces();
+    const current = inForce();
     // Validate records even for an empty inventory. Keep this CLI-only read out
     // of listWorkspaces(), whose install and browser callers need only IDs/names.
     recordedWorkspaceIds();
     listed = {
       ...inventory,
       entries: inventory.entries.map((entry) => {
-        const hub = readWorkspaceHub(entry.uuid);
-        return { ...entry, hub: hub === undefined ? "unknown" : hub ?? "local" };
+        const recorded = readWorkspaceHub(entry.uuid);
+        const hub = recorded === undefined && entry.active && !hasWorkspaceReplica(entry.uuid)
+          ? current.hubUrl : recorded;
+        return { ...entry, hub: hub ?? "local" };
       }),
     };
   } catch (error) {
     io.err(`ub workspace list: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
-  const { entries, warnings } = listed;
+  const { entries, warnings, selectionNote } = listed;
   warn(io, warnings);
+  if (selectionNote !== null) io.err(`${selectionNote}\n`);
 
   if (json) {
     io.out(`${JSON.stringify(entries, null, 2)}\n`);
@@ -305,11 +314,11 @@ function listCommand(argv: string[], io: Io): number {
     io.out("no workspaces on this machine — run `ub workspace create <name>` to create one\n");
     return 0;
   }
+  const nameWidth = entries.reduce((width, entry) => Math.max(width, entry.name?.length ?? 0), 0);
   let text = "";
   for (const entry of entries) {
-    const hub = entry.hub === "unknown" ? "hub unknown"
-      : entry.hub === "local" ? "local" : displayWorkspaceHub(entry.hub);
-    text += `${entry.active ? "*" : " "} ${entry.uuid}${entry.name === null ? "" : ` | ${entry.name}`} | ${hub}\n`;
+    const hub = entry.hub === "local" ? "local" : displayWorkspaceHub(entry.hub);
+    text += `${entry.active ? "*" : " "} ${entry.uuid} | ${(entry.name ?? "").padEnd(nameWidth)} | ${hub}\n`;
   }
   io.out(text);
   return 0;
@@ -375,7 +384,7 @@ operands:
                     hub.example.test/<workspace-id>, or ws(s)://endpoint/<id>.
                     Browser document URLs are not workspace links.
   <id>              a workspace <uuid>, a decorated <slug>-<uuid>, or a unique
-                    prefix of a recorded UUID
+                    prefix of a UUID from this machine's workspaces
 
 options:
   --verbose         add fetched documents, verification details and config paths
@@ -397,7 +406,9 @@ the verified snapshot.
 
 An id uses the hub this machine recorded for the workspace, or local; it moves
 no documents, verifies no membership and never replaces that hub record.
-An unknown workspace must first be fetched with \`ub workspace use <link>\`.
+An existing replica with no hub record is selected and recorded as local.
+Hub sync resumes only through explicit promotion or \`ub workspace use <link>\`.
+A workspace with neither replica nor record must first be fetched with a link.
 UB_WORKSPACE_ID selects the workspace for this shell; a differing UB_HUB_URL
 is refused. Clear both variables to follow the project binding again.
 `;
@@ -462,12 +473,10 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   const id = resolved.id;
 
   let hub = readWorkspaceHub(id);
-  if (hub === undefined) {
+  if (hub === undefined && !hasWorkspaceReplica(id)) {
     io.err(
       "ub workspace use: this machine has no hub record for that workspace. " +
-      "Fetch a shared workspace with `ub workspace use <link>`. " +
-      `To register an existing local replica, serve it once with \`UB_WORKSPACE_ID=${id} UB_HUB_URL=local ub mcp serve\`; ` +
-      "use an explicit hub link to reconnect a hub replica.\n",
+      "Fetch a shared workspace with `ub workspace use <link>`.\n",
     );
     return 1;
   }
@@ -488,7 +497,11 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
     previous = resolveProjectBinding({ env: {} }).binding;
     // A promotion/fetch may have finished while this command waited for the lock.
     hub = readWorkspaceHub(id);
-    if (hub === undefined) throw new Error("workspace record disappeared; fetch it with `ub workspace use <link>`");
+    if (hub === undefined && !hasWorkspaceReplica(id)) {
+      throw new Error("workspace has neither replica nor record; fetch it with `ub workspace use <link>`");
+    }
+    const registersSelected = hub === undefined;
+    hub ??= null;
     // Preserve endpoint metadata before the user removes obsolete selection keys.
     const admission = hub !== null && usesDeviceLogin(hub, { ...process.env, HUB_ADMISSION: undefined })
       ? writeHubAdmission(hub, true)
@@ -497,7 +510,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
     const registersPrevious = previous !== null && readWorkspaceHub(previous.workspaceId) === undefined;
     path = writeProjectBinding({ workspaceId: id, hubUrl: hub });
     await fillMainRepositoryFromOrigin(id, hub);
-    written = [...admission.written, ...(registersPrevious ? [workspaceRegistryPath()] : []), path];
+    written = [...admission.written, ...(registersSelected || registersPrevious ? [workspaceRegistryPath()] : []), path];
     text = useBindingLines({ workspaceId: id, hubUrl: hub }, previous, path);
   } catch (error) {
     io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -532,8 +545,8 @@ export async function workspaceCommand(
 ): Promise<number> {
   // Dispatch first so help reaches the leaf; an unknown leaf remains an error.
   const [sub, ...rest] = argv;
-  if (sub === "status") return workspaceStatusCommand(rest, io);
   if (sub === "create") return createWorkspaceCommand(rest, io);
+  if (sub === "fork") return forkWorkspaceCommand(rest, io);
   if (sub === "promote") return promoteWorkspaceCommand(rest, io);
   if (sub === "member") return workspaceMemberCommand(rest, io);
   if (sub === "list") {

@@ -19,7 +19,7 @@ import { openBrowser } from "./browser.js";
 import { type Io, shellArgument } from "./io.js";
 import { assertHubTransport, authenticationOrigin, hubTransportProblem, normalizeRemoteUrl } from "@uberblick/mcp-server/remote-url";
 import { SYNC_PROTOCOL_VERSION, protocolSkew, readProtocolMismatch, wrapToken } from "@uberblick/schema/protocol";
-import { generateCredentialKeyPair } from "@uberblick/schema/token";
+import { DEVICE_CREDENTIAL_LIFETIME_MS, generateCredentialKeyPair } from "@uberblick/schema/token";
 import { manageRequest, ManagementResponseError, sanitizeManagementReply } from "./access-management.js";
 export { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 
@@ -83,6 +83,7 @@ export const AUTH_LOGOUT_HELP = `usage: ub auth logout [--all-devices] [hub]
 Revoke this computer at the given hub, then remove its login here.
 Without a hub, use the hub selected by this project's binding.
 The hub can be a bare host, an http(s) address or a ws(s) endpoint.
+Without --all-devices, a credential the hub refuses after 30 days is removed; exit 0.
 If revocation is not confirmed, the local login is still removed; exit 1.
 Finish with \`ub auth logout --all-devices <hub>\` from a computer still signed in.
 With --all-devices, revoke every device of your signed-in GitHub account on
@@ -283,7 +284,9 @@ async function status(selection: Selection, io: Io, json: boolean): Promise<numb
   return printAuthStatus(selection.origin, checked.outcome, report, io, json, checked.guidance);
 }
 
-class DeviceFailure extends Error {}
+class DeviceFailure extends Error {
+  constructor(message: string, readonly signInRequired = false) { super(message); }
+}
 
 type DeviceAction = { operation: "list-devices" } | { operation: "revoke-device"; deviceId: string };
 
@@ -311,11 +314,26 @@ async function deviceRequest(origin: string, action: DeviceAction, login: Stored
     failed: [500, "the hub could not complete device management"],
   };
   const refusal = refusals[String(reply.body.status)];
-  throw new DeviceFailure(refusal?.[0] === reply.status ? refusal[1] : "the hub returned an invalid device-management response");
+  throw new DeviceFailure(refusal?.[0] === reply.status ? refusal[1] : "the hub returned an invalid device-management response",
+    reply.status === 401 && reply.body.status === "sign-in-required");
 }
 
 function authField(io: Io, label: string, value: string): void {
   io.out(`${label.padEnd(11)}${value}\n`);
+}
+
+async function retireCurrentDevice(origin: string, login: StoredHubLogin, io: Io): Promise<string | undefined> {
+  try {
+    await deviceRequest(origin, { operation: "revoke-device", deviceId: login.credential.record.deviceId }, login, io);
+    authField(io, "revoked", `this computer on ${origin}`);
+  } catch (error) {
+    if (error instanceof DeviceFailure && error.signInRequired &&
+        Date.now() - login.credential.record.issuedAt >= DEVICE_CREDENTIAL_LIFETIME_MS) {
+      authField(io, "expired", `this computer's credential on ${origin}`);
+    } else {
+      return error instanceof DeviceFailure ? error.message : "revocation not confirmed";
+    }
+  }
 }
 
 async function logout(selection: Selection, io: Io, allDevices: boolean): Promise<number> {
@@ -368,12 +386,7 @@ async function logout(selection: Selection, io: Io, allDevices: boolean): Promis
     const user = login.identity.githubUsername;
     authField(io, "revoked", `${confirmed} devices of ${displayUsername(user)} on ${origin}, including this computer`);
   } else if (login !== undefined) {
-    try {
-      await deviceRequest(origin, { operation: "revoke-device", deviceId: login.credential.record.deviceId }, login, io);
-      authField(io, "revoked", `this computer on ${origin}`);
-    } catch (error) {
-      failure = error instanceof DeviceFailure ? error.message : "revocation not confirmed";
-    }
+    failure = await retireCurrentDevice(origin, login, io);
   } else if (missing !== "no login stored") {
     failure = missing;
   }
@@ -634,7 +647,7 @@ async function login(selection: Selection, io: Io, nextAction: boolean): Promise
           }
           await deviceRequest(selection.origin, {
             operation: "revoke-device", deviceId: replaced.credential.record.deviceId,
-          }, replaced, io);
+          }, replaced.identity.githubAccountId === credential.identity.githubAccountId ? credential : replaced, io);
         } catch (error) {
           io.err(`ub auth: warning: the previous device is not revoked on ${selection.origin}: ${error instanceof DeviceFailure ? error.message : "revocation not confirmed"}. The new login is stored.\n`);
         }

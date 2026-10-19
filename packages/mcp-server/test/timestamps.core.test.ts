@@ -22,7 +22,7 @@
  * clock rather than by shrinking the window down to something untrue.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDirectoryEntry, getDirectoryMap, setTags, setTitle } from "@uberblick/schema";
+import { appendBlock, getDirectoryEntry, getDirectoryMap, setCodeCheck, setTags, setTitle } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import { removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { McpConfig } from "../src/config.js";
@@ -41,6 +41,11 @@ const T0 = Date.UTC(2031, 0, 1, 0, 0, 0);
 
 /** The coarseness window in force, from the config the rigs are built with. */
 const WINDOW = testConfig().updatedAtCoarsenessMs;
+const CHECK = {
+  repository: "uberblick-ai/uberblick-2",
+  commit: "33086e02eb66f2e32dcce67a21c6c8ece9cf9ae4",
+  result: "matches",
+} as const;
 
 function stub(rig: Rig, uuid: string): DirectoryEntry {
   const entry = getDirectoryEntry(rig.instance.replicas.directory().doc, uuid);
@@ -138,6 +143,73 @@ describe("directory timestamps", () => {
       updatedAt: T0 + 2_000,
       createdAt: T0,
     });
+  });
+
+  it("refreshes code-check caches without stamping or consuming the content-edit window", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", { title: "Checked", description: "A test document." });
+    const changedCheck = { ...CHECK, commit: "a".repeat(40), result: "drift" };
+
+    for (const [time, codeCheck] of [
+      [T0 + 1_000, CHECK],
+      [T0 + 1_000, CHECK],
+      [T0 + 2_000, CHECK],
+      [T0 + WINDOW + 1_000, changedCheck],
+      [T0 + 2 * WINDOW, changedCheck],
+    ] as const) {
+      vi.setSystemTime(time);
+      const written = await rig.ok("set_metadata", { uuid: doc.uuid, code_check: codeCheck });
+      expect(written.code_check).toEqual([{ ...codeCheck, checked_at: new Date(time).toISOString() }]);
+      expect(stub(rig, doc.uuid)).toMatchObject({ createdAt: T0, updatedAt: T0 });
+      const listed = (await rig.ok("list_docs")).docs.find((entry: any) => entry.uuid === doc.uuid);
+      expect(listed).toMatchObject({ code_check: written.code_check, updatedAt: T0 });
+    }
+
+    vi.setSystemTime(T0 + 2 * WINDOW + 1_000);
+    await typeInto(rig, doc.uuid, "an authored content edit");
+    expect(stub(rig, doc.uuid).updatedAt).toBe(T0 + 2 * WINDOW + 1_000);
+    vi.setSystemTime(T0 + 2 * WINDOW + 2_000);
+    await typeInto(rig, doc.uuid, "still in that content-edit window");
+    expect(stub(rig, doc.uuid).updatedAt).toBe(T0 + 2 * WINDOW + 1_000);
+    vi.setSystemTime(T0 + 3 * WINDOW + 1_000);
+    await typeInto(rig, doc.uuid, "the next content-edit window");
+    expect(stub(rig, doc.uuid).updatedAt).toBe(T0 + 3 * WINDOW + 1_000);
+  });
+
+  it.each([
+    { field: "title", value: "Changed title" },
+    { field: "description", value: "Changed description." },
+    { field: "tldr", value: "A short summary." },
+    { field: "tags", value: ["mcp"] },
+    { field: "links", value: null },
+  ])("stamps a code check immediately when $field also changes", async ({ field, value }) => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", { title: "Checked", description: "A test document." });
+    const changed = field === "links"
+      ? [(await rig.ok("create_doc", { title: "Link target", description: "A related page." })).uuid]
+      : value;
+
+    vi.setSystemTime(T0 + 1_000);
+    const written = await rig.ok("set_metadata", { uuid: doc.uuid, [field]: changed, code_check: CHECK });
+    expect(stub(rig, doc.uuid)).toMatchObject({ updatedAt: T0 + 1_000, createdAt: T0 });
+    const listed = (await rig.ok("list_docs")).docs.find((entry: any) => entry.uuid === doc.uuid);
+    expect(listed).toMatchObject({ code_check: written.code_check, updatedAt: T0 + 1_000 });
+  });
+
+  it("stamps a code check immediately when the same transaction also edits content", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", { title: "Checked", description: "A test document." });
+    const replica = rig.instance.replicas.replica(doc.uuid);
+
+    vi.setSystemTime(T0 + 1_000);
+    replica.doc.transact(() => {
+      setCodeCheck(replica.doc, CHECK);
+      appendBlock(replica.doc, { type: "paragraph", text: "An authored content edit." });
+    });
+    expect(stub(rig, doc.uuid)).toMatchObject({ updatedAt: T0 + 1_000, createdAt: T0 });
+    expect((await rig.ok("get_doc", { uuid: doc.uuid })).blocks).toEqual([
+      expect.objectContaining({ text: "An authored content edit." }),
+    ]);
   });
 
   it("stamps a regular document immediately when its open-thread count changes", async () => {

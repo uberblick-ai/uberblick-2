@@ -17,6 +17,7 @@ import { fixture } from "./auth-fixtures.js";
 import { runUb, DEAD_HUB_URL, removeTempDirs, sandbox, unboundSandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 import { ensureWorkspaceBinding } from "../src/workspace-registry.js";
+import { cliVersion } from "../src/version.js";
 
 afterAll(removeTempDirs);
 
@@ -108,11 +109,48 @@ describe("the status replica reading", () => {
 });
 
 describe("the short status report", () => {
+  it.each(["1.2.3", "1.2.2"])("shows connected hub release %s without adding a problem", hubVersion => {
+    const reading = report({ hubVersion });
+    expect(renderStatus(reading)).toContain(`hub         ${ORIGIN}\nversion     client 1.2.3, hub ${hubVersion}\n`);
+    expect(shortStatusReport(reading).version).toEqual({ client: "1.2.3", hub: hubVersion });
+    expect(shortStatusReport(reading).problems).toEqual([]);
+  });
+
+  it.each([
+    { hub: { status: "hub-down", url: HUB, protocolVersion: SYNC_PROTOCOL_VERSION } },
+    { hub: { status: "connecting", url: HUB, protocolVersion: SYNC_PROTOCOL_VERSION } },
+    { hub: { status: "disabled", url: null, protocolVersion: SYNC_PROTOCOL_VERSION } },
+    { hub: { status: "quarantined", url: HUB, protocolVersion: SYNC_PROTOCOL_VERSION } },
+    { hub: { status: "update-required", url: HUB, protocolVersion: SYNC_PROTOCOL_VERSION, hubProtocolVersion: SYNC_PROTOCOL_VERSION + 1 } },
+    { hub: { status: "auth-failed", url: HUB, protocolVersion: SYNC_PROTOCOL_VERSION, authRecovery: "sign-in-required" } },
+    { hub: { status: "auth-failed", url: HUB, protocolVersion: SYNC_PROTOCOL_VERSION, authRecovery: "no-workspace-access" } },
+    { hubTransportProblem: { reason: "unencrypted connection refused", fix: "use wss" } },
+    { bindingProblem: { reason: "hub mismatch", fix: "restore the binding" } },
+    { binding: { workspaceId: WORKSPACE, hubUrl: null }, bindingProblem: { reason: "hub mismatch", fix: "restore the binding" } },
+  ] satisfies Partial<StatusReport>[])("withholds a supplied hub version for a failed or refused connection: %j", overrides => {
+    const reading = report({ ...overrides, hubVersion: "1.2.3" });
+    const short = shortStatusReport(reading);
+    expect(short.connection?.state).not.toBe("connected");
+    expect(short.version).toEqual({ client: "1.2.3", hub: null });
+    expect(row(renderStatus(reading), "version")).toBe("version     client 1.2.3, hub unknown");
+    expect(short.problems).toEqual(shortStatusReport(report(overrides)).problems);
+  });
+
+  it("withholds unsafe hub metadata at both public output boundaries", () => {
+    const reading = report({ hubVersion: "1.2.3\nunsafe\u001b[31m" });
+    expect(shortStatusReport(reading).version).toEqual({ client: "1.2.3", hub: null });
+    expect(row(renderStatus(reading), "version")).toBe("version     client 1.2.3, hub unknown");
+    expect(renderStatus(reading) + JSON.stringify(shortStatusReport(reading))).not.toContain("unsafe");
+  });
+
   it("prints the hub example in its specified order with no internal diagnostics", () => {
     expect(renderStatus(report(), undefined, "Uberblick")).toBe(
       `workspace   Uberblick (${WORKSPACE})\n` +
       `hub         ${ORIGIN}\n` +
+      "version     client 1.2.3, hub unknown\n" +
       "account     @bk-one (GitHub)\n" +
+      "chosen by   project config in /project\n" +
+      "stored in   /workspace/replica.sqlite\n" +
       "connection  connected\n" +
       "pending     none\n" +
       "last sync   never\n" +
@@ -121,7 +159,10 @@ describe("the short status report", () => {
     expect(shortStatusReport(report(), "Uberblick")).toEqual({
       workspace: { id: WORKSPACE, name: "Uberblick" },
       hub: ORIGIN,
+      version: { client: "1.2.3", hub: null },
       account: { login: "bk-one", provider: "github" },
+      chosenBy: { source: "project-config", path: "/project/.uberblick.json" },
+      storedIn: "/workspace/replica.sqlite",
       connection: { state: "connected", cause: null, detail: null },
       pending: { count: 0 },
       lastSync: null,
@@ -145,20 +186,45 @@ describe("the short status report", () => {
     expect(renderStatus(reading)).not.toMatch(/37|5284|rooms|local log|selection|recovery|failures|uuid/);
   });
 
-  it.each([null, "2026-10-05T19:58:12Z"])("prints four local rows regardless of stored sync time %s", (lastSync) => {
+  it.each([null, "2026-10-05T19:58:12Z"])("prints the local report regardless of stored sync time %s", (lastSync) => {
     const reading = report({
       binding: { workspaceId: WORKSPACE, hubUrl: null },
+      hubVersion: "1.2.3",
       lastSync, unsyncedChanges: 5, inFlightUpdates: 7,
     });
     expect(renderStatus(reading, ORIGIN, "My Workspace")).toBe(
       `workspace   My Workspace (${WORKSPACE})\n` +
       "hub         local, this computer only\n" +
+      "version     client 1.2.3\n" +
       "account     none needed for a local workspace\n" +
+      "chosen by   project config in /project\n" +
+      "stored in   /workspace/replica.sqlite\n" +
       "problems    none\n",
     );
     expect(shortStatusReport(reading, "My Workspace")).toEqual({
       workspace: { id: WORKSPACE, name: "My Workspace" },
+      version: { client: "1.2.3", hub: null },
       hub: null, account: null, connection: null, pending: { count: 0 }, lastSync: null, recentDevices: null, problems: [],
+      chosenBy: { source: "project-config", path: "/project/.uberblick.json" },
+      storedIn: "/workspace/replica.sqlite",
+    });
+  });
+
+  it.each([
+    { name: "workspace-hub-mismatch", bindingProblem: { reason: "hub mismatch", fix: "restore the binding" } },
+    { name: "refused hub", hub: { status: "auth-failed", url: HUB, protocolVersion: SYNC_PROTOCOL_VERSION } },
+    { name: "insecure hub", hubTransportProblem: { reason: "unencrypted connection refused", fix: "use wss" } },
+  ] satisfies (Partial<StatusReport> & { name: string })[])("keeps selection and storage before connection for $name", ({ name: _name, ...overrides }) => {
+    const reading = report(overrides);
+    expect(renderStatus(reading)).toContain(
+      "account     @bk-one (GitHub)\n" +
+      "chosen by   project config in /project\n" +
+      "stored in   /workspace/replica.sqlite\n" +
+      "connection  ",
+    );
+    expect(shortStatusReport(reading)).toMatchObject({
+      chosenBy: { source: "project-config", path: "/project/.uberblick.json" },
+      storedIn: "/workspace/replica.sqlite",
     });
   });
 
@@ -412,16 +478,22 @@ describe("the real project's short report", () => {
     expect(run.output).not.toContain("url-secret");
   });
 
-  it("uses the same binding from nested directories without exposing selection or storage", async () => {
+  it("reports the binding file and replica from nested directories", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     const nested = join(box.cwd, "src", "nested");
     mkdirSync(nested, { recursive: true });
     const run = await runInProcess(["status", "--json"], { ...box, cwd: nested });
     expect(run.status).toBe(0);
     expect(JSON.parse(run.stdout)).toEqual({ workspace: { id: WORKSPACE, name: null },
+      version: { client: cliVersion(), hub: null },
       hub: null, account: null, connection: null, pending: { count: 0 }, lastSync: null, recentDevices: null, problems: [],
+      chosenBy: { source: "project-config", path: join(box.cwd, ".uberblick.json") },
+      storedIn: defaultWorkspaceDatabasePath(WORKSPACE, box.env),
     });
-    expect((await runInProcess(["status"], { ...box, cwd: nested })).stdout).toBe(`workspace   ${WORKSPACE}\nhub         local, this computer only\naccount     none needed for a local workspace\nproblems    none\n`);
+    expect((await runInProcess(["status"], { ...box, cwd: nested })).stdout).toBe(
+      `workspace   ${WORKSPACE}\nhub         local, this computer only\nversion     client ${cliVersion()}\naccount     none needed for a local workspace\n` +
+      `chosen by   project config in ${box.cwd}\nstored in   ${defaultWorkspaceDatabasePath(WORKSPACE, box.env)}\nproblems    none\n`,
+    );
   });
 
   it.each([DEAD_HUB_URL, null])("reads the local name and counts reserved pending rooms only for a hub %s", async (hubUrl) => {
@@ -445,7 +517,7 @@ describe("the real project's short report", () => {
     const json = await runInProcess(["status", "--json"], box);
     expect(json.status, json.stderr).toBe(0);
     const reading = JSON.parse(json.stdout);
-    expect(Object.keys(reading).sort()).toEqual(["account", "connection", "hub", "lastSync", "pending", "problems", "recentDevices", "workspace"]);
+    expect(Object.keys(reading).sort()).toEqual(["account", "chosenBy", "connection", "hub", "lastSync", "pending", "problems", "recentDevices", "storedIn", "version", "workspace"]);
     expect(reading.workspace).toEqual({ id: WORKSPACE, name: "Stored name" });
     expect(reading.pending).toEqual({ count: hubUrl === null ? 0 : 4 });
     const text = await runInProcess(["status"], box);
@@ -453,7 +525,7 @@ describe("the real project's short report", () => {
     expect(row(text.stdout, "workspace")).toBe(`workspace   Stored name (${WORKSPACE})`);
     if (hubUrl === null) {
       expect(reading.lastSync).toBeNull();
-      expect(text.stdout.trim().split("\n")).toHaveLength(4);
+      expect(text.stdout.trim().split("\n")).toHaveLength(7);
     } else {
       expect(row(text.stdout, "pending")).toBe("pending     4 changes not yet on the hub");
       expect(reading.connection.state).toBe("failed");
@@ -478,7 +550,7 @@ describe("the locally stored account in ub status", () => {
       const auth = await runInProcess(["auth", "status"], box);
       expect(auth.status).toBe(1);
       const displayed = row(auth.stdout, "stored account").replace(/^stored account\s+/, "").replace(/ \(github\)$/, "");
-      expect(text.stdout).toContain(`hub         http://127.0.0.1:1\naccount     @${displayed} (GitHub)\n`);
+      expect(text.stdout).toContain(`hub         http://127.0.0.1:1\nversion     client ${cliVersion()}, hub unknown\naccount     @${displayed} (GitHub)\n`);
       expect(json.output + text.output).not.toContain(login.credential.key);
     },
   );
@@ -497,7 +569,7 @@ describe("the locally stored account in ub status", () => {
     expect(JSON.parse(json.stdout).account).toBeNull();
     const text = await runInProcess(["status"], box);
     expect(text.status, text.stderr).toBe(0);
-    expect(text.stdout).toContain(`hub         ${ORIGIN}\naccount     not signed in to ${ORIGIN}\n`);
+    expect(text.stdout).toContain(`hub         ${ORIGIN}\nversion     client ${cliVersion()}, hub unknown\naccount     not signed in to ${ORIGIN}\n`);
     expect(text.stdout).not.toContain("previous-user");
   });
 

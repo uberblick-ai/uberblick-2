@@ -46,6 +46,7 @@ import { acquireInitLock, tryAcquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { readAccessAction, requestAccess, type AccessBinding } from "./open-access.js";
+import { createBrowserAccess, hasSession, serveSessionRequest, type BrowserAccess } from "./open-session.js";
 import { requestAccount, requestDeviceLogin } from "./open-account.js";
 import { monitorOpenHub, waitForOpenHubState } from "./open-hub-output.js";
 import { openBanner } from "./open-output.js";
@@ -235,6 +236,7 @@ const MIME: Record<string, string> = {
   ".gif": "image/gif",
   ".webp": "image/webp",
   ".ico": "image/x-icon",
+  ".webmanifest": "application/manifest+json",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
   ".ttf": "font/ttf",
@@ -265,9 +267,9 @@ function fileFor(root: string, pathname: string): string {
 }
 
 /**
- * The endpoint/key describe startup; the UUID map gives each offered replica
- * its own browser key/upstream. Preserve workspace spelling but admit by bare UUID.
- * Serialize only browser keys, never upstream credentials; unbound serving has no key.
+ * The endpoint describes startup; the UUID map gives each offered replica its
+ * upstream. Preserve workspace spelling but admit by bare UUID. The document is
+ * public and carries no key: a page with a session asks for room tokens.
  * configSource refreshes unbound values; servingConfigSource freezes destinations
  * and updates only rebound, keeping browser and replica identities aligned.
  */
@@ -279,7 +281,7 @@ function configDocument(
     remoteHubUrl: string;
     rebound: boolean;
     workspaces?: readonly string[];
-    servedWorkspaces?: Record<string, { browserKey: string; remoteHubUrl: string | null; name: string | null }>;
+    servedWorkspaces?: Record<string, { remoteHubUrl: string | null; name: string | null }>;
   },
   defaultPresenceName?: string,
 ): string {
@@ -380,18 +382,16 @@ function servingConfigSource(
   const destinations = {
     workspaces: [...workspaces.values()].map(entry => entry.workspace),
     servedWorkspaces: Object.fromEntries([...workspaces].map(([id, entry]) => [id, {
-      browserKey: entry.browserKey,
       name: entry.name,
       // The startup replica retains ensureHub's loopback behavior. Explicit
       // local-only secondaries have no upstream to name or start.
       remoteHubUrl: id === startupId ? binding.hubUrl : entry.binding.hubUrl,
     }])),
   };
-  const browserKey = workspaces.values().next().value?.browserKey ?? "";
   let accepted = configDocument(
     localHubUrl,
     binding.workspace,
-    browserKey,
+    "",
     { remoteHubUrl: binding.hubUrl, rebound: false, ...destinations },
     defaultPresenceName,
   );
@@ -403,7 +403,7 @@ function servingConfigSource(
       accepted = configDocument(
         localHubUrl,
         binding.workspace,
-        browserKey,
+        "",
         { remoteHubUrl: binding.hubUrl, rebound: !sameBinding(binding, current), ...destinations },
         defaultPresenceName,
       );
@@ -555,7 +555,11 @@ async function serveApiRequest(
   env: NodeJS.ProcessEnv,
   expectedOrigin: string,
   document: () => string,
+  access: BrowserAccess,
 ): Promise<void> {
+  const reply = (status: number, body: object, headers?: Record<string, string>) =>
+    apiResponse(request, response, status, body, headers);
+  if (await serveSessionRequest(access, request, target.pathname, expectedOrigin, reply)) return;
   const queriedToken = TOKEN_QUERY_PARAMS.some((name) =>
     target.searchParams.has(name),
   );
@@ -572,6 +576,11 @@ async function serveApiRequest(
   const workspace = replicas.workspaces.get(workspaceId);
   if (workspace === undefined) {
     apiResponse(request, response, 401, { error: "unauthorized" });
+    return;
+  }
+  // A room token alone is not enough: every API call also names the page's session.
+  if (!hasSession(access, request)) {
+    apiResponse(request, response, 401, { error: "session_required" });
     return;
   }
   if (target.pathname === DEVICE_LOGIN_PATH) {
@@ -689,6 +698,7 @@ function serveBoundRequest(
   status: (workspace: string) => ServingSyncStatus,
   env: NodeJS.ProcessEnv,
   expectedOrigin: string,
+  access: BrowserAccess,
   request: IncomingMessage,
   response: ServerResponse,
 ): void {
@@ -708,6 +718,7 @@ function serveBoundRequest(
     env,
     expectedOrigin,
     document,
+    access,
   ).catch(() => {
     if (!response.headersSent) {
       apiResponse(request, response, 500, { error: "internal_error" });
@@ -1079,7 +1090,7 @@ async function openStartupReadings(
   return await Promise.all([
     sync === null ? null : waitForOpenHubState(sync, connectTimeoutMs),
     sync === null || !sync.deviceAuthenticated() || connectTimeoutMs <= 0 ? null
-      : requestRecentDevices(binding, AbortSignal.timeout(Math.floor(connectTimeoutMs))),
+      : requestRecentDevices(binding, AbortSignal.timeout(Math.floor(connectTimeoutMs))).then(reading => reading?.devices ?? null),
   ]);
 }
 
@@ -1265,6 +1276,7 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
   const servedUrl = new URL(`http://${WEB_HOST}:${options.port}/`);
   const expectedHost = servedUrl.host;
   const localHubUrl = `ws://${WEB_HOST}:${options.port}`;
+  let access: BrowserAccess | null = null;
   try {
     const mcpConfig = workspace === null ? null : resolveMcpConfig(env);
     if (mcpConfig !== null) {
@@ -1274,6 +1286,8 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
       const workspaces = browserWorkspaces(projectBinding, mcpConfig, startupEnv,
         message => io.err(`ub: warning: ${message}\n`));
       const authenticateApi = await createApiAuthenticator(workspaces);
+      access = await createBrowserAccess(new Map([...workspaces].map(([id, entry]) => [id, entry.browserKey])), startupEnv);
+      const browserAccess = access;
       const document = servingConfigSource(
         startupEnv,
         initial.resolved,
@@ -1343,6 +1357,7 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
             status,
             startupEnv,
             servedUrl.origin,
+            browserAccess,
             request,
             response,
           );
@@ -1379,7 +1394,8 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
     return await foreground.shutdown(0);
   }
 
-  const url = servedUrl.href;
+  // The fragment never reaches a server; the page trades it once for a session.
+  const url = access === null ? servedUrl.href : `${servedUrl.href}#launch=${access.launch.value}`;
   const sync = owned.engine === null ? null : openHubSource(owned.engine, hubUrl, env, hubDeviceAuthenticated);
   const connectTimeoutMs = owned.engine?.replicas.config.connectTimeoutMs ?? 0;
   const [hubState, recentDevices] = await openStartupReadings(sync, connectTimeoutMs, { ...projectBinding, env });

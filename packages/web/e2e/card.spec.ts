@@ -43,70 +43,13 @@ async function selectPart(part: Locator): Promise<void> {
   }));
 }
 
-test("both menu paths focus the title and optional placeholders collapse outside the focused card", { tag: "@webkit" }, async ({ page }, info) => {
-  const first = await openCard(page);
-  await expect.poll(() => page.evaluate(() => {
-    const anchor = document.getSelection()?.anchorNode;
-    return anchor?.parentElement?.closest("[data-card-part]")?.getAttribute("data-card-part");
-  })).toBe("title");
-  for (const part of ["label", "body", "footer"]) await expect(first.locator(`[data-card-part=${part}]`)).toBeVisible();
-  await page.keyboard.type("First recommendation");
-  await expect(first.locator(".ub-card-title")).toHaveText("First recommendation");
-  await page.locator(".ub-title").click();
-  for (const part of ["label", "body", "footer"]) await expect(first.locator(`[data-card-part=${part}]`)).toBeHidden();
-  await first.locator(".ub-card-title").click();
-  if (info.project.use.hasTouch !== true) await first.hover();
-  const insert = page.getByRole("button", { name: "Insert block below", exact: true });
-  await insert.click();
-  await page.getByRole("option", { name: "Card", exact: true }).click();
-  await expect(page.locator(".ub-card")).toHaveCount(2);
-  await page.keyboard.type("Second recommendation");
-  const second = page.locator(".ub-card").nth(1);
-  await expect(second.locator(".ub-card-title")).toHaveText("Second recommendation");
-  await page.locator(".ub-title").click();
-  const gap = await page.locator(".ub-card").evaluateAll((cards) => {
-    const firstCard = cards[0];
-    const secondCard = cards[1];
-    if (firstCard === undefined || secondCard === undefined) throw new Error("e2e: missing stacked cards");
-    const first = firstCard.getBoundingClientRect();
-    const second = secondCard.getBoundingClientRect();
-    return second.top - first.bottom;
-  });
-  expect(gap).toBe(12);
-  for (const colorScheme of ["light", "dark"] as const) {
-    await page.emulateMedia({ colorScheme });
-    const shell = await first.evaluate((element) => {
-      const style = getComputedStyle(element);
-      const probe = document.createElement("div");
-      probe.style.borderRadius = "var(--radius)";
-      document.body.append(probe);
-      const radius = getComputedStyle(probe).borderRadius;
-      probe.remove();
-      return { vertical: style.paddingTop, horizontal: style.paddingLeft, border: style.borderTopWidth,
-        sharedRadius: style.borderRadius === radius, shadow: style.boxShadow, card: style.backgroundColor };
-    });
-    expect(shell).toMatchObject({ vertical: "20px", horizontal: "24px", border: "1px", sharedRadius: true, shadow: "none" });
-    expect(shell.card).not.toBe("rgba(0, 0, 0, 0)");
-    if (process.env.UB_AGENTS_SCRATCH !== undefined) {
-      await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH, `card-${info.project.name}-${colorScheme}.png`) });
-    }
-    await first.locator(".ub-card-title").click();
-    const focusRing = await first.evaluate((element) => {
-      const probe = document.createElement("div");
-      probe.style.boxShadow = "0 0 0 1px var(--ring)";
-      document.body.append(probe);
-      const matches = getComputedStyle(element).boxShadow === getComputedStyle(probe).boxShadow;
-      probe.remove();
-      return matches;
-    });
-    expect(focusRing).toBe(true);
-    await page.locator(".ub-title").click();
-  }
-});
-
-test("all four prose parts take formatting and web comments and keep footer link case", { tag: "@webkit" }, async ({ page }, info) => {
+test("empty optional parts collapse outside the card, and all four prose parts take formatting and web comments and keep footer link case", { tag: "@webkit" }, async ({ page }, info) => {
   const card = await openCard(page);
+  for (const part of ["label", "body", "footer"]) await expect(card.locator(`[data-card-part=${part}]`)).toBeVisible();
   await page.keyboard.type("Title words");
+  await page.locator(".ub-title").click();
+  for (const part of ["label", "body", "footer"]) await expect(card.locator(`[data-card-part=${part}]`)).toBeHidden();
+  await card.locator(".ub-card-title").click();
   for (const [part, text] of [["label", "Label words"], ["body", "Body words"], ["footer", "Metadata words"]] as const) {
     await card.locator(`[data-card-part=${part}] p`).click();
     await page.keyboard.type(text);

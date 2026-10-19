@@ -4,7 +4,7 @@ import type { NodeView } from "@tiptap/pm/view";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { FIGMA_DEFAULT_HEIGHT, FIGMA_PROVIDER, normalizeFigmaLink } from "@uberblick/schema";
-import { notifyTransient } from "../notifications.js";
+import { toast } from "sonner";
 import { blockCaption } from "./source-chrome.js";
 import { endUndoCapture } from "./block-menu.js";
 import { FigmaFields } from "./figma-fields.js";
@@ -131,7 +131,7 @@ class FigmaView implements NodeView {
       void this.dom.requestFullscreen().catch(() => {
         this.fullscreen = false;
         this.visibility.refresh();
-        notifyTransient({ key: "figma-fullscreen", message: "Couldn't open fullscreen. Use Open in Figma instead.", severity: "error" });
+        toast.error("Couldn't open fullscreen. Use Open in Figma instead.", { id: "figma-fullscreen" });
       });
     });
     document.addEventListener("pointerdown", this.outside, true);

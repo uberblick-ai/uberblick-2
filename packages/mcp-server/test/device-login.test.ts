@@ -1,12 +1,13 @@
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
+import { DEVICE_CREDENTIAL_LIFETIME_MS } from "@uberblick/schema/token";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { credentialsPath, readHubLogins, removeHubLogin, usesDeviceCredentials, writeHubLogin } from "../src/auth-store.js";
-import { ensureDeviceLogin, readDeviceLogin } from "../src/device-login.js";
+import { DEVICE_CREDENTIAL_RENEWAL_AGE_MS, ensureDeviceLogin, readDeviceLogin } from "../src/device-login.js";
 import { acquireInitLock } from "../src/init-lock.js";
 import { cleanupTestResources } from "./helpers.js";
 
@@ -26,6 +27,7 @@ async function setup() {
   return { ...test, hub };
 }
 afterEach(async () => {
+  vi.restoreAllMocks();
   await cleanupTestResources({
 
     hubs: hubs.splice(0).map((hub) => () => hub.close()),
@@ -42,6 +44,64 @@ async function waitForRequest(hub: Awaited<ReturnType<typeof startDeviceSyncHub>
 }
 
 describe("stored device login renewal", () => {
+  it.each([false, true])("renews by age unconditionally even when workspace access is unchanged (missing: %s)", async missing => {
+    const test = await setup();
+    if (!missing) test.hub.grant(WORKSPACE);
+    const before = test.hub.issue({ workspaces: missing ? [] : [WORKSPACE] });
+    before.credential.record.issuedAt = Date.now() - DEVICE_CREDENTIAL_LIFETIME_MS / 2;
+    await writeHubLogin(test.hub.origin, before, test.env);
+    const results = await Promise.all([
+      ensureDeviceLogin(test.hub.url, WORKSPACE, { env: test.env }),
+      ensureDeviceLogin(test.hub.url, WORKSPACE, { env: test.env }),
+    ]);
+    expect(results.map(result => result.status)).toEqual(missing ? ["no-access", "no-access"] : ["ready", "ready"]);
+    expect(test.hub.renewalCount).toBe(1);
+    const after = readHubLogins(test.env).logins[test.hub.origin]!;
+    expect(after.credential.record.id).not.toBe(before.credential.record.id);
+    expect(after.credential.record.deviceId).toBe(before.credential.record.deviceId);
+    expect(after.credential.record.issuedAt).toBeGreaterThan(before.credential.record.issuedAt);
+  });
+
+  it.each([false, true])("renews at half-life despite a cached unchanged-access result (missing: %s)", async missing => {
+    const test = await setup();
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    test.hub.grant(WORKSPACE);
+    const before = test.hub.issue({ workspaces: [WORKSPACE] });
+    before.credential.record.issuedAt = now - DEVICE_CREDENTIAL_RENEWAL_AGE_MS + 1_000;
+    await writeHubLogin(test.hub.origin, before, test.env);
+
+    expect((await ensureDeviceLogin(test.hub.url, OTHER_WORKSPACE, { env: test.env })).status).toBe("no-access");
+    expect((await ensureDeviceLogin(test.hub.url, OTHER_WORKSPACE, { env: test.env })).status).toBe("no-access");
+    expect(test.hub.renewalCount).toBe(1);
+    expect(readHubLogins(test.env).logins[test.hub.origin]).toEqual(before);
+
+    now += 1_000;
+    const workspace = missing ? OTHER_WORKSPACE : WORKSPACE;
+    const results = await Promise.all([
+      ensureDeviceLogin(test.hub.url, workspace, { env: test.env }),
+      ensureDeviceLogin(test.hub.url, workspace, { env: test.env }),
+    ]);
+    expect(results.map(result => result.status)).toEqual(missing ? ["no-access", "no-access"] : ["ready", "ready"]);
+    expect(test.hub.renewalCount).toBe(2);
+    const after = readHubLogins(test.env).logins[test.hub.origin]!;
+    expect(after.credential.record.id).not.toBe(before.credential.record.id);
+    expect(after.credential.record.issuedAt).toBe(now);
+  });
+
+  it("reads a login at its full lifetime as signed out without attempting renewal", async () => {
+    const test = await setup();
+    const before = test.hub.issue({ workspaces: [WORKSPACE] });
+    before.credential.record.issuedAt = Date.now() - DEVICE_CREDENTIAL_LIFETIME_MS;
+    await writeHubLogin(test.hub.origin, before, test.env);
+    expect(readDeviceLogin(test.hub.url, WORKSPACE, test.env)).toMatchObject({
+      status: "sign-in-required", message: expect.stringContaining("ub auth login"),
+    });
+    expect((await ensureDeviceLogin(test.hub.url, WORKSPACE, { env: test.env })).status).toBe("sign-in-required");
+    expect(test.hub.renewalCount).toBe(0);
+    expect(readHubLogins(test.env).logins[test.hub.origin]).toEqual(before);
+  });
+
   it("requires sign-in for an old HMAC login without treating its store as damaged or falling back on loopback", async () => {
     const test = await setup();
     const old = test.hub.issue({ workspaces: [WORKSPACE] });
@@ -153,6 +213,7 @@ describe("stored device login renewal", () => {
   ])("classifies renewal reply $status/$reading without inventing access", async ({ reading, ...reply }) => {
     const test = await setup();
     const before = test.hub.issue({ workspaces: [] });
+    before.credential.record.issuedAt = Date.now() - DEVICE_CREDENTIAL_RENEWAL_AGE_MS;
     await writeHubLogin(test.hub.origin, before, test.env);
     test.hub.setRenewalReply(reply);
     const result = await ensureDeviceLogin(test.hub.url, WORKSPACE, { env: test.env });

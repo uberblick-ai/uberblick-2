@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="ab" viewBox="0 0 656 282" width="656" height="282" role="img" aria-label="Flow: agent calls edit_block, server, guidance_required, Edit applied, get_doc">
+<style>.ab{--ink:var(--ab-ink,#e5e9ef);--muted:var(--ab-muted,#98a2b0);--line:var(--ab-line,#2c3440);--band:var(--ab-band,#151b23);--surface:var(--ab-surface,#1d232d);--agent:var(--ab-agent,#5cc5bb);--agent-bg:var(--ab-agent-bg,#12302d);--rework:var(--ab-rework,#e3a250);--rework-bg:var(--ab-rework-bg,#33250f);--stop:var(--ab-stop,#ef7f73);--stop-bg:var(--ab-stop-bg,#3a1916);--done:var(--ab-done,#72cf91);--done-bg:var(--ab-done-bg,#142e1d);}
+.ab text{font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;fill:var(--ink)}
+.ab .m{font-family:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+.ab .s11{font-size:11px}.ab .s12{font-size:12px}.ab .s13{font-size:13px}
+.ab .muted{fill:var(--muted)}.ab .b{font-weight:600}
+.ab .cap{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.08em;fill:var(--muted)}
+.ab .band{fill:var(--band)}.ab .rule{stroke:var(--line);stroke-width:1.2;stroke-dasharray:3 5}
+.ab .pill{fill:var(--surface);stroke:var(--line);stroke-width:1.2}
+.ab .e{fill:none;stroke-width:1.6}.ab .dash{stroke-dasharray:6 5}
+.ab .t-ink{fill:var(--muted)}.ab .e-ink{stroke:var(--muted)}.ab .k-ink{fill:var(--surface);stroke:var(--line);stroke-width:1.5}.ab .t-muted{fill:var(--muted)}.ab .e-muted{stroke:var(--muted)}.ab .k-muted{fill:var(--surface);stroke:var(--line);stroke-width:1.5}.ab .t-agent{fill:var(--agent)}.ab .e-agent{stroke:var(--agent)}.ab .k-agent{fill:var(--agent-bg);stroke:var(--agent);stroke-width:1.5}.ab .t-done{fill:var(--done)}.ab .e-done{stroke:var(--done)}.ab .k-done{fill:var(--done-bg);stroke:var(--done);stroke-width:1.5}.ab .t-rework{fill:var(--rework)}.ab .e-rework{stroke:var(--rework)}.ab .k-rework{fill:var(--rework-bg);stroke:var(--rework);stroke-width:1.5}.ab .t-stop{fill:var(--stop)}.ab .e-stop{stroke:var(--stop)}.ab .k-stop{fill:var(--stop-bg);stroke:var(--stop);stroke-width:1.5}
+.ab .k-stop.panel{stroke-width:1.2;stroke-dasharray:5 4}</style>
+<defs>
+<marker id="gate-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0,0 L10,5 L0,10 z" class="t-ink"/></marker>
+<marker id="gate-rework" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0,0 L10,5 L0,10 z" class="t-rework"/></marker>
+</defs>
+<path d="M479,50 L479,80" class="e e-ink" marker-end="url(#gate-ink)"/>
+<path d="M478,126 L478,156" class="e e-ink" marker-end="url(#gate-ink)"/>
+<path d="M388,103 L243,103" class="e e-rework" marker-end="url(#gate-rework)"/>
+<path d="M164,120 L164,220" class="e e-rework" marker-end="url(#gate-rework)"/>
+<path d="M40,243 L16,243 L16,33 L381,33" class="e e-rework" marker-end="url(#gate-rework)"/>
+<g><rect x="381" y="16" width="194" height="34" rx="17" class="pill"/>
+<circle cx="395" cy="33" r="5" class="t-agent"/>
+<text x="407" y="37" class="m s12">agent calls edit_block</text></g>
+<g>
+<rect x="388" y="80" width="181" height="46" rx="8" class="k-agent"/>
+<text x="479" y="99" text-anchor="middle" class="m s13 b t-agent">server</text>
+<text x="479" y="116" text-anchor="middle" class="s11 muted">checks the guidance lease</text>
+</g>
+<rect x="393" y="156" width="170" height="34" rx="17" class="k-done"/>
+<text x="478" y="177" text-anchor="middle" class="s12 b t-done">Edit applied</text>
+<g><rect x="85" y="86" width="158" height="34" rx="17" class="pill"/>
+<circle cx="99" cy="103" r="5" class="t-rework"/>
+<text x="111" y="107" class="m s12">guidance_required</text></g>
+<g>
+<rect x="40" y="220" width="248" height="46" rx="8" class="k-agent"/>
+<text x="164" y="239" text-anchor="middle" class="m s13 b t-agent">get_doc</text>
+<text x="164" y="256" text-anchor="middle" class="s11 muted">agent reads the pages it was told to</text>
+</g>
+<text x="488" y="145" class="m s11">read within ten minutes</text>
+<text x="378" y="96" text-anchor="end" class="m s11 t-rework">not read</text>
+<text x="371" y="26" text-anchor="end" class="m s11 t-rework">calls again</text>
+</svg>

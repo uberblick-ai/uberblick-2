@@ -128,18 +128,18 @@ describe("ub open", () => {
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
   });
 
-  it.each([false, true])("serves the local browser endpoint and names the upstream with stored login %s", async signedIn => {
+  it.each(["missing", "current", "expired"])("serves the local browser endpoint and names the upstream with a %s login", async loginState => {
     const { box, env } = configured();
     const remote = "wss://hub.example.ts.net/ws";
     pointAt(box, remote);
-    if (signedIn) {
+    if (loginState !== "missing") {
       const principalId = crypto.randomUUID();
       await writeHubLogin("https://hub.example.ts.net", {
         identity: { id: principalId, githubAccountId: "12345", githubUsername: "open-person" },
         credential: {
           key: generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "der" }).toString("base64url"),
           record: { id: crypto.randomUUID(), principalId, deviceId: crypto.randomUUID(),
-            workspaces: [], issuedAt: Date.now(), revokedAt: null },
+            workspaces: [], issuedAt: Date.now() - (loginState === "expired" ? 30 * 24 * 60 * 60 * 1000 : 0), revokedAt: null },
         },
       }, box.env);
     }
@@ -148,16 +148,17 @@ describe("ub open", () => {
     const app = await open(box, ["--port", String(webPort)], env);
 
     // Byte-exact: a wrong document path or shape silently looks like an
-    // offline hub to the web client. Its independent key admits the page only
-    // to the local server, never to the upstream hub.
+    // offline hub to the web client. The public document carries no key; the
+    // printed address carries the launch secret the page trades for a session.
     const document = await get(`${app.url}uberblick-config.json`);
     expect(await document.text()).toBe(
-      servingDocumentOf(app.url, remote, WORKSPACE, localBrowserKey(WORKSPACE, box.env)),
+      servingDocumentOf(app.url, remote, WORKSPACE),
     );
+    expect(app.printed).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#launch=[A-Za-z0-9_-]{43}$/);
     expect(app.stdout()).toBe(
-      `web        ${app.url}\n` +
+      `web        ${app.printed}\n` +
       `workspace  ${WORKSPACE} (https://hub.example.ts.net)\n` +
-      (signedIn
+      (loginState === "current"
         ? "hub        unreachable, changes stay on this machine until it is back\n"
         : "hub        not signed in, changes stay on this machine\n             → ub auth login\n") +
       "\n" +
@@ -253,7 +254,7 @@ describe("ub open", () => {
     const before = await get(url);
     expect(before.headers.get("cache-control")).toBe("no-store");
     expect(await before.text()).toBe(
-      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, localBrowserKey(WORKSPACE, box.env)),
+      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE),
     );
 
     // `ub workspace use` completes while this `ub open` keeps running.
@@ -266,7 +267,7 @@ describe("ub open", () => {
     // The live engine keeps its startup identity. A reload is told that the
     // machine moved underneath it, without silently retargeting the replica.
     expect(await (await get(url)).text()).toBe(
-      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, localBrowserKey(WORKSPACE, box.env), true),
+      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, true),
     );
 
     expect((await app.interrupt()).status).toBe(0);
@@ -277,9 +278,8 @@ describe("ub open", () => {
         restarted.url,
         SECOND_REMOTE,
         REBOUND_WORKSPACE,
-        localBrowserKey(REBOUND_WORKSPACE, box.env),
         false,
-        { [WORKSPACE]: { browserKey: localBrowserKey(WORKSPACE, box.env), remoteHubUrl: FIRST_REMOTE } },
+        { [WORKSPACE]: { remoteHubUrl: FIRST_REMOTE } },
       ),
     );
     expect((await restarted.interrupt()).status).toBe(0);
@@ -293,7 +293,7 @@ describe("ub open", () => {
     const url = `${app.url}uberblick-config.json`;
 
     expect(await (await get(url)).text()).toBe(
-      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, localBrowserKey(WORKSPACE, box.env)),
+      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE),
     );
 
     // A write is in flight after its first publication. Pairing this new secret
@@ -308,12 +308,12 @@ describe("ub open", () => {
     const held = await get(url);
     const text = await held.text();
     expect(Date.now() - started).toBeLessThan(1_000);
-    expect(text).toBe(servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, localBrowserKey(WORKSPACE, box.env)));
+    expect(text).toBe(servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE));
 
     writeBinding(box, SECOND_REMOTE, REBOUND_WORKSPACE);
     lock.release();
     expect(await (await get(url)).text()).toBe(
-      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, localBrowserKey(WORKSPACE, box.env), true),
+      servingDocumentOf(app.url, FIRST_REMOTE, WORKSPACE, true),
     );
 
     // Only an *active* write falls back like that. A completed removal is the
@@ -321,7 +321,7 @@ describe("ub open", () => {
     // stale so a restart can adopt the removal coherently.
     rmSync(join(configDir(box), "credentials.json"), { force: true });
     expect(await (await get(url)).json()).toMatchObject({
-      hubAuthToken: localBrowserKey(WORKSPACE, box.env),
+      workspaces: [WORKSPACE],
       rebound: true,
     });
 
@@ -351,7 +351,7 @@ describe("ub open", () => {
 
     const app = await opening;
     expect(await (await get(`${app.url}uberblick-config.json`)).text()).toBe(
-      servingDocumentOf(app.url, SECOND_REMOTE, REBOUND_WORKSPACE, localBrowserKey(REBOUND_WORKSPACE, box.env)),
+      servingDocumentOf(app.url, SECOND_REMOTE, REBOUND_WORKSPACE),
     );
     expect((await app.interrupt()).status).toBe(0);
   });
@@ -371,7 +371,7 @@ describe("ub open", () => {
     const url = `${app.url}uberblick-config.json`;
 
     expect(await (await get(url)).text()).toBe(
-      servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, localBrowserKey(REBOUND_WORKSPACE, box.env)),
+      servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE),
     );
 
     // The complete environment pair stays selected even when both file values
@@ -383,7 +383,7 @@ describe("ub open", () => {
       signingSecret: REBOUND_SECRET,
     });
     expect(await (await get(url)).text()).toBe(
-      servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE, localBrowserKey(REBOUND_WORKSPACE, box.env)),
+      servingDocumentOf(app.url, FIRST_REMOTE, REBOUND_WORKSPACE),
     );
 
     expect((await app.interrupt()).status).toBe(0);
@@ -719,7 +719,7 @@ it.each([false, true])("uses the served database's workspace name beside its ext
   });
   try {
     expect(running.stdout()).toBe(
-      `web        ${running.url}\n` +
+      `web        ${running.printed}\n` +
       (verbose
         ? "hub        https://named.example.ts.net (not signed in, changes stay here)\n" +
           "             → ub auth login\n" +

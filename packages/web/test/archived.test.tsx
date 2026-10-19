@@ -53,12 +53,19 @@ import {
 } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import * as guardedBinding from "../src/editor/guarded-binding.js";
-import { notifyTransient } from "../src/notifications.js";
+import { toast, type Action, type ExternalToast } from "sonner";
+import { acquireRoom } from "../src/collab/rooms.js";
 
-vi.mock("../src/notifications.js", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../src/notifications.js")>(),
-  notifyTransient: vi.fn(),
-}));
+function archiveNotice(index = 0): ExternalToast & { action: Action } {
+  return vi.mocked(toast.success).mock.calls[index]![1] as ExternalToast & { action: Action };
+}
+
+function undoRelease(): () => void {
+  return vi.mocked(acquireRoom).mock.results.flatMap((result, index) =>
+    result.type === "return" && vi.mocked(acquireRoom).mock.calls[index]?.[0] === directoryRoom(WORKSPACE)
+      ? [result.value.release] : [],
+  ).at(-1)!;
+}
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const UUID = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
@@ -140,7 +147,7 @@ function emitStatus(name: string, change: Partial<RoomStatus>): void {
 }
 
 vi.mock("../src/collab/rooms.js", () => ({
-  acquireRoom: (name: string) => ({ connection: room(name), release: () => {} }),
+  acquireRoom: vi.fn((name: string) => ({ connection: room(name), release: vi.fn() })),
 }));
 
 const { App } = await import("../src/ui/App.js");
@@ -160,7 +167,9 @@ function peerDirectory(local: Y.Doc): Y.Doc {
 // Answered here rather than left to a real `fetch` so the gate settles on this
 // suite's own terms and not on what the sandbox does with a relative URL.
 beforeEach(() => {
-  vi.mocked(notifyTransient).mockClear();
+  vi.mocked(acquireRoom).mockClear();
+  vi.spyOn(toast, "success");
+  vi.spyOn(toast, "error");
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response("", { status: 404 }),
   );
@@ -176,6 +185,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  act(() => toast.dismiss());
   rooms.clear();
   roomStatus.clear();
   statusListeners.clear();
@@ -304,8 +314,8 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
     expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
 
-    const archivedNotice = vi.mocked(notifyTransient).mock.calls.at(-1)?.[0];
-    expect(archivedNotice?.message).toBe("Archived “New lease”.");
+    const archivedNotice = archiveNotice();
+    expect(toast.success).toHaveBeenCalledWith("Archived “New lease”.", expect.any(Object));
     expect(archivedNotice?.action?.label).toBe("Undo");
     act(() => archivedNotice?.action?.onClick({} as MouseEvent<HTMLButtonElement>));
     expect(getDirectoryEntry(directory, OTHER)?.deleted).toBeUndefined();
@@ -340,21 +350,25 @@ describe("an archived document is readable, says so, and offers one way back", (
     openActions(host);
     act(() => action("Archive document")?.click());
     act(() => screen.getByRole("button", { name: /^Archive$/ }).click());
-    expect(notifyTransient).toHaveBeenCalledTimes(1);
-    const notice = vi.mocked(notifyTransient).mock.calls[0]![0];
-    expect(notice.message).toBe("Archived “Original”.");
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    const notice = archiveNotice();
+    const release = undoRelease();
+    expect(release).not.toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalledWith("Archived “Original”.", expect.any(Object));
     await act(async () => {
       window.history.pushState(null, "", `/${nextWorkspace}/${OTHER}`);
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     expect(within(host).getByPlaceholderText<HTMLTextAreaElement>("Untitled").value).toBe("Other document");
-    act(() => notice.action?.onClick({} as MouseEvent<HTMLButtonElement>));
+    act(() => notice.action.onClick({ preventDefault: vi.fn() } as unknown as MouseEvent<HTMLButtonElement>));
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
     expect(getDirectoryEntry(nextDirectory, OTHER)?.deleted).toBeUndefined();
     expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
-    notice.onClose?.();
-    act(() => notice.action?.onClick({} as MouseEvent<HTMLButtonElement>));
-    expect(notifyTransient).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(1);
+    act(() => notice.onDismiss?.({ id: "closed" }));
+    act(() => notice.action.onClick({ preventDefault: vi.fn() } as unknown as MouseEvent<HTMLButtonElement>));
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(1);
   });
 
   it("refuses Undo without writing when its directory loses write readiness", async () => {
@@ -366,18 +380,71 @@ describe("an archived document is readable, says so, and offers one way back", (
     openActions(host);
     act(() => action("Archive document")?.click());
     act(() => screen.getByRole("button", { name: /^Archive$/ }).click());
-    const notice = vi.mocked(notifyTransient).mock.calls[0]![0];
+    const notice = archiveNotice();
+    const release = undoRelease();
+    const id = vi.mocked(toast.success).mock.results[0]!.value;
     emitStatus(directoryName, { writable: false });
     const writes = vi.fn();
     directory.on("update", writes);
-    act(() => notice.action?.onClick({} as MouseEvent<HTMLButtonElement>));
+    const preventDefault = vi.fn();
+    act(() => notice.action.onClick({ preventDefault } as unknown as MouseEvent<HTMLButtonElement>));
     expect(writes).not.toHaveBeenCalled();
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
-    expect(vi.mocked(notifyTransient).mock.calls.at(-1)?.[0]).toMatchObject({
-      key: notice.key,
-      severity: "error",
-      message: "“Original” is still archived. Open its link and choose Restore when the connection is ready.",
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith(
+      "“Original” is still archived. Open its link and choose Restore when the connection is ready.",
+      { id, action: undefined },
+    );
+    expect(toast.getToasts().find((notice) => notice.id === id)).toHaveProperty("action", undefined);
+    act(() => notice.onAutoClose?.({ id }));
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["onDismiss", "onAutoClose"] as const)("releases Undo's room once on %s and rejects a late action", async (callback) => {
+    const directory = room(directoryRoom(WORKSPACE)).ydoc;
+    initDoc(room(roomForDoc(WORKSPACE, UUID)).ydoc, { uuid: UUID, title: "Original" });
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Original" });
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+    openActions(host);
+    act(() => action("Archive document")?.click());
+    act(() => screen.getByRole("button", { name: /^Archive$/ }).click());
+    const notice = archiveNotice();
+    const release = undoRelease();
+    expect(release).not.toHaveBeenCalled();
+    act(() => {
+      notice[callback]?.({ id: "closed" });
+      notice[callback]?.({ id: "closed" });
+      notice.action.onClick({} as MouseEvent<HTMLButtonElement>);
     });
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
+  });
+
+  it("gives a new archive its own Undo hold even while the previous notice is closing", async () => {
+    const directory = room(directoryRoom(WORKSPACE)).ydoc;
+    initDoc(room(roomForDoc(WORKSPACE, UUID)).ydoc, { uuid: UUID, title: "Original" });
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Original" });
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+    openActions(host);
+    act(() => action("Archive document")?.click());
+    act(() => screen.getByRole("button", { name: /^Archive$/ }).click());
+    const first = archiveNotice();
+    const firstRelease = undoRelease();
+    act(() => first.onAutoClose?.({ id: "closed" }));
+    act(() => restoreButton(host)?.click());
+    openActions(host);
+    act(() => action("Archive document")?.click());
+    act(() => screen.getByRole("button", { name: /^Archive$/ }).click());
+    const second = archiveNotice(1);
+    const secondRelease = undoRelease();
+    const ids = vi.mocked(toast.success).mock.results.map((result) => result.value);
+    expect(ids[1]).not.toBe(ids[0]);
+    expect(firstRelease).toHaveBeenCalledTimes(1);
+    expect(secondRelease).not.toHaveBeenCalled();
+    act(() => second.action.onClick({} as MouseEvent<HTMLButtonElement>));
+    expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
+    expect(secondRelease).toHaveBeenCalledTimes(1);
   });
 
   it("does not publish an archive toast for a remote archive", async () => {
@@ -387,7 +454,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     const host = await openApp(`/${WORKSPACE}/${UUID}`);
     act(() => tombstoneDirectoryEntry(directory, UUID));
     expect(banner(host)).not.toBeNull();
-    expect(notifyTransient).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
   });
 
   it("curates and archives from the identity-row menu, taking the pin with it", async () => {
@@ -570,7 +637,7 @@ describe("an archived document is readable, says so, and offers one way back", (
       // instead of pretending the archive happened.
       const dialog = screen.getByRole("alertdialog", { name: "Archive “Retired protocol”?" });
       expect(dialog?.textContent).toContain("Archive unavailable");
-      expect(notifyTransient).not.toHaveBeenCalled();
+      expect(toast.success).not.toHaveBeenCalled();
       expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
       expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
 

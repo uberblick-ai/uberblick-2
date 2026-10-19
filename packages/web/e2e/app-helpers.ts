@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } from "@playwright/test";
-import { openUpstreamApp, startHarness } from "./harness.js";
+import { authorizeBrowser, openUpstreamApp, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 import { activateControl } from "./input-helpers.js";
 export { activateControl, closeIfOpen } from "./input-helpers.js";
@@ -34,7 +34,7 @@ export function setupHarness(options: {
     return started;
   }
 
-  const start = async (): Promise<void> => {
+  const start = async ({ browser }: { browser: Browser }): Promise<void> => {
     started = await startHarness({
       ...(options.accessRole === undefined ? {} : { accessRole: options.accessRole }),
       ...(options.hubAdmin === undefined ? {} : { hubAdmin: options.hubAdmin }),
@@ -42,6 +42,7 @@ export function setupHarness(options: {
       ...(options.localWorkspace === undefined ? {} : { localWorkspace: options.localWorkspace }),
       ...(options.gitUserName === undefined ? {} : { gitUserName: options.gitUserName }),
     });
+    await authorizeBrowser(browser);
   };
   const stop = async (): Promise<void> => {
     const running = started;
@@ -87,15 +88,6 @@ export function setupHarness(options: {
 
 export function editor(page: Page): Locator {
   return page.locator(".ub-editor .ProseMirror");
-}
-
-/** Keyboard input needs the opened menu's focus lifecycle, not just its paint. */
-export async function openKeyboardMenu(page: Page, shortcut: string, trigger?: Locator): Promise<void> {
-  await page.keyboard.press(shortcut);
-  if (trigger !== undefined) await expect(trigger).toHaveAttribute("data-state", "open");
-  const menu = page.getByRole("menu");
-  await expect(menu).toBeVisible();
-  await expect.poll(() => menu.evaluate(element => element.contains(element.ownerDocument.activeElement))).toBe(true);
 }
 
 export function docButton(page: Page, title: string): Locator {

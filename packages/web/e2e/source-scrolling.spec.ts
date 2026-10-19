@@ -290,21 +290,14 @@ async function exerciseSourceCopy(page: Page, touch: boolean): Promise<void> {
         expect(before.focused).toBe(true);
         expect(before.text).toBe(collapsed ? "" : sourceText.slice(0, 4));
         await page.locator("html").evaluate((element) => element.removeAttribute("data-copied-source"));
-        const previous = (await notices.elementHandles())[0];
         if (touch) await copy.tap();
         else await copy.click();
         await expect(copy).toHaveText("Copy");
-        // Wait for native dismissal so the previous success cannot satisfy
-        // assertions before the replacement has been published.
-        if (previous !== undefined) {
-          await expect.poll(() => previous.evaluate((element) => element.isConnected)).toBe(false);
-          await previous.dispose();
-        }
+        await expect(page.locator("html")).toHaveAttribute("data-copied-source", sourceText);
         await expect(notices).toHaveCount(1);
         await expect(notices).toBeVisible();
         await expect(notices.locator("[data-title]")).toHaveText("Source copied");
         await expect(notices).toHaveAttribute("data-type", "success");
-        await expect(page.locator("html")).toHaveAttribute("data-copied-source", sourceText);
         await expect.poll(() => editorSelection(page)).toEqual(before);
         await expect.poll(() => source.textContent()).toBe(sourceText);
       }

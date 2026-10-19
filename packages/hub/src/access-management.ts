@@ -12,6 +12,55 @@ import type { WorkspacePromotions } from "./workspace-promotion.js";
 import { HubAdminRefusal, type HubAdminRegistry } from "./hub-admins.js";
 
 type ManagementAction = Exclude<RequestAction, { operation: "renew-credential" }>;
+type ManagementOperation = ManagementAction["operation"];
+type ManagementPolicy<Action extends ManagementAction> = {
+  scope: Action extends { workspaceId: string } ? "workspace" | "hub" : "own" | "hub";
+  role: "signed-in" | "member" | "admin" | "admin-or-receipt";
+  target: readonly Exclude<keyof Action, "operation" | "cursor" | "role">[];
+  changesState: boolean;
+};
+
+export const MANAGEMENT_OPERATIONS = {
+  "list-devices": { scope: "own", role: "signed-in", target: [], changesState: false },
+  "revoke-device": { scope: "own", role: "signed-in", target: ["deviceId"], changesState: true },
+  "own-hub-role": { scope: "hub", role: "admin", target: [], changesState: false },
+  "list-hub-admins": { scope: "hub", role: "admin", target: [], changesState: false },
+  "list-hub-workspaces": { scope: "hub", role: "admin", target: [], changesState: false },
+  "remove-hub-admin": { scope: "hub", role: "admin", target: ["principalId"], changesState: true },
+  "suspend-workspace": { scope: "hub", role: "admin", target: ["workspaceId"], changesState: true },
+  "restore-workspace": { scope: "hub", role: "admin", target: ["workspaceId"], changesState: true },
+  // Promotion checks hub administration or receipt-based resumption atomically in its registry.
+  "promote-workspace": { scope: "hub", role: "admin-or-receipt", target: ["workspaceId", "attemptId"], changesState: true },
+  "own-role": { scope: "workspace", role: "member", target: ["workspaceId"], changesState: false },
+  "list-members": { scope: "workspace", role: "admin", target: ["workspaceId"], changesState: false },
+  "resolve-account": { scope: "workspace", role: "admin", target: ["workspaceId", "githubUsername"], changesState: false },
+  "grant-member": { scope: "workspace", role: "admin", target: ["workspaceId", "githubAccountId"], changesState: true },
+  "change-role": { scope: "workspace", role: "admin", target: ["workspaceId", "principalId"], changesState: true },
+  "remove-member": { scope: "workspace", role: "admin", target: ["workspaceId", "principalId"], changesState: true },
+} as const satisfies { [Operation in ManagementOperation]: ManagementPolicy<Extract<ManagementAction, { operation: Operation }>> };
+
+function undeclaredOperation(_action: never): { status: "invalid-request" } {
+  return { status: "invalid-request" };
+}
+
+async function readManagementRequest(request: IncomingMessage): Promise<{ token: string; version: number; action: ManagementAction }> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    const bytes = Buffer.from(chunk as Uint8Array);
+    size += bytes.length;
+    if (size > 4096) throw new Error();
+    chunks.push(bytes);
+  }
+  const body: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  if (body === null || typeof body !== "object" || Array.isArray(body)) throw new Error();
+  const { token, protocolVersion, ...fields } = body as Record<string, unknown>;
+  const action = readRequestAction(fields);
+  if (typeof token !== "string" || !Number.isSafeInteger(protocolVersion) ||
+    (protocolVersion as number) <= 0 || action === null || action.operation === "renew-credential" ||
+    Object.keys(fields).some(field => !Object.hasOwn(action, field))) throw new Error();
+  return { token, version: protocolVersion as number, action };
+}
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export async function handleAccessManagement(
@@ -25,6 +74,7 @@ export async function handleAccessManagement(
   promotions?: WorkspacePromotions,
   accounts?: GithubAccountLookup,
   hubAdmins?: HubAdminRegistry,
+  hubVersion?: string,
 ): Promise<boolean> {
   if (request.url !== "/auth/manage") return false;
   const reply = (status: number, body: unknown): void => {
@@ -40,36 +90,23 @@ export async function handleAccessManagement(
     reply(400, { status: "invalid-request" });
     return true;
   }
-  let token: string;
-  let version: number;
-  let action: ManagementAction;
+  let management: Awaited<ReturnType<typeof readManagementRequest>>;
   try {
-    let size = 0;
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) {
-      const bytes = Buffer.from(chunk as Uint8Array);
-      size += bytes.length;
-      if (size > 4096) throw new Error();
-      chunks.push(bytes);
-    }
-    const body: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (body === null || typeof body !== "object" || Array.isArray(body)) throw new Error();
-    const { token: proof, protocolVersion: suppliedVersion, ...fields } = body as Record<string, unknown>;
-    const parsed = readRequestAction(fields);
-    if (typeof proof !== "string" || !Number.isSafeInteger(suppliedVersion) ||
-      (suppliedVersion as number) <= 0 || parsed === null || parsed.operation === "renew-credential" ||
-      Object.keys(fields).some(field => !Object.hasOwn(parsed, field))) throw new Error();
-    token = proof;
-    version = suppliedVersion as number;
-    action = parsed;
+    management = await readManagementRequest(request);
   } catch {
     reply(400, { status: "invalid-request" });
     return true;
   }
+  const { token, version, action } = management;
   if (version !== protocolVersion) {
     reply(409, { status: "protocol-mismatch", reason: protocolMismatchReason(protocolVersion) });
     return true;
   }
+  if (!Object.hasOwn(MANAGEMENT_OPERATIONS, action.operation)) {
+    reply(400, { status: "invalid-request" });
+    return true;
+  }
+  const policy = MANAGEMENT_OPERATIONS[action.operation];
   let closesAccess = false;
   try {
     const verified = await credentials.verifyRequest(token, action);
@@ -78,17 +115,20 @@ export async function handleAccessManagement(
     // synchronously with the write, on the hub's shared database handle.
     const readCurrent = () => {
       const current = verified === null ? null : credentials.get(verified.record.id);
-      if (current === null || current.revokedAt !== null || current.replacedAt !== null ||
+      if (current === null || current.revokedAt !== null || current.replacedAt !== null || credentials.isExpired(current) ||
         verified === null || clampToken(verified.claims, Math.floor(Date.now() / 1000)) !== null) {
         reply(401, { status: "sign-in-required" });
         return null;
       }
-      const hubWorkspaceAction = action.operation === "suspend-workspace" || action.operation === "restore-workspace";
-      if (action.operation !== "promote-workspace" && !hubWorkspaceAction && "workspaceId" in action &&
-        (!current.workspaces.includes(action.workspaceId) || hubAdmins?.isSuspended(action.workspaceId))) {
-        reply(403, { status: "forbidden" });
-        return null;
+      if (policy.scope === "workspace") {
+        if (!("workspaceId" in action) || !current.workspaces.includes(action.workspaceId) || hubAdmins?.isSuspended(action.workspaceId)) {
+          reply(403, { status: "forbidden" });
+          return null;
+        }
+        if (policy.role === "admin") memberships.requireAdmin(action.workspaceId, current.principalId);
+        else memberships.ownRole(action.workspaceId, current.principalId);
       }
+      if (policy.scope === "hub" && policy.role === "admin") hubAdmins?.requireAdmin(current.principalId);
       return current;
     };
     const current = readCurrent();
@@ -96,7 +136,6 @@ export async function handleAccessManagement(
     switch (action.operation) {
       case "resolve-account":
       case "grant-member": {
-        memberships.requireAdmin(action.workspaceId, current.principalId);
         if (accounts === undefined) {
           reply(503, { status: "not-configured" });
           break;
@@ -108,7 +147,6 @@ export async function handleAccessManagement(
         }
         const refreshed = readCurrent();
         if (refreshed === null) return true;
-        memberships.requireAdmin(action.workspaceId, refreshed.principalId);
         if (action.operation === "resolve-account") {
           reply(200, account);
           break;
@@ -146,7 +184,6 @@ export async function handleAccessManagement(
           reply(503, { status: "not-configured" });
           break;
         }
-        hubAdmins.requireAdmin(current.principalId);
         if (action.operation === "own-hub-role") reply(200, { status: "ok", role: "admin" });
         else if (action.operation === "list-hub-admins") reply(200, { status: "ok", ...hubAdmins.pageAdmins(current.principalId, action.cursor) });
         else if (action.operation === "list-hub-workspaces") reply(200, { status: "ok", ...hubAdmins.pageWorkspaces(current.principalId, action.cursor) });
@@ -163,7 +200,7 @@ export async function handleAccessManagement(
         break;
       }
       case "list-devices":
-        reply(200, { status: "ok", devices: credentials.listDevices(current.principalId)
+        reply(200, { status: "ok", ...(hubVersion === undefined ? {} : { hubVersion }), devices: credentials.listDevices(current.principalId)
           .map(device => ({ ...device, current: device.deviceId === current.deviceId })) });
         break;
       case "revoke-device": {
@@ -194,6 +231,9 @@ export async function handleAccessManagement(
         closesAccess = true;
         memberships.remove({ ...action, actorPrincipalId: current.principalId });
         reply(200, { status: "ok" });
+        break;
+      default:
+        reply(400, undeclaredOperation(action));
         break;
     }
   } catch (error) {

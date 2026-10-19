@@ -46,7 +46,7 @@ import {
 } from "../config.js";
 import type { HubEndpoint, LocalServing } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
-import { notifyTransient } from "../notifications.js";
+import { toast } from "sonner";
 import { watchDocumentStub } from "../collab/directory-stub.js";
 import { randomIdentity } from "../collab/identity.js";
 import { createDocLinkContext } from "../editor/doc-links.js";
@@ -99,6 +99,7 @@ import {
   useDocMeta,
   useHubEndpoint,
   useIdentity,
+  useLocalSessionMissing,
   usePresence,
   useTitlePresence,
   useRoom,
@@ -119,6 +120,23 @@ const REPLICA_UNAVAILABLE_DETAIL = {
   "replica-quarantined": "This workspace’s replica is quarantined. Run ub doctor in a project bound to this workspace and follow its recovery steps.",
   "replica-failed": "This workspace’s replica could not be served. Run ub doctor in a project bound to this workspace and follow its recovery steps.",
 };
+
+/** ub open admits a browser only through the address it printed. */
+function LocalSessionNotice(): ReactElement {
+  return (
+    <PaneNotice>
+      <section className="mx-auto w-full max-w-xl p-6 text-(--foreground)" aria-label="Connect this page">
+        <div role="status">
+          <h1 className="m-0 ub-type-h2 font-semibold">This page is not connected to ub open</h1>
+          <p className="mt-3">
+            Open the address <code>ub open</code> printed in your terminal to connect this
+            browser to it.
+          </p>
+        </div>
+      </section>
+    </PaneNotice>
+  );
+}
 
 /** The frozen serving process is still useful; this notice only names its binding. */
 export function ReboundNotice({
@@ -381,6 +399,7 @@ export function App(): ReactElement {
   const workspaceUuid = workspace?.uuid ?? null;
   const serving = hubReady && workspaceUuid !== null ? localServing(workspaceUuid) : null;
   const remoteSignIn = hubReady && browserSignInRequired();
+  const sessionMissing = useLocalSessionMissing(hubReady && servedWorkspaceNames() !== null);
   const roomReady = hubReady && !remoteSignIn;
   /** Which hub the room providers dial. */
   const endpoint = hubReady ? hubEndpoint() : null;
@@ -732,36 +751,39 @@ export function App(): ReactElement {
     archiveDocument(directory.ydoc, sidebar.ydoc, selected);
     const uuid = selected;
     const title = getMeta(doc.ydoc).title || "Untitled";
-    const key = `archive:${directory.room}:${uuid}`;
     // Keep the original directory alive while Undo is offered, including
     // navigation to a document in another workspace.
     const held = acquireRoom(directory.room, defaultIdentity, { presence: false });
     let closed = false;
     const close = (): void => {
+      if (closed) return;
       closed = true;
       held.release();
       archiveUndoReleases.current.delete(close);
     };
     archiveUndoReleases.current.add(close);
-    notifyTransient({
-      key,
-      message: `Archived “${title}”.`,
-      severity: "success",
-      onClose: close,
+    const id = toast.success(`Archived “${title}”.`, {
+      onDismiss: close,
+      onAutoClose: close,
       action: {
         label: "Undo",
-        onClick: () => {
-          if (closed || !decisionTopicArchived(held.connection.ydoc, uuid)) return;
-          if (!held.connection.status.writable) {
-            notifyTransient({
-              key,
-              message: `“${title}” is still archived. Open its link and choose Restore when the connection is ready.`,
-              severity: "error",
-            });
-            return;
+        onClick: (event) => {
+          try {
+            if (closed || !decisionTopicArchived(held.connection.ydoc, uuid)) return;
+            if (!held.connection.status.writable) {
+              // Keep the replacement visible after Sonner finishes this action.
+              event.preventDefault();
+              toast.error(`“${title}” is still archived. Open its link and choose Restore when the connection is ready.`, {
+                id,
+                action: undefined,
+              });
+              return;
+            }
+            restoreFocusRoom.current = null;
+            restoreDirectoryEntry(held.connection.ydoc, uuid);
+          } finally {
+            close();
           }
-          restoreFocusRoom.current = null;
-          restoreDirectoryEntry(held.connection.ydoc, uuid);
         },
       },
     });
@@ -1014,6 +1036,13 @@ export function App(): ReactElement {
     return (
       <main className="ub-app">
         <RemoteHubGuide />
+      </main>
+    );
+  }
+  if (sessionMissing) {
+    return (
+      <main className="ub-app">
+        <LocalSessionNotice />
       </main>
     );
   }

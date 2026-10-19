@@ -54,6 +54,7 @@ function row(page: Page, state: string, question: string): Locator {
 async function absent(page: Page): Promise<void> {
   await expect(block(page)).toHaveCount(0);
   await expect(page.locator(".ub-decisions-link")).toHaveCount(0);
+  await expect(page.locator(".ub-status-separator")).toHaveCount(0);
 }
 
 // Decode with the provider's own dependency, as the other protocol probes do.
@@ -282,7 +283,10 @@ for (const touch of [false, true]) {
     expect((await rows.evaluateAll((links) => links.map((link) => new URL((link as HTMLAnchorElement).href).pathname.split("/").at(-1)))).sort()).toEqual(relatedTopics);
     const summary = "6 decisions · 1 conflict · 1 under review · 1 agent stance · 1 not yet decided";
     await expect(block(page).locator(".ub-decisions-summary")).toHaveText(summary);
-    await expect(page.locator(".ub-decisions-link")).toHaveText(`${summary} ↓`);
+    await expect(page.locator(".ub-decisions-link")).toHaveText(summary);
+    await expect(page.locator(".ub-decisions-link")).toHaveAccessibleName(summary);
+    await expect(page.locator(".ub-status-left")).toHaveText(new RegExp(`^Edited .+ · ${summary}$`));
+    await expect(page.locator(".ub-status-separator")).toHaveText("·");
     await expect(row(page, "Conflict", "Conflict question").locator(".ub-decisions-row-preview")).toHaveText("Nothing is in force.");
     await expect(row(page, "Under review", "Review question").locator(".ub-decisions-row-preview")).toHaveText(currentReview.blocks[0]?.text ?? "");
     await expect(block(page)).not.toContainText("Pending preview");
@@ -392,13 +396,13 @@ test("a page without headings gains and loses its live Decisions block", async (
   await absent(page);
   const proposal = await create(writer, "Live question", "The first answer becomes guidance when accepted.", { kind: "decision", related: owner.uuid });
   await expect(row(page, "Not yet decided", "Live question")).toBeVisible();
-  await expect(page.locator(".ub-decisions-link")).toHaveText("1 decision · 1 not yet decided ↓");
+  await expect(page.locator(".ub-decisions-link")).toHaveText("1 decision · 1 not yet decided");
   await writer.call("set_status", { uuid: proposal.uuid, status: "decided", answer: answer() });
   await expect(row(page, "In force", "Live question")).toBeVisible();
-  await expect(page.locator(".ub-decisions-link")).toHaveText("1 decision in force ↓");
+  await expect(page.locator(".ub-decisions-link")).toHaveText("1 decision in force");
   const pending = await create(writer, "Proposed replacement question", "The proposed preview never appears on the page.", { kind: "decision", supersedes: proposal.uuid });
   await expect(row(page, "Under review", "Live question")).toBeVisible();
-  await expect(page.locator(".ub-decisions-link")).toHaveText("1 decision · 1 under review ↓");
+  await expect(page.locator(".ub-decisions-link")).toHaveText("1 decision · 1 under review");
   await expect(row(page, "Under review", "Live question").locator(".ub-decisions-row-preview")).toHaveText(proposal.blocks[0]?.text ?? "");
   await writer.call("set_status", { uuid: pending.uuid, status: "withdrawn" });
   await expect(row(page, "In force", "Live question")).toBeVisible();

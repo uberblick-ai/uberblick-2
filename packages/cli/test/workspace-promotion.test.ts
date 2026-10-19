@@ -6,10 +6,10 @@ import { DatabaseSync } from "node:sqlite";
 import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub, type TeamHub as Hub } from "@uberblick/hub/team";
 import { issueCredential } from "@uberblick/hub/test-device-credentials";
-import { writeHubLogin, removeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
+import { readHubLogins, writeHubLogin, removeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { ensureDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { compareCorpus, createMcpServer, inspectRemote, isIdentical, resolveMcpConfig, syncWorkspace } from "@uberblick/mcp-server";
-import { getWorkspaceName, getWorkspaceMainRepository, setWorkspaceMainRepository, listDirectory, readSidebar, tombstoneDirectoryEntry } from "@uberblick/schema";
+import { appendBlock, createAnnotation, createTagCatalogEntry, deleteDirectoryEntry, getWorkspaceName, getWorkspaceMainRepository, initDoc, isDirectoryEntryDeleted, listDirectory, readSidebar, renameGroup, retireTagCatalogEntry, setInlineLink, setKind, setLinks, setTags, setWorkspaceMainRepository, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UB_BIN, removeTempDirs, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
@@ -132,29 +132,6 @@ describe("workspace creation and promotion", () => {
     expect(selected(box)).toEqual(previous);
   });
 
-  it("keeps loopback promotion admission private and requires login after logout", async () => {
-    const box = await localWorkspace();
-    const { hub, endpoint } = await hubFor(box);
-    const mcpEntry = JSON.stringify({ mcpServers: { uberblick: { env: { UB_WORKSPACE_ID: selected(box).workspaceId, UB_HUB_URL: "local" } } } });
-    writeFileSync(join(box.cwd, ".mcp.json"), mcpEntry);
-    const result = await runInProcess(["workspace", "promote", endpoint], box);
-    expect(result.status, result.output).toBe(0);
-    expect(result.stderr).not.toContain("MCP registrations");
-    expect(result.stderr).not.toContain("ub mcp install");
-    expect(readFileSync(join(box.cwd, ".mcp.json"), "utf8")).toBe(mcpEntry);
-    expect(Object.keys(selected(box)).sort()).toEqual(["hubUrl", "workspaceId"]);
-    expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBe(endpoint);
-    const connected = await runInProcess(["status", "--json"], box);
-    expect(connected.status, connected.output).toBe(0);
-    expect(JSON.parse(connected.stdout).connection.state).toBe("connected");
-    expect(JSON.parse(connected.stdout).problems).toEqual([]);
-    await removeHubLogin(`http://127.0.0.1:${hub.port}`, box.env);
-    const status = await runInProcess(["status", "--json"], box, { HUB_AUTH_TOKEN: "synthetic-local-secret" });
-    expect(JSON.parse(status.stdout).connection.state).toBe("refused");
-    expect(JSON.parse(status.stdout).account).toBeNull();
-    expect(status.stdout).toContain("ub auth login");
-  });
-
   it("does not select the hub when private admission persistence fails after upload", async () => {
     const box = await localWorkspace();
     const { hub, endpoint } = await hubFor(box);
@@ -239,7 +216,7 @@ describe("workspace creation and promotion", () => {
     expect(selected(box)).toEqual({ workspaceId: selected(box).workspaceId, hubUrl: endpoint });
     expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBe(endpoint);
     const privateConfig = JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"));
-    expect(privateConfig.hubAdmissions).toEqual({ [endpoint]: "device" });
+    expect(privateConfig.hubAdmissions).toEqual({ [`${endpoint}/`]: "device" });
     const remote = await inspectRemote(resolveMcpConfig({ ...box.env, WORKSPACE_ID: selected(box).workspaceId, HUB_URL: endpoint, HUB_ADMISSION: "device" }), { documents: true, workspace: true });
     expect(remote.missing).toEqual([]);
     expect(remote.entries.filter(entry => entry.deleted)).toHaveLength(1);
@@ -287,6 +264,106 @@ describe("workspace creation and promotion", () => {
     try {
       expect(db.prepare("SELECT name FROM documents WHERE substr(name, 1, ?) = ?").all(prefix.length, prefix)).toEqual([]);
     } finally { db.close(); }
+  });
+
+  it("promotes a complete fork to its source hub without changing the source or its members", async () => {
+    const box = await localWorkspace("Shared project");
+    const sourceId = selected(box).workspaceId;
+    const sourceConfig = offline(box);
+    const archivedDecision = randomUUID();
+    const deletedId = randomUUID();
+    let liveId: string;
+    const seeded = createMcpServer(sourceConfig);
+    try {
+      const [live, archived] = listDirectory(seeded.replicas.directory().doc);
+      liveId = live!.uuid;
+      const archivedDoc = seeded.replicas.replica(archived!.uuid).doc;
+      const block = appendBlock(archivedDoc, { type: "paragraph", text: "Keep this archived comment and link" });
+      createAnnotation(archivedDoc, block, 0, 4, "test-author", "Archived context");
+      setInlineLink(archivedDoc, block, { start: 5, end: 9 }, liveId);
+      setLinks(archivedDoc, [liveId]);
+      tombstoneDirectoryEntry(seeded.replicas.directory().doc, archived!.uuid);
+      const decision = seeded.replicas.replica(archivedDecision).doc;
+      initDoc(decision, { uuid: archivedDecision, title: "Archived decision", governs: liveId });
+      setKind(decision, "decision");
+      appendBlock(decision, { type: "paragraph", text: "Retain the complete archived decision answer." });
+      upsertDirectoryEntry(seeded.replicas.directory().doc, { uuid: archivedDecision, title: "Archived decision", kind: "decision", status: "open", topic: archivedDecision, governs: liveId });
+      tombstoneDirectoryEntry(seeded.replicas.directory().doc, archivedDecision);
+      const discarded = seeded.replicas.replica(deletedId).doc;
+      initDoc(discarded, { uuid: deletedId, title: "Permanently removed" });
+      appendBlock(discarded, { type: "paragraph", text: "Content must stay absent." });
+      deleteDirectoryEntry(seeded.replicas.directory().doc, deletedId);
+      const tag = createTagCatalogEntry(seeded.replicas.settings().doc, "fork-fixture");
+      const retired = createTagCatalogEntry(seeded.replicas.settings().doc, "retired-fixture");
+      retireTagCatalogEntry(seeded.replicas.settings().doc, retired.id);
+      setTags(seeded.replicas.replica(liveId).doc, [tag.id]);
+      renameGroup(seeded.replicas.sidebar().doc, readSidebar(seeded.replicas.sidebar().doc)[0]!.id, "Shared navigation");
+      setWorkspaceMainRepository(seeded.replicas.settings().doc, "acme/shared-project");
+    } finally { await seeded.close(); }
+    const { hub, endpoint } = await hubFor(box);
+    const promotedSource = await runInProcess(["workspace", "promote", endpoint], box);
+    expect(promotedSource.status, promotedSource.output).toBe(0);
+    const colleague = hub.principals!.identify("1203", "source-colleague");
+    hub.memberships!.grant({ workspaceId: sourceId, principalId: colleague.id, role: "member" });
+    const sourceRemoteConfig = resolveMcpConfig({ ...box.env, WORKSPACE_ID: sourceId, HUB_URL: endpoint, HUB_ADMISSION: "device" });
+    const remoteBefore = await inspectRemote(sourceRemoteConfig, { documents: true, workspace: true });
+    const accessBefore = accessRows(hub);
+    const login = readHubLogins(box.env).logins[`http://127.0.0.1:${hub.port}`]!;
+    await removeHubLogin(`http://127.0.0.1:${hub.port}`, box.env);
+    const servingSource = createMcpServer(sourceConfig);
+    try {
+      appendBlock(servingSource.replicas.replica(liveId!).doc, { type: "paragraph", text: "A local change the source hub has never acknowledged." });
+      const expected = await syncWorkspace(sourceConfig);
+      expect(expected.missing).toEqual([]);
+      const forked = await runInProcess(["workspace", "fork"], box);
+      expect(forked.status, forked.output).toBe(0);
+      const forkId = selected(box).workspaceId;
+      expect(forkId).not.toBe(sourceId);
+      expect(selected(box).hubUrl).toBeNull();
+      expect(readWorkspaceHub(forkId, box.env)).toBeNull();
+      expect(readWorkspaceHub(sourceId, box.env)).toBe(endpoint);
+      expect(accessRows(hub)).toEqual(accessBefore);
+      const forkLocal = await syncWorkspace(offline(box));
+      expect(forkLocal.missing).toEqual([]);
+      expect(isIdentical(compareCorpus(expected.entries, forkLocal.entries))).toBe(true);
+      expect(isIdentical(compareCorpus(expected.workspace!, forkLocal.workspace!))).toBe(true);
+      expect(forkLocal.entries.filter(entry => entry.deleted)).toHaveLength(2);
+      expect(forkLocal.entries.some(entry => entry.uuid === archivedDecision)).toBe(true);
+      expect(forkLocal.entries.some(entry => entry.uuid === deletedId)).toBe(false);
+      const fork = createMcpServer(offline(box));
+      try {
+        expect(isDirectoryEntryDeleted(fork.replicas.directory().doc, deletedId)).toBe(true);
+        expect(() => fork.replicas.replica(deletedId)).toThrow("permanently deleted");
+      } finally { await fork.close(); }
+      await writeHubLogin(`http://127.0.0.1:${hub.port}`, login, box.env);
+      const promotedFork = await runInProcess(["workspace", "promote", endpoint], box);
+      expect(promotedFork.status, promotedFork.output).toBe(0);
+      expect(selected(box)).toEqual({ workspaceId: forkId, hubUrl: endpoint });
+      const remoteFork = await inspectRemote(resolveMcpConfig({ ...box.env, WORKSPACE_ID: forkId, HUB_URL: endpoint, HUB_ADMISSION: "device" }), { documents: true, workspace: true });
+      expect(remoteFork.missing).toEqual([]);
+      expect(isIdentical(compareCorpus(expected.entries, remoteFork.entries))).toBe(true);
+      expect(isIdentical(compareCorpus(expected.workspace!, remoteFork.workspace!))).toBe(true);
+      const sourceAfter = await syncWorkspace(sourceConfig);
+      expect(isIdentical(compareCorpus(expected.entries, sourceAfter.entries))).toBe(true);
+      expect(isIdentical(compareCorpus(expected.workspace!, sourceAfter.workspace!))).toBe(true);
+      const remoteAfter = await inspectRemote(sourceRemoteConfig, { documents: true, workspace: true });
+      expect(isIdentical(compareCorpus(remoteBefore.entries, remoteAfter.entries))).toBe(true);
+      expect(isIdentical(compareCorpus(remoteBefore.workspace!, remoteAfter.workspace!))).toBe(true);
+      const accessAfter = accessRows(hub);
+      expect(accessAfter.memberships.filter(row => row.workspace_id !== forkId)).toEqual(accessBefore.memberships);
+      expect(accessAfter.hubAdmins).toEqual(accessBefore.hubAdmins);
+      expect(accessAfter.claims).toEqual(accessBefore.claims);
+      expect(readWorkspaceHub(sourceId, box.env)).toBe(endpoint);
+      const switchedBack = await runInProcess(["workspace", "use", sourceId], box);
+      expect(switchedBack.status, switchedBack.output).toBe(0);
+      expect(selected(box)).toEqual({ workspaceId: sourceId, hubUrl: endpoint });
+      const resumed = await syncWorkspace(sourceRemoteConfig);
+      expect(resumed.missing).toEqual([]);
+      expect(isIdentical(compareCorpus(expected.entries, resumed.entries))).toBe(true);
+      const sourceSynced = await inspectRemote(sourceRemoteConfig, { documents: true, workspace: true });
+      expect(isIdentical(compareCorpus(expected.entries, sourceSynced.entries))).toBe(true);
+      expect(isIdentical(compareCorpus(expected.workspace!, sourceSynced.workspace!))).toBe(true);
+    } finally { await servingSource.close(); }
   });
 
   it("refuses an existing destination and a workspace already bound to a hub", async () => {

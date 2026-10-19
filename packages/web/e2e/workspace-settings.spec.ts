@@ -130,7 +130,7 @@ for (const colorScheme of ["light", "dark"] as const) {
         const failure = notice(page, "Couldn't copy the workspace ID. Try again in a browser with clipboard access.");
         await expect(failure).toHaveAttribute("data-type", "error");
         await page.clock.runFor(10_000);
-        await expect(failure).toBeVisible();
+        await expect(failure).toHaveCount(0);
         await page.goto(new URL(path, harness().appUrl).href);
         await expect(page.getByRole("button", { name: "Connection details", exact: true })).toHaveAttribute("aria-expanded", "false");
       });

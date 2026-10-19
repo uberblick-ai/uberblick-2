@@ -1,28 +1,23 @@
-/* Compare sub-page: same shell as the landing page, one reading column, a decision list before any table. */
-.hero { padding: 48px 0 8px; display: grid; grid-template-columns: minmax(0, var(--measure)); gap: 14px; }
-.crumb { font: 400 13px/18px var(--font-sans); color: var(--muted); }
-.hero .lede { font-size: 18px; line-height: 29px; color: var(--prose); }
-.col { max-width: var(--measure); display: flex; flex-direction: column; gap: 18px; }
-.q { padding-top: 34px; display: flex; flex-direction: column; gap: 14px; }
-.q h2 { font: 500 26px/32px var(--font-display); }
-.col ul { margin: 0; padding-left: 1.2em; color: var(--prose); display: flex; flex-direction: column; gap: 6px; }
-.guide { margin: 0; display: flex; flex-direction: column; }
-.guide > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; padding: 14px 0; border-top: 1px solid var(--rule); }
-.guide > div:last-child { border-bottom: 1px solid var(--rule); }
-.guide dt { color: var(--fg); font-weight: 500; }
-.guide dd { margin: 0; color: var(--prose); font-size: 15px; line-height: 24px; }
-.guide dd b { font-weight: 600; color: var(--fg); }
-.guide > div.us { position: relative; padding-left: 14px; background: var(--card); }
-.guide > div.us::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--brand-ink); }
-.credits { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 24px; }
-.credits article { display: flex; flex-direction: column; gap: 6px; }
-.credits h3 { font: 600 17px/24px var(--font-sans); }
-#better .credits article { padding-left: 12px; border-left: 3px solid var(--brand-ink); }
-.credits p { font-size: 15px; line-height: 24px; }
-.matrix { margin: 8px 0; overflow-x: auto; }
-.matrix table { min-width: 1080px; font-size: 13.5px; line-height: 19px; }
-.matrix thead th { font: 500 14px/20px var(--font-sans); color: var(--fg); padding-bottom: 10px; }
-.matrix tbody th { font: 500 13.5px/19px var(--font-sans); color: var(--muted); padding: 11px 12px 11px 0; border-bottom: 1px solid var(--rule); vertical-align: top; white-space: nowrap; }
-.matrix td { padding: 11px 12px 11px 0; font-size: 13.5px; line-height: 19px; }
-.matrix .us { background: var(--card); padding-left: 12px; border-left: 3px solid var(--brand-ink); }
-@media (max-width: 700px) { .hero h1 { font-size: 30px; line-height: 36px; } .guide > div { grid-template-columns: 1fr; } .credits { grid-template-columns: 1fr; } .q h2 { font-size: 23px; line-height: 29px; } }
+/* Compare sub-page: the shared shell, a decision list before any table. */
+.col { max-width: 68ch; display: grid; gap: 4px }
+.col > * { min-width: 0 }
+.guide { margin: 0 0 14px; display: grid }
+.guide > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; padding: 14px 0; border-top: 1px solid var(--line) }
+.guide > div:last-child { border-bottom: 1px solid var(--line) }
+.guide dt { font-weight: 500 }
+.guide dd { margin: 0; font-size: 15px; line-height: 1.55 }
+.guide dd b { font-weight: 600 }
+.guide > div.us { position: relative; padding-left: 14px; background: var(--panel) }
+.guide > div.us::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent) }
+.credits { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 24px; margin-bottom: 14px }
+.credits article { display: grid; gap: 6px; align-content: start }
+.credits h3 { margin: 0; font-size: 16px; font-weight: 600 }
+.credits p { font-size: 15px; line-height: 1.55; margin: 0 }
+#better .credits article { padding-left: 12px; border-left: 3px solid var(--accent) }
+.matrix { margin: 8px 0 16px; overflow-x: auto }
+.matrix table { min-width: 1080px; font-size: 13.5px; line-height: 1.4 }
+.matrix thead th { font-weight: 500; color: var(--fg); padding-bottom: 10px }
+.matrix tbody th { font-weight: 500; color: var(--muted); padding: 11px 12px 11px 0; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap }
+.matrix td { padding: 11px 12px 11px 0 }
+.matrix .us { background: var(--panel); padding-left: 12px; border-left: 3px solid var(--accent) }
+@media (max-width: 700px) { .guide > div { grid-template-columns: 1fr } .credits { grid-template-columns: 1fr } }

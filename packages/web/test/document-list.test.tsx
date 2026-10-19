@@ -1084,7 +1084,7 @@ describe("decision topics in the list", () => {
     assertRestored();
     await traverseHistory("forward");
     if (entry === "Back to workspace") {
-      await act(async () => within(host).getByRole("button", { name: "Settings" }).click());
+      await act(async () => within(host).getByRole("button", { name: "Workspace settings" }).click());
     }
     await act(async () => within(host).getByRole("button", { name: entry === "All documents" ? entry : "Unnamed workspace" }).click());
     const assertDefaults = (): void => {

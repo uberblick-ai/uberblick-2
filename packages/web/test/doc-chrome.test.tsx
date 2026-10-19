@@ -20,15 +20,15 @@ import {
 import { DocMetaLine } from "../src/ui/document/DocChrome.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
 import { writeToClipboard } from "../src/editor/source-chrome.js";
-import { notifyTransient } from "../src/notifications.js";
+import { toast } from "sonner";
 
 vi.mock("../src/editor/source-chrome.js", async (original) => ({
   ...await original<typeof import("../src/editor/source-chrome.js")>(),
   writeToClipboard: vi.fn().mockResolvedValue(true),
 }));
-vi.mock("../src/notifications.js", async (original) => ({
-  ...await original<typeof import("../src/notifications.js")>(),
-  notifyTransient: vi.fn(),
+vi.mock("sonner", async (original) => ({
+  ...await original<typeof import("sonner")>(),
+  toast: { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() },
 }));
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
@@ -78,7 +78,7 @@ function openActions(host: HTMLElement): void {
 }
 
 async function selectCopy(name: string): Promise<void> {
-  await act(async () => screen.getByRole("menuitem", { name }).click());
+  await act(async () => screen.getByRole(name === "Copy link" ? "button" : "menuitem", { name }).click());
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
@@ -122,7 +122,7 @@ describe("the document identity line keeps its local controls", () => {
       name: "Archive unavailable — the directory or sidebar room is not ready to write, or there is no live entry for this document",
     });
     expect(unavailable?.getAttribute("aria-disabled")).toBe("true");
-    expect(document.activeElement?.textContent).toBe("Copy link");
+    expect(document.activeElement?.textContent).toBe("Copy document id");
     act(() => {
       document.activeElement?.dispatchEvent(
         new KeyboardEvent("keydown", { key: "End", bubbles: true }),
@@ -148,9 +148,20 @@ describe("the document identity line keeps its local controls", () => {
     expect(within(host).getByRole("button", { name: "Document actions" })).not.toBeNull();
   });
 
-  it("starts a selected copy during the input event", async () => {
+  it("offers an icon-only copy button immediately before document actions", () => {
     const { host } = mount(fixture());
+    const copy = within(host).getByRole("button", { name: "Copy link" });
+    const actions = within(host).getByRole("button", { name: "Document actions" });
+    expect(copy.getAttribute("title")).toBe("Copy link");
+    expect(copy.textContent).toBe("");
+    expect(copy.querySelector("svg[aria-hidden=true]")).not.toBeNull();
+    expect(copy.nextElementSibling?.contains(actions)).toBe(true);
     openActions(host);
+    expect(screen.queryByRole("menuitem", { name: "Copy link" })).toBeNull();
+  });
+
+  it("starts a link copy during the input event without opening the menu", async () => {
+    const { host } = mount(fixture());
     let dispatching = false;
     let startedInGesture = false;
     vi.mocked(writeToClipboard).mockImplementationOnce(async () => {
@@ -159,7 +170,7 @@ describe("the document identity line keeps its local controls", () => {
     });
     act(() => {
       dispatching = true;
-      screen.getByRole("menuitem", { name: "Copy link" }).click();
+      within(host).getByRole("button", { name: "Copy link" }).click();
       dispatching = false;
     });
     expect(startedInGesture).toBe(true);
@@ -167,6 +178,8 @@ describe("the document identity line keeps its local controls", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(writeToClipboard).toHaveBeenCalledTimes(1);
+    expect(writeToClipboard).toHaveBeenCalledWith(`${window.location.origin}/${WORKSPACE}/${DOC_UUID}`, undefined);
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it.each([
@@ -175,9 +188,9 @@ describe("the document identity line keeps its local controls", () => {
   ])("gives a next step when %s fails", async (name, message) => {
     vi.mocked(writeToClipboard).mockResolvedValueOnce(false);
     const { host } = mount(fixture());
-    openActions(host);
+    if (name === "Copy document id") openActions(host);
     await selectCopy(name);
-    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message, severity: "error" });
+    expect(toast.error).toHaveBeenLastCalledWith(message, { id: "clipboard" });
   });
 
   it("names lifecycle records, omits ordinary documents and tolerates a mismatched status", () => {
@@ -226,28 +239,33 @@ describe("the document identity line keeps its local controls", () => {
   });
 
   it.each([
-    { kind: "regular", archived: false, copyPath: undefined },
-    { kind: "decision", archived: false, copyPath: `/${WORKSPACE}/topic/record/${DOC_UUID}` },
-    { kind: "regular", archived: true, copyPath: undefined },
-    { kind: "decision", archived: true, copyPath: `/${WORKSPACE}/topic` },
-  ])("copies the shown $kind document's canonical path and full id when archived=$archived", async ({ kind, archived, copyPath }) => {
+    { kind: "regular", archived: false, readOnly: false, status: undefined, copyPath: undefined },
+    { kind: "regular", archived: false, readOnly: true, status: undefined, copyPath: undefined },
+    { kind: "decision", archived: false, readOnly: false, status: undefined, copyPath: `/${WORKSPACE}/topic/record/${DOC_UUID}` },
+    { kind: "decision", archived: false, readOnly: true, status: "decided" as const, copyPath: `/${WORKSPACE}/topic` },
+    { kind: "regular", archived: true, readOnly: true, status: undefined, copyPath: undefined },
+    { kind: "decision", archived: true, readOnly: true, status: "decided" as const, copyPath: `/${WORKSPACE}/topic` },
+  ])("copies the shown $kind document's canonical path and full id when archived=$archived, readOnly=$readOnly and status=$status", async ({ kind, archived, readOnly, status, copyPath }) => {
     const fix = fixture();
     if (kind === "decision") setKind(fix.ydoc, "decision");
+    if (status !== undefined) setStatus(fix.ydoc, status);
     const { container: host } = render(<DocMetaLine
       connection={fix.connection}
       segment={WORKSPACE}
       meta={getMeta(fix.ydoc)}
       archived={archived}
+      readOnly={readOnly}
       copyPath={copyPath}
     />);
-    openActions(host);
-    if (archived) expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Copy link", "Copy document id"]);
     await selectCopy("Copy link");
-    expect(writeToClipboard).toHaveBeenLastCalledWith(`${window.location.origin}${copyPath ?? `/${WORKSPACE}/${DOC_UUID}`}`, expect.any(Promise));
-    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: "Link copied", severity: "success" });
+    expect(writeToClipboard).toHaveBeenLastCalledWith(`${window.location.origin}${copyPath ?? `/${WORKSPACE}/${DOC_UUID}`}`, undefined);
+    expect(toast.success).toHaveBeenLastCalledWith("Link copied", { id: "clipboard" });
+    expect(screen.queryByRole("menu")).toBeNull();
     openActions(host);
+    expect(screen.queryByRole("menuitem", { name: "Copy link" })).toBeNull();
+    if (archived) expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Copy document id"]);
     await selectCopy("Copy document id");
     expect(writeToClipboard).toHaveBeenLastCalledWith(DOC_UUID, expect.any(Promise));
-    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: "Document id copied", severity: "success" });
+    expect(toast.success).toHaveBeenLastCalledWith("Document id copied", { id: "clipboard" });
   });
 });

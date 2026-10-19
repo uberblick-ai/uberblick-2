@@ -171,6 +171,71 @@ test("MCP decision adoption reaches an open regular page and the directory", asy
   await expect(page.locator(".ub-docs-row", { hasText: title })).toHaveCount(1);
 });
 
+test("the list and palette search fragments through the serving replica", async ({ browser }) => {
+  const writer = agent().open({ name: "fragment-search-e2e" });
+  const suffix = Date.now();
+  const titleHit = `ub workspace use ${suffix}`;
+  const bodyHit = `Body guide ${suffix}`;
+  const descriptionHit = `Description guide ${suffix}`;
+  const tagHit = `Tag guide ${suffix}`;
+  const shortTitleHit = `Überblick MCP server tools ${suffix}`;
+  for (const fixture of [
+    { title: titleHit, description: "A title match.", text: "Neutral content." },
+    { title: bodyHit, description: "A body match.", text: "workspace mc" },
+    { title: descriptionHit, description: "workspace mc", text: "Neutral content." },
+    { title: tagHit, description: "A tag match.", text: "Neutral content.", tags: ["mcp"] },
+    { title: shortTitleHit, description: "An accented title match.", text: "Neutral content." },
+  ]) {
+    await writer.call("create_doc", {
+      title: fixture.title, description: fixture.description,
+      blocks: [{ type: "paragraph", text: fixture.text }],
+      ...(fixture.tags === undefined ? {} : { tags: fixture.tags }),
+    });
+  }
+  const page = await openApp(browser, `/${harness().workspace}/all`, { readySelector: ".ub-docs-heading" });
+  for (const title of [titleHit, bodyHit, descriptionHit, tagHit, shortTitleHit]) {
+    await expect(listedTitles(page).filter({ hasText: title })).toBeVisible();
+  }
+  const listSearch = page.getByRole("searchbox", { name: "Search", exact: true });
+  async function searchList(query: string): Promise<void> {
+    await Promise.all([
+      page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.pathname === "/api/search" && url.searchParams.get("q") === query && response.status() === 200;
+      }),
+      listSearch.fill(query),
+    ]);
+  }
+  for (const query of ["worksp", "space"]) {
+    await searchList(query);
+    for (const title of [titleHit, bodyHit, descriptionHit]) {
+      await expect(listedTitles(page).filter({ hasText: title })).toBeVisible();
+    }
+  }
+  await searchList("mc");
+  for (const title of [shortTitleHit, tagHit]) {
+    await expect(listedTitles(page).filter({ hasText: title })).toBeVisible();
+  }
+  for (const title of [bodyHit, descriptionHit]) {
+    await expect(listedTitles(page).filter({ hasText: title })).toHaveCount(0);
+  }
+  for (const query of ["ub", "uber"]) {
+    await searchList(query);
+    await expect(listedTitles(page).filter({ hasText: shortTitleHit })).toBeVisible();
+  }
+
+  // The palette uses the same live endpoint; its existing navigation matrix
+  // stubs ranked hits to exercise decision-topic navigation independently.
+  const apple = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform));
+  await page.keyboard.press(apple ? "Meta+k" : "Control+k");
+  const palette = page.getByRole("dialog", { name: "Command palette", exact: true });
+  await expect(palette).toBeVisible();
+  await palette.getByRole("combobox", { name: "Search documents and decisions", exact: true }).fill("worksp");
+  for (const title of [titleHit, bodyHit, descriptionHit]) {
+    await expect(palette.getByRole("option", { name: `${title} Document`, exact: true })).toBeVisible();
+  }
+});
+
 interface DecisionFixture {
   uuid: string;
   blocks: Array<{ id: string; text: string }>;

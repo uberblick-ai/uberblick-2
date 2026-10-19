@@ -18,6 +18,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
 import { pipeline } from "node:stream/promises";
 import { adminSocketPath } from "./admin-setup.js";
+import { restoreAccessChanges, writeAccessRecovery } from "./operator-restore-access.js";
 
 const PRIVATE_ACCESS_TABLES = [
   "hub_principals",
@@ -139,9 +140,14 @@ async function refuseUnsafeRestore(databasePath: string, signal?: AbortSignal): 
 export async function restoreDatabase(
   databasePath: string,
   input: string | NodeJS.ReadableStream,
-  options: { signal?: AbortSignal } = {},
+  options: {
+    signal?: AbortSignal;
+    yes?: boolean;
+    writeLine?: (line: string) => void;
+    confirm?: (signal?: AbortSignal) => Promise<boolean>;
+  } = {},
 ): Promise<void> {
-  const { signal } = options;
+  const { signal, writeLine = console.log } = options;
   signal?.throwIfAborted();
   const checkDirectory = mkdtempSync(join(tmpdir(), "ub-hub-restore-"));
   const candidate = join(checkDirectory, "candidate.sqlite");
@@ -156,6 +162,21 @@ export async function restoreDatabase(
     signal?.throwIfAborted();
     verifyCandidate(candidate);
     await refuseUnsafeRestore(databasePath, signal);
+    const changes = restoreAccessChanges(databasePath, candidate, join(checkDirectory, "live.sqlite"));
+    if (changes === undefined) {
+      writeLine("Newer device revocations, workspace member removals and hub-admin removals can't be determined: the live database is absent or can't be read.");
+      writeAccessRecovery(writeLine);
+    } else if (changes.length === 0) {
+      writeLine("Nothing would be undone: no device revocations, workspace member removals or hub-admin removals.");
+    } else {
+      writeLine("This restore would undo:");
+      for (const change of changes) writeLine(`- ${change}`);
+      writeAccessRecovery(writeLine);
+      if (!options.yes && !await options.confirm?.(signal)) {
+        throw new Error("restore was not confirmed; confirm at a terminal or rerun ub-hub restore --yes <file|->");
+      }
+    }
+    signal?.throwIfAborted();
     stage = join(dirname(resolve(databasePath)), `.hub-restoring-${randomUUID()}.sqlite`);
     await pipeline(createReadStream(candidate), createWriteStream(stage, { flags: "wx", mode: 0o600 }), { signal });
     signal?.throwIfAborted();

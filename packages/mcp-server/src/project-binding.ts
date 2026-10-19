@@ -163,8 +163,10 @@ export function writeProjectBinding(
   const publish = () => publishOwnerOnly(path, `${JSON.stringify({ ...existing, ...binding }, null, 2)}\n`);
   if (options.record === false) publish();
   else {
-    const previous = Object.keys(existing).length === 0 ? [] : [validateProjectBinding(existing, path)];
-    withWorkspaceBindings([...previous, binding], publish, options.env ?? process.env,
+    const previous = Object.keys(existing).length === 0 ? null : validateProjectBinding(existing, path);
+    const bindings = previous !== null && parseWorkspaceId(previous.workspaceId).uuid !== parseWorkspaceId(binding.workspaceId).uuid
+      ? [previous, binding] : [binding];
+    withWorkspaceBindings(bindings, publish, options.env ?? process.env,
       options.record === "promote" || options.record === "join" ? binding.workspaceId : undefined, path);
   }
   return path;

@@ -1,5 +1,6 @@
 /** Only selected public account identity crosses the local browser boundary. */
 import { mintHubAuthMessage } from "../collab/rooms.js";
+import { localSessionHeaders } from "../collab/local-session.js";
 import { isGithubAccountId } from "@uberblick/schema/github-identity";
 
 export type AccountIdentity =
@@ -41,6 +42,7 @@ function createIdentityClient(
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${await mintHubAuthMessage(workspace, subject)}`,
+        ...await localSessionHeaders(),
       },
       signal,
     });

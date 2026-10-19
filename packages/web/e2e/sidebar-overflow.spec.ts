@@ -104,10 +104,6 @@ async function expectFixedFrame(page: Page, scrollable = false): Promise<void> {
       throw new Error("e2e: incomplete sidebar frame");
     }
     const settings = footer.querySelector<HTMLElement>(".ub-settings-entry");
-    const settingsOpen = sidebar.dataset.mode === "settings";
-    if (settingsOpen ? settings !== null : settings === null) {
-      throw new Error("e2e: settings footer entry does not match the sidebar mode");
-    }
     const box = (node: Element) => {
       const rect = node.getBoundingClientRect();
       return { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left };
@@ -213,7 +209,8 @@ test("empty and long-label sidebars fit narrow and docked layouts in both modes"
           }).map((control) => control.className);
         });
         expect(outside).toEqual([]);
-        await page.locator(".ub-settings-entry").click();
+        await page.getByTestId("account-menu").click();
+        await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
         await openSidebar(page, true);
         await expect(page.locator(".ub-list")).toHaveAttribute("data-mode", "settings");
         await settleSidebar(page);

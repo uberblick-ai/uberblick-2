@@ -49,8 +49,8 @@ export function TableRowHandle({ target, index, rowKey, bottom, size, revealed, 
         type="button" className="ub-table-control ub-table-row-handle"
         data-table-row={index} data-revealed={revealed}
         style={{ right: `calc(${size}px - var(--ub-table-control-overhang))`, top: bottom - size / 2, width: size, height: size }}
-        aria-label={`Row ${index + 1} actions`} aria-keyshortcuts="Control+Alt+R Shift+F10"
-        title="Row actions · drag to move; Control+Alt+R or Shift+F10"
+        aria-label={`Row ${index + 1} actions`}
+        title="Row actions · drag to move"
         onMouseDown={(event) => event.preventDefault()}
         onPointerDownCapture={resetGuard} onKeyDownCapture={resetGuard}
         onClickCapture={clickGuard} onClick={open}>

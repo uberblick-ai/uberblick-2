@@ -10,7 +10,7 @@ import { NodeSelection, Plugin } from "@tiptap/pm/state";
 import type { EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { NodeView } from "@tiptap/pm/view";
-import { notifyTransient } from "../notifications.js";
+import { toast } from "sonner";
 import { codeLanguageLabel } from "./syntax-highlighting.js";
 
 /**
@@ -76,11 +76,10 @@ export function copyButton(source: () => string): {
   element.addEventListener("click", (event) => {
     event.preventDefault();
     void writeToClipboard(source()).then((copied) => {
-      notifyTransient({
-        key: "clipboard",
-        message: copied ? "Source copied" : "Couldn't copy the source. Select the source text and copy it instead.",
-        severity: copied ? "success" : "error",
-      });
+      toast[copied ? "success" : "error"](
+        copied ? "Source copied" : "Couldn't copy the source. Select the source text and copy it instead.",
+        { id: "clipboard" },
+      );
     });
   });
 
