@@ -13,12 +13,14 @@ import {
   deleteBlock,
   editBlock,
   getBlock,
+  getBlockInline,
   getBlockRev,
   getBlockText,
   getBlocks,
   getBlocksFragment,
   initDoc,
   insertBlock,
+  listAnnotations,
   resolveAnnotationRange,
   setBlockLevel,
 } from "../src/index.js";
@@ -126,6 +128,44 @@ describe("editBlock: minimal splices", () => {
 });
 
 describe("two clients, one block", () => {
+  it("keeps an item's identity, formatting and threads while merging list attributes with remote text", () => {
+    let blockId = "";
+    let threadId = "";
+    const [a, b] = replicaPair((doc) => {
+      initDoc(doc, { uuid: UUID, title: "List attributes" });
+      appendBlock(doc, { type: "paragraph", text: "before" });
+      blockId = appendBlock(doc, {
+        type: "list-item",
+        inline: [{ text: "marked", marks: { bold: true } }, { text: " item", marks: {} }],
+      });
+      threadId = createAnnotation(doc, blockId, 0, 6, "reviewer", "Keep this word").id;
+      appendBlock(doc, { type: "paragraph", text: "after" });
+    });
+    const ids = blockIdsOf(a);
+    const element = getBlocksFragment(a).get(1);
+    const inline = getBlockInline(a, blockId);
+    const annotations = listAnnotations(a);
+    const rev = getBlockRev(a, blockId);
+
+    editBlock(a, blockId, "marked item", "marked item", { rev, list: "ordered", indent: 2 });
+    expect(getBlocksFragment(a).get(1)).toBe(element);
+    expect(blockIdsOf(a)).toEqual(ids);
+    expect(getBlockInline(a, blockId)).toEqual(inline);
+    expect(listAnnotations(a)).toEqual(annotations);
+    expect(resolveAnnotationRange(a, threadId)).toMatchObject({ start: 0, end: 6, collapsed: false });
+
+    editBlock(b, blockId, "marked item", "marked item from B", { rev });
+    syncDocs(a, b);
+
+    expect(getBlock(a, blockId)).toMatchObject({ id: blockId, text: "marked item from B", list: "ordered", indent: 2 });
+    expect(getBlocks(a)).toEqual(getBlocks(b));
+    expect(blockIdsOf(a)).toEqual(ids);
+    expect(getBlockInline(a, blockId)[0]).toEqual({ text: "marked", marks: { bold: true } });
+    expect(listAnnotations(a)).toEqual(annotations);
+    expect(resolveAnnotationRange(a, threadId)).toMatchObject({ start: 0, end: 6, collapsed: false });
+    expect(resolveAnnotationRange(b, threadId)).toEqual(resolveAnnotationRange(a, threadId));
+  });
+
   it("merges edits to different ranges and converges identically", () => {
     const original = "The quick brown fox jumps";
     let blockId = "";

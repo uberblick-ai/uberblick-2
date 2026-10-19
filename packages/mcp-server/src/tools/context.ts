@@ -27,6 +27,7 @@ import type {
   HeadingLevel,
   InlineMarkSet,
   InlineRun,
+  ListIndent,
   TableMapping,
 } from "@uberblick/schema";
 import type { z } from "zod";
@@ -88,6 +89,8 @@ function toBlockInput(
       ? {}
       : { level: input.level as HeadingLevel }),
     ...(input.language === undefined ? {} : { language: input.language }),
+    ...(input.list === undefined ? {} : { list: input.list }),
+    ...(input.indent === undefined ? {} : { indent: input.indent as ListIndent }),
     ...(inline === undefined ? {} : { inline }),
   };
 }

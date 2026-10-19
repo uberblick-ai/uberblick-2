@@ -10,7 +10,8 @@ export function registerInsertBlock(server: ToolRegistrar, context: ToolContext)
     title: "Insert a block",
     description:
       "Insert one block after after_block_id, or at the top when omitted; lists use adjacent list-item " +
-      "blocks. Tables take one GFM table or invalid_table refuses. Cards take :::card content without " +
+      "blocks with list/indent (default bullet/0). " +
+      "Tables take one GFM table or invalid_table refuses. Cards take :::card content without " +
       "delimiters: nonempty title, optional label/footer, repeated button: [Text](destination) lines " +
       "and inline-Markdown prose. Button labels are plain text; destinations are https or exact " +
       "claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled " +

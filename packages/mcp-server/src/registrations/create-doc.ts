@@ -10,6 +10,7 @@ export function registerCreateDoc(server: ToolRegistrar, context: ToolContext): 
     title: "Create a document",
     description:
       "Create doc/stub; optional blocks/regular-page TL;DR. Require nonblank title/description. " +
+      "List-item seeds accept list bullet/ordered and integer indent 0–3 (defaults bullet and 0). " +
       "Active tag ids/exact names; unknown/retired refuse. Kind defaults to first status; invalid pairs refuse. " +
       "Before creating a decision topic, consult get_help({topic: \"lifecycle\"}) for when to create a record. " +
       "For decision answers, see lifecycle's Decision answers and topics section. " +

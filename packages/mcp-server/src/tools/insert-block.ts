@@ -15,7 +15,7 @@ export const inputSchema = strictInput({
   ...blockShape,
 });
 
-export const insertBlockOperation = documentOperation("insert_block", inputSchema, (context, { uuid, after_block_id, type, text, level, language, inline }, _request, replica) => {
+export const insertBlockOperation = documentOperation("insert_block", inputSchema, (context, { uuid, after_block_id, type, text, level, language, list, indent, inline }, _request, replica) => {
   const { replicas, blockInputFor } = context;
 
   if (getMeta(replica.doc, replica.id).kind === "decision") {
@@ -27,7 +27,7 @@ export const insertBlockOperation = documentOperation("insert_block", inputSchem
   }
 
   // Resolve targets before inserting so refusals leave nothing written.
-  const input = blockInputFor({ type, text, level, language, inline });
+  const input = blockInputFor({ type, text, level, language, list, indent, inline });
   const blockId = insertBlock(replica.doc, after_block_id ?? null, input);
   const block = getBlock(replica.doc, blockId);
   // Use stored text length: inline runs can replace the supplied text.

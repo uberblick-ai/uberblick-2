@@ -5,6 +5,10 @@ export const toolHelpDetails = {
   create_doc:
     "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
     "search. Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
+    "List-item seeds accept optional `list` (`bullet` or `ordered`, default `bullet`) and `indent` " +
+    "(integer 0–3, default 0). These fields apply only to list-item blocks; invalid values refuse before " +
+    "creating anything. For example, `{\"type\":\"list-item\",\"text\":\"Review notes\",\"list\":\"ordered\",\"indent\":2}` " +
+    "creates a nested ordered item. " +
     "Figma seeds take the :::figma body without delimiters, as insert_block does; invalid_figma refuses " +
     "before creating anything. See markdown for keys, accepted links and normalization. " +
     "Optional `tldr` supplies a regular document's person-facing summary under set_metadata rules and limit. " +
@@ -253,6 +257,14 @@ export const toolHelpDetails = {
   edit_block:
     "Replace one block's text by diff-and-splice: only the characters that actually changed are touched, so a " +
     "concurrent human edit elsewhere in the block survives.\n\n" +
+    "For an existing list item, optional `list` (`bullet` or `ordered`) and `indent` (integer 0–3) change " +
+    "its style and depth in place, together with a text edit or alone. To re-indent without changing text, " +
+    "pass the same read text as `old_text` and `new_text`, the read `rev`, and the new `indent`. " +
+    "Omitted list fields keep their existing values. The same old_text/rev assertions guard both text " +
+    "and attribute changes in one write; failures change neither. The result returns the new list fields " +
+    "and rev. Attribute-only changes keep the block id, text, inline formatting and comment threads, " +
+    "and concurrent text edits from another replica survive the merge. These fields refuse on any " +
+    "other block type; they do not convert blocks or move an item.\n\n" +
     "Marks anchor to positions in the block's text, not to the words they cover, and this tool writes text " +
     "without ever writing a mark. A splice strictly inside unmarked text leaves every mark — inline " +
     "formatting and annotation anchors alike — exactly where it was. A splice that touches a mark's edge " +
@@ -321,7 +333,10 @@ export const toolHelpDetails = {
   insert_block:
     "Insert one block after `after_block_id`, or at the top of the document when it is omitted. Block types " +
     `are the closed set the schema owns — ${BLOCK_TYPES.join(", ")}. ` +
-    "A list is a run of adjacent list-item blocks. " +
+    "A list is a run of adjacent list-item blocks. Optional `list` is `bullet` or `ordered` (default " +
+    "`bullet`), and `indent` is an integer 0–3 (default 0); both apply only to list-item blocks. " +
+    "For example, `list: \"ordered\", indent: 2` creates a nested numbered item. Invalid values refuse " +
+    "before writing. Depth need not follow the preceding item's depth. " +
     "A table's `text` must be exactly one GFM table, or `invalid_table` refuses the write; its rows and cells " +
     "are stored structurally. Alignment markers are accepted but not stored. Inline markdown stores cell " +
     "formatting and escaped punctuation stays literal. Document-link targets must be known to this replica's " +

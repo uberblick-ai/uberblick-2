@@ -234,6 +234,7 @@ export {
   InlineLinkRangeError,
   InvalidDocLinkTargetError,
   InvalidLinkHrefError,
+  InvalidListAttributesError,
   InvalidRoomError,
   InvalidWorkspaceIdError,
   MarksNotAllowedError,
