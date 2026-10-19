@@ -129,7 +129,8 @@ live in the change — for example breaking persisted-data compatibility rather
 than an additive optional schema field; authority or merge rules rather than
 routine process clarification; a new runtime dependency subject to the web UI
 exception in [delivery-policy.md](delivery-policy.md) rather than a dev
-dependency; auth/token semantics; a decided-architecture or invariants edit; or
+dependency; auth/token semantics; any `SYNC_PROTOCOL_VERSION` change, which only
+an explicit maintainer comment covers; a decided-architecture or invariants edit; or
 overruling a major reviewer finding. A tier-3 trigger without a person's answer
 that covers it is an escalation naming the trigger. With one, verify the diff
 conforms to what the answer covers, cite the answer in the merge report, and
