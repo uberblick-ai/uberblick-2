@@ -5,7 +5,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { publishOwnerOnly } from "@uberblick/mcp-server/safe-write";
 import { acquireInitLock } from "../src/init-lock.js";
 import { writeProjectBinding } from "../src/project-binding.js";
-import { readWorkspaceHub, ensureWorkspaceBinding, workspaceRegistryPath } from "../src/workspace-registry.js";
+import { assertWorkspaceBinding, readWorkspaceHub, ensureWorkspaceBinding, workspaceRegistryPath } from "../src/workspace-registry.js";
 import { removeTempDirs, sandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 
@@ -38,6 +38,46 @@ function customReplica(box: Sandbox, id: string): string {
 }
 
 describe("workspace record failure boundaries", () => {
+  it.each([
+    ["wss://HUB.EXAMPLE:443/a/../ws", "wss://hub.example/ws"],
+    ["ws://127.1:4444/ws", "ws://127.0.0.1:4444/ws"],
+    ["ws://[0:0:0:0:0:0:0:1]:4444/ws", "ws://[::1]:4444/ws"],
+  ])("accepts another spelling of recorded hub %s without rewriting either file", async (recorded, hubUrl) => {
+    const binding = { workspaceId: selected, hubUrl };
+    const box = sandbox({ projectBinding: binding });
+    await ensureWorkspaceBinding({ workspaceId: selected, hubUrl: recorded }, box.env);
+    const registry = workspaceRegistryPath(box.env);
+    const recordsBefore = readFileSync(registry);
+    const path = join(box.cwd, ".uberblick.json");
+    const bindingBefore = readFileSync(path);
+    expect(JSON.parse(recordsBefore.toString("utf8"))).toEqual({ [selected]: recorded });
+    expect(assertWorkspaceBinding(binding, box.env)).toBe(true);
+    await ensureWorkspaceBinding(binding, box.env);
+    expect(readWorkspaceHub(selected, box.env)).toBe(recorded);
+    expect(readFileSync(registry)).toEqual(recordsBefore);
+    expect(readFileSync(path)).toEqual(bindingBefore);
+  });
+
+  it.each([
+    "ws://localhost:4444/ws/",
+    "ws://localhost:4444/WS",
+    "ws://localhost:4444/w%73",
+    "ws://127.0.0.1:4444/ws",
+    "ws://[::1]:4444/ws",
+  ])("rejects distinct hub %s without rewriting the record or binding", async hubUrl => {
+    const box = sandbox({ projectBinding: { workspaceId: selected, hubUrl } });
+    const recorded = "ws://localhost:4444/ws";
+    await ensureWorkspaceBinding({ workspaceId: selected, hubUrl: recorded }, box.env);
+    const registry = workspaceRegistryPath(box.env);
+    const recordsBefore = readFileSync(registry);
+    const path = join(box.cwd, ".uberblick.json");
+    const bindingBefore = readFileSync(path);
+    expect(() => assertWorkspaceBinding({ workspaceId: selected, hubUrl }, box.env)).toThrow("belongs to");
+    expect(readWorkspaceHub(selected, box.env)).toBe(recorded);
+    expect(readFileSync(registry)).toEqual(recordsBefore);
+    expect(readFileSync(path)).toEqual(bindingBefore);
+  });
+
   it("passive registration cannot attach an existing unrecorded replica to a hub", async () => {
     const box = sandbox();
     const database = replica(box, selected);

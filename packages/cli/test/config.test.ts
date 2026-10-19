@@ -17,6 +17,7 @@ import {
   credentialsPath,
   resolveConfig,
   writeCredentials,
+  writeHubAdmission,
 } from "../src/config.js";
 import {
   REPO_ROOT,
@@ -45,6 +46,34 @@ function mcpConfig(env: NodeJS.ProcessEnv) {
 }
 
 describe("resolveConfig", () => {
+  it.each([
+    ["ws://localhost:8080/ws", "WS://LOCALHOST:8080/ws"],
+    ["ws://localhost:8080/ws", "ws://localhost:8080/a/../ws"],
+    ["ws://127.0.0.1:8080/ws", "ws://127.1:8080/ws"],
+    ["ws://[::1]:8080/ws", "ws://[0:0:0:0:0:0:0:1]:8080/ws"],
+    ["ws://localhost", "ws://LOCALHOST:80/"],
+  ])("keeps device admission for equivalent project and environment spellings: %s / %s", (admitted, selected) => {
+    const box = sandbox({
+      projectBinding: { workspaceId: FROM_USER, hubUrl: selected },
+      userConfig: { hubAdmissions: { [admitted]: "device" } },
+      credentials: { signingSecret: SECRET_ON_FILE },
+    });
+    const bindingPath = join(box.cwd, ".uberblick.json");
+    const before = readFileSync(bindingPath);
+    for (const extra of [{}, { UB_WORKSPACE_ID: FROM_ENV, UB_HUB_URL: selected }]) {
+      const resolved = resolveConfig({ env: { ...box.env, ...extra, HUB_AUTH_TOKEN: SECRET_IN_ENV }, cwd: box.cwd });
+      expect(resolved.binding?.hubUrl).toBe(selected);
+      expect(resolved.env.HUB_URL).toBe(selected);
+      expect(resolved.env.HUB_ADMISSION).toBe("device");
+      expect(resolved.env.HUB_AUTH_TOKEN).toBeUndefined();
+      expect(resolved.origins.credential).toBeNull();
+      expect(resolved.warnings).toEqual([]);
+      expect(mcpConfig(resolved.env).authSecret).toBeNull();
+      expect(mcpConfig(resolved.env).deviceLogin).toBeDefined();
+    }
+    expect(readFileSync(bindingPath)).toEqual(before);
+  });
+
   it("resolves joined device admission by the explicit endpoint, including complete environment pins", () => {
     const first = "ws://localhost:8080/custom-path";
     const second = "ws://localhost:8081/other-path";
@@ -71,7 +100,9 @@ describe("resolveConfig", () => {
       userConfig: { hubAdmissions: { [first]: "device" } },
       credentials: { signingSecret: SECRET_ON_FILE },
     });
-    for (const hub of ["ws://localhost:1234", "ws://localhost:8080/other", "local"]) {
+    for (const hub of ["ws://localhost:1234", "ws://localhost:8080/other", "ws://localhost:8080/ws/",
+      "ws://localhost:8080/WS", "ws://localhost:8080/w%73",
+      "ws://127.0.0.1:8080/ws", "ws://[::1]:8080/ws", "local"]) {
       const resolved = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: FROM_ENV, UB_HUB_URL: hub, HUB_ADMISSION: "device" }, cwd: box.cwd });
       expect(resolved.env.HUB_ADMISSION).toBeUndefined();
       expect(resolved.env.HUB_AUTH_TOKEN).toBe(SECRET_ON_FILE);
@@ -89,10 +120,11 @@ describe("resolveConfig", () => {
     const unbound = resolveConfig({ env: box.env, cwd: box.cwd });
     expect(unbound.binding).toBeNull();
     expect(unbound.env.HUB_ADMISSION).toBeUndefined();
-    for (const hub of [endpoint, "ws://localhost:1234"]) {
+    const equivalent = "ws://LOCALHOST:8080/a/../custom-path";
+    for (const hub of [endpoint, equivalent, "ws://localhost:1234"]) {
       const resolved = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: FROM_ENV, UB_HUB_URL: hub }, cwd: box.cwd });
-      expect(resolved.env.HUB_ADMISSION).toBe(hub === endpoint ? "device" : undefined);
-      expect(resolved.env.HUB_AUTH_TOKEN).toBe(hub === endpoint ? undefined : SECRET_ON_FILE);
+      expect(resolved.env.HUB_ADMISSION).toBe(hub !== "ws://localhost:1234" ? "device" : undefined);
+      expect(resolved.env.HUB_AUTH_TOKEN).toBe(hub !== "ws://localhost:1234" ? undefined : SECRET_ON_FILE);
     }
   });
 
@@ -260,6 +292,51 @@ describe("resolveConfig", () => {
     });
     expect(agreeing.warnings).toEqual([]);
     expect(agreeing.shadowed).toEqual([]);
+  });
+});
+
+describe("writeHubAdmission", () => {
+  it("stores one identity and resolves it through the user's endpoint spelling", () => {
+    const endpoint = "WS://LOCALHOST:80/a/../ws";
+    const box = sandbox({ projectBinding: { workspaceId: FROM_USER, hubUrl: endpoint } });
+    writeHubAdmission(endpoint, true, box.env);
+    const saved = JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"));
+    expect(saved.hubAdmissions).toEqual({ "ws://localhost/ws": "device" });
+    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
+    expect(resolved.binding?.hubUrl).toBe(endpoint);
+    expect(resolved.env.HUB_ADMISSION).toBe("device");
+  });
+
+  it("clears every equivalent old key and legacy admission without clearing other targets", () => {
+    const spellings = ["ws://localhost:8080/ws", "WS://LOCALHOST:8080/ws", "ws://localhost:8080/a/../ws"];
+    const other = "ws://localhost:8080/ws/";
+    const box = sandbox({
+      userConfig: {
+        displayName: "keep-me", hubUrl: spellings[1], hubAdmission: "device",
+        hubAdmissions: { [spellings[0]!]: "device", [spellings[1]!]: "device", [other]: "device" },
+      },
+      credentials: { signingSecret: SECRET_ON_FILE },
+    });
+    writeHubAdmission(spellings[2]!, false, box.env);
+    const saved = JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"));
+    expect(saved).toEqual({ displayName: "keep-me", hubUrl: spellings[1], hubAdmissions: { [other]: "device" } });
+    for (const hub of [...spellings, other]) {
+      const resolved = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: FROM_ENV, UB_HUB_URL: hub }, cwd: box.cwd });
+      expect(resolved.env.HUB_ADMISSION).toBe(hub === other ? "device" : undefined);
+      expect(resolved.env.HUB_AUTH_TOKEN).toBe(hub === other ? undefined : SECRET_ON_FILE);
+    }
+  });
+
+  it("keeps unknown admission modes fail-safe across equivalent spellings", () => {
+    const box = sandbox({
+      projectBinding: { workspaceId: FROM_USER, hubUrl: "ws://LOCALHOST:8080/ws" },
+      userConfig: { hubAdmissions: { "ws://localhost:8080/ws": "future-mode" } },
+      credentials: { signingSecret: SECRET_ON_FILE },
+    });
+    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
+    expect(resolved.env.HUB_ADMISSION).toBe("device");
+    expect(resolved.env.HUB_AUTH_TOKEN).toBeUndefined();
+    expect(resolved.warnings).toEqual([expect.stringContaining("unsupported hub admission")]);
   });
 });
 

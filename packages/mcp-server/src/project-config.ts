@@ -1,6 +1,6 @@
 /** Machine settings hold identity and admission; only a complete binding selects a workspace. */
 
-import { normalizeRemoteUrl } from "./remote-url.js";
+import { hubIdentity } from "./remote-url.js";
 import { usesDeviceCredentials } from "./auth-store.js";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, statSync } from "node:fs";
@@ -159,7 +159,7 @@ function hubAdmissions(
   }
   for (const [endpoint, admission] of Object.entries(raw ?? {})) {
     let normalized: string;
-    try { normalized = normalizeRemoteUrl(endpoint); }
+    try { normalized = hubIdentity(endpoint); }
     catch {
       warnings.push(`ignoring an invalid endpoint in hubAdmissions in ${path}`);
       continue;
@@ -171,7 +171,7 @@ function hubAdmissions(
   // The legacy mode belongs only to its validated endpoint, never to the current selection.
   if (source?.hubAdmission !== undefined && typeof source.hubUrl === "string") {
     try {
-      const normalized = normalizeRemoteUrl(source.hubUrl);
+      const normalized = hubIdentity(source.hubUrl);
       if (source.hubAdmission !== "device") warnings.push(`unsupported hubAdmission in ${path}; using device credentials`);
       result[normalized] = "device";
     } catch {
@@ -190,7 +190,7 @@ export function migrateHubAdmissions(
   const warnings = [...current.warnings];
   const admissions = hubAdmissions(current.raw, path, warnings);
   if (current.raw?.hubAdmission === undefined || current.config.hubUrl === undefined) return { written: [], warnings };
-  try { normalizeRemoteUrl(current.config.hubUrl); }
+  try { hubIdentity(current.config.hubUrl); }
   catch { return { written: [], warnings }; }
   const updated: Record<string, unknown> = { ...current.raw, hubAdmissions: admissions };
   delete updated.hubAdmission;
@@ -204,7 +204,7 @@ export function writeHubAdmission(
   device: boolean,
   env: NodeJS.ProcessEnv = process.env,
 ): { written: string[]; warnings: string[] } {
-  const normalized = normalizeRemoteUrl(endpoint);
+  const normalized = hubIdentity(endpoint);
   const current = readUserConfig(env);
   const path = userConfigPath(env);
   const warnings = [...current.warnings];
@@ -367,7 +367,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   const admissions = hubAdmissions(userConfig, paths.userConfig, warnings);
   const admissionEnv: NodeJS.ProcessEnv = { ...env };
   delete admissionEnv.HUB_ADMISSION;
-  if (hubUrl.value !== null && admissions[hubUrl.value] === "device") admissionEnv.HUB_ADMISSION = "device";
+  if (hubUrl.value !== null && admissions[hubIdentity(hubUrl.value)] === "device") admissionEnv.HUB_ADMISSION = "device";
   const device = hubUrl.value !== null && usesDeviceCredentials(hubUrl.value, admissionEnv);
   // Report disagreement without values, lengths or prefixes, only after exposure refusal.
   if (
