@@ -89,6 +89,69 @@ it("re-purges peer index rows without scanning unrelated FTS content for absent 
   expect(opened.search("secret", 10).map(hit => hit.uuid)).toEqual(["survivor"]);
 });
 
+it("removes fragment text left by an older peer's purge without repeatedly scanning or locking absent copies", () => {
+  const path = tempDatabasePath();
+  const opened = store(path);
+  const room = `${WORKSPACE}/deleted`;
+  const indexed = {
+    uuid: "deleted", title: "Private workspace", description: "Private description", body: "secret",
+    tags: ["private"], tagNames: ["Private tag"], links: [],
+  };
+  opened.indexDoc({ ...indexed, uuid: "survivor", title: "Survivor" }, 1);
+  // Prime the absent-copy check before another connection changes the file.
+  opened.purgeDoc(room, indexed.uuid);
+  opened.indexDoc(indexed, 1);
+  const peer = new DatabaseSync(path);
+  const db = (opened as unknown as { db: DatabaseSync }).db;
+  try {
+    // Replay the older store's purge, which cannot know the fragment table.
+    peer.exec("BEGIN IMMEDIATE");
+    for (const [table, key, value] of [
+      ["docs_fts", "uuid", indexed.uuid], ["doc_tags", "uuid", indexed.uuid],
+      ["doc_links", "source", indexed.uuid], ["decision_github_refs", "source", indexed.uuid],
+      ["doc_index", "uuid", indexed.uuid], ["doc_index_seq", "uuid", indexed.uuid],
+      ["updates", "room", room], ["snapshots", "room", room], ["pending_rooms", "room", room],
+    ] as const) {
+      peer.prepare(`DELETE FROM ${table} WHERE ${key} = ?`).run(value);
+    }
+    peer.exec("COMMIT");
+    expect(peer.prepare("SELECT title, body, description, tag_names FROM docs_fragment_fts WHERE uuid = ?").get(indexed.uuid))
+      .toEqual({ title: indexed.title, body: indexed.body, description: indexed.description, tag_names: "Private tag" });
+
+    db.setAuthorizer((action, table) => action === constants.SQLITE_DELETE && table === "docs_fragment_fts"
+      ? constants.SQLITE_DENY : constants.SQLITE_OK);
+    try {
+      expect(() => opened.purgeDoc(room, indexed.uuid)).toThrow();
+    } finally {
+      db.setAuthorizer(null);
+    }
+    expect(peer.prepare("SELECT uuid FROM docs_fragment_fts WHERE uuid = ?").get(indexed.uuid))
+      .toEqual({ uuid: indexed.uuid });
+    opened.purgeDoc(room, indexed.uuid);
+    expect(peer.prepare("SELECT uuid FROM docs_fragment_fts").all()).toEqual([{ uuid: "survivor" }]);
+
+    // An unrelated writer must not make an absent-copy check take a write lock.
+    peer.prepare("UPDATE doc_index SET title = title WHERE uuid = ?").run("survivor");
+    peer.exec("BEGIN IMMEDIATE");
+    opened.purgeDoc(room, indexed.uuid);
+    db.setAuthorizer((action, table) =>
+      action === constants.SQLITE_READ && (table?.startsWith("docs_fts") || table?.startsWith("docs_fragment_fts"))
+        ? constants.SQLITE_DENY : constants.SQLITE_OK,
+    );
+    try {
+      for (let pass = 0; pass < 50; pass++) opened.purgeDoc(room, indexed.uuid);
+    } finally {
+      db.setAuthorizer(null);
+      peer.exec("ROLLBACK");
+    }
+    expect(opened.searchUuids("survi")).toEqual(["survivor"]);
+    opened.close();
+    expect(store(path).searchUuids("survi")).toEqual(["survivor"]);
+  } finally {
+    peer.close();
+  }
+});
+
 describe("a database written by the better-sqlite3 build", () => {
   it("opens under node:sqlite with its log, snapshot and index intact", () => {
     const opened = store(legacyDatabase());

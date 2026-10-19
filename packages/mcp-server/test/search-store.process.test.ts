@@ -32,7 +32,8 @@ afterEach(() => {
 function downgrade(path: string): void {
   const db = new DatabaseSync(path);
   db.exec(
-    "CREATE TEMP TABLE old_rows AS SELECT uuid, title, body FROM docs_fts; " +
+    "DROP TABLE docs_fragment_fts; " +
+      "CREATE TEMP TABLE old_rows AS SELECT uuid, title, body FROM docs_fts; " +
       "DROP TABLE docs_fts; CREATE VIRTUAL TABLE docs_fts USING fts5(uuid UNINDEXED, title, body); " +
       "INSERT INTO docs_fts SELECT * FROM old_rows; DROP TABLE old_rows; " +
       "ALTER TABLE doc_index DROP COLUMN kind; " +
@@ -48,6 +49,7 @@ describe("search index upgrade", () => {
     const doc = row("1", "Launching", { tagNames: ["protocol"] });
     const before = open(path);
     before.indexDoc(doc, 2, 7);
+    before.indexDoc(row("2", "Existing document", { body: "workspace" }), 1, 7);
     before.close();
     downgrade(path);
     const results = await Promise.allSettled(Array.from({ length: 4 }, () =>
@@ -57,6 +59,10 @@ describe("search index upgrade", () => {
     for (const result of results) {
       if (result.status === "rejected") throw result.reason;
     }
-    expect(titles(open(path), "protocol")).toEqual(["Launching"]);
+    const upgraded = open(path);
+    expect(titles(upgraded, "protocol")).toEqual(["Launching"]);
+    expect(upgraded.searchUuids("aunch")).toEqual(["1"]);
+    expect(upgraded.searchUuids("proto")).toEqual(["1"]);
+    expect(upgraded.searchUuids("worksp")).toEqual(["2"]);
   });
 });
