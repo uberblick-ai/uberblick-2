@@ -186,7 +186,7 @@ CREATE VIRTUAL TABLE docs_fragment_fts USING fts5 (
 `;
 
 function foldFragment(text: string): string {
-  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  return text.normalize("NFD").replace(/\p{M}/gu, "").normalize("NFC").toLowerCase();
 }
 
 const SCHEMA = `
@@ -1150,7 +1150,7 @@ export class MirrorStore {
 
   /** Complete relevance order for callers that filter using directory metadata. */
   searchUuids(query: string): string[] {
-    const words = [...new Set(query.match(/[\p{L}\p{N}_]+/gu) ?? [])];
+    const words = [...new Set(query.normalize("NFC").match(/[\p{L}\p{N}_]+/gu) ?? [])];
     if (words.length === 0) return [];
     const long = words.filter((word) => [...word].length >= 3);
     const short = [...new Set(words.filter((word) => [...word].length < 3).map(foldFragment))];

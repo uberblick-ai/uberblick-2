@@ -130,13 +130,24 @@ describe("web fragment UUID search", () => {
       row("body", "Notes", { body: "ÜBERBLICK" }),
       row("accent", "Café"),
     ].forEach((doc) => { store.indexDoc(doc, 1); });
-    for (const query of ["u", "Ü", "ub", "ÜB"]) {
+    for (const query of ["u", "Ü", "u\u0308", "ub", "ÜB", "U\u0308B"]) {
       expect(store.searchUuids(query)).toEqual(["title", "tags"]);
     }
-    for (const query of ["uber", "ÜBER"]) {
+    for (const query of ["uber", "ÜBER", "U\u0308BER"]) {
       expect(store.searchUuids(query).toSorted()).toEqual(["body", "description", "tags", "title"]);
     }
     expect(store.searchUuids("cafe")).toEqual(["accent"]);
+    store.indexDoc(row("unrelated", "Uplink", { body: "September" }), 1);
+    expect(store.searchUuids("U\u0308BER").toSorted()).toEqual(["body", "description", "tags", "title"]);
+  });
+
+  it("counts non-Latin characters and does not match only part of a composed character", () => {
+    const store = open();
+    store.indexDoc(row("different-syllable", "각자 문서"), 1);
+    store.indexDoc(row("title", "가나다 문서"), 1);
+    store.indexDoc(row("body", "Reference", { body: "가나다" }), 1);
+    expect(store.searchUuids("가")).toEqual(["title"]);
+    expect(store.searchUuids("가나다")).toEqual(["title", "body"]);
   });
 
   it("matches any query word while applying each word's fragment-length rule", () => {
