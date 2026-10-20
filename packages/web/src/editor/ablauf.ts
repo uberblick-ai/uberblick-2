@@ -7,6 +7,8 @@ import type { NodeView } from "@tiptap/pm/view";
 import type { TextStyle } from "@uberblick/ablauf";
 import { COMMENT_MARK } from "@uberblick/schema";
 import { blockCaption, codeBlockChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js";
+import { playbackControls } from "./ablauf-playback.js";
+import type { TimelineStep } from "./ablauf-playback.js";
 import rendererUrl from "./ablauf-renderer-url.js";
 import { dataRevision, recordDraw } from "./render-state.js";
 
@@ -48,7 +50,8 @@ export function ablaufBlockView(): NodeViewRenderer {
     source.textContent = "Source";
     source.setAttribute("aria-label", "Open ablauf source");
     const copy = copyButton(() => current.textContent);
-    header.actions.append(copy.element, source);
+    const playback = playbackControls();
+    header.actions.append(playback.button, copy.element, source);
     header.label.append(caption);
     const panel = document.createElement("div");
     panel.className = "ub-ablauf-panel";
@@ -72,7 +75,7 @@ export function ablaufBlockView(): NodeViewRenderer {
     const diagnostics = document.createElement("ul");
     diagnostics.className = "ub-ablauf-diagnostics";
     diagnostics.hidden = true;
-    panel.append(viewport, stale, diagnostics);
+    panel.append(viewport, playback.panel, stale, diagnostics);
     const contentDOM = document.createElement("pre");
     contentDOM.className = "ub-ablauf-source";
     dom.append(header.row, panel, contentDOM);
@@ -124,7 +127,9 @@ export function ablaufBlockView(): NodeViewRenderer {
         const hostStyle = document.createElement("style");
         // Fan-out ignores fonts options. Its mono role still uses the host face.
         hostStyle.textContent = '.ab { display: block; width: 100%; height: auto; background: var(--ab-bg); } .ab .m, .ab .cap { font-family: var(--font-mono); }';
-        shadow.replaceChildren(document.importNode(svg, true), hostStyle);
+        const adopted = document.importNode(svg, true);
+        shadow.replaceChildren(adopted, hostStyle);
+        playback.attach(adopted, (result as { timeline?: TimelineStep[] }).timeline ?? [], renderer);
         // Let CSS fit the SVG to the column, retaining legible size before scroll.
         drawing.style.width = `min(100%, ${width}px)`;
         drawing.style.minWidth = `${width * 0.6}px`;
@@ -189,6 +194,7 @@ export function ablaufBlockView(): NodeViewRenderer {
           ["id", "data-language", "data-annotated", "data-source-rev", "data-data-rev", "data-draw-state"].includes(mutation.attributeName ?? "")),
       destroy: () => {
         destroyed = true;
+        playback.destroy();
         if (pending !== null) clearTimeout(pending);
         document.fonts.removeEventListener("loadingdone", fontsLoaded);
         editor.off("transaction", sync);

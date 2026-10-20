@@ -22,3 +22,11 @@
 .ub-ablauf-diagnostics { margin: 0.5rem 0 0; font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans); color: var(--muted-foreground); }
 .ub-ablauf-diagnostics { padding-left: 1.2rem; overflow-wrap: anywhere; }
 .ub-ablauf-stale { font-weight: 500; }
+.ub-ablauf-playback { margin: 0.5rem 0 0; }
+.ub-ablauf-steps { display: flex; gap: 3px; }
+.ub-ablauf-steps > button { flex: 1 1 0; min-width: 0; height: 18px; padding: 0; border: 0; background: transparent; cursor: pointer; position: relative; }
+.ub-ablauf-steps > button::after { content: ""; position: absolute; inset: 6px 0; border-radius: 3px; background: var(--border); }
+.ub-ablauf-steps > button.done::after { background: var(--muted-foreground); }
+.ub-ablauf-steps > button.on::after { background: var(--foreground); }
+.ub-ablauf-steps > button:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ub-ablauf-step-caption { min-height: 1lh; margin: 0.25rem 0 0; font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans); color: var(--muted-foreground); }
