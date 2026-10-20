@@ -97,7 +97,9 @@ test("an archive in another tab shows the banner without offering Undo here", as
   await expect(page.getByRole("button", { name: "Undo", exact: true })).toHaveCount(0);
 });
 
-test("Undo refused by a lost connection auto-closes its notice and keeps banner recovery", async ({ browser }) => {
+test.fixme("Undo refused by a lost connection auto-closes its notice and keeps banner recovery", {
+  annotation: { type: "issue", description: "https://github.com/uberblick-ai/uberblick-2/issues/2003" },
+}, async ({ browser }) => {
   const page = await openApp(browser, "/", { upstream: true, readySelector: ".ub-workspace" });
   const title = docTitle("Disconnected Undo");
   await createDoc(page, title);

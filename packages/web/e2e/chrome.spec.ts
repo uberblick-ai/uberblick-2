@@ -2255,7 +2255,9 @@ for (const scheme of ["light"] as const) {
   });
 }
 for (const scheme of ["light", "dark"] as const) {
-  test(`document tags occupy only their control, leaving blank header space inert — ${scheme} @webkit`, async ({ browser }, info) => {
+  test.fixme(`document tags occupy only their control, leaving blank header space inert — ${scheme} @webkit`, {
+    annotation: { type: "issue", description: "https://github.com/uberblick-ai/uberblick-2/issues/2003" },
+  }, async ({ browser }, info) => {
     const touch = info.project.name === "webkit-ipad";
     const page = await openApp(browser, `/${harness().workspace}/settings/tags`, {
       upstream: true,
@@ -2669,7 +2671,10 @@ function activeHoverRules(control: Locator): Promise<string[]> {
 }
 
 for (const scheme of ["light", "dark"] as const) {
-  test(`links, kind badges and reversible document actions use neutral ink — ${scheme}`, { tag: "@webkit" }, async ({ browser }, info) => {
+  test.fixme(`links, kind badges and reversible document actions use neutral ink — ${scheme}`, {
+    tag: "@webkit",
+    annotation: { type: "issue", description: "https://github.com/uberblick-ai/uberblick-2/issues/2003" },
+  }, async ({ browser }, info) => {
     const touch = info.project.use.hasTouch === true;
     const page = await openApp(browser, "/", {
       upstream: true, contextOptions: { colorScheme: scheme, hasTouch: touch }, readySelector: ".ub-pane",

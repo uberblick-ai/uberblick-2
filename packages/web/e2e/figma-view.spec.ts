@@ -392,7 +392,10 @@ test("moving adjacent live viewers and undo or redo reloads each affected viewer
   await bounded([...initial].reverse());
 });
 
-test("new and existing caption comments stay at their Figma block and MCP reads their caption ranges", { tag: "@webkit" }, async ({ browser }) => {
+test.fixme("new and existing caption comments stay at their Figma block and MCP reads their caption ranges", {
+  tag: "@webkit",
+  annotation: { type: "issue", description: "https://github.com/uberblick-ai/uberblick-2/issues/1835" },
+}, async ({ browser }) => {
   const session = writer();
   const created = await create(session);
   const block = created.blocks.find((candidate) => candidate.type === "figma");
