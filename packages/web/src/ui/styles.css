@@ -2286,16 +2286,10 @@ h6.ub-heading {
   flex: 1;
 }
 
-.ub-decision-selection,
 .ub-decision-linked {
   color: var(--muted-foreground);
   font-size: var(--type-small-size);
   line-height: var(--type-small-leading);
-}
-
-.ub-decision-selection {
-  flex: none;
-  margin-inline-start: auto;
 }
 
 .ub-decision-preview {

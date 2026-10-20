@@ -203,10 +203,9 @@ function Timeline({ topic, selected, linkedRecord, segment, navigate, docLinks, 
               <AnswerPill state={state} timeline />
               {event && <span className="ub-decision-event">{event}</span>}
               {linkedRecord === record.uuid && <span className="ub-decision-linked">Linked record</span>}
-              {chosen && <span className="ub-decision-selection">viewing</span>}
             </span>
             {record.answerPreview && <span className="ub-decision-preview">{record.answerPreview}</span>}
-            {record.commentCount !== undefined && <span className="ub-decision-record-comments" role="img"
+            {(record.commentCount ?? 0) > 0 && <span className="ub-decision-record-comments" role="img"
               aria-label={`${record.commentCount} ${record.commentCount === 1 ? "comment" : "comments"}`}>
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
                 <path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-3 2V11.5a10 10 0 0 1 20 0Z" />
