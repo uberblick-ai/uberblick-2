@@ -175,16 +175,14 @@ Use `set_metadata` to record a `code_check` on every regular page you compared
 or changed, including pages needing no rewrite and your own rewrites beyond the
 `Compared` list, against repository `uberblick-ai/uberblick-2` at the merge
 commit. Include `rev` from the page you read with `get_doc` and `paths` you
-looked at: 1–20 literal repo-relative entries, at most 200 characters each,
-trailing `/` for folders, no globs or `..` segments. For a page you edited,
-read it after applying the edits and compare that revision with the merged code
-before recording the check. If a revision is refused, read the page again with
-`get_doc` and compare again before retrying. Set your own `result`, which may
-differ from the implementer's proposal: `matches` when they agree, `ahead`
-when the page intentionally describes behavior not delivered there, or `drift`
-for an unintended disagreement. Never write checks on decision records. The
-writing replica supplies `checked_at`; keep the comparison's coverage and any
-unresolved gap in the PR evidence rather than implying an exhaustive check.
+looked at, following the installed `set_metadata` schema and its refusal
+recovery. For a page you edited, read it after applying the edits and compare
+that revision with the merged code before recording the check. Set your own
+`result`, which may differ from the implementer's proposal: `matches` when they
+agree, `ahead` when the page intentionally describes behavior not delivered
+there, or `drift` for an unintended disagreement. Never write checks on decision
+records. The writing replica supplies `checked_at`; keep the comparison's
+coverage and any unresolved gap in the PR evidence rather than implying an exhaustive check.
 Inspect and report every corpus write's durability results under
 [AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action).
 If MCP fails or a post-merge write remains unsynced, open an issue titled

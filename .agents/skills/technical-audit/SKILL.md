@@ -96,9 +96,7 @@ For each regular page whose described behavior you compared with code, record
 one `code_check` through `set_metadata`, with repository
 `uberblick-ai/uberblick-2`, the audited `origin/main` commit, `rev` from the page
 read with `get_doc`, `paths` you looked at and the result of that comparison.
-Paths use 1–20 literal repo-relative entries, at most 200 characters each,
-trailing `/` for folders, no globs or `..` segments. If a revision is refused,
-read the page again with `get_doc` and compare again before retrying.
+Follow the installed `set_metadata` schema and its refusal recovery.
 `aligned` maps to `matches`, `corpus-ahead` to `ahead`, and
 `code-ahead` or `contradiction` to `drift`. A page's intentional, undelivered
 behavior is `ahead` even when its availability boundary is already clear.
