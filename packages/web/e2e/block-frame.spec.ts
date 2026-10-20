@@ -2,6 +2,7 @@
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { activateControl, editor, setupHarness } from "./app-helpers.js";
+import { placeCaretIn } from "./harness.js";
 import { renderedText } from "./contrast-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import { expectMcp, proveMcpArrival, waitForDocumentDraw } from "./settle.js";
@@ -215,8 +216,7 @@ async function edit(session: McpSession, uuid: string, block: Block, text: strin
 }
 
 async function capture(page: Page, info: TestInfo, name: string): Promise<void> {
-  await editor(page).focus();
-  await page.keyboard.press("ArrowRight");
+  await placeCaretIn(editor(page).locator(":scope > p").first());
   await expect.poll(() => page.evaluate(() => document.getSelection()?.isCollapsed)).toBe(true);
   await expect(page.getByRole("toolbar", { name: "Text formatting and comment", exact: true })).toHaveCount(0);
   await editor(page).scrollIntoViewIfNeeded();
