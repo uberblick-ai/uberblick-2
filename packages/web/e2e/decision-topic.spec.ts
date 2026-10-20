@@ -117,7 +117,7 @@ function entry(page: Page, uuid: string): Locator {
 
 async function selected(page: Page, uuid: string, text: string): Promise<void> {
   await expect(entry(page, uuid).locator(".ub-decision-record")).toHaveAttribute("aria-current", "true");
-  await expect(entry(page, uuid).locator(".ub-decision-selection")).toHaveText("viewing");
+  await expect(page.locator(".ub-decision-timeline")).not.toContainText("viewing");
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await expect(editor(page)).toHaveText(text);
   await expect(entry(page, uuid).locator(".ub-decision-record-state")).toHaveText(await page.locator(".ub-decision-answer-header .ub-decision-answer-state").innerText());
@@ -653,7 +653,7 @@ for (const { touch, appearance } of [
     await expect(page.locator(".ub-decision-timeline > li")).toHaveCount(5);
     await expect(page.locator(".ub-decision-record-state")).toHaveText(["Under review", "Withdrawn", "Rejected", "In force", "Superseded"]);
     await expect(entry(page, rejected.uuid).getByLabel("1 comment", { exact: true })).toHaveText("1");
-    await expect(entry(page, pending.uuid).getByLabel("0 comments", { exact: true })).toHaveText("0");
+    await expect(entry(page, pending.uuid).locator(".ub-decision-record-comments")).toHaveCount(0);
     await expect(entry(page, rejected.uuid).locator(".ub-decision-event")).toHaveText(/^Recorded rejecter rejected the proposal from (just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
     await expect(entry(page, current.uuid).locator(".ub-decision-event")).toHaveText("Recorded answerer decided");
     await expect(entry(page, first.uuid).locator(".ub-decision-event")).toHaveText("Earlier answerer decided");

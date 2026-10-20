@@ -528,6 +528,9 @@ describe("decision topic navigation and history", () => {
 
   it("renders cached history newest first with matching answer pills and the rail through the answer in force", async () => {
     story();
+    const first = room(roomForDoc(WORKSPACE, FIRST)).ydoc;
+    createAnnotation(first, getBlocks(first)[0]!.id, 5, 9, "Another reader", "Another earlier record comment");
+    publishRecord(first);
     const host = (await open()).container;
     const history = timeline(host);
     expect(within(history).getByRole("heading", { name: "HISTORY" }).textContent).toBe("HISTORY");
@@ -550,11 +553,14 @@ describe("decision topic navigation and history", () => {
       expect(row.querySelector(".ub-decision-event")?.textContent ?? null).toBe(event);
       await choose(host, uuid);
       expectAnswerState(host, label);
+      expect(selection(host)).toBe(uuid);
+      expect(item(host, uuid).getAttribute("data-selected")).toBe("true");
     }
-    expect(item(host, FIRST).querySelector(".ub-decision-selection")?.textContent?.trim()).toBe("viewing");
+    expect(history.textContent).not.toContain("viewing");
     expect(history.textContent).not.toContain("Selected");
-    expect(within(item(host, CURRENT)).getByLabelText("1 comment")).toBeDefined();
-    expect(within(item(host, OPEN)).getByLabelText("0 comments")).toBeDefined();
+    expect(within(item(host, CURRENT)).getByRole("img", { name: "1 comment" }).textContent).toBe("1");
+    expect(within(item(host, FIRST)).getByRole("img", { name: "2 comments" }).textContent).toBe("2");
+    expect(item(host, OPEN).querySelector(".ub-decision-record-comments")).toBeNull();
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, RFC));
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, EARLIER_RFC));
   });
