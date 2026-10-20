@@ -11,7 +11,7 @@ Its observers inspect the existing Yjs document without a product test hook.
 | Seven daily observations, desktop | ![Light daily desktop chart](daily-desktop-light.png) | ![Dark daily desktop chart](daily-desktop-dark.png) |
 | Seven daily observations, iPad touch | ![Light daily iPad chart](daily-ipad-light.png) | ![Dark daily iPad chart](daily-ipad-dark.png) |
 | Three percentage panels, document width | ![Light desktop panels](panels-desktop-light.png) | ![Dark desktop panels](panels-desktop-dark.png) |
-| Score line in front of grouped response bars, document width | ![Light mixed chart](mixed-desktop-light.png) | ![Dark mixed chart](mixed-desktop-dark.png) |
+| Score line in front of response bars, document width | ![Light mixed chart](mixed-desktop-light.png) | ![Dark mixed chart](mixed-desktop-dark.png) |
 | Survey scale and references, overlay | ![Light survey overlay](survey-overlay-light.png) | ![Dark survey overlay](survey-overlay-dark.png) |
 | Survey scale and references, panels | ![Light survey panels](survey-panels-light.png) | ![Dark survey panels](survey-panels-dark.png) |
 
@@ -32,6 +32,13 @@ The desktop and explicit iPad touch
 contexts run in both appearances, with paired Chromium and WebKit coverage.
 The suite also checks legend placement, opposite-side unit ticks, the editor's
 font, same-x tooltips for sparse series and a visible single-x point.
+The two-unit and mixed screenshots show each sole-series value axis's numbers
+in its series colour. Current-draw canvas text and point colours check the
+association, including live appearance and mapping changes, neutral shared
+axes, single-axis charts and panels, and unchanged x-axis and legend ink.
+Canvas tick colours pass 4.5:1 contrast on the chart tint in both appearances;
+all eight palette colours are measured on that ground, including the light
+yellow-brown tick with the smallest margin.
 The compact controls are checked on charts, tables and empty chart panels.
 Panel fixtures check one accessible image, ordered series headers, the latest
 plotted tooltip values, an empty series, comparable unit-group ranges,

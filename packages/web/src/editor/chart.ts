@@ -108,6 +108,11 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
   const { config } = result;
   const layout = config.layout === "panels" ? "panels" : "overlay";
   const axes = chartAxes(config.y);
+  const axisTickColor = (axis: "y" | "yRight"): string => {
+    if (layout === "panels" || axes.rightUnit === undefined) return colors.color;
+    const index = axes.seriesAxes.indexOf(axis);
+    return index >= 0 && axes.seriesAxes.lastIndexOf(axis) === index ? palette[index] ?? colors.color : colors.color;
+  };
   const hasBars = config.y.some(series => series.type === "bar");
   const font = {
     family: colors.fontFamily,
@@ -237,7 +242,7 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
             ...(layout === "panels" ? {
               afterFit: (scale: Scale) => { scale.width = Math.min(panelAxisWidth, scale.maxWidth); },
             } : {}),
-            ticks: { color: colors.color, font, maxTicksLimit: layout === "panels" ? 3 : 6,
+            ticks: { color: axisTickColor("y"), font, maxTicksLimit: layout === "panels" ? 3 : 6,
               callback: (value, _index, ticks) => formatChartTick(Number(value), layout === "panels" ? panelUnit(indices[0] ?? 0) : axes.leftUnit, ticks) },
             grid: { color: colors.borderTopColor },
             border: { display: false },
@@ -245,7 +250,7 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
           ...(layout === "overlay" && axes.rightUnit !== undefined ? { yRight: {
             type: "linear" as const, position: "right" as const,
             ...valueScaleRange(rightRange, references.some(series => series.yAxisID === "yRight"), barsOnAxis("yRight")),
-            ticks: { color: colors.color, font, maxTicksLimit: 6, callback: (value: string | number, _index: number, ticks: { value: number }[]) => formatChartTick(Number(value), axes.rightUnit ?? "", ticks) },
+            ticks: { color: axisTickColor("yRight"), font, maxTicksLimit: 6, callback: (value: string | number, _index: number, ticks: { value: number }[]) => formatChartTick(Number(value), axes.rightUnit ?? "", ticks) },
             grid: { drawOnChartArea: false },
             border: { display: false },
           } } : {}),

@@ -7,7 +7,7 @@ import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
 import { writeFileSync } from "node:fs";
-import { composite, pageGrounds } from "../test/colour.js";
+import { composite, contrast, pageGrounds, srgb } from "../test/colour.js";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { setNativeSelection } from "./native-selection.js";
 import { McpAgent } from "./mcp-agent.js";
@@ -45,6 +45,7 @@ test("all eight panel caption colours keep AA on the blue tint in both appearanc
   await measurements(session, uuid);
   for (const appearance of ["light", "dark"] as const) {
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      beforeNavigate: loading => installProbe(loading, uuid),
       contextOptions: { viewport: { width: 1366, height: 900 }, colorScheme: appearance },
     });
     await expectReady(page, session, uuid);
@@ -60,6 +61,16 @@ test("all eight panel caption colours keep AA on the blue tint in both appearanc
       expect(readings.length).toBeGreaterThan(0);
       for (const reading of readings) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
     }
+    await editMapping(session, uuid, JSON.stringify({ ...mapping, layout: "overlay",
+      y: mapping.y.map((series, index) => ({ ...series, unit: index === 4 ? "requests" : "ms" })),
+    }));
+    await expectReady(page, session, uuid);
+    await expectPaintedTextColour(page, /^\d+ requests$/, colours[4]);
+    const grounds = await chartGrounds(page);
+    for (const colour of colours) for (const ground of grounds) {
+      expect(contrast(colour, ground), `${appearance} ${colour} on ${ground}`).toBeGreaterThanOrEqual(4.5);
+    }
+    await editMapping(session, uuid, JSON.stringify(mapping));
   }
 });
 
@@ -89,12 +100,41 @@ const SCHEMA = {
   },
 };
 
-interface PaintedText { canvas: number; text: string; x: number; y: number; width: number; left: number; right: number; font: string; rotated: boolean }
-interface PaintedPoint { canvas: number; x: number; y: number; radius: number }
+interface PaintedText { canvas: number; text: string; color: string; x: number; y: number; width: number; left: number; right: number; font: string; rotated: boolean }
+interface PaintedPoint { canvas: number; x: number; y: number; radius: number; color: string }
 interface ChartPaintProbe { texts: string[]; ink: PaintedText[]; points: PaintedPoint[] }
 interface PaintedRectangle { left: number; right: number; top: number; bottom: number }
 interface PaintedBar extends PaintedRectangle { canvas: number; color: string; clip: PaintedRectangle | null; sequence: number }
 interface BarPaintProbe { bars: PaintedBar[]; points: { canvas: number; x: number; sequence: number }[] }
+
+async function chartGrounds(page: Page): Promise<string[]> {
+  const colours = await page.locator(".ub-chart").evaluate(element => ({
+    tint: getComputedStyle(element).backgroundColor,
+    background: getComputedStyle(document.body).backgroundColor,
+    image: getComputedStyle(document.body).backgroundImage,
+  }));
+  return pageGrounds(colours.image, colours.background).map(backing => composite(colours.tint, backing));
+}
+
+async function expectPaintedTextColour(page: Page, pattern: RegExp, colour?: string): Promise<PaintedText[]> {
+  const neutral = await page.locator(".ub-chart-probe").evaluate(element => {
+    const context = document.createElement("canvas").getContext("2d");
+    if (context === null) throw new Error("e2e: chart colour context is missing");
+    context.fillStyle = getComputedStyle(element).color;
+    return String(context.fillStyle);
+  });
+  const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
+  const matching = ink.filter(entry => pattern.test(entry.text));
+  expect(matching.length, `no painted text matches ${pattern}`).toBeGreaterThan(0);
+  const grounds = await chartGrounds(page);
+  for (const entry of matching) {
+    expect(srgb(entry.color), `${entry.text} colour`).toEqual(srgb(colour ?? neutral));
+    for (const ground of grounds) {
+      expect(contrast(entry.color, ground), `${entry.text}: ${entry.color} on ${ground}`).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+  return matching;
+}
 
 /** Tick anchors and point anchors are observed independently from canvas calls. */
 async function expectObservationGeometry(
@@ -429,7 +469,7 @@ async function installProbe(page: Page, uuid: string): Promise<void> {
         const left = transform.transformPoint({ x: args[1] - metrics.actualBoundingBoxLeft, y: args[2] });
         const right = transform.transformPoint({ x: args[1] + metrics.actualBoundingBoxRight, y: args[2] });
         probe.ink.push({ canvas: [...document.querySelectorAll(".ub-chart canvas")].indexOf(this.canvas),
-          text: args[0], x: position.x * box.width / this.canvas.width,
+          text: args[0], color: String(this.fillStyle), x: position.x * box.width / this.canvas.width,
           y: position.y * box.height / this.canvas.height,
           width: metrics.width * Math.hypot(transform.a, transform.b) * box.width / this.canvas.width,
           left: left.x * box.width / this.canvas.width, right: right.x * box.width / this.canvas.width, font: this.font,
@@ -444,7 +484,7 @@ async function installProbe(page: Page, uuid: string): Promise<void> {
         const box = this.canvas.getBoundingClientRect();
         probe.points.push({ canvas: [...document.querySelectorAll(".ub-chart canvas")].indexOf(this.canvas),
           x: position.x * box.width / this.canvas.width,
-          y: position.y * box.height / this.canvas.height, radius: args[2] });
+          y: position.y * box.height / this.canvas.height, radius: args[2], color: String(this.fillStyle) });
       }
       arc.apply(this, args);
     };
@@ -619,8 +659,13 @@ test("mixed charts paint grouped bars behind lines with ordered legend and share
     expect(rightTicks.length).toBeGreaterThan(0);
     expect(Math.max(...leftTicks.map(entry => entry.right))).toBeLessThan(Math.min(...bars.map(bar => bar.left)));
     expect(Math.min(...rightTicks.map(entry => entry.left))).toBeGreaterThan(Math.max(...bars.map(bar => bar.right)));
-    const block = page.locator(".ub-chart");
-    await canvasEvidence(block, info, `chart-mixed-desktop-${appearance}`);
+    const lineColours = await page.evaluate(() => [...new Set(
+      (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.points.map(point => point.color),
+    )]);
+    expect(lineColours).toHaveLength(1);
+    await expectPaintedTextColour(page, /^\d+%$/, lineColours[0]);
+    await expectPaintedTextColour(page, /^\d+ responses$/);
+    await expectPaintedTextColour(page, /^(Responses \(responses\)|Score \(%\)|Returning \(responses\)|Jan 1|Feb 1|Mar 1)$/);
     const box = await image.boundingBox();
     if (box === null) throw new Error("e2e: mixed chart has no canvas box");
     const middle = responses[1];
@@ -644,6 +689,14 @@ test("mixed charts paint grouped bars behind lines with ordered legend and share
       expect(point.x).toBeCloseTo(anchors[index]?.x ?? NaN, 1);
     });
     expect(await referenceInk(page, 0, 50, "%", referenced[0]?.clip ?? undefined)).toBeGreaterThan(0.75);
+    const singleBar = { ...mapping, y: mapping.y.filter(series => series.field !== "returning") };
+    await editMapping(session, uuid, JSON.stringify(singleBar));
+    await waitForDocumentDraw(page, session, uuid);
+    const singleBars = await barGeometry(page);
+    expect(singleBars).toHaveLength(3);
+    await expectPaintedTextColour(page, /^\d+ responses$/, singleBars[0]?.color);
+    await expectPaintedTextColour(page, /^\d+%$/, lineColours[0]);
+    await canvasEvidence(page.locator(".ub-chart"), info, `chart-mixed-desktop-${appearance}`);
     await editMapping(session, uuid, JSON.stringify(mapping));
   }
 });
@@ -1092,6 +1145,65 @@ test("crowded daily endpoint labels stay inside the canvas after resizing", { ta
       expect(label.right, `${label.text} right edge at ${width}px`).toBeLessThanOrEqual(width);
     }
   }
+});
+
+test("two value axes match their sole series through appearance and mapping changes", { tag: "@webkit" }, async ({ browser }) => {
+  const session = writer();
+  const uuid = await chartDoc(session, "Axis series colours");
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA, replaceRecords: [
+    { id: "first", value: { day: "2026-01-01", latency: 80, errors: 3 } },
+    { id: "middle", value: { day: "2026-01-02", latency: 100, errors: null } },
+    { id: "last", value: { day: "2026-01-03", latency: 125, errors: 4 } },
+  ] }] });
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: loading => installProbe(loading, uuid),
+    contextOptions: { locale: "en-US", colorScheme: "light" },
+  });
+  await expectReady(page, session, uuid);
+  const seriesColour = async (pointCount: number): Promise<string> => {
+    const points = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.points);
+    const colours = [...new Set(points.map(point => point.color))];
+    const colour = colours.find(candidate => points.filter(point => point.color === candidate).length === pointCount);
+    if (colour === undefined) throw new Error(`e2e: no series has ${pointCount} painted points`);
+    return colour;
+  };
+  const image = page.getByRole("img", { name: "API latency", exact: true });
+  const description = await page.locator(".ub-chart-description").textContent();
+  const lightLeft = await seriesColour(3), lightRight = await seriesColour(2);
+  expect(lightLeft).not.toBe(lightRight);
+  await expectPaintedTextColour(page, /^[\d.,]+ ms$/, lightLeft);
+  await expectPaintedTextColour(page, /^[\d.,]+ requests$/, lightRight);
+  await expectPaintedTextColour(page, /^(Jan [123]|Latency \(ms\)|Errors \(requests\))$/);
+
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect.poll(() => seriesColour(3)).not.toBe(lightLeft);
+  const darkLeft = await seriesColour(3), darkRight = await seriesColour(2);
+  expect(darkRight).not.toBe(lightRight);
+  await expectPaintedTextColour(page, /^[\d.,]+ ms$/, darkLeft);
+  await expectPaintedTextColour(page, /^[\d.,]+ requests$/, darkRight);
+  await expectPaintedTextColour(page, /^(Jan [123]|Latency \(ms\)|Errors \(requests\))$/);
+  await expect(image).toBeVisible();
+  expect(await page.locator(".ub-chart-description").textContent()).toBe(description);
+
+  await editMapping(session, uuid, JSON.stringify({ ...MAPPING,
+    y: [...MAPPING.y, { field: "latency", label: "Comparison", unit: "ms" }],
+  }));
+  await expectReady(page, session, uuid);
+  await expectPaintedTextColour(page, /^[\d.,]+ ms$/);
+  await expectPaintedTextColour(page, /^[\d.,]+ requests$/, await seriesColour(2));
+
+  await editMapping(session, uuid, JSON.stringify({ ...MAPPING, y: [MAPPING.y[0]] }));
+  await expectReady(page, session, uuid);
+  await expectPaintedTextColour(page, /^[\d.,]+ ms$/);
+  await editMapping(session, uuid, JSON.stringify({ ...MAPPING, layout: "panels" }));
+  await expectReady(page, session, uuid);
+  await expect(page.locator(".ub-chart-series-panel")).toHaveCount(2);
+  await expectPaintedTextColour(page, /^[\d.,]+ (ms|requests)$/);
+
+  await editMapping(session, uuid, JSON.stringify(MAPPING));
+  await expectReady(page, session, uuid);
+  await expectPaintedTextColour(page, /^[\d.,]+ ms$/, darkLeft);
+  await expectPaintedTextColour(page, /^[\d.,]+ requests$/, darkRight);
 });
 
 test("observation ink, independent unit axes and nearest-x tooltips keep sparse and single-x charts readable", async ({ browser }) => {
