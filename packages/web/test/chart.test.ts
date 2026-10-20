@@ -421,6 +421,98 @@ describe("the chart's derived lifecycle", () => {
     editor.destroy(); doc.destroy(); directory.destroy();
   });
 
+  it("recolours sole-series axes with their series on appearance changes without counting references", async () => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ ...JSON.parse(mapping), y: [
+      { field: "value", unit: "%", reference: 5 }, { field: "secondary", unit: "ms", reference: 20 },
+    ] });
+    editBlock(doc, id, mapping, source);
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } },
+      replaceRecords: [{ id: "a", value: { day: 1, value: 3, secondary: 10 } }],
+    }]);
+    const originalTheme = document.documentElement.getAttribute("data-theme");
+    document.documentElement.setAttribute("data-theme", "light");
+    const { editor } = mountEditor(doc);
+    try {
+      flush();
+      const instance = charts.instances[0]!;
+      expect(panelData(instance).datasets).toHaveLength(4);
+      for (const [theme, palette] of [
+        ["light", ["#1d4ed8", "#b91c1c"]],
+        ["dark", ["#93c5fd", "#fca5a5"]],
+        ["light", ["#1d4ed8", "#b91c1c"]],
+      ] as const) {
+        document.documentElement.setAttribute("data-theme", theme);
+        await Promise.resolve();
+        flush();
+        const neutral = (instance.options as { color: string }).color;
+        expect(panelData(instance).datasets.slice(0, 2).map(series => series.borderColor)).toEqual(palette);
+        expect(instance.options).toMatchObject({ scales: {
+          x: { ticks: { color: neutral }, title: { color: neutral } },
+          y: { ticks: { color: palette[0] } },
+          yRight: { ticks: { color: palette[1] } },
+        } });
+      }
+      expect(charts.instances).toHaveLength(1);
+    } finally {
+      editor.destroy(); doc.destroy(); directory.destroy();
+      if (originalTheme === null) document.documentElement.removeAttribute("data-theme");
+      else document.documentElement.setAttribute("data-theme", originalTheme);
+    }
+  });
+
+  it.each(["light", "dark"])("updates sole and shared mixed-axis colours while keeping single axes and panels neutral in %s", theme => {
+    const { doc, directory, id } = fixture();
+    const mixed = { ...JSON.parse(mapping), y: [
+      { field: "secondary", unit: "%", type: "bar" }, { field: "value", unit: "%" },
+    ] };
+    let source = JSON.stringify(mixed);
+    editBlock(doc, id, mapping, source);
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } },
+      replaceRecords: [{ id: "a", value: { day: 1, value: 3, secondary: 10 } }],
+    }]);
+    const originalTheme = document.documentElement.getAttribute("data-theme");
+    document.documentElement.setAttribute("data-theme", theme);
+    const { editor } = mountEditor(doc);
+    try {
+      flush();
+      const instance = charts.instances[0]!;
+      const neutral = (instance.options as { color: string }).color;
+      const [bar, line] = panelData(instance).datasets;
+      expect(instance.options).toMatchObject({ scales: {
+        y: { ticks: { color: line!.borderColor } }, yRight: { ticks: { color: bar!.borderColor } },
+      } });
+      const redraw = (next: unknown) => {
+        const updated = JSON.stringify(next);
+        editBlock(doc, id, source, updated);
+        source = updated;
+        flush();
+      };
+      redraw({ ...mixed, y: [...mixed.y, { field: "empty", unit: "%", type: "bar" }] });
+      expect(instance.options).toMatchObject({ scales: {
+        y: { ticks: { color: line!.borderColor } }, yRight: { ticks: { color: neutral } },
+      } });
+      redraw({ ...mixed, y: [...mixed.y, { field: "empty", unit: "%" }] });
+      expect(instance.options).toMatchObject({ scales: {
+        y: { ticks: { color: neutral } }, yRight: { ticks: { color: bar!.borderColor } },
+      } });
+      redraw({ ...mixed, y: [{ field: "value", unit: "%" }] });
+      expect(instance.options).toMatchObject({ scales: { y: { ticks: { color: neutral } } } });
+      expect((instance.options as { scales: Record<string, unknown> }).scales).not.toHaveProperty("yRight");
+      redraw({ ...mixed, layout: "panels" });
+      const panels = charts.instances.filter(chart => !chart.destroyed);
+      expect(panels).toHaveLength(2);
+      for (const panel of panels) {
+        expect(panel.options).toMatchObject({ scales: { y: { ticks: { color: neutral } } } });
+        expect((panel.options as { scales: Record<string, unknown> }).scales).not.toHaveProperty("yRight");
+      }
+    } finally {
+      editor.destroy(); doc.destroy(); directory.destroy();
+      if (originalTheme === null) document.documentElement.removeAttribute("data-theme");
+      else document.documentElement.setAttribute("data-theme", originalTheme);
+    }
+  });
+
   it.each(["overlay", "panels"])("uses exact combined spans and native noninteractive references in %s", layout => {
     const { doc, directory, id } = fixture();
     const source = JSON.stringify({ ...JSON.parse(mapping), layout, y: [
