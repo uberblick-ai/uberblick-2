@@ -1,6 +1,7 @@
 /** Topic navigation reads one record room while directory caches supply history. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
+import type { Editor } from "@tiptap/core";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -14,6 +15,7 @@ import {
   getMeta,
   getMetaMap,
   initDoc,
+  listDirectory,
   pinDoc,
   readSidebar,
   resolveDecisionTopics,
@@ -261,6 +263,33 @@ describe("decision topic navigation and history", () => {
     expect(timeline(view.container).querySelectorAll("li[data-record]")).toHaveLength(5);
     expect(view.container.textContent).not.toContain("Forged record");
     expect(acquired).not.toContain(`${WORKSPACE}/evil/key`);
+  });
+
+  it.each([false, true])("offers Alter decision on a live answer in force (agent stance=%s)", async (agent) => {
+    record(FIRST, "Question in force", "decided", "The current answer.", { agent, ...(agent ? {} : { answerer: "Ben" }) });
+    const host = (await open()).container;
+    const header = answerHeader(host);
+    const button = within(header).getByRole("button", { name: "Alter decision" });
+    expect(button).toBe(header.lastElementChild);
+    expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
+    await act(async () => record(OPEN, "A proposed replacement", "open", "The proposed answer.", { supersedes: FIRST, order: 1 }));
+    expect(within(answerHeader(host)).getByRole("button", { name: "Alter decision" })).toBe(button);
+    expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("Under review");
+    await choose(host, OPEN);
+    expect(within(host).queryByRole("button", { name: "Alter decision" })).toBeNull();
+    expect(within(host).queryByRole("button", { name: /approve|reject|withdraw/i })).toBeNull();
+  });
+
+  it.each(["source", "directory"] as const)("hides Alter decision when the %s cannot write", async (which) => {
+    record(FIRST, "Question in force", "decided", "The current answer.");
+    const connection = room(which === "source" ? roomForDoc(WORKSPACE, FIRST) : directoryRoom(WORKSPACE));
+    Object.defineProperty(connection, "status", { value: { ...LIVE, writable: false } });
+    Object.defineProperty(connection, "onStatusChange", { value: (listener: (status: RoomStatus) => void) => {
+      listener(connection.status);
+      return () => {};
+    } });
+    const host = (await open()).container;
+    expect(within(host).queryByRole("button", { name: "Alter decision" })).toBeNull();
   });
 
   it("uses the current room's identity when its metadata names another record", async () => {
@@ -627,6 +656,44 @@ describe("decision topic navigation and history", () => {
     expect(window.location.pathname).toBe(docPath(WORKSPACE, CURRENT));
   });
 
+  it("keeps the typed dialog and source room when the page follows a different answer", async () => {
+    story();
+    const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
+    const host = (await open()).container;
+    const source = room(roomForDoc(WORKSPACE, CURRENT)).ydoc;
+    const before = Y.encodeStateAsUpdate(source);
+    await act(async () => within(host).getByRole("button", { name: "Alter decision" }).click());
+    const dialog = screen.getByRole("dialog", { name: "Alter decision" });
+    const editor: Editor | undefined = binding.mock.results
+      .map((result) => result.value?.editor as Editor | null | undefined)
+      .find((instance): instance is Editor => instance?.isEditable === true);
+    if (editor === undefined) throw new Error("No detached answer editor");
+    await act(async () => {
+      editor.commands.setContent({ type: "doc", content: [
+        { type: "paragraph", content: [{ type: "text", text: "A typed replacement answer." }] },
+      ] });
+      fireEvent.change(within(dialog).getByRole("textbox", { name: /Why the change/ }), {
+        target: { value: "The old wording no longer fits." },
+      });
+    });
+    expect(acquired.filter((name) => name === roomForDoc(WORKSPACE, CURRENT))).toHaveLength(2);
+    await act(async () => record(NEXT, "Another answer took effect", "decided", "The concurrent answer.", {
+      supersedes: CURRENT, answerer: "Ben", answerDate: "2026-11-06T09:00:00Z", order: 5,
+    }));
+    expect(host.querySelector('.ub-decision-history [aria-current="true"]')?.closest("li")?.getAttribute("data-record")).toBe(NEXT);
+    expect(screen.getByRole("dialog", { name: "Alter decision" })).toBe(dialog);
+    expect(dialog.textContent).toContain("A typed replacement answer.");
+    expect(within(dialog).getByRole("textbox", { name: /Why the change/ })).toHaveProperty("value", "The old wording no longer fits.");
+    const beforeDirectory = listDirectory(directory());
+    await act(async () => within(dialog).getByRole("button", { name: "Decide" }).click());
+    expect(dialog.textContent).toMatch(/no longer|current answer|another answer/i);
+    expect(dialog.textContent).toContain("A typed replacement answer.");
+    expect(listDirectory(directory())).toEqual(beforeDirectory);
+    expect(Y.encodeStateAsUpdate(source)).toEqual(before);
+    await act(async () => within(dialog).getByRole("button", { name: "Cancel" }).click());
+    expect(screen.queryByRole("dialog", { name: "Alter decision" })).toBeNull();
+  });
+
   it("uses the latest stored record when nothing is in force without inventing proposal data", async () => {
     regular(RFC, "Open RFC document");
     record(FIRST, "Unanswered topic", "open", "First open proposal.", { discussion: RFC });
@@ -638,6 +705,7 @@ describe("decision topic navigation and history", () => {
     });
     record(WITHDRAWN, "Latest withdrawn record", "withdrawn", "Withdrawn latest answer.", { supersedes: OPEN, order: 3 });
     const host = (await open()).container;
+    expect(within(host).queryByRole("button", { name: "Alter decision" })).toBeNull();
     expect(selection(host)).toBe(WITHDRAWN);
     expect(answer(host).textContent).toContain("Withdrawn latest answer.");
     expectAnswerState(host, "Withdrawn");
@@ -825,6 +893,7 @@ describe("decision topic navigation and history", () => {
     record(CURRENT, "First conflicting answer", "decided", "One conflicting answer.", { supersedes: FIRST, answerer: "Ben", answerDate: DATE, discussion: RFC, order: 1 });
     record(NEXT, "Second conflicting answer", "decided", "Another conflicting answer.", { supersedes: FIRST, answerer: "Alex", answerDate: DATE, order: 2 });
     const host = (await open()).container;
+    expect(within(host).queryByRole("button", { name: "Alter decision" })).toBeNull();
     expect(selection(host)).toBe(NEXT);
     expect(host.querySelector(".ub-decision-rfc")).toBeNull();
     expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("Nothing is in force");
@@ -853,6 +922,7 @@ describe("decision topic navigation and history", () => {
     story();
     tombstoneDirectoryEntry(directory(), FIRST);
     const host = (await open()).container;
+    expect(within(host).queryByRole("button", { name: "Alter decision" })).toBeNull();
     expect(host.textContent).toContain("Archived. Read-only and hidden from the document list.");
     expect(timeline(host).querySelectorAll("li")).toHaveLength(5);
     expect(host.querySelector(".ub-thread-actions")).toBeNull();

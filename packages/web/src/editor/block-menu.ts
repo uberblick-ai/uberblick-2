@@ -185,6 +185,10 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
   },
 ];
 
+export const DECISION_ANSWER_MENU_ENTRIES: readonly BlockMenuEntry[] = BLOCK_MENU_ENTRIES.filter(
+  (entry) => ["paragraph", "list-bullet", "list-ordered", "code", "table"].includes(entry.id),
+);
+
 /**
  * Trim the committing space for display and filtering; keep it in input rules.
  */
@@ -208,10 +212,13 @@ function haystack(entry: BlockMenuEntry): string[] {
  * Empty queries offer the whole registry in order. No matches closes the menu
  * so slash-prefixed prose can continue without a picker.
  */
-export function filterBlockMenu(query: string): BlockMenuEntry[] {
+export function filterBlockMenu(
+  query: string,
+  entries: readonly BlockMenuEntry[] = BLOCK_MENU_ENTRIES,
+): BlockMenuEntry[] {
   const needle = query.trim().toLowerCase();
-  if (needle === "") return [...BLOCK_MENU_ENTRIES];
-  return BLOCK_MENU_ENTRIES.filter((entry) =>
+  if (needle === "") return [...entries];
+  return entries.filter((entry) =>
     haystack(entry).some((term) => term !== "" && term.includes(needle)),
   );
 }

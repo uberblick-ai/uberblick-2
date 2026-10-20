@@ -29,6 +29,7 @@
     "@tiptap/core": "^3.30.5",
     "@tiptap/extension-table": "3.30.5",
     "@tiptap/pm": "^3.30.5",
+    "@uberblick/ablauf": "^0.2.0",
     "@uberblick/hub": "workspace:*",
     "@uberblick/mcp-server": "workspace:*",
     "@uberblick/schema": "workspace:*",
@@ -59,6 +60,6 @@
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
     "vite": "^8.2.2",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.4"
   }
 }

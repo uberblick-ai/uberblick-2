@@ -27,6 +27,7 @@ import {
 } from "@uberblick/schema";
 import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
 import { revokeHmacCredentials } from "./credentials-schema.js";
+import { writeDatabaseRelease } from "./database-release.js";
 
 /**
  * Retain the exact extension schema and unique index; SQLite does not enforce
@@ -104,7 +105,7 @@ export class HubDatabase implements Extension {
    * Synchronous pre-bind setup; a path that cannot open leaves no handle. A
    * read-only file may still open and fail later through the sticky store path.
    */
-  open(): void {
+  open(hubVersion?: string): void {
     if (this.db !== undefined) {
       throw new Error("HubDatabase.open: already open");
     }
@@ -124,6 +125,7 @@ export class HubDatabase implements Extension {
       chmodSync(this.databasePath, 0o600);
     }
     try {
+      if (hubVersion !== undefined && durable) writeDatabaseRelease(db, hubVersion);
       db.exec(SCHEMA);
       revokeHmacCredentials(db);
       this.statements = {

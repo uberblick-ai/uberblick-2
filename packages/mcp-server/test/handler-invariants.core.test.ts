@@ -1,7 +1,7 @@
 /** Enforce the synchronous write phase documented at guarded. */
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import ts from "typescript";
+import ts from "typescript-api";
 import { expect, it } from "vitest";
 import { MUTATING_TOOLS, READ_ONLY_TOOLS } from "../src/failures.js";
 import { PACKAGE_ROOT } from "./core-helpers.js";

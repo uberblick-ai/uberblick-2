@@ -1,0 +1,24 @@
+.ub-ablauf { white-space: normal; }
+.ub-ablauf-viewport {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  background: var(--ab-bg);
+}
+.ub-ablauf-viewport:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ub-ablauf-source {
+  display: none;
+  margin: 0.6rem 0 0;
+  padding: 0.6rem 0 0;
+  border: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  font: var(--type-small-size)/1.7 var(--font-mono);
+  white-space: pre;
+}
+.ub-ablauf-editing > .ub-ablauf-source,
+.ub-ablauf[data-annotated="true"] > .ub-ablauf-source { display: block; }
+.ub-ablauf-stale,
+.ub-ablauf-diagnostics { margin: 0.5rem 0 0; font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans); color: var(--muted-foreground); }
+.ub-ablauf-diagnostics { padding-left: 1.2rem; overflow-wrap: anywhere; }
+.ub-ablauf-stale { font-weight: 500; }

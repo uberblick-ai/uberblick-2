@@ -9,6 +9,7 @@ const osSensitive = [
   "hub-admin-setup-wrapper",
   "operator-restore-access",
   "operator-restore-command",
+  "database-release",
   "persistence",
   "shutdown",
   "startup",

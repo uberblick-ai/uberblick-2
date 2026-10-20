@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -19,6 +20,59 @@ function execute(script, overrides = {}, args = [], cwd = root) {
 		cwd, env: { ...process.env, ...settings, ...overrides }, encoding: "utf8",
 	});
 }
+
+test("hub image health probe checks its own listener without proxy or DNS settings", async () => {
+	let status = 200;
+	let requestedPath;
+	const server = createServer((request, response) => {
+		requestedPath = request.url;
+		if (status === null) return;
+		response.writeHead(status).end();
+	});
+	await new Promise((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", resolve);
+	});
+	const port = server.address().port;
+	const probe = (overrides = {}) => new Promise((resolve, reject) => {
+		const child = spawn(process.execPath, [join(root, "hub-healthcheck.mjs")], {
+			env: { ...process.env, HUB_HOST: "0.0.0.0", PORT: String(port),
+				HTTP_PROXY: "http://unreachable.invalid:1", NODE_USE_ENV_PROXY: "1", ...overrides },
+			stdio: "ignore", timeout: 6_000,
+		});
+		child.once("error", reject);
+		child.once("exit", (code) => resolve(code));
+	});
+	try {
+		assert.equal(await probe(), 0);
+		assert.equal(requestedPath, "/auth/claim-state");
+		assert.equal(await probe({ HUB_HOST: "127.0.0.1" }), 0);
+		assert.equal(await probe({ HUB_HOST: "localhost" }), 0);
+		assert.equal(await probe({ HUB_HOST: "unreachable.invalid" }), 0);
+		status = 503;
+		assert.equal(await probe(), 1);
+		status = null;
+		assert.equal(await probe(), 1);
+		await new Promise((resolve) => server.close(resolve));
+		assert.equal(await probe(), 1);
+	} finally {
+		server.close();
+	}
+});
+
+test("both runtime images declare fast local health checks inherited by existing Compose files", () => {
+	const dockerfile = readFileSync(join(root, "Dockerfile.hub-release"), "utf8");
+	const stages = dockerfile.split(/^FROM .* AS (?:hub|web)$/m).slice(1);
+	assert.equal(stages.length, 2);
+	for (const stage of stages) {
+		assert.match(stage, /HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=2s --retries=3/);
+	}
+	assert.match(stages[0], /CMD \["node", "\/usr\/local\/bin\/hub-healthcheck\.mjs"\]/);
+	assert.match(readFileSync(join(root, "Dockerfile.hub-release.dockerignore"), "utf8"), /^!hub-healthcheck\.mjs$/m);
+	assert.match(stages[1], /CMD \["wget", "-q", "-Y", "off", "-T", "4", "-O", "\/dev\/null", "http:\/\/127\.0\.0\.1:2019\/config\/"\]/);
+	assert.match(readFileSync(join(root, "Caddyfile"), "utf8"), /admin 127\.0\.0\.1:2019/);
+	assert.doesNotMatch(readFileSync(join(root, "compose.release.yml"), "utf8"), /healthcheck:/);
+});
 
 test("service entrypoints refuse every unsafe document setting before executing their service", () => {
 	for (const key of [...Object.keys(settings), "WEB_HOST", "HTTPS_BIND_IP", "LOOPBACK_PORT"]) {

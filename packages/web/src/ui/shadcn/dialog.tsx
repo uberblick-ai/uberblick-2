@@ -15,6 +15,10 @@ function DialogTitle(props: ComponentProps<typeof DialogPrimitive.Title>): React
   return <DialogPrimitive.Title data-slot="dialog-title" {...props} />;
 }
 
+function DialogTrigger(props: ComponentProps<typeof DialogPrimitive.Trigger>): ReactElement {
+  return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />;
+}
+
 function DialogContent({ className, children, ...props }: ComponentProps<typeof DialogPrimitive.Content>): ReactElement {
   return <DialogPrimitive.Portal>
     <DialogPrimitive.Overlay data-slot="dialog-overlay" className="fixed inset-0 z-50 bg-black/45" />
@@ -26,4 +30,4 @@ function DialogContent({ className, children, ...props }: ComponentProps<typeof 
   </DialogPrimitive.Portal>;
 }
 
-export { Dialog, DialogContent, DialogTitle };
+export { Dialog, DialogContent, DialogTitle, DialogTrigger };

@@ -107,7 +107,8 @@ export async function waitForDocumentDraw(page: Page, session: McpSession, uuid:
     let blocks: Block[] = [];
     await expect(async () => {
       const doc = await session.call<{ blocks: Block[] }>("get_doc", { uuid });
-      const rendered = doc.blocks.filter(entry => entry.type === "chart" || entry.type === "code" && entry.language === "wireframe");
+      const rendered = doc.blocks.filter(entry => entry.type === "chart" || entry.type === "code" &&
+        (entry.language === "wireframe" || entry.language === "ablauf"));
       const block = rendered[options.index === "all" ? 0 : options.index ?? 0];
       expect(block).toBeDefined();
       if (options.source !== undefined) expect(block?.text).toBe(options.source);

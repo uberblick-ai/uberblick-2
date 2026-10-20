@@ -2,5 +2,8 @@
   // No project references: @uberblick/schema resolves to its TypeScript
   // sources through its package exports, so tsc typechecks it in-program.
   "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

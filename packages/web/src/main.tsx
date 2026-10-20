@@ -15,6 +15,7 @@ import { applyStoredAppearance } from "./ui/theme.js";
 import "./ui/styles.css";
 import "@uberblick/wireframe/styles.css";
 import "./ui/wireframe.css";
+import "./ui/ablauf.css";
 // Layered Tailwind styles product controls; unlayered .ub-* rules still win.
 // Keep editor content in plain CSS; see ui/tailwind.css.
 import "./ui/tailwind.css";

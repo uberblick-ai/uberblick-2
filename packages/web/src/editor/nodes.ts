@@ -25,6 +25,7 @@ import { terminalBlockView } from "./terminal.js";
 import type * as Y from "yjs";
 import { chartBlockView } from "./chart.js";
 import { wireframeBlockView } from "./wireframe.js";
+import { ablaufBlockView } from "./ablauf.js";
 import { Card, CardParts } from "./card.js";
 import { Figma, FigmaCaption } from "./figma.js";
 
@@ -226,17 +227,20 @@ export const CodeBlock = Node.create({
       ["code", {}, 0],
     ];
   },
-  // Wireframe drawing is view chrome. Serialization still emits the ordinary
+  // Diagram drawing is view chrome. Serialization still emits the ordinary
   // pre/code source, regardless of which editor view its language selects.
   addNodeView() {
     const ordinary = sourceBlockView(codeBlockChrome);
     const wireframe = wireframeBlockView();
+    const ablauf = ablaufBlockView();
     return (props) => {
-      const rendered = props.node.attrs.language === "wireframe";
-      const view = (rendered ? wireframe : ordinary)(props);
+      const language = props.node.attrs.language;
+      const rendererFor = (value: unknown) => value === "wireframe" ? wireframe : value === "ablauf" ? ablauf : ordinary;
+      const selected = rendererFor(language);
+      const view = selected(props);
       const update = view.update;
       view.update = (node, decorations, innerDecorations) => {
-        if ((node.attrs.language === "wireframe") !== rendered) return false;
+        if (rendererFor(node.attrs.language) !== selected) return false;
         return update?.(node, decorations, innerDecorations) ?? false;
       };
       return view;

@@ -80,10 +80,28 @@ export async function publishHubRelease(input, services) {
   return { outcome: "published", refs };
 }
 
-function run(command, args, options = {}) {
+export function run(command, args, options = {}) {
   const result = spawnSync(command, args, { cwd: ROOT, encoding: "utf8", ...options });
   if (result.status !== 0) fail(`${command} failed: ${result.stderr ?? result.signal ?? result.status}`);
   return result.stdout?.trim() ?? "";
+}
+
+export async function assertRemoteTag(tag, sha) {
+  const refs = run("git", ["ls-remote", "origin", `refs/tags/${tag}`, `refs/tags/${tag}^{}`]);
+  const lines = refs.split("\n");
+  const resolved = lines.find((line) => line.endsWith("^{}")) ?? lines[0];
+  if (resolved.split(/\s/)[0] !== sha) fail(`remote tag ${tag} moved or disappeared; nothing published`);
+}
+
+export async function getImage(ref) {
+  const probe = spawnSync("docker", ["manifest", "inspect", ref], { encoding: "utf8" });
+  if (probe.status !== 0) {
+    // Network/auth failures must never masquerade as an unpublished tag.
+    if (/manifest unknown|no such manifest/i.test(probe.stderr)) return null;
+    fail(`cannot establish whether ${ref} exists: ${probe.stderr}`);
+  }
+  run("docker", ["pull", "--platform", "linux/amd64", ref], { stdio: "inherit" });
+  return JSON.parse(run("docker", ["image", "inspect", ref]))[0];
 }
 
 function localServices(scratch) {
@@ -113,22 +131,8 @@ function localServices(scratch) {
 function productionServices(scratch) {
   return {
     ...localServices(scratch),
-    assertRemoteTag: async (tag, sha) => {
-      const refs = run("git", ["ls-remote", "origin", `refs/tags/${tag}`, `refs/tags/${tag}^{}`]);
-      const lines = refs.split("\n");
-      const resolved = lines.find((line) => line.endsWith("^{}")) ?? lines[0];
-      if (resolved.split(/\s/)[0] !== sha) fail(`remote tag ${tag} moved or disappeared; nothing published`);
-    },
-    getImage: async (ref) => {
-      const probe = spawnSync("docker", ["manifest", "inspect", ref], { encoding: "utf8" });
-      if (probe.status !== 0) {
-        // Network/auth failures must never masquerade as an unpublished tag.
-        if (/manifest unknown|no such manifest/i.test(probe.stderr)) return null;
-        fail(`cannot establish whether ${ref} exists: ${probe.stderr}`);
-      }
-      run("docker", ["pull", "--platform", "linux/amd64", ref], { stdio: "inherit" });
-      return JSON.parse(run("docker", ["image", "inspect", ref]))[0];
-    },
+    assertRemoteTag,
+    getImage,
     pushImage: async (ref) => run("docker", ["push", ref], { stdio: "inherit" }),
   };
 }

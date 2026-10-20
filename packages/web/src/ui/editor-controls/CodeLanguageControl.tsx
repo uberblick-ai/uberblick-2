@@ -12,8 +12,9 @@ import { selectedBlock } from "../../editor/source-chrome.js";
 import { codeLanguageLabel, codeLanguages } from "../../editor/syntax-highlighting.js";
 import { PickerList } from "../PickerList.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../shadcn/popover.js";
+import { useEditorControlsHost } from "./EditorControlsHost.js";
 
-const languages = ["", ...[...codeLanguages.filter((name) => name !== "plaintext"), "wireframe"].sort()];
+const languages = ["", ...[...codeLanguages.filter((name) => name !== "plaintext"), "wireframe", "ablauf"].sort()];
 
 interface Target {
   id: string;
@@ -34,6 +35,7 @@ export function CodeLanguageControl({ editor, canWrite }: {
   const picked = useRef(false);
   const returnToBlock = useRef(false);
   const listId = useId();
+  const controlsHost = useEditorControlsHost();
 
   useEffect(() => {
     const read = (): void => tick((value) => value + 1);
@@ -125,6 +127,8 @@ export function CodeLanguageControl({ editor, canWrite }: {
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[min(16rem,calc(100vw_-_2rem))]! overflow-hidden p-0!"
+        container={controlsHost?.portalContainer}
+        collisionBoundary={controlsHost?.boundary ?? []}
         onOpenAutoFocus={(event) => { event.preventDefault(); search.current?.focus(); }}
         onEscapeKeyDown={() => { returnToBlock.current = true; }}
         onCloseAutoFocus={(event) => {
