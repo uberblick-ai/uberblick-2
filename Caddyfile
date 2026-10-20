@@ -1,4 +1,6 @@
 {
+	# Docker checks the local process independently of the public site route.
+	admin 127.0.0.1:2019
 	# HTTPS routes expose only port 443. ACME uses TLS-ALPN; never create an
 	# HTTP redirect listener on a non-loopback route.
 	auto_https disable_redirects

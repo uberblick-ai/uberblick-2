@@ -21,6 +21,7 @@
 !bin/hub-restore.sh
 !bin/hub-admin-setup.sh
 !hub-release-entrypoint.sh
+!hub-healthcheck.mjs
 !web-release-entrypoint.sh
 !Caddyfile
 !REMOTE.md
