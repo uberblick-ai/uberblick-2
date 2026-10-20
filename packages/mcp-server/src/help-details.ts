@@ -372,15 +372,19 @@ export const toolHelpDetails = {
     "text is a JSON mapping, for example " +
     "`{\"version\":1,\"type\":\"line\",\"collection\":\"observations\",\"x\":{\"field\":\"day\",\"type\":\"date\"}," +
     "\"y\":[{\"field\":\"count\"}]}`. It names top-level record fields: x type is number or date, " +
-    "and y has one to eight numeric series. Optional x and y labels, y units, title and " +
+    "and y has one to eight numeric series. Optional y series type is line or bar, default line. " +
+    "Bars-only charts keep top-level type line and draw grouped bars from zero. " +
+    "In overlay, a mixed chart draws its bars behind its lines on a separate right-hand value axis. " +
+    "Missing, null or wrong-type bar values draw no bar; missing affects only lines. Optional x and y labels, y units, title and " +
     "missing (gap or connect, default gap) control presentation. Optional layout is overlay or panels, default overlay. " +
-    "panels draws one compact line chart per y series in mapping order, in a responsive grid; each panel shows its label " +
+    "panels draws one compact line or bar chart per y series in mapping order, in a responsive grid; each panel shows its label " +
     "and latest plotted value. Panels share the x range and share y ranges within each unit group. " +
     "layout is invalid for table mappings. Each y series optionally accepts range [min, max], exactly two finite numbers " +
     "with min lower than max, and reference, one finite number. In overlay, both apply to the series' left or right value axis. " +
     "In panels, range applies to the series' unit group and reference draws only on that series' own panel. " +
     "A range is a minimum span: the axis covers every declared range, and plotted or reference values outside it widen the axis. " +
-    "A declared range replaces the zero-baseline rule. A reference draws a horizontal line across the plot; " +
+    "A declared range replaces the zero-baseline rule for line-only axes and panel unit groups. " +
+    "Axes and panel unit groups containing bars always include zero. A reference draws a horizontal line across the plot; " +
     "each distinct reference value appears once per axis or panel. A panel's reference value also widens its unit group's shared range. " +
     "range and reference are invalid on x and in table mappings. Optional limit is an integer of 1 or more " +
     "and selects the latest N records with a valid x in x-then-record-id order, still at most 5,000. " +

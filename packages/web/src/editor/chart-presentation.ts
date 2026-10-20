@@ -2,9 +2,10 @@ import type { ChartSeries, ChartSeriesMapping } from "./chart-data.js";
 
 export interface ChartPanelRange { min: number; max: number; declared?: [number, number] }
 
-/** A declared span replaces the zero rule for its whole axis or unit group. */
+/** Declared spans replace the line zero rule; bar groups always include zero. */
 export function chartValueRanges(series: ChartSeries[], mappings: ChartSeriesMapping[], groupKeys: string[]): ChartPanelRange[] {
   const groups = new Map<string, ChartPanelRange>();
+  const barGroups = new Set(groupKeys.filter((_, index) => series[index]?.type === "bar"));
   series.forEach((entry, index) => {
     const key = groupKeys[index] ?? "";
     let range = groups.get(key);
@@ -26,8 +27,9 @@ export function chartValueRanges(series: ChartSeries[], mappings: ChartSeriesMap
       if (point.y !== null) include(point.y);
     }
   });
-  for (const range of groups.values()) {
+  for (const [key, range] of groups) {
     if (range.declared === undefined && range.min >= 0) range.min = 0;
+    if (barGroups.has(key)) { range.min = Math.min(0, range.min); range.max = Math.max(0, range.max); }
   }
   return series.map((_, index) => groups.get(groupKeys[index] ?? "") ?? { min: 0, max: 1 });
 }
@@ -44,13 +46,18 @@ export interface ChartAxes {
   legendLabels: string[];
 }
 
-/** The mapping order chooses the left unit; absent and empty units are equal. */
+/** Mixed marks split by mark; otherwise mapping order chooses the left unit. */
 export function chartAxes(series: ChartSeriesMapping[]): ChartAxes {
   const units = [...new Set(series.map((entry) => entry.unit || ""))];
-  const leftUnit = units.length < 3 ? units[0] ?? "" : "";
-  const rightUnit = units.length === 2 ? units[1] : undefined;
+  const mixed = series.some((entry) => entry.type === "bar") && series.some((entry) => entry.type !== "bar");
+  const markUnit = (bar: boolean): string => {
+    const markUnits = [...new Set(series.filter((entry) => (entry.type === "bar") === bar).map((entry) => entry.unit || ""))];
+    return markUnits.length === 1 ? markUnits[0] ?? "" : "";
+  };
+  const leftUnit = mixed ? markUnit(false) : units.length < 3 ? units[0] ?? "" : "";
+  const rightUnit = mixed ? markUnit(true) : units.length === 2 ? units[1] : undefined;
   return {
-    seriesAxes: series.map((entry) => rightUnit !== undefined && (entry.unit || "") !== leftUnit ? "yRight" : "y"),
+    seriesAxes: series.map((entry) => (mixed ? entry.type === "bar" : rightUnit !== undefined && (entry.unit || "") !== leftUnit) ? "yRight" : "y"),
     leftUnit,
     ...(rightUnit !== undefined ? { rightUnit } : {}),
     legendLabels: series.map((entry) => `${entry.label || entry.field}${units.length >= 2 && entry.unit ? ` (${entry.unit})` : ""}`),
