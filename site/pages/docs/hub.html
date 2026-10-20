@@ -1,0 +1,53 @@
+<head>
+<title>Run a hub · Uberblick docs</title>
+<meta name="description" content="Run an Uberblick hub with Docker, claim it, let other computers reach it, and connect them.">
+<link rel="stylesheet" href="/css/sub.css">
+</head>
+<div class="hero sub">
+  <p class="crumb"><a href="/">Uberblick</a> / Docs / Sharing</p>
+  <h1>Run a hub</h1>
+  <p class="lede">A hub shares a workspace between computers and people. Every computer keeps its own copy and works offline; the hub passes changes on and admits only members. It is one Docker release.</p>
+</div>
+<article class="col">
+
+  <section class="q" id="start"><h2>Start one</h2>
+  <section class="block terminal"><div class="cap"><span>Terminal</span><button type="button" data-copy="mkdir -p ~/uberblick-remote &amp;&amp; cd ~/uberblick-remote
+docker cp $(docker create --platform linux/amd64 ghcr.io/uberblick-ai/hub:0.4.7):/release/. .
+cp remote.env.example .env
+sh bin/remote-compose.sh up --detach">Copy</button></div><pre><span class="p">$</span> mkdir -p ~/uberblick-remote &amp;&amp; cd ~/uberblick-remote
+<span class="p">$</span> docker cp $(docker create --platform linux/amd64 ghcr.io/uberblick-ai/hub:0.4.7):/release/. .
+<span class="p">$</span> cp remote.env.example .env
+<span class="p">$</span> sh bin/remote-compose.sh up --detach</pre></section>
+  <p>This copies the release's Compose files out of the hub image and starts the hub at <code>http://localhost:8080</code>, on this computer only. Documents and the claim live in named Docker volumes, so they survive restarts and updates; only <code>down --volumes</code> deletes them. It needs Docker Engine 28 or newer on Linux x86_64, or Docker Desktop on macOS.</p>
+  </section>
+
+  <section class="q" id="claim"><h2>Claim it</h2>
+  <p>Open <code>http://localhost:8080</code> and choose <strong>Sign in with GitHub</strong>, or run <code>ub auth login http://localhost:8080</code>. The first account to sign in becomes the hub's administrator. It reports the default workspace's id; keep it for the other computers.</p>
+  </section>
+
+  <section class="q" id="reach"><h2>Let other computers reach it</h2>
+  <p>Set one route in <code>.env</code>, then run <code>sh bin/remote-compose.sh up --detach --force-recreate</code>.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Route</th><th>In <code>.env</code></th></tr></thead>
+    <tbody>
+      <tr><td>Tailscale, recommended (Linux)</td><td><code>WEB_HOST=machine.tailnet.ts.net</code> and <code>TAILSCALE_IP</code> from <code>tailscale ip -4</code></td></tr>
+      <tr><td>A public host name</td><td><code>WEB_HOST=hub.example.com</code>, with port 443 open</td></tr>
+    </tbody>
+  </table></div>
+  </section>
+
+  <section class="q" id="connect"><h2>Connect a computer</h2>
+  <section class="block terminal"><div class="cap"><span>Terminal</span><button type="button" data-copy="ub auth login https://hub.example.com">Copy</button></div><pre><span class="p">$</span> ub auth login https://hub.example.com
+<span class="p">$</span> ub workspace use wss://hub.example.com/ws/&lt;WORKSPACE_ID&gt;
+<span class="p">$</span> ub open</pre></section>
+  <p>Add people with <code>ub workspace member add &lt;github-handle&gt;</code>. To share a workspace you already have, run <code>ub workspace promote https://hub.example.com</code> in its project.</p>
+  </section>
+
+  <section class="q" id="kamal"><h2>With Kamal</h2>
+  <p>We use it with <a href="https://kamal-deploy.org">Kamal</a>: the hub runs as an accessory next to the app.</p>
+  </section>
+
+  <section class="q" id="operate"><h2>Keep it running</h2>
+  <p><code>sh bin/remote-compose.sh exec hub ub-hub status</code> shows the release and whether the hub is claimed; <code>ub-hub doctor</code>, <code>backup</code> and <code>restore</code> do the rest. To update, back up, copy the newer release's files over the old ones the same way, and recreate. Everything else is in <a href="https://github.com/uberblick-ai/uberblick-2/blob/main/REMOTE.md">REMOTE.md</a>.</p>
+  </section>
+</article>
