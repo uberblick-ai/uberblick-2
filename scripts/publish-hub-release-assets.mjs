@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readHubReleaseAssets } from "./hub-release-assets.mjs";
-import { assertImage, imageRefs, versionForTag } from "./publish-hub-release.mjs";
+import { assertImage, assertRemoteTag, getImage, imageRefs, run, versionForTag } from "./publish-hub-release.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPOSITORY = "uberblick-ai/uberblick-2";
@@ -92,12 +91,6 @@ export async function publishHubReleaseAssets(input, services) {
   return { outcome: missing.length === 0 ? "no-op" : "published" };
 }
 
-function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { cwd: ROOT, encoding: "utf8", ...options });
-  if (result.status !== 0) fail(`${command} failed: ${result.stderr ?? result.signal ?? result.status}`);
-  return result.stdout?.trim() ?? "";
-}
-
 function productionServices() {
   const token = process.env.GITHUB_TOKEN;
   if (!token) fail("GITHUB_TOKEN is required");
@@ -122,21 +115,8 @@ function productionServices() {
     }
   }
   return {
-    assertRemoteTag: async (tag, sha) => {
-      const refs = run("git", ["ls-remote", "origin", `refs/tags/${tag}`, `refs/tags/${tag}^{}`]);
-      const lines = refs.split("\n");
-      const resolved = lines.find((line) => line.endsWith("^{}")) ?? lines[0];
-      if (resolved.split(/\s/)[0] !== sha) fail(`remote tag ${tag} moved or disappeared`);
-    },
-    getImage: async (ref) => {
-      const probe = spawnSync("docker", ["manifest", "inspect", ref], { encoding: "utf8" });
-      if (probe.status !== 0) {
-        if (/manifest unknown|no such manifest/i.test(probe.stderr)) return null;
-        fail(`cannot establish whether ${ref} exists: ${probe.stderr}`);
-      }
-      run("docker", ["pull", "--platform", "linux/amd64", ref], { stdio: "inherit" });
-      return JSON.parse(run("docker", ["image", "inspect", ref]))[0];
-    },
+    assertRemoteTag,
+    getImage,
     getRelease: async (tag) => {
       const release = await request(`/releases/tags/${tag}`, { notFound: true });
       if (release !== null) release.assets = await list(`/releases/${release.id}/assets`);

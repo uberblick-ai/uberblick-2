@@ -54,26 +54,27 @@ Download the published [compose.yml](https://github.com/uberblick-ai/uberblick-2
 [remote.env.example](https://github.com/uberblick-ai/uberblick-2/releases/latest/download/remote.env.example),
 [remote.https.yml](https://github.com/uberblick-ai/uberblick-2/releases/latest/download/remote.https.yml)
 and [remote.tailscale.yml](https://github.com/uberblick-ai/uberblick-2/releases/latest/download/remote.tailscale.yml).
-These links select the newest published hub release. For one specific version,
-replace `releases/latest/download/` with `releases/download/hub-vX.Y.Z/` in
-each URL. Download all four files from the same release. No image extraction
-or installed `ub` client is needed.
+These links select the newest published hub release. Open the
+[latest release](https://github.com/uberblick-ai/uberblick-2/releases/latest)
+to find its `hub-vX.Y.Z` tag, or choose an earlier published release. Replace
+`X.Y.Z` below with that version so all four downloads come from the same
+release. No image extraction or installed `ub` client is needed.
 
 Run these commands **on the hub host**, in an empty deployment directory:
 
 ```sh
 mkdir -p ~/uberblick-remote
 cd ~/uberblick-remote
-curl -fL -o compose.yml https://github.com/uberblick-ai/uberblick-2/releases/latest/download/compose.yml
-curl -fL -o remote.env.example https://github.com/uberblick-ai/uberblick-2/releases/latest/download/remote.env.example
-curl -fL -o remote.https.yml https://github.com/uberblick-ai/uberblick-2/releases/latest/download/remote.https.yml
-curl -fL -o remote.tailscale.yml https://github.com/uberblick-ai/uberblick-2/releases/latest/download/remote.tailscale.yml
+curl -fL -o compose.yml https://github.com/uberblick-ai/uberblick-2/releases/download/hub-vX.Y.Z/compose.yml
+curl -fL -o remote.env.example https://github.com/uberblick-ai/uberblick-2/releases/download/hub-vX.Y.Z/remote.env.example
+curl -fL -o remote.https.yml https://github.com/uberblick-ai/uberblick-2/releases/download/hub-vX.Y.Z/remote.https.yml
+curl -fL -o remote.tailscale.yml https://github.com/uberblick-ai/uberblick-2/releases/download/hub-vX.Y.Z/remote.tailscale.yml
 cp remote.env.example .env
 chmod 600 .env
 ```
 
-Edit `.env`: set `HUB_VERSION=X.Y.Z` to the published version you chose, without
-the `hub-v` prefix. Leave `COMPOSE_FILE=compose.yml` for same-computer use.
+Edit `.env`: set `HUB_VERSION=X.Y.Z` to the release that supplied these files,
+without the `hub-v` prefix. Leave `COMPOSE_FILE=compose.yml` for same-computer use.
 Choose other settings from [the route guide below](#choose-how-clients-reach-the-hub).
 `compose.yml` selects both exact versioned images from `HUB_VERSION` and
 refuses an unset or empty version before pulling or starting containers. It
@@ -121,12 +122,42 @@ alone does not establish it.
 
 ### Updating the host — deliberately
 
-**The host does not update itself.** Edit `HUB_VERSION` in `.env` to a newer
-published version, then pull and recreate the containers. Keep the other
-settings in `.env` and run one operator session at a time. If the target
-release's instructions require updated host files, first download its
-`compose.yml` and route files from `releases/download/hub-vX.Y.Z/`; a version
-change alone otherwise suffices:
+**The host does not update itself.** Choose a newer published version and
+run one operator session at a time. Before changing `HUB_VERSION`, download
+and compare the target release's three host files. Replace `X.Y.Z` below with
+that version:
+
+```sh
+cd ~/uberblick-remote
+mkdir -p hub-vX.Y.Z
+curl -fL -o hub-vX.Y.Z/compose.yml https://github.com/uberblick-ai/uberblick-2/releases/download/hub-vX.Y.Z/compose.yml
+curl -fL -o hub-vX.Y.Z/remote.https.yml https://github.com/uberblick-ai/uberblick-2/releases/download/hub-vX.Y.Z/remote.https.yml
+curl -fL -o hub-vX.Y.Z/remote.tailscale.yml https://github.com/uberblick-ai/uberblick-2/releases/download/hub-vX.Y.Z/remote.tailscale.yml
+```
+
+Continue only after all three downloads succeed. Compare them with the local
+copies, including routes you are not currently using:
+
+```sh
+diff -u compose.yml hub-vX.Y.Z/compose.yml
+diff -u remote.https.yml hub-vX.Y.Z/remote.https.yml
+diff -u remote.tailscale.yml hub-vX.Y.Z/remote.tailscale.yml
+```
+
+No output and exit 0 means a file is identical; exit 1 shows differences.
+If any file differs, refresh all three from the downloaded target copies
+before starting that version:
+
+```sh
+cp hub-vX.Y.Z/compose.yml compose.yml
+cp hub-vX.Y.Z/remote.https.yml remote.https.yml
+cp hub-vX.Y.Z/remote.tailscale.yml remote.tailscale.yml
+```
+
+A missing local file also needs its target copy. Stop on any other download
+or comparison error. If all three files are identical, a version change alone
+suffices. Set `HUB_VERSION=X.Y.Z` in `.env`, keep its other settings, then pull
+and recreate the containers:
 
 ```sh
 cd ~/uberblick-remote
