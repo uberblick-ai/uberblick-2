@@ -37,14 +37,15 @@ class CountingStore extends MirrorStore {
     doc: IndexedDoc,
     throughSeq: number,
     catalogThroughSeq = 0,
-  ): void {
+    directoryThroughSeq = 0,
+  ): boolean {
     this.indexAttempts += 1;
     if (this.failEveryIndex || this.failNextIndex) {
       this.failNextIndex = false;
       throw new Error("simulated index failure");
     }
     this.indexed.push(doc.uuid);
-    super.indexDoc(doc, throughSeq, catalogThroughSeq);
+    return super.indexDoc(doc, throughSeq, catalogThroughSeq, directoryThroughSeq);
   }
 
   unindexAttempts = 0;
@@ -719,6 +720,9 @@ describe("individual decision record archives", () => {
     const read = await rig.ok("get_doc", { uuid: proposal.uuid });
     expect(read.blocks[0].text).toBe("An archiveworthy answer.");
     expect(read.annotations).toHaveLength(1);
+    expect(read.predecessors).toMatchObject([{ uuid: first.uuid, deleted: false }]);
+    expect((await rig.ok("get_doc", { uuid: first.uuid })).successors)
+      .toMatchObject([{ uuid: proposal.uuid, deleted: true }]);
     const before = Y.encodeStateAsUpdate(rig.instance.replicas.replica(proposal.uuid).doc);
     for (const [tool, args] of [
       ["edit_block", { uuid: proposal.uuid, block_id: proposal.blocks[0].id, old_text: "An archiveworthy answer.", new_text: "Changed" }],
@@ -809,6 +813,8 @@ describe("individual decision record archives", () => {
     getMetaMap(rig.instance.replicas.replica(proposal.uuid).doc).set("status", "decided");
     expect((await rig.ok("search", { query: "archiveworthy" })).hits.map((hit: any) => hit.uuid).sort()).toEqual([first.uuid, proposal.uuid].sort());
     expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ inForce: { uuid: proposal.uuid } }]);
+    expect((await rig.ok("list_docs", { kind: "decision", include_superseded: true, include_deleted: true })).docs)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ uuid: proposal.uuid, deleted: false })]));
     expect((await rig.ok("set_metadata", { uuid: proposal.uuid, description: "Live answer" })).applied).toBe(true);
     const rival = await record(rig, { supersedes: first.uuid });
     directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).set(first.uuid, true);
@@ -818,6 +824,11 @@ describe("individual decision record archives", () => {
     const topic = (await rig.ok("list_docs", { kind: "decision" })).docs[0];
     expect(topic.inForce).toBeNull();
     expect(topic.conflicts.map((entry: any) => entry.uuid).sort()).toEqual([proposal.uuid, rival.uuid].sort());
+    for (const conflict of topic.conflicts) expect(conflict.deleted).toBe(false);
+    const records = (await rig.ok("list_docs", { kind: "decision", include_superseded: true, include_deleted: true })).docs;
+    expect(records.find((entry: any) => entry.uuid === first.uuid).deleted).toBe(true);
+    expect(records.find((entry: any) => entry.uuid === proposal.uuid).deleted).toBe(false);
+    expect(records.find((entry: any) => entry.uuid === rival.uuid).deleted).toBe(false);
     expect(rig.instance.store.isIndexed(proposal.uuid)).toBe(true);
     expect(rig.instance.store.isIndexed(rival.uuid)).toBe(true);
     getMetaMap(rig.instance.replicas.replica(rival.uuid).doc).set("status", "rejected");

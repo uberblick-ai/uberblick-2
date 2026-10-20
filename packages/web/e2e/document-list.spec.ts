@@ -244,12 +244,13 @@ interface DecisionFixture {
 
 async function decision(
   writer: McpSession,
-  title: string,
+  title: string | undefined,
   text: string,
   fields: Record<string, unknown> = {},
 ): Promise<DecisionFixture> {
   return writer.call<DecisionFixture>("create_doc", {
-    title, kind: "decision", description: "Browser acceptance fixture.",
+    ...(title === undefined ? {} : { title }),
+    kind: "decision", description: "Browser acceptance fixture.",
     blocks: [{ type: "paragraph", text }], ...fields,
   });
 }
@@ -317,17 +318,17 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     const writer = agent().open({ name: "decision-list-e2e" });
     const prefix = docTitle("decisionlist").replaceAll("-", "");
     const approval = { who: "A workspace member", when: "2026-10-04T12:00:00Z", where: "https://example.org/team/decision" };
-    const first = await decision(writer, `${prefix} earlier title`, "Earlier answer is history.", {
+    const first = await decision(writer, `${prefix} current title`, "Earlier answer is history.", {
       status: "decided", answer: approval,
     });
     const currentTitle = `${prefix} current title`;
     const currentAnswer = "Current answer stays in force during review.";
-    const current = await decision(writer, currentTitle, currentAnswer, {
+    const current = await decision(writer, undefined, currentAnswer, {
       status: "decided", supersedes: first.uuid, answer: approval,
       tags: ["auth", "billing", "mcp", "rfc", "sync"],
     });
     const storedTags = current.tags.map((tag) => tag.name);
-    const pending = await decision(writer, `${prefix} pending title`, "Pending proposal must not become the list answer.", {
+    const pending = await decision(writer, undefined, "Pending proposal must not become the list answer.", {
       supersedes: current.uuid,
     });
     for (const record of [first, current, pending]) {
@@ -342,7 +343,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     const archived = await decision(writer, `${prefix} archived title`, "The whole topic will be archived.", {
       status: "decided", answer: approval,
     });
-    await decision(writer, `${prefix} archived successor`, "An archived topic includes later proposals.", { supersedes: archived.uuid });
+    await decision(writer, undefined, "An archived topic includes later proposals.", { supersedes: archived.uuid });
     await writer.call("archive_doc", { uuid: archived.uuid });
 
     const page = await openApp(browser, `/${harness().workspace}/all`, {

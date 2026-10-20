@@ -99,9 +99,10 @@ function answer(who = "A workspace member") {
   return { who, when: "2026-10-04T12:00:00Z", where: "https://example.org/team/decision" };
 }
 
-async function create(writer: McpSession, title: string, text: string, fields: Record<string, unknown> = {}): Promise<StoredDoc> {
+async function create(writer: McpSession, title: string | undefined, text: string, fields: Record<string, unknown> = {}): Promise<StoredDoc> {
   return writer.call<StoredDoc>("create_doc", {
-    title, description: "Browser acceptance fixture.", blocks: [{ type: "paragraph", text }], ...fields,
+    ...(title === undefined ? {} : { title }),
+    description: "Browser acceptance fixture.", blocks: [{ type: "paragraph", text }], ...fields,
   });
 }
 
@@ -346,10 +347,10 @@ test("decision title renames sync without approving answer changes", async ({ br
   const writer = session();
   const owner = await create(writer, "Rename owner", "The related page's prose.");
   const first = await create(writer, "Original rename question", "Earlier answer.", { kind: "decision", status: "decided" });
-  const current = await create(writer, "Current rename question", "Approved answer.", {
+  const current = await create(writer, undefined, "Approved answer.", {
     kind: "decision", status: "decided", supersedes: first.uuid, related: owner.uuid, answer: answer(),
   });
-  const pending = await create(writer, "Pending rename question", "Pending proposal.", { kind: "decision", supersedes: current.uuid });
+  const pending = await create(writer, undefined, "Pending proposal.", { kind: "decision", supersedes: current.uuid });
   const topicPath = `/${harness().workspace}/${first.uuid}`;
   const page = await openApp(browser, topicPath, { upstream: true });
   const reader = await openApp(browser, topicPath, { upstream: true });
@@ -359,13 +360,17 @@ test("decision title renames sync without approving answer changes", async ({ br
   await expect(page.locator(".ub-lifecycle-badge")).toHaveText("Decision");
   await expect(page.locator(".ub-decision-notice")).toContainText("Under review.");
   const renamed = `Clearer question ${current.uuid}`;
-  await title.fill(renamed);
-  await expect(reader.getByRole("textbox", { name: "Document title" })).toHaveValue(renamed);
+  await writer.call("pin_doc", { uuid: current.uuid, group: "Renamed topic" });
+  try {
+    await title.fill(renamed);
+    await expect(reader.getByRole("textbox", { name: "Document title" })).toHaveValue(renamed);
+    await expect(reader.locator(".ub-list").getByRole("button", { name: renamed, exact: true })).toBeVisible();
+  } finally { await writer.call("unpin_doc", { uuid: current.uuid }); }
   await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: current.uuid }), doc => {
     expect(doc).toMatchObject({ title: renamed, approvalChanged: false });
   });
   await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: pending.uuid }), doc => {
-    expect(doc.title).toBe(pending.title);
+    expect(doc.title).toBe(renamed);
   });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await expect(editor(page)).toHaveText(answerText(current));
@@ -387,6 +392,9 @@ test("decision title renames sync without approving answer changes", async ({ br
 
   const peer = await legacyDecisionPeer(harness(), current.uuid);
   try {
+    const firstRoom = await peer.join(`${harness().workspaceUuid}/${first.uuid}`);
+    await expect.poll(() => getMetaMap(firstRoom).get("title")).toBe(mcpTitle);
+    expect(getMetaMap(peer.doc).get("title")).toBe(current.title);
     appendBlock(peer.doc, { type: "paragraph", text: "Changed answer from an older client." });
     peer.decide("decided");
     await expect.poll(async () => (await writer.call<StoredDoc>("get_doc", { uuid: current.uuid })).approvalChanged).toBe(true);
@@ -397,6 +405,8 @@ test("decision title renames sync without approving answer changes", async ({ br
     await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: current.uuid }), doc => {
       expect(doc).toMatchObject({ title: changedTitle, approvalChanged: true });
     });
+    await expect.poll(() => getMetaMap(firstRoom).get("title")).toBe(changedTitle);
+    expect(getMetaMap(peer.doc).get("title")).toBe(current.title);
   } finally { peer.close(); }
 });
 
@@ -568,6 +578,18 @@ for (const { touch, appearance } of [
     await expect(page.locator(".ub-archived-banner")).toHaveCount(0);
     await activateControl(page.getByRole("button", { name: "Undo", exact: true }), { touch });
     await expect(entry(page, first.uuid)).toHaveCount(1);
+    await activateControl(entry(page, first.uuid).locator(".ub-decision-record"), { touch });
+    await activateControl(actions, { touch });
+    await activateControl(archiveItem, { touch });
+    await activateControl(dialog.getByRole("button", { name: "Archive", exact: true }), { touch });
+    await selected(page, current.uuid, answerText(current));
+    await page.goto(new URL(`/${harness().workspace}/${first.uuid}/record/${first.uuid}`, page.url()).href);
+    await expect(editor(page)).toHaveText(answerText(first));
+    await expect(page.locator(".ub-archived-banner")).toBeVisible();
+    await answerHeader(page, "Superseded", "superseded");
+    await expect(page.locator(".ub-decision-earlier-answer")).toContainText("it no longer applies.");
+    await activateControl(page.getByRole("button", { name: "Restore", exact: true }), { touch });
+    await expect(entry(page, first.uuid)).toHaveCount(1);
     await activateControl(entry(page, proposal.uuid).locator(".ub-decision-record"), { touch });
     await activateControl(actions, { touch });
     await activateControl(page.getByRole("menuitem", { name: "Archive this record", exact: true }), { touch });
@@ -581,6 +603,7 @@ for (const { touch, appearance } of [
     await expect(page).toHaveURL(new URL(`/${harness().workspace}/${first.uuid}/record/${proposal.uuid}`, page.url()).href);
     await expect(editor(page)).toHaveText(answerText(proposal));
     await expect(page.locator(".ub-archived-banner")).toBeVisible();
+    await answerHeader(page, "Open proposal", "open-proposal");
     await expect(entry(page, proposal.uuid)).toHaveCount(0);
     await activateControl(page.getByRole("button", { name: "Restore", exact: true }), { touch });
     await selected(page, proposal.uuid, answerText(proposal));
@@ -589,8 +612,8 @@ for (const { touch, appearance } of [
 
   test(`decision title control stays editable only on the current record on ${touch ? "iPad touch @webkit-touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
     const writer = session();
-    const first = await create(writer, "Original title control question", "Earlier answer.", { kind: "decision", status: "decided" });
-    const current = await create(writer, "May technical pull requests be integrated without a linked issue?", "Approved answer.", {
+    const first = await create(writer, "May technical pull requests be integrated without a linked issue?", "Earlier answer.", { kind: "decision", status: "decided" });
+    const current = await create(writer, undefined, "Approved answer.", {
       kind: "decision", status: "decided", supersedes: first.uuid, answer: answer(),
     });
     const page = await openApp(browser, `/${harness().workspace}/${first.uuid}`, {
@@ -647,18 +670,18 @@ for (const { touch, appearance } of [
       kind: "decision", status: "decided", related: formerOwner.uuid, discussion: firstRfc.uuid, answer: answer("Earlier answerer"),
     });
     await writer.call("pin_doc", { uuid: first.uuid, group: "Reading" });
-    const current = await create(writer, "Current topic title", "Current answer stays in force during review. Keep the embedded database in the hub process so each workspace remains portable, backups remain straightforward, and readers can inspect the same durable answer while the proposed replacement is discussed.", {
+    const current = await create(writer, undefined, "Current answer stays in force during review. Keep the embedded database in the hub process so each workspace remains portable, backups remain straightforward, and readers can inspect the same durable answer while the proposed replacement is discussed.", {
       kind: "decision", status: "decided", supersedes: first.uuid, related: owner.uuid, discussion: currentRfc.uuid, answer: answer("Recorded answerer"),
     });
-    const rejected = await create(writer, "Rejected alternative", "Rejected answer remains available as history.", {
+    const rejected = await create(writer, undefined, "Rejected answer remains available as history.", {
       kind: "decision", supersedes: current.uuid, discussion: firstRfc.uuid,
     });
     await writer.call("set_status", { uuid: rejected.uuid, status: "rejected", answer: answer("Recorded rejecter"), reason: "The proposal does not meet the constraint." });
-    const withdrawn = await create(writer, "Withdrawn alternative", "Withdrawn answer remains available as history.", {
+    const withdrawn = await create(writer, undefined, "Withdrawn answer remains available as history.", {
       kind: "decision", supersedes: current.uuid,
     });
     await writer.call("set_status", { uuid: withdrawn.uuid, status: "withdrawn" });
-    const pending = await create(writer, "Pending alternative", "Pending answer remains an open proposal.", {
+    const pending = await create(writer, undefined, "Pending answer remains an open proposal.", {
       kind: "decision", supersedes: current.uuid, discussion: rfc.uuid,
     });
     await comment(writer, first, "Conversation about the earlier answer.");
@@ -676,7 +699,7 @@ for (const { touch, appearance } of [
       contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1440, height: 1000 } }), colorScheme: appearance },
       beforeNavigate: captureClipboard,
     });
-    await expect(page.getByRole("textbox", { name: "Document title" })).toHaveValue("Current topic title");
+    await expect(page.getByRole("textbox", { name: "Document title" })).toHaveValue("Initial topic title");
     await answerHeader(page, "In force", "in-force");
     await expect(page.locator(".ub-decision-notice")).toContainText("The current answer stays in force.");
     await selected(page, current.uuid, answerText(current));
@@ -914,10 +937,10 @@ test("undecided proposals, agent stances and conflicting answers show selected-r
   await expect(entry(page, stance.uuid).locator("time")).toHaveCount(1);
   await expect(page.locator(".ub-decision-attribution")).toHaveText(/^(just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
   await expect(page.locator(".ub-decision-answer-header").getByText("Agent stance", { exact: true })).toHaveCount(1);
-  const left = await create(writer, "Competing answer one", "The first conflicting answer.", {
+  const left = await create(writer, undefined, "The first conflicting answer.", {
     kind: "decision", status: "decided", supersedes: stance.uuid, discussion: rfc.uuid, answer: answer("First answerer"),
   });
-  const right = await create(writer, "Competing answer two", "The second conflicting answer.", {
+  const right = await create(writer, undefined, "The second conflicting answer.", {
     kind: "decision", status: "decided", supersedes: stance.uuid, answer: answer("Second answerer"),
   });
   await expect(page.locator(".ub-decision-notice")).toContainText("Nothing is in force.");
@@ -931,7 +954,7 @@ test("undecided proposals, agent stances and conflicting answers show selected-r
   await selected(page, left.uuid, answerText(left));
   await selectedRfc(page, rfc, "First topic RFC");
   await expect(page.getByRole("link", { name: "Go to the current answer", exact: true })).toHaveCount(0);
-  const pending = await create(writer, "A proposal during the conflict", "An alternative while neither answer is in force.", {
+  const pending = await create(writer, undefined, "An alternative while neither answer is in force.", {
     kind: "decision", supersedes: stance.uuid,
   });
   await expect(entry(page, pending.uuid)).toBeVisible();

@@ -315,7 +315,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
 
     const archivedNotice = archiveNotice();
-    expect(toast.success).toHaveBeenCalledWith("Archived “New lease”.", expect.any(Object));
+    expect(toast.success).toHaveBeenCalledWith("Archived “Original lease”.", expect.any(Object));
     expect(archivedNotice?.action?.label).toBe("Undo");
     act(() => archivedNotice?.action?.onClick({} as MouseEvent<HTMLButtonElement>));
     expect(getDirectoryEntry(directory, OTHER)?.deleted).toBeUndefined();

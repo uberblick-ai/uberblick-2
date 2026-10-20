@@ -869,11 +869,11 @@ describe("decision topics in the list", () => {
 
     const host = await openApp(allPath(WORKSPACE));
     await chooseDecisions(host);
-    expect(rowTitles(host)).toEqual(["Stable answer title", "Alpha answer"]);
+    expect(rowTitles(host)).toEqual(["Original answer title", "Alpha answer"]);
     expect(rowUuids(host)).toEqual([ONE, OTHER]);
     const row = topicRow(host, ONE);
-    expect(row.querySelector(".ub-docs-title")?.textContent).toBe("Stable answer title");
-    expect(row.querySelector(".ub-docs-open")?.textContent).toBe("Stable answer title");
+    expect(row.querySelector(".ub-docs-title")?.textContent).toBe("Original answer title");
+    expect(row.querySelector(".ub-docs-open")?.textContent).toBe("Original answer title");
     expect(row.querySelector("th")?.children).toHaveLength(1);
     expect(row.textContent).not.toContain("Under review");
     expect(row.textContent).not.toContain("answer.");
@@ -885,9 +885,9 @@ describe("decision topics in the list", () => {
     );
 
     await act(async () => within(documentTable(host)).getByRole("button", { name: "Title" }).click());
-    expect(rowTitles(host)).toEqual(["Alpha answer", "Stable answer title"]);
+    expect(rowTitles(host)).toEqual(["Alpha answer", "Original answer title"]);
     await act(async () => typeInto(filter(host), "pending proposal"));
-    expect(rowTitles(host)).toEqual(["Stable answer title"]);
+    expect(rowTitles(host)).toEqual(["Original answer title"]);
     await act(async () => typeInto(filter(host), "stable answer"));
     expect(rowUuids(host)).toEqual([ONE]);
     expect(search.mock.calls.map(([query]) => query)).toEqual(["pending proposal", "stable answer"]);
@@ -958,7 +958,7 @@ describe("decision topics in the list", () => {
       ["under-review", "Under review"], ["agent-stance", "Agent stance"],
       ["conflict", "Conflict"], ["changed-after-approval", "Changed after approval"],
     ]);
-    expect(rowTitles(host)).toEqual(["Agent recommendation", "Answer under review", "Approved", "Latest conflicting title", "Undecided"]);
+    expect(rowTitles(host)).toEqual(["Agent recommendation", "Answer under review", "Approved", "First conflicting title", "Undecided"]);
     expect(topicRow(host, THREE).textContent).not.toContain("Agent stance");
     expect(topicRow(host, GONE).textContent).not.toContain("Nothing is in force");
     expect(topicRow(host, TWO).textContent).not.toContain("Changed after approval");
@@ -1019,7 +1019,7 @@ describe("decision topics in the list", () => {
     const host = await openApp(allPath(WORKSPACE));
     await chooseDecisions(host);
     expect(rowUuids(host)).toEqual([THREE]);
-    expect(rowTitles(host)).toEqual(["Live current answer"]);
+    expect(rowTitles(host)).toEqual(["Live first"]);
     expect([...rooms.keys()].sort()).toEqual(
       [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE)].sort(),
     );
@@ -1037,7 +1037,7 @@ describe("decision topics in the list", () => {
     const host = await openApp(allPath(WORKSPACE));
     await chooseDecisions(host);
     const pin = (): HTMLButtonElement => within(topicRow(host, ONE)).getByRole<HTMLButtonElement>("button", {
-      name: /^(?:Pin|Unpin) Current answer (?:to|from) the sidebar$/,
+      name: /^(?:Pin|Unpin) Original answer (?:to|from) the sidebar$/,
     });
     expect(pin().getAttribute("aria-pressed")).toBe("true");
     await act(async () => pin().click());
@@ -1071,7 +1071,7 @@ describe("decision topics in the list", () => {
     await act(async () => within(documentTable(host)).getByRole("button", { name: "Title" }).click());
     await act(async () => openButtons(host)[0]?.click());
     expect(window.location.pathname).toBe(`/${WORKSPACE}/${ONE}`);
-    expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).value).toBe("Current answer");
+    expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).value).toBe("Original answer");
     const assertRestored = (): void => {
       expect(window.location.pathname).toBe(allPath(WORKSPACE));
       expect(within(within(host).getByRole("tablist", { name: "Document type" }))

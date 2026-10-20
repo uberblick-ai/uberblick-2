@@ -228,6 +228,7 @@ CREATE TABLE IF NOT EXISTS doc_index_seq (
   uuid                TEXT PRIMARY KEY,
   indexed_through_seq INTEGER NOT NULL,
   catalog_through_seq INTEGER NOT NULL DEFAULT 0,
+  directory_through_seq INTEGER NOT NULL DEFAULT 0,
   github_refs_indexed INTEGER NOT NULL DEFAULT 0,
   search_rowid        INTEGER
 );
@@ -482,7 +483,8 @@ export class MirrorStore {
     markPending: Prepared<[string, number]>;
     clearPending: Prepared<[string, number]>;
     listPending: Prepared<[]>;
-    advanceIndex: Prepared<[string, number, number]>;
+    advanceIndex: Prepared<[string, number, number, number, number]>;
+    staleIndex: Prepared<[string, number, number, number, number]>;
     putDoc: Prepared<[string, string, string, string]>;
     hasDoc: Prepared<[string]>;
     dropDoc: Prepared<[string]>;
@@ -529,7 +531,8 @@ export class MirrorStore {
     doc: IndexedDoc,
     throughSeq: number,
     catalogThroughSeq: number,
-  ) => void;
+    directoryThroughSeq: number,
+  ) => boolean;
 
   private readonly unindexTx: (uuid: string) => void;
 
@@ -590,6 +593,7 @@ export class MirrorStore {
     this.migratePendingRooms();
     this.migrateDocDescription();
     this.migrateCatalogIndexSequence();
+    this.migrateDirectoryIndexSequence();
     this.migrateGithubRefsIndexSequence();
     this.migrateSearchIndex();
     this.migrateFragmentSearchIndex();
@@ -642,15 +646,18 @@ export class MirrorStore {
       ),
       listPending: prepare("SELECT room, seq FROM pending_rooms ORDER BY room"),
       advanceIndex: prepare(
-        "INSERT INTO doc_index_seq (uuid, indexed_through_seq, catalog_through_seq, github_refs_indexed) VALUES (?, ?, ?, 1) " +
+        "INSERT INTO doc_index_seq (uuid, indexed_through_seq, catalog_through_seq, directory_through_seq, github_refs_indexed) VALUES (?, ?, ?, ?, 1) " +
           "ON CONFLICT (uuid) DO UPDATE SET " +
           "indexed_through_seq = excluded.indexed_through_seq, " +
           "catalog_through_seq = excluded.catalog_through_seq, " +
+          "directory_through_seq = excluded.directory_through_seq, " +
           "github_refs_indexed = excluded.github_refs_indexed " +
           "WHERE doc_index_seq.indexed_through_seq <= excluded.indexed_through_seq " +
           "AND doc_index_seq.catalog_through_seq <= excluded.catalog_through_seq " +
+          "AND (? = 0 OR doc_index_seq.directory_through_seq <= excluded.directory_through_seq) " +
           "AND (doc_index_seq.indexed_through_seq < excluded.indexed_through_seq " +
           "OR doc_index_seq.catalog_through_seq < excluded.catalog_through_seq " +
+          "OR doc_index_seq.directory_through_seq < excluded.directory_through_seq " +
           "OR doc_index_seq.github_refs_indexed = 0 " +
           // An older peer can replace the row using only the original columns.
           "OR NOT EXISTS (SELECT 1 FROM docs_fts f WHERE f.rowid = doc_index_seq.search_rowid " +
@@ -660,6 +667,10 @@ export class MirrorStore {
           "OR NOT EXISTS (SELECT 1 FROM docs_fragment_fts f WHERE f.rowid = doc_index_seq.search_rowid " +
           "AND f.uuid = excluded.uuid AND f.indexed_through_seq = excluded.indexed_through_seq " +
           "AND f.catalog_through_seq = excluded.catalog_through_seq))",
+      ),
+      staleIndex: prepare(
+        "SELECT 1 FROM doc_index_seq WHERE uuid = ? AND " +
+          "(indexed_through_seq > ? OR catalog_through_seq > ? OR (? = 1 AND directory_through_seq > ?))",
       ),
       putDoc: prepare(
         "INSERT INTO doc_index (uuid, title, description, kind) VALUES (?, ?, ?, ?) " +
@@ -808,7 +819,11 @@ export class MirrorStore {
       doc: IndexedDoc,
       throughSeq: number,
       catalogThroughSeq: number,
+      directoryThroughSeq: number,
     ) => {
+      // A client can remove the decision kind. Its regular-page derivation no
+      // longer reads the directory, even if the prior row carried that cut.
+      const readsDirectory = doc.kind === "decision" ? 1 : 0;
       // Reject stale cuts before deleting rows; the winning cuts, metadata and
       // dependent rows must commit together.
       const written =
@@ -816,9 +831,11 @@ export class MirrorStore {
           doc.uuid,
           throughSeq,
           catalogThroughSeq,
+          directoryThroughSeq,
+          readsDirectory,
         ).changes > 0;
       if (!written) {
-        return;
+        return this.statements.staleIndex.get(doc.uuid, throughSeq, catalogThroughSeq, readsDirectory, directoryThroughSeq) === undefined;
       }
       this.statements.putDoc.run(doc.uuid, doc.title, doc.description, doc.kind ?? "regular");
       this.statements.dropTags.run(doc.uuid);
@@ -847,6 +864,7 @@ export class MirrorStore {
         (doc.tagNames ?? []).join("\n"), throughSeq, catalogThroughSeq,
       );
       this.statements.markSearch.run(indexed.lastInsertRowid, doc.uuid);
+      return true;
     });
 
     this.unindexTx = transactional(this.db, (uuid: string) => {
@@ -1051,17 +1069,19 @@ export class MirrorStore {
   }
 
   /**
-   * Derive from contiguous document and settings cuts; stale input on either
+   * Derive from contiguous document, settings and directory cuts; stale input
    * must not replace newer rows. Commit cuts, metadata and dependents together;
    * allow equal-cut replacements only for incomplete derived rows.
+   * False means a newer stored source cut refused this derivation; retry later.
    */
   indexDoc(
     doc: IndexedDoc,
     throughSeq: number,
     catalogThroughSeq = 0,
-  ): void {
+    directoryThroughSeq = 0,
+  ): boolean {
     this.assertWorkspacePresent();
-    this.indexTx(doc, throughSeq, catalogThroughSeq);
+    return this.indexTx(doc, throughSeq, catalogThroughSeq, directoryThroughSeq);
   }
 
   /** Check before deleting: this WAL read avoids busy-timeout waits for absent rows. */
@@ -1312,6 +1332,21 @@ export class MirrorStore {
     this.db.exec(
       "ALTER TABLE doc_index_seq ADD COLUMN catalog_through_seq INTEGER NOT NULL DEFAULT 0",
     );
+  }
+
+  /** Topic titles depend on the first record's directory entry. */
+  private migrateDirectoryIndexSequence(): void {
+    const hasColumn = () => {
+      const columns = this.db.prepare("SELECT name FROM pragma_table_info('doc_index_seq')")
+        .all() as { name: string }[];
+      return columns.some((column) => column.name === "directory_through_seq");
+    };
+    if (hasColumn()) return;
+    transactional(this.db, () => {
+      if (!hasColumn()) {
+        this.db.exec("ALTER TABLE doc_index_seq ADD COLUMN directory_through_seq INTEGER NOT NULL DEFAULT 0");
+      }
+    }, "immediate")();
   }
 
   /**

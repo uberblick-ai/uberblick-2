@@ -10,6 +10,8 @@ import {
   enforceDeletedDirectoryEntries,
   documentDirectoryFields,
   isDirectoryEntryArchived,
+  decisionTopicArchived,
+  decisionTopicTitle,
   findBlockElement,
   getBlocksFragment,
   getBlocksWithInline,
@@ -29,6 +31,7 @@ import {
   normalizeLegacyTables,
   removeLegacyMermaidBlocks,
   repairDuplicateBlocks,
+  resolveDecisionTopics,
   resolveTagAssignments,
   roomForDoc,
   settingsRoom,
@@ -677,10 +680,15 @@ export class Replicas {
   private indexRows(replica: Replica, meta: DocMeta): void {
     const blocks = getBlocksWithInline(replica.doc);
     const tags = resolveTagAssignments(this.settings().doc, meta.tags);
-    this.store.indexDoc(
+    const directory = this.directory();
+    const topic = meta.kind === "decision"
+      ? resolveDecisionTopics(listDirectory(directory.doc, { includeDeleted: true }))
+        .find((topic) => topic.topic === (meta.topic ?? meta.uuid))
+      : undefined;
+    const current = this.store.indexDoc(
       {
         uuid: replica.id,
-        title: meta.title,
+        title: topic === undefined ? meta.title : decisionTopicTitle(topic),
         kind: meta.kind === "decision" ? "decision" : "regular",
         tags: tags.map((entry) => entry.id),
         tagNames: tags.flatMap((entry) => entry.name === null ? [] : [entry.name]),
@@ -711,7 +719,9 @@ export class Replicas {
       },
       replica.indexedThroughSeq,
       this.settings().indexedThroughSeq,
+      meta.kind === "decision" ? directory.indexedThroughSeq : 0,
     );
+    if (current === false) this.pace(replica.id, Date.now() + this.config.reconcileRetryMs);
   }
 
   /**
@@ -751,7 +761,7 @@ export class Replicas {
       if (entry === null) {
         return;
       }
-      if (isDirectoryEntryArchived(this.directory().doc, entry.uuid)) {
+      if (decisionTopicArchived(this.directory().doc, entry.uuid) || entry.recordArchived === true) {
         // Ask before deleting: the usual tombstone has no rows left, and a
         // delete that finds nothing still queues behind a write lock.
         if (this.store.isIndexed(uuid)) {
@@ -890,7 +900,7 @@ export class Replicas {
       includeDeleted: true,
     })) {
       if (this.isDeleted(entry.uuid)) continue;
-      if (isDirectoryEntryArchived(this.directory().doc, entry.uuid)) {
+      if (decisionTopicArchived(this.directory().doc, entry.uuid) || entry.recordArchived === true) {
         // Catch tombstones missed by observers during hydration or old rebuilds.
         // Queue actual deletes so lock waits do not multiply with the backlog;
         // an already absent index row costs only a read.

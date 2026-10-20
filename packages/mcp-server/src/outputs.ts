@@ -328,6 +328,7 @@ export const outputSchemas = {
   set_metadata: z.object({
     uuid,
     ...documentDurability,
+    rooms: z.array(touchedRoom).optional().describe("Independently persisted document, topic-title and directory rooms when a rename targets another record; top-level synced is their conjunction."),
     title: z.string(),
     description,
     tldr,

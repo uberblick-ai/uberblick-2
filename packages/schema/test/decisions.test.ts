@@ -14,6 +14,7 @@ import {
   decisionRelations,
   decisionTopicArchived,
   decisionTopicState,
+  decisionTopicTitle,
   directoryStubDiffers,
   exportMarkdown,
   getDirectoryEntry,
@@ -470,6 +471,24 @@ describe("stubs-only topic resolution", () => {
     expect(decisionCurrentRecord(topic)?.uuid).toBe(B);
     expect(restoreDirectoryEntry(directory, A)).toEqual([A]);
     expect(ids(resolveDecisionTopics(directory)[0]!.records)).toEqual([A]);
+  });
+
+  it("takes one title from the first record and falls back to the current record when first is missing", () => {
+    const directory = new Y.Doc();
+    stub(directory, A, { title: "One topic", createdAt: 10 });
+    stub(directory, B, { title: "Old client title", supersedes: A, createdAt: 20 });
+    const live = resolveDecisionTopics(directory)[0]!;
+    expect(decisionTopicTitle(live)).toBe("One topic");
+    expect(live.inForce?.title).toBe("Old client title");
+    tombstoneDirectoryEntry(directory, A);
+    expect(decisionTopicTitle(resolveDecisionTopics(directory)[0]!)).toBe("One topic");
+    expect(decisionTopicTitle({ ...live, first: null })).toBe("Old client title");
+    expect(decisionTopicTitle({ ...live, first: null, inForce: null, records: [] })).toBe("Old client title");
+    const doc = record(B, A);
+    expect(exportMarkdown(doc, { directory })).toContain('title: One topic');
+    expect(exportMarkdown(doc)).toContain('title: A choice');
+    doc.destroy();
+    directory.destroy();
   });
 
   it("derives topic states with conflict precedence and preserves the answer during review", () => {

@@ -18,6 +18,7 @@ import {
   archiveDecisionRecord,
   decisionDirectoryFields,
   decisionCurrentRecord,
+  decisionTopicTitle,
   decisionTopicArchived,
   directoryRoom,
   getDirectoryEntry,
@@ -210,6 +211,7 @@ export function RoutePane({
   selectedUuid,
   navigate,
   directoryConnection = null,
+  titleConnection = null,
   relatedTopics = [],
   onAlterDecision = null,
 }: {
@@ -279,6 +281,7 @@ export function RoutePane({
   selectedUuid?: string | null | undefined;
   navigate?: Navigate;
   directoryConnection?: RoomConnection | null;
+  titleConnection?: RoomConnection | null;
   relatedTopics?: readonly DecisionTopicResolution[];
   onAlterDecision?: (() => void) | null;
 }): ReactElement {
@@ -380,6 +383,7 @@ export function RoutePane({
     return <DecisionTopicPane {...editorProps}
       topic={topic} selected={selectedUuid ?? null} navigate={navigate}
       directoryConnection={directoryConnection}
+      titleConnection={titleConnection}
       onAlterDecision={onAlterDecision}
       explicit={route.kind === "decision"}
       linkedRecord={route.kind === "doc" && route.uuid !== current?.uuid ? route.uuid : null}
@@ -619,6 +623,16 @@ export function App(): ReactElement {
       : null,
     defaultIdentity,
   );
+  // Keep the first room alive across directory arrival and answer selection;
+  // switching its title/answer holders must not detach and immediately rejoin it.
+  const routedTitleUuid = route.kind === "decision" ? route.topic : route.kind === "doc" ? route.uuid : null;
+  const routedTitleEntry = directory === null || routedTitleUuid === null ? null : getDirectoryEntry(directory.ydoc, routedTitleUuid);
+  const titleUuid = topic?.topic ?? (routedTitleEntry === null || routedTitleEntry.kind === "decision" ? routedTitleUuid : null);
+  const topicTitleRoom = useRoom(
+    roomReady && workspace !== null && titleUuid !== null ? roomForDoc(workspace.uuid, titleUuid) : null,
+    defaultIdentity,
+    false,
+  );
   const sidebar = useRoom(
     roomReady && workspace !== null ? sidebarRoom(workspace.uuid) : null,
     defaultIdentity,
@@ -805,7 +819,7 @@ export function App(): ReactElement {
     if (entry === null || decisionTopicArchived(directory.ydoc, selected)) return;
     const freshTopic = entry.kind === "decision"
       ? resolveDecisionTopics(directory.ydoc).find((candidate) => candidate.topic === (entry.topic ?? entry.uuid)) : undefined;
-    const title = (freshTopic === undefined ? getMeta(doc.ydoc).title : decisionCurrentRecord(freshTopic)?.title) || "Untitled";
+    const title = (freshTopic === undefined ? getMeta(doc.ydoc).title : decisionTopicTitle(freshTopic)) || "Untitled";
     if (recordOnly) {
       if (!archiveDecisionRecord(directory.ydoc, sidebar.ydoc, selected)) return;
       if (workspace !== null && entry.kind === "decision") navigate(docPath(workspace.segment, entry.topic ?? entry.uuid));
@@ -1089,13 +1103,16 @@ export function App(): ReactElement {
    * tombstone cannot race repair. See collab/directory-stub.ts.
    */
   useEffect(() => {
-    if (doc === null || directory === null) return;
-    return watchDocumentStub(doc.ydoc, directory.ydoc, parseRoom(doc.room).uuid, {
-      writable: () => directory.status.writable,
-      synchronized: () => directory.status.synced,
-      subscribe: (listener) => directory.onStatusChange(() => listener()),
-    });
-  }, [doc, directory]);
+    if (directory === null) return;
+    const stops = [doc, topicTitleRoom].flatMap((connection) => connection === null ? [] : [
+      watchDocumentStub(connection.ydoc, directory.ydoc, parseRoom(connection.room).uuid, {
+        writable: () => directory.status.writable,
+        synchronized: () => directory.status.synced,
+        subscribe: (listener) => directory.onStatusChange(() => listener()),
+      }),
+    ]);
+    return () => { for (const stop of stops) stop(); };
+  }, [doc, topicTitleRoom, directory]);
 
   const sidebarHidden = narrowSidebar ? !sidebarOpen : collapsed;
   const sidebarName = settings ? "sidebar" : "document list";
@@ -1224,6 +1241,7 @@ export function App(): ReactElement {
               selectedUuid={selected}
               navigate={navigate}
               directoryConnection={directory}
+              titleConnection={topic?.topic === selected ? doc : topicTitleRoom}
               onAlterDecision={openAlterDecision}
               relatedTopics={relatedTopics}
               configured={hubReady}

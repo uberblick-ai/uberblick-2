@@ -16,7 +16,8 @@ import { z } from "zod";
 import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
 import { resolveTagSelectors } from "../tag-catalog.js";
-import { documentOperation } from "./operation.js";
+import { operation } from "./operation.js";
+import { roomStages } from "./helpers.js";
 import { descriptionArg, docLinkTargetArg, titleArg, tldrArg, uuidArg } from "./schemas.js";
 import { discussionTarget } from "./discussion.js";
 
@@ -38,7 +39,7 @@ const codeCheckArg = z.unknown().meta({
 
 export const inputSchema = strictInput({
   uuid: uuidArg,
-  title: titleArg.optional(),
+  title: titleArg.optional().describe("Display title. A decision topic has one title stored on its first record; title on any live record renames the topic without changing answer approval. Successors take the topic's title."),
   description: descriptionArg.optional(),
   tldr: tldrArg.optional().describe(`Person-facing regular-document summary, at most ${MAX_TLDR_LENGTH} characters. Null clears it without changing a deliberate removal mark. On a marked page, a non-null summary requires tldr_opt_in: true. Decisions have no TL;DR; open records accept null.`),
   tldr_opt_in: z.boolean().optional().describe("Pass true with a non-null tldr to lift a person's deliberate TL;DR removal. Requires a non-null tldr; false does not lift the mark."),
@@ -89,9 +90,12 @@ function forField<T>(field: typeof fields[number], validate: () => T): T {
   }
 }
 
-export const setMetadataOperation = documentOperation("set_metadata", inputSchema, (context, args, _request, replica) => {
+export const setMetadataOperation = operation("set_metadata", inputSchema, (context, args, _request) => {
   const { uuid, title, description, tldr, tldr_opt_in, tags, links, discussion, code_check } = args;
+  const replica = context.requireWritableDoc(uuid);
   const current = getMeta(replica.doc, replica.id);
+  const titleReplica = title === undefined || current.kind !== "decision" ? replica :
+    forField("title", () => context.requireWritableDoc(current.topic ?? uuid));
   const codeCheck = code_check === undefined ? undefined : normalizeCodeCheck(code_check);
   if (codeCheck === null) {
     throw new ToolError("invalid_code_check", "A code check needs a repository, full hexadecimal commit and matches, ahead or drift result; checked_at is assigned by this replica.", { uuid, field: "code_check" });
@@ -137,24 +141,41 @@ export const setMetadataOperation = documentOperation("set_metadata", inputSchem
   // No validation awaits or writes separate these checks from the transaction.
   // Tag assignment revalidates before its own first write, so it runs first;
   // the remaining setters accept the already-parsed values without refusals.
-  replica.doc.transact(() => {
+  const writeMetadata = () => replica.doc.transact(() => {
     if (tagIds !== undefined) assignDocumentTags(replica.doc, context.tagCatalog(), tagIds);
-    if (title !== undefined) setTitle(replica.doc, title);
+    if (title !== undefined && titleReplica === replica) setTitle(replica.doc, title);
     if (description !== undefined) setDescription(replica.doc, description);
     if (tldr !== undefined) setTldr(replica.doc, tldr);
     if (links !== undefined) setLinks(replica.doc, links);
     if (discussionUuid !== undefined) setDiscussion(replica.doc, discussionUuid);
     if (codeCheck !== undefined) setCodeCheck(replica.doc, codeCheck);
   });
+  let durability: Record<string, unknown>;
+  if (titleReplica === replica) {
+    writeMetadata();
+    durability = context.durability(replica);
+  } else {
+    const directory = context.replicas.directory();
+    const { completed, stage } = roomStages(
+      context.replicas, "set_metadata", uuid,
+      room => room === replica.room ? "document" : room === titleReplica.room ? "topic" : room === directory.room ? "directory" : "other",
+      () => "Restart the MCP server, then re-read the addressed record and its topic with get_doc before repeating set_metadata. Completed rooms are durable; no writes were rolled back.",
+    );
+    if (fields.some(field => field !== "title" && args[field] !== undefined)) stage("document", replica, writeMetadata);
+    if (title !== undefined) stage("topic", titleReplica, () => setTitle(titleReplica.doc, title));
+    stage("directory", directory, () => {});
+    durability = context.durabilityAcross(replica, completed);
+  }
   const meta = getMeta(replica.doc, replica.id);
   return {
     uuid,
-    title: meta.title,
+    title: context.titleFor(uuid, context.requireStub(uuid)),
     description: meta.description,
     tldr: meta.tldr,
     tags: context.documentTags(replica),
     links: meta.links,
     ...(meta.kind === "decision" ? { discussion: meta.discussion } : {}),
     ...(meta.kind === "decision" ? {} : { code_check: meta.code_check }),
+    ...durability,
   };
 });

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { Editor } from "@tiptap/core";
 import type * as Y from "yjs";
-import { getBlocksFragment, getMeta, parseRoom } from "@uberblick/schema";
+import { decisionTopicTitle, getBlocksFragment, getMeta, parseRoom, resolveDecisionTopics } from "@uberblick/schema";
 import { alteredDecisionAnswerProblem, createDecisionDraft, recordAlteredDecision } from "../../collab/alter-decision.js";
 import type { AlterDecisionResult } from "../../collab/alter-decision.js";
 import type { AwarenessUser } from "../../collab/identity.js";
@@ -21,7 +21,7 @@ import { CommentComposer } from "../comments/CommentComposer.js";
 import { DialogContent, DialogTitle } from "../shadcn/dialog.js";
 import { Button } from "../shadcn/button.js";
 import { Textarea } from "../shadcn/textarea.js";
-import { useRoomStatus } from "../hooks.js";
+import { useDirectory, useRoomStatus } from "../hooks.js";
 
 export interface AlterDecisionSession {
   source: RoomConnection;
@@ -152,7 +152,10 @@ export function AlterDecisionDialog({ session, displayName, docLinks, onClose, o
     }
   };
   const disabled = problem !== null || waiting || !catalogStatus.synced;
-  const topicTitle = getMeta(session.source.ydoc).title;
+  const entries = useDirectory(session.directory, true);
+  const sourceMeta = getMeta(session.source.ydoc, parseRoom(session.source.room).uuid);
+  const topic = resolveDecisionTopics(entries).find((entry) => entry.topic === sourceMeta.topic);
+  const topicTitle = topic === undefined ? sourceMeta.title : decisionTopicTitle(topic);
   return <DialogContent ref={setBoundary} className="ub-alter-dialog" aria-describedby="alter-decision-topic"
       onEscapeKeyDown={(event) => { if (editorControlsOwnEscape(boundary, event, draftEditor)) event.preventDefault(); }}>
       <EditorControlsHost value={{ portalContainer: boundary, boundary }}>

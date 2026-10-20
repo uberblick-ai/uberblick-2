@@ -81,6 +81,7 @@ export function useLocalSessionMissing(servedLocally: boolean): boolean {
 export function useRoom(
   room: string | null,
   identity: AwarenessUser,
+  presence = true,
 ): RoomConnection | null {
   const [connection, setConnection] = useState<RoomConnection | null>(null);
   useEffect(() => {
@@ -88,7 +89,7 @@ export function useRoom(
       setConnection(null);
       return;
     }
-    const handle = acquireRoom(room, identity);
+    const handle = presence ? acquireRoom(room, identity) : acquireRoom(room, identity, { presence: false });
     setConnection(handle.connection);
     const stopReplacement = handle.onReplace?.(setConnection);
     return () => {
@@ -96,7 +97,7 @@ export function useRoom(
       stopReplacement?.();
       handle.release();
     };
-  }, [room, identity]);
+  }, [room, identity, presence]);
   return connection !== null && connection.room === room ? connection : null;
 }
 
@@ -202,7 +203,8 @@ export function useDirectory(
     const read = (): void => emit(listDirectory(ydoc, { includeDeleted }).map(
       (entry) => entry.kind === "decision"
         ? { ...entry, deleted: entry.uuid === (entry.topic ?? entry.uuid)
-          ? decisionTopicArchived(ydoc, entry.uuid) : isDirectoryEntryArchived(ydoc, entry.uuid) }
+          ? decisionTopicArchived(ydoc, entry.uuid)
+          : decisionTopicArchived(ydoc, entry.uuid) || entry.recordArchived === true }
         : entry,
     ));
     read();

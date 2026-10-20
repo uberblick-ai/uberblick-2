@@ -87,7 +87,7 @@ describe("decision authority through MCP", () => {
     await refuse(rig, "set_status", { uuid: next.uuid, status: "decided" }, "decision_answer_required", next.uuid);
     expect((await rig.ok("get_doc", { uuid: next.uuid })).status).toBe("open");
     await refuse(rig, "create_doc", {
-      title: "Replacement", description: "A successor needs a person's answer.", kind: "decision", status: "decided", supersedes: first.uuid, blocks: body,
+      description: "A successor needs a person's answer.", kind: "decision", status: "decided", supersedes: first.uuid, blocks: body,
     }, "decision_answer_required");
     for (const invalid of [
       { who: "", when: answer.when, where: answer.where },

@@ -46,7 +46,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
       blocks: [{ type: "paragraph", text: regularText }],
     });
     const prior = await writer.call<{ uuid: string }>("create_doc", {
-      title: `${prefix} old question`, description: "Palette browser acceptance fixture.", kind: "decision", status: "decided",
+      title: `${prefix} current question`, description: "Palette browser acceptance fixture.", kind: "decision", status: "decided",
       blocks: [{ type: "paragraph", text: "The previous answer belongs in history." }],
     });
     const currentTitle = `${prefix} current question`;

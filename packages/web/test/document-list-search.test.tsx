@@ -180,7 +180,7 @@ it("ranks a decision topic by its best record, keeps one current row and maps th
   const { container } = await renderSettled(list({ entries: records, searchClient: { search: async () => [THREE, FOUR, ONE, TWO] },
     state: { ...INITIAL_DOCUMENT_LIST_STATE, mode: "decision", query: "history", relevance: true },
   }));
-  expect(titles(container)).toEqual(["Current", "Another topic"]);
+  expect(titles(container)).toEqual(["Original", "Another topic"]);
   expect(container.textContent).not.toContain("Current answer");
 });
 
@@ -197,7 +197,7 @@ it("merges documents and current decision topics in shared relevance order while
   ]);
   const ranked = rankDocumentSearchRows(rows, [FOUR, archivedSuccessor, ONE, THREE, TWO]);
   expect(ranked.map(({ uuid, title, kind }) => ({ uuid, title, kind }))).toEqual([
-    { uuid: ONE, title: "Current answer", kind: "decision" },
+    { uuid: ONE, title: "Historical answer", kind: "decision" },
     { uuid: THREE, title: "Document", kind: undefined },
   ]);
 });

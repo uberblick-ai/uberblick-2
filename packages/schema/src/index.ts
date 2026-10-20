@@ -30,7 +30,7 @@ export {
 export type { DataCollection, DataCollectionChange, DataUpdatePlan, DataIssue, DataOperation, DataRecord, DocData } from "./data.js";
 export { DataError, canonicalJson, compareCodePoints, validateCollectionSchema, validateDataRecord } from "./data-schema.js";
 export type { CollectionSchema, DataSchema, JSONObject, JSONValue } from "./data-schema.js";
-export { decisionCurrentRecord, decisionRelations, decisionTopicState, readDecisions, relatedDecisionTopics, resolveDecisionTopics } from "./decisions.js";
+export { decisionCurrentRecord, decisionRelations, decisionTopicState, decisionTopicTitle, readDecisions, relatedDecisionTopics, resolveDecisionTopics } from "./decisions.js";
 export type { DecisionTopicState } from "./decisions.js";
 export {
   decisionAnswerFailure, decisionAnswerShapeFailure, decisionDocAnswerFailure,

@@ -62,12 +62,44 @@ function olderPeerIndex(db: DatabaseSync, doc: IndexedDoc, throughSeq: number, c
 }
 
 describe("search index upgrade", () => {
+  it("drops the directory dependency when a newer record becomes regular without weakening room cuts", () => {
+    const store = open();
+    const doc = row("1", "Orchard", { kind: "decision" });
+    expect(store.indexDoc(doc, 2, 7, 10)).toBe(true);
+    expect(store.indexDoc({ ...doc, kind: "regular", title: "Meadow" }, 3, 7, 0)).toBe(true);
+    expect(titles(store, "orchard")).toEqual([]);
+    expect(titles(store, "meadow")).toEqual(["Meadow"]);
+    expect(store.indexDoc({ ...doc, kind: "regular", title: "Stale" }, 2, 8, 0)).toBe(false);
+    expect(titles(store, "stale")).toEqual([]);
+    expect(titles(store, "meadow")).toEqual(["Meadow"]);
+  });
+
+  it("refreshes a topic title at unchanged record cuts and rejects stale directory derivations", () => {
+    const path = tempDatabasePath();
+    const store = open(path);
+    const doc = row("1", "Orchard", { kind: "decision" });
+    expect(store.indexDoc(doc, 2, 7, 10)).toBe(true);
+    expect(store.indexDoc({ ...doc, title: "Meadow" }, 2, 7, 11)).toBe(true);
+    expect(store.indexDoc({ ...doc, title: "Ignored at equal cuts" }, 2, 7, 11)).toBe(true);
+    expect(titles(store, "orchard")).toEqual([]);
+    expect(titles(store, "meadow")).toEqual(["Meadow"]);
+    expect(store.indexDoc({ ...doc, title: "Stale" }, 3, 8, 10)).toBe(false);
+    expect(titles(store, "stale")).toEqual([]);
+    store.close();
+    const reopened = open(path);
+    expect(reopened.indexDoc({ ...doc, title: "Stale" }, 3, 8, 10)).toBe(false);
+    expect(titles(reopened, "meadow")).toEqual(["Meadow"]);
+  });
+
   it("preserves searches, rejects stale cuts and permits one unchanged-cut enrichment", () => {
     const path = tempDatabasePath();
     const doc = row("1", "Launching", { kind: "decision", tags: ["mcp"], tagNames: ["protocol"] });
     const before = open(path);
     before.indexDoc(doc, 2, 7);
     before.close();
+    const legacy = new DatabaseSync(path);
+    legacy.exec("ALTER TABLE doc_index_seq DROP COLUMN directory_through_seq");
+    legacy.close();
     downgrade(path);
 
     const store = open(path);

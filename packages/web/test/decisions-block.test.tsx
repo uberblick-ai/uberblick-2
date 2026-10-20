@@ -51,7 +51,7 @@ describe("the compact Decisions block", () => {
     ]).container;
     expect(within(host).getByRole("region", { name: "Decisions" }).getAttribute("tabindex")).toBe("-1");
     expect(within(host).getAllByRole("link").map((link) => link.getAttribute("aria-label"))).toEqual([
-      "Conflict: Conflict latest", "Under review: Review question", "In force: Alpha answer",
+      "Conflict: Conflict first", "Under review: Review question", "In force: Alpha answer",
       "In force: Zebra answer", "Agent stance: Agent answer", "Not yet decided: Open question",
     ]);
     expect(host.querySelectorAll('.ub-decisions-mark[aria-hidden="true"]')).toHaveLength(6);
@@ -71,7 +71,7 @@ describe("the compact Decisions block", () => {
     expect(review.querySelector(".ub-decisions-question")?.getAttribute("title")).toBe("Current question");
     expect(review.querySelector(".ub-decisions-row-preview")?.getAttribute("title")).toBe("Current answer");
     expect(review.textContent).not.toContain("Pending");
-    expect(within(host).getByRole("link", { name: "Conflict: Conflict latest" }).textContent).toContain("Nothing is in force.");
+    expect(within(host).getByRole("link", { name: "Conflict: Conflict first" }).textContent).toContain("Nothing is in force.");
     expect(host.textContent).not.toContain("Conflicting first answer");
     expect(host.textContent).not.toContain("Conflicting latest answer");
     expect(within(host).getByRole("link", { name: "Not yet decided: Unanswered question" }).querySelector(".ub-decisions-row-preview")).toBeNull();

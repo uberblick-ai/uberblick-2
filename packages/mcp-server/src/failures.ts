@@ -421,6 +421,10 @@ const RECOVERIES: Record<string, Recovery> = {
       "Choose a decision UUID from list_docs with `kind: decision`, then call create_doc again. Nothing was " +
       "created by this refused call.",
   },
+  decision_title_mismatch: {
+    recoveryClass: "reread",
+    guidance: "Read the topic's current title with get_doc, then omit title or supply that title when creating its successor. Nothing was created.",
+  },
 };
 
 /**

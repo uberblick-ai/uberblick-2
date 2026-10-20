@@ -71,13 +71,14 @@ describe("decision context on page reads", () => {
   it("returns preview caches through topic rows, conflicts, record rows and decision relations", async () => {
     const rig = await localRig();
     const first = await rig.ok("create_doc", { title: "Actual topic", description: "Decision history.", kind: "decision", blocks: [{ type: "paragraph", text: "First answer." }] });
-    const next = await rig.ok("create_doc", { title: "Actual replacement", description: "Proposal.", kind: "decision", supersedes: first.uuid, blocks: [{ type: "paragraph", text: "Replacement answer." }] });
+    const next = await rig.ok("create_doc", { description: "Proposal.", kind: "decision", supersedes: first.uuid, blocks: [{ type: "paragraph", text: "Replacement answer." }] });
     const conflictA = stub(rig, { title: "Conflict A", createdAt: 1, status: "decided", topic: first.uuid, supersedes: first.uuid, answerPreview: "Conflict answer A" });
     const conflictB = stub(rig, { title: "Conflict B", createdAt: 2, status: "decided", topic: first.uuid, supersedes: first.uuid, answerPreview: null });
 
     const topics = (await rig.ok("list_docs", { kind: "decision" })).docs;
     expect(topics).toMatchObject([{ uuid: next.uuid, answerPreview: "Replacement answer.", inForce: null, pending: [{ uuid: next.uuid, answerPreview: "Replacement answer." }], conflicts: [{ uuid: conflictA.uuid, answerPreview: "Conflict answer A" }, { uuid: conflictB.uuid, answerPreview: null }] }]);
     const records = (await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs;
+    for (const row of [...topics, ...records, ...topics[0].pending, ...topics[0].conflicts]) expect(row.title).toBe("Actual topic");
     expect(records.find((entry: any) => entry.uuid === first.uuid)).toMatchObject({ answerPreview: "First answer." });
     expect(records.find((entry: any) => entry.uuid === conflictB.uuid)).toMatchObject({ answerPreview: null });
     const readNext = await rig.ok("get_doc", { uuid: next.uuid });
