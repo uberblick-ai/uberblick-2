@@ -27,6 +27,7 @@ import { replicaPair, syncDocs } from "./helpers.js";
 
 const UUID = "11111111-1111-4111-8111-111111111111";
 const COMMIT = "a".repeat(40);
+const REV = "0123456789abcdef";
 const CHECK = { repository: "uberblick-ai/uberblick-2", commit: COMMIT, result: "matches" } as const;
 
 function seeded(): Y.Doc {
@@ -71,6 +72,50 @@ describe("document code checks", () => {
     null,
   ])("rejects a malformed or caller-stamped input %j", (value) => {
     expect(normalizeCodeCheck(value)).toBeNull();
+  });
+
+  it("stores the compared revision and deduplicated path hints while preserving legacy entries", () => {
+    const doc = seeded();
+    setCodeCheck(doc, { ...CHECK, rev: REV, paths: ["packages/schema/", "README.md", "packages/schema/"] });
+    expect(getMeta(doc).code_check?.[0]).toEqual({
+      ...CHECK, checked_at: expect.any(String), rev: REV, paths: ["packages/schema/", "README.md"],
+    });
+    setCodeCheck(doc, CHECK);
+    expect(getMeta(doc).code_check?.[0]).toEqual({ ...CHECK, checked_at: expect.any(String) });
+    doc.destroy();
+  });
+
+  it.each([undefined, ["a".repeat(200)], Array.from({ length: 20 }, (_, index) => `file-${index}`),
+    ["src/", "README.md", ".github/workflows/ci.yml", "file..txt", "dir/.../file"],
+  ])("accepts optional bounded repository paths %j", (paths) => {
+    expect(normalizeCodeCheck({ ...CHECK, rev: REV, paths })).not.toBeNull();
+  });
+
+  it.each([
+    [], [""], ["a".repeat(201)], Array.from({ length: 21 }, (_, index) => `file-${index}`),
+    ["/root/file"], [".."], ["../file"], ["dir/../file"], ["dir/.."], ["dir/../"],
+    ["dir/*"], ["dir/?"], ["dir/[name"], ["dir/name]"], ["dir/{name"], ["dir/name}"],
+    ["valid", 1], "src/", null,
+  ])("rejects invalid path hints %j", (paths) => {
+    expect(normalizeCodeCheck({ ...CHECK, rev: REV, paths })).toBeNull();
+  });
+
+  it.each(["", "abc", "g".repeat(16), "A".repeat(16), null, 1])("rejects invalid page revisions %j", (rev) => {
+    expect(normalizeCodeCheck({ ...CHECK, rev })).toBeNull();
+  });
+
+  it("keeps valid checks when foreign extensions are malformed or an older replica drops them", () => {
+    const doc = seeded();
+    const legacy = { ...CHECK, checked_at: "2026-01-01T00:00:00.000Z" };
+    getMetaMap(doc).set(`code-check:${CHECK.repository}`, { ...legacy, rev: REV, paths: ["src/"], future: true });
+    expect(getMeta(doc).code_check).toEqual([{ ...legacy, rev: REV, paths: ["src/"] }]);
+    getMetaMap(doc).set(`code-check:${CHECK.repository}`, { ...legacy, rev: "broken", paths: ["src/"] });
+    expect(getMeta(doc).code_check).toEqual([{ ...legacy, paths: ["src/"] }]);
+    getMetaMap(doc).set(`code-check:${CHECK.repository}`, { ...legacy, rev: REV, paths: ["../file"] });
+    expect(getMeta(doc).code_check).toEqual([{ ...legacy, rev: REV }]);
+    getMetaMap(doc).set(`code-check:${CHECK.repository}`, legacy);
+    expect(getMeta(doc).code_check).toEqual([legacy]);
+    doc.destroy();
   });
 
   it("preserves simultaneous first checks for different repositories after sync", () => {
@@ -136,9 +181,33 @@ describe("directory code-check cache", () => {
     for (const change of [
       { commit: "b".repeat(40) }, { result: "ahead" as const },
       { checked_at: "2026-01-01T00:00:00.000Z" }, { repository: "another/project" },
+      { rev: REV }, { paths: ["src/"] },
     ]) {
       expect(directoryStubDiffers(cached, getMeta(doc), { code_check: [{ ...check, ...change }] })).toBe(true);
     }
+    doc.destroy();
+    directory.destroy();
+  });
+
+  it("repairs extension-only changes and tolerates an older directory repair dropping them", () => {
+    const doc = seeded();
+    const directory = new Y.Doc();
+    const legacy = { ...CHECK, checked_at: "2026-01-01T00:00:00.000Z" };
+    for (const extension of [{ rev: REV }, { rev: "fedcba9876543210", paths: ["src/"] },
+      { rev: "fedcba9876543210", paths: ["src/", "README.md"] }, { paths: ["README.md"] }, {}]) {
+      getMetaMap(doc).set(`code-check:${CHECK.repository}`, { ...legacy, ...extension });
+      expect(directoryStubDiffers(getDirectoryEntry(directory, UUID), getMeta(doc), documentDirectoryFields(doc))).toBe(true);
+      upsertDirectoryEntry(directory, { uuid: UUID, title: "Code checks", ...documentDirectoryFields(doc) });
+      expect(listDirectory(directory)[0]?.code_check).toEqual([{ ...legacy, ...extension }]);
+      expect(directoryStubDiffers(getDirectoryEntry(directory, UUID), getMeta(doc), documentDirectoryFields(doc))).toBe(false);
+    }
+    getMetaMap(doc).set(`code-check:${CHECK.repository}`, { ...legacy, rev: REV, paths: ["src/"] });
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Code checks", ...documentDirectoryFields(doc) });
+    getDirectoryMap(directory).set(UUID, { title: "Code checks", tags: [], code_check: [legacy] });
+    expect(listDirectory(directory)[0]?.code_check).toEqual([legacy]);
+    expect(directoryStubDiffers(getDirectoryEntry(directory, UUID), getMeta(doc), documentDirectoryFields(doc))).toBe(true);
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Code checks", ...documentDirectoryFields(doc) });
+    expect(listDirectory(directory)[0]?.code_check).toEqual([{ ...legacy, rev: REV, paths: ["src/"] }]);
     doc.destroy();
     directory.destroy();
   });

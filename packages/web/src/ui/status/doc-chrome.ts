@@ -5,8 +5,10 @@
 
 import * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
-import { blockRev, getBlock, getBlocks, getBlocksFragment } from "@uberblick/schema";
+import { getBlocksFragment } from "@uberblick/schema";
 import { parseRemoteAwareness } from "../../collab/remote-awareness.js";
+
+export { observeDocRev } from "@uberblick/schema";
 
 /** What kind of session a peer is, as the session itself says. */
 export type SessionKind = "agent" | "human";
@@ -198,63 +200,4 @@ export function samePresence(
     a.length === b.length &&
     a.every((session, at) => sameSession(session, b[at] ?? null))
   );
-}
-
-/** The top-level block containing an event, or null for a fragment event. */
-function blockElementOf(
-  target: Y.AbstractType<unknown>,
-  fragment: Y.XmlFragment,
-): Y.XmlElement | null {
-  // Deep events name the changed type, including table cell text and rows.
-  // The cache owns the fragment's direct children, not those nested elements.
-  let current: Y.AbstractType<unknown> | null = target;
-  while (current !== null) {
-    if (current.parent === fragment) {
-      return current instanceof Y.XmlElement ? current : null;
-    }
-    current = current.parent;
-  }
-  return null;
-}
-
-/**
- * Fold visible block IDs and revisions as a change detector, so order and
- * splits matter without text edits. Seed with one document read, then cache
- * by element identity and reread only invalidated blocks: retyping preserves
- * IDs but replaces elements. Rebuild the cache during folding to drop
- * departed elements, and skip shadowed duplicates so hidden repairs cannot
- * change the visible revision.
- */
-export function observeDocRev(ydoc: Y.Doc, emit: (rev: string) => void): () => void {
-  const fragment = getBlocksFragment(ydoc);
-  let revs = new Map<Y.XmlElement, string>();
-
-  const fold = (seeded?: ReadonlyMap<string, string>): string => {
-    const next = new Map<Y.XmlElement, string>();
-    const lines: string[] = [];
-    for (const child of visibleBlocks(fragment)) {
-      const id = child.getAttribute("id") ?? "";
-      // A missing cache entry may be new, invalidated or retyped. getBlock
-      // supplies the schema read and excludes shadowed duplicates.
-      const rev = revs.get(child) ?? seeded?.get(id) ?? getBlock(ydoc, id)?.rev ?? "";
-      next.set(child, rev);
-      lines.push(`${id} ${rev}`);
-    }
-    revs = next;
-    return blockRev({ type: "paragraph", text: lines.join("\n") });
-  };
-
-  const onChange = (events: Array<Y.YEvent<Y.AbstractType<unknown>>>): void => {
-    for (const event of events) {
-      const element = blockElementOf(event.target, fragment);
-      if (element !== null) revs.delete(element);
-    }
-    emit(fold());
-  };
-
-  // The one whole-document pass, handed to the first fold so it costs a single
-  // read rather than a `getBlock` scan per block.
-  emit(fold(new Map(getBlocks(ydoc).map((block) => [block.id, block.rev]))));
-  fragment.observeDeep(onChange);
-  return () => fragment.unobserveDeep(onChange);
 }

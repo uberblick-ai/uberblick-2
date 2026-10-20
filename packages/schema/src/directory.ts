@@ -69,7 +69,10 @@ function sameCodeChecks(a: CodeCheck[] | undefined, b: CodeCheck[]): boolean {
   const checks = new Map(a.map((check) => [check.repository, check]));
   return b.every((check) => {
     const cached = checks.get(check.repository);
-    return cached?.commit === check.commit && cached.checked_at === check.checked_at && cached.result === check.result;
+    return cached?.commit === check.commit && cached.checked_at === check.checked_at && cached.result === check.result &&
+      cached.rev === check.rev && (cached.paths === undefined ? check.paths === undefined :
+        check.paths !== undefined && cached.paths.length === check.paths.length &&
+        cached.paths.every((path, index) => path === check.paths?.[index]));
   });
 }
 

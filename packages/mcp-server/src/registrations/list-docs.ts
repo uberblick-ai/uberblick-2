@@ -16,9 +16,8 @@ export function registerListDocs(server: ToolRegistrar, context: ToolContext): v
       "never permanently deleted UUIDs; it is no predicate. Filters combine; unknown tags refuse. " +
       "has_open_threads accepts only true (known openThreadCount >= 1); false refuses. Every entry, including " +
       "inForce/pending/conflicts, caches openThreadCount: threads not resolved, including deleted anchors; " +
-      "absent means unknown. A representative may have zero/unknown count. Use include_superseded with " +
-      "has_open_threads for every matching document, get_doc for threads, annotate to reply/resolve. Regular " +
-      "code_check cache: latest repository/commit/checked_at/result per repository, [] if never checked, absent " +
+      "absent means unknown. Use get_doc for threads, annotate to reply/resolve. Regular " +
+      "code_check cache: repository/commit/checked_at/result plus recorded rev/paths when known; paths are hints, not complete dependencies. No current page rev is cached. [] if never checked, absent " +
       "if uncached. Results: matches (agrees), ahead (intentionally undelivered), drift (unintended " +
       "disagreement); content edits preserve checks. Decisions omit code_check/TL;DR; answerPreview: first " +
       "answer paragraph/list or null; discussion: RFC UUID/null, apart from curated links/recorded answer; " +

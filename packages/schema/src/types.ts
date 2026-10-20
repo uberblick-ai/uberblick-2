@@ -192,6 +192,10 @@ export interface CodeCheck {
   /** UTC time recorded by the writing replica. */
   checked_at: string;
   result: "matches" | "ahead" | "drift";
+  /** Page content revision compared by the checker; absent on legacy entries. */
+  rev?: string;
+  /** Repository-relative hints, not a complete dependency list. */
+  paths?: string[];
 }
 
 export type CodeCheckInput = Omit<CodeCheck, "checked_at">;

@@ -81,7 +81,7 @@ describe("successful MCP output contracts", () => {
       title: "Link target", description: "The target of this fixture's links.",
     });
     const uuid = created.uuid;
-    await success("get_doc", { uuid });
+    const read = await success("get_doc", { uuid });
     await success("list_docs");
     await success("search", { query: "Output contract" });
     await success("find_decisions", { github_ref: "uberblick-ai/uberblick-2#1429" });
@@ -90,7 +90,7 @@ describe("successful MCP output contracts", () => {
       uuid, title: "Output contract renamed", description: "The renamed contract fixture.",
       tldr: "All advertised tool answers are checked.",
       tags: tags.tags.slice(0, 1).map((tag: { id: string }) => tag.id), links: [target.uuid],
-      code_check: { repository: "uberblick-ai/uberblick-2", commit: "a".repeat(40), result: "matches" },
+      code_check: { repository: "uberblick-ai/uberblick-2", commit: "a".repeat(40), result: "matches", rev: read.rev, paths: ["packages/schema/"] },
     });
     await success("set_status", { uuid: target.uuid, status: "open" });
     const edited = await success("edit_block", {
