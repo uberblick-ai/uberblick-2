@@ -157,6 +157,13 @@ A pointer is a route to the source, not a substitute for reading it.
   maintainer. Change a page to match the code only where delivered behavior
   changes or extends what it describes. When unsure which applies, ask a
   maintainer instead of editing.
+  For every corpus write by a delivery role or the technical audit, inspect
+  `applied` and `synced`, including per-room results when returned. Follow the
+  tool's recovery for refused or partial writes; local application alone is not
+  hub acknowledgement. Name every write returning `synced: false`, with its
+  operation, page title and UUID, in the run's PR evidence, handoff or audit
+  report. If `sync_status` confirms acknowledgement before the run ends, record
+  that resolution too; acknowledgement does not claim durable hub storage.
 
 When instructions come from a different checkout than the code being examined,
 identify both sources and revisions. Verify code and path claims at the stated

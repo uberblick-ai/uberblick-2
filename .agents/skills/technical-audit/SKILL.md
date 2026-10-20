@@ -94,8 +94,12 @@ Classify each material check:
 
 For each regular page whose described behavior you compared with code, record
 one `code_check` through `set_metadata`, with repository
-`uberblick-ai/uberblick-2`, the audited `origin/main` commit and the result of
-that comparison: `aligned` maps to `matches`, `corpus-ahead` to `ahead`, and
+`uberblick-ai/uberblick-2`, the audited `origin/main` commit, `rev` from the page
+read with `get_doc`, `paths` you looked at and the result of that comparison.
+Paths use 1–20 literal repo-relative entries, at most 200 characters each,
+trailing `/` for folders, no globs or `..` segments. If a revision is refused,
+read the page again with `get_doc` and compare again before retrying.
+`aligned` maps to `matches`, `corpus-ahead` to `ahead`, and
 `code-ahead` or `contradiction` to `drift`. A page's intentional, undelivered
 behavior is `ahead` even when its availability boundary is already clear.
 When a page has several checked claims, use `drift` if any unintentionally
@@ -105,6 +109,9 @@ result. The writing replica supplies `checked_at`. Keep the sampled claims,
 evidence and coverage limits in the report: the entry records that comparison,
 not exhaustive verification of the page. Never write code checks on decision
 records or alter corpus content or other metadata.
+Inspect every write's `applied` and `synced` results and name unsynced writes
+with their pages in the report under
+[AGENTS.md's Edit corpus rules](../../../AGENTS.md#read-for-the-action).
 
 Do not demand one-to-one documentation for internal mechanics. Report only a
 gap that could mislead a user or agent, hide an invariant, cause a wrong product
@@ -213,7 +220,8 @@ Lane coverage
 - <lane 1-6: scope; immutable code/test/corpus evidence; result; limits>
 
 Corpus ↔ code
-- <status> — <claim, implementation evidence, attributable merge, consequence>
+- <status> — <page title/UUID, page rev, paths looked at, sampled claims, implementation evidence, attributable merge, consequence, code_check result>
+- <unsynced write and page, including acknowledgement confirmed before run end> | None.
 
 Findings
 - <P1|P2|P3> <confidence> — <finding, evidence, consequence, correction, owner>
