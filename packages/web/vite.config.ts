@@ -15,16 +15,16 @@ import { fileURLToPath } from "node:url";
 const BUILD_STAMP = "uberblick-build.json";
 
 /** Resolve the retry URL through the bundler without preloading the renderer. */
-function wireframeRendererUrlPlugin(): Plugin {
-  const urlModule = fileURLToPath(new URL("./src/editor/wireframe-renderer-url.ts", import.meta.url));
+function diagramRendererUrlPlugin(language: "wireframe" | "ablauf"): Plugin {
+  const urlModule = fileURLToPath(new URL(`./src/editor/${language}-renderer-url.ts`, import.meta.url));
   return {
-    name: "uberblick:wireframe-renderer-url",
+    name: `uberblick:${language}-renderer-url`,
     apply: "build",
     async load(id) {
       if (id !== urlModule) return;
-      const renderer = await this.resolve("@uberblick/wireframe", urlModule);
-      if (renderer === null) throw new Error("Cannot resolve the wireframe renderer");
-      const reference = this.emitFile({ type: "chunk", id: renderer.id, name: "wireframe-renderer", preserveSignature: "strict" });
+      const renderer = await this.resolve(`@uberblick/${language}`, urlModule);
+      if (renderer === null) throw new Error(`Cannot resolve the ${language} renderer`);
+      const reference = this.emitFile({ type: "chunk", id: renderer.id, name: `${language}-renderer`, preserveSignature: "strict" });
       return `export default import.meta.ROLLUP_FILE_URL_${reference};`;
     },
   };
@@ -72,7 +72,7 @@ export default defineConfig(async (): Promise<UserConfig> => {
     // Omit Tailwind preflight to preserve editor and unmigrated control defaults.
     // Editor content remains plain CSS; see src/ui/tailwind.css.
     // The entry imports React's module preamble; its inline HTML preamble is blocked by script-src.
-    plugins: [tailwindcss(), react().map((plugin) => ({ ...plugin, transformIndexHtml: undefined })), ...(dev === null ? [] : [dev.devConfigDocumentPlugin()]), buildStampPlugin(webPolicy.WEB_CONTENT_SECURITY_POLICY), wireframeRendererUrlPlugin()],
+    plugins: [tailwindcss(), react().map((plugin) => ({ ...plugin, transformIndexHtml: undefined })), ...(dev === null ? [] : [dev.devConfigDocumentPlugin()]), buildStampPlugin(webPolicy.WEB_CONTENT_SECURITY_POLICY), diagramRendererUrlPlugin("wireframe"), diagramRendererUrlPlugin("ablauf")],
     define: {
       __RUNTIME_CONFIG_ONLY__: JSON.stringify(runtimeConfigOnly),
       __HUB_URL__: JSON.stringify(config?.hubUrl ?? ""),

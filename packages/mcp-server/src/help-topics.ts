@@ -142,6 +142,8 @@ Stored Mermaid blocks are deleted automatically, including in archived documents
 
 A \`\`\`\` \`\`\`wireframe \`\`\`\` fence is an ordinary code block that the web editor draws as a wireframe.
 
+An \`ablauf\` fence is an ordinary code block that the web editor draws as a diagram. It supports \`flow v0\` and \`fan-out v0\`; see the [Ablauf authoring primer](https://github.com/uberblick-ai/ablauf/blob/main/spike/PRIMER.md). Import, export and MCP preserve its literal source.
+
 Prose supports \`**bold**\`, \`*italic*\`, \`~~strikethrough~~\`, inline code, \`[label](https://example.com)\` and \`[label](document-uuid)\` document links. Underscore emphasis (\`__bold__\` and \`_italic_\`) is also read; export uses asterisks. Source blocks keep literal text. Tables read inline Markdown inside cells and escape literal punctuation and pipes. Alignment markers are accepted but not stored. Table rows are projected to the widest row with virtual empty padding.
 
 ### Inline icons

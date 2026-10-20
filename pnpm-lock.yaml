@@ -213,6 +213,9 @@ importers:
       '@tiptap/pm':
         specifier: ^3.30.5
         version: 3.30.5
+      '@uberblick/ablauf':
+        specifier: ^0.2.0
+        version: 0.2.0
       '@uberblick/hub':
         specifier: workspace:*
         version: link:../hub
@@ -1415,6 +1418,10 @@ packages:
 
   '@types/unist@3.0.3':
     resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
+
+  '@uberblick/ablauf@0.2.0':
+    resolution: {integrity: sha512-cO3bcnKF8kyJVcHjyiGO1AD+tlTJs5pzKRa1+/EUD7Xo/amLgOYzecpaLkupAZF3st9t4QssxujVt8ked2AauQ==}
+    engines: {node: '>=22.18'}
 
   '@uberblick/wireframe@0.3.0':
     resolution: {integrity: sha512-eCccUU0iw/WoK0R4vToGPhP6FUkCJ3ItpQXUG8Lt6qNwjizJxg5sK4wuPN+blHJsLfOyfrV1z2skMQFXLebpnQ==}
@@ -3496,6 +3503,8 @@ snapshots:
       csstype: 3.2.3
 
   '@types/unist@3.0.3': {}
+
+  '@uberblick/ablauf@0.2.0': {}
 
   '@uberblick/wireframe@0.3.0': {}
 

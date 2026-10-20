@@ -10,7 +10,7 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { common, createLowlight } from "lowlight";
 
 const highlighter = createLowlight();
-const displayNames = new Map<string, string>([["wireframe", "Wireframe"]]);
+const displayNames = new Map<string, string>([["wireframe", "Wireframe"], ["ablauf", "Ablauf"]]);
 
 // Read names and aliases as the existing grammars register with Lowlight.
 for (const [id, grammar] of Object.entries(common)) {
