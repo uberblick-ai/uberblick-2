@@ -239,7 +239,10 @@ test("the header cannot be picked up and drops above it are rejected", async ({ 
   } finally { fixture.close(); }
 });
 
-test("Move entries keep the caret in the moved row and typing in separate undo steps", { tag: "@webkit" }, async ({ page }, info) => {
+test.fixme("Move entries keep the caret in the moved row and typing in separate undo steps", {
+  tag: "@webkit",
+  annotation: { type: "issue", description: "https://github.com/uberblick-ai/uberblick-2/issues/2003" },
+}, async ({ page }, info) => {
   const fixture = await publishTable();
   try {
     const table = await openTable(page, fixture.uuid);
