@@ -16,6 +16,8 @@ stylesheets, the fonts and the Pages _headers file.
 
 The sidebar marks the page whose path matches the link; the top bar shows the
 newest release tag when git can name one (a shallow checkout shows none).
+A page's <!-- recent changes --> line becomes the five newest releases from
+the repository's CHANGELOG.md: each section's date and summary paragraph.
 
 Links inside the site are root-relative (/compare, /css/landing.css), so the
 output is meant to be served, not opened as files:
@@ -27,11 +29,12 @@ so a second Pages project can serve the same pages on another host; SITE_NOINDEX
 set to anything, adds a robots noindex meta tag for a host that search engines
 should not index.
 """
-import os, re, shutil, subprocess, sys
+import html, os, re, shutil, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PAGES, STATIC, OUT = ROOT / 'pages', ROOT / 'static', ROOT / 'out'
+CHANGELOG, RECENT = ROOT.parent / 'CHANGELOG.md', '<!-- recent changes -->'
 SITE = os.environ.get('SITE_URL', 'https://uberblick.ai').rstrip('/')
 NOINDEX = '<meta name="robots" content="noindex">\n' if os.environ.get('SITE_NOINDEX') else ''
 
@@ -73,7 +76,7 @@ SKELETON = """<!doctype html>
       <div class="cols">
         <div><h3>Docs</h3><ul><li><a href="/docs/install">Install and update</a></li><li><a href="/docs/workspaces">Workspaces</a></li><li><a href="/docs/editor">The editor</a></li><li><a href="/docs/hub">Run a hub</a></li><li><a href="/docs/cli">CLI reference</a></li></ul></div>
         <div><h3>Agents</h3><ul><li><a href="/docs/agents">Agents over MCP</a></li><li><a href="/docs/mcp">MCP reference</a></li><li><a href="/docs/decisions">Decisions</a></li><li><a href="https://agents.uberblick.ai">ub-agents</a></li><li><a href="https://skills.uberblick.ai">Skills</a></li></ul></div>
-        <div><h3>Project</h3><ul><li><a href="https://github.com/uberblick-ai/uberblick-2">GitHub</a></li><li><a href="https://github.com/uberblick-ai/uberblick-2/tags">Releases</a></li><li><a href="https://github.com/uberblick-ai/homebrew-tap">Homebrew tap</a></li><li><a href="https://github.com/uberblick-ai/uberblick-2/blob/main/SECURITY.md">Security</a></li><li><a href="/compare">Compare</a></li></ul></div>
+        <div><h3>Project</h3><ul><li><a href="https://github.com/uberblick-ai/uberblick-2">GitHub</a></li><li><a href="https://github.com/uberblick-ai/uberblick-2/blob/main/CHANGELOG.md">Changelog</a></li><li><a href="https://github.com/uberblick-ai/homebrew-tap">Homebrew tap</a></li><li><a href="https://github.com/uberblick-ai/uberblick-2/blob/main/SECURITY.md">Security</a></li><li><a href="/compare">Compare</a></li></ul></div>
       </div>
     </section>
   </main>
@@ -81,7 +84,7 @@ SKELETON = """<!doctype html>
 <footer class="foot">
   <span>MIT license</span>
   <a href="https://github.com/uberblick-ai/uberblick-2">Source</a>
-  <a href="https://github.com/uberblick-ai/uberblick-2/tags">Releases</a>
+  <a href="https://github.com/uberblick-ai/uberblick-2/blob/main/CHANGELOG.md">Changelog</a>
   <a href="https://github.com/uberblick-ai/homebrew-tap">Homebrew tap</a>
   <a href="https://github.com/uberblick-ai/uberblick-2/blob/main/SECURITY.md">Security</a>
   <a href="https://agents.uberblick.ai">ub-agents</a>
@@ -132,6 +135,17 @@ def version():
     return f'<a class="count" href="https://github.com/uberblick-ai/uberblick-2/releases/tag/{tag}">{tag}</a>\n  '
 
 
+def recent(count=5):
+    sections = re.findall(r'^## (v\S+) — (\d{4}-\d{2}-\d{2})\n\n(.+?)\n\n', CHANGELOG.read_text(), re.M | re.S)
+    if len(sections) < count:
+        sys.exit(f'CHANGELOG.md: expected {count} "## vX.Y.Z — YYYY-MM-DD" sections with a summary paragraph, found {len(sections)}')
+    items = []
+    for tag, date, summary in sections[:count]:
+        text = re.sub(r'`([^`]+)`', r'<code>\1</code>', html.escape(' '.join(summary.split()), quote=False))
+        items.append(f'<li><time>{date}</time><span class="tag">Release</span><span>{tag}: {text}</span></li>')
+    return '\n  '.join(items)
+
+
 def sidebar(path):
     def link(href, label):
         on = ' class="on"' if href == path else ''
@@ -177,6 +191,8 @@ def main():
     for page in sorted(PAGES.rglob('*.html')):
         name = page.relative_to(ROOT).as_posix()
         head, body = split(page.read_text(), name)
+        if RECENT in body:
+            body = body.replace(RECENT, recent())
         path, target = route(page)
         canonical = '' if path == '/404' else f'<link rel="canonical" href="{SITE}{path}">\n'
         target.parent.mkdir(parents=True, exist_ok=True)
