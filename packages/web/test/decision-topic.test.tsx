@@ -2,9 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
+import type { MouseEvent } from "react";
 import * as Y from "yjs";
 import {
   appendBlock,
+  archiveDecisionRecord,
   createAnnotation,
   createGroup,
   decisionDirectoryFields,
@@ -25,6 +27,7 @@ import {
   setStatus,
   sidebarRoom,
   tombstoneDirectoryEntry,
+  restoreDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DecisionStatus } from "@uberblick/schema";
@@ -33,6 +36,8 @@ import * as guardedBinding from "../src/editor/guarded-binding.js";
 import { act, renderSettled } from "./react-render.js";
 import { decisionRecordPath, docPath } from "../src/ui/route.js";
 import { DecisionTopicPane } from "../src/ui/document/DecisionTopicPane.js";
+import { createDocLinkContext } from "../src/editor/doc-links.js";
+import { toast, type Action, type ExternalToast } from "sonner";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const FIRST = "d4ee98ac-9a9c-4a81-a68d-d8ecc09ca509";
@@ -939,6 +944,78 @@ describe("decision topic navigation and history", () => {
     expect(host.querySelector(".ub-thread-actions")).toBeNull();
     await choose(host, OPEN);
     expect(host.querySelector(".ub-decision-rfc")?.textContent).toBe("RFC Proposal discussion");
+  });
+
+  it("keeps an archived first answer separate from the live topic address and restores it in place", async () => {
+    story();
+    const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
+    const group = createGroup(sidebar, "Decisions");
+    pinDoc(sidebar, group, FIRST);
+    expect(archiveDecisionRecord(directory(), sidebar, FIRST)).toBe(true);
+    expect(readSidebar(sidebar)[0]?.docs).toContain(FIRST);
+    const links = createDocLinkContext({ directory: directory(), href: (id) => docPath(WORKSPACE, id), open: () => {} });
+    expect(links.lookup(FIRST).state).toBe("resolved");
+    const view = await open();
+    expect(answer(view.container).textContent).toContain("Use the current answer.");
+    expect(view.container.querySelector(".ub-archived-banner")).toBeNull();
+    expect(timeline(view.container).querySelector(`li[data-record="${FIRST}"]`)).toBeNull();
+    view.unmount();
+    const archivedView = await open(decisionRecordPath(WORKSPACE, FIRST, FIRST));
+    const host = archivedView.container;
+    expect(answer(host).textContent).toContain("Keep the original answer.");
+    expect(host.querySelector(".ub-archived-banner")).not.toBeNull();
+    expect(host.querySelector(".ub-thread-actions")).toBeNull();
+    expect(timeline(host).querySelector(`li[data-record="${FIRST}"]`)).toBeNull();
+    const clipboard = copiedUrls();
+    await copy(host);
+    expect(new URL(clipboard.mock.calls[0]?.[0] as string).pathname).toBe(decisionRecordPath(WORKSPACE, FIRST, FIRST));
+    await act(async () => within(host).getByRole("button", { name: "Restore" }).click());
+    expect(host.querySelector(".ub-archived-banner")).toBeNull();
+    expect(selection(host)).toBe(FIRST);
+    expect([...timeline(host).querySelectorAll("li")].at(-1)?.getAttribute("data-record")).toBe(FIRST);
+  });
+
+  it("archives an open proposal through the menu, selects the current answer, and undoes it", async () => {
+    story();
+    const success = vi.spyOn(toast, "success").mockReturnValue("record-archive");
+    const host = (await open(decisionRecordPath(WORKSPACE, FIRST, OPEN))).container;
+    await act(async () => fireEvent.keyDown(within(host).getByRole("button", { name: "Document actions" }), { key: "Enter" }));
+    await act(async () => screen.getByRole("menuitem", { name: "Archive this record" }).click());
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog.textContent).toContain("It leaves this topic's history. Links to it show it as archived, and you can restore it from there.");
+    await act(async () => within(dialog).getByRole("button", { name: "Archive" }).click());
+    expect(window.location.pathname).toBe(docPath(WORKSPACE, FIRST));
+    expect(selection(host)).toBe(CURRENT);
+    expect(timeline(host).querySelector(`li[data-record="${OPEN}"]`)).toBeNull();
+    expect(host.querySelector(".ub-decision-notice")?.textContent ?? "").not.toContain("Under review");
+    expect(resolveDecisionTopics(directory())[0]?.pending).toHaveLength(0);
+    const notice = success.mock.calls[0]?.[1] as ExternalToast & { action: Action };
+    await act(async () => notice.action.onClick({ preventDefault() {} } as MouseEvent<HTMLButtonElement>));
+    expect(item(host, OPEN)).not.toBeNull();
+    expect(resolveDecisionTopics(directory())[0]?.pending.map((record) => record.uuid)).toEqual([OPEN]);
+    await choose(host, CURRENT);
+    await act(async () => fireEvent.keyDown(within(host).getByRole("button", { name: "Document actions" }), { key: "Enter" }));
+    expect(screen.getByRole("menuitem", { name: "Archive this record unavailable — it is the decision in force" }).getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("restores a topic before its independently archived answer", async () => {
+    story();
+    archiveDecisionRecord(directory(), room(sidebarRoom(WORKSPACE)).ydoc, REJECTED);
+    const host = (await open(docPath(WORKSPACE, REJECTED))).container;
+    expect(answer(host).textContent).toContain("Use the rejected alternative.");
+    const clipboard = copiedUrls();
+    await copy(host);
+    expect(new URL(clipboard.mock.calls[0]?.[0] as string).pathname).toBe(decisionRecordPath(WORKSPACE, FIRST, REJECTED));
+    await act(async () => tombstoneDirectoryEntry(directory(), CURRENT));
+    expect(host.querySelector(".ub-archived-banner")).not.toBeNull();
+    await act(async () => within(host).getByRole("button", { name: "Restore" }).click());
+    expect(resolveDecisionTopics(directory())[0]?.archived).toBe(false);
+    expect(host.querySelector(".ub-archived-banner")).not.toBeNull();
+    expect(timeline(host).querySelector(`li[data-record="${REJECTED}"]`)).toBeNull();
+    await act(async () => restoreDirectoryEntry(directory(), REJECTED));
+    expect(host.querySelector(".ub-archived-banner")).toBeNull();
+    expect(selection(host)).toBe(REJECTED);
+    expectAnswerState(host, "Rejected");
   });
 
   it("shows only the selected record's RFC directly between its answer and History", async () => {

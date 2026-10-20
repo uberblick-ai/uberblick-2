@@ -307,7 +307,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(banner(host)).toBeNull();
     expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
     openActions(host);
-    act(() => action("Archive document")?.click());
+    act(() => action("Archive topic")?.click());
     act(() => screen.getByRole("button", { name: /^Archive$/ }).click());
     expect(getDirectoryEntry(directory, OTHER)?.deleted).toBe(true);
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);

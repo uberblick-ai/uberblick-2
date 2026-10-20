@@ -15,6 +15,7 @@ import type { ComponentProps, ReactElement } from "react";
 import {
   appendBlock,
   archiveDocument,
+  archiveDecisionRecord,
   decisionDirectoryFields,
   decisionCurrentRecord,
   decisionTopicArchived,
@@ -23,6 +24,7 @@ import {
   getMeta,
   initDoc,
   isDirectoryEntryDeleted,
+  isDirectoryEntryArchived,
   parseRoom,
   readSidebar,
   relatedDecisionTopics,
@@ -191,6 +193,9 @@ export function RoutePane({
   pinned = false,
   onTogglePin = null,
   onArchive = null,
+  onArchiveRecord = null,
+  showArchiveRecord = false,
+  archiveRecordUnavailable = null,
   onArchiveConfirmationFocusChange,
   focusRestore = false,
   onRestoreFocused,
@@ -251,6 +256,9 @@ export function RoutePane({
   pinned?: boolean;
   onTogglePin?: (() => void) | null;
   onArchive?: (() => void) | null;
+  onArchiveRecord?: (() => void) | null;
+  showArchiveRecord?: boolean;
+  archiveRecordUnavailable?: string | null;
   /** Track focus that should survive a remote archive closing its confirmation. */
   onArchiveConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
   /** A local confirmed archive moves focus to the surviving Restore action. */
@@ -362,6 +370,7 @@ export function RoutePane({
     connection, segment: route.workspace.segment, presence, endpoint,
     hubAcked, rawHubAcked, sampledAt, notSharedReason, author, catalogConnection, archived, updatedAt,
     onLastUpdatedChange, docLinks, pinned, onTogglePin, onArchive,
+    onArchiveRecord, showArchiveRecord, archiveRecordUnavailable,
     onArchiveConfirmationFocusChange, focusRestore, onRestoreFocused, onRestore,
     onSelectThread, threads, threadsOpen, onToggleThreads, syncDetails,
   };
@@ -593,12 +602,13 @@ export function App(): ReactElement {
   const topic = route.kind === "decision"
     ? topics.find((candidate) => candidate.topic === route.topic) ?? null
     : route.kind === "doc"
-      ? topics.find((candidate) => candidate.records.some((record) => record.uuid === route.uuid)) ?? null
+      ? topics.find((candidate) => candidate.allRecords.some((record) => record.uuid === route.uuid)) ?? null
       : null;
   const candidateSelection = directory === null ? null : topic === null ? (route.kind === "decision" ? null : routedSelection)
     : route.kind === "decision"
-      ? topic.records.find((record) => record.uuid === route.record)?.uuid ?? null
-      : decisionCurrentRecord(topic)?.uuid ?? null;
+      ? topic.allRecords.find((record) => record.uuid === route.record)?.uuid ?? null
+      : route.kind === "doc" && route.uuid !== topic.topic && topic.archivedRecords.some((record) => record.uuid === route.uuid)
+        ? route.uuid : decisionCurrentRecord(topic)?.uuid ?? null;
   const selected = directory !== null && candidateSelection !== null &&
     isDirectoryEntryDeleted(directory.ydoc, candidateSelection)
     ? null : candidateSelection;
@@ -662,7 +672,8 @@ export function App(): ReactElement {
   }, [alterDecision, navigate]);
   /** Read the same synced sidebar document used by browser and MCP readers. */
   const sidebarGroups = useSidebar(sidebar);
-  const pinTargets = topic?.records.map((record) => record.uuid) ?? (selected === null ? [] : [selected]);
+  const pinTargets = topic === null ? (selected === null ? [] : [selected])
+    : [topic.topic, ...topic.records.map((record) => record.uuid)];
   const pinnedRecords = sidebarGroups.flatMap((group) => group.docs).filter((uuid) => pinTargets.includes(uuid));
   const pinned = pinnedRecords.length > 0;
   const sidebarSelection = topic === null || (routedSelection !== null && pinnedRecords.includes(routedSelection))
@@ -777,7 +788,7 @@ export function App(): ReactElement {
 
   // Re-read room state at activation; require a synced writable sidebar
   // so the archive uses the current pin state.
-  const onArchive = useCallback(() => {
+  const onArchive = useCallback((recordOnly = false) => {
     if (
       directory === null ||
       doc === null ||
@@ -791,8 +802,13 @@ export function App(): ReactElement {
     }
     const entry = getDirectoryEntry(directory.ydoc, selected);
     if (entry === null || decisionTopicArchived(directory.ydoc, selected)) return;
-    restoreFocusRoom.current = doc.room;
-    archiveDocument(directory.ydoc, sidebar.ydoc, selected);
+    if (recordOnly) {
+      if (!archiveDecisionRecord(directory.ydoc, sidebar.ydoc, selected)) return;
+      if (workspace !== null && entry.kind === "decision") navigate(docPath(workspace.segment, entry.topic ?? entry.uuid));
+    } else {
+      restoreFocusRoom.current = doc.room;
+      archiveDocument(directory.ydoc, sidebar.ydoc, selected);
+    }
     const uuid = selected;
     const title = getMeta(doc.ydoc).title || "Untitled";
     // Keep the original directory alive while Undo is offered, including
@@ -813,7 +829,7 @@ export function App(): ReactElement {
         label: "Undo",
         onClick: (event) => {
           try {
-            if (closed || !decisionTopicArchived(held.connection.ydoc, uuid)) return;
+            if (closed || !isDirectoryEntryArchived(held.connection.ydoc, uuid)) return;
             if (!held.connection.status.writable) {
               // Keep the replacement visible after Sonner finishes this action.
               event.preventDefault();
@@ -831,7 +847,7 @@ export function App(): ReactElement {
         },
       },
     });
-  }, [directory, doc, sidebar, selected, defaultIdentity]);
+  }, [directory, doc, sidebar, selected, defaultIdentity, workspace, navigate]);
 
   /**
    * Canonicalize the default route, trailing slash and document UUID case
@@ -877,7 +893,7 @@ export function App(): ReactElement {
       }
       const target = topics.find((candidate) => candidate.topic === uuid);
       const pins = readSidebar(sidebar.ydoc).flatMap((group) => group.docs)
-        .filter((pinnedUuid) => target?.records.some((record) => record.uuid === pinnedUuid));
+        .filter((pinnedUuid) => target?.topic === pinnedUuid || target?.records.some((record) => record.uuid === pinnedUuid));
       if (pins.length === 0) togglePin(sidebar.ydoc, uuid);
       else sidebar.ydoc.transact(() => {
         for (const pinnedUuid of pins) unpinDoc(sidebar.ydoc, pinnedUuid);
@@ -1231,6 +1247,13 @@ export function App(): ReactElement {
                   ? onArchive
                   : null
               }
+              showArchiveRecord={topic !== null && topic.records.length >= 2}
+              archiveRecordUnavailable={topic?.inForce?.uuid === selected
+                ? "Archive this record unavailable — it is the decision in force"
+                : topic?.conflicts.some((record) => record.uuid === selected)
+                  ? "Archive this record unavailable — it is a conflicting answer" : null}
+              onArchiveRecord={!archived && directoryStatus.writable && sidebarStatus.writable && sidebarStatus.synced
+                ? () => onArchive(true) : null}
               onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
               focusRestore={
                 doc !== null &&

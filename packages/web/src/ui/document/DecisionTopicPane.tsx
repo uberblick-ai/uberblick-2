@@ -114,9 +114,9 @@ function TopicNotice({ topic, state: selectedState, selectedInForce, docLinks }:
 }
 
 function replacementRecord(topic: DecisionTopicResolution, selected: string): DirectoryEntry | undefined {
-  const byId = new Map(topic.records.map((record) => [record.uuid, record]));
+  const byId = new Map(topic.allRecords.map((record) => [record.uuid, record]));
   // Records are oldest first; a missing first replacement date must not fall through to a later answer.
-  return topic.records.find((record) => {
+  return topic.allRecords.find((record) => {
     if (record.status !== "decided" || record.uuid === selected) return false;
     const visited = new Set<string>([record.uuid]);
     let next = record.supersedes;
@@ -256,7 +256,7 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
   const directoryStatus = useRoomStatus(directoryConnection);
   if (topic === null || selected === null) return <EditorPane {...editorProps} />;
   const current = decisionCurrentRecord(topic);
-  const record = topic.records.find((entry) => entry.uuid === selected);
+  const record = topic.allRecords.find((entry) => entry.uuid === selected);
   if (current === null || record === undefined) throw new Error("Decision selection must belong to its topic");
   const { segment, docLinks, connection } = editorProps;
   const history = topic.inForce?.uuid !== selected;
@@ -265,8 +265,10 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
   const discussionTitle = !record.discussion || directoryConnection === null ? undefined
     : getDirectoryEntry(directoryConnection.ydoc, record.discussion)?.title || undefined;
   return <EditorPane {...editorProps}
+    isDecisionTopic
     decisionView
-    copyPath={explicit ? decisionRecordPath(segment, topic.topic, selected) : topicPath}
+    copyPath={explicit || (linkedRecord === selected && record.recordArchived === true)
+      ? decisionRecordPath(segment, topic.topic, selected) : topicPath}
     header={<TopicTitle topic={topic} current={current} selected={selected} connection={connection}
       directoryConnection={directoryConnection} archived={editorProps.archived} />}
     beforeAnswer={<>

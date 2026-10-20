@@ -535,6 +535,57 @@ for (const { touch, appearance } of [
   { touch: false, appearance: "light" }, { touch: false, appearance: "dark" },
   { touch: true, appearance: "light" }, { touch: true, appearance: "dark" },
 ] as const) {
+  test(`decision record archive and restore preserve the topic on ${touch ? "iPad touch @webkit-touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
+    const writer = session();
+    const first = await create(writer, "Record archive topic", "Original answer to retain.", { kind: "decision", status: "decided" });
+    const current = await create(writer, "Record archive topic", "Current answer stays in force.", {
+      kind: "decision", status: "decided", supersedes: first.uuid, answer: answer(),
+    });
+    const proposal = await create(writer, "Record archive topic", "An open replacement proposal.", {
+      kind: "decision", supersedes: current.uuid,
+    });
+    const page = await openApp(browser, `/${harness().workspace}/${first.uuid}`, {
+      upstream: true,
+      contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1440, height: 1000 } }), colorScheme: appearance },
+    });
+    await selected(page, current.uuid, answerText(current));
+    const actions = page.getByRole("button", { name: "Document actions", exact: true });
+    await activateControl(actions, { touch });
+    await expect(page.getByRole("menuitem", { name: "Archive this record unavailable — it is the decision in force", exact: true })).toHaveAttribute("aria-disabled", "true");
+    await expect(page.getByRole("menuitem", { name: "Archive topic", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await activateControl(entry(page, first.uuid).locator(".ub-decision-record"), { touch });
+    await activateControl(actions, { touch });
+    const archiveItem = page.getByRole("menuitem", { name: "Archive this record", exact: true });
+    if (touch) await activateControl(archiveItem, { touch });
+    else { await archiveItem.focus(); await page.keyboard.press("Enter"); }
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog.getByRole("heading", { name: "Archive this record?", exact: true })).toBeVisible();
+    await expect(dialog).toContainText("It leaves this topic's history. Links to it show it as archived, and you can restore it from there.");
+    await activateControl(dialog.getByRole("button", { name: "Archive", exact: true }), { touch });
+    await selected(page, current.uuid, answerText(current));
+    await expect(entry(page, first.uuid)).toHaveCount(0);
+    await expect(page.locator(".ub-archived-banner")).toHaveCount(0);
+    await activateControl(page.getByRole("button", { name: "Undo", exact: true }), { touch });
+    await expect(entry(page, first.uuid)).toHaveCount(1);
+    await activateControl(entry(page, proposal.uuid).locator(".ub-decision-record"), { touch });
+    await activateControl(actions, { touch });
+    await activateControl(page.getByRole("menuitem", { name: "Archive this record", exact: true }), { touch });
+    await activateControl(dialog.getByRole("button", { name: "Archive", exact: true }), { touch });
+    await selected(page, current.uuid, answerText(current));
+    await expect(page.locator(".ub-decision-notice")).toHaveCount(0);
+    await expectMcp(() => writer.call<{ docs: { uuid: string }[] }>("list_docs", { kind: "decision", include_superseded: true }), result => {
+      expect(result.docs.some(record => record.uuid === proposal.uuid)).toBe(false);
+    });
+    await page.goto(new URL(`/${harness().workspace}/${first.uuid}/record/${proposal.uuid}`, page.url()).href);
+    await expect(editor(page)).toHaveText(answerText(proposal));
+    await expect(page.locator(".ub-archived-banner")).toBeVisible();
+    await expect(entry(page, proposal.uuid)).toHaveCount(0);
+    await activateControl(page.getByRole("button", { name: "Restore", exact: true }), { touch });
+    await selected(page, proposal.uuid, answerText(proposal));
+    await expect(page.locator(".ub-archived-banner")).toHaveCount(0);
+  });
+
   test(`decision title control stays editable only on the current record on ${touch ? "iPad touch @webkit-touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
     const writer = session();
     const first = await create(writer, "Original title control question", "Earlier answer.", { kind: "decision", status: "decided" });

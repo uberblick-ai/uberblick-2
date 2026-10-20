@@ -37,7 +37,7 @@ export {
 } from "./decision-answer.js";
 export type { DecisionAnswerFailure, DecisionAnswerShapeFailure } from "./decision-answer.js";
 export { decisionApprovalChanged, decisionApprovalFingerprint } from "./approval.js";
-export { archiveDocument } from "./lifecycle.js";
+export { archiveDecisionRecord, archiveDocument } from "./lifecycle.js";
 
 export {
   appendBlock,
@@ -179,6 +179,7 @@ export {
 export {
   DIRECTORY_DOCS_KEY,
   DIRECTORY_DELETED_KEY,
+  DIRECTORY_ARCHIVED_RECORDS_KEY,
   deleteDirectoryEntry,
   enforceDeletedDirectoryEntries,
   decisionDirectoryFields,
@@ -187,10 +188,12 @@ export {
   documentDirectoryFields,
   getDirectoryEntry,
   getDirectoryMap,
+  isDirectoryEntryArchived,
   isDirectoryEntryDeleted,
   listDeletedDirectoryUuids,
   listDirectory,
   restoreDirectoryEntry,
+  tombstoneDecisionRecord,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "./directory.js";

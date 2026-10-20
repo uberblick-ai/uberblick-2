@@ -11,7 +11,7 @@
  */
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { pinDoc, setTags, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
+import { DIRECTORY_ARCHIVED_RECORDS_KEY, getMetaMap, pinDoc, setTags, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
 import { WORKSPACE, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 import { MirrorStore } from "../src/store.js";
@@ -685,5 +685,144 @@ describe("restore_doc", () => {
       openThreadCount: 0,
       code_check: [],
     });
+  });
+});
+
+describe("individual decision record archives", () => {
+  const answer = { who: "A person", when: "2026-10-04T12:00:00Z", where: "A recorded team discussion." };
+
+  async function record(rig: Rig, fields: Record<string, unknown> = {}) {
+    return rig.ok("create_doc", {
+      title: "Archive question", description: "A decision archive test.", kind: "decision",
+      blocks: [{ type: "paragraph", text: "An archiveworthy answer." }], ...fields,
+    });
+  }
+
+  it("hides a record, refuses content, comments and lifecycle writes, and restores it", async () => {
+    const rig = await localRig();
+    const first = await record(rig, { status: "decided" });
+    const proposal = await record(rig, { supersedes: first.uuid });
+    const thread = await rig.ok("annotate", {
+      uuid: proposal.uuid, block_id: proposal.blocks[0].id, start: 0, end: 2, text: "Retain this comment.",
+    });
+    const directory = rig.instance.replicas.directory().doc;
+    directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).set(proposal.uuid, true);
+
+    expect(rig.instance.store.isIndexed(proposal.uuid)).toBe(false);
+    expect((await rig.ok("search", { query: "archiveworthy" })).hits.map((hit: any) => hit.uuid)).toEqual([first.uuid]);
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([
+      { uuid: first.uuid, inForce: { uuid: first.uuid }, pending: [] },
+    ]);
+    expect((await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs.map((entry: any) => entry.uuid)).toEqual([first.uuid]);
+    expect((await rig.ok("list_docs", { kind: "decision", include_superseded: true, include_deleted: true })).docs)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ uuid: proposal.uuid, deleted: true })]));
+    const read = await rig.ok("get_doc", { uuid: proposal.uuid });
+    expect(read.blocks[0].text).toBe("An archiveworthy answer.");
+    expect(read.annotations).toHaveLength(1);
+    const before = Y.encodeStateAsUpdate(rig.instance.replicas.replica(proposal.uuid).doc);
+    for (const [tool, args] of [
+      ["edit_block", { uuid: proposal.uuid, block_id: proposal.blocks[0].id, old_text: "An archiveworthy answer.", new_text: "Changed" }],
+      ["set_metadata", { uuid: proposal.uuid, description: "Changed" }],
+      ["annotate", { uuid: proposal.uuid, thread_id: thread.annotation.id, text: "Changed", resolved: true }],
+      ["set_status", { uuid: proposal.uuid, status: "decided", answer }],
+    ] as const) {
+      expect((await rig.call(tool, args)).payload).toMatchObject({ error: "doc_archived", uuid: proposal.uuid, applied: false });
+    }
+    expect(Y.encodeStateAsUpdate(rig.instance.replicas.replica(proposal.uuid).doc)).toEqual(before);
+    expect(await rig.ok("restore_doc", { uuid: proposal.uuid })).toMatchObject({ records: [proposal.uuid], archived: false, indexed: true });
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ pending: [{ uuid: proposal.uuid }] }]);
+    expect((await rig.ok("search", { query: "archiveworthy" })).hits.map((hit: any) => hit.uuid).sort()).toEqual([first.uuid, proposal.uuid].sort());
+    expect((await rig.ok("set_status", { uuid: proposal.uuid, status: "withdrawn" })).applied).toBe(true);
+  });
+
+  it("restores a topic before a record and keeps the first UUID usable as a live pin", async () => {
+    const rig = await localRig();
+    const first = await record(rig, { status: "decided" });
+    const middle = await record(rig, { supersedes: first.uuid, status: "decided", answer });
+    const current = await record(rig, { supersedes: middle.uuid, status: "decided", answer });
+    const directory = rig.instance.replicas.directory().doc;
+    await rig.ok("pin_doc", { uuid: first.uuid, group: "Reading" });
+    directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).set(first.uuid, true);
+    directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).set(middle.uuid, true);
+    await rig.ok("pin_doc", { uuid: middle.uuid, group: "Reading" });
+    expect((await rig.ok("get_sidebar")).groups[0].docs).toEqual([
+      { uuid: first.uuid, title: "Archive question", status: "ok" },
+      { uuid: middle.uuid, title: "Archive question", status: "archived" },
+    ]);
+
+    expect((await rig.ok("archive_doc", { uuid: middle.uuid })).records.sort()).toEqual([first.uuid, middle.uuid, current.uuid].sort());
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toEqual([]);
+    expect(await rig.ok("restore_doc", { uuid: middle.uuid })).toMatchObject({ archived: true });
+    expect((await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs.map((entry: any) => entry.uuid)).toEqual([current.uuid]);
+    expect((await rig.call("set_metadata", { uuid: middle.uuid, description: "Still archived" })).payload.error).toBe("doc_archived");
+    expect(await rig.ok("restore_doc", { uuid: middle.uuid })).toMatchObject({ records: [middle.uuid], archived: false, indexed: true });
+    const archived = (await rig.ok("list_docs", { kind: "decision", include_superseded: true, include_deleted: true })).docs;
+    expect(archived.find((entry: any) => entry.uuid === first.uuid).deleted).toBe(true);
+    expect(archived.find((entry: any) => entry.uuid === middle.uuid).deleted).toBe(false);
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ inForce: { uuid: current.uuid }, conflicts: [] }]);
+  });
+
+  it("restores an individually archived record known only from directory stubs", async () => {
+    const rig = await localRig();
+    const first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const archived = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const directory = rig.instance.replicas.directory().doc;
+    upsertDirectoryEntry(directory, { uuid: first, title: "Unhydrated topic", kind: "decision", topic: first, status: "open" });
+    upsertDirectoryEntry(directory, { uuid: archived, title: "Unhydrated topic", kind: "decision", topic: first, status: "open", supersedes: first });
+    directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).set(archived, true);
+    expect(await rig.ok("restore_doc", { uuid: archived })).toMatchObject({ records: [archived], archived: false, indexed: false });
+    expect(rig.instance.replicas.hydrated(archived)).toBe(false);
+    expect((await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs.map((entry: any) => entry.uuid).sort()).toEqual([first, archived].sort());
+  });
+
+  it("excludes an archived record when its index withdrawal fails", async () => {
+    const store = new CountingStore(":memory:", WORKSPACE);
+    const rig = await startServer(testConfig(), store);
+    rigs.push(rig);
+    const page = await seedDoc(rig);
+    const first = await record(rig, { status: "decided" });
+    const proposal = await record(rig, {
+      supersedes: first.uuid,
+      blocks: [{ type: "paragraph", text: "", inline: [
+        { text: "An archiveworthy answer.", marks: { link: "https://github.com/owner/repo/issues/42" } },
+      ] }],
+    });
+    await rig.ok("set_metadata", { uuid: proposal.uuid, links: [page.uuid] });
+    expect((await rig.ok("backlinks", { uuid: page.uuid })).backlinks).toHaveLength(1);
+    expect((await rig.ok("find_decisions", { github_ref: "owner/repo#42" })).decisions).toHaveLength(1);
+    store.failUnindex = true;
+    rig.instance.replicas.directory().doc.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).set(proposal.uuid, true);
+    expect(store.isIndexed(proposal.uuid)).toBe(true);
+    expect((await rig.ok("search", { query: "archiveworthy" })).hits.map((hit: any) => hit.uuid)).toEqual([first.uuid]);
+    expect((await rig.ok("backlinks", { uuid: page.uuid })).backlinks).toEqual([]);
+    expect((await rig.ok("find_decisions", { github_ref: "owner/repo#42" })).decisions).toEqual([]);
+  });
+
+  it("unhides a marked answer when an older client approves it or creates a conflict", async () => {
+    const rig = await localRig();
+    const first = await record(rig, { status: "decided" });
+    const proposal = await record(rig, { supersedes: first.uuid });
+    const directory = rig.instance.replicas.directory().doc;
+    directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).set(proposal.uuid, true);
+    expect(rig.instance.store.isIndexed(proposal.uuid)).toBe(false);
+
+    getMetaMap(rig.instance.replicas.replica(proposal.uuid).doc).set("status", "decided");
+    expect((await rig.ok("search", { query: "archiveworthy" })).hits.map((hit: any) => hit.uuid).sort()).toEqual([first.uuid, proposal.uuid].sort());
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ inForce: { uuid: proposal.uuid } }]);
+    expect((await rig.ok("set_metadata", { uuid: proposal.uuid, description: "Live answer" })).applied).toBe(true);
+    const rival = await record(rig, { supersedes: first.uuid });
+    directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).set(first.uuid, true);
+    expect(rig.instance.store.isIndexed(first.uuid)).toBe(false);
+    directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).set(rival.uuid, true);
+    getMetaMap(rig.instance.replicas.replica(rival.uuid).doc).set("status", "decided");
+    const topic = (await rig.ok("list_docs", { kind: "decision" })).docs[0];
+    expect(topic.inForce).toBeNull();
+    expect(topic.conflicts.map((entry: any) => entry.uuid).sort()).toEqual([proposal.uuid, rival.uuid].sort());
+    expect(rig.instance.store.isIndexed(proposal.uuid)).toBe(true);
+    expect(rig.instance.store.isIndexed(rival.uuid)).toBe(true);
+    getMetaMap(rig.instance.replicas.replica(rival.uuid).doc).set("status", "rejected");
+    getMetaMap(rig.instance.replicas.replica(proposal.uuid).doc).set("status", "rejected");
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ inForce: { uuid: first.uuid } }]);
+    expect(rig.instance.store.isIndexed(first.uuid)).toBe(true);
   });
 });

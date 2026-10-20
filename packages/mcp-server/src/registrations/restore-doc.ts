@@ -9,8 +9,10 @@ export function registerRestoreDoc(server: ToolRegistrar, context: ToolContext):
   server.registerTool("restore_doc", {
     title: "Restore an archived document",
     description:
-      "Restore a document or decision topic's directory visibility and search indexing, using its recorded " +
-      "title and tags. It never restores a sidebar pin; use pin_doc for placement. On an already live document " +
+      "Remove one archive layer: restore an archived decision topic first, retaining records archived individually " +
+      "beforehand; in a live topic restore the addressed record. The archived result says whether that answer " +
+      "remains archived. Restore directory visibility and search indexing, using its recorded " +
+      "title and tags. It never restores a sidebar pin; use pin_doc for placement. On an already live regular document " +
       "it can repair a drifted directory stub. Check indexed: false means this replica lacks the content or its " +
       "index write failed. The restore still applies and replicates; search catches up when content arrives or " +
       "a later call retries. Offline content arrival requires hub recovery." +

@@ -471,7 +471,9 @@ export const toolHelpDetails = {
     "Hide a document: tombstones its directory stub, so it leaves list_docs and the search index. This is not " +
     "erasure and not a delete. Every block, mark and annotation stays exactly where it was: get_doc still " +
     "serves the document by uuid, and list_docs with `include_deleted: true` still lists it, flagged " +
-    "`deleted`. delete_doc permanently removes an archived regular document.\n\n" +
+    "`deleted`. For a decision UUID it always archives the whole topic, including records previously " +
+    "archived individually in the web. No MCP argument archives one record. delete_doc permanently removes " +
+    "an archived regular document.\n\n" +
     "It also leaves the sidebar, because it is unpinned: a document that has left every other listing is not " +
     "an entry point. The unpin is unconditional — it does not first look for a pin, and it hides every pin " +
     "this replica can see — so `unpinned` says what the call asserted, not that a pin was found: it is true " +
@@ -501,19 +503,24 @@ export const toolHelpDetails = {
     "The result reports uuid, title, records: [uuid], deleted: true and independent directory/sidebar durability. " +
     "Protocol 4 requires a matching hub and client. Freed SQLite pages and earlier backups are not overwritten.",
   restore_doc:
-    "Lift a document's archive tombstone: it returns to the default list_docs listing unless it is a " +
+    "Remove one archive layer. In an archived decision topic this restores the topic and the records archived " +
+    "with it, leaving records archived individually beforehand unchanged. In a live topic it restores the " +
+    "addressed record. A repeated call can therefore remove the next layer. `archived` reports whether the " +
+    "addressed answer remains archived; `records` names those affected by this call. No sidebar pins return.\n\n" +
+    "A restored document returns to the default list_docs listing unless it is a " +
     "decision, returns to matching filtered listings either way, and returns to the search index, with the " +
     "title and tags the directory recorded for it. It does NOT return to the sidebar: archive_doc unpinned " +
     "it, and putting an entry point back is pin_doc's deliberate act, not a side effect of restoring. The " +
     "counterpart to archive_doc, and the sanctioned way back — a rename or a retag from a replica that has " +
-    "seen the archive deliberately cannot revive a document. Restoring one that is not archived leaves its " +
+    "seen the archive deliberately cannot revive a document. Restoring a regular document that is not archived leaves its " +
     "archive state alone, but is not quite a no-op: the directory entry is a cache of the document's own " +
     "metadata, and this trues it up, so a stub that had drifted is repaired in passing.\n\n" +
     "Check `indexed`. It is true when this replica holds the document itself and has just re-derived its " +
     "search rows — the usual case. It is false in two: when this replica knows the document only from the " +
     "directory, and when the index write was refused. Either way the restore is real, replicates, and shows " +
-    "immediately in the list_docs collection that includes its kind, but SEARCH ON THIS REPLICA will not find " +
-    "the document yet — it catches up when the content arrives or on a later call, whichever was missing. " +
+    "immediately in the list_docs collection that includes its kind, except for individual record archives " +
+    "left in place. SEARCH ON THIS REPLICA will not find a restored but unindexed " +
+    "document yet — it catches up when the content arrives or on a later call, whichever was missing. " +
     "Offline, content arriving means the hub coming back.",
   annotate:
     "Open an annotation thread over a range of a block's text, or — with `thread_id` — add a comment to an " +

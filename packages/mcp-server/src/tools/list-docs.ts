@@ -1,4 +1,4 @@
-import { listDirectory, readDirectoryTags, resolveDecisionTopics } from "@uberblick/schema";
+import { isDirectoryEntryArchived, listDirectory, readDirectoryTags, resolveDecisionTopics } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "../inputs.js";
@@ -36,7 +36,8 @@ export const listDocsOperation = operation("list_docs", inputSchema, (context, {
   const topics = resolveDecisionTopics(entries);
   const decisionRows = !hasPredicate ? [] : include_superseded
     ? topics.filter(topic => include_deleted || !topic.archived)
-      .flatMap(topic => topic.records.filter(matches).map(entry => ({ ...entry, deleted: topic.archived })))
+      .flatMap(topic => (include_deleted ? topic.allRecords : topic.records)
+        .filter(matches).map(entry => ({ ...entry, deleted: isDirectoryEntryArchived(directory, entry.uuid) })))
     : topics.filter(topic => {
       if ((!include_deleted && topic.archived) || (kind !== undefined && kind !== "decision")) return false;
       const live = topic.records.filter(entry => entry.status !== "rejected" && entry.status !== "withdrawn");
@@ -51,13 +52,16 @@ export const listDocsOperation = operation("list_docs", inputSchema, (context, {
     workspace: replicas.config.workspaceId,
     docs: [...documents, ...decisionRows]
       .sort((a, b) => a.title < b.title ? -1 : a.title > b.title ? 1 : a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0)
-      .map((entry) => ({
-      ...entry,
-      tags: readDirectoryTags(entry, catalog),
-      // Keep absent descriptions explicit as null.
-      description: entry.description ?? null,
-      pinned: pinned.has(entry.uuid),
-    })),
+      .map((entry) => {
+        const { recordArchived: _recordArchived, ...fields } = entry;
+        return {
+          ...fields,
+          tags: readDirectoryTags(entry, catalog),
+          // Keep absent descriptions explicit as null.
+          description: entry.description ?? null,
+          pinned: pinned.has(entry.uuid),
+        };
+      }),
     hub: replicas.sync.state(),
   };
 });

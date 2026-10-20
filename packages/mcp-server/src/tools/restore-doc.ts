@@ -1,4 +1,4 @@
-import { restoreDirectoryEntry } from "@uberblick/schema";
+import { isDirectoryEntryArchived, restoreDirectoryEntry } from "@uberblick/schema";
 import { strictInput } from "../inputs.js";
 import { roomStages } from "./helpers.js";
 import { uuidArg } from "./schemas.js";
@@ -32,7 +32,7 @@ export const restoreDocOperation = operation("restore_doc", inputSchema, (contex
     uuid,
     title: titleFor(uuid, stub),
     records: affected,
-    archived: false,
+    archived: isDirectoryEntryArchived(directory.doc, uuid),
     indexed: affected.every(recordUuid => replicas.hydrated(recordUuid) && replicas.indexReconciled(recordUuid)),
     ...durabilityAcross(directory, completed),
   };

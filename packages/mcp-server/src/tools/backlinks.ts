@@ -1,5 +1,5 @@
 import { strictInput } from "../inputs.js";
-import { isDirectoryEntryDeleted } from "@uberblick/schema";
+import { isDirectoryEntryArchived, isDirectoryEntryDeleted } from "@uberblick/schema";
 import { uuidArg } from "./schemas.js";
 import { operation } from "./operation.js";
 
@@ -9,5 +9,7 @@ export const backlinksOperation = operation("backlinks", inputSchema, (context, 
   const { replicas } = context;
   context.requireNotDeleted(uuid);
 
-  return { uuid, backlinks: replicas.store.backlinks(uuid).filter(entry => !isDirectoryEntryDeleted(replicas.directory().doc, entry.uuid)) };
+  return { uuid, backlinks: replicas.store.backlinks(uuid).filter(entry =>
+    !isDirectoryEntryDeleted(replicas.directory().doc, entry.uuid) &&
+    !isDirectoryEntryArchived(replicas.directory().doc, entry.uuid)) };
 });

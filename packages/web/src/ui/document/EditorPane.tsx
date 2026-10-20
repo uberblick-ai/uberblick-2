@@ -780,6 +780,10 @@ export function EditorPane({
   pinned = false,
   onTogglePin = null,
   onArchive = null,
+  isDecisionTopic = false,
+  showArchiveRecord = false,
+  onArchiveRecord = null,
+  archiveRecordUnavailable = null,
   onArchiveConfirmationFocusChange,
   focusRestore = false,
   onRestoreFocused,
@@ -825,6 +829,10 @@ export function EditorPane({
   pinned?: boolean;
   onTogglePin?: (() => void) | null;
   onArchive?: (() => void) | null;
+  isDecisionTopic?: boolean;
+  showArchiveRecord?: boolean;
+  onArchiveRecord?: (() => void) | null;
+  archiveRecordUnavailable?: string | null;
   onArchiveConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
   focusRestore?: boolean;
   onRestoreFocused?: (() => void) | undefined;
@@ -938,6 +946,10 @@ export function EditorPane({
           pinned={pinned}
           onTogglePin={onTogglePin}
           onArchive={onArchive}
+          isDecisionTopic={isDecisionTopic}
+          showArchiveRecord={showArchiveRecord}
+          onArchiveRecord={onArchiveRecord}
+          archiveRecordUnavailable={archiveRecordUnavailable}
           onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
           hasTldr={meta?.tldr != null}
           onEditTldr={() => {

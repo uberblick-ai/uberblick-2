@@ -5,6 +5,7 @@
 import {
   decisionTopicArchived,
   getDirectoryEntry,
+  isDirectoryEntryArchived,
   isDirectoryEntryDeleted,
   moveDoc,
   pinDoc,
@@ -113,7 +114,8 @@ export function sidebarPayload(
     return {
       uuid,
       title: stub.title,
-      status: decisionTopicArchived(directory, uuid) ? "archived" : "ok",
+      status: (stub.kind === "decision" && (stub.topic ?? stub.uuid) === uuid
+        ? decisionTopicArchived(directory, uuid) : isDirectoryEntryArchived(directory, uuid)) ? "archived" : "ok",
     };
   };
   return {

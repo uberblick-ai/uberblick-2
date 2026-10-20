@@ -284,7 +284,7 @@ describe("read-only decision records", () => {
 
     act(() => openActions(host));
     expect(menuItem("Pin to sidebar")?.getAttribute("data-disabled")).toBeNull();
-    expect(menuItem("Archive document")?.getAttribute("aria-disabled")).toBe("false");
+    expect(menuItem("Archive topic")?.getAttribute("aria-disabled")).toBe("false");
     expect(menuItem("Edit TL;DR")).toBeUndefined();
   });
 
@@ -421,7 +421,7 @@ describe("read-only decision records", () => {
     const host = await openApp();
     const prose = editorElement(host);
     act(() => openActions(host));
-    act(() => menuItem("Archive document")?.click());
+    act(() => menuItem("Archive topic")?.click());
     const dialog = document.querySelector<HTMLElement>('[role="alertdialog"]')!;
     act(() => button(dialog, "Archive").click());
     const item = card(host, thread.id);

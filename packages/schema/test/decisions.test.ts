@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   InvalidSupersedesReferenceError,
+  DIRECTORY_ARCHIVED_RECORDS_KEY,
   addComment,
   appendBlock,
   createAnnotation,
@@ -17,6 +18,7 @@ import {
   exportMarkdown,
   getDirectoryEntry,
   getDirectoryMap,
+  isDirectoryEntryArchived,
   getMeta,
   getMetaMap,
   initDoc,
@@ -31,6 +33,7 @@ import {
   setStatus,
   setTldr,
   tombstoneDirectoryEntry,
+  tombstoneDecisionRecord,
   upsertDirectoryEntry,
 } from "../src/index.js";
 import type { DirectoryUpsert } from "../src/index.js";
@@ -348,6 +351,127 @@ describe("decision metadata and caches", () => {
 });
 
 describe("stubs-only topic resolution", () => {
+  it("hides archived intermediates without changing supersession or the topic authority", () => {
+    const directory = new Y.Doc();
+    stub(directory, A, { createdAt: 10 });
+    stub(directory, B, { supersedes: A, createdAt: 20 });
+    stub(directory, C, { supersedes: B, createdAt: 30 });
+    expect(tombstoneDecisionRecord(directory, B)).toBe(true);
+    expect(tombstoneDecisionRecord(directory, A)).toBe(true);
+    const topic = resolveDecisionTopics(directory)[0]!;
+    expect(ids(topic.records)).toEqual([C]);
+    expect(ids(topic.archivedRecords)).toEqual([A, B]);
+    expect(ids(topic.allRecords)).toEqual([A, B, C]);
+    expect(topic.first?.uuid).toBe(A);
+    expect(topic.archived).toBe(false);
+    expect(topic.inForce?.uuid).toBe(C);
+    expect(topic.conflicts).toEqual([]);
+    expect(ids(decisionRelations(directory, C).predecessors)).toEqual([B, A]);
+    expect(isDirectoryEntryArchived(directory, A)).toBe(true);
+    expect(decisionTopicArchived(directory, A)).toBe(false);
+    expect(ids(listDirectory(directory))).toEqual([C]);
+    expect(restoreDirectoryEntry(directory, B)).toEqual([B]);
+    expect(ids(resolveDecisionTopics(directory)[0]!.records)).toEqual([B, C]);
+    expect(ids(resolveDecisionTopics(directory)[0]!.superseded)).toEqual([B]);
+  });
+
+  it("removes archived proposals from pending without hiding other proposals", () => {
+    const directory = new Y.Doc();
+    stub(directory, A, { createdAt: 10 });
+    stub(directory, B, { status: "open", supersedes: A, createdAt: 20 });
+    stub(directory, C, { status: "open", supersedes: A, createdAt: 30 });
+    expect(tombstoneDecisionRecord(directory, B)).toBe(true);
+    let topic = resolveDecisionTopics(directory)[0]!;
+    expect(ids(topic.pending)).toEqual([C]);
+    expect(decisionTopicState(topic)).toBe("under-review");
+    expect(tombstoneDecisionRecord(directory, C)).toBe(true);
+    topic = resolveDecisionTopics(directory)[0]!;
+    expect(topic.pending).toEqual([]);
+    expect(topic.inForce?.uuid).toBe(A);
+    expect(decisionTopicState(topic)).toBe("in-force");
+  });
+
+  it.each(["rejected", "withdrawn"] as const)("archives a %s intermediary without changing the remaining states", (status) => {
+    const directory = new Y.Doc();
+    stub(directory, A, { createdAt: 10 });
+    stub(directory, B, { status, supersedes: A, createdAt: 20 });
+    stub(directory, C, { supersedes: B, createdAt: 30 });
+    expect(tombstoneDecisionRecord(directory, B)).toBe(true);
+    const topic = resolveDecisionTopics(directory)[0]!;
+    expect(ids(topic.records)).toEqual([A, C]);
+    expect(ids(topic.superseded)).toEqual([A]);
+    expect(topic.inForce?.uuid).toBe(C);
+    expect(ids(topic.archivedRecords)).toEqual([B]);
+    expect(restoreDirectoryEntry(directory, B)).toEqual([B]);
+    expect(ids(resolveDecisionTopics(directory)[0]![status])).toEqual([B]);
+  });
+
+  it("refuses current and conflicting answers and ignores marks when a proposal is approved", () => {
+    const directory = new Y.Doc();
+    stub(directory, A);
+    stub(directory, B, { status: "open", supersedes: A });
+    expect(tombstoneDecisionRecord(directory, A)).toBe(false);
+    expect(tombstoneDecisionRecord(directory, B)).toBe(true);
+    stub(directory, B, { status: "decided" });
+    expect(getDirectoryEntry(directory, B)?.recordArchived).toBeUndefined();
+    expect(isDirectoryEntryArchived(directory, B)).toBe(false);
+    expect(resolveDecisionTopics(directory)[0]!.inForce?.uuid).toBe(B);
+    stub(directory, C, { status: "decided", supersedes: A });
+    directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).set(C, true);
+    const topic = resolveDecisionTopics(directory)[0]!;
+    expect(ids(topic.conflicts)).toEqual([B, C]);
+    expect(topic.archivedRecords).toEqual([]);
+    expect(tombstoneDecisionRecord(directory, B)).toBe(false);
+    expect(tombstoneDecisionRecord(directory, C)).toBe(false);
+    expect(ids(listDirectory(directory))).toEqual([A, B, C]);
+  });
+
+  it.each([1, 3])("keeps concurrently approved archived proposals visible on every replica (client %i)", (archiverId) => {
+    const directory = new Y.Doc();
+    directory.clientID = archiverId;
+    const approver = new Y.Doc();
+    approver.clientID = 2;
+    stub(directory, A, { createdAt: 10 });
+    stub(directory, B, { status: "open", supersedes: A, createdAt: 20 });
+    stub(directory, C, { status: "open", supersedes: A, createdAt: 30 });
+    syncDocs(directory, approver);
+    expect(tombstoneDecisionRecord(directory, B)).toBe(true);
+    // An older replica accepts approvals without seeing the record's archive.
+    stub(approver, B, { status: "decided" });
+    syncDocs(directory, approver);
+    for (const replica of [directory, approver]) {
+      expect(replica.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).get(B)).toBe(true);
+      expect(isDirectoryEntryArchived(replica, B)).toBe(false);
+      expect(resolveDecisionTopics(replica)[0]!.inForce?.uuid).toBe(B);
+    }
+    expect(tombstoneDecisionRecord(directory, C)).toBe(true);
+    stub(approver, C, { status: "decided" });
+    syncDocs(directory, approver);
+    for (const replica of [directory, approver]) {
+      expect(ids(resolveDecisionTopics(replica)[0]!.conflicts)).toEqual([B, C]);
+      expect(isDirectoryEntryArchived(replica, B)).toBe(false);
+      expect(isDirectoryEntryArchived(replica, C)).toBe(false);
+    }
+    expect(resolveDecisionTopics(directory)).toEqual(resolveDecisionTopics(approver));
+  });
+
+  it("keeps a topic reachable when concurrent archives hide its final live records", () => {
+    const directory = new Y.Doc();
+    stub(directory, A, { status: "open", createdAt: 10 });
+    stub(directory, B, { status: "open", createdAt: 20 });
+    const peer = new Y.Doc(); syncDocs(directory, peer);
+    expect(tombstoneDecisionRecord(directory, A)).toBe(true);
+    expect(tombstoneDecisionRecord(peer, B)).toBe(true);
+    syncDocs(directory, peer);
+    const topic = resolveDecisionTopics(directory)[0]!;
+    expect(topic.records).toEqual([]);
+    expect(topic.first?.uuid).toBe(A);
+    expect(topic.archived).toBe(false);
+    expect(decisionCurrentRecord(topic)?.uuid).toBe(B);
+    expect(restoreDirectoryEntry(directory, A)).toEqual([A]);
+    expect(ids(resolveDecisionTopics(directory)[0]!.records)).toEqual([A]);
+  });
+
   it("derives topic states with conflict precedence and preserves the answer during review", () => {
     const directory = new Y.Doc();
     stub(directory, A, { createdAt: 10, agentStance: true });
@@ -376,7 +500,7 @@ describe("stubs-only topic resolution", () => {
     expect(topic.pending).toHaveLength(1);
     expect(topic.representative.uuid).toBe(A);
     expect(decisionCurrentRecord(topic)?.uuid).toBe(C);
-    expect(decisionCurrentRecord({ ...topic, records: [] })).toBeNull();
+    expect(decisionCurrentRecord({ ...topic, records: [], archivedRecords: [] })).toBeNull();
   });
 
   it("preserves the B/C/D fork and resolves through rejected intermediates without timestamp winners", () => {

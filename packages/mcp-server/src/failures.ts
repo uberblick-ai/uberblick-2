@@ -133,8 +133,8 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolHints>> = {
   // Tombstones and unpins; every repeat raises the unpin counter, suppressing later pins.
   archive_doc: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
   delete_doc: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  // Clears the tombstone and overwrites stub metadata; repeating leaves the same state.
-  restore_doc: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  // Removes one archive layer; repeating can restore a previously archived record.
+  restore_doc: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
   // Replaces, upserts and deletes data; an identical repeat reports changed: false.
   update_data: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   // Moves an existing pin; repeating leaves it in the requested place.

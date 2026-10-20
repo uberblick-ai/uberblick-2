@@ -6,6 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { act, render, type RenderResult } from "./react-render.js";
 import * as Y from "yjs";
 import {
@@ -56,7 +57,10 @@ function fixture(): Fixture {
   return { ydoc, connection, blockIds };
 }
 
-function mount(fix: Fixture): { host: HTMLElement; view: RenderResult } {
+function mount(
+  fix: Fixture,
+  props: Partial<ComponentProps<typeof DocMetaLine>> = {},
+): { host: HTMLElement; view: RenderResult } {
   const view = render(
     <DocMetaLine
       connection={fix.connection}
@@ -64,6 +68,7 @@ function mount(fix: Fixture): { host: HTMLElement; view: RenderResult } {
       meta={getMeta(fix.ydoc)}
       archived={false}
       onTogglePin={() => {}}
+      {...props}
     />,
   );
   return { host: view.container, view };
@@ -136,6 +141,99 @@ describe("the document identity line keeps its local controls", () => {
       );
     });
     expect(screen.queryByRole("alertdialog", { name: /Archive/ })).toBeNull();
+  });
+
+  it.each([
+    {
+      isDecisionTopic: false,
+      item: "Archive document",
+      title: "Archive “Sync and offline”?",
+      description: "It leaves the document list and search. You can restore it later.",
+    },
+    {
+      isDecisionTopic: true,
+      item: "Archive topic",
+      title: "Archive topic “Sync and offline”?",
+      description: "The topic and all its records leave the decision list and search. You can restore it later.",
+    },
+  ])("confirms $item with its scope and keeps single-record topics to that action", ({ isDecisionTopic, item, title, description }) => {
+    const onArchive = vi.fn();
+    const { host } = mount(fixture(), { isDecisionTopic, onArchive });
+    openActions(host);
+    expect(screen.queryByRole("menuitem", { name: "Archive this record" })).toBeNull();
+    act(() => screen.getByRole("menuitem", { name: item }).click());
+    const dialog = screen.getByRole("alertdialog", { name: title });
+    expect(within(dialog).getByText(description)).not.toBeNull();
+    expect(onArchive).not.toHaveBeenCalled();
+    act(() => within(dialog).getByRole("button", { name: "Archive" }).click());
+    expect(onArchive).toHaveBeenCalledOnce();
+  });
+
+  it("confirms the selected record separately from the topic", () => {
+    const onArchive = vi.fn();
+    const onArchiveRecord = vi.fn();
+    const { host } = mount(fixture(), {
+      isDecisionTopic: true,
+      showArchiveRecord: true,
+      onArchive,
+      onArchiveRecord,
+    });
+    openActions(host);
+    expect(screen.getByRole("menuitem", { name: "Archive topic" })).not.toBeNull();
+    act(() => screen.getByRole("menuitem", { name: "Archive this record" }).click());
+    const dialog = screen.getByRole("alertdialog", { name: "Archive this record?" });
+    expect(within(dialog).getByText("It leaves this topic's history. Links to it show it as archived, and you can restore it from there.")).not.toBeNull();
+    expect(onArchiveRecord).not.toHaveBeenCalled();
+    act(() => within(dialog).getByRole("button", { name: "Archive" }).click());
+    expect(onArchiveRecord).toHaveBeenCalledOnce();
+    expect(onArchive).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "Archive this record unavailable — it is the decision in force",
+    "Archive this record unavailable — it is a conflicting answer",
+  ])("keeps the record refusal visible and non-activating: %s", (archiveRecordUnavailable) => {
+    const onArchiveRecord = vi.fn();
+    const { host } = mount(fixture(), {
+      isDecisionTopic: true,
+      showArchiveRecord: true,
+      onArchive: vi.fn(),
+      onArchiveRecord,
+      archiveRecordUnavailable,
+    });
+    openActions(host);
+    const item = screen.getByRole("menuitem", { name: archiveRecordUnavailable });
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    act(() => item.click());
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(onArchiveRecord).not.toHaveBeenCalled();
+  });
+
+  it("refuses record confirmation in place when the answer becomes protected", () => {
+    const fix = fixture();
+    const onArchiveRecord = vi.fn();
+    const props = {
+      connection: fix.connection,
+      segment: WORKSPACE,
+      meta: getMeta(fix.ydoc),
+      archived: false,
+      isDecisionTopic: true,
+      showArchiveRecord: true,
+      onArchive: vi.fn(),
+      onArchiveRecord,
+    };
+    const { host, view } = mount(fix, props);
+    openActions(host);
+    act(() => screen.getByRole("menuitem", { name: "Archive this record" }).click());
+    const reason = "Archive this record unavailable — it is the decision in force";
+    view.rerender(<DocMetaLine {...props} archiveRecordUnavailable={reason} />);
+    const dialog = screen.getByRole("alertdialog", { name: "Archive this record?" });
+    expect(within(dialog).getByText(`${reason}. Nothing has been archived.`)).not.toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Archive" }).hasAttribute("disabled")).toBe(true);
+    act(() => within(dialog).getByRole("button", { name: "Archive" }).click());
+    expect(onArchiveRecord).not.toHaveBeenCalled();
+    act(() => within(dialog).getByRole("button", { name: "Cancel" }).click());
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
   it("does not derive navigation from tags or show identity above the title", () => {
