@@ -9,6 +9,7 @@ import {
   enforceDeletedDirectoryEntries,
   documentDirectoryFields,
   decisionTopicArchived,
+  decisionTopicTitle,
   findBlockElement,
   getBlocksFragment,
   getBlocksWithInline,
@@ -28,6 +29,7 @@ import {
   normalizeLegacyTables,
   removeLegacyMermaidBlocks,
   repairDuplicateBlocks,
+  resolveDecisionTopics,
   resolveTagAssignments,
   roomForDoc,
   settingsRoom,
@@ -671,10 +673,15 @@ export class Replicas {
   private indexRows(replica: Replica, meta: DocMeta): void {
     const blocks = getBlocksWithInline(replica.doc);
     const tags = resolveTagAssignments(this.settings().doc, meta.tags);
+    const directory = this.directory();
+    const topic = meta.kind === "decision"
+      ? resolveDecisionTopics(listDirectory(directory.doc, { includeDeleted: true }))
+        .find((topic) => topic.topic === (meta.topic ?? meta.uuid))
+      : undefined;
     this.store.indexDoc(
       {
         uuid: replica.id,
-        title: meta.title,
+        title: topic === undefined ? meta.title : decisionTopicTitle(topic),
         kind: meta.kind === "decision" ? "decision" : "regular",
         tags: tags.map((entry) => entry.id),
         tagNames: tags.flatMap((entry) => entry.name === null ? [] : [entry.name]),
@@ -705,6 +712,7 @@ export class Replicas {
       },
       replica.indexedThroughSeq,
       this.settings().indexedThroughSeq,
+      directory.indexedThroughSeq,
     );
   }
 

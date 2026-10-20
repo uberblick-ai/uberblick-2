@@ -273,6 +273,16 @@ it("describes editable decision titles and answer-only approval while retaining 
   expect(lifecycle).toContain("A decided decision record's answer blocks and structured data are read-only");
   expect(lifecycle).toContain("naming tldr or discussion");
   expect(lifecycle).not.toMatch(/approves the current title|record's title, answer blocks|naming title, tldr/);
+  expect(lifecycle).toContain("A topic has one title, stored on its first record");
+  expect(lifecycle).toContain("A rename through any record renames the topic");
+  expect(lifecycle).toContain("Older clients show, and can still write, each record's own title");
+  for (const topic of ["create_doc", "set_metadata"]) {
+    const help = (await rig.ok("get_help", { topic })).text;
+    expect(help).toContain("stored on its first record");
+    expect(help).toContain("rename through any record renames the topic");
+    expect(help).toContain("Successors take the topic's title");
+    expect(help).not.toContain("successors keep it");
+  }
   const metadata = (await rig.ok("get_help", { topic: "set_metadata" })).text;
   expect(metadata).toContain("accepts title, description, tags and links");
   expect(metadata).toContain("refuses tldr or discussion");

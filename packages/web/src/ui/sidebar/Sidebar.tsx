@@ -10,10 +10,12 @@ import type { ReactElement, ReactNode, Ref, RefObject } from "react";
 import type * as Y from "yjs";
 import {
   createGroup,
+  decisionTopicTitle,
   deleteGroup,
   pinDoc,
   readSidebar,
   renameGroup,
+  resolveDecisionTopics,
   unpinDoc,
 } from "@uberblick/schema";
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
@@ -200,10 +202,13 @@ function SidebarContent({
    * archived titles after leaving ordinary listings.
    */
   const stubs = useDirectory(connection, true);
-  const labels = useMemo(
-    () => new Map(stubs.map((entry) => [entry.uuid, entry])),
-    [stubs],
-  );
+  const labels = useMemo(() => {
+    const entries = new Map(stubs.map((entry) => [entry.uuid, entry]));
+    for (const topic of resolveDecisionTopics(stubs)) {
+      for (const record of topic.records) entries.set(record.uuid, { ...record, title: decisionTopicTitle(topic), deleted: topic.archived });
+    }
+    return entries;
+  }, [stubs]);
   const personalSettings = settingsPage === "preferences" || settingsPage === "devices";
   const settingsArea = settingsOpen ? personalSettings ? "personal" : "workspace" : null;
   const shownMode = useRef(settingsArea);

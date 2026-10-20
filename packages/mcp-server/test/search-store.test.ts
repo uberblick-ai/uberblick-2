@@ -62,12 +62,31 @@ function olderPeerIndex(db: DatabaseSync, doc: IndexedDoc, throughSeq: number, c
 }
 
 describe("search index upgrade", () => {
+  it("refreshes a topic title at unchanged record cuts and rejects stale directory derivations", () => {
+    const path = tempDatabasePath();
+    const store = open(path);
+    const doc = row("1", "Orchard", { kind: "decision" });
+    store.indexDoc(doc, 2, 7, 10);
+    store.indexDoc({ ...doc, title: "Meadow" }, 2, 7, 11);
+    expect(titles(store, "orchard")).toEqual([]);
+    expect(titles(store, "meadow")).toEqual(["Meadow"]);
+    store.indexDoc({ ...doc, title: "Stale" }, 3, 8, 10);
+    expect(titles(store, "stale")).toEqual([]);
+    store.close();
+    const reopened = open(path);
+    reopened.indexDoc({ ...doc, title: "Stale" }, 3, 8, 10);
+    expect(titles(reopened, "meadow")).toEqual(["Meadow"]);
+  });
+
   it("preserves searches, rejects stale cuts and permits one unchanged-cut enrichment", () => {
     const path = tempDatabasePath();
     const doc = row("1", "Launching", { kind: "decision", tags: ["mcp"], tagNames: ["protocol"] });
     const before = open(path);
     before.indexDoc(doc, 2, 7);
     before.close();
+    const legacy = new DatabaseSync(path);
+    legacy.exec("ALTER TABLE doc_index_seq DROP COLUMN directory_through_seq");
+    legacy.close();
     downgrade(path);
 
     const store = open(path);

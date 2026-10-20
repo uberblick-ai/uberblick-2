@@ -10,7 +10,7 @@ export const inputSchema = strictInput({
 });
 
 export const findDecisionsOperation = operation("find_decisions", inputSchema, (context, { github_ref }, _request) => {
-  const { replicas } = context;
+  const { replicas, titleFor } = context;
 
   const reference = githubReference(github_ref);
   if (reference === null) {
@@ -23,9 +23,9 @@ export const findDecisionsOperation = operation("find_decisions", inputSchema, (
   const directory = replicas.directory().doc;
   return {
     github_ref: reference,
-    decisions: replicas.store.decisionsForGithub(reference).filter(record => !isDirectoryEntryDeleted(directory, record.uuid)).map((record) => ({
-      ...record,
-      status: getDirectoryEntry(directory, record.uuid)?.status ?? null,
-    })),
+    decisions: replicas.store.decisionsForGithub(reference).filter(record => !isDirectoryEntryDeleted(directory, record.uuid)).map((record) => {
+      const stub = getDirectoryEntry(directory, record.uuid);
+      return { ...record, title: stub === null ? record.title : titleFor(record.uuid, stub), status: stub?.status ?? null };
+    }),
   };
 });

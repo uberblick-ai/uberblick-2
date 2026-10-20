@@ -802,6 +802,7 @@ export function EditorPane({
   answerClassName,
   copyPath,
   decisionView = false,
+  displayTitle,
 }: {
   connection: RoomConnection | null;
   /** The workspace as the address spells it — see {@link DocMetaLine}. */
@@ -851,8 +852,9 @@ export function EditorPane({
   threadsOpen?: boolean;
   onToggleThreads?: (() => void) | undefined;
   syncDetails?: boolean;
-  /** Topic pages supply their current-record title. */
+  /** Topic pages supply their shared title. */
   header?: ReactNode;
+  displayTitle?: string;
   beforeAnswer?: ReactNode;
   afterAnswer?: ReactNode;
   /** Read-only page chrome in the line under the title. */
@@ -930,7 +932,7 @@ export function EditorPane({
           connection={connection}
           catalogConnection={catalogConnection}
           segment={segment}
-          meta={meta}
+          meta={meta === null || displayTitle === undefined ? meta : { ...meta, title: displayTitle }}
           archived={archived}
           readOnly={!writable}
           contentReadOnly={decision}

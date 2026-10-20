@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { decisionCurrentRecord, decisionTopicState, resolveDecisionTopics } from "@uberblick/schema";
+import { decisionCurrentRecord, decisionTopicState, decisionTopicTitle, resolveDecisionTopics } from "@uberblick/schema";
 import type { DecisionTopicState, DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import type { DocumentSearchClient } from "./document-search.js";
 
@@ -36,7 +36,7 @@ export function documentSearchRows(entries: readonly DirectoryEntry[], groups: r
     const pinnedRecord = topic.records.find((record) => groupOf.has(record.uuid));
     return [{
       uuid: topic.topic,
-      title: current.title,
+      title: decisionTopicTitle(topic),
       tags: current.tags,
       kind: "decision" as const,
       topicState: decisionTopicState(topic),

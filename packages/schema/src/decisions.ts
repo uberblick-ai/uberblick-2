@@ -100,6 +100,11 @@ export function decisionCurrentRecord(resolution: DecisionTopicResolution): Dire
   return resolution.inForce ?? resolution.records.at(-1) ?? null;
 }
 
+/** A topic's question belongs to its first record, including archived topics. */
+export function decisionTopicTitle(resolution: DecisionTopicResolution): string {
+  return resolution.first?.title ?? decisionCurrentRecord(resolution)?.title ?? resolution.representative.title;
+}
+
 /** Related-page membership may be on any record; retain the resolver's order. */
 export function relatedDecisionTopics(
   topics: readonly DecisionTopicResolution[],

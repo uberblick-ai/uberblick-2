@@ -7,7 +7,7 @@ import type * as Y from "yjs";
 import { getBlocksWithInline } from "./blocks.js";
 import { getMeta } from "./doc.js";
 import { hasDocData } from "./data.js";
-import { readDecisions } from "./decisions.js";
+import { decisionRelations, decisionTopicTitle, readDecisions } from "./decisions.js";
 import { listAnnotations, resolveAnnotationRange } from "./annotations.js";
 import {
   hasInlineMarks,
@@ -578,8 +578,7 @@ const DECISIONS_NOTE =
   "Importing this file does not restore them. -->";
 
 function renderDecision(reference: DecisionReference): string {
-  const record = reference.representative;
-  const title = escapeInline(record.title.replace(/[\r\n]+/g, " "),
+  const title = escapeInline(decisionTopicTitle(reference).replace(/[\r\n]+/g, " "),
     { insideLabel: false, hugged: false });
   const answer = reference.inForce === null ? "nothing in force" : `in force: ${reference.inForce.uuid}`;
   const pending = reference.pending.length === 0 ? "" : `; pending: ${reference.pending.map((entry) => entry.uuid).join(", ")}`;
@@ -607,6 +606,8 @@ export function exportMarkdown(
 
   if (withFrontmatter) {
     const meta = getMeta(ydoc, options.uuid);
+    const topic = meta.kind === "decision" && options.directory !== undefined
+      ? decisionRelations(options.directory, meta.uuid).resolution : null;
     const tags =
       options.tagCatalog === undefined
         ? meta.tags
@@ -616,7 +617,7 @@ export function exportMarkdown(
     const lines = [
       "---",
       `uuid: ${emitScalar(meta.uuid)}`,
-      `title: ${emitScalar(meta.title)}`,
+      `title: ${emitScalar(topic === null ? meta.title : decisionTopicTitle(topic))}`,
       // Absence must remain distinct from an empty metadata value.
       ...(meta.description === null
         ? []

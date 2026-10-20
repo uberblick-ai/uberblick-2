@@ -4,6 +4,7 @@ import {
   decisionContentLocked,
   decisionRelations,
   decisionTopicArchived,
+  decisionTopicTitle,
   getBlocksWithInline,
   getDirectoryEntry,
   getMeta,
@@ -18,6 +19,7 @@ import {
   readDirectoryTags,
   readDocumentTags,
   resolveAnnotationRange,
+  resolveDecisionTopics,
 } from "@uberblick/schema";
 import type {
   Annotation,
@@ -212,19 +214,23 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   };
 
   /**
-   * Prefer hydrated metadata over the directory's cached title.
+   * Decision titles are topic-wide; regular documents prefer hydrated metadata.
    */
-  const titleFor = (uuid: string, stub: DirectoryEntry): string =>
-    replicas.hydrated(uuid)
-      ? getMeta(replicas.replica(uuid).doc).title
-      : stub.title;
+  const titleFor = (uuid: string, stub: DirectoryEntry): string => {
+    if (stub.kind === "decision") {
+      const topic = resolveDecisionTopics(replicas.directory().doc)
+        .find((entry) => entry.topic === (stub.topic ?? uuid));
+      if (topic !== undefined) return decisionTopicTitle(topic);
+    }
+    return replicas.hydrated(uuid) ? getMeta(replicas.replica(uuid).doc).title : stub.title;
+  };
 
   /** The settings doc is the one catalog authority every tag path resolves. */
   const tagCatalog = () => replicas.settings().doc;
 
   /** Normalize directory descriptions and resolve tags through the settings catalog. */
   const decisionEntryJson = (entry: DirectoryEntry) => ({
-    ...entry, tags: readDirectoryTags(entry, tagCatalog()),
+    ...entry, title: titleFor(entry.uuid, entry), tags: readDirectoryTags(entry, tagCatalog()),
     ...(entry.kind === "decision" ? { deleted: decisionTopicArchived(replicas.directory().doc, entry.uuid) } : {}),
     description: entry.description ?? null,
   });
@@ -240,6 +246,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   const decisionReadJson = (uuid: string) => {
     const { predecessors, successors, resolution } = decisionRelations(replicas.directory().doc, uuid);
     return {
+      ...(resolution === null ? {} : { title: decisionTopicTitle(resolution) }),
       predecessors: predecessors.map(decisionEntryJson),
       successors: successors.map(decisionEntryJson),
       resolution: resolution === null ? null : { ...decisionEntryJson(resolution.representative), ...topicJson(resolution) },

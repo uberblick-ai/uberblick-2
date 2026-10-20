@@ -4,11 +4,13 @@
  */
 import {
   decisionTopicArchived,
+  decisionTopicTitle,
   getDirectoryEntry,
   isDirectoryEntryDeleted,
   moveDoc,
   pinDoc,
   readSidebar,
+  resolveDecisionTopics,
 } from "@uberblick/schema";
 import type { SidebarGroup } from "@uberblick/schema";
 import { ToolError } from "./failures.js";
@@ -107,12 +109,14 @@ export function sidebarPayload(
   sidebar: Replica,
 ): Record<string, unknown> {
   const directory = replicas.directory().doc;
+  const topics = new Map(resolveDecisionTopics(directory).map(topic => [topic.topic, topic]));
   const resolve = (uuid: string): PinnedDoc => {
     const stub = getDirectoryEntry(directory, uuid);
     if (stub === null) return { uuid, title: null, status: "unknown" };
+    const topic = stub.kind === "decision" ? topics.get(stub.topic ?? uuid) : undefined;
     return {
       uuid,
-      title: stub.title,
+      title: topic === undefined ? stub.title : decisionTopicTitle(topic),
       status: decisionTopicArchived(directory, uuid) ? "archived" : "ok",
     };
   };

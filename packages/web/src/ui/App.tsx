@@ -17,6 +17,7 @@ import {
   archiveDocument,
   decisionDirectoryFields,
   decisionCurrentRecord,
+  decisionTopicTitle,
   decisionTopicArchived,
   directoryRoom,
   getDirectoryEntry,
@@ -204,6 +205,7 @@ export function RoutePane({
   selectedUuid,
   navigate,
   directoryConnection = null,
+  titleConnection = null,
   relatedTopics = [],
   onAlterDecision = null,
 }: {
@@ -270,6 +272,7 @@ export function RoutePane({
   selectedUuid?: string | null | undefined;
   navigate?: Navigate;
   directoryConnection?: RoomConnection | null;
+  titleConnection?: RoomConnection | null;
   relatedTopics?: readonly DecisionTopicResolution[];
   onAlterDecision?: (() => void) | null;
 }): ReactElement {
@@ -370,6 +373,7 @@ export function RoutePane({
     return <DecisionTopicPane {...editorProps}
       topic={topic} selected={selectedUuid ?? null} navigate={navigate}
       directoryConnection={directoryConnection}
+      titleConnection={titleConnection}
       onAlterDecision={onAlterDecision}
       explicit={route.kind === "decision"}
       linkedRecord={route.kind === "doc" && route.uuid !== current?.uuid ? route.uuid : null}
@@ -608,6 +612,13 @@ export function App(): ReactElement {
       : null,
     defaultIdentity,
   );
+  const topicTitleRoom = useRoom(
+    roomReady && workspace !== null && topic !== null && selected === decisionCurrentRecord(topic)?.uuid &&
+      selected !== topic.topic && !topic.archived
+      ? roomForDoc(workspace.uuid, topic.topic) : null,
+    defaultIdentity,
+    false,
+  );
   const sidebar = useRoom(
     roomReady && workspace !== null ? sidebarRoom(workspace.uuid) : null,
     defaultIdentity,
@@ -794,7 +805,8 @@ export function App(): ReactElement {
     restoreFocusRoom.current = doc.room;
     archiveDocument(directory.ydoc, sidebar.ydoc, selected);
     const uuid = selected;
-    const title = getMeta(doc.ydoc).title || "Untitled";
+    const archivedTopic = resolveDecisionTopics(directory.ydoc).find((candidate) => candidate.records.some((record) => record.uuid === selected));
+    const title = (archivedTopic === undefined ? getMeta(doc.ydoc).title : decisionTopicTitle(archivedTopic)) || "Untitled";
     // Keep the original directory alive while Undo is offered, including
     // navigation to a document in another workspace.
     const held = acquireRoom(directory.room, defaultIdentity, { presence: false });
@@ -1063,13 +1075,16 @@ export function App(): ReactElement {
    * tombstone cannot race repair. See collab/directory-stub.ts.
    */
   useEffect(() => {
-    if (doc === null || directory === null) return;
-    return watchDocumentStub(doc.ydoc, directory.ydoc, parseRoom(doc.room).uuid, {
-      writable: () => directory.status.writable,
-      synchronized: () => directory.status.synced,
-      subscribe: (listener) => directory.onStatusChange(() => listener()),
-    });
-  }, [doc, directory]);
+    if (directory === null) return;
+    const stops = [doc, topicTitleRoom].flatMap((connection) => connection === null ? [] : [
+      watchDocumentStub(connection.ydoc, directory.ydoc, parseRoom(connection.room).uuid, {
+        writable: () => directory.status.writable,
+        synchronized: () => directory.status.synced,
+        subscribe: (listener) => directory.onStatusChange(() => listener()),
+      }),
+    ]);
+    return () => { for (const stop of stops) stop(); };
+  }, [doc, topicTitleRoom, directory]);
 
   const sidebarHidden = narrowSidebar ? !sidebarOpen : collapsed;
   const sidebarName = settings ? "sidebar" : "document list";
@@ -1198,6 +1213,7 @@ export function App(): ReactElement {
               selectedUuid={selected}
               navigate={navigate}
               directoryConnection={directory}
+              titleConnection={topic?.topic === selected ? doc : topicTitleRoom}
               onAlterDecision={openAlterDecision}
               relatedTopics={relatedTopics}
               configured={hubReady}

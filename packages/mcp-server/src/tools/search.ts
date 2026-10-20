@@ -1,4 +1,4 @@
-import { isDirectoryEntryDeleted, resolveDecisionTopics, resolveTagAssignments } from "@uberblick/schema";
+import { decisionTopicTitle, isDirectoryEntryDeleted, resolveDecisionTopics, resolveTagAssignments } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "../inputs.js";
 import { resolveTagFilter } from "../tag-catalog.js";
@@ -30,9 +30,11 @@ export const searchOperation = operation("search", inputSchema, (context, { quer
   const hits = replicas.store.search(query, limit ?? 20, tagIds, kind)
     .filter(hit => !isDirectoryEntryDeleted(replicas.directory().doc, hit.uuid));
   const states = new Map<string, RecordState>();
+  const titles = new Map<string, string>();
   if (hits.some((hit) => hit.kind === "decision")) {
     for (const topic of resolveDecisionTopics(replicas.directory().doc)) {
       for (const record of topic.records) {
+        titles.set(record.uuid, decisionTopicTitle(topic));
         states.set(record.uuid, record.status === "rejected" || record.status === "withdrawn" ? record.status : "open");
       }
       for (const record of topic.superseded) states.set(record.uuid, "superseded");
@@ -46,7 +48,7 @@ export const searchOperation = operation("search", inputSchema, (context, { quer
     ...(kind === undefined ? {} : { kind }),
     hits: hits.map((hit) => ({
       ...hit,
-      ...(hit.kind === "decision" ? { state: states.get(hit.uuid) ?? "open" } : {}),
+      ...(hit.kind === "decision" ? { title: titles.get(hit.uuid) ?? hit.title, state: states.get(hit.uuid) ?? "open" } : {}),
       tags: resolveTagAssignments(catalog, hit.tags),
     })),
   };

@@ -335,6 +335,27 @@ describe("MCP-compatible stored successors", () => {
     result.release();
   });
 
+  it.each(["decide", "rfc"] as const)("uses the first record's title for %s after the current record kept an older title", async (mode) => {
+    const { source, directory, input } = fixture();
+    const first = localDoc();
+    initDoc(first, { uuid: NEXT, title: "Renamed topic" });
+    setKind(first, "decision");
+    appendBlock(first, { type: "paragraph", text: "Earlier answer." });
+    setStatus(first, "decided");
+    publish(directory.connection.ydoc, first);
+    getMetaMap(source.connection.ydoc).set("topic", NEXT);
+    getMetaMap(source.connection.ydoc).set("supersedes", NEXT);
+    publish(directory.connection.ydoc, source.connection.ydoc);
+    const pending = recordAlteredDecision({ ...input, mode });
+    await admitAll();
+    const result = await pending;
+    if (!result.ok) throw new Error(result.message);
+    expect(getMeta(stored(result.decision)).title).toBe("Renamed topic");
+    if (result.rfc !== undefined) expect(getMeta(stored(result.rfc)).title).toBe("Renamed topic");
+    expect(getMeta(source.connection.ydoc).title).toBe("Current question");
+    result.release();
+  });
+
   it.each([true, false])("opens an RFC and proposal with the catalog rfc tag present=%s", async (hasTag) => {
     const { directory, tagCatalog, input } = fixture();
     if (hasTag) createTagCatalogEntry(tagCatalog, "rfc", RFC_TAG);

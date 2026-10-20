@@ -1,5 +1,5 @@
 import type { ComponentProps, MouseEvent, ReactElement } from "react";
-import { decisionCurrentRecord, decisionTopicState, getDirectoryEntry, getMeta, parseRoom, resolveDecisionTopics, setTitle } from "@uberblick/schema";
+import { decisionCurrentRecord, decisionTopicState, decisionTopicTitle, getDirectoryEntry, getMeta, parseRoom, resolveDecisionTopics, setTitle } from "@uberblick/schema";
 import type { DecisionTopicResolution, DirectoryEntry } from "@uberblick/schema";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import type { RoomConnection } from "../../collab/rooms.js";
@@ -222,35 +222,45 @@ function Timeline({ topic, selected, linkedRecord, segment, navigate, docLinks, 
   </section>;
 }
 
-function TopicTitle({ topic, current, selected, connection, directoryConnection, archived }: {
+function TopicTitle({ topic, current, selected, connection, titleConnection, directoryConnection, archived }: {
   topic: DecisionTopicResolution; current: DirectoryEntry; selected: string;
-  connection: RoomConnection | null; directoryConnection: RoomConnection | null; archived: boolean;
+  connection: RoomConnection | null; titleConnection: RoomConnection | null;
+  directoryConnection: RoomConnection | null; archived: boolean;
 }): ReactElement {
   const observedMeta = useDocMeta(connection);
   const meta = observedMeta ?? (connection === null ? null : readRoomMeta(connection));
+  const observedTitleMeta = useDocMeta(titleConnection);
+  const titleMeta = observedTitleMeta ?? (titleConnection === null ? null : readRoomMeta(titleConnection));
   const { writable } = useRoomStatus(connection);
+  const titleStatus = useRoomStatus(titleConnection);
   const currentRoom = selected === current.uuid && connection !== null &&
     parseRoom(connection.room).uuid === current.uuid && meta?.uuid === current.uuid && meta.kind === "decision";
+  const firstRoom = titleConnection !== null && parseRoom(titleConnection.room).uuid === topic.topic &&
+    titleMeta?.uuid === topic.topic && titleMeta.kind === "decision";
   return <DocumentTitle
-    value={currentRoom ? meta.title : current.title}
-    readOnly={!currentRoom || archived || topic.archived || !writable || directoryConnection === null}
+    value={firstRoom ? titleMeta.title : decisionTopicTitle(topic)}
+    readOnly={!currentRoom || !firstRoom || archived || topic.archived || !writable || !titleStatus.writable || directoryConnection === null}
     onChange={(value) => {
-      if (!currentRoom || archived || connection === null || !connection.status.writable || directoryConnection === null) return;
+      if (!currentRoom || !firstRoom || archived || connection === null || !connection.status.writable ||
+        titleConnection === null || !titleConnection.status.writable || directoryConnection === null) return;
       const liveMeta = getMeta(connection.ydoc);
+      const liveTitleMeta = readRoomMeta(titleConnection);
       const liveTopic = resolveDecisionTopics(directoryConnection.ydoc).find((entry) => entry.topic === topic.topic);
-      if (liveMeta.uuid === "" || liveMeta.kind !== "decision" || liveTopic === undefined ||
+      if (liveMeta.uuid === "" || liveMeta.kind !== "decision" || liveTitleMeta.uuid !== topic.topic ||
+        liveTitleMeta.kind !== "decision" || liveTopic === undefined ||
         liveTopic.archived || decisionCurrentRecord(liveTopic)?.uuid !== current.uuid) return;
-      setTitle(connection.ydoc, value);
+      setTitle(titleConnection.ydoc, value);
     }}
   />;
 }
 
-/** A topic uses one selected room; its history reads directory caches only. */
-export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, explicit, directoryConnection, onAlterDecision = null, ...editorProps }:
+/** Answer history reads directory caches; renaming uses the first record's room. */
+export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, explicit, directoryConnection, titleConnection = null, onAlterDecision = null, ...editorProps }:
   ComponentProps<typeof EditorPane> & {
     topic: DecisionTopicResolution | null; selected: string | null; linkedRecord: string | null;
     navigate: Navigate; explicit: boolean;
     directoryConnection: RoomConnection | null;
+    titleConnection?: RoomConnection | null;
     onAlterDecision?: (() => void) | null;
   }): ReactElement {
   const sourceStatus = useRoomStatus(editorProps.connection);
@@ -260,6 +270,7 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
   const record = topic.records.find((entry) => entry.uuid === selected);
   if (current === null || record === undefined) throw new Error("Decision selection must belong to its topic");
   const { segment, docLinks, connection } = editorProps;
+  const titleSource = titleConnection ?? (connection !== null && parseRoom(connection.room).uuid === topic.topic ? connection : null);
   const history = topic.inForce?.uuid !== selected;
   const topicPath = docPath(segment, topic.topic);
   const rejectionReason = connection === null ? undefined : getMeta(connection.ydoc).rejectionReason;
@@ -267,8 +278,9 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
     : getDirectoryEntry(directoryConnection.ydoc, record.discussion)?.title || undefined;
   return <EditorPane {...editorProps}
     decisionView
+    displayTitle={decisionTopicTitle(topic)}
     copyPath={explicit ? decisionRecordPath(segment, topic.topic, selected) : topicPath}
-    header={<TopicTitle topic={topic} current={current} selected={selected} connection={connection}
+    header={<TopicTitle topic={topic} current={current} selected={selected} connection={connection} titleConnection={titleSource}
       directoryConnection={directoryConnection} archived={editorProps.archived} />}
     beforeAnswer={<>
       <AnswerHeader topic={topic} record={record} topicPath={topicPath} navigate={navigate} docLinks={docLinks}
