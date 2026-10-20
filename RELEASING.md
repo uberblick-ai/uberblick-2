@@ -191,7 +191,40 @@ registry pulls; those remain attended release checks.
 
 The paired release task pushes `hub-vX.Y.Z` together with `vX.Y.Z`; each tag
 starts its own publisher. The hub workflow builds and checks both images, then
-pushes them to GHCR.
+pushes them to GHCR. A separate job verifies both published images against the
+tag's version, commit and protocol before attaching `compose.yml`,
+`remote.env.example`, `remote.https.yml` and `remote.tailscale.yml` to this
+repository's GitHub release. Only that job holds `contents: write`; it uses
+runner tools and repository scripts without installing packages, building or
+running images. It runs on the same person's hub tag push as the image job,
+including when that job reuses both images on a rerun.
+
+The asset job is serialized across hub tags. It creates releases without making
+them latest, verifies every asset through its anonymous download URL, and marks
+a complete release latest only when no higher stable hub version has all its
+assets completely uploaded. An interrupted newer upload does not hide a
+complete release; rerunning the newer tag finishes its uploads and promotes it.
+Operators download the newest files from
+`https://github.com/uberblick-ai/uberblick-2/releases/latest/download/<file>`
+or one version from `releases/download/hub-vX.Y.Z/<file>`.
+
+Check the generated downloads with the host's Compose plugin, without pulling
+or starting images:
+
+```sh
+mise exec -- node scripts/hub-compose-config-proof.mjs
+```
+
+This resolves all three routes, checks unchanged volume identities and refuses
+an unset version before `pull` or `up` can act. It also checks that the new
+`compose.yml` takes precedence beside a migrated `docker-compose.yml`.
+
+Rerunning a tag compares existing assets byte for byte with that tag's generated
+files before uploading any missing ones. Differing, duplicate or incompletely
+uploaded assets stop the job; it never deletes or replaces them. A failed
+upload can leave a release with only some assets. Re-run to recover missing
+assets only when the existing ones match and finished uploading; an incomplete
+or differing asset requires maintainer inspection rather than replacement.
 There is no `latest` tag or moving channel. A published version is immutable:
 a rerun verifies the recorded source commit and reuses matching published
 images without replacing them. A tag moved to another commit is refused before
