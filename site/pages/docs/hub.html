@@ -18,7 +18,7 @@ sh bin/remote-compose.sh up --detach">Copy</button></div><pre><span class="p">$<
 <span class="p">$</span> docker cp $(docker create --platform linux/amd64 ghcr.io/uberblick-ai/hub:0.4.7):/release/. .
 <span class="p">$</span> cp remote.env.example .env
 <span class="p">$</span> sh bin/remote-compose.sh up --detach</pre></section>
-  <p>This copies the release's Compose files out of the hub image and starts the hub at <code>http://localhost:8080</code>, on this computer only. It needs Docker Engine 28 or newer on Linux x86_64, or Docker Desktop on macOS.</p>
+  <p>This copies the release's Compose files out of the hub image and starts the hub at <code>http://localhost:8080</code>, on this computer only. Documents and the claim live in named Docker volumes, so they survive restarts and updates; only <code>down --volumes</code> deletes them. It needs Docker Engine 28 or newer on Linux x86_64, or Docker Desktop on macOS.</p>
   </section>
 
   <section class="q" id="claim"><h2>Claim it</h2>
