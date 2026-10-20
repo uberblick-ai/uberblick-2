@@ -78,6 +78,15 @@ following [AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action)
 and any governing authoring guidance discovered by purpose. The integrator applies it after merge,
 so the corpus never describes unmerged code. Keep it current with every revision.
 
+Under `Corpus update`, keep a `Compared` list with one entry for every regular
+page you compared with code, including pages needing no rewrite: title and UUID,
+the paths you looked at, the claims covered and your proposed result (`matches`,
+`ahead` or `drift`). Use the installed `set_metadata` schema for paths and its
+refusal recovery for writes. Pages only found by search stay out of this list.
+If you compared no regular page with code, say so explicitly. Keep comparison
+coverage and proposed rewrites distinct and current through revisions; the
+integrator makes its own comparison after merge.
+
 ## Decision records
 
 Consult bundled `get_help({topic: "lifecycle"})` for the initial-record
@@ -229,7 +238,11 @@ Closes #N
 None. | <material facts or links; no merge-tier ruling>
 
 ## Corpus update
-None — <pages searched, and why no documented claim changes> | <title> (<uuid>), block <id>: <new text>
+Compared:
+- <title> (<uuid>) — paths: <paths looked at>; claims: <claims covered>; proposed result: <matches|ahead|drift>.
+Or: None — no regular page compared with code.
+
+Rewrites: None — <why no documented claim changes> | <title> (<uuid>), block <id>: <new text>
 
 ## Self-review
 KISS: <why this is the least defensible change>

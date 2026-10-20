@@ -162,20 +162,32 @@ move or a head mismatch returns to the applicable gates.
 ## After the merge
 
 Confirm every issue the PR closes auto-closed, and close a parent whose last
-open sub-issue it closed. Then apply the pull request's `Corpus update` through
-MCP, checked against the merged code. A block that describes intended behavior
+open sub-issue it closed. Compare every regular page in the pull request's
+`Corpus update` `Compared` list with the merged code yourself, covering its
+listed claims and paths. Then apply the proposed rewrites through MCP, checked
+against that code. A block that describes intended behavior
 the merged code does not deliver yet stays as it is, tracked by an issue under
 [AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action); when you cannot tell
 whether a block is intent or a wrong claim, leave it and ask the maintainers on
-the PR. Once the update is applied, use `set_metadata` to record a `code_check`
-on each regular page it changed, against repository `uberblick-ai/uberblick-2`
-at the merge commit. Compare the page with that merged code and set `result`
-to `matches` when they agree, `ahead` when the page intentionally describes
-behavior not delivered there, or `drift` for an unintended disagreement. The
-writing replica supplies `checked_at`; keep the comparison's coverage and any
-unresolved gap in the PR evidence rather than implying an exhaustive check.
-If MCP fails, open an issue titled `Corpus update outstanding for #<PR>`
-that quotes the concrete failure and the update still to apply, link it on the
+the PR.
+
+Use `set_metadata` to record a `code_check` on every regular page you compared
+or changed, including pages needing no rewrite and your own rewrites beyond the
+`Compared` list, against repository `uberblick-ai/uberblick-2` at the merge
+commit. Include `rev` from the page you read with `get_doc` and `paths` you
+looked at, following the installed `set_metadata` schema and its refusal
+recovery. For a page you edited, read it after applying the edits and compare
+that revision with the merged code before recording the check. Set your own
+`result`, which may differ from the implementer's proposal: `matches` when they
+agree, `ahead` when the page intentionally describes behavior not delivered
+there, or `drift` for an unintended disagreement. Never write checks on decision
+records. The writing replica supplies `checked_at`; keep the comparison's
+coverage and any unresolved gap in the PR evidence rather than implying an exhaustive check.
+Inspect and report every corpus write's durability results under
+[AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action).
+If MCP fails or a post-merge write remains unsynced, open an issue titled
+`Corpus update outstanding for #<PR>` that quotes the concrete failure or
+unsynced write and the update or check still outstanding, link it on the
 PR, and still finish `merged`. A fresh integrator does not own
 or restart another session's development processes.
 

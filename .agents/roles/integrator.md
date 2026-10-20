@@ -71,8 +71,11 @@ P3s accepted as debt (one line each), the merge report the policy requires, and
 the documentation pass result. Link gate and reviewer evidence instead of
 restating it. A tier-1 record is the merge SHA, the gate links and one line per
 acceptance criterion; its documentation pass is one sentence. On every tier
-it checks the pages the implementer's search names for the surfaces the merge
-changed. A
+it compares every page in the implementer's `Compared` list with the merged
+code and records checks on every regular page it compared or changed, including
+pages needing no rewrite, under [After the merge](../protocols/integration.md#after-the-merge).
+Its evidence names unsynced corpus writes under
+[AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action). A
 `changes` record says only what failed and where. Do not add a wrapper comment
 for a Copilot review that already exists or for a no-comment result.
 
