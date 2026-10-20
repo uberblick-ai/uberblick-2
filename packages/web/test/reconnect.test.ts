@@ -443,7 +443,7 @@ function wireString(value: string): number[] {
   return [...wireUint(bytes.length), ...bytes];
 }
 
-function wireFrame(room: string, ...payload: number[]): Uint8Array {
+function wireFrame(room: string, ...payload: number[]): Uint8Array<ArrayBuffer> {
   return Uint8Array.from([...wireString(room), ...payload]);
 }
 

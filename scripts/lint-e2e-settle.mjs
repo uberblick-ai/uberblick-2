@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import ts from "typescript";
+import ts from "typescript-api";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const sharedHelper = "packages/web/e2e/settle.ts";

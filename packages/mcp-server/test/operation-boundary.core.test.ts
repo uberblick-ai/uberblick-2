@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
+import ts from "typescript-api";
 import { expect, it } from "vitest";
 
 it("keeps the transitive operation and failure path free of SDK value and type imports", () => {

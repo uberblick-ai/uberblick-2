@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import ts from "typescript";
+import ts from "typescript-api";
 import { readFileSync } from "node:fs";
 import { lintE2eSources } from "./lint-e2e-settle.mjs";
 

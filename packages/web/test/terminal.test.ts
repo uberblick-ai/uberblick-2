@@ -89,6 +89,7 @@ beforeEach(() => {
   class StubObserver implements IntersectionObserver {
     readonly root = null;
     readonly rootMargin = "";
+    readonly scrollMargin = "0px 0px 0px 0px";
     readonly thresholds: readonly number[] = [];
     private readonly record: FakeObserver;
     constructor(callback: IntersectionObserverCallback) {

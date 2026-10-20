@@ -23,6 +23,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.9",
     "@uberblick/cli": "workspace:*",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2",
+    "typescript-api": "npm:typescript@5.9.3"
   }
 }
