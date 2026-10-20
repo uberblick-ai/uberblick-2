@@ -9,7 +9,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import type { NodeView } from "@tiptap/pm/view";
 import {
-  Chart, LineController, LineElement, PointElement, LinearScale, Legend, Tooltip,
+  Chart, LineController, LineElement, PointElement, BarController, BarElement, LinearScale, Legend, Tooltip,
 } from "chart.js";
 import type { ChartConfiguration, ChartDataset, Scale } from "chart.js";
 import { COMMENT_MARK } from "@uberblick/schema";
@@ -31,48 +31,56 @@ import { recordDraw } from "./render-state.js";
 
 // Both axes are linear. Epoch milliseconds plus Intl date labels require no
 // date adapter. No auto registry, decimator, transform or chart plugin package.
-Chart.register(LineController, LineElement, PointElement, LinearScale, Legend, Tooltip);
+Chart.register(LineController, LineElement, PointElement, BarController, BarElement, LinearScale, Legend, Tooltip);
 type Point = { x: number; y: number | null };
+type Mark = "line" | "bar";
 
 const LIGHT = ["#1d4ed8", "#b91c1c", "#047857", "#7e22ce", "#a16207", "#0e7490", "#be185d", "#334155"];
 const DARK = ["#93c5fd", "#fca5a5", "#6ee7b7", "#d8b4fe", "#fde047", "#67e8f9", "#f9a8d4", "#cbd5e1"];
 
-function seriesDatasets(result: ChartReady, indices: number[], axes: ChartAxes, palette: string[], ranges: ChartPanelRange[]): ChartDataset<"line", Point[]>[] {
+function seriesDatasets(result: ChartReady, indices: number[], axes: ChartAxes, palette: string[], ranges: ChartPanelRange[]): ChartDataset<Mark, Point[]>[] {
+  const hasBars = result.config.y.some(series => series.type === "bar");
   return indices.map(index => {
     const series = result.series[index];
     if (series === undefined) throw new Error("Chart series is absent");
-    const plottedValues = series.points.filter(point => point.y !== null).length;
+    const plottedValues = series.type === "bar" ? 0 : series.points.filter(point => point.y !== null).length;
     return {
+      type: series.type,
+      ...(hasBars ? { order: series.type === "bar" ? 1 : 0 } : {}),
       label: axes.legendLabels[index] ?? series.label,
       xAxisID: "x",
       yAxisID: result.config.layout === "panels" ? "y" : axes.seriesAxes[index],
-      data: series.points.map(({ x, y }) => ({ x, y })),
-      borderColor: palette[index], backgroundColor: palette[index], borderWidth: 2,
-      // A dense gap-free panel has no visible points. A constant lets
-      // Chart.js share its point options instead of resolving every point.
-      pointRadius: result.config.layout === "panels" && plottedValues > 40 && plottedValues === series.points.length
-        ? 0 : context => chartPointRadius(series.points, context.dataIndex, plottedValues),
-      pointHoverRadius: 4, pointHitRadius: 6, spanGaps: false,
-      // Explicit bounds otherwise cut off markers and strokes at the y ends.
-      ...(ranges[index]?.declared ? { clip: { left: 0, right: 0, top: 5, bottom: 5 } } : {}),
+      // Native null bars still affect slot width and participate in hover.
+      data: series.type === "bar" ? series.points.filter(point => point.y !== null) : series.points.map(({ x, y }) => ({ x, y })),
+      borderColor: palette[index], backgroundColor: palette[index], borderWidth: series.type === "bar" ? 0 : 2,
+      ...(series.type === "bar" ? {} : {
+        // A dense gap-free panel has no visible points. A constant lets
+        // Chart.js share its point options instead of resolving every point.
+        pointRadius: result.config.layout === "panels" && plottedValues > 40 && plottedValues === series.points.length
+          ? 0 : context => chartPointRadius(series.points, context.dataIndex, plottedValues),
+        pointHoverRadius: 4, pointHitRadius: 6, spanGaps: false,
+        // Explicit bounds otherwise cut off markers and strokes at the y ends.
+        ...(ranges[index]?.declared ? { clip: { left: 0, right: 0, top: 5, bottom: 5 } } : {}),
+      }),
     };
   });
 }
 
-function valueScaleRange(range: ChartPanelRange | undefined, panels: boolean) {
+function valueScaleRange(range: ChartPanelRange | undefined, panels: boolean, bars: boolean) {
   if (range?.declared) return {
     // Widened sides use native nice ticks so their labels match the gridlines.
     ...(range.min === range.declared[0] ? { min: range.min } : { suggestedMin: range.min }),
     ...(range.max === range.declared[1] ? { max: range.max } : { suggestedMax: range.max }),
-    beginAtZero: false,
+    beginAtZero: bars,
   };
   return {
-    beginAtZero: (range?.min ?? 0) >= 0,
+    beginAtZero: bars || (range?.min ?? 0) >= 0,
     ...(panels ? { suggestedMin: range?.min, suggestedMax: range?.max } : {}),
   };
 }
 
 function referenceDatasets(result: ChartReady, indices: number[], axes: ChartAxes, color: string): ChartDataset<"line", Point[]>[] {
+  const hasBars = result.series.some(series => series.type === "bar");
   const seen = new Map<string, Set<number>>();
   return indices.flatMap(index => {
     const reference = result.config.y[index]?.reference;
@@ -83,13 +91,15 @@ function referenceDatasets(result: ChartReady, indices: number[], axes: ChartAxe
     values.add(reference);
     seen.set(axis, values);
     return [{
-      xAxisID: "referenceX", yAxisID: axis,
-      // Off-plot endpoints keep native nearest interaction on real series.
-      // The hidden normalized scale avoids arithmetic on arbitrary x values.
-      data: [{ x: -1, y: reference }, { x: 2, y: reference }],
+      type: "line",
+      xAxisID: hasBars ? "x" : "referenceX", yAxisID: axis,
+      // A second x axis changes native bar grouping. On their shared scale,
+      // Chart.js clamps infinite endpoints off-plot and clips the full line.
+      data: [{ x: hasBars ? -Infinity : -1, y: reference }, { x: hasBars ? Infinity : 2, y: reference }],
       borderColor: color, backgroundColor: color, borderWidth: 2,
       pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 0,
-      clip: { left: 0, right: 0, top: 1, bottom: 1 }, order: 1,
+      clip: { left: 0, right: 0, top: 1, bottom: 1 },
+      order: hasBars ? 0 : 1,
     }];
   });
 }
@@ -98,6 +108,12 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
   const { config } = result;
   const layout = config.layout === "panels" ? "panels" : "overlay";
   const axes = chartAxes(config.y);
+  const axisTickColor = (axis: "y" | "yRight"): string => {
+    if (layout === "panels" || axes.rightUnit === undefined) return colors.color;
+    const index = axes.seriesAxes.indexOf(axis);
+    return index >= 0 && axes.seriesAxes.lastIndexOf(axis) === index ? palette[index] ?? colors.color : colors.color;
+  };
+  const hasBars = config.y.some(series => series.type === "bar");
   const font = {
     family: colors.fontFamily,
     size: Number.parseFloat(colors.fontSize),
@@ -134,9 +150,13 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
     series.points.filter(point => point.y !== null).map(point => point.x)))].sort((a, b) => a - b);
   const endpoints = layout === "panels" ? observationEndpoints(xValues, config.x.type) : null;
   const fittedTicks = new Map<number, ReturnType<typeof observationTicks>>();
-  const configurationFor = (indices: number[]): ChartConfiguration<"line", Point[]> => {
+  const labelWidths = new Map<string, number>();
+  const configurationFor = (indices: number[]): ChartConfiguration<Mark, Point[]> => {
     const leftRange = ranges[layout === "panels" ? indices[0] ?? 0 : axes.seriesAxes.indexOf("y")];
     const rightRange = ranges[axes.seriesAxes.indexOf("yRight")];
+    const barsOnAxis = (axis: "y" | "yRight"): boolean => result.series.some((series, index) =>
+      series.type === "bar" && (layout === "panels"
+        ? panelUnit(index) === panelUnit(indices[0] ?? 0) : axes.seriesAxes[index] === axis));
     const xLabels = new Map<number, string[]>();
     const setTicks = (scale: Scale, ticks: ReturnType<typeof observationTicks>): void => {
       xLabels.clear();
@@ -150,8 +170,27 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
       ctx.font = `${font.size}px ${font.family}`;
       let ticks = layout === "panels" ? fittedTicks.get(scale.width) : undefined;
       if (ticks === undefined) {
-        ticks = observationTicks(xValues, config.x.type, scale.min, scale.max, scale.width,
-          label => ctx.measureText(label).width + (layout === "panels" ? 6 : 0));
+        const fitLabels = (width: number) => observationTicks(xValues, config.x.type, scale.min, scale.max, width,
+          label => {
+            let measured = labelWidths.get(label);
+            if (measured === undefined) {
+              measured = ctx.measureText(label).width + (layout === "panels" ? 6 : 0);
+              labelWidths.set(label, measured);
+            }
+            return measured;
+          });
+        ticks = fitLabels(scale.width);
+        // Native linear offsets reserve half a tick slot at either edge.
+        // Refit when removing labels enlarges that slot, until these labels
+        // also fit the remaining observation span.
+        if (hasBars) {
+          let count = ticks.length;
+          while (count > 1) {
+            ticks = fitLabels(scale.width * (count - 1) / count);
+            if (ticks.length >= count) break;
+            count = ticks.length;
+          }
+        }
         if (layout === "panels") fittedTicks.set(scale.width, ticks);
       }
       ctx.restore();
@@ -163,7 +202,7 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
     const min = result.firstX === result.lastX ? Math.max(-Number.MAX_VALUE, result.firstX - padding) : result.firstX;
     const max = result.firstX === result.lastX ? Math.min(Number.MAX_VALUE, result.lastX + padding) : result.lastX;
     const references = referenceDatasets(result, indices, axes, colors.color);
-    const configuration: ChartConfiguration<"line", Point[]> = {
+    const configuration: ChartConfiguration<Mark, Point[]> = {
       type: "line",
       data: { datasets: [...seriesDatasets(result, indices, axes, palette, ranges), ...references] },
       options: {
@@ -175,12 +214,15 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
         font,
         interaction: { mode: "nearest", axis: "x", intersect: false },
         scales: {
-          ...(references.length > 0 ? { referenceX: {
+          ...(references.length > 0 && !hasBars ? { referenceX: {
             type: "linear" as const, axis: "x" as const, display: false, min: 0, max: 1,
           } } : {}),
           x: {
             type: "linear",
             min, max,
+            // Native linear-scale offsets reserve whole slots for edge bars,
+            // including a lone observation, without changing stored x values.
+            ...(hasBars ? { offset: true } : {}),
             title: { display: config.x.type === "number", text: config.x.label || config.x.field, color: colors.color, font },
             // Reserve both endpoints even if crowding will omit one, so
             // the fitted selection cannot introduce an unpadded end label.
@@ -196,19 +238,19 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
           },
           y: {
             type: "linear",
-            ...valueScaleRange(leftRange, layout === "panels" || references.some(series => series.yAxisID === "y")),
+            ...valueScaleRange(leftRange, layout === "panels" || references.some(series => series.yAxisID === "y"), barsOnAxis("y")),
             ...(layout === "panels" ? {
               afterFit: (scale: Scale) => { scale.width = Math.min(panelAxisWidth, scale.maxWidth); },
             } : {}),
-            ticks: { color: colors.color, font, maxTicksLimit: layout === "panels" ? 3 : 6,
+            ticks: { color: axisTickColor("y"), font, maxTicksLimit: layout === "panels" ? 3 : 6,
               callback: (value, _index, ticks) => formatChartTick(Number(value), layout === "panels" ? panelUnit(indices[0] ?? 0) : axes.leftUnit, ticks) },
             grid: { color: colors.borderTopColor },
             border: { display: false },
           },
           ...(layout === "overlay" && axes.rightUnit !== undefined ? { yRight: {
             type: "linear" as const, position: "right" as const,
-            ...valueScaleRange(rightRange, references.some(series => series.yAxisID === "yRight")),
-            ticks: { color: colors.color, font, maxTicksLimit: 6, callback: (value: string | number, _index: number, ticks: { value: number }[]) => formatChartTick(Number(value), axes.rightUnit ?? "", ticks) },
+            ...valueScaleRange(rightRange, references.some(series => series.yAxisID === "yRight"), barsOnAxis("yRight")),
+            ticks: { color: axisTickColor("yRight"), font, maxTicksLimit: 6, callback: (value: string | number, _index: number, ticks: { value: number }[]) => formatChartTick(Number(value), axes.rightUnit ?? "", ticks) },
             grid: { drawOnChartArea: false },
             border: { display: false },
           } } : {}),
@@ -217,11 +259,23 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
           legend: { display: layout === "overlay", position: "bottom", align: "start", labels: {
             color: colors.color, font, usePointStyle: true, pointStyle: "line", boxWidth: 20, boxHeight: 8,
             filter: item => (item.datasetIndex ?? 0) < indices.length,
+            ...(hasBars ? {
+              generateLabels: chart => Chart.defaults.plugins.legend.labels.generateLabels(chart).map(item => ({
+                ...item, pointStyle: chart.data.datasets[item.datasetIndex ?? 0]?.type === "bar" ? "rect" : "line",
+              })),
+              sort: (a, b) => (a.datasetIndex ?? 0) - (b.datasetIndex ?? 0),
+            } : {}),
           } },
           tooltip: { titleFont: font, bodyFont: font, footerFont: font,
-            filter: item => item.datasetIndex < indices.length, callbacks: {
+            ...(hasBars ? { displayColors: false } : {}),
+            filter: (item, index) => item.datasetIndex < indices.length && (!hasBars || index === 0), callbacks: {
             title: items => items[0]?.parsed.x == null ? "" : formatChartX(items[0].parsed.x, config.x.type),
             label: item => {
+              // Grouped bars have different pixel centers. Keep native nearest-x
+              // selection and format the chosen observation's complete values.
+              if (hasBars) return indices.flatMap(index => result.series[index]?.points.flatMap(point =>
+                point.x === item.parsed.x && point.y !== null
+                  ? [`${result.series[index]?.label}: ${formatValue(index, point.y)}`] : []) ?? []);
               const index = indices[item.datasetIndex] ?? 0;
               const series = config.y[index];
               return item.parsed.y === null ? "" : `${series?.label ?? series?.field ?? ""}: ${formatValue(index, item.parsed.y)}`;
@@ -240,7 +294,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
   // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
   return ({ node, editor, getPos }: NodeViewRendererProps): NodeView => {
     let current: PMNode = node;
-    let instances: Chart<"line", Point[]>[] = [];
+    let instances: Chart<Mark, Point[]>[] = [];
     let drawnLayout: "overlay" | "panels" | null = null;
     let seriesPanels: { header: HTMLElement; canvas: HTMLCanvasElement }[] = [];
     let destroyed = false;

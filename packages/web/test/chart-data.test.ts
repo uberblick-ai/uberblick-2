@@ -34,8 +34,22 @@ function ready(data: DocData, config = mapping): ChartReady {
 }
 
 describe("chart mapping", () => {
+  it.each(["overlay", "panels"] as const)("defaults absent series types in a detached %s view", (layout) => {
+    const source = JSON.stringify({ ...mapping, layout, y: [{ field: "y" }, { field: "z", type: "bar" }] });
+    const parsed = parseChartConfig(source);
+    expect(parsed).toMatchObject({ ok: true, config: { y: [{ field: "y", type: "line" }, { field: "z", type: "bar" }] } });
+    expect(JSON.parse(source).y).toEqual([{ field: "y" }, { field: "z", type: "bar" }]);
+    expect(parseChartConfig(JSON.stringify({ ...mapping, layout, y: [{ field: "y", type: "line" }] })))
+      .toMatchObject({ ok: true, config: { y: [{ type: "line" }] } });
+  });
+
+  it.each([null, "", "area", 0, true, [], {}])("refuses unsupported series type %j", (type) => {
+    expect(prepareChart(JSON.stringify({ ...mapping, y: [{ field: "y", type }] }), null).status).toBe("invalid-configuration");
+  });
+
   it.each([
     { range: [-100, 100] }, { range: [50, 100] }, { reference: 0 },
+    { type: "bar", range: [1, 7], reference: 0 },
     { range: [-Number.MAX_VALUE, Number.MAX_VALUE], reference: Number.MAX_VALUE },
   ])("accepts optional per-series value-axis settings %j at version 1", (settings) => {
     const config = { ...mapping, y: [{ ...mapping.y[0], ...settings }] };
@@ -104,7 +118,7 @@ describe("chart mapping", () => {
     const parsed = parseChartConfig(source);
     expect(parsed).toEqual({ ok: true, config: {
       version: 1, type: "line", collection: "observations", x: { field: "x", type: "date", label: "Day" },
-      y: [{ field: "y", label: "Delivered", unit: "issues" }], title: "Delivery", missing: "gap", layout: "overlay",
+      y: [{ field: "y", label: "Delivered", unit: "issues", type: "line" }], title: "Delivery", missing: "gap", layout: "overlay",
     } });
     expect(source).not.toContain("missing");
     expect(source).not.toContain("layout");
@@ -264,6 +278,25 @@ describe("chart data projection", () => {
     ]);
   });
 
+  it("keeps bar omissions unchanged by missing while projecting each series type", () => {
+    const { doc, data } = fixture([
+      { id: "a", value: { x: 1, y: 0, z: 1 } }, { id: "b", value: { x: 2, z: 2 } },
+      { id: "c", value: { x: 3, y: null } }, { id: "d", value: { x: 4, y: "4", z: null } },
+      { id: "e", value: { x: 5, y: -5, z: 5 } },
+    ]);
+    const config: ChartConfig = { ...mapping, y: [{ field: "y", type: "bar" }, { field: "z" }] };
+    const before = getDocDataEntries(doc);
+    const gap = ready(data, config);
+    const connect = ready(data, { ...config, missing: "connect" });
+    expect(connect.series.map((series) => series.type)).toEqual(["bar", "line"]);
+    expect(connect.series[0]?.points).toEqual(gap.series[0]?.points);
+    expect(connect.series[0]?.points.map(({ y }) => y)).toEqual([0, null, null, null, -5]);
+    expect(connect.series[1]?.points.map(({ y }) => y)).toEqual([1, 2, 5]);
+    expect(connect.diagnostics).toEqual(gap.diagnostics);
+    expect(connect.diagnostics.series[0]).toMatchObject({ missing: 2, invalid: 1 });
+    expect(getDocDataEntries(doc)).toEqual(before);
+  });
+
   it("skips schema-invalid records from independent schema and record merges", () => {
     const schema: CollectionSchema = { version: 1, schema: {
       type: "object", properties: { x: { type: "number" }, y: { type: "number" } },
@@ -358,6 +391,15 @@ describe("chart problem states", () => {
 });
 
 describe("chart text alternative", () => {
+  it("names bar-only and mixed charts while keeping explicit titles", () => {
+    const bar: ChartConfig = { ...mapping, y: [{ field: "y", label: "Responses", type: "bar" }] };
+    const mixed: ChartConfig = { ...bar, y: [...bar.y, { field: "score" }] };
+    expect(chartAccessibleName(bar)).toBe("Bar chart of Responses by x");
+    expect(chartAccessibleName(mixed)).toBe("Line and bar chart of Responses, score by x");
+    expect(chartAccessibleName({ ...mixed, title: "Survey" })).toBe("Survey");
+    expect(chartAccessibleName({ ...mapping, y: [{ field: "score", type: "line" }] })).toBe("Line chart of score by x");
+  });
+
   it("uses locale formatting, series labels/units and latest plotted values", () => {
     const { data } = fixture([
       { id: "a", value: { x: 1, y: 1_234.5, z: 100 } },

@@ -34,6 +34,10 @@ vi.mock("../src/editor/table-data.js", async (importOriginal) => {
 vi.mock("chart.js", () => {
   class Chart {
     static register() {}
+    static defaults = { plugins: { legend: { labels: {
+      generateLabels: (chart: { data: { datasets: { label: string }[] } }) =>
+        chart.data.datasets.map((dataset, datasetIndex) => ({ text: dataset.label, datasetIndex })),
+    } } } };
     canvas: unknown;
     data: unknown;
     options: unknown;
@@ -48,7 +52,7 @@ vi.mock("chart.js", () => {
     update() { this.updates += 1; }
     destroy() { this.destroyed = true; }
   }
-  return { Chart, LineController: {}, LineElement: {}, PointElement: {}, LinearScale: {}, Legend: {}, Tooltip: {} };
+  return { Chart, LineController: {}, LineElement: {}, PointElement: {}, BarController: {}, BarElement: {}, LinearScale: {}, Legend: {}, Tooltip: {} };
 });
 
 const mapping = JSON.stringify({ version: 1, type: "line", collection: "trend", x: { field: "day", type: "number" }, y: [{ field: "value", label: "Delivery", unit: "issues" }] });
@@ -110,6 +114,132 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("the chart's derived lifecycle", () => {
+  it("draws native bars behind lines without changing mapping order in the legend or shared tooltip", () => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ ...JSON.parse(mapping), missing: "connect", y: [
+      { field: "secondary", label: "Responses", unit: "responses", type: "bar" },
+      { field: "value", label: "Score", unit: "%" },
+      { field: "third", label: "Other responses", unit: "responses", type: "bar" },
+    ] });
+    editBlock(doc, id, mapping, source);
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } }, replaceRecords: [
+      { id: "a", value: { day: 1, value: -30, secondary: -10, third: -20 } },
+      { id: "b", value: { day: 2, secondary: null, third: -30 } },
+      { id: "wrong", value: { day: 2.25, secondary: "wrong" } },
+      { id: "absent", value: { day: 2.5 } },
+      { id: "c", value: { day: 3, value: -50, secondary: -40, third: -60 } },
+    ] }]);
+    const before = Y.encodeStateAsUpdate(doc);
+    const { editor } = mountEditor(doc);
+    flush();
+    const instance = charts.instances[0]!;
+    const datasets = (instance.data as ChartConfiguration<"line" | "bar">["data"]).datasets;
+    expect(datasets.map(series => [series.type, series.yAxisID, series.order])).toEqual([
+      ["bar", "yRight", 1], ["line", "y", 0], ["bar", "yRight", 1],
+    ]);
+    expect(datasets[0]).not.toHaveProperty("pointRadius");
+    expect(datasets[0]?.data).toEqual([
+      expect.objectContaining({ x: 1, y: -10 }), expect.objectContaining({ x: 3, y: -40 }),
+    ]);
+    expect(datasets[1]).toHaveProperty("pointRadius");
+    expect(instance.options).toMatchObject({
+      scales: { x: { min: 1, max: 3, offset: true }, y: { beginAtZero: false }, yRight: { beginAtZero: true, grid: { drawOnChartArea: false } } },
+    });
+    const plugins = (instance.options as { plugins: {
+      legend: { labels: { generateLabels: (chart: unknown) => { datasetIndex: number; pointStyle: string }[];
+        sort: (a: { datasetIndex: number }, b: { datasetIndex: number }) => number } };
+      tooltip: { displayColors: boolean; filter: (item: unknown, index: number) => boolean;
+        callbacks: { label: (item: { parsed: { x: number; y: number } }) => string[] } };
+    } }).plugins;
+    const labels = plugins.legend.labels.generateLabels(instance);
+    expect(labels.map(item => item.pointStyle)).toEqual(["rect", "line", "rect"]);
+    expect([labels[2]!, labels[0]!, labels[1]!].sort(plugins.legend.labels.sort).map(item => item.datasetIndex)).toEqual([0, 1, 2]);
+    expect(plugins.tooltip.filter({ datasetIndex: 0 }, 0)).toBe(true);
+    expect(plugins.tooltip.filter({ datasetIndex: 1 }, 1)).toBe(false);
+    expect(plugins.tooltip.filter({ datasetIndex: 3 }, 0)).toBe(false);
+    expect(plugins.tooltip.displayColors).toBe(false);
+    expect(plugins.tooltip.callbacks.label({ parsed: { x: 3, y: -40 } })).toEqual([
+      "Responses: -40 responses", "Score: -50 %", "Other responses: -60 responses",
+    ]);
+    expect(plugins.tooltip.callbacks.label({ parsed: { x: 2, y: -30 } })).toEqual(["Other responses: -30 responses"]);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
+  it("groups all-bar series on native axes and includes zero in bar panels with negative values", () => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ ...JSON.parse(mapping), y: [
+      { field: "value", unit: "%", type: "bar" }, { field: "secondary", unit: "requests", type: "bar" },
+    ] });
+    editBlock(doc, id, mapping, source);
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } }, replaceRecords: [
+      { id: "a", value: { day: 1, value: -5, secondary: -100 } },
+    ] }]);
+    const { editor } = mountEditor(doc);
+    flush();
+    expect(charts.instances[0]?.options).toMatchObject({ scales: {
+      x: { min: 0, max: 2, offset: true }, y: { beginAtZero: true }, yRight: { beginAtZero: true },
+    } });
+    expect((charts.instances[0]!.data as ChartConfiguration<"bar">["data"]).datasets.map(series => series.yAxisID)).toEqual(["y", "yRight"]);
+    editBlock(doc, id, source, JSON.stringify({ ...JSON.parse(source), layout: "panels" }));
+    flush();
+    const panels = charts.instances.slice(1);
+    expect(panels).toHaveLength(2);
+    expect(panels.map(panel => panelData(panel).datasets[0])).toEqual([
+      expect.objectContaining({ type: "bar", yAxisID: "y" }), expect.objectContaining({ type: "bar", yAxisID: "y" }),
+    ]);
+    expect(panels.map(panel => panelOptions(panel).scales.y.suggestedMax)).toEqual([0, 0]);
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
+  it.each(["overlay", "panels"])("keeps declared bar ranges at zero and references ahead of bars in %s", layout => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ ...JSON.parse(mapping), layout, y: [
+      { field: "value", unit: "responses", type: "bar", range: [-10, -1], reference: -3 },
+      { field: "secondary", unit: "score", range: [20, 30], reference: 25 },
+    ] });
+    editBlock(doc, id, mapping, source);
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } },
+      replaceRecords: [{ id: "a", value: { day: 1, value: -5, secondary: 25 } }],
+    }]);
+    const { editor } = mountEditor(doc);
+    flush();
+    const bars = charts.instances[0]!;
+    const lines = charts.instances[layout === "panels" ? 1 : 0]!;
+    expect(bars.options).toMatchObject({ scales: { [layout === "panels" ? "y" : "yRight"]: {
+      min: -10, suggestedMax: 0, beginAtZero: true,
+    } } });
+    expect(lines.options).toMatchObject({ scales: { y: { min: 20, max: 30, beginAtZero: false } } });
+    const datasets = (bars.data as ChartConfiguration<"line" | "bar">["data"]).datasets;
+    expect(datasets[0]).toMatchObject({ type: "bar", order: 1 });
+    expect(datasets.at(-1)).toMatchObject({ type: "line", order: 0, xAxisID: "x", pointRadius: 0,
+      data: [{ x: -Infinity, y: layout === "panels" ? -3 : 25 }, { x: Infinity, y: layout === "panels" ? -3 : 25 }],
+    });
+    expect(new Set(datasets.map(dataset => dataset.xAxisID))).toEqual(new Set(["x"]));
+    expect((bars.options as { scales: Record<string, unknown> }).scales).not.toHaveProperty("referenceX");
+    expect(datasets[0]).not.toHaveProperty("clip");
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
+  it("fits observation labels within the span left by native bar offsets", () => {
+    const { doc, directory, id } = fixture();
+    editBlock(doc, id, mapping, JSON.stringify({ ...JSON.parse(mapping), y: [{ field: "value", type: "bar" }] }));
+    applyDocData(doc, directory, [{ collection: "trend", replaceRecords: [
+      { id: "a", value: { day: 100, value: 1 } }, { id: "b", value: { day: 101, value: 2 } },
+      { id: "c", value: { day: 102, value: 3 } },
+    ] }]);
+    const { editor } = mountEditor(doc);
+    flush();
+    const instance = charts.instances[0]!;
+    const scale = { min: 100, max: 102, width: 45, ticks: [] as { value: number; label: string[] }[],
+      chart: { ctx: { save() {}, restore() {}, font: "", measureText: (text: string) => ({ width: text.length * 6 }) } } };
+    panelOptions(instance).scales.x.afterFit(scale);
+    expect(scale.ticks.map(tick => tick.value)).toEqual([100, 102]);
+    const span = scale.width * (scale.ticks.length - 1) / scale.ticks.length;
+    expect(span).toBeGreaterThanOrEqual(18);
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
   it.each([mapping, tableMapping])("exposes only the source and data revision whose drawing completed: %s", (source) => {
     const { doc, directory, id } = fixture();
     if (source !== mapping) editBlock(doc, id, mapping, source);
@@ -289,6 +419,98 @@ describe("the chart's derived lifecycle", () => {
     flush();
     expect(instance.options).toMatchObject({ scales: { y: { beginAtZero: true }, yRight: { beginAtZero: true } } });
     editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
+  it("recolours sole-series axes with their series on appearance changes without counting references", async () => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ ...JSON.parse(mapping), y: [
+      { field: "value", unit: "%", reference: 5 }, { field: "secondary", unit: "ms", reference: 20 },
+    ] });
+    editBlock(doc, id, mapping, source);
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } },
+      replaceRecords: [{ id: "a", value: { day: 1, value: 3, secondary: 10 } }],
+    }]);
+    const originalTheme = document.documentElement.getAttribute("data-theme");
+    document.documentElement.setAttribute("data-theme", "light");
+    const { editor } = mountEditor(doc);
+    try {
+      flush();
+      const instance = charts.instances[0]!;
+      expect(panelData(instance).datasets).toHaveLength(4);
+      for (const [theme, palette] of [
+        ["light", ["#1d4ed8", "#b91c1c"]],
+        ["dark", ["#93c5fd", "#fca5a5"]],
+        ["light", ["#1d4ed8", "#b91c1c"]],
+      ] as const) {
+        document.documentElement.setAttribute("data-theme", theme);
+        await Promise.resolve();
+        flush();
+        const neutral = (instance.options as { color: string }).color;
+        expect(panelData(instance).datasets.slice(0, 2).map(series => series.borderColor)).toEqual(palette);
+        expect(instance.options).toMatchObject({ scales: {
+          x: { ticks: { color: neutral }, title: { color: neutral } },
+          y: { ticks: { color: palette[0] } },
+          yRight: { ticks: { color: palette[1] } },
+        } });
+      }
+      expect(charts.instances).toHaveLength(1);
+    } finally {
+      editor.destroy(); doc.destroy(); directory.destroy();
+      if (originalTheme === null) document.documentElement.removeAttribute("data-theme");
+      else document.documentElement.setAttribute("data-theme", originalTheme);
+    }
+  });
+
+  it.each(["light", "dark"])("updates sole and shared mixed-axis colours while keeping single axes and panels neutral in %s", theme => {
+    const { doc, directory, id } = fixture();
+    const mixed = { ...JSON.parse(mapping), y: [
+      { field: "secondary", unit: "%", type: "bar" }, { field: "value", unit: "%" },
+    ] };
+    let source = JSON.stringify(mixed);
+    editBlock(doc, id, mapping, source);
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } },
+      replaceRecords: [{ id: "a", value: { day: 1, value: 3, secondary: 10 } }],
+    }]);
+    const originalTheme = document.documentElement.getAttribute("data-theme");
+    document.documentElement.setAttribute("data-theme", theme);
+    const { editor } = mountEditor(doc);
+    try {
+      flush();
+      const instance = charts.instances[0]!;
+      const neutral = (instance.options as { color: string }).color;
+      const [bar, line] = panelData(instance).datasets;
+      expect(instance.options).toMatchObject({ scales: {
+        y: { ticks: { color: line!.borderColor } }, yRight: { ticks: { color: bar!.borderColor } },
+      } });
+      const redraw = (next: unknown) => {
+        const updated = JSON.stringify(next);
+        editBlock(doc, id, source, updated);
+        source = updated;
+        flush();
+      };
+      redraw({ ...mixed, y: [...mixed.y, { field: "empty", unit: "%", type: "bar" }] });
+      expect(instance.options).toMatchObject({ scales: {
+        y: { ticks: { color: line!.borderColor } }, yRight: { ticks: { color: neutral } },
+      } });
+      redraw({ ...mixed, y: [...mixed.y, { field: "empty", unit: "%" }] });
+      expect(instance.options).toMatchObject({ scales: {
+        y: { ticks: { color: neutral } }, yRight: { ticks: { color: bar!.borderColor } },
+      } });
+      redraw({ ...mixed, y: [{ field: "value", unit: "%" }] });
+      expect(instance.options).toMatchObject({ scales: { y: { ticks: { color: neutral } } } });
+      expect((instance.options as { scales: Record<string, unknown> }).scales).not.toHaveProperty("yRight");
+      redraw({ ...mixed, layout: "panels" });
+      const panels = charts.instances.filter(chart => !chart.destroyed);
+      expect(panels).toHaveLength(2);
+      for (const panel of panels) {
+        expect(panel.options).toMatchObject({ scales: { y: { ticks: { color: neutral } } } });
+        expect((panel.options as { scales: Record<string, unknown> }).scales).not.toHaveProperty("yRight");
+      }
+    } finally {
+      editor.destroy(); doc.destroy(); directory.destroy();
+      if (originalTheme === null) document.documentElement.removeAttribute("data-theme");
+      else document.documentElement.setAttribute("data-theme", originalTheme);
+    }
   });
 
   it.each(["overlay", "panels"])("uses exact combined spans and native noninteractive references in %s", layout => {

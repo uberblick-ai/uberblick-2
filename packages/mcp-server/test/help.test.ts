@@ -499,16 +499,31 @@ it("documents optional record limits for both views through data and insert_bloc
   }
 });
 
-it("documents opt-in line panels through data and insert_block help", async () => {
+it("documents opt-in chart panels through data and insert_block help", async () => {
   const rig = await local();
   for (const topic of ["data", "insert_block"]) {
     const { text } = await rig.ok("get_help", { topic });
     for (const guidance of [
       "Optional layout is overlay or panels, default overlay",
-      "panels draws one compact line chart per y series in mapping order, in a responsive grid",
+      "panels draws one compact line or bar chart per y series in mapping order, in a responsive grid",
       "each panel shows its label and latest plotted value",
       "Panels share the x range and share y ranges within each unit group",
       "layout is invalid for table mappings",
+    ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
+    expect((await rig.client.readResource({ uri: `uberblick://help/${topic}` })).contents[0])
+      .toMatchObject({ text });
+  }
+});
+
+it("documents opt-in bar series through data and insert_block help", async () => {
+  const rig = await local();
+  for (const topic of ["data", "insert_block"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    for (const guidance of [
+      "Optional y series type is line or bar, default line",
+      "Bars-only charts keep top-level type line and draw grouped bars from zero",
+      "In overlay, a mixed chart draws its bars behind its lines on a separate right-hand value axis",
+      "Missing, null or wrong-type bar values draw no bar",
     ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
     expect((await rig.client.readResource({ uri: `uberblick://help/${topic}` })).contents[0])
       .toMatchObject({ text });
@@ -525,7 +540,8 @@ it("documents per-series ranges and references through data and insert_block hel
       "In overlay, both apply to the series' left or right value axis",
       "In panels, range applies to the series' unit group and reference draws only on that series' own panel",
       "A range is a minimum span: the axis covers every declared range, and plotted or reference values outside it widen the axis",
-      "A declared range replaces the zero-baseline rule",
+      "A declared range replaces the zero-baseline rule for line-only axes and panel unit groups",
+      "Axes and panel unit groups containing bars always include zero",
       "A reference draws a horizontal line across the plot",
       "each distinct reference value appears once per axis or panel",
       "A panel's reference value also widens its unit group's shared range",

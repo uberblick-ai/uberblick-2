@@ -11,6 +11,7 @@ Its observers inspect the existing Yjs document without a product test hook.
 | Seven daily observations, desktop | ![Light daily desktop chart](daily-desktop-light.png) | ![Dark daily desktop chart](daily-desktop-dark.png) |
 | Seven daily observations, iPad touch | ![Light daily iPad chart](daily-ipad-light.png) | ![Dark daily iPad chart](daily-ipad-dark.png) |
 | Three percentage panels, document width | ![Light desktop panels](panels-desktop-light.png) | ![Dark desktop panels](panels-desktop-dark.png) |
+| Score line in front of response bars, document width | ![Light mixed chart](mixed-desktop-light.png) | ![Dark mixed chart](mixed-desktop-dark.png) |
 | Survey scale and references, overlay | ![Light survey overlay](survey-overlay-light.png) | ![Dark survey overlay](survey-overlay-dark.png) |
 | Survey scale and references, panels | ![Light survey panels](survey-panels-light.png) | ![Dark survey panels](survey-panels-dark.png) |
 
@@ -31,6 +32,13 @@ The desktop and explicit iPad touch
 contexts run in both appearances, with paired Chromium and WebKit coverage.
 The suite also checks legend placement, opposite-side unit ticks, the editor's
 font, same-x tooltips for sparse series and a visible single-x point.
+The two-unit and mixed screenshots show each sole-series value axis's numbers
+in its series colour. Current-draw canvas text and point colours check the
+association, including live appearance and mapping changes, neutral shared
+axes, single-axis charts and panels, and unchanged x-axis and legend ink.
+Canvas tick colours pass 4.5:1 contrast on the chart tint in both appearances;
+all eight palette colours are measured on that ground, including the light
+yellow-brown tick with the smallest margin.
 The compact controls are checked on charts, tables and empty chart panels.
 Panel fixtures check one accessible image, ordered series headers, the latest
 plotted tooltip values, an empty series, comparable unit-group ranges,
@@ -107,6 +115,19 @@ That opt-in requires representative first draw within 500 ms and median redraw
 within 250 ms, plus bounded first draw, median and every redraw within 1,000 ms.
 The panels variant enforces the same bounded budget for the complete block,
 including all eight Chart.js instances.
+
+The all-bar overlay variant uses the same 5,000-record/eight-series fixture and
+enforces that bound for its first draw and every live redraw. Native canvas
+rectangle observations separately check grouped bars, zero-based negative bars,
+missing values, endpoint and lone-x containment, bars behind lines, filled legend
+swatches and mapping-order shared tooltips. The mixed fixture runs in Chromium
+and WebKit in both appearances.
+
+Copy the mixed-chart screenshots from a fresh Chromium run:
+
+```sh
+python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path("packages/web/test-results"); target = Path("packages/web/e2e/evidence/chart"); names = ["mixed-desktop-light", "mixed-desktop-dark"]; matches = {name: [path for path in source.rglob("chart-" + name + ".png") if path.parent.name.endswith("-chromium")] for name in names}; assert all(len(paths) == 1 for paths in matches.values()), matches; [copyfile(matches[name][0], target / (name + ".png")) for name in names]'
+```
 
 Regenerate and copy the two panel screenshots with the chart suite above:
 
