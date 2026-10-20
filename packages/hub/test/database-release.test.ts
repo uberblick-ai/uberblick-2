@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { copyFileSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -113,6 +113,24 @@ function legacyDatabase(version?: string): string {
     database.close();
     document.destroy();
   }
+  return databasePath;
+}
+
+function crashLeftWalDatabase(previous: string, current: string, write?: (database: DatabaseSync) => void): string {
+  const source = legacyDatabase(previous);
+  const databasePath = tempDatabasePath();
+  const writer = new DatabaseSync(source);
+  try {
+    writer.exec("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0");
+    const mainBeforeCommit = readFileSync(source);
+    writer.prepare("UPDATE hub_release SET version = ? WHERE id = 1").run(current);
+    write?.(writer);
+    expect(readFileSync(source)).toEqual(mainBeforeCommit);
+    expect(writer.prepare("SELECT version FROM hub_release WHERE id = 1").get()?.version).toBe(current);
+    // Freeze a crash snapshot while the writer holds committed pages outside the main file.
+    copyFileSync(source, databasePath);
+    copyFileSync(`${source}-wal`, `${databasePath}-wal`);
+  } finally { writer.close(); }
   return databasePath;
 }
 
@@ -270,6 +288,88 @@ describe("released database startup", () => {
     expect((await start(tempDatabasePath(), undefined, { port })).port).toBe(port);
   });
 
+  it("repeatedly refuses a clean closed WAL database without creating sidecars or changing bytes", async () => {
+    const databasePath = legacyDatabase("1.10.0");
+    const database = new DatabaseSync(databasePath);
+    try { database.exec("PRAGMA journal_mode = WAL"); }
+    finally { database.close(); }
+    expect(readdirSync(dirname(databasePath))).toEqual([basename(databasePath)]);
+    const original = readFileSync(databasePath);
+    const records: HubLogRecord[] = [];
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await expect(start(databasePath, "1.9.99", { log: record => { records.push(record); } }))
+        .rejects.toThrow(/run hub release 1\.10\.0 instead/);
+      expect(readdirSync(dirname(databasePath))).toEqual([basename(databasePath)]);
+      expect(readFileSync(databasePath)).toEqual(original);
+    }
+    expect(records.map(record => record.event)).not.toContain("hub.listen");
+  });
+
+  it("honors a newer release committed only in a crash-left WAL without changing its files", async () => {
+    const databasePath = crashLeftWalDatabase("1.0.0", "2.0.0");
+    const original = readFileSync(databasePath);
+    const originalWal = readFileSync(`${databasePath}-wal`);
+    const names = [basename(databasePath), `${basename(databasePath)}-wal`].sort();
+    const records: HubLogRecord[] = [];
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(start(databasePath, "1.0.1", { log: record => { records.push(record); } }))
+        .rejects.toThrow(/run hub release 2\.0\.0 instead/);
+      expect(readdirSync(dirname(databasePath)).sort()).toEqual(names);
+      expect(readFileSync(databasePath)).toEqual(original);
+      expect(readFileSync(`${databasePath}-wal`)).toEqual(originalWal);
+    }
+    expect(records.map(record => record.event)).not.toContain("hub.listen");
+  });
+
+  it("backs up the complete committed WAL state before a newer release writes the original files", async () => {
+    const databasePath = crashLeftWalDatabase("0.9.0", "1.2.3", database => {
+      database.exec("CREATE TABLE wal_only (value TEXT); INSERT INTO wal_only VALUES ('committed only in WAL')");
+      const document = new Y.Doc();
+      try {
+        document.getText("body").insert(0, "document committed only in WAL");
+        database.prepare("INSERT INTO documents VALUES (?, ?)")
+          .run(`${WORKSPACE}/88121a57-e140-4827-a79b-54a4db533ed3`, Y.encodeStateAsUpdate(document));
+      } finally { document.destroy(); }
+    });
+    const original = readFileSync(databasePath);
+    const originalWal = readFileSync(`${databasePath}-wal`);
+    let mainWhenLogged: Buffer | undefined;
+    let walWhenLogged: Buffer | undefined;
+    let namesWhenLogged: string[] | undefined;
+
+    await start(databasePath, "1.2.4", {
+      log: record => {
+        if (record.event !== "hub.database.backup") return;
+        mainWhenLogged = readFileSync(databasePath);
+        walWhenLogged = readFileSync(`${databasePath}-wal`);
+        namesWhenLogged = readdirSync(dirname(databasePath)).sort();
+      },
+    });
+
+    expect(mainWhenLogged).toEqual(original);
+    expect(walWhenLogged).toEqual(originalWal);
+    const copied = backups(databasePath);
+    expect(copied).toHaveLength(1);
+    const backup = copied[0]!;
+    expect(namesWhenLogged).toEqual([basename(databasePath), `${basename(databasePath)}-wal`, basename(backup)].sort());
+    expectCompleteCopy(databasePath, backup);
+    expect(release(backup)).toBe("1.2.3");
+    read(backup, database => {
+      expect(database.prepare("SELECT value FROM wal_only").get()?.value).toBe("committed only in WAL");
+      expect(database.prepare("SELECT count(*) AS count FROM documents").get()?.count).toBe(2);
+      const document = new Y.Doc();
+      try {
+        const row = database.prepare("SELECT data FROM documents WHERE name = ?")
+          .get(`${WORKSPACE}/88121a57-e140-4827-a79b-54a4db533ed3`);
+        Y.applyUpdate(document, row?.data as Uint8Array);
+        expect(document.getText("body").toString()).toBe("document committed only in WAL");
+      } finally { document.destroy(); }
+    });
+    expect(release(databasePath)).toBe("1.2.4");
+  });
+
   it("fails before any live write or listener if backup publication runs out of space", async () => {
     const databasePath = legacyDatabase();
     const original = readFileSync(databasePath);
@@ -288,6 +388,26 @@ describe("released database startup", () => {
     expect(records.map(record => record.event)).not.toContain("hub.database.backup");
     expect(records.map(record => record.event)).not.toContain("hub.listen");
     expect((await start(tempDatabasePath(), undefined, { port })).port).toBe(port);
+  });
+
+  it("leaves a clean closed WAL database unchanged and creates no sidecars when its backup fails", async () => {
+    const databasePath = legacyDatabase();
+    const database = new DatabaseSync(databasePath);
+    try { database.exec("PRAGMA journal_mode = WAL"); }
+    finally { database.close(); }
+    expect(readdirSync(dirname(databasePath))).toEqual([basename(databasePath)]);
+    const original = readFileSync(databasePath);
+    const records: HubLogRecord[] = [];
+
+    filesystem.failPublish = true;
+    await expect(start(databasePath, "1.2.3", { log: record => { records.push(record); } }))
+      .rejects.toThrow(/cannot back up.*ENOSPC.*database was unchanged/);
+    filesystem.failPublish = false;
+
+    expect(readdirSync(dirname(databasePath))).toEqual([basename(databasePath)]);
+    expect(readFileSync(databasePath)).toEqual(original);
+    expect(records.map(record => record.event)).not.toContain("hub.database.backup");
+    expect(records.map(record => record.event)).not.toContain("hub.listen");
   });
 
   it("discards an integrity-check failure before any live write or listener", async () => {

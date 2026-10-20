@@ -228,7 +228,7 @@ try {
   assert.equal((await databaseState("/data/hub.sqlite", live)).release, "0.0.1");
 
   await compose(["stop", "hub"]);
-  await stopped('const {DatabaseSync}=require("node:sqlite");const db=new DatabaseSync("/data/hub.sqlite");try{db.prepare("UPDATE hub_release SET version = ?").run("0.0.2");}finally{db.close();}');
+  await stopped('const {DatabaseSync}=require("node:sqlite");const db=new DatabaseSync("/data/hub.sqlite");try{db.exec("PRAGMA journal_mode = WAL");db.prepare("UPDATE hub_release SET version = ?").run("0.0.2");}finally{db.close();}');
   const beforeNewer = await volumeState();
   for (let attempt = 0; attempt < 2; attempt++) {
     const refused = await offline([], { allowFailure: true });

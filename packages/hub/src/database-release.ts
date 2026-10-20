@@ -1,5 +1,8 @@
-import { existsSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { pathToFileURL } from "node:url";
 import type { HubLogger } from "./log.js";
 import { backupDatabase } from "./database-backup.js";
 
@@ -12,12 +15,29 @@ function releaseParts(version: string): [bigint, bigint, bigint] {
   return [BigInt(major), BigInt(minor), BigInt(patch)];
 }
 
-/** Read-only until a verified copy has been published and its path logged. */
+/** Leave the live database untouched until a verified copy is published and logged. */
 export async function prepareDatabaseRelease(databasePath: string, version: string, log: HubLogger): Promise<void> {
   const current = releaseParts(version);
   if (!existsSync(databasePath)) return;
-  const database = new DatabaseSync(databasePath, { readOnly: true });
+  let copyDirectory: string | undefined;
+  let database: DatabaseSync | undefined;
   try {
+    const sidecars = ["-wal", "-journal"].filter(suffix => existsSync(`${databasePath}${suffix}`));
+    let sourcePath = databasePath;
+    if (sidecars.length > 0) {
+      // Recover committed journal state only in a private copy of the stopped database.
+      copyDirectory = mkdtempSync(join(tmpdir(), "hub-startup-"));
+      sourcePath = join(copyDirectory, "database.sqlite");
+      for (const suffix of ["", ...sidecars]) {
+        copyFileSync(`${databasePath}${suffix}`, `${sourcePath}${suffix}`);
+        chmodSync(`${sourcePath}${suffix}`, 0o600);
+      }
+    }
+    const source = pathToFileURL(sourcePath);
+    // Even a read-only WAL handle can create sidecars. Immutable reads cannot;
+    // they are safe only without journals, on the closed database before startup.
+    if (copyDirectory === undefined) source.searchParams.set("immutable", "1");
+    database = new DatabaseSync(source.href, { readOnly: copyDirectory === undefined });
     const tables = database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
     if (tables.length === 0) return;
     let previous: string | null = null;
@@ -44,7 +64,8 @@ export async function prepareDatabaseRelease(databasePath: string, version: stri
     }
     log({ event: "hub.database.backup", database: databasePath, backup: path, previousRelease: previous, release: version });
   } finally {
-    database.close();
+    try { database?.close(); }
+    finally { if (copyDirectory !== undefined) rmSync(copyDirectory, { recursive: true, force: true }); }
   }
 }
 
