@@ -1,6 +1,7 @@
 import * as Y from "yjs";
 import {
   appendBlock,
+  COMMENT_MARK,
   decisionAnswerShapeFailure,
   decisionApprovalFingerprint,
   documentDirectoryFields,
@@ -29,14 +30,19 @@ import type { RoomConnection } from "./rooms.js";
 /** The caller owns this isolated draft and destroys it when the editor closes. */
 export function createDecisionDraft(source: Y.Doc): Y.Doc {
   const draft = new Y.Doc();
+  const fragment = getBlocksFragment(draft);
   // Native clones preserve cell marks and links, list attributes and code languages.
-  getBlocksFragment(draft).insert(0, getBlocksFragment(source).toArray().map((block) => {
+  fragment.insert(0, getBlocksFragment(source).toArray().map((block) => {
     if (!(block instanceof Y.XmlElement || block instanceof Y.XmlText)) {
       throw new Error("The answer contains an unsupported XML node.");
     }
     return block.clone();
   }));
   repairDuplicateBlocks(draft);
+  // Anchors belong to the source's comment threads, which the draft does not copy.
+  for (const node of fragment.createTreeWalker(() => true)) {
+    if (node instanceof Y.XmlText) node.format(0, node.length, { [COMMENT_MARK]: null });
+  }
   return draft;
 }
 
@@ -230,9 +236,6 @@ export async function recordAlteredDecision(request: AlterDecisionInput): Promis
             const staged = destinations.map(({ uuid, handle }) => ({ handle,
               ...(uuid === rfc ? stageRfc(input, uuid, decision, now) : stageDecision(input, draft, uuid, rfc, now)),
             }));
-            const finalFailure = sourceFailure(input) ?? destinationState(destinations, input.directory.ydoc);
-            if (finalFailure === "pending") return;
-            if (finalFailure !== null) return finish(finalFailure);
             finished = true;
             committed = true;
             // RFC first: no published proposal can reference an unwritten discussion.

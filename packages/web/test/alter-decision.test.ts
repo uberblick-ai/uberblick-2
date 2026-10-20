@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import {
   appendBlock,
+  createAnnotation,
   createTagCatalogEntry,
   decisionApprovalChanged,
   decisionApprovalFingerprint,
@@ -15,6 +16,8 @@ import {
   getMeta,
   getMetaMap,
   initDoc,
+  listAnnotationRanges,
+  listAnnotations,
   listDirectory,
   listTagCatalog,
   parseRoom,
@@ -185,6 +188,43 @@ function expectNothingWritten(directory: Y.Doc): void {
 }
 
 describe("copying the current decision answer", () => {
+  it.each(["decide", "rfc"] as const)("leaves predecessor comments behind when copying an answer for %s", async (mode) => {
+    const { source, input } = fixture([
+      { type: "paragraph", inline: [
+        { text: "Keep ", marks: {} },
+        { text: "formatted", marks: { bold: true, docLink: RELATED } },
+      ] },
+      { type: "table", text: "| Header |\n| --- |\n| **formatted** [cell](https://example.com) |" },
+    ]);
+    const original = source.connection.ydoc;
+    const [prose, table] = getBlocks(original);
+    createAnnotation(original, prose!.id, 5, 14, "Earlier reader", "Prose discussion");
+    createAnnotation(original, table!.id, 0, 14, "Earlier reader", "Cell discussion", { row: 1, column: 0 });
+    const before = getBlocksWithInline(original);
+    const threads = listAnnotations(original);
+    const ranges = getBlocks(original).map((block) => listAnnotationRanges(original, block.id));
+
+    const draft = draftOf(original);
+    expect(getBlocksWithInline(draft)).toEqual(before);
+    expect(listAnnotations(draft)).toEqual([]);
+    for (const block of getBlocks(draft)) expect(listAnnotationRanges(draft, block.id)).toEqual([]);
+
+    const pending = recordAlteredDecision({ ...input, draft, mode });
+    await admitAll();
+    const result = await pending;
+    if (!result.ok) throw new Error(result.message);
+    const answer = stored(result.decision);
+    expect(getBlocksWithInline(answer).slice(0, before.length)).toEqual(before);
+    expect(listAnnotations(answer)).toEqual([]);
+    for (const block of getBlocks(answer)) expect(listAnnotationRanges(answer, block.id)).toEqual([]);
+    expect(() => createAnnotation(answer, prose!.id, 5, 14, "Current reader", "New prose discussion")).not.toThrow();
+    expect(() => createAnnotation(answer, table!.id, 0, 14, "Current reader", "New cell discussion", { row: 1, column: 0 })).not.toThrow();
+    expect(getBlocksWithInline(original)).toEqual(before);
+    expect(listAnnotations(original)).toEqual(threads);
+    expect(getBlocks(original).map((block) => listAnnotationRanges(original, block.id))).toEqual(ranges);
+    result.release();
+  });
+
   it("copies the visible answer without reviving shadowed same-id blocks", async () => {
     const { source, input } = fixture();
     const original = getBlocksWithInline(source.connection.ydoc);
