@@ -66,15 +66,16 @@ describe("search index upgrade", () => {
     const path = tempDatabasePath();
     const store = open(path);
     const doc = row("1", "Orchard", { kind: "decision" });
-    store.indexDoc(doc, 2, 7, 10);
-    store.indexDoc({ ...doc, title: "Meadow" }, 2, 7, 11);
+    expect(store.indexDoc(doc, 2, 7, 10)).toBe(true);
+    expect(store.indexDoc({ ...doc, title: "Meadow" }, 2, 7, 11)).toBe(true);
+    expect(store.indexDoc({ ...doc, title: "Ignored at equal cuts" }, 2, 7, 11)).toBe(true);
     expect(titles(store, "orchard")).toEqual([]);
     expect(titles(store, "meadow")).toEqual(["Meadow"]);
-    store.indexDoc({ ...doc, title: "Stale" }, 3, 8, 10);
+    expect(store.indexDoc({ ...doc, title: "Stale" }, 3, 8, 10)).toBe(false);
     expect(titles(store, "stale")).toEqual([]);
     store.close();
     const reopened = open(path);
-    reopened.indexDoc({ ...doc, title: "Stale" }, 3, 8, 10);
+    expect(reopened.indexDoc({ ...doc, title: "Stale" }, 3, 8, 10)).toBe(false);
     expect(titles(reopened, "meadow")).toEqual(["Meadow"]);
   });
 

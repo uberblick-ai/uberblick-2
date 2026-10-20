@@ -484,6 +484,7 @@ export class MirrorStore {
     clearPending: Prepared<[string, number]>;
     listPending: Prepared<[]>;
     advanceIndex: Prepared<[string, number, number, number]>;
+    staleIndex: Prepared<[string, number, number, number]>;
     putDoc: Prepared<[string, string, string, string]>;
     hasDoc: Prepared<[string]>;
     dropDoc: Prepared<[string]>;
@@ -531,7 +532,7 @@ export class MirrorStore {
     throughSeq: number,
     catalogThroughSeq: number,
     directoryThroughSeq: number,
-  ) => void;
+  ) => boolean;
 
   private readonly unindexTx: (uuid: string) => void;
 
@@ -666,6 +667,10 @@ export class MirrorStore {
           "OR NOT EXISTS (SELECT 1 FROM docs_fragment_fts f WHERE f.rowid = doc_index_seq.search_rowid " +
           "AND f.uuid = excluded.uuid AND f.indexed_through_seq = excluded.indexed_through_seq " +
           "AND f.catalog_through_seq = excluded.catalog_through_seq))",
+      ),
+      staleIndex: prepare(
+        "SELECT 1 FROM doc_index_seq WHERE uuid = ? AND " +
+          "(indexed_through_seq > ? OR catalog_through_seq > ? OR directory_through_seq > ?)",
       ),
       putDoc: prepare(
         "INSERT INTO doc_index (uuid, title, description, kind) VALUES (?, ?, ?, ?) " +
@@ -826,7 +831,7 @@ export class MirrorStore {
           directoryThroughSeq,
         ).changes > 0;
       if (!written) {
-        return;
+        return this.statements.staleIndex.get(doc.uuid, throughSeq, catalogThroughSeq, directoryThroughSeq) === undefined;
       }
       this.statements.putDoc.run(doc.uuid, doc.title, doc.description, doc.kind ?? "regular");
       this.statements.dropTags.run(doc.uuid);
@@ -855,6 +860,7 @@ export class MirrorStore {
         (doc.tagNames ?? []).join("\n"), throughSeq, catalogThroughSeq,
       );
       this.statements.markSearch.run(indexed.lastInsertRowid, doc.uuid);
+      return true;
     });
 
     this.unindexTx = transactional(this.db, (uuid: string) => {
@@ -1062,15 +1068,16 @@ export class MirrorStore {
    * Derive from contiguous document, settings and directory cuts; stale input
    * must not replace newer rows. Commit cuts, metadata and dependents together;
    * allow equal-cut replacements only for incomplete derived rows.
+   * False means a newer stored source cut refused this derivation; retry later.
    */
   indexDoc(
     doc: IndexedDoc,
     throughSeq: number,
     catalogThroughSeq = 0,
     directoryThroughSeq = 0,
-  ): void {
+  ): boolean {
     this.assertWorkspacePresent();
-    this.indexTx(doc, throughSeq, catalogThroughSeq, directoryThroughSeq);
+    return this.indexTx(doc, throughSeq, catalogThroughSeq, directoryThroughSeq);
   }
 
   /** Check before deleting: this WAL read avoids busy-timeout waits for absent rows. */

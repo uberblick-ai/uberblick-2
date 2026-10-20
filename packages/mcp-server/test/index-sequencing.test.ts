@@ -1,8 +1,8 @@
 /** Derived-index generations stay monotone and atomic across processes. */
 
 import { constants, DatabaseSync } from "node:sqlite";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { getMeta, setDescription, setTitle } from "@uberblick/schema";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { editBlock, getBlocks, getDirectoryEntry, getMeta, setDescription, setTitle, setWorkspaceName, upsertDirectoryEntry } from "@uberblick/schema";
 import {
   removeTempDirs,
   startServer,
@@ -27,6 +27,58 @@ afterEach(async () => {
 afterAll(removeTempDirs);
 
 describe("the index derivation cut", () => {
+  it("retries content rejected by a newer directory cut after idle peer catch-up", async () => {
+    const databasePath = tempDatabasePath();
+    const first = await server(databasePath);
+    const created = await first.ok("create_doc", {
+      title: "Stable title", description: "Stable metadata.", blocks: [{ type: "paragraph", text: "Oldbody" }],
+    });
+    const unrelated = await first.ok("create_doc", { title: "Unrelated", description: "Another page." });
+    const second = await server(databasePath);
+    await second.ok("get_doc", { uuid: created.uuid });
+    first.instance.replicas.refresh();
+    second.instance.replicas.refresh();
+    expect(second.instance.replicas.indexReconciled(created.uuid)).toBe(true);
+
+    const replica = second.instance.replicas.replica(created.uuid);
+    const directory = second.instance.replicas.directory();
+    const readSince = second.instance.store.readSince.bind(second.instance.store);
+    let directoryReads = 0;
+    let injected = false;
+    const replay = vi.spyOn(second.instance.store, "readSince").mockImplementation((room, seq) => {
+      const slice = readSince(room, seq);
+      // A peer can advance the shared directory and rederive rows after this
+      // process's directory poll but before its document poll.
+      if (room === directory.room && ++directoryReads === 2 && !injected) {
+        injected = true;
+        const firstDirectory = first.instance.replicas.directory().doc;
+        upsertDirectoryEntry(firstDirectory, { ...getDirectoryEntry(firstDirectory, unrelated.uuid)!, title: "Unrelated changed" });
+        setWorkspaceName(first.instance.replicas.settings().doc, "A peer settings change");
+        const block = getBlocks(replica.doc)[0]!;
+        editBlock(replica.doc, block.id, block.text, "Newbody", { rev: block.rev });
+      }
+      return slice;
+    });
+    try {
+      second.instance.replicas.refresh();
+    } finally {
+      replay.mockRestore();
+    }
+    expect(injected).toBe(true);
+    expect(getBlocks(replica.doc)[0]?.text).toBe("Newbody");
+    expect(replica.lastSeq).toBe(replica.indexedThroughSeq);
+    expect(second.instance.store.search("Newbody", 10)).toEqual([]);
+    expect(second.instance.replicas.indexReconciled(created.uuid)).toBe(false);
+
+    second.instance.replicas.refresh();
+    second.instance.replicas.refresh();
+    expect(second.instance.store.search("Newbody", 10)).toMatchObject([{ uuid: created.uuid }]);
+    expect(second.instance.store.search("Oldbody", 10)).toEqual([]);
+    expect(second.instance.replicas.indexReconciled(created.uuid)).toBe(true);
+    second.instance.replicas.refresh();
+    expect(second.instance.replicas.indexReconciled(created.uuid)).toBe(true);
+  });
+
   it("replays the missing prefix before indexing its own later append", async () => {
     const databasePath = tempDatabasePath();
     const first = await server(databasePath);

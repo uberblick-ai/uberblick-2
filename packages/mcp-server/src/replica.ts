@@ -678,7 +678,7 @@ export class Replicas {
       ? resolveDecisionTopics(listDirectory(directory.doc, { includeDeleted: true }))
         .find((topic) => topic.topic === (meta.topic ?? meta.uuid))
       : undefined;
-    this.store.indexDoc(
+    const current = this.store.indexDoc(
       {
         uuid: replica.id,
         title: topic === undefined ? meta.title : decisionTopicTitle(topic),
@@ -714,6 +714,7 @@ export class Replicas {
       this.settings().indexedThroughSeq,
       directory.indexedThroughSeq,
     );
+    if (current === false) this.pace(replica.id, Date.now() + this.config.reconcileRetryMs);
   }
 
   /**

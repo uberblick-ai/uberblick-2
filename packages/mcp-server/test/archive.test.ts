@@ -37,14 +37,15 @@ class CountingStore extends MirrorStore {
     doc: IndexedDoc,
     throughSeq: number,
     catalogThroughSeq = 0,
-  ): void {
+    directoryThroughSeq = 0,
+  ): boolean {
     this.indexAttempts += 1;
     if (this.failEveryIndex || this.failNextIndex) {
       this.failNextIndex = false;
       throw new Error("simulated index failure");
     }
     this.indexed.push(doc.uuid);
-    super.indexDoc(doc, throughSeq, catalogThroughSeq);
+    return super.indexDoc(doc, throughSeq, catalogThroughSeq, directoryThroughSeq);
   }
 
   unindexAttempts = 0;
