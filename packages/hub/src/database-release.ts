@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import type { HubLogger } from "./log.js";
-import { backupDatabase } from "./operator-database.js";
+import { backupDatabase } from "./database-backup.js";
 
 /** Published images use only stable MAJOR.MINOR.PATCH versions. */
 function releaseParts(version: string): [bigint, bigint, bigint] {

@@ -68,6 +68,7 @@ test("both runtime images declare fast local health checks inherited by existing
 		assert.match(stage, /HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=2s --retries=3/);
 	}
 	assert.match(stages[0], /CMD \["node", "\/usr\/local\/bin\/hub-healthcheck\.mjs"\]/);
+	assert.match(readFileSync(join(root, "Dockerfile.hub-release.dockerignore"), "utf8"), /^!hub-healthcheck\.mjs$/m);
 	assert.match(stages[1], /CMD \["wget", "-q", "-Y", "off", "-T", "4", "-O", "\/dev\/null", "http:\/\/127\.0\.0\.1:2019\/config\/"\]/);
 	assert.match(readFileSync(join(root, "Caddyfile"), "utf8"), /admin 127\.0\.0\.1:2019/);
 	assert.doesNotMatch(readFileSync(join(root, "compose.release.yml"), "utf8"), /healthcheck:/);
