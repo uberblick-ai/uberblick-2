@@ -218,9 +218,9 @@ version recorded by the hub release before choosing it.
 
 ### Move an existing release deployment to downloaded files
 
-For an existing `~/uberblick-remote` deployment created by `ub hub setup` or
-image extraction, keep its `.env` and volumes. Take an operator backup with
-the existing deployment before changing files. Download `compose.yml` and both
+For an existing `~/uberblick-remote` release deployment, keep its `.env` and
+volumes. Take an operator backup with the existing deployment before changing
+files. Download `compose.yml` and both
 route files from the chosen version's release assets into that same directory;
 do not copy `remote.env.example` over `.env`.
 
@@ -242,43 +242,6 @@ names must match the existing ones. Run `docker compose pull` and
 No `down` or volume removal is needed. Compose prefers the new `compose.yml`
 over an old `docker-compose.yml`; keep using plain Compose from this directory
 after the switch.
-
-### Use an earlier installed client
-
-An earlier installed client that has `ub hub` can still extract and operate
-the release's image payload instead of using the downloaded files:
-
-```sh
-ub hub setup --release X.Y.Z
-# Edit ~/uberblick-remote/.env if you need a route other than localhost.
-ub hub up
-ub hub status
-ub hub status --json
-ub hub upgrade --release X.Y.Z
-```
-
-These commands run on the hub host and need no project binding or login.
-Every subcommand accepts `--dir <path>`; the default is `~/uberblick-remote`.
-Setup refuses a directory holding files, creates a mode-0600 `.env` and starts
-nothing. The image payload retains fixed image references, `release.json`
-and its `bin/remote-compose.sh` and backup scripts. Its environment template
-lets the wrapper choose routes from the host settings. Keep this payload's
-layout and template when continuing to operate it through `ub hub`; the
-downloaded-file layout is operated through plain Compose. For this payload's
-operator commands below, use `sh bin/remote-compose.sh` in place of
-`docker compose` so its wrapper selects the route.
-
-`status` checks the site and `/ws` from the host and exits 0 only when healthy;
-allow certificate acquisition to finish and check again. `--json` prints one
-object. `ub hub down` removes containers and keeps the data and certificate
-volumes. Upgrade requires a running hub and a newer release; the current
-release changes nothing and older targets are refused. It stages and checks
-the target, pulls images, runs the live deployment's backup script, keeps
-`.env` and earlier backups, and checks health after recreating containers.
-A sync protocol change asks for confirmation at a terminal or accepts `--yes`;
-update every client in the same sitting. `ub hub` grants no hub or workspace
-role. To switch this deployment to downloaded files, follow the migration
-above.
 
 ### Upgrade an existing deployment to device credentials
 
@@ -1400,9 +1363,7 @@ docker compose up -d
 
 Compose reads `COMPOSE_FILE` from the deployment's `.env`, so the same plain
 command starts every route. Change both the file selection and host settings
-when changing routes. The image payload's legacy `bin/remote-compose.sh`
-continues to choose its optional files from host settings for `ub hub`;
-downloaded-file deployments need no wrapper.
+when changing routes.
 
 Switching routes keeps the same `uberblick-remote` project and `hub-data`,
 `caddy-data` and `caddy-config` volumes, including the claim and certificate
@@ -1622,8 +1583,6 @@ have the same contents, integrity check and private mode. Find their paths in
 `docker compose logs hub` under `hub.database.backup`; they stay beside
 `/data/hub.sqlite` and can be restored directly from that volume. They supplement
 operator backups and follow the same owner-managed retention policy.
-The retained `bin/hub-backup.sh` is a compatibility route used by `ub hub
-upgrade`; it stops and restarts the hub and writes its backup to the host.
 
 ### Restoring one
 
