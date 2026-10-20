@@ -211,6 +211,28 @@ records and Caddy's certificate state across replacement. Do not pass
 `--volumes` to `down`, rename the project or change these volume names.
 Nothing follows `latest`, a moving branch or a schedule.
 
+Before a newer hub release writes to an existing database, it makes a complete,
+integrity-checked startup copy beside the database (`/data` in the container,
+the `hub-data` volume under Compose). This also covers databases from releases
+that recorded no version, and container replacement through other tools. The
+`hub.database.backup` log event names the new mode-0600 file in its `backup`
+field. Only after logging that path does the hub record its own release and
+continue startup. A fresh database gets no copy; restarting the same release
+makes no additional copy. A failed copy stops startup before any database writes.
+
+A hub refuses a database last written by a newer release, exits nonzero and
+names that release to run instead. A restart policy can repeat the refusal;
+each attempt leaves the database unchanged. Releases predating this guard do
+not honor the record. If one writes after a guarded release, that write is not
+detectable from the record. Local hubs started by `ub open`, source runs and
+tests without a release identity do not record or check a release.
+
+Check `sh bin/remote-compose.sh ps` for container health. Both images include
+their own checks, so existing Compose files inherit them: the hub checks its
+own HTTP listener and the web image checks Caddy's loopback admin listener.
+These checks use no public DNS name, TLS certificate or deployment route; still
+check the selected site and `/ws` from the client.
+
 **When to update:** choose a release containing a change you want live, and
 stay present to verify it. Deploying a release neither creates, moves nor
 deletes a workspace on existing hub data. A database holding any hub data when
@@ -1577,10 +1599,24 @@ not device signing secrets, but their documents and access records still require
 private storage. Backups made before the device-created-key upgrade contain
 the earlier device signing secrets and must remain private.
 Manage retention yourself; a copy in `hub-data` is lost if that volume is lost.
+The automatic startup copies described in [Updating the host](#updating-the-host--deliberately)
+have the same contents, integrity check and private mode. Find their paths in
+`sh bin/remote-compose.sh logs hub` under `hub.database.backup`; they stay beside
+`/data/hub.sqlite` and can be restored directly from that volume. They supplement
+operator backups and follow the same owner-managed retention policy.
 The retained `bin/hub-backup.sh` is a compatibility route used by `ub hub
 upgrade`; it stops and restarts the hub and writes its backup to the host.
 
 ### Restoring one
+
+To return to an older release after an update, stop the hub and restore the
+startup copy logged before that update, using the current image's restore
+command below. Restore may ask about access changes it would undo. After it
+succeeds, select the older release's images and matching release files, keep
+the deployment's `.env` and volumes, and recreate the containers. Start only
+the older release against the restored database; starting the newer release
+first records the newer version again. Changes made after the copy are lost,
+and all clients must match the restored hub's sync protocol.
 
 ```sh
 sh bin/remote-compose.sh stop hub

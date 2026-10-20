@@ -35,6 +35,7 @@ import type {
 } from "@uberblick/schema/token";
 import { clampToken, importRootSecret, inspectToken } from "@uberblick/schema/token";
 import { isLoopbackHost } from "@uberblick/schema/loopback";
+import { prepareDatabaseRelease } from "./database-release.js";
 
 /**
  * Local connections carry verified claims. Remote connections carry the
@@ -489,6 +490,7 @@ async function listen(
 export async function createHub(config: HubConfig, options: {
   /** Test seam that can only make loopback admission stricter. */
   deviceCredentials?: true;
+  hubVersion?: string;
   extension?: (context: HubExtensionContext) => HubExtension;
 } = {}): Promise<Hub> {
   const address = config.address ?? DEFAULT_HOST;
@@ -541,11 +543,14 @@ export async function createHub(config: HubConfig, options: {
 
   // Before the socket, not after: a hub that is listening has a database.
   try {
-    database.open();
+    if (options.hubVersion !== undefined && !isEphemeralDatabase(databasePath)) {
+      await prepareDatabaseRelease(databasePath, options.hubVersion, log);
+    }
+    database.open(options.hubVersion);
   } catch (error) {
     closeDatabase();
     throw new Error(
-      `createHub: cannot open the SQLite database at ${databasePath}`,
+      `createHub: cannot open the SQLite database at ${databasePath}: ${String(error)}`,
       { cause: error },
     );
   }

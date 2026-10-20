@@ -108,6 +108,7 @@ export async function createTeamHub(config: TeamHubConfig, options: TeamHubOptio
   if (config.github !== undefined) validateGithubClientId(config.github.clientId);
   let team: ReturnType<typeof createTeamExtension> | undefined;
   const hub = await createHub(config, {
+    ...(options.hubVersion === undefined ? {} : { hubVersion: options.hubVersion }),
     ...(options.deviceCredentials === undefined ? {} : { deviceCredentials: options.deviceCredentials }),
     extension(context) {
       team = createTeamExtension(config, options, context);

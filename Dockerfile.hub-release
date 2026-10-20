@@ -42,10 +42,13 @@ WORKDIR /app
 COPY --from=build /out/hub.mjs /out/ub-hub.mjs ./
 COPY --from=build /out/release /release
 COPY hub-release-entrypoint.sh remote-settings.sh /usr/local/bin/
+COPY hub-healthcheck.mjs /usr/local/bin/
 COPY --chmod=0755 bin/ub-hub /usr/local/bin/ub-hub
 RUN install -d -o node -g node /data
 USER node
 EXPOSE 1234
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=2s --retries=3 \
+    CMD ["node", "/usr/local/bin/hub-healthcheck.mjs"]
 ENTRYPOINT ["sh", "/usr/local/bin/hub-release-entrypoint.sh"]
 CMD ["node", "/app/hub.mjs"]
 
@@ -62,5 +65,7 @@ COPY --from=build /out/web/uberblick-csp.caddy /etc/caddy/uberblick-csp.caddy
 COPY --from=build /out/web /srv
 COPY --from=build /out/release/release.json /release/release.json
 COPY web-release-entrypoint.sh remote-settings.sh /usr/local/bin/
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=2s --retries=3 \
+    CMD ["wget", "-q", "-Y", "off", "-T", "4", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
 ENTRYPOINT ["sh", "/usr/local/bin/web-release-entrypoint.sh"]
 CMD ["run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

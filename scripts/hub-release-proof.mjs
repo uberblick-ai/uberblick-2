@@ -238,6 +238,24 @@ db.close(); console.log(JSON.stringify(result));`;
     }
     throw new Error(`stack did not serve loopback HTTP/config/WebSocket: ${interrupted ?? lastError}`);
   }
+  async function health(expected, timeout = 60_000) {
+    const ids = [];
+    for (const service of ["hub", "caddy"]) ids.push((await compose(["ps", "--quiet", service])).stdout.trim());
+    const until = Date.now() + timeout;
+    let states;
+    while (Date.now() < until && !interrupted) {
+      states = JSON.parse((await command("docker", ["inspect", ...ids])).stdout);
+      if (states.every((state) => state.State.Health?.Status === expected)) {
+        const output = (await compose(["ps", "--format", "json"])).stdout.trim();
+        const services = output.startsWith("[") ? JSON.parse(output) : output.split("\n").map((line) => JSON.parse(line));
+        assert.equal(services.length, 2);
+        assert.ok(services.every((service) => service.Health === expected), output);
+        return ids;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new Error(`Docker health did not become ${expected}: ${JSON.stringify(states?.map((state) => state.State.Health))}`);
+  }
   try {
     deployment = await extract(versions[0], 0);
     cleanupDeployment = deployment;
@@ -341,8 +359,20 @@ db.exec("COMMIT"); db.close();`);
     const before = (await compose(["ps", "--quiet", "hub"])).stdout.trim();
     const legacyBackup = readFileSync(join(deployment, "backup.sqlite"));
     deployment = await extract(versions[1], 1);
+    const replacedAt = Date.now();
     await compose(["up", "--detach", "--no-build", "--pull", "never", "--force-recreate"]);
     await serving();
+    const healthyIds = await health("healthy");
+    assert.ok(Date.now() - replacedAt < 90_000, "inherited image health arrives inside the existing client's wait");
+    try {
+      for (const id of healthyIds) await command("docker", ["kill", "--signal", "STOP", id]);
+      await health("unhealthy", 110_000);
+    } finally {
+      for (const id of healthyIds) await command("docker", ["kill", "--signal", "CONT", id], { cleanup: true, allowFailure: true });
+    }
+    await health("healthy");
+    await serving();
+    console.log("Existing Compose health settings inherit both image probes; answering services are healthy, suspended listeners are unhealthy, and resumed services recover.");
     assert.notEqual((await compose(["ps", "--quiet", "hub"])).stdout.trim(), before);
     let upgraded = await snapshot();
     assertHubDatabaseUpgrade(upgraded, original);
