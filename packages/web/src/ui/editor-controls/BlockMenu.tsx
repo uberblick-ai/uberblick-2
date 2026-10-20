@@ -104,10 +104,12 @@ function gutterTop(
 export function BlockMenu({
   editor,
   host,
+  entries: availableEntries,
 }: {
   editor: Editor;
   /** The positioned element the menu and the gutter button are placed inside. */
   host: RefObject<HTMLElement | null>;
+  entries?: readonly BlockMenuEntry[];
 }): ReactElement {
   const [slash, setSlash] = useState<SlashSession | null>(null);
   const [hover, setHover] = useState<GutterTarget | null>(null);
@@ -276,7 +278,7 @@ export function BlockMenu({
 
   const query = gutter !== null ? gutterQuery : (slash?.trigger.query ?? null);
   const path = gutter !== null ? "gutter" : slash !== null ? "slash" : null;
-  const entries = query === null ? [] : filterBlockMenu(query);
+  const entries = query === null ? [] : filterBlockMenu(query, availableEntries);
   // A slash query nothing matches is a reader writing prose, not choosing a
   // block: the menu gets out of the way and gives Enter back to the editor.
   const open = path === "gutter" || (path === "slash" && entries.length > 0);

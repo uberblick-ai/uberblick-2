@@ -26,8 +26,11 @@ import { retypeBlockInTransaction } from "./retype.js";
  * Match the whole paragraph against a literal registry trigger, including 1.
  * for ordered lists. Mid-text prefixes and other authored numbers stay prose.
  */
-export function entryForTrigger(text: string): BlockMenuEntry | null {
-  return BLOCK_MENU_ENTRIES.find((entry) => entry.trigger === text) ?? null;
+export function entryForTrigger(
+  text: string,
+  entries: readonly BlockMenuEntry[] = BLOCK_MENU_ENTRIES,
+): BlockMenuEntry | null {
+  return entries.find((entry) => entry.trigger === text) ?? null;
 }
 
 /**
@@ -39,6 +42,7 @@ function conversionFor(
   from: number,
   to: number,
   text: string,
+  entries: readonly BlockMenuEntry[],
 ): { blockId: string; entry: BlockMenuEntry } | null {
   // An input method mid-composition is not finished typing; taking the
   // keystroke here would commit half a character.
@@ -56,7 +60,7 @@ function conversionFor(
   // prefix — there is text in front of it.
   if ($from.parentOffset !== block.content.size) return null;
 
-  const entry = entryForTrigger(block.textContent + text);
+  const entry = entryForTrigger(block.textContent + text, entries);
   if (entry === null) return null;
   const blockId = block.attrs.id;
   if (typeof blockId !== "string" || blockId === "") return null;
@@ -93,11 +97,11 @@ function convertOnTrigger(
   return true;
 }
 
-export function blockInputRulePlugin(): Plugin {
+export function blockInputRulePlugin(entries: readonly BlockMenuEntry[] = BLOCK_MENU_ENTRIES): Plugin {
   return new Plugin({
     props: {
       handleTextInput(view, from, to, text, defaultTransaction) {
-        const conversion = conversionFor(view, from, to, text);
+        const conversion = conversionFor(view, from, to, text, entries);
         if (conversion === null) return false;
         return convertOnTrigger(
           view,
@@ -111,9 +115,10 @@ export function blockInputRulePlugin(): Plugin {
 }
 
 /** Tiptap wrapper around {@link blockInputRulePlugin}. */
-export const BlockInputRules = Extension.create({
+export const BlockInputRules = Extension.create<{ entries: readonly BlockMenuEntry[] }>({
   name: "uberblickBlockInputRules",
+  addOptions: () => ({ entries: BLOCK_MENU_ENTRIES }),
   addProseMirrorPlugins() {
-    return [blockInputRulePlugin()];
+    return [blockInputRulePlugin(this.options.entries)];
   },
 });

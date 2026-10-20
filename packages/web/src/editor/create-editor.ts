@@ -9,6 +9,7 @@ import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import { seedNewCardParts, seedNewFigmaCaptions, seedNewTableCells } from "@uberblick/schema";
 import { BlockIds } from "./block-ids.js";
+import type { BlockMenuEntry } from "./block-menu.js";
 import { CaretMenuKeys } from "./caret-menu.js";
 import { Collaboration } from "./collaboration.js";
 import { CommentAnchors } from "./comment-anchors.js";
@@ -56,6 +57,8 @@ export interface CreateEditorOptions {
   docLinks?: DocLinkContext | null;
   /** Shared settings drive presentation without changing the document. */
   workspaceSettings?: Y.Doc | null;
+  /** Limit authored block choices and Markdown shortcuts without narrowing the stored schema. */
+  blockMenuEntries?: readonly BlockMenuEntry[];
 }
 
 export function createUberblickEditor(options: CreateEditorOptions): Editor {
@@ -79,7 +82,9 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     }),
     // Keep behavior outside the shared schema. BlockIds runs before rules so
     // conversions can address the block it identifies.
-    BlockInputRules,
+    options.blockMenuEntries === undefined
+      ? BlockInputRules
+      : BlockInputRules.configure({ entries: options.blockMenuEntries }),
     // Installed once: reconfiguring plugins on menu mount destroys collaboration
     // views (including its UndoManager). The UI only registers live handlers.
     CaretMenuKeys,

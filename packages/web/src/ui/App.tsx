@@ -59,6 +59,9 @@ import { Sidebar, togglePin } from "./sidebar/Sidebar.js";
 import { SidebarProvider, SIDEBAR_TOGGLE_CLASSES } from "./shadcn/sidebar.js";
 import { EditorPane, PaneNotice, StatusLine } from "./document/EditorPane.js";
 import { DecisionTopicPane } from "./document/DecisionTopicPane.js";
+import { AlterDecisionDialog } from "./document/AlterDecisionDialog.js";
+import type { AlterDecisionSession, RecordedDecision } from "./document/AlterDecisionDialog.js";
+import { Dialog } from "./shadcn/dialog.js";
 import { DecisionsBlock, DecisionsLink } from "./document/DecisionsBlock.js";
 import { RemoteHubGuide } from "./document/RemoteHubGuide.js";
 import { SyncPanel } from "./status/SyncPanel.js";
@@ -202,6 +205,7 @@ export function RoutePane({
   navigate,
   directoryConnection = null,
   relatedTopics = [],
+  onAlterDecision = null,
 }: {
   route: Route;
   /**
@@ -267,6 +271,7 @@ export function RoutePane({
   navigate?: Navigate;
   directoryConnection?: RoomConnection | null;
   relatedTopics?: readonly DecisionTopicResolution[];
+  onAlterDecision?: (() => void) | null;
 }): ReactElement {
   // Hooks precede early returns. The answer flag distinguishes a joining
   // empty room from an empty server answer.
@@ -365,6 +370,7 @@ export function RoutePane({
     return <DecisionTopicPane {...editorProps}
       topic={topic} selected={selectedUuid ?? null} navigate={navigate}
       directoryConnection={directoryConnection}
+      onAlterDecision={onAlterDecision}
       explicit={route.kind === "decision"}
       linkedRecord={route.kind === "doc" && route.uuid !== current?.uuid ? route.uuid : null}
     />;
@@ -616,6 +622,44 @@ export function App(): ReactElement {
   const directoryStatus = useRoomStatus(directory);
   const docStatus = useRoomStatus(doc);
   const sidebarStatus = useRoomStatus(sidebar);
+  const [alterDecision, setAlterDecision] = useState<AlterDecisionSession | null>(null);
+  const alteredResult = useRef<{ room: string; release(): void } | null>(null);
+  useEffect(() => () => alterDecision?.release(), [alterDecision]);
+  useEffect(() => () => alteredResult.current?.release(), []);
+  useEffect(() => {
+    const held = alteredResult.current;
+    if (held === null || doc?.room !== held.room) return;
+    alteredResult.current = null;
+    held.release();
+  }, [doc]);
+  const openAlterDecision = useCallback(() => {
+    if (doc === null || directory === null || catalog === null || workspace === null || topic === null ||
+      !doc.status.writable || !doc.status.synced || !directory.status.writable || !directory.status.synced) return;
+    const sourceUuid = parseRoom(doc.room).uuid;
+    const fresh = resolveDecisionTopics(directory.ydoc).find((entry) => entry.topic === topic.topic);
+    if (fresh === undefined || fresh.archived || fresh.inForce?.uuid !== sourceUuid) return;
+    const sourceHandle = acquireRoom(doc.room, defaultIdentity, { presence: false });
+    const directoryHandle = acquireRoom(directory.room, defaultIdentity, { presence: false });
+    const catalogHandle = acquireRoom(catalog.room, defaultIdentity, { presence: false });
+    const cancellation = new AbortController();
+    setAlterDecision({
+      source: sourceHandle.connection, directory: directoryHandle.connection,
+      catalog: catalogHandle.connection, identity: defaultIdentity,
+      topicPath: docPath(workspace.segment, topic.topic),
+      segment: workspace.segment,
+      cancellation,
+      release: () => { cancellation.abort(); sourceHandle.release(); directoryHandle.release(); catalogHandle.release(); },
+    });
+  }, [doc, directory, catalog, workspace, topic, defaultIdentity]);
+  const onDecisionRecorded = useCallback((result: RecordedDecision) => {
+    if (alterDecision === null) { result.release(); return; }
+    const sourceWorkspace = parseRoom(alterDecision.source.room).workspaceId;
+    const target = result.rfc ?? result.decision;
+    alteredResult.current?.release();
+    alteredResult.current = { room: roomForDoc(sourceWorkspace, target), release: result.release };
+    navigate(result.rfc === undefined ? alterDecision.topicPath : docPath(alterDecision.segment, result.rfc));
+    setAlterDecision(null);
+  }, [alterDecision, navigate]);
   /** Read the same synced sidebar document used by browser and MCP readers. */
   const sidebarGroups = useSidebar(sidebar);
   const pinTargets = topic?.records.map((record) => record.uuid) ?? (selected === null ? [] : [selected]);
@@ -1032,22 +1076,12 @@ export function App(): ReactElement {
   const sidebarToggleLabel = `${sidebarHidden ? "Show" : "Hide"} ${sidebarName}`;
   const sidebarCloseLabel = narrowSidebar ? `Close ${sidebarName}` : sidebarToggleLabel;
 
-  if (remoteSignIn) {
-    return (
-      <main className="ub-app">
-        <RemoteHubGuide />
-      </main>
-    );
-  }
-  if (sessionMissing) {
-    return (
-      <main className="ub-app">
-        <LocalSessionNotice />
-      </main>
-    );
-  }
-
   return (
+    <Dialog open={alterDecision !== null} onOpenChange={(open) => {
+      if (!open) { alterDecision?.cancellation.abort(); setAlterDecision(null); }
+    }}>
+    {remoteSignIn ? <main className="ub-app"><RemoteHubGuide /></main>
+      : sessionMissing ? <main className="ub-app"><LocalSessionNotice /></main> : (
     <main className="ub-app flex h-dvh flex-col">
       {workspace !== null && <CommandPalette key={workspace.uuid} entries={allEntries} searchClient={documentSearch ?? null}
         writable={directoryStatus.writable} onSelect={onSelect} onCreate={onCreate} />}
@@ -1164,6 +1198,7 @@ export function App(): ReactElement {
               selectedUuid={selected}
               navigate={navigate}
               directoryConnection={directory}
+              onAlterDecision={openAlterDecision}
               relatedTopics={relatedTopics}
               configured={hubReady}
               connection={doc}
@@ -1257,5 +1292,9 @@ export function App(): ReactElement {
         )}
       </SidebarProvider>
     </main>
+    )}
+    {alterDecision !== null && <AlterDecisionDialog session={alterDecision} displayName={identity.name}
+      docLinks={docLinks} onClose={() => setAlterDecision(null)} onRecorded={onDecisionRecorded} />}
+    </Dialog>
   );
 }

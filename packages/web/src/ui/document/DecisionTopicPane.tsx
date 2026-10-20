@@ -10,6 +10,8 @@ import { decisionRecordPath, docPath } from "../route.js";
 import type { Navigate } from "../route.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
 import { TOPIC_STATES } from "./decision-state.js";
+import { Button } from "../shadcn/button.js";
+import { DialogTrigger } from "../shadcn/dialog.js";
 
 function navigateLink(event: MouseEvent<HTMLAnchorElement>, navigate: Navigate): void {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -127,9 +129,10 @@ function replacementRecord(topic: DecisionTopicResolution, selected: string): Di
   });
 }
 
-function AnswerHeader({ topic, record, topicPath, navigate, docLinks }: {
+function AnswerHeader({ topic, record, topicPath, navigate, docLinks, onAlterDecision }: {
   topic: DecisionTopicResolution; record: DirectoryEntry; topicPath: string;
   navigate: Navigate; docLinks: DocLinkContext | null;
+  onAlterDecision: (() => void) | null;
 }): ReactElement {
   const now = useTimestampClock();
   const state = answerState(topic, record);
@@ -153,6 +156,7 @@ function AnswerHeader({ topic, record, topicPath, navigate, docLinks }: {
         <AnswerPill state={state} />
       </div>
       <RecordedAttribution record={record} state={state} now={now} />
+      {onAlterDecision !== null && <DialogTrigger asChild><Button size="sm" variant="outline" className="ms-auto" onClick={onAlterDecision}>Alter decision</Button></DialogTrigger>}
     </div>
   </>;
 }
@@ -242,12 +246,15 @@ function TopicTitle({ topic, current, selected, connection, directoryConnection,
 }
 
 /** A topic uses one selected room; its history reads directory caches only. */
-export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, explicit, directoryConnection, ...editorProps }:
+export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, explicit, directoryConnection, onAlterDecision = null, ...editorProps }:
   ComponentProps<typeof EditorPane> & {
     topic: DecisionTopicResolution | null; selected: string | null; linkedRecord: string | null;
     navigate: Navigate; explicit: boolean;
     directoryConnection: RoomConnection | null;
+    onAlterDecision?: (() => void) | null;
   }): ReactElement {
+  const sourceStatus = useRoomStatus(editorProps.connection);
+  const directoryStatus = useRoomStatus(directoryConnection);
   if (topic === null || selected === null) return <EditorPane {...editorProps} />;
   const current = decisionCurrentRecord(topic);
   const record = topic.records.find((entry) => entry.uuid === selected);
@@ -264,7 +271,11 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
     header={<TopicTitle topic={topic} current={current} selected={selected} connection={connection}
       directoryConnection={directoryConnection} archived={editorProps.archived} />}
     beforeAnswer={<>
-      <AnswerHeader topic={topic} record={record} topicPath={topicPath} navigate={navigate} docLinks={docLinks} />
+      <AnswerHeader topic={topic} record={record} topicPath={topicPath} navigate={navigate} docLinks={docLinks}
+        onAlterDecision={!topic.archived && !editorProps.archived && topic.inForce?.uuid === selected &&
+          connection !== null && parseRoom(connection.room).uuid === selected &&
+          sourceStatus.writable && sourceStatus.synced && directoryStatus.writable && directoryStatus.synced
+          ? onAlterDecision : null} />
       {record.status === "rejected" && rejectionReason && <p className="ub-decision-rejection">Rejection reason: {rejectionReason}</p>}
     </>}
     answerClassName={history ? "ub-decision-answer ub-decision-answer-history" : "ub-decision-answer"}

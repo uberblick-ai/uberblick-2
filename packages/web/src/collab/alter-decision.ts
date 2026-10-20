@@ -65,6 +65,10 @@ type RefusalCode =
   | "destination_exists" | "abandoned";
 
 type Refusal = { ok: false; code: RefusalCode; message: string };
+type AnswerProblem = {
+  code: "decision_answer_empty" | "decision_block_unsupported" | "decision_answer_too_long";
+  blockTypes: string[];
+};
 export type AlterDecisionResult = {
   ok: true;
   decision: string;
@@ -89,6 +93,19 @@ const messages: Record<RefusalCode, string> = {
 
 function refuse(code: RefusalCode): Refusal {
   return { ok: false, code, message: messages[code] };
+}
+
+export function alteredDecisionAnswerProblem(draft: Y.Doc): AnswerProblem | null {
+  const unsupported = getBlocksFragment(draft).toArray().filter((block) =>
+    !(block instanceof Y.XmlElement) || !["paragraph", "list-item", "code", "table"].includes(block.nodeName));
+  const blockTypes = [...new Set(unsupported.map((block) => block instanceof Y.XmlElement ? block.nodeName : "unknown"))];
+  if (unsupported.length > 0) return { code: "decision_block_unsupported", blockTypes };
+  // Reserve the third schema answer block for Decide's reason in either mode.
+  const shape = decisionAnswerShapeFailure([...getBlocks(draft), { type: "paragraph" }]);
+  if (shape !== null) return { code: shape, blockTypes };
+  const hasText = getBlocksWithInline(draft).some(({ block, table }) =>
+    table === undefined ? block.text.trim() !== "" : table.flat(2).some((run) => run.text.trim() !== ""));
+  return hasText ? null : { code: "decision_answer_empty", blockTypes };
 }
 
 function sourceFailure(input: AlterDecisionInput): Refusal | null {
@@ -186,16 +203,8 @@ function stageRfc(input: AlterDecisionInput, uuid: string, decision: string, now
  */
 export async function recordAlteredDecision(request: AlterDecisionInput): Promise<AlterDecisionResult> {
   const input = { ...request, reason: request.reason.trim(), displayName: request.displayName.trim() };
-  const unsupported = getBlocksFragment(input.draft).toArray().some((block) =>
-    !(block instanceof Y.XmlElement) || !["paragraph", "list-item", "code", "table"].includes(block.nodeName));
-  if (unsupported) return refuse("decision_block_unsupported");
-  const blocks = getBlocks(input.draft);
-  // Reserve the third schema answer block for Decide's reason in either mode.
-  const shape = decisionAnswerShapeFailure([...blocks, { type: "paragraph" }]);
-  if (shape !== null) return refuse(shape);
-  const hasText = getBlocksWithInline(input.draft).some(({ block, table }) =>
-    table === undefined ? block.text.trim() !== "" : table.flat(2).some((run) => run.text.trim() !== ""));
-  if (!hasText) return refuse("decision_answer_empty");
+  const problem = alteredDecisionAnswerProblem(input.draft);
+  if (problem !== null) return refuse(problem.code);
   if (input.mode === "decide" && input.reason === "") return refuse("reason_empty");
   if (input.mode === "decide" && input.displayName === "") return refuse("display_name_empty");
   const failure = sourceFailure(input);
