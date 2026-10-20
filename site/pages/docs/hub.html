@@ -1,122 +1,53 @@
 <head>
 <title>Run a hub · Uberblick docs</title>
-<meta name="description" content="Run an Uberblick hub with Docker, claim it, choose how other computers reach it, connect them, and keep it updated and backed up.">
+<meta name="description" content="Run an Uberblick hub with Docker, claim it, let other computers reach it, and connect them.">
 <link rel="stylesheet" href="/css/sub.css">
 </head>
 <div class="hero sub">
   <p class="crumb"><a href="/">Uberblick</a> / Docs / Sharing</p>
   <h1>Run a hub</h1>
-  <p class="lede">A hub shares a workspace between computers. Every computer keeps its own copy and keeps working offline; the hub passes changes on and admits only the people who are members. You need one when a second person or a second machine should see the same documents. A hub is one Docker release: the hub itself and a Caddy web server in front of it.</p>
+  <p class="lede">A hub shares a workspace between computers and people. Every computer keeps its own copy and works offline; the hub passes changes on and admits only members. It is one Docker release.</p>
 </div>
 <article class="col">
 
   <section class="q" id="start"><h2>Start one</h2>
-  <p>Run this on the computer that will host it. It copies the release's files out of the hub image into <code>~/uberblick-remote</code>, then starts the stack:</p>
   <section class="block terminal"><div class="cap"><span>Terminal</span><button type="button" data-copy="mkdir -p ~/uberblick-remote &amp;&amp; cd ~/uberblick-remote
-HUB_VERSION=0.4.7
-docker pull --platform linux/amd64 &quot;ghcr.io/uberblick-ai/hub:$HUB_VERSION&quot;
-release_container=$(docker create --platform linux/amd64 &quot;ghcr.io/uberblick-ai/hub:$HUB_VERSION&quot;)
-docker cp &quot;$release_container:/release/.&quot; .
-docker rm &quot;$release_container&quot;
-cp remote.env.example .env &amp;&amp; chmod 600 .env
-sh bin/remote-compose.sh up --detach
-sh bin/remote-compose.sh exec hub ub-hub status">Copy</button></div><pre><span class="p">$</span> mkdir -p ~/uberblick-remote &amp;&amp; cd ~/uberblick-remote
-<span class="p">$</span> HUB_VERSION=0.4.7   <span class="c"># a published release; nothing follows latest</span>
-<span class="p">$</span> docker pull --platform linux/amd64 "ghcr.io/uberblick-ai/hub:$HUB_VERSION"
-<span class="p">$</span> release_container=$(docker create --platform linux/amd64 "ghcr.io/uberblick-ai/hub:$HUB_VERSION")
-<span class="p">$</span> docker cp "$release_container:/release/." .
-<span class="p">$</span> docker rm "$release_container"
-<span class="p">$</span> cp remote.env.example .env &amp;&amp; chmod 600 .env
-
-<span class="p">$</span> sh bin/remote-compose.sh up --detach
-<span class="p">$</span> sh bin/remote-compose.sh exec hub ub-hub status</pre></section>
-  <p>The host needs Linux x86_64 with Docker Engine 28.0.0 or newer and Docker Compose 2.24.4 or newer, or Docker Desktop on macOS. Only <code>linux/amd64</code> images are published, so Apple Silicon runs them under emulation. The host needs no <code>ub</code> client, no Node and no GitHub account.</p>
-  <p>The hub now answers at <code>http://localhost:8080</code> and nowhere else: Caddy is published only on the host's loopback interface, and the hub has no port of its own. On its first start the hub creates one workspace, named <strong>Default workspace</strong>. <code>bin/remote-compose.sh</code> is a thin wrapper around <code>docker compose</code> that checks <code>.env</code> and picks the release's Compose files for the route you set there.</p>
+docker cp $(docker create --platform linux/amd64 ghcr.io/uberblick-ai/hub:0.4.7):/release/. .
+cp remote.env.example .env
+sh bin/remote-compose.sh up --detach">Copy</button></div><pre><span class="p">$</span> mkdir -p ~/uberblick-remote &amp;&amp; cd ~/uberblick-remote
+<span class="p">$</span> docker cp $(docker create --platform linux/amd64 ghcr.io/uberblick-ai/hub:0.4.7):/release/. .
+<span class="p">$</span> cp remote.env.example .env
+<span class="p">$</span> sh bin/remote-compose.sh up --detach</pre></section>
+  <p>This copies the release's Compose files out of the hub image and starts the hub at <code>http://localhost:8080</code>, on this computer only. It needs Docker Engine 28 or newer on Linux x86_64, or Docker Desktop on macOS.</p>
   </section>
 
   <section class="q" id="claim"><h2>Claim it</h2>
-  <p>Open <code>http://localhost:8080</code> on the host and choose <strong>Sign in with GitHub</strong>. If the host has the client installed, this works too:</p>
-  <section class="block terminal"><div class="cap"><span>Terminal</span><button type="button" data-copy="ub auth login http://localhost:8080">Copy</button></div><pre><span class="p">$</span> ub auth login http://localhost:8080</pre></section>
-  <p>The first GitHub account that completes sign-in becomes the hub's administrator and the administrator of its default workspace. The page and the terminal both report the claim and the workspace's UUID; keep the UUID, because every other computer needs it. Claim the hub before other computers can reach it. A claim cannot be handed over or undone. If the wrong account claims a fresh hub, start again with <code>sh bin/remote-compose.sh down --volumes</code>, which deletes everything on it.</p>
-  <p>Sign-in uses GitHub's device flow through the public Uberblick Login app, so there is nothing to register. GitHub's approval page shows the app's name, not your hub's: approve only a code you just started yourself.</p>
+  <p>Open <code>http://localhost:8080</code> and choose <strong>Sign in with GitHub</strong>, or run <code>ub auth login http://localhost:8080</code>. The first account to sign in becomes the hub's administrator. It reports the default workspace's id; keep it for the other computers.</p>
   </section>
 
   <section class="q" id="reach"><h2>Let other computers reach it</h2>
-  <p>Choose a route in <code>.env</code>, then recreate the containers. All three routes admit the same signed-in members.</p>
+  <p>Set one route in <code>.env</code>, then run <code>sh bin/remote-compose.sh up --detach --force-recreate</code>.</p>
   <div class="tablewrap"><table>
-    <thead><tr><th>Route</th><th>Set in <code>.env</code></th><th>Clients sign in at</th></tr></thead>
+    <thead><tr><th>Route</th><th>In <code>.env</code></th></tr></thead>
     <tbody>
-      <tr><td>This computer only, the default</td><td>nothing; <code>LOOPBACK_PORT</code> changes 8080</td><td><code>http://localhost:8080</code></td></tr>
-      <tr><td>Tailscale, recommended, Linux hosts</td><td><code>WEB_HOST=machine.tailnet.ts.net</code><br><code>TAILSCALE_IP=100.x.y.z</code></td><td><code>https://machine.tailnet.ts.net</code></td></tr>
-      <tr><td>A public host name</td><td><code>WEB_HOST=hub.example.com</code></td><td><code>https://hub.example.com</code></td></tr>
+      <tr><td>Tailscale, recommended (Linux)</td><td><code>WEB_HOST=machine.tailnet.ts.net</code> and <code>TAILSCALE_IP</code> from <code>tailscale ip -4</code></td></tr>
+      <tr><td>A public host name</td><td><code>WEB_HOST=hub.example.com</code>, with port 443 open</td></tr>
     </tbody>
   </table></div>
-  <section class="block terminal"><div class="cap"><span>Terminal</span><button type="button" data-copy="sh bin/remote-compose.sh config --quiet
-sh bin/remote-compose.sh up --detach --force-recreate">Copy</button></div><pre><span class="p">$</span> sh bin/remote-compose.sh config --quiet   <span class="c"># refuses a bad setting and names it</span>
-<span class="p">$</span> sh bin/remote-compose.sh up --detach --force-recreate</pre></section>
-  <p><strong>Tailscale</strong> keeps the hub on your private tailnet. Turn on MagicDNS and HTTPS for the tailnet, then take the machine's full <code>*.ts.net</code> name from <code>tailscale status --json</code> and its address from <code>tailscale ip -4</code>. Port 443 is then published only on the Tailscale address, and Caddy gets its certificate from the host's Tailscale daemon. Enabling HTTPS in Tailscale writes the machine name to a public certificate log.</p>
-  <p><strong>A public host name</strong> needs DNS records that reach the host and inbound TCP 443. Caddy gets and renews a publicly trusted certificate on port 443; port 80 stays closed. IP addresses, local names and your own certificate files are not supported.</p>
-  <p>Changing routes keeps the documents, the claim and the certificates, which live in the <code>hub-data</code>, <code>caddy-data</code> and <code>caddy-config</code> volumes. Clients sign in again at the new address.</p>
   </section>
 
   <section class="q" id="connect"><h2>Connect a computer</h2>
-  <p>On each computer that should use the hub's workspace, in the project directory:</p>
   <section class="block terminal"><div class="cap"><span>Terminal</span><button type="button" data-copy="ub auth login https://hub.example.com">Copy</button></div><pre><span class="p">$</span> ub auth login https://hub.example.com
 <span class="p">$</span> ub workspace use wss://hub.example.com/ws/&lt;WORKSPACE_ID&gt;
-<span class="o">fetched    Product notes from https://hub.example.com: 12 documents
-using      Product notes (&lt;WORKSPACE_ID&gt;, https://hub.example.com)
-wrote      ~/Projects/project/.uberblick.json
-open it with: ub open</span></pre></section>
-  <p><code>ub auth login</code> stores a device login for that hub on this computer. It lasts 30 days and renews itself while the client is in use; it changes nothing else. <code>ub workspace use</code> downloads the whole workspace, checks it, and only then binds the project to it. The MCP server and <code>ub open</code> follow that binding. Spell the hub's address the same way everywhere: <code>localhost</code> and <code>127.0.0.1</code> are different hubs to the client.</p>
-  <p>Already have a local workspace to share? Sign in as a hub administrator and run <code>ub workspace promote https://hub.example.com</code> in its project. It uploads every document, verifies them on the hub and binds the project, then prints the link for the other computers.</p>
-  <p>Other people sign in the same way, but a hub admits only members. A workspace administrator adds them with <code>ub workspace member add &lt;github-handle&gt;</code>; see <a href="/docs/access">Access and membership</a>.</p>
+<span class="p">$</span> ub open</pre></section>
+  <p>Add people with <code>ub workspace member add &lt;github-handle&gt;</code>. To share a workspace you already have, run <code>ub workspace promote https://hub.example.com</code> in its project.</p>
   </section>
 
-  <section class="q" id="operate"><h2>Check, back up and update</h2>
-  <p>The hub image carries <code>ub-hub</code> for everything an operator does inside it. Run these in <code>~/uberblick-remote</code>:</p>
-  <section class="block terminal"><div class="cap"><span>Terminal</span><button type="button" data-copy="sh bin/remote-compose.sh exec hub ub-hub doctor">Copy</button></div><pre><span class="p">$</span> sh bin/remote-compose.sh exec hub ub-hub status   <span class="c"># release, protocol, database, claimed or not</span>
-<span class="p">$</span> sh bin/remote-compose.sh exec hub ub-hub doctor   <span class="c"># ok, warn, FAIL or skip per check, changes nothing</span>
-<span class="p">$</span> sh bin/remote-compose.sh logs --tail=100 hub caddy
-
-<span class="p">$</span> sh bin/remote-compose.sh exec hub ub-hub backup   <span class="c"># while the hub keeps serving; prints the file</span>
-<span class="p">$</span> sh bin/remote-compose.sh cp hub:/data/&lt;backup-file&gt;.sqlite ~/uberblick-hub-backup.sqlite
-
-<span class="p">$</span> sh bin/remote-compose.sh stop hub
-<span class="p">$</span> sh bin/remote-compose.sh run --rm hub ub-hub restore /data/&lt;backup-file&gt;.sqlite
-<span class="p">$</span> sh bin/remote-compose.sh start hub</pre></section>
-  <p>A backup is a verified copy of the hub's database: documents, claim and access records. Keep it private, and copy it off the host, because a copy left in <code>hub-data</code> is lost with that volume.</p>
-  <p>The hub never updates itself. To move to a newer release, back it up, copy the new release's files over the old ones the same way you started, and recreate. <code>.env</code> is never part of a release, so your settings stay:</p>
-  <section class="block terminal"><div class="cap"><span>Terminal</span><button type="button" data-copy="cd ~/uberblick-remote
-HUB_VERSION=0.4.7
-mkdir &quot;.release-$HUB_VERSION&quot;
-docker pull --platform linux/amd64 &quot;ghcr.io/uberblick-ai/hub:$HUB_VERSION&quot;
-release_container=$(docker create --platform linux/amd64 &quot;ghcr.io/uberblick-ai/hub:$HUB_VERSION&quot;)
-docker cp &quot;$release_container:/release/.&quot; &quot;.release-$HUB_VERSION/&quot;
-docker rm &quot;$release_container&quot;
-cat &quot;.release-$HUB_VERSION/release.json&quot;
-cp -R &quot;.release-$HUB_VERSION/.&quot; .
-sh bin/remote-compose.sh pull
-sh bin/remote-compose.sh up --detach --force-recreate">Copy</button></div><pre><span class="p">$</span> cd ~/uberblick-remote
-<span class="p">$</span> HUB_VERSION=0.4.7   <span class="c"># the release you are moving to</span>
-<span class="p">$</span> mkdir ".release-$HUB_VERSION"
-<span class="p">$</span> docker pull --platform linux/amd64 "ghcr.io/uberblick-ai/hub:$HUB_VERSION"
-<span class="p">$</span> release_container=$(docker create --platform linux/amd64 "ghcr.io/uberblick-ai/hub:$HUB_VERSION")
-<span class="p">$</span> docker cp "$release_container:/release/." ".release-$HUB_VERSION/"
-<span class="p">$</span> docker rm "$release_container"
-<span class="p">$</span> cat ".release-$HUB_VERSION/release.json"   <span class="c"># version, source commit, sync protocol</span>
-<span class="p">$</span> cp -R ".release-$HUB_VERSION/." .
-<span class="p">$</span> sh bin/remote-compose.sh pull
-<span class="p">$</span> sh bin/remote-compose.sh up --detach --force-recreate</pre></section>
-  <p>Each release ships the client and the hub from the same commit. When the sync protocol in <code>release.json</code> changes, update the hub and every client in the same sitting; an older client is told an update is required. If you cannot do both now, do neither.</p>
+  <section class="q" id="kamal"><h2>With Kamal</h2>
+  <p>We use it with <a href="https://kamal-deploy.org">Kamal</a>: the hub runs as an accessory next to the app.</p>
   </section>
 
-  <section class="q" id="limits"><h2>What a hub does not do</h2>
-  <ul>
-    <li>It serves no documents to a browser. Its web page signs you in and shows how to connect; you edit through <code>ub open</code> or your agent, on your own computer.</li>
-    <li>It does not take back what a computer already downloaded. Removing a member stops their sync, not their local copy.</li>
-    <li>It does not update, restart or back itself up on a schedule. Every change to the host is an operator's command.</li>
-    <li>It runs once per Docker host, managed from a session on that host. Remote orchestration is not supported.</li>
-  </ul>
-  <p>Every setting, route, recovery step and upgrade note is in <a href="https://github.com/uberblick-ai/uberblick-2/blob/main/REMOTE.md">REMOTE.md</a>, which each release also copies into <code>~/uberblick-remote</code>.</p>
+  <section class="q" id="operate"><h2>Keep it running</h2>
+  <p><code>sh bin/remote-compose.sh exec hub ub-hub status</code> shows the release and whether the hub is claimed; <code>ub-hub doctor</code>, <code>backup</code> and <code>restore</code> do the rest. To update, back up, copy the newer release's files over the old ones the same way, and recreate. Everything else is in <a href="https://github.com/uberblick-ai/uberblick-2/blob/main/REMOTE.md">REMOTE.md</a>.</p>
   </section>
 </article>
