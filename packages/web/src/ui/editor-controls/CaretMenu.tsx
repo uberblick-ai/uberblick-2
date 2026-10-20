@@ -4,6 +4,7 @@ import type { ReactElement, ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
 import { autoUpdate, computePosition, flip, offset, shift, size } from "@floating-ui/dom";
 import type { Editor } from "@tiptap/core";
+import { useEditorControlsHost } from "./EditorControlsHost.js";
 
 export function useCaretMenuIds(active: number): {
   listId: string;
@@ -56,11 +57,12 @@ export function CaretMenu({
 }): ReactElement | null {
   const list = useRef<HTMLDivElement | null>(null);
   const card = useRef<HTMLDivElement | null>(null);
+  const controlsHost = useEditorControlsHost();
 
   useEffect(() => {
     const element = card.current;
     if (!open || !element) return;
-    const boundary = host.current?.closest<HTMLElement>(".ub-pane") ?? undefined;
+    const boundary = controlsHost?.boundary ?? host.current?.closest<HTMLElement>(".ub-pane") ?? undefined;
     const reference = {
       contextElement: anchor?.current ?? editor.view.dom,
       getBoundingClientRect: (): DOMRect => {
@@ -102,7 +104,7 @@ export function CaretMenu({
     // without a transaction. Floating UI owns collision and resize handling.
     const stop = autoUpdate(reference, element, update, { animationFrame: true });
     return () => { disposed = true; stop(); };
-  }, [open, editor, host, anchor]);
+  }, [open, editor, host, anchor, controlsHost?.boundary]);
 
   useEffect(() => {
     if (!open) return;
@@ -181,6 +183,6 @@ export function CaretMenu({
         </div>
       )}
     </div>,
-    editor.view.dom.ownerDocument.body,
+    controlsHost?.portalContainer ?? editor.view.dom.ownerDocument.body,
   );
 }

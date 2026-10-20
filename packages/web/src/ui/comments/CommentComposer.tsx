@@ -25,6 +25,7 @@ import { CommentForm } from "./CommentForm.js";
 import { blockRefLabel } from "./threads.js";
 import { Button } from "../shadcn/button.js";
 import { Input } from "../shadcn/input.js";
+import { useEditorControlsHost } from "../editor-controls/EditorControlsHost.js";
 
 type FlagMark = "bold" | "italic" | "strike" | "inlineCode";
 type MarkState = "off" | "mixed" | "on";
@@ -39,6 +40,10 @@ interface MarkReading {
 interface Draft {
   target: CommentTarget | CellTextTarget | CardTextTarget | FigmaTextTarget;
   marks: Record<FlagMark, MarkReading> & { link: MarkReading };
+}
+
+function supportsFormatting(target: Draft["target"]): boolean {
+  return !target.clamped && (isProseBlockType(target.blockType) || "cellPos" in target || "part" in target);
 }
 
 /** The range a target names, as a value two reads can be compared by. */
@@ -203,6 +208,7 @@ function FormatButton({
 export function CommentComposer({
   editor,
   contentReadOnly = false,
+  formattingOnly = false,
   ydoc,
   author,
   mentions,
@@ -212,6 +218,8 @@ export function CommentComposer({
   editor: Editor;
   /** Comments remain writable while content is read-only. */
   contentReadOnly?: boolean;
+  /** Detached answer drafts support formatting and links without comments. */
+  formattingOnly?: boolean;
   ydoc: Y.Doc;
   /** The awareness name this client publishes — the comment's author. */
   author: string;
@@ -236,6 +244,7 @@ export function CommentComposer({
   const floating = useRef<HTMLDivElement | null>(null);
   const readDraft = useEffectEvent(() => draft);
   const readMode = useEffectEvent(() => mode);
+  const controlsHost = useEditorControlsHost();
 
   useEffect(() => {
     // Capture once: the editor can destroy its view before React runs this
@@ -253,7 +262,10 @@ export function CommentComposer({
       }
       if (composing.current) return;
       const selected = commentTargetOf(editor, ydoc);
-      const target = selected !== null && "cellPos" in selected && cellNavigation.current ? null : selected;
+      const target = selected !== null && (
+        ("cellPos" in selected && cellNavigation.current)
+        || (formattingOnly && !supportsFormatting(selected))
+      ) ? null : selected;
       if (target === null) {
         setDraft(null);
         setMode("toolbar");
@@ -311,6 +323,7 @@ export function CommentComposer({
         setMode("toolbar");
         setHref("");
         setError(null);
+        editor.view.focus();
         return;
       }
       dismissed.current = rangeOf(currentDraft.target);
@@ -363,7 +376,7 @@ export function CommentComposer({
       editorDom.removeEventListener("keydown", keyboard, true);
       ownerDocument.removeEventListener("keydown", dismiss, true);
     };
-  }, [editor, ydoc]);
+  }, [editor, ydoc, formattingOnly]);
 
   const open = draft !== null;
   const selectedCellStart = draft !== null && "cellPos" in draft.target ? draft.target.contentStart : null;
@@ -371,7 +384,7 @@ export function CommentComposer({
   useEffect(() => {
     const element = floating.current;
     if (!open || !element) return;
-    const boundary = host.current?.closest<HTMLElement>(".ub-pane") ?? undefined;
+    const boundary = controlsHost?.boundary ?? host.current?.closest<HTMLElement>(".ub-pane") ?? undefined;
     // The selected paragraph is inside the table scrollport. Using it as the
     // virtual reference context lets Floating UI subscribe to sideways scroll.
     const contextElement = selectedCellStart === null ? editor.view.dom
@@ -435,14 +448,15 @@ export function CommentComposer({
     editor.on("transaction", update);
     const stop = autoUpdate(reference, element, update);
     return () => { disposed = true; editor.off("transaction", update); stop(); };
-  }, [editor, host, open, mode, touch, selectedCellStart]);
+  }, [editor, host, open, mode, touch, selectedCellStart, controlsHost?.boundary]);
 
   if (draft === null) return null;
   const { target } = draft;
   const cell = "cellPos" in target;
   const card = "part" in target;
   const prose = !target.clamped && isProseBlockType(target.blockType);
-  const formatting = (prose || ((cell || card) && !target.clamped)) && !contentReadOnly && editor.isEditable;
+  const formatting = supportsFormatting(target) && !contentReadOnly && editor.isEditable;
+  if (formattingOnly && !formatting) return null;
   const blockRef = blockRefLabel(target.blockType, target.blockIndex,
     editor.state.doc.nodeAt(target.contentStart - 1)?.textContent);
 
@@ -450,6 +464,7 @@ export function CommentComposer({
     setMode("toolbar");
     setHref("");
     setError(null);
+    editor.view.focus();
   };
 
   const create = (text: string): boolean => {
@@ -559,7 +574,7 @@ export function CommentComposer({
         <div
           className="flex flex-wrap items-center gap-[0.15rem]"
           role="toolbar"
-          aria-label="Text formatting and comment"
+          aria-label={formattingOnly ? "Text formatting" : "Text formatting and comment"}
         >
           <FormatButton
             label="Bold"
@@ -604,18 +619,20 @@ export function CommentComposer({
           >
             Link
           </Button>
-          <span className="mx-[0.2rem] h-4 w-px bg-(--border)" aria-hidden="true" />
-          <Button
-            type="button"
-            variant="selection"
-            size="selection"
-            data-selection-tool
-            aria-label="Comment"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={openComment}
-          >
-            Comment
-          </Button>
+          {!formattingOnly && <>
+            <span className="mx-[0.2rem] h-4 w-px bg-(--border)" aria-hidden="true" />
+            <Button
+              type="button"
+              variant="selection"
+              size="selection"
+              data-selection-tool
+              aria-label="Comment"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={openComment}
+            >
+              Comment
+            </Button>
+          </>}
         </div>
       ) : (
         <Button
@@ -630,6 +647,6 @@ export function CommentComposer({
         </Button>
       )}
     </div>,
-    editor.view.dom.ownerDocument.body,
+    controlsHost?.portalContainer ?? editor.view.dom.ownerDocument.body,
   );
 }

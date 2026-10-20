@@ -13,6 +13,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "../shadcn/dropdown-menu.js";
 import { TableRowHandle, tableRowSensors } from "./table-row-drag.js";
+import { useEditorControlsHost } from "./EditorControlsHost.js";
 
 interface Geometry {
   tableId: string;
@@ -107,6 +108,7 @@ function TableControlSurface({ tableId, editor, host }: {
   editor: Editor;
   host: RefObject<HTMLElement | null>;
 }): ReactElement | null {
+  const controlsHost = useEditorControlsHost();
   const [geometry, setGeometry] = useState<Geometry | null>(null);
   const [menu, setMenu] = useState<TableRowTarget | null>(null);
   const menuRef = useRef<TableRowTarget | null>(null);
@@ -549,6 +551,8 @@ function TableControlSurface({ tableId, editor, host }: {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="center" collisionPadding={8}
+            container={controlsHost?.portalContainer}
+            collisionBoundary={controlsHost?.boundary ?? []}
             onCloseAutoFocus={(event) => {
               closing.current = false;
               queueMicrotask(() => refresh.current());
@@ -595,6 +599,8 @@ function TableControlSurface({ tableId, editor, host }: {
             }}
             open={() => { acted.current = false; setTarget(openRow === index ? null : row.target); }} />
           <DropdownMenuContent align="end" collisionPadding={8}
+            container={controlsHost?.portalContainer}
+            collisionBoundary={controlsHost?.boundary ?? []}
             onCloseAutoFocus={(event) => {
               // Retain the trigger through Radix's close/focus phase on touch,
               // where neither hover nor editor focus keeps it mounted.
