@@ -26,6 +26,7 @@ Check these before deploying:
   Compose 5 satisfies the floor too. `docker version --format '{{.Server.Version}}'`
   checks the Engine. Older engines can expose localhost-published ports to
   [other hosts on the same network segment](https://docs.docker.com/engine/network/port-publishing/).
+  Plain Compose does not enforce the Engine floor; check it before starting.
   `docker compose version --short` checks the plugin; `docker info` checks that
   your host user can reach the daemon. If the Docker socket refuses access,
   Linux users may need their host's `docker` group and a new session; on macOS,
@@ -47,100 +48,47 @@ The macOS routes are loopback and public DNS HTTPS; the host-socket Tailscale
 recipe is Linux-only. Every other process runs in the published containers, including backup,
 restore and first-admin setup. The host needs no Node, pnpm or `sqlite3`.
 
-## Quickstart with an installed client
-
-Install the `ub` client on the hub host and meet [the host prerequisites](#host-prerequisites):
-Linux x86_64 with Docker Engine 28.0.0 or newer, or Docker Desktop on macOS
-with that Engine floor, and Docker Compose 2.24.4 or newer. Run these commands
-on that host from any directory; they need no project binding or login:
-
-```sh
-ub hub setup
-# Edit ~/uberblick-remote/.env if you need a route other than localhost.
-ub hub up
-ub hub status
-ub hub status --json
-```
-
-`setup` extracts the published release matching this client's version into
-`~/uberblick-remote`, creates a mode-0600 `.env` from its template, and starts
-nothing. It refuses a non-empty directory. Use `--release X.Y.Z` on setup or
-upgrade to choose another published release; a source-checkout client reporting
-`0.0.0` requires this flag. Every subcommand accepts `--dir <path>` for an
-existing Docker-only deployment or another deployment directory.
-
-`up` checks the configuration, pulls the release's images and starts the stack
-through that deployment's `bin/remote-compose.sh`. `status` reports the release,
-sync protocol, hub and Caddy states, and configured site origin. It checks the
-site and `/ws` from the host itself and exits 0 only when healthy; an HTTPS
-name the host cannot reach shows as not answering. `--json` prints one JSON
-object. Allow certificate acquisition to finish, then check status again.
-After starting a fresh hub, [claim it](#claim-a-fresh-hub) from its web page or with `ub auth login`
-before wider exposure; see the corpus's CLI: ub auth intents and examples
-(0ad5f7da-edb2-4e53-a6eb-9d95922a3e95), “Claim a fresh hub”.
-
-```sh
-ub hub down
-ub hub up
-ub hub upgrade --release X.Y.Z
-```
-
-`down` removes containers and keeps the `hub-data`, `caddy-data` and
-`caddy-config` volumes. The next `up` reuses documents, claim state and
-certificates. `upgrade` requires a running hub; choosing the current release
-changes nothing, and an older target is refused. For a newer published release,
-it stages and checks the target and pulls its images, then runs the live
-deployment's backup script before replacing release files and recreating
-containers. It keeps `.env` and earlier backups, and checks health for up to
-90 seconds while the recreated services start and certificates are acquired.
-It reports the new backup's path and resulting health. Retain backups according to
-[the backup procedure](#backing-the-hub-up).
-If the sync protocol changes, update every client in the same sitting;
-upgrade asks for confirmation at a terminal, or accepts `--yes`.
-
-Run one operator session at a time. The release uses the single Compose project
-`uberblick-remote`; ambient `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE` do not
-redirect these commands. Hosts without Docker, remote or SSH orchestration,
-service integration, and more than one deployment per Docker host are
-unsupported. To operate an SSH host, sign in there and run `ub hub` locally.
-Use [the manual switch procedure](#switch-an-existing-checkout-host-to-a-release)
-for a source-checkout deployment. `ub hub` grants no hub or workspace role.
-
 ## Stand it up from a release
 
-Choose an existing published hub version explicitly. The version below is an
-example, not a moving channel. Run these commands **on the hub host**, in an
-empty deployment directory:
+Download the published [compose.yml](https://github.com/uberblick-ai/uberblick-2/releases/latest/download/compose.yml),
+[remote.env.example](https://github.com/uberblick-ai/uberblick-2/releases/latest/download/remote.env.example),
+[remote.https.yml](https://github.com/uberblick-ai/uberblick-2/releases/latest/download/remote.https.yml)
+and [remote.tailscale.yml](https://github.com/uberblick-ai/uberblick-2/releases/latest/download/remote.tailscale.yml).
+These links select the newest published hub release. Open the
+[latest release](https://github.com/uberblick-ai/uberblick-2/releases/latest)
+to find its `hub-vX.Y.Z` tag, or choose an earlier published release. Replace
+`X.Y.Z` below with that version so all four downloads come from the same
+release. No image extraction or installed `ub` client is needed.
+
+Run these commands **on the hub host**, in an empty deployment directory:
 
 ```sh
 mkdir -p ~/uberblick-remote
 cd ~/uberblick-remote
-HUB_VERSION=0.1.0
-docker pull --platform linux/amd64 "ghcr.io/uberblick-ai/hub:$HUB_VERSION"
-release_container=$(docker create --platform linux/amd64 "ghcr.io/uberblick-ai/hub:$HUB_VERSION")
-docker cp "$release_container:/release/." .
-docker rm "$release_container"
+curl -fL -o compose.yml https://github.com/uberblick-ai/uberblick-2/releases/download/hub-vX.Y.Z/compose.yml
+curl -fL -o remote.env.example https://github.com/uberblick-ai/uberblick-2/releases/download/hub-vX.Y.Z/remote.env.example
+curl -fL -o remote.https.yml https://github.com/uberblick-ai/uberblick-2/releases/download/hub-vX.Y.Z/remote.https.yml
+curl -fL -o remote.tailscale.yml https://github.com/uberblick-ai/uberblick-2/releases/download/hub-vX.Y.Z/remote.tailscale.yml
 cp remote.env.example .env
 chmod 600 .env
 ```
 
-`docker create` does not start the container. The copied files include the
-version's `docker-compose.yml`, `remote.https.yml`, `remote.tailscale.yml`, `remote.env.example` template,
-`remote-settings.sh`, Compose and compatibility scripts in `bin/`, this manual, RELEASING.md and
-`release.json`. The Compose file names both exact versioned images; it has
-no host build. The same prebuilt web image serves every host, with its endpoint
-and workspace list supplied only by `/uberblick-config.json`.
+Edit `.env`: set `HUB_VERSION=X.Y.Z` to the release that supplied these files,
+without the `hub-v` prefix. Leave `COMPOSE_FILE=compose.yml` for same-computer use.
+Choose other settings from [the route guide below](#choose-how-clients-reach-the-hub).
+`compose.yml` selects both exact versioned images from `HUB_VERSION` and
+refuses an unset or empty version before pulling or starting containers. It
+has no host build. The same prebuilt web image serves every host, with its
+endpoint and workspace list supplied only by `/uberblick-config.json`.
 
-Leave the network settings commented for same-computer use. Choose other
-settings from [the guide below](#configure-and-check-the-stack), then:
+Validate and start the selected release:
 
 ```sh
-sh bin/remote-compose.sh config --quiet
-sh bin/remote-compose.sh pull
-sh bin/remote-compose.sh up --detach
-sh bin/remote-compose.sh ps
-sh bin/remote-compose.sh exec hub ub-hub status
-sh bin/remote-compose.sh logs --tail=100 hub caddy
+docker compose config --quiet
+docker compose up -d
+docker compose ps
+docker compose exec hub ub-hub status
+docker compose logs --tail=100 hub caddy
 ```
 
 [Check the site and WebSocket upgrade](#check-the-deployment) on the host, then
@@ -161,8 +109,7 @@ Anyone who can pull the public image can read its source commit and sync
 protocol version, without access to this repository:
 
 ```sh
-docker run --rm --platform linux/amd64 --entrypoint cat "ghcr.io/uberblick-ai/hub:$HUB_VERSION" \
-  /release/release.json
+docker compose run --rm --entrypoint cat hub /release/release.json
 ```
 
 The JSON records `version`, `sourceCommit`, `syncProtocolVersion` and the two
@@ -175,41 +122,57 @@ alone does not establish it.
 
 ### Updating the host — deliberately
 
-**The host does not update itself.** Name a newer published hub version, extract
-its host files to a staging directory, inspect its identity, then replace the
-release files and pull and recreate the containers. Keep the deployment's
-`.env`; no release contains that file. Run one operator session at a time:
+**The host does not update itself.** Choose a newer published version and
+run one operator session at a time. Before changing `HUB_VERSION`, download
+and compare the target release's three host files. Replace `X.Y.Z` below with
+that version:
 
 ```sh
 cd ~/uberblick-remote
-HUB_VERSION=0.2.0
-mkdir ".release-$HUB_VERSION"
-docker pull --platform linux/amd64 "ghcr.io/uberblick-ai/hub:$HUB_VERSION"
-release_container=$(docker create --platform linux/amd64 "ghcr.io/uberblick-ai/hub:$HUB_VERSION")
-docker cp "$release_container:/release/." ".release-$HUB_VERSION/"
-docker rm "$release_container"
-cat ".release-$HUB_VERSION/release.json"
-cp -R ".release-$HUB_VERSION/." .
-sh bin/remote-compose.sh config --quiet
-sh bin/remote-compose.sh pull
-sh bin/remote-compose.sh up --detach --force-recreate
+mkdir -p hub-vX.Y.Z
+curl -fL -o hub-vX.Y.Z/compose.yml https://github.com/uberblick-ai/uberblick-2/releases/download/hub-vX.Y.Z/compose.yml
+curl -fL -o hub-vX.Y.Z/remote.https.yml https://github.com/uberblick-ai/uberblick-2/releases/download/hub-vX.Y.Z/remote.https.yml
+curl -fL -o hub-vX.Y.Z/remote.tailscale.yml https://github.com/uberblick-ai/uberblick-2/releases/download/hub-vX.Y.Z/remote.tailscale.yml
 ```
 
-If the previous release had its operator scripts at the top level, remove
-only those four leftover files after the new `bin/` commands work:
+Continue only after all three downloads succeed. Compare them with the local
+copies, including routes you are not currently using:
 
 ```sh
-rm -f remote-compose.sh hub-backup.sh hub-restore.sh hub-admin-setup.sh
+diff -u compose.yml hub-vX.Y.Z/compose.yml
+diff -u remote.https.yml hub-vX.Y.Z/remote.https.yml
+diff -u remote.tailscale.yml hub-vX.Y.Z/remote.tailscale.yml
 ```
 
-Check the selected site and `/ws` again. An existing Tailscale `.env` keeps
-working without edits: the wrapper selects the HTTPS and socket files from
-`TAILSCALE_HOST` and `TAILSCALE_IP`, preserving its sole Tailscale port binding.
+No output and exit 0 means a file is identical; exit 1 shows differences.
+If any file differs, refresh all three from the downloaded target copies
+before starting that version:
+
+```sh
+cp hub-vX.Y.Z/compose.yml compose.yml
+cp hub-vX.Y.Z/remote.https.yml remote.https.yml
+cp hub-vX.Y.Z/remote.tailscale.yml remote.tailscale.yml
+```
+
+A missing local file also needs its target copy. Stop on any other download
+or comparison error. If all three files are identical, a version change alone
+suffices. Set `HUB_VERSION=X.Y.Z` in `.env`, keep its other settings, then pull
+and recreate the containers:
+
+```sh
+cd ~/uberblick-remote
+docker compose config --quiet
+docker compose pull && docker compose up -d
+```
+
+Check the selected site and `/ws` again. Keep your `.env` instead of replacing
+it with the template. Assets at a versioned URL never change. The `latest`
+download links are for finding host files, not a moving image tag.
+
 The project remains `uberblick-remote`, and its
 `hub-data`, `caddy-data` and `caddy-config` volumes keep documents, private access
 records and Caddy's certificate state across replacement. Do not pass
 `--volumes` to `down`, rename the project or change these volume names.
-Nothing follows `latest`, a moving branch or a schedule.
 
 Before a newer hub release writes to an existing database, it makes a complete,
 integrity-checked startup copy beside the database (`/data` in the container,
@@ -227,7 +190,7 @@ not honor the record. If one writes after a guarded release, that write is not
 detectable from the record. Local hubs started by `ub open`, source runs and
 tests without a release identity do not record or check a release.
 
-Check `sh bin/remote-compose.sh ps` for container health. Both images include
+Check `docker compose ps` for container health. Both images include
 their own checks, so existing Compose files inherit them: the hub checks its
 own HTTP listener and the web image checks Caddy's loopback admin listener.
 These checks use no public DNS name, TLS certificate or deployment route; still
@@ -252,6 +215,70 @@ sitting**, and reload every open browser tab so it takes its bundle and
 configuration from the host.
 If you cannot finish both halves now, do neither now. Check the protocol
 version recorded by the hub release before choosing it.
+
+### Move an existing release deployment to downloaded files
+
+For an existing `~/uberblick-remote` deployment created by `ub hub setup` or
+image extraction, keep its `.env` and volumes. Take an operator backup with
+the existing deployment before changing files. Download `compose.yml` and both
+route files from the chosen version's release assets into that same directory;
+do not copy `remote.env.example` over `.env`.
+
+Add `HUB_VERSION=X.Y.Z` and the appropriate `COMPOSE_FILE` line to `.env`:
+
+| Existing route settings | Add to `.env` |
+| --- | --- |
+| No host name, loopback only | `COMPOSE_FILE=compose.yml` |
+| `WEB_HOST` for public DNS HTTPS | `COMPOSE_FILE=compose.yml:remote.https.yml` |
+| `WEB_HOST` or `TAILSCALE_HOST` with `TAILSCALE_IP` for Tailscale | `COMPOSE_FILE=compose.yml:remote.https.yml:remote.tailscale.yml` |
+
+Retain the existing host name, bind address, workspace list and GitHub app
+settings. A host name alone does not select HTTPS with plain Compose; the
+`COMPOSE_FILE` line is required. Run `docker compose config` before starting:
+the project must remain `uberblick-remote`, the images must name the selected
+version, and the resolved `hub-data`, `caddy-data` and `caddy-config` volume
+names must match the existing ones. Run `docker compose pull` and
+`docker compose up -d`, then check the site, `/ws`, documents and claim state.
+No `down` or volume removal is needed. Compose prefers the new `compose.yml`
+over an old `docker-compose.yml`; keep using plain Compose from this directory
+after the switch.
+
+### Use an earlier installed client
+
+An earlier installed client that has `ub hub` can still extract and operate
+the release's image payload instead of using the downloaded files:
+
+```sh
+ub hub setup --release X.Y.Z
+# Edit ~/uberblick-remote/.env if you need a route other than localhost.
+ub hub up
+ub hub status
+ub hub status --json
+ub hub upgrade --release X.Y.Z
+```
+
+These commands run on the hub host and need no project binding or login.
+Every subcommand accepts `--dir <path>`; the default is `~/uberblick-remote`.
+Setup refuses a directory holding files, creates a mode-0600 `.env` and starts
+nothing. The image payload retains fixed image references, `release.json`
+and its `bin/remote-compose.sh` and backup scripts. Its environment template
+lets the wrapper choose routes from the host settings. Keep this payload's
+layout and template when continuing to operate it through `ub hub`; the
+downloaded-file layout is operated through plain Compose. For this payload's
+operator commands below, use `sh bin/remote-compose.sh` in place of
+`docker compose` so its wrapper selects the route.
+
+`status` checks the site and `/ws` from the host and exits 0 only when healthy;
+allow certificate acquisition to finish and check again. `--json` prints one
+object. `ub hub down` removes containers and keeps the data and certificate
+volumes. Upgrade requires a running hub and a newer release; the current
+release changes nothing and older targets are refused. It stages and checks
+the target, pulls images, runs the live deployment's backup script, keeps
+`.env` and earlier backups, and checks health after recreating containers.
+A sync protocol change asks for confirmation at a terminal or accepts `--yes`;
+update every client in the same sitting. `ub hub` grants no hub or workspace
+role. To switch this deployment to downloaded files, follow the migration
+above.
 
 ### Upgrade an existing deployment to device credentials
 
@@ -499,13 +526,16 @@ container-only rehearsal exposes no local browser server.
 
 ### Switch an existing checkout host to a release
 
-The old and released stacks use the same service and volume names. Extract
+The old and released stacks use the same service and volume names. Download
 chosen release files into a separate empty directory using the launch commands
 above, with `~/uberblick-hub-release` in place of `~/uberblick-remote`.
 Instead of copying `remote.env.example`, copy the checkout's `.env` and retain
 mode `0600`. Keep its host settings, workspace list and any
 `HUB_GITHUB_CLIENT_ID` override. An old `HUB_AUTH_TOKEN` line is ignored and
-may be removed. Leave the existing stack running while preparing the release.
+may be removed. Add `HUB_VERSION` and the route's `COMPOSE_FILE` as in
+[the release migration](#move-an-existing-release-deployment-to-downloaded-files).
+Leave the existing stack running while preparing the release, and take a
+backup through that deployment's existing backup procedure before switching.
 
 First identify that stack's project from its running hub container:
 
@@ -530,22 +560,19 @@ change:
 ```sh
 cd ~/uberblick-hub-release
 unset COMPOSE_FILE
-sh bin/remote-compose.sh config
+docker compose config
 ```
 
 Its project must match the recorded label, its images must name the chosen
 release, and its `hub-data`, `caddy-data` and `caddy-config` volumes must keep
-their existing project-prefixed names. Then pull, take
-[a backup](#backing-the-hub-up) through these release scripts, and replace the
-containers:
+their existing project-prefixed names. Then pull and replace the containers:
 
 ```sh
-sh bin/remote-compose.sh pull
-sh bin/hub-backup.sh ~/uberblick-hub-before-release.sqlite
-sh bin/remote-compose.sh up --detach --force-recreate
+docker compose pull
+docker compose up -d
 ```
 
-The release scripts find the existing containers by their unchanged project
+Compose finds the existing containers by their unchanged project
 and service labels, even if the checkout's stack files have already gone.
 The active database stays in place: the new containers reopen the existing
 named volumes. Check HTTPS, `/ws` and the documents; keep the backup. Use this release
@@ -614,7 +641,7 @@ host setting. After saving `.env`, recreate the
 hub from the deployment directory:
 
 ```sh
-sh bin/remote-compose.sh up --detach hub
+docker compose up --detach hub
 ```
 
 To return to Uberblick Login, remove the line or leave its value empty and
@@ -852,7 +879,7 @@ Host-only first-admin setup grants workspace administration only.
 A claim made by someone else cannot be recovered in place. There is no operator
 override, administrator recovery or supported way to reopen claiming. The resulting membership admits that account's device credentials to its default workspace.
 A fresh hub has nothing to lose, so start over instead: run
-`sh bin/remote-compose.sh down --volumes`, then `up` again and claim it.
+`docker compose down --volumes`, then `up` again and claim it.
 
 `GET /auth/claim-state` needs no credential and changes nothing. It reports
 only `unclaimed` and `canClaim`, the latter requiring configured GitHub sign-in.
@@ -1157,7 +1184,7 @@ applied change, with a failed live closure.
 Run this in the deployment directory **on the hub host**, for example over SSH:
 
 ```sh
-sh bin/remote-compose.sh exec hub ub-hub hub-admin add <github-login>
+docker compose exec hub ub-hub hub-admin add <github-login>
 ```
 
 The account must have completed GitHub sign-in to **this hub**, through
@@ -1179,7 +1206,7 @@ non-zero exit and no grant. GitHub logins can match more than one recorded accou
 after renames; select the intended account's durable ID explicitly instead:
 
 ```sh
-sh bin/remote-compose.sh exec hub ub-hub hub-admin add --account-id <github-account-id>
+docker compose exec hub ub-hub hub-admin add --account-id <github-account-id>
 ```
 
 A plain argument is always a login, including an entirely numeric login.
@@ -1203,7 +1230,7 @@ run setup in the deployment directory **on the hub host**, for example over SSH.
 [GitHub sign-in](#github-sign-in) is available by default:
 
 ```sh
-sh bin/remote-compose.sh exec hub ub-hub admin-setup <workspace-uuid>
+docker compose exec hub ub-hub admin-setup <workspace-uuid>
 ```
 
 Name exactly one bare workspace UUID. For an existing workspace, use the UUID
@@ -1275,14 +1302,14 @@ Losing the result does **not** establish that nothing changed. Reconnect to
 the host deployment directory and use the setup ID printed by the original command:
 
 ```sh
-sh bin/remote-compose.sh exec hub ub-hub admin-setup status <setup-uuid>
+docker compose exec hub ub-hub admin-setup status <setup-uuid>
 ```
 
 The committed receipt is private hub data and survives a hub restart. This
 lookup retrieves what that setup committed without granting or changing
 anything. An unknown result never proves that nothing changed: for example,
 a database restore can replace the recorded history. Check the hub's grant
-logs with `sh bin/remote-compose.sh logs hub` and the applicable backups when the
+logs with `docker compose logs hub` and the applicable backups when the
 receipt is unavailable. Do not interpret a connection failure or an unknown
 result as permission to replace an administrator.
 
@@ -1306,7 +1333,7 @@ decision.
 
 ## Configure and check the stack
 
-The extracted `docker-compose.yml` names the images and persistent volumes.
+The downloaded `compose.yml` names the images and persistent volumes.
 It publishes Caddy only on `127.0.0.1:${LOOPBACK_PORT:-8080}` and publishes no hub
 port. The optional `remote.https.yml` replaces that publication with port 443;
 `remote.tailscale.yml` adds the daemon socket only for Tailscale certificates.
@@ -1329,9 +1356,9 @@ All three routes enforce the same device credentials and workspace membership.
 
 | Route | Network settings in `.env` | Sign in | Bind to the existing workspace |
 | --- | --- | --- | --- |
-| Same computer, default | None; optional `LOOPBACK_PORT=8080` | `ub auth login http://localhost:8080` | `ub workspace use ws://localhost:8080/ws/<WORKSPACE_ID>` |
-| HTTPS with public DNS | `WEB_HOST=hub.example.com`; optional `HTTPS_BIND_IP=<host-ipv4>` | `ub auth login https://hub.example.com` | `ub workspace use wss://hub.example.com/ws/<WORKSPACE_ID>` |
-| HTTPS with Tailscale, Linux only | `WEB_HOST=machine.tailnet.ts.net`, `TAILSCALE_IP=<tailscale-ipv4>` | `ub auth login https://machine.tailnet.ts.net` | `ub workspace use wss://machine.tailnet.ts.net/ws/<WORKSPACE_ID>` |
+| Same computer, default | `COMPOSE_FILE=compose.yml`; optional `LOOPBACK_PORT=8080` | `ub auth login http://localhost:8080` | `ub workspace use ws://localhost:8080/ws/<WORKSPACE_ID>` |
+| HTTPS with public DNS | `COMPOSE_FILE=compose.yml:remote.https.yml`, `WEB_HOST=hub.example.com`; optional `HTTPS_BIND_IP=<host-ipv4>` | `ub auth login https://hub.example.com` | `ub workspace use wss://hub.example.com/ws/<WORKSPACE_ID>` |
+| HTTPS with Tailscale, Linux only | `COMPOSE_FILE=compose.yml:remote.https.yml:remote.tailscale.yml`, `WEB_HOST=machine.tailnet.ts.net`, `TAILSCALE_IP=<tailscale-ipv4>` | `ub auth login https://machine.tailnet.ts.net` | `ub workspace use wss://machine.tailnet.ts.net/ws/<WORKSPACE_ID>` |
 
 Use the UUID reported by the claim or first-admin setup. Use the selected port
 in both loopback commands. The client's origin must be spelled consistently:
@@ -1358,7 +1385,8 @@ using root inside the container for socket access; see
 Enabling HTTPS publishes the machine name to a public certificate transparency
 log; see [Tailscale's HTTPS guide](https://tailscale.com/docs/how-to/set-up-https-certificates).
 
-**Existing Tailscale deployments:** keep their `.env` unchanged. `TAILSCALE_HOST`
+**Existing Tailscale deployments:** keep their existing host settings and add
+the Tailscale `COMPOSE_FILE` line when moving to downloaded files. `TAILSCALE_HOST`
 is the legacy alias for `WEB_HOST`, and `TAILSCALE_IP` supplies the HTTPS bind
 address. Use one host-name setting, or set both to the same name. The update commands keep
 HTTPS on the existing Tailscale address and publish nothing else.
@@ -1366,23 +1394,15 @@ HTTPS on the existing Tailscale address and publish nothing else.
 After changing network settings, validate and recreate with:
 
 ```sh
-sh bin/remote-compose.sh config --quiet
-sh bin/remote-compose.sh up --detach --force-recreate
+docker compose config --quiet
+docker compose up -d
 ```
 
-The wrapper chooses the release's optional Compose files from `.env` automatically.
-It refuses `--env-file`; put route settings in the deployment's `.env`. If you
-set `COMPOSE_FILE`, you select the files yourself. Plain Compose can select the
-same routes explicitly, with `.env` in the deployment directory:
-
-```sh
-# Default, same computer.
-docker compose -f docker-compose.yml up --detach
-# Public DNS HTTPS.
-docker compose -f docker-compose.yml -f remote.https.yml up --detach
-# Tailscale HTTPS, Linux only.
-docker compose -f docker-compose.yml -f remote.https.yml -f remote.tailscale.yml up --detach
-```
+Compose reads `COMPOSE_FILE` from the deployment's `.env`, so the same plain
+command starts every route. Change both the file selection and host settings
+when changing routes. The image payload's legacy `bin/remote-compose.sh`
+continues to choose its optional files from host settings for `ub hub`;
+downloaded-file deployments need no wrapper.
 
 Switching routes keeps the same `uberblick-remote` project and `hub-data`,
 `caddy-data` and `caddy-config` volumes, including the claim and certificate
@@ -1390,9 +1410,9 @@ state. Clients sign in at the new origin and use a link with the same workspace 
 no device key is copied. A claim made on loopback remains claimed after wider
 exposure. Never pass `--volumes` to `down` or rename the project.
 
-`bin/remote-compose.sh` refuses unsafe settings before calling Docker. Service
-entrypoints validate them again before Caddy serves, including with plain
-Compose. Each refusal names the setting. The accepted values are:
+Service entrypoints validate settings before Caddy serves. Each refusal names
+the setting. The legacy `bin/remote-compose.sh` also checks them before calling
+Docker. The accepted values are:
 
 | Setting | Accepted value |
 | --- | --- |
@@ -1405,7 +1425,7 @@ Compose. Each refusal names the setting. The accepted values are:
 
 The alphabets for served values exclude quotes, backslashes and whitespace, so
 substitution cannot inject another JSON key or Caddy directive. Use
-`sh bin/remote-compose.sh config --quiet` before starting either layout.
+`docker compose config --quiet` before starting either layout.
 
 ### Check the deployment
 
@@ -1428,7 +1448,7 @@ Expect `200` from the first and `101 Switching Protocols` from the second;
 the upgraded socket stays open, so the second curl ends on its five-second
 deadline after printing the headers. A `502` on
 `/ws` is Caddy up and the hub down — expected while the hub is stopped for a
-restore, and otherwise a job for `sh bin/remote-compose.sh logs hub`.
+restore, and otherwise a job for `docker compose logs hub`.
 
 Then open the selected site origin. On a claimable fresh hub it shows
 **This hub is unclaimed** and warns that the first completed GitHub sign-in
@@ -1461,7 +1481,7 @@ Caddy renders that public document from its checked runtime environment:
 rebuild:
 
 ```sh
-sh bin/remote-compose.sh up --detach caddy
+docker compose up --detach caddy
 ```
 
 The document is served with `Cache-Control: no-store`, so the next page load
@@ -1497,11 +1517,11 @@ distinct awareness name/color if prompted.
    A's network. Confirm both browsers converge to the same text and neither
    edit disappears.
 4. **Hub restart durability:** make one more edit and wait until it appears on
-   both computers. On the host run `sh bin/remote-compose.sh restart hub`, then
+   both computers. On the host run `docker compose restart hub`, then
    reload B. Confirm the document and the last edit remain.
 5. **Named-volume durability:** record a distinctive document title, then run
-   `sh bin/remote-compose.sh down` followed by
-   `sh bin/remote-compose.sh up --detach`. Reload B and confirm the title remains
+   `docker compose down` followed by
+   `docker compose up --detach`. Reload B and confirm the title remains
    and the directory hydrates. Do not pass `--volumes` to `down`; that flag
    intentionally deletes the named SQLite volume.
 
@@ -1512,16 +1532,16 @@ they are not replaced by the repository's local test suite.
 ## Operations
 
 ```sh
-sh bin/remote-compose.sh logs --follow hub caddy
-sh bin/remote-compose.sh restart hub
-sh bin/remote-compose.sh down
-sh bin/remote-compose.sh up --detach
+docker compose logs --follow hub caddy
+docker compose restart hub
+docker compose down
+docker compose up --detach
 ```
 
 Deploying a newer release is [its own runbook](#updating-the-host--deliberately).
 The hub handles Compose's `SIGTERM` by flushing pending document updates before
 it exits. The image sets `HUB_DB_PATH=/data/hub.sqlite` in the `hub-data` named
-volume, so normal container replacement and `sh bin/remote-compose.sh down`
+volume, so normal container replacement and `docker compose down`
 preserve it. Both the hub and `ub-hub` require a non-empty `HUB_DB_PATH` for database operations;
 an unset or empty value refuses startup and names the setting.
 
@@ -1546,8 +1566,8 @@ backup and restore. These commands use the private control socket or the
 start, stop or update containers. Run them from the deployment directory:
 
 ```sh
-sh bin/remote-compose.sh exec hub ub-hub status
-sh bin/remote-compose.sh exec hub ub-hub doctor
+docker compose exec hub ub-hub status
+docker compose exec hub ub-hub doctor
 ```
 
 `status` prints the release version, source commit and sync protocol, the
@@ -1561,21 +1581,19 @@ nothing and exits 1 if a check fails. Site, TLS and Caddy checks remain in
 For a stopped hub or one that keeps restarting, check the database directly:
 
 ```sh
-sh bin/remote-compose.sh run --rm hub ub-hub doctor
+docker compose run --rm hub ub-hub doctor
 ```
 
-On deployments using downloaded Compose files, use `docker compose` in place
-of `sh bin/remote-compose.sh` in these operator commands. Bare `ub-hub` and
-`ub-hub --help` list the commands and exit 0; bad arguments exit 2, and
+Bare `ub-hub` and `ub-hub --help` list the commands and exit 0; bad arguments exit 2, and
 operational failures exit 1. First-admin setup retains its cancellation codes
 and reports an unknown result when it cannot confirm what happened.
 
 ### Backing the hub up
 
 ```sh
-sh bin/remote-compose.sh exec hub ub-hub backup
+docker compose exec hub ub-hub backup
 # Use the backup path printed by the command:
-sh bin/remote-compose.sh cp hub:/data/<backup-file>.sqlite ~/uberblick-hub-backup.sqlite
+docker compose cp hub:/data/<backup-file>.sqlite ~/uberblick-hub-backup.sqlite
 chmod 600 ~/uberblick-hub-backup.sqlite
 ```
 
@@ -1601,7 +1619,7 @@ the earlier device signing secrets and must remain private.
 Manage retention yourself; a copy in `hub-data` is lost if that volume is lost.
 The automatic startup copies described in [Updating the host](#updating-the-host--deliberately)
 have the same contents, integrity check and private mode. Find their paths in
-`sh bin/remote-compose.sh logs hub` under `hub.database.backup`; they stay beside
+`docker compose logs hub` under `hub.database.backup`; they stay beside
 `/data/hub.sqlite` and can be restored directly from that volume. They supplement
 operator backups and follow the same owner-managed retention policy.
 The retained `bin/hub-backup.sh` is a compatibility route used by `ub hub
@@ -1619,9 +1637,9 @@ first records the newer version again. Changes made after the copy are lost,
 and all clients must match the restored hub's sync protocol.
 
 ```sh
-sh bin/remote-compose.sh stop hub
-sh bin/remote-compose.sh run --rm hub ub-hub restore /data/<backup-file>.sqlite
-sh bin/remote-compose.sh start hub
+docker compose stop hub
+docker compose run --rm hub ub-hub restore /data/<backup-file>.sqlite
+docker compose start hub
 ```
 
 Only start the hub after restore reports success. To restore a backup kept on
@@ -1631,19 +1649,19 @@ standard input. `-T` keeps the container terminal from changing binary input;
 confirmation prompt:
 
 ```sh
-sh bin/remote-compose.sh stop hub
-sh bin/remote-compose.sh run --rm -T hub ub-hub restore --yes - < ~/uberblick-hub-backup.sqlite
-sh bin/remote-compose.sh start hub
+docker compose stop hub
+docker compose run --rm -T hub ub-hub restore --yes - < ~/uberblick-hub-backup.sqlite
+docker compose start hub
 ```
 
 To copy a host backup into the volume for a later restore, use the running
 container and a new destination name, then stop it and restore that path:
 
 ```sh
-sh bin/remote-compose.sh exec -T hub sh -c 'umask 077; set -C; cat > /data/restore-candidate.sqlite' < ~/uberblick-hub-backup.sqlite
-sh bin/remote-compose.sh stop hub
-sh bin/remote-compose.sh run --rm hub ub-hub restore /data/restore-candidate.sqlite
-sh bin/remote-compose.sh start hub
+docker compose exec -T hub sh -c 'umask 077; set -C; cat > /data/restore-candidate.sqlite' < ~/uberblick-hub-backup.sqlite
+docker compose stop hub
+docker compose run --rm hub ub-hub restore /data/restore-candidate.sqlite
+docker compose start hub
 ```
 
 Restore reads the candidate before changing the volume: it must pass
@@ -1687,9 +1705,9 @@ by opening the database cleanly, then stop the hub and retry; never delete the
 journal to bypass the refusal:
 
 ```sh
-sh bin/remote-compose.sh start hub
-sh bin/remote-compose.sh stop hub
-sh bin/remote-compose.sh run --rm hub ub-hub restore /data/<backup-file>.sqlite
+docker compose start hub
+docker compose stop hub
+docker compose run --rm hub ub-hub restore /data/<backup-file>.sqlite
 ```
 
 The verified candidate is staged under a name the hub does not open. One

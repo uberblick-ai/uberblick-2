@@ -11,12 +11,14 @@ concurrency:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   publish:
     if: github.event.sender.type == 'User' && github.event.sender.login != 'uberblick-agent' && github.event.deleted == false
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -28,3 +30,28 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Build, scan and publish the immutable hub version
         run: mise run publish-hub-release -- "$GITHUB_REF_NAME"
+
+  assets:
+    needs: publish
+    if: github.event.sender.type == 'User' && github.event.sender.login != 'uberblick-agent' && github.event.deleted == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: hub-release-assets
+      queue: max
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Authenticate to inspect the published images
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Attach the immutable Docker Compose downloads
+        run: node scripts/publish-hub-release-assets.mjs "$GITHUB_REF_NAME"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
