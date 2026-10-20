@@ -97,8 +97,10 @@ export const setMetadataOperation = operation("set_metadata", inputSchema, (cont
   const { uuid, title, description, tldr, tldr_opt_in, tags, links, discussion, code_check } = args;
   const replica = context.requireWritableDoc(uuid);
   const current = getMeta(replica.doc, replica.id);
+  // The addressed record's gate checks the topic archive. The first answer's
+  // individual archive does not lock the shared topic title.
   const titleReplica = title === undefined || current.kind !== "decision" ? replica :
-    forField("title", () => context.requireWritableDoc(current.topic ?? uuid));
+    forField("title", () => context.requireDoc(current.topic ?? uuid));
   const codeCheck = code_check === undefined ? undefined : normalizeCodeCheck(code_check);
   if (codeCheck === null || (codeCheck !== undefined && (codeCheck.rev === undefined || codeCheck.rev !== docRev(replica.doc)))) {
     throw new ToolError("invalid_code_check", "A code check needs a repository, full hexadecimal commit, matches, ahead or drift result, the current page rev and optional valid paths. Read the page again with get_doc and compare it with code before recording a check.", { uuid, field: "code_check" });

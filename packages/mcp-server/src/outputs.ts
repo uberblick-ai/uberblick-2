@@ -360,7 +360,7 @@ export const outputSchemas = {
     uuid,
     title: z.string(),
     records: z.array(z.string()),
-    archived: z.literal(false),
+    archived: z.boolean().describe("Whether the addressed document remains archived after removing one archive layer."),
     indexed: z.boolean(),
     ...multipleRoomDurability,
   }).strict(),

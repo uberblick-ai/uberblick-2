@@ -12,6 +12,7 @@ import { listAnnotations } from "./annotations.js";
 import { decisionApprovalChanged } from "./approval.js";
 import { decisionAnswerPreview } from "./decision-answer.js";
 import { readCodeChecks } from "./code-check.js";
+import { resolveDecisionTopics } from "./decisions.js";
 import type {
   CodeCheck,
   DirectoryEntry,
@@ -25,6 +26,9 @@ export const DIRECTORY_DOCS_KEY = "docs";
 
 /** Grow-only deletion evidence, independent of whole-entry metadata writes. */
 export const DIRECTORY_DELETED_KEY = "deleted-docs";
+
+/** Individual archives survive whole-stub rewrites by older clients. */
+export const DIRECTORY_ARCHIVED_RECORDS_KEY = "archived-records";
 
 /**
  * Per-client max candidates survive losing whole-stub writes. Retained until
@@ -530,9 +534,24 @@ function restoreOneDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
 
 /** First-record authority for a decision topic; ordinary records own their state. */
 export function decisionTopicArchived(dirDoc: Y.Doc, uuid: string): boolean {
-  const entry = getDirectoryEntry(dirDoc, uuid);
+  const entry = readStored(getDirectoryMap(dirDoc).get(uuid));
   if (entry?.kind !== "decision") return entry?.deleted === true;
-  return getDirectoryEntry(dirDoc, entry.topic ?? entry.uuid)?.deleted === true;
+  return readStored(getDirectoryMap(dirDoc).get(entry.topic ?? uuid))?.deleted === true;
+}
+
+/** A record's own archive is distinct from its topic's archive authority. */
+export function isDirectoryEntryArchived(dirDoc: Y.Doc, uuid: string): boolean {
+  return decisionTopicArchived(dirDoc, uuid) || getDirectoryEntry(dirDoc, uuid)?.recordArchived === true;
+}
+
+/** Preserve the whole graph; never archive an answer in force or in conflict. */
+export function tombstoneDecisionRecord(dirDoc: Y.Doc, uuid: string): boolean {
+  const topic = resolveDecisionTopics(dirDoc).find((candidate) => candidate.allRecords.some((record) => record.uuid === uuid));
+  if (topic === undefined || topic.archived || topic.records.length < 2 ||
+    !topic.records.some((record) => record.uuid === uuid) ||
+    topic.inForce?.uuid === uuid || topic.conflicts.some((record) => record.uuid === uuid)) return false;
+  dirDoc.getMap<unknown>(DIRECTORY_ARCHIVED_RECORDS_KEY).set(uuid, true);
+  return true;
 }
 
 /** All observed topic records, including the authority even if its stub is missing. */
@@ -555,8 +574,14 @@ export function tombstoneDirectoryEntry(dirDoc: Y.Doc, uuid: string): string[] {
   return targets;
 }
 
-/** Restore a decision's whole topic; no document room needs hydration. */
+/** Restore the topic first, or one individually archived record in a live topic. */
 export function restoreDirectoryEntry(dirDoc: Y.Doc, uuid: string): string[] {
+  const entry = getDirectoryEntry(dirDoc, uuid);
+  if (entry?.kind === "decision" && !decisionTopicArchived(dirDoc, uuid)) {
+    if (dirDoc.getMap<unknown>(DIRECTORY_ARCHIVED_RECORDS_KEY).get(uuid) !== true) return [];
+    dirDoc.getMap<unknown>(DIRECTORY_ARCHIVED_RECORDS_KEY).delete(uuid);
+    return [uuid];
+  }
   const targets = archiveTargets(dirDoc, uuid);
   dirDoc.transact(() => { for (const target of targets) restoreOneDirectoryEntry(dirDoc, target); });
   return targets;
@@ -567,12 +592,13 @@ export interface ListDirectoryOptions {
   includeDeleted?: boolean;
 }
 
-function toEntry(uuid: string, stored: StoredEntry): DirectoryEntry {
+function toEntry(uuid: string, stored: StoredEntry, recordArchived = false): DirectoryEntry {
   return {
     uuid,
     title: stored.title,
     tags: stored.tags,
     ...(stored.deleted === true ? { deleted: true as const } : {}),
+    ...(stored.kind === "decision" && recordArchived ? { recordArchived: true as const } : {}),
     ...(stored.createdAt === undefined ? {} : { createdAt: stored.createdAt }),
     ...(stored.updatedAt === undefined ? {} : { updatedAt: stored.updatedAt }),
     ...(stored.description === undefined
@@ -598,6 +624,9 @@ export function getDirectoryEntry(
     recordedUpdatedAt(dirDoc, uuid),
   );
   if (stored === null) return null;
+  if (stored.kind === "decision" && dirDoc.getMap<unknown>(DIRECTORY_ARCHIVED_RECORDS_KEY).get(uuid) === true) {
+    return listDirectory(dirDoc, { includeDeleted: true }).find((entry) => entry.uuid === uuid) ?? null;
+  }
   return toEntry(uuid, stored);
 }
 
@@ -622,17 +651,24 @@ export function listDirectory(
       updatedAts.get(uuid),
     );
     if (stored === null) continue;
-    if (!includeDeleted) {
-      const archived = stored.kind === "decision"
-        ? readStored(getDirectoryMap(dirDoc).get(stored.topic ?? uuid))?.deleted === true
-        : stored.deleted === true;
-      if (archived) continue;
-    }
-    out.push(toEntry(uuid, stored));
+    out.push(toEntry(uuid, stored, dirDoc.getMap<unknown>(DIRECTORY_ARCHIVED_RECORDS_KEY).get(uuid) === true));
   }
-  out.sort((a, b) => {
+  const archivedRecords = new Set(out.some((entry) => entry.recordArchived === true)
+    ? resolveDecisionTopics(out).flatMap((topic) => topic.archivedRecords.map((record) => record.uuid)) : []);
+  const normalized = out.flatMap((entry) => {
+    const recordArchived = archivedRecords.has(entry.uuid);
+    if (!includeDeleted && (recordArchived || (entry.kind === "decision"
+      ? readStored(getDirectoryMap(dirDoc).get(entry.topic ?? entry.uuid))?.deleted === true
+      : entry.deleted === true))) return [];
+    if (entry.recordArchived === true && !recordArchived) {
+      const { recordArchived: _archive, ...visible } = entry;
+      return [visible];
+    }
+    return [entry];
+  });
+  normalized.sort((a, b) => {
     if (a.title !== b.title) return a.title < b.title ? -1 : 1;
     return a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0;
   });
-  return out;
+  return normalized;
 }

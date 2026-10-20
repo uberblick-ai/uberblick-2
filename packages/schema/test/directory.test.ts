@@ -7,6 +7,7 @@ import {
   deleteBlock,
   deleteDirectoryEntry,
   decisionTopicArchived,
+  DIRECTORY_ARCHIVED_RECORDS_KEY,
   directoryStubDiffers,
   documentDirectoryFields,
   enforceDeletedDirectoryEntries,
@@ -16,6 +17,7 @@ import {
   getMeta,
   initDoc,
   isDirectoryEntryDeleted,
+  isDirectoryEntryArchived,
   listDeletedDirectoryUuids,
   listDirectory,
   resolveAnnotationRange,
@@ -23,6 +25,7 @@ import {
   setAnnotationResolved,
   setKind,
   tombstoneDirectoryEntry,
+  tombstoneDecisionRecord,
   upsertDirectoryEntry,
 } from "../src/index.js";
 import type { DirectoryEntry, DocMeta } from "../src/index.js";
@@ -34,6 +37,31 @@ const GAMMA = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 // The well-known room name itself is pinned once, in rooms.test.ts.
 describe("directory doc", () => {
+  it("keeps record archives through modern and older whole-stub rewrites and restores one layer", () => {
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, { uuid: ALPHA, title: "First", kind: "decision", topic: ALPHA, status: "decided" });
+    upsertDirectoryEntry(directory, { uuid: BETA, title: "Current", kind: "decision", topic: ALPHA, supersedes: ALPHA, status: "decided" });
+    expect(tombstoneDecisionRecord(directory, ALPHA)).toBe(true);
+    upsertDirectoryEntry(directory, { uuid: ALPHA, title: "Cache repair", tags: ["tag"] });
+    expect(getDirectoryEntry(directory, ALPHA)?.recordArchived).toBe(true);
+    const peer = new Y.Doc(); syncDocs(directory, peer);
+    getDirectoryMap(peer).set(ALPHA, { title: "Older client", tags: [], kind: "decision", topic: ALPHA, status: "decided" });
+    syncDocs(directory, peer);
+    expect(directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).get(ALPHA)).toBe(true);
+    expect(getDirectoryEntry(directory, ALPHA)).toMatchObject({ title: "Older client", recordArchived: true });
+    expect(decisionTopicArchived(directory, ALPHA)).toBe(false);
+    tombstoneDirectoryEntry(directory, BETA);
+    expect(isDirectoryEntryArchived(directory, BETA)).toBe(true);
+    expect(restoreDirectoryEntry(directory, ALPHA)).toEqual([ALPHA, BETA]);
+    expect(decisionTopicArchived(directory, ALPHA)).toBe(false);
+    expect(isDirectoryEntryArchived(directory, ALPHA)).toBe(true);
+    expect(isDirectoryEntryArchived(directory, BETA)).toBe(false);
+    expect(listDirectory(directory).map((entry) => entry.uuid)).toEqual([BETA]);
+    expect(restoreDirectoryEntry(directory, ALPHA)).toEqual([ALPHA]);
+    expect(getDirectoryEntry(directory, ALPHA)?.recordArchived).toBeUndefined();
+    expect(listDirectory(directory)).toHaveLength(2);
+  });
+
   it("keeps only permanent UUID evidence and refuses every later metadata write", () => {
     const directory = new Y.Doc();
     upsertDirectoryEntry(directory, {

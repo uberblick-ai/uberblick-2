@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   archiveDocument,
+  archiveDecisionRecord,
   createGroup,
   getDirectoryEntry,
   listDirectory,
@@ -17,6 +18,22 @@ const OTHER_RECORD = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const NEIGHBOR = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 
 describe("archiveDocument", () => {
+  it("unpins only an individually archived record while preserving the first record's topic pin", () => {
+    const directory = new Y.Doc();
+    const sidebar = new Y.Doc();
+    for (const uuid of [TOPIC, SUCCESSOR, OTHER_RECORD]) {
+      upsertDirectoryEntry(directory, { uuid, title: uuid, kind: "decision", status: "open", topic: TOPIC });
+    }
+    const group = createGroup(sidebar, "Reading");
+    for (const uuid of [TOPIC, SUCCESSOR, OTHER_RECORD]) pinDoc(sidebar, group, uuid);
+    expect(archiveDecisionRecord(directory, sidebar, TOPIC)).toBe(true);
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([TOPIC, SUCCESSOR, OTHER_RECORD]);
+    expect(archiveDecisionRecord(directory, sidebar, SUCCESSOR)).toBe(true);
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([TOPIC, OTHER_RECORD]);
+    expect(archiveDecisionRecord(directory, sidebar, OTHER_RECORD)).toBe(false);
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([TOPIC, OTHER_RECORD]);
+  });
+
   it("tombstones every topic target before unpinning, including a missing first record", () => {
     const directory = new Y.Doc();
     const sidebar = new Y.Doc();

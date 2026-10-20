@@ -49,12 +49,11 @@ export function resolveDecisionTopics(
   }
   const out: DecisionTopicResolution[] = [];
   for (const [topic, unsorted] of groups) {
-    const records = [...unsorted].sort(compareAge);
-    const oldest = records[0];
+    const graph = [...unsorted].sort(compareAge);
+    const oldest = graph[0];
     if (oldest === undefined) continue;
-    const byId = new Map(records.map((record) => [record.uuid, record]));
-    const first = allById.get(topic) ?? null;
-    const live = records.filter((record) => record.status !== "rejected" && record.status !== "withdrawn");
+    const byId = new Map(graph.map((record) => [record.uuid, record]));
+    const live = graph.filter((record) => record.status !== "rejected" && record.status !== "withdrawn");
     const supersededByLive = new Set<string>();
     const supersededByDecided = new Set<string>();
     for (const record of live) {
@@ -64,19 +63,30 @@ export function resolveDecisionTopics(
       }
     }
     const maximalDecided = live.filter((record) => record.status === "decided" && !supersededByDecided.has(record.uuid));
-    const inForce = maximalDecided.length === 1 ? (maximalDecided[0] ?? null) : null;
-    const pending = live.filter((record) => record.status === "open" && !supersededByLive.has(record.uuid));
+    const protectedAnswers = new Set(maximalDecided.map((record) => record.uuid));
+    const allRecords: DirectoryEntry[] = graph.map((record) => {
+      if (record.recordArchived !== true || !protectedAnswers.has(record.uuid)) return record;
+      const { recordArchived: _archive, ...visible } = record;
+      return visible;
+    });
+    const records = allRecords.filter((record) => record.recordArchived !== true);
+    const archivedRecords = allRecords.filter((record) => record.recordArchived === true);
+    const first = allRecords.find((record) => record.uuid === topic) ?? allById.get(topic) ?? null;
+    const inForce = maximalDecided.length === 1 ? records.find((record) => record.uuid === maximalDecided[0]?.uuid) ?? null : null;
+    const pending = records.filter((record) => record.status === "open" && !supersededByLive.has(record.uuid));
     out.push({
       topic,
       first,
-      representative: inForce ?? pending[0] ?? first ?? oldest,
+      representative: inForce ?? pending[0] ?? records.find((record) => record.uuid === topic) ?? records[0] ?? first ?? oldest,
       inForce,
       pending,
-      conflicts: maximalDecided.length > 1 ? maximalDecided : [],
-      superseded: live.filter((record) => record.status === "decided" && supersededByDecided.has(record.uuid)),
+      conflicts: maximalDecided.length > 1 ? records.filter((record) => protectedAnswers.has(record.uuid)) : [],
+      superseded: records.filter((record) => record.status === "decided" && supersededByDecided.has(record.uuid)),
       rejected: records.filter((record) => record.status === "rejected"),
       withdrawn: records.filter((record) => record.status === "withdrawn"),
       records,
+      archivedRecords,
+      allRecords,
       archived: first?.deleted === true,
     });
   }
@@ -97,7 +107,7 @@ export function decisionTopicState(resolution: DecisionTopicResolution): Decisio
 
 /** The web opens the answer in force, or the latest stored record without one. */
 export function decisionCurrentRecord(resolution: DecisionTopicResolution): DirectoryEntry | null {
-  return resolution.inForce ?? resolution.records.at(-1) ?? null;
+  return resolution.inForce ?? resolution.records.at(-1) ?? resolution.archivedRecords.at(-1) ?? null;
 }
 
 /** A topic's question belongs to its first record, including archived topics. */
@@ -130,7 +140,7 @@ export function decisionRelations(directory: Y.Doc, uuid: string): {
   const record = all.find((entry) => entry.uuid === uuid && entry.kind === "decision");
   if (record === undefined) return { predecessors: [], successors: [], resolution: null };
   const resolution = resolveDecisionTopics(all).find((topic) => topic.topic === (record.topic ?? record.uuid)) ?? null;
-  const byId = new Map((resolution?.records ?? []).map((entry) => [entry.uuid, entry]));
+  const byId = new Map((resolution?.allRecords ?? []).map((entry) => [entry.uuid, entry]));
   const predecessorIds = ancestors(record, byId);
   return {
     predecessors: [...predecessorIds].flatMap((id) => {

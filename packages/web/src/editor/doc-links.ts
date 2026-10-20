@@ -21,9 +21,9 @@ import { singleLine } from "./table-text.js";
 import { inlineIconAnchorLabel } from "../inline-icons.js";
 import {
   decisionTopicArchived,
+  isDirectoryEntryArchived,
   canonicalDocumentUuid,
   getDirectoryEntry,
-  getDirectoryMap,
   listDirectory,
 } from "@uberblick/schema";
 
@@ -84,7 +84,9 @@ export function createDocLinkContext(options: {
     lookup(docId: string): DocLinkTarget {
       const entry = directory === null ? null : getDirectoryEntry(directory, docId);
       if (entry === null) return { state: "unresolved", title: null };
-      if (directory !== null && decisionTopicArchived(directory, docId)) {
+      const topicAddress = entry.kind === "decision" && docId === (entry.topic ?? entry.uuid);
+      if (directory !== null && (topicAddress
+        ? decisionTopicArchived(directory, docId) : isDirectoryEntryArchived(directory, docId))) {
         return { state: "archived", title: null };
       }
       return { state: "resolved", title: entry.title === "" ? null : entry.title };
@@ -99,9 +101,8 @@ export function createDocLinkContext(options: {
     },
     subscribe(onChange: () => void): () => void {
       if (directory === null) return () => {};
-      const map = getDirectoryMap(directory);
-      map.observe(onChange);
-      return () => map.unobserve(onChange);
+      directory.on("update", onChange);
+      return () => directory.off("update", onChange);
     },
   };
 }

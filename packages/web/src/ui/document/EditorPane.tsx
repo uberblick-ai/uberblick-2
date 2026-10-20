@@ -792,6 +792,11 @@ export function EditorPane({
   pinned = false,
   onTogglePin = null,
   onArchive = null,
+  isDecisionTopic = false,
+  actionTitle,
+  showArchiveRecord = false,
+  onArchiveRecord = null,
+  archiveRecordUnavailable = null,
   onArchiveConfirmationFocusChange,
   focusRestore = false,
   onRestoreFocused,
@@ -838,6 +843,11 @@ export function EditorPane({
   pinned?: boolean;
   onTogglePin?: (() => void) | null;
   onArchive?: (() => void) | null;
+  isDecisionTopic?: boolean;
+  actionTitle?: string | undefined;
+  showArchiveRecord?: boolean;
+  onArchiveRecord?: (() => void) | null;
+  archiveRecordUnavailable?: string | null;
   onArchiveConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
   focusRestore?: boolean;
   onRestoreFocused?: (() => void) | undefined;
@@ -945,6 +955,7 @@ export function EditorPane({
           catalogConnection={catalogConnection}
           segment={segment}
           meta={meta === null || displayTitle === undefined ? meta : { ...meta, title: displayTitle }}
+          actionTitle={actionTitle}
           archived={archived}
           readOnly={!writable}
           contentReadOnly={decision}
@@ -952,6 +963,10 @@ export function EditorPane({
           pinned={pinned}
           onTogglePin={onTogglePin}
           onArchive={onArchive}
+          isDecisionTopic={isDecisionTopic}
+          showArchiveRecord={showArchiveRecord}
+          onArchiveRecord={onArchiveRecord}
+          archiveRecordUnavailable={archiveRecordUnavailable}
           onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
           hasTldr={meta?.tldr != null}
           onEditTldr={() => {

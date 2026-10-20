@@ -13,8 +13,8 @@ import {
 import * as Y from "yjs";
 import {
   decisionTopicArchived,
+  isDirectoryEntryArchived,
   getBlocksFragment,
-  getDirectoryMap,
   getMeta,
   getMetaMap,
   listDirectory,
@@ -202,7 +202,9 @@ export function useDirectory(
     const { ydoc } = current;
     const read = (): void => emit(listDirectory(ydoc, { includeDeleted }).map(
       (entry) => entry.kind === "decision"
-        ? { ...entry, deleted: decisionTopicArchived(ydoc, entry.uuid) }
+        ? { ...entry, deleted: entry.uuid === (entry.topic ?? entry.uuid)
+          ? decisionTopicArchived(ydoc, entry.uuid)
+          : decisionTopicArchived(ydoc, entry.uuid) || entry.recordArchived === true }
         : entry,
     ));
     read();
@@ -234,8 +236,7 @@ function observeSidebar(
 }
 
 /**
- * Decisions use only their topic's first-record directory tombstone, including
- * partial writes; other documents use their own. Unknown UUIDs are not archived.
+ * Observe topic archives and independent record archives. Unknown UUIDs are not archived.
  * Read synchronously during render with useSyncExternalStore so an archive
  * never paints an editable first frame or route-switch frame.
  */
@@ -246,15 +247,14 @@ export function useArchived(
   const subscribe = useCallback(
     (onChange: () => void) => {
       if (directory === null) return () => {};
-      const map = getDirectoryMap(directory.ydoc);
-      map.observe(onChange);
-      return () => map.unobserve(onChange);
+      directory.ydoc.on("update", onChange);
+      return () => directory.ydoc.off("update", onChange);
     },
     [directory],
   );
   const read = useCallback(() => {
     if (directory === null || uuid === null) return false;
-    return decisionTopicArchived(directory.ydoc, uuid);
+    return isDirectoryEntryArchived(directory.ydoc, uuid);
   }, [directory, uuid]);
   return useSyncExternalStore(subscribe, read);
 }

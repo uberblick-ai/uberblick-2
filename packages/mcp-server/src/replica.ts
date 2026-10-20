@@ -2,12 +2,14 @@ import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import {
   DIRECTORY_SUFFIX,
+  DIRECTORY_ARCHIVED_RECORDS_KEY,
   SETTINGS_SUFFIX,
   SIDEBAR_SUFFIX,
   directoryRoom,
   directoryStubDiffers,
   enforceDeletedDirectoryEntries,
   documentDirectoryFields,
+  isDirectoryEntryArchived,
   decisionTopicArchived,
   decisionTopicTitle,
   findBlockElement,
@@ -440,9 +442,9 @@ export class Replicas {
         for (const uuid of event.keysChanged) {
           if (readSyncedDocId(uuid, "directory key") === null) continue;
           this.staleStubs.add(uuid);
-          const first = getDirectoryEntry(doc, uuid);
-          if (first?.kind === "decision" && (first.topic ?? first.uuid) === uuid) {
-            changedTopics.add(uuid);
+          const entry = getDirectoryEntry(doc, uuid);
+          if (entry?.kind === "decision") {
+            changedTopics.add(entry.topic ?? entry.uuid);
           }
         }
         if (changedTopics.size > 0) {
@@ -451,6 +453,11 @@ export class Replicas {
               this.staleStubs.add(record.uuid);
             }
           }
+        }
+      });
+      doc.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).observe((event) => {
+        for (const uuid of event.keysChanged) {
+          if (readSyncedDocId(uuid, "directory key") !== null) this.staleStubs.add(uuid);
         }
       });
     }
@@ -624,7 +631,7 @@ export class Replicas {
         if (meta.uuid === "") continue;
         try {
           if (
-            decisionTopicArchived(this.directory().doc, document.id)
+            isDirectoryEntryArchived(this.directory().doc, document.id)
           ) {
             if (this.store.isIndexed(document.id)) this.store.unindexDoc(document.id);
             continue;
@@ -653,7 +660,7 @@ export class Replicas {
       }
       // Live updates and rebuilds must keep archived documents out of the index.
       if (meta.kind === "decision") this.repairStub(replica, meta, authored);
-      if (decisionTopicArchived(this.directory().doc, replica.id)) {
+      if (isDirectoryEntryArchived(this.directory().doc, replica.id)) {
         this.store.unindexDoc(replica.id);
         return;
       }
@@ -754,7 +761,7 @@ export class Replicas {
       if (entry === null) {
         return;
       }
-      if (decisionTopicArchived(this.directory().doc, entry.uuid)) {
+      if (decisionTopicArchived(this.directory().doc, entry.uuid) || entry.recordArchived === true) {
         // Ask before deleting: the usual tombstone has no rows left, and a
         // delete that finds nothing still queues behind a write lock.
         if (this.store.isIndexed(uuid)) {
@@ -893,7 +900,7 @@ export class Replicas {
       includeDeleted: true,
     })) {
       if (this.isDeleted(entry.uuid)) continue;
-      if (decisionTopicArchived(this.directory().doc, entry.uuid)) {
+      if (decisionTopicArchived(this.directory().doc, entry.uuid) || entry.recordArchived === true) {
         // Catch tombstones missed by observers during hydration or old rebuilds.
         // Queue actual deletes so lock waits do not multiply with the backlog;
         // an already absent index row costs only a read.

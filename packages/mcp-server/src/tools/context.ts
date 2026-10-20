@@ -3,6 +3,7 @@ import {
   decisionApprovalFingerprint,
   decisionContentLocked,
   decisionRelations,
+  isDirectoryEntryArchived,
   decisionTopicArchived,
   decisionTopicTitle,
   getBlocksWithInline,
@@ -176,7 +177,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
    */
   const requireWritableDoc = (uuid: string, contentMutation = false): Replica => {
     requireNotDeleted(uuid);
-    if (decisionTopicArchived(replicas.directory().doc, uuid)) {
+    if (isDirectoryEntryArchived(replicas.directory().doc, uuid)) {
       throw new ToolError(
         "doc_archived",
         `Document ${uuid} is archived — restore_doc to edit`,
@@ -230,11 +231,14 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   const tagCatalog = () => replicas.settings().doc;
 
   /** Normalize directory descriptions and resolve tags through the settings catalog. */
-  const decisionEntryJson = (entry: DirectoryEntry, title: string, archived: boolean) => ({
-    ...entry, title, tags: readDirectoryTags(entry, tagCatalog()),
-    ...(entry.kind === "decision" ? { deleted: archived } : {}),
-    description: entry.description ?? null,
-  });
+  const decisionEntryJson = (entry: DirectoryEntry, title: string, archived: boolean) => {
+    const { recordArchived: _recordArchived, ...fields } = entry;
+    return {
+      ...fields, title, tags: readDirectoryTags(entry, tagCatalog()),
+      ...(entry.kind === "decision" ? { deleted: archived || entry.recordArchived === true } : {}),
+      description: entry.description ?? null,
+    };
+  };
 
   const topicJson = (topic: DecisionTopicResolution) => {
     const entryJson = (entry: DirectoryEntry) => decisionEntryJson(entry, decisionTopicTitle(topic), topic.archived);

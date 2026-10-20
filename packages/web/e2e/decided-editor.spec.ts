@@ -223,7 +223,7 @@ test("an open decision keeps prose and tables read-only through later states whi
   await expect(page.getByRole("menuitem", { name: "Add TL;DR", exact: true })).toHaveCount(0);
   await expect(page.getByRole("menuitem", { name: "Remove TL;DR", exact: true })).toHaveCount(0);
   await expect(page.getByRole("menuitem", { name: "Pin to sidebar", exact: true })).toBeEnabled();
-  await expect(page.getByRole("menuitem", { name: "Archive document", exact: true })).toBeEnabled();
+  await expect(page.getByRole("menuitem", { name: "Archive topic", exact: true })).toBeEnabled();
   await page.keyboard.press("Escape");
   await expect(page.locator(".ub-tag-placeholder")).toHaveText("Add tags");
 

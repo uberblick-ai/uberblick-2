@@ -262,7 +262,10 @@ export interface DecisionTopicResolution {
   superseded: DirectoryEntry[];
   rejected: DirectoryEntry[];
   withdrawn: DirectoryEntry[];
+  /** Visible records, with archived intermediates retained separately for graph resolution. */
   records: DirectoryEntry[];
+  archivedRecords: DirectoryEntry[];
+  allRecords: DirectoryEntry[];
   /** Only the first record's tombstone controls topic visibility. */
   archived: boolean;
 }
@@ -327,6 +330,8 @@ export interface DirectoryEntry {
   /** Stored catalog UUIDs, or provisional strings awaiting the clean cut. */
   tags: string[];
   deleted?: boolean;
+  /** Effective individual record archive, derived independently of replaceable stubs. */
+  recordArchived?: true;
   /**
    * Epoch ms on the creating replica's clock; absent until supplied or backfilled.
    */

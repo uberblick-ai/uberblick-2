@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { decisionApprovalChanged, getBlocks, getDirectoryEntry, getDirectoryMap, getMeta, getMetaMap, editBlock, setTitle, upsertDirectoryEntry } from "@uberblick/schema";
+import { decisionApprovalChanged, getBlocks, getDirectoryEntry, getDirectoryMap, getMeta, getMetaMap, editBlock, isDirectoryEntryArchived, setTitle, tombstoneDecisionRecord, upsertDirectoryEntry } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { startServer, testConfig } from "./core-helpers.js";
@@ -116,6 +116,35 @@ it("renames through every live record state, writes only the first title and pre
       .toMatchObject({ isError: true, payload: { error: "doc_archived", applied: false, partial: false } });
   }
   expect(roomState(rig, records.map(record => record.uuid))).toEqual(before);
+});
+
+it("renames a live topic without restoring its individually archived first answer", async () => {
+  const rig = await localRig();
+  const first = await decision(rig, { title: "Original question", status: "decided", answer });
+  const current = await decision(rig, { supersedes: first.uuid, status: "decided", answer });
+  const directory = rig.instance.replicas.directory().doc;
+  expect(tombstoneDecisionRecord(directory, first.uuid)).toBe(true);
+  const approved = [approval(rig, first.uuid), approval(rig, current.uuid)];
+  const currentBefore = Y.encodeStateAsUpdate(rig.instance.replicas.replica(current.uuid).doc);
+
+  expect(await rig.ok("set_metadata", { uuid: current.uuid, title: "Renamed question" }))
+    .toMatchObject({ title: "Renamed question", applied: true });
+  expect(getMeta(rig.instance.replicas.replica(first.uuid).doc).title).toBe("Renamed question");
+  expect(Y.encodeStateAsUpdate(rig.instance.replicas.replica(current.uuid).doc)).toEqual(currentBefore);
+  expect([approval(rig, first.uuid), approval(rig, current.uuid)]).toEqual(approved);
+  expect(isDirectoryEntryArchived(directory, first.uuid)).toBe(true);
+  expect(getDirectoryEntry(directory, first.uuid)?.recordArchived).toBe(true);
+  expect((await rig.ok("get_doc", { uuid: first.uuid })).title).toBe("Renamed question");
+
+  const before = roomState(rig, [first.uuid, current.uuid]);
+  expect(await rig.call("set_metadata", { uuid: first.uuid, title: "Archived rename" }))
+    .toMatchObject({ isError: true, payload: { error: "doc_archived", applied: false, partial: false } });
+  expect(roomState(rig, [first.uuid, current.uuid])).toEqual(before);
+  await rig.ok("archive_doc", { uuid: current.uuid });
+  const archivedBefore = roomState(rig, [first.uuid, current.uuid]);
+  expect(await rig.call("set_metadata", { uuid: current.uuid, title: "Archived topic rename" }))
+    .toMatchObject({ isError: true, payload: { error: "doc_archived", applied: false, partial: false } });
+  expect(roomState(rig, [first.uuid, current.uuid])).toEqual(archivedBefore);
 });
 
 it("validates all metadata and the first record's room before writing either room", async () => {

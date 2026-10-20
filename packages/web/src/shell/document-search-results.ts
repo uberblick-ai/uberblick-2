@@ -33,7 +33,7 @@ export function documentSearchRows(entries: readonly DirectoryEntry[], groups: r
       const stamp = usableDocumentStamp(record.updatedAt);
       return stamp === undefined ? [] : [stamp];
     });
-    const pinnedRecord = topic.records.find((record) => groupOf.has(record.uuid));
+    const pinnedUuid = [topic.topic, ...topic.records.map((record) => record.uuid)].find((uuid) => groupOf.has(uuid));
     return [{
       uuid: topic.topic,
       title: decisionTopicTitle(topic),
@@ -42,8 +42,8 @@ export function documentSearchRows(entries: readonly DirectoryEntry[], groups: r
       topicState: decisionTopicState(topic),
       approvalChanged: [topic.inForce, ...topic.conflicts].some((record) => record?.approvalChanged === true),
       ...(stamps.length === 0 ? {} : { updatedAt: Math.max(...stamps) }),
-      pinned: pinnedRecord !== undefined,
-      groupName: pinnedRecord === undefined ? undefined : groupOf.get(pinnedRecord.uuid),
+      pinned: pinnedUuid !== undefined,
+      groupName: pinnedUuid === undefined ? undefined : groupOf.get(pinnedUuid),
       recordIds: topic.records.map((record) => record.uuid),
     }];
   });

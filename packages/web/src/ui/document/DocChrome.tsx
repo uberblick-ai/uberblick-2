@@ -349,12 +349,17 @@ export function DocMetaLine({
   segment,
   copyPath,
   meta,
+  actionTitle,
   archived,
   readOnly = false,
   contentReadOnly = false,
   pinned = false,
   onTogglePin = null,
   onArchive = null,
+  isDecisionTopic = false,
+  showArchiveRecord = false,
+  onArchiveRecord = null,
+  archiveRecordUnavailable = null,
   onArchiveConfirmationFocusChange,
   hasTldr = false,
   onEditTldr,
@@ -367,6 +372,7 @@ export function DocMetaLine({
   segment: string;
   copyPath?: string | undefined;
   meta: DocMeta | null;
+  actionTitle?: string | undefined;
   /** Whether the directory tombstones this document: no writes from here. */
   archived: boolean;
   /** Whether the document room currently refuses writes. */
@@ -377,6 +383,10 @@ export function DocMetaLine({
   onTogglePin?: (() => void) | null;
   /** Null means this replica cannot establish a current live directory stub. */
   onArchive?: (() => void) | null;
+  isDecisionTopic?: boolean;
+  showArchiveRecord?: boolean;
+  onArchiveRecord?: (() => void) | null;
+  archiveRecordUnavailable?: string | null;
   /** Whether focus is inside the confirmation a remote archive may remove. */
   onArchiveConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
   /** Whether the document-actions entry adds or edits the person-facing summary. */
@@ -421,12 +431,16 @@ export function DocMetaLine({
             </button>
             <DocumentActions
               key={`${connection.room}/${archived}`}
-              title={titleOf(meta)}
+              title={actionTitle || titleOf(meta)}
               uuid={meta.uuid}
               archived={archived}
               pinned={pinned}
               onTogglePin={onTogglePin}
               onArchive={onArchive}
+              isDecisionTopic={isDecisionTopic}
+              showArchiveRecord={showArchiveRecord}
+              onArchiveRecord={onArchiveRecord}
+              archiveRecordUnavailable={archiveRecordUnavailable}
               onConfirmationFocusChange={onArchiveConfirmationFocusChange}
               hasTldr={hasTldr}
               tldrOptOut={meta.tldrOptOut === true}
@@ -442,12 +456,14 @@ export function DocMetaLine({
 }
 
 /**
- * Use one Archive refusal in the menu and open confirmation. Readiness can
+ * Reuse each Archive refusal in its menu item and open confirmation. Readiness can
  * disappear before confirmation; refusing in place must preserve the dialog
  * and explain why nothing was written.
  */
 const ARCHIVE_UNAVAILABLE =
   "Archive unavailable — the directory or sidebar room is not ready to write, or there is no live entry for this document";
+const ARCHIVE_RECORD_UNAVAILABLE =
+  "Archive this record unavailable — the directory or sidebar room is not ready to write, or there is no live entry for this record";
 
 function DocumentActions({
   title,
@@ -456,6 +472,10 @@ function DocumentActions({
   pinned,
   onTogglePin,
   onArchive,
+  isDecisionTopic,
+  showArchiveRecord,
+  onArchiveRecord,
+  archiveRecordUnavailable,
   onConfirmationFocusChange,
   hasTldr,
   tldrOptOut,
@@ -469,6 +489,10 @@ function DocumentActions({
   pinned: boolean;
   onTogglePin: (() => void) | null;
   onArchive: (() => void) | null;
+  isDecisionTopic: boolean;
+  showArchiveRecord: boolean;
+  onArchiveRecord: (() => void) | null;
+  archiveRecordUnavailable: string | null;
   onConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
   hasTldr: boolean;
   tldrOptOut: boolean;
@@ -476,9 +500,16 @@ function DocumentActions({
   onEditTldr: (() => void) | null;
   onRemoveTldr: (() => void) | null;
 }): ReactElement {
-  const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirming] = useState<"document" | "record" | null>(null);
   const openingTldrEditor = useRef(false);
   const pendingCopy = useRef<(() => void) | null>(null);
+  const recordUnavailable = archiveRecordUnavailable ?? (
+    onArchiveRecord === null || !showArchiveRecord ? ARCHIVE_RECORD_UNAVAILABLE : null
+  );
+  const archive = confirming === "record" ? onArchiveRecord : onArchive;
+  const unavailable = confirming === "record"
+    ? recordUnavailable
+    : onArchive === null ? ARCHIVE_UNAVAILABLE : null;
 
   const copyFromMenu = (text: string, message: string, failure: string): void => {
     const closed = new Promise<void>((resolve) => { pendingCopy.current = resolve; });
@@ -492,12 +523,12 @@ function DocumentActions({
 
   return (
     <AlertDialog
-      open={confirming}
+      open={confirming !== null}
       onOpenChange={(open) => {
         // The persistent menu button is also AlertDialogTrigger so Radix can return
         // focus to it. Its ordinary menu click therefore requests a dialog
-        // open too; only the Archive item below is allowed to accept that half.
-        if (!open) setConfirming(false);
+        // open too; only an Archive item below is allowed to accept that half.
+        if (!open) setConfirming(null);
       }}
     >
       <span className="ub-document-actions">
@@ -587,11 +618,25 @@ function DocumentActions({
                       event.preventDefault();
                       return;
                     }
-                    setConfirming(true);
+                    setConfirming("document");
                   }}
                 >
-                  {onArchive === null ? ARCHIVE_UNAVAILABLE : "Archive document"}
+                  {onArchive === null ? ARCHIVE_UNAVAILABLE : isDecisionTopic ? "Archive topic" : "Archive document"}
                 </DropdownMenuItem>
+                {isDecisionTopic && showArchiveRecord && (
+                  <DropdownMenuItem
+                    aria-disabled={recordUnavailable !== null}
+                    onSelect={(event) => {
+                      if (recordUnavailable !== null) {
+                        event.preventDefault();
+                        return;
+                      }
+                      setConfirming("record");
+                    }}
+                  >
+                    {recordUnavailable ?? "Archive this record"}
+                  </DropdownMenuItem>
+                )}
               </>
             )}
           </DropdownMenuContent>
@@ -605,25 +650,33 @@ function DocumentActions({
             }
           }}
         >
-          <AlertDialogTitle>Archive “{title}”?</AlertDialogTitle>
+          <AlertDialogTitle>
+            {confirming === "record"
+              ? "Archive this record?"
+              : isDecisionTopic ? `Archive topic “${title}”?` : `Archive “${title}”?`}
+          </AlertDialogTitle>
           <AlertDialogDescription>
-            {onArchive === null
-              ? `${ARCHIVE_UNAVAILABLE}. Nothing has been archived.`
-              : "It leaves the document list and search. You can restore it later."}
+            {unavailable !== null
+              ? `${unavailable}. Nothing has been archived.`
+              : confirming === "record"
+                ? "It leaves this topic's history. Links to it show it as archived, and you can restore it from there."
+                : isDecisionTopic
+                  ? "The topic and all its records leave the decision list and search. You can restore it later."
+                  : "It leaves the document list and search. You can restore it later."}
           </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={onArchive === null}
+              disabled={unavailable !== null}
               onClick={(event) => {
                 // Lost readiness refuses Archive in place; keep the reason
                 // and Cancel visible instead of closing as though the archive
                 // succeeded.
-                if (onArchive === null) {
+                if (unavailable !== null || archive === null) {
                   event.preventDefault();
                   return;
                 }
-                onArchive();
+                archive();
               }}
             >
               Archive

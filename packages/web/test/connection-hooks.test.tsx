@@ -20,6 +20,7 @@ import {
   createGroup,
   getBlocksFragment,
   initDoc,
+  tombstoneDecisionRecord,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -249,6 +250,44 @@ describe("connection-scoped readings", () => {
     expect(entries.find(({ uuid }) => uuid === OTHER_UUID)?.deleted).toBe(true);
     view.rerender(<Probe includeDeleted={false} />);
     expect(entries.map(({ uuid }) => uuid)).toEqual([UUID]);
+  });
+
+  it("preserves topic identity while reflecting effective record and topic archives", () => {
+    const fix = fixture(`${WORKSPACE}/decision-directory`);
+    const proposal = "6c612466-bb45-4b45-9aa7-e73680ae0bc5";
+    upsertDirectoryEntry(fix.ydoc, {
+      uuid: UUID, title: "First answer", kind: "decision", status: "decided", topic: UUID,
+    });
+    upsertDirectoryEntry(fix.ydoc, {
+      uuid: OTHER_UUID, title: "Current answer", kind: "decision", status: "decided", topic: UUID, supersedes: UUID,
+    });
+    upsertDirectoryEntry(fix.ydoc, {
+      uuid: proposal, title: "Proposal", kind: "decision", status: "open", topic: UUID, supersedes: OTHER_UUID,
+    });
+    let entries: ReturnType<typeof useDirectory> = [];
+    function Probe(): null {
+      entries = useDirectory(fix.connection, true);
+      return null;
+    }
+    render(<Probe />);
+
+    act(() => {
+      expect(tombstoneDecisionRecord(fix.ydoc, UUID)).toBe(true);
+      expect(tombstoneDecisionRecord(fix.ydoc, proposal)).toBe(true);
+    });
+    expect(entries.find(({ uuid }) => uuid === UUID)).toMatchObject({ deleted: false, recordArchived: true });
+    expect(entries.find(({ uuid }) => uuid === proposal)).toMatchObject({ deleted: true, recordArchived: true });
+    expect(entries.find(({ uuid }) => uuid === OTHER_UUID)?.deleted).toBe(false);
+
+    // An archive mark cannot hide an answer that subsequently becomes in force.
+    act(() => upsertDirectoryEntry(fix.ydoc, { uuid: proposal, title: "Approved answer", status: "decided" }));
+    expect(entries.find(({ uuid }) => uuid === proposal)?.deleted).toBe(false);
+    expect(entries.find(({ uuid }) => uuid === proposal)?.recordArchived).toBeUndefined();
+    expect(entries.find(({ uuid }) => uuid === UUID)).toMatchObject({ deleted: false, recordArchived: true });
+
+    act(() => { tombstoneDirectoryEntry(fix.ydoc, OTHER_UUID); });
+    expect(entries).toHaveLength(3);
+    expect(entries.every(({ deleted }) => deleted === true)).toBe(true);
   });
 
   it("refreshes link conflicts before the transaction has notified observers", () => {

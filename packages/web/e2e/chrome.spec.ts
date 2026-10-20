@@ -2749,7 +2749,7 @@ for (const scheme of ["light", "dark"] as const) {
       await trigger.click();
       const copy = page.getByRole("menuitem", { name: "Copy document id", exact: true });
       const unpin = page.getByRole("menuitem", { name: "Unpin from sidebar" });
-      const archive = page.getByRole("menuitem", { name: "Archive document", exact: true });
+      const archive = page.getByRole("menuitem", { name: "Archive topic", exact: true });
       const restingInk = await paintedIn(copy, "color");
       const highlightedInk = await page.evaluate(() => {
         const probe = document.createElement("span");
@@ -2784,7 +2784,7 @@ for (const scheme of ["light", "dark"] as const) {
       await page.keyboard.press("ArrowDown");
       await page.keyboard.press("Enter");
       const confirmation = page.getByRole("alertdialog");
-      await expect(confirmation).toContainText("It leaves the document list and search. You can restore it later.");
+      await expect(confirmation).toContainText("The topic and all its records leave the decision list and search. You can restore it later.");
       const cancel = confirmation.getByRole("button", { name: "Cancel", exact: true });
       const primary = confirmation.getByRole("button", { name: "Archive", exact: true });
       await expect(cancel).toBeFocused();
@@ -3439,7 +3439,7 @@ test("decision archive and restore follow the whole topic and its first record",
     await expect(page.locator(".ub-archived-banner")).toHaveCount(0);
     await expect(editor(page)).toHaveAttribute("contenteditable", "false");
     await page.getByRole("button", { name: "Document actions" }).click();
-    await page.getByRole("menuitem", { name: "Archive document" }).click();
+    await page.getByRole("menuitem", { name: "Archive topic", exact: true }).click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Archive", exact: true }).click();
     await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
     await expect(earlier.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
