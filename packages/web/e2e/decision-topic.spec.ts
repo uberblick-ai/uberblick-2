@@ -301,9 +301,11 @@ async function headerLayout(page: Page, wrapped: boolean | null): Promise<void> 
     if (state === null || attribution === null || pane === null) throw new Error("e2e: missing answer header layout");
     const pill = state.getBoundingClientRect();
     const meta = attribution.getBoundingClientRect();
+    const alter = element.querySelector("button")?.getBoundingClientRect() ?? null;
     return {
-      pillTop: pill.top, pillBottom: pill.bottom, attributionTop: meta.top,
+      pillTop: pill.top, pillBottom: pill.bottom, attributionTop: meta.top, attributionBottom: meta.bottom,
       attributionRight: meta.right, headerRight: element.getBoundingClientRect().right,
+      alter: alter === null ? null : { left: alter.left, right: alter.right, top: alter.top, bottom: alter.bottom },
       headerWidth: element.clientWidth, headerScroll: element.scrollWidth,
       paneWidth: pane.clientWidth, paneScroll: pane.scrollWidth,
       pageWidth: document.documentElement.clientWidth, pageScroll: document.documentElement.scrollWidth,
@@ -312,7 +314,13 @@ async function headerLayout(page: Page, wrapped: boolean | null): Promise<void> 
   if (wrapped === true) expect(layout.attributionTop).toBeGreaterThanOrEqual(layout.pillBottom);
   else if (wrapped === false) {
     expect(layout.attributionTop).toBeLessThan(layout.pillBottom);
-    expect(Math.abs(layout.headerRight - layout.attributionRight)).toBeLessThanOrEqual(2);
+    if (layout.alter === null) expect(Math.abs(layout.headerRight - layout.attributionRight)).toBeLessThanOrEqual(2);
+    else {
+      expect(Math.abs(layout.headerRight - layout.alter.right)).toBeLessThanOrEqual(2);
+      expect(layout.attributionRight).toBeLessThanOrEqual(layout.alter.left);
+      expect(layout.alter.top).toBeLessThan(layout.attributionBottom);
+      expect(layout.alter.bottom).toBeGreaterThan(layout.attributionTop);
+    }
   }
   expect(layout.headerScroll).toBeLessThanOrEqual(layout.headerWidth + 1);
   expect(layout.paneScroll).toBeLessThanOrEqual(layout.paneWidth + 1);
@@ -728,6 +736,7 @@ for (const { touch, appearance } of [
     await expect(page.getByRole("menuitem", { name: "Unpin from sidebar", exact: true })).toBeEnabled();
     await page.keyboard.press("Escape");
     await answerHeader(page, "Superseded", "superseded");
+    await headerLayout(page, touch ? null : false);
     const replacementAge = await entry(page, current.uuid).locator("time").textContent();
     await expect(page.locator(".ub-decision-earlier-answer")).toContainText(`Earlier answer. Replaced ${replacementAge}; it no longer applies.`);
     await expect(page.getByRole("link", { name: "Go to the current answer", exact: true })).toBeVisible();
