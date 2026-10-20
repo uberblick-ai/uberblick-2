@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -19,17 +19,18 @@ function releaseParts(version: string): [bigint, bigint, bigint] {
 export async function prepareDatabaseRelease(databasePath: string, version: string, log: HubLogger): Promise<void> {
   const current = releaseParts(version);
   if (!existsSync(databasePath)) return;
+  const livePath = realpathSync(databasePath);
   let copyDirectory: string | undefined;
   let database: DatabaseSync | undefined;
   try {
-    const sidecars = ["-wal", "-journal"].filter(suffix => existsSync(`${databasePath}${suffix}`));
-    let sourcePath = databasePath;
+    const sidecars = ["-wal", "-journal"].filter(suffix => existsSync(`${livePath}${suffix}`));
+    let sourcePath = livePath;
     if (sidecars.length > 0) {
       // Recover committed journal state only in a private copy of the stopped database.
       copyDirectory = mkdtempSync(join(tmpdir(), "hub-startup-"));
       sourcePath = join(copyDirectory, "database.sqlite");
       for (const suffix of ["", ...sidecars]) {
-        copyFileSync(`${databasePath}${suffix}`, `${sourcePath}${suffix}`);
+        copyFileSync(`${livePath}${suffix}`, `${sourcePath}${suffix}`);
         chmodSync(`${sourcePath}${suffix}`, 0o600);
       }
     }
@@ -58,7 +59,7 @@ export async function prepareDatabaseRelease(databasePath: string, version: stri
     }
     let path: string;
     try {
-      path = await backupDatabase(database, databasePath);
+      path = await backupDatabase(database, livePath);
     } catch (error) {
       throw new Error(`cannot back up the database before hub release ${version}: ${String(error)}; the database was unchanged`, { cause: error });
     }

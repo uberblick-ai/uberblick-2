@@ -1,4 +1,4 @@
-import { copyFileSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { copyFileSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync, symlinkSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -84,7 +84,7 @@ function release(databasePath: string): string | undefined {
 function backups(databasePath: string): string[] {
   return readdirSync(dirname(databasePath))
     .filter(name => name !== basename(databasePath) && name.endsWith(".sqlite"))
-    .map(name => join(dirname(databasePath), name));
+    .map(name => realpathSync(join(dirname(databasePath), name)));
 }
 
 function legacyDatabase(version?: string): string {
@@ -135,8 +135,8 @@ function crashLeftWalDatabase(previous: string, current: string, write?: (databa
 }
 
 function expectCompleteCopy(source: string, backup: string): void {
-  expect(dirname(backup)).toBe(dirname(source));
-  expect(backup).not.toBe(source);
+  expect(realpathSync(dirname(backup))).toBe(realpathSync(dirname(source)));
+  expect(realpathSync(backup)).not.toBe(realpathSync(source));
   expect(statSync(backup).mode & 0o777).toBe(0o600);
   read(backup, database => {
     expect(database.prepare("PRAGMA integrity_check").all()).toEqual([{ integrity_check: "ok" }]);
@@ -321,6 +321,43 @@ describe("released database startup", () => {
       expect(readFileSync(`${databasePath}-wal`)).toEqual(originalWal);
     }
     expect(records.map(record => record.event)).not.toContain("hub.listen");
+  });
+
+  it("follows a configured symlink to the real database's newer committed WAL without changing either path", async () => {
+    const canonical = crashLeftWalDatabase("1.0.0", "2.0.0");
+    const configured = tempDatabasePath();
+    symlinkSync(canonical, configured);
+    const original = readFileSync(canonical);
+    const originalWal = readFileSync(`${canonical}-wal`);
+    const records: HubLogRecord[] = [];
+
+    await expect(start(configured, "1.0.1", { log: record => { records.push(record); } }))
+      .rejects.toThrow(/run hub release 2\.0\.0 instead/);
+
+    expect(readFileSync(canonical)).toEqual(original);
+    expect(readFileSync(`${canonical}-wal`)).toEqual(originalWal);
+    expect(readdirSync(dirname(canonical)).sort()).toEqual([basename(canonical), `${basename(canonical)}-wal`].sort());
+    expect(readdirSync(dirname(configured))).toEqual([basename(configured)]);
+    expect(lstatSync(configured).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(configured)).toBe(canonical);
+    expect(records.map(record => record.event)).not.toContain("hub.listen");
+  });
+
+  it("publishes a symlinked database's startup backup beside the real database with its committed WAL state", async () => {
+    const canonical = crashLeftWalDatabase("0.9.0", "1.2.3");
+    const configured = tempDatabasePath();
+    symlinkSync(canonical, configured);
+
+    await start(configured, "1.2.4");
+
+    const copied = backups(canonical);
+    expect(copied).toHaveLength(1);
+    expectCompleteCopy(canonical, copied[0]!);
+    expect(release(copied[0]!)).toBe("1.2.3");
+    expect(release(canonical)).toBe("1.2.4");
+    expect(backups(configured)).toEqual([]);
+    expect(lstatSync(configured).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(configured)).toBe(canonical);
   });
 
   it("backs up the complete committed WAL state before a newer release writes the original files", async () => {
