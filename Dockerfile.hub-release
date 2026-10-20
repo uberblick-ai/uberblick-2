@@ -36,7 +36,7 @@ ARG HUB_SYNC_PROTOCOL_VERSION
 LABEL org.opencontainers.image.version=$HUB_RELEASE_VERSION \
     org.opencontainers.image.revision=$HUB_RELEASE_COMMIT \
     org.opencontainers.image.source="https://github.com/uberblick-ai/uberblick-2" \
-    org.opencontainers.image.description="Uberblick hub: shares workspaces between computers and people. Setup: https://uberblick.ai/docs/hub" \
+    org.opencontainers.image.description="Uberblick hub: shares workspaces between computers and people. Setup: https://next.uberblick.ai/docs/hub" \
     io.uberblick.sync-protocol-version=$HUB_SYNC_PROTOCOL_VERSION
 ENV NODE_ENV=production HUB_HOST=0.0.0.0 PORT=1234 HUB_DB_PATH=/data/hub.sqlite
 WORKDIR /app
@@ -57,7 +57,7 @@ ARG HUB_SYNC_PROTOCOL_VERSION
 LABEL org.opencontainers.image.version=$HUB_RELEASE_VERSION \
     org.opencontainers.image.revision=$HUB_RELEASE_COMMIT \
     org.opencontainers.image.source="https://github.com/uberblick-ai/uberblick-2" \
-    org.opencontainers.image.description="Uberblick hub web front (Caddy), runs next to the hub image. Setup: https://uberblick.ai/docs/hub" \
+    org.opencontainers.image.description="Uberblick hub web front (Caddy), runs next to the hub image. Setup: https://next.uberblick.ai/docs/hub" \
     io.uberblick.sync-protocol-version=$HUB_SYNC_PROTOCOL_VERSION
 COPY Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /out/web/uberblick-csp.caddy /etc/caddy/uberblick-csp.caddy
