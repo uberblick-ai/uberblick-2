@@ -613,8 +613,9 @@ export function App(): ReactElement {
     defaultIdentity,
   );
   const topicTitleRoom = useRoom(
-    roomReady && workspace !== null && topic !== null && selected === decisionCurrentRecord(topic)?.uuid &&
-      selected !== topic.topic && !topic.archived
+    roomReady && workspace !== null && topic !== null && !topic.archived &&
+      topic.topic !== decisionCurrentRecord(topic)?.uuid &&
+      (selected === decisionCurrentRecord(topic)?.uuid || selected === topic.topic)
       ? roomForDoc(workspace.uuid, topic.topic) : null,
     defaultIdentity,
     false,

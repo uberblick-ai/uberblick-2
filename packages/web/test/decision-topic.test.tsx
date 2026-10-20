@@ -62,6 +62,7 @@ const LIVE: RoomStatus = {
 
 const rooms = new Map<string, RoomConnection>();
 const acquired: string[] = [];
+const released: string[] = [];
 function room(name: string): RoomConnection {
   const existing = rooms.get(name);
   if (existing !== undefined) return existing;
@@ -82,12 +83,13 @@ function room(name: string): RoomConnection {
 vi.mock("../src/collab/rooms.js", () => ({
   acquireRoom: (name: string) => {
     acquired.push(name);
-    return { connection: room(name), release: () => {} };
+    return { connection: room(name), release: () => { released.push(name); } };
   },
 }));
 const { App } = await import("../src/ui/App.js");
 
 beforeEach(() => {
+  released.length = 0;
   vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-11-06T10:00:00Z"));
   Element.prototype.scrollIntoView = function scrollIntoView() {};
   const empty = new DOMRect();
@@ -102,6 +104,7 @@ beforeEach(() => {
 afterEach(() => {
   rooms.clear();
   acquired.length = 0;
+  released.length = 0;
   Reflect.deleteProperty(navigator, "clipboard");
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -561,6 +564,27 @@ describe("decision topic navigation and history", () => {
     expect(timeline(host).querySelectorAll("li")).toHaveLength(5);
     expect(acquired.filter((name) => [FIRST, CURRENT, REJECTED, WITHDRAWN, OPEN].some((uuid) => name === roomForDoc(WORKSPACE, uuid)))).toEqual([roomForDoc(WORKSPACE, CURRENT), roomForDoc(WORKSPACE, FIRST)]);
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, RFC));
+  });
+
+  it("retains the first-record title connection while its room becomes the selected answer", async () => {
+    story();
+    const firstRoom = roomForDoc(WORKSPACE, FIRST);
+    const currentRoom = roomForDoc(WORKSPACE, CURRENT);
+    const view = await open();
+    const host = view.container;
+    expect(acquired.filter((name) => name === firstRoom)).toHaveLength(1);
+    await choose(host, FIRST);
+    expect(selection(host)).toBe(FIRST);
+    expect(released.filter((name) => name === firstRoom)).toHaveLength(0);
+    expect(acquired.filter((name) => name === firstRoom)).toHaveLength(2);
+    await choose(host, CURRENT);
+    expect(selection(host)).toBe(CURRENT);
+    expect(released.filter((name) => name === firstRoom)).toHaveLength(1);
+    await choose(host, REJECTED);
+    expect(selection(host)).toBe(REJECTED);
+    expect(released.filter((name) => name === firstRoom)).toHaveLength(2);
+    expect(released.filter((name) => name === currentRoom)).toHaveLength(2);
+    view.unmount();
   });
 
   it("renders cached history newest first with matching answer pills and the rail through the answer in force", async () => {
