@@ -21,7 +21,7 @@
     "test:homebrew-release": "node --test scripts/publish-homebrew-release.test.mjs scripts/homebrew-proof.test.mjs"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.9",
+    "@biomejs/biome": "2.5.15",
     "@uberblick/cli": "workspace:*",
     "typescript": "^5.9.3"
   }
