@@ -15,7 +15,8 @@ import type { ToolContext } from "./context.js";
 import { discussionTarget } from "./discussion.js";
 
 const DECISION_GUIDANCE =
-  "A decision title names the stable topic or question, never the answer; successors keep the title. " +
+  "A decision topic has one title, stored on its first record, naming the question rather than the answer. " +
+  "A rename through any record renames the topic. Successors take the topic's title; omit title or supply that same title. " +
   "For decision answers, see lifecycle's Decision answers and topics section. " +
   "Answer blocks are distinct from recorded answer: {who, when, where}.";
 
@@ -27,6 +28,7 @@ const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
   {
     title: "An ordinary document",
     when: { field: "kind", present: false },
+    requires: ["title"],
     forbids: ["status", "related", "supersedes", "answer", "discussion"],
   },
 ];
@@ -82,7 +84,7 @@ const RECOVERY: Record<string, string> & { other: string } = {
 // Refuse unknown keys at the root and throughout nested placement objects.
 export const inputSchema = strictInput(
   {
-    title: titleArg.describe(`Display title. Identity is the document's UUID, never this. ${DECISION_GUIDANCE}`),
+    title: titleArg.optional().describe(`Display title; required except on a successor. Identity is the document's UUID, never this. ${DECISION_GUIDANCE}`),
     description: descriptionArg,
     tldr: tldrArg.optional(),
     answer: decisionAnswerArg.optional(),
@@ -109,7 +111,13 @@ export const inputSchema = strictInput(
     sidebar: sidebarPlacementArg,
   },
   CREATE_DOC_LIFECYCLE_MODES,
-);
+).superRefine((args, ctx) => {
+  if (args.kind === "decision" && args.supersedes === undefined && args.title === undefined) {
+    ctx.addIssue({ code: "custom", path: ["title"], message: "A topic's first record needs `title`" });
+  }
+}).meta({
+  dependencies: { kind: { anyOf: [{ required: ["title"] }, { required: ["supersedes"] }] } },
+});
 
 function initialBlocks(
   context: ToolContext,
@@ -205,6 +213,14 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
       { supersedes: supersedesUuid, kind: supersededKind },
     );
   }
+  const inheritedTitle = superseded === null ? undefined : context.titleFor(superseded.id, context.requireStub(superseded.id));
+  if (inheritedTitle !== undefined && title !== undefined && title !== inheritedTitle) {
+    throw new ToolError("decision_title_mismatch", "A successor takes its topic's title; omit title or supply the topic's current title. Nothing was created.", {
+      field: "title", supersedes: supersedesUuid, title: inheritedTitle,
+    });
+  }
+  const documentTitle = inheritedTitle ?? title;
+  if (documentTitle === undefined) throw new Error("Validated create_doc title is missing");
 
   // Refuse invalid tags before allocating an identity or writing any room.
   const tagIds = resolveTagSelectors(replicas, tags ?? []);
@@ -246,7 +262,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
     replica.doc.transact(() => {
       initDoc(replica.doc, {
         uuid,
-        title,
+        title: documentTitle,
         description,
         ...(governs === undefined ? {} : { governs }),
         ...(lifecycle?.kind === "decision"
@@ -278,7 +294,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
     const now = Date.now();
     upsertDirectoryEntry(directory.doc, {
       uuid,
-      title,
+      title: documentTitle,
       description,
       ...(tags === undefined ? {} : { tags: tagIds }),
       ...(lifecycle === null ? {} : lifecycle),
@@ -330,7 +346,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
   return {
     uuid,
     room: replica.room,
-    title,
+    title: documentTitle,
     description,
     tags: documentTags(replica),
     ...(lifecycle === null ? {} : lifecycle),

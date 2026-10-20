@@ -4,6 +4,7 @@ import {
   COMMENT_MARK,
   decisionAnswerShapeFailure,
   decisionApprovalFingerprint,
+  decisionTopicTitle,
   documentDirectoryFields,
   getBlocks,
   getBlocksFragment,
@@ -151,10 +152,12 @@ function stageDocument(doc: Y.Doc, now: number) {
 
 function stageDecision(input: AlterDecisionInput, draft: Y.Doc, uuid: string, rfc: string | undefined, now: number) {
   const predecessor = getMeta(input.source.ydoc, parseRoom(input.source.room).uuid);
+  const topic = resolveDecisionTopics(input.directory.ydoc).find((entry) => entry.topic === predecessor.topic);
+  if (topic === undefined) throw new Error(messages.stale_decision);
   const record = createDecisionDraft(draft);
   try {
     initDoc(record, {
-      uuid, title: predecessor.title,
+      uuid, title: decisionTopicTitle(topic),
       ...(predecessor.description == null ? {} : { description: predecessor.description }),
       tags: predecessor.tags, topic: predecessor.topic ?? predecessor.uuid,
       supersedes: predecessor.uuid,
@@ -181,7 +184,10 @@ function stageDecision(input: AlterDecisionInput, draft: Y.Doc, uuid: string, rf
 function stageRfc(input: AlterDecisionInput, uuid: string, decision: string, now: number) {
   const discussion = new Y.Doc();
   try {
-    const title = getMeta(input.source.ydoc).title;
+    const source = getMeta(input.source.ydoc, parseRoom(input.source.room).uuid);
+    const topic = resolveDecisionTopics(input.directory.ydoc).find((entry) => entry.topic === source.topic);
+    if (topic === undefined) throw new Error(messages.stale_decision);
+    const title = decisionTopicTitle(topic);
     const tag = listTagCatalog(input.tagCatalog).find((entry) => entry.name === "rfc" && entry.state === "active");
     initDoc(discussion, { uuid, title, tags: tag === undefined ? [] : [tag.id] });
     appendBlock(discussion, { type: "paragraph", inline: [

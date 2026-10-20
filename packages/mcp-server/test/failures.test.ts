@@ -205,6 +205,7 @@ const EXPECTED: Record<
     recoveryClass: "reread",
     detail: ["supersedes", "kind"],
   },
+  decision_title_mismatch: { recoveryClass: "reread", detail: ["field", "supersedes", "title"] },
   // The unclassified fallback: a handler that threw something nobody mapped
   // cannot say what happened to a write, so it promises the floor and no more.
   internal_error: { recoveryClass: null, detail: [] },
@@ -433,11 +434,13 @@ describe("the failure contract", () => {
       blocks: [{ type: "paragraph", text: "Use the existing log." }],
     });
     const successorDecision = await rig.ok("create_doc", {
-      title: "Successor proposal",
       description: "A proposal that needs a person's answer.",
       kind: "decision",
       supersedes: firstDecision.uuid,
     });
+    record((await rig.call("create_doc", {
+      title: "A different question", description: "A successor cannot rename the topic.", kind: "decision", supersedes: firstDecision.uuid,
+    })).payload);
     record(
       (
         await rig.call("set_status", {

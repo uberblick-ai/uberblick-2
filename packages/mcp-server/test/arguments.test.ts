@@ -177,6 +177,7 @@ describe("create_doc lifecycle arguments", () => {
       },
       {
         title: "An ordinary document",
+        required: ["title"],
         properties: {
           kind: false,
           status: false,

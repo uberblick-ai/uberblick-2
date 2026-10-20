@@ -1,4 +1,4 @@
-import { getMeta, listAnnotations, readDecisions, resolveDecisionTopics, summarizeDocData } from "@uberblick/schema";
+import { decisionTopicTitle, getMeta, listAnnotations, readDecisions, resolveDecisionTopics, summarizeDocData } from "@uberblick/schema";
 import { strictInput } from "../inputs.js";
 import { uuidArg } from "./schemas.js";
 import { operation } from "./operation.js";
@@ -24,8 +24,8 @@ export const getDocOperation = operation("get_doc", inputSchema, (context, { uui
     tags: documentTags(replica),
     room: replica.room,
     decisions: [
-      ...related.map(topic => ({ ...decisionEntryJson(topic.representative), ...topicJson(topic), relation: "related" })),
-      ...linked.map(topic => ({ ...decisionEntryJson(topic.representative), ...topicJson(topic), relation: "linked" })),
+      ...related.map(topic => ({ ...decisionEntryJson(topic.representative, decisionTopicTitle(topic), topic.archived), ...topicJson(topic), relation: "related" })),
+      ...linked.map(topic => ({ ...decisionEntryJson(topic.representative, decisionTopicTitle(topic), topic.archived), ...topicJson(topic), relation: "linked" })),
     ],
     ...(meta.kind === "decision" ? decisionReadJson(uuid) : {}),
     blocks: blocksJson(replica),

@@ -1,4 +1,4 @@
-import { decisionCurrentRecord, decisionTopicState } from "@uberblick/schema";
+import { decisionCurrentRecord, decisionTopicState, decisionTopicTitle } from "@uberblick/schema";
 import type { DecisionTopicResolution, DirectoryEntry } from "@uberblick/schema";
 import type { ReactElement } from "react";
 import { TOPIC_STATES, TOPIC_STATE_ORDER } from "./decision-state.js";
@@ -50,7 +50,7 @@ export function DecisionsBlock({ topics, segment, navigate, id }: {
   if (topics.length === 0) return null;
   const ordered = [...topics].sort((left, right) => {
     const byState = TOPIC_STATE_ORDER.indexOf(decisionTopicState(left)) - TOPIC_STATE_ORDER.indexOf(decisionTopicState(right));
-    return byState || (decisionCurrentRecord(left)?.title || "Untitled").localeCompare(decisionCurrentRecord(right)?.title || "Untitled");
+    return byState || (decisionTopicTitle(left) || "Untitled").localeCompare(decisionTopicTitle(right) || "Untitled");
   });
   return <section className="ub-decisions-block" id={id} aria-label="Decisions" tabIndex={-1}>
     <header className="ub-decisions-heading">
@@ -61,7 +61,7 @@ export function DecisionsBlock({ topics, segment, navigate, id }: {
       {ordered.map((topic) => {
         const state = decisionTopicState(topic);
         const current = decisionCurrentRecord(topic);
-        const question = current?.title || "Untitled";
+        const question = decisionTopicTitle(topic) || "Untitled";
         const preview = state === "conflict" ? "Nothing is in force."
           : state === "not-yet-decided" ? null : topic.inForce?.answerPreview;
         return <li key={topic.topic}>

@@ -542,7 +542,6 @@ describe("decision log tools", () => {
     const before = await rig.ok("get_doc", { uuid: earlier.uuid });
 
     const successor = await rig.ok("create_doc", {
-      title: "Replacement decision",
       description: "Records the choice that replaces an earlier decision.",
       kind: "decision",
       supersedes: earlier.uuid,
@@ -566,7 +565,7 @@ describe("decision log tools", () => {
     ).toEqual([
       {
         uuid: successor.uuid,
-        title: "Replacement decision",
+        title: "Earlier decision",
         description: "Records the choice that replaces an earlier decision.",
       },
     ]);

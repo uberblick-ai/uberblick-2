@@ -24,8 +24,8 @@ export const toolHelpDetails = {
     "`tags` is a complete assignment set of active catalog ids or active names. Name matching ignores case. Names are selectors; " +
     "the document stores canonical ids and the answer resolves each id beside its current name. An unknown or " +
     "retired selection refuses the whole call before a document exists; list_tags is the active vocabulary.\n\n" +
-    "A `title` and a `description` are both REQUIRED here and the call fails without either, creating " +
-    "nothing. A title cannot be empty or whitespace: an untitled document cannot be picked out of a listing, " +
+    "A `description` is REQUIRED; `title` is also required except for a successor with `supersedes`. " +
+    "A missing required field creates nothing. A title cannot be empty or whitespace: an untitled document cannot be picked out of a listing, " +
     "and set_metadata with `title` is the repair for the untitled ones the web UI creates.\n\n" +
     "Pass `kind: decision` to create a decision record. Its `status` defaults to `open`; `status` " +
     "without `kind` is refused before a document is created. A decision " +
@@ -51,7 +51,9 @@ export const toolHelpDetails = {
     "without `kind: \"decision\"` is an argument error. For a new topic, create an open first record with " +
     "related and discussion; it has no answer until one is recorded. For reconsideration, create an open " +
     "successor with supersedes and discussion; the current answer stays in force. In both flows, the title " +
-    "names the stable topic or question, never the answer; successors keep it. " +
+    "names the stable topic or question, never the answer. A topic has one title, stored on its first record. " +
+    "Successors take the topic's title: omit title or supply that exact title; a different title refuses " +
+    "with field title and creates nothing. A rename through any record renames the topic. " +
     "Decision answer guidance is in [Decision answers and topics](uberblick://help/lifecycle). " +
     "These answer blocks are distinct from " +
     "recorded `answer: {who, when, where}` attribution. A record created decided " +
@@ -426,7 +428,9 @@ export const toolHelpDetails = {
     "get_doc returns the entries, or []; list_docs caches them on regular entries, with absence meaning " +
     "not cached yet. No removal or check history is provided.\n\n" +
     "A title is replaced wholesale without changing the document UUID, so links, backlinks and annotations " +
-    "survive a rename. Title and description are trimmed and cannot be empty or cleared; replace a " +
+    "survive a rename. A decision topic has one title, stored on its first record; a rename through any " +
+    "record renames the topic by writing only that first record. Successors take the topic's title. " +
+    "Title and description are trimmed and cannot be empty or cleared; replace a " +
     "description you dislike with a better one. The directory caches both and follows in the same call, " +
     "so list_docs and search answer with their new values; backlinks also returns the description.\n\n" +
     "The person-facing TL;DR is independent of the agent-facing description. Empty, whitespace-only and " +

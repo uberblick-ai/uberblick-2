@@ -4,6 +4,7 @@ import {
   decisionContentLocked,
   decisionRelations,
   decisionTopicArchived,
+  decisionTopicTitle,
   getBlocksWithInline,
   getDirectoryEntry,
   getMeta,
@@ -18,6 +19,7 @@ import {
   readDirectoryTags,
   readDocumentTags,
   resolveAnnotationRange,
+  resolveDecisionTopics,
 } from "@uberblick/schema";
 import type {
   Annotation,
@@ -212,37 +214,49 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   };
 
   /**
-   * Prefer hydrated metadata over the directory's cached title.
+   * Decision titles are topic-wide; regular documents prefer hydrated metadata.
    */
-  const titleFor = (uuid: string, stub: DirectoryEntry): string =>
-    replicas.hydrated(uuid)
-      ? getMeta(replicas.replica(uuid).doc).title
-      : stub.title;
+  const titleFor = (uuid: string, stub: DirectoryEntry, topics?: ReadonlyMap<string, DecisionTopicResolution>): string => {
+    if (stub.kind === "decision") {
+      const topic = topics === undefined
+        ? resolveDecisionTopics(replicas.directory().doc).find((entry) => entry.topic === (stub.topic ?? uuid))
+        : topics.get(stub.topic ?? uuid);
+      if (topic !== undefined) return decisionTopicTitle(topic);
+    }
+    return replicas.hydrated(uuid) ? getMeta(replicas.replica(uuid).doc).title : stub.title;
+  };
 
   /** The settings doc is the one catalog authority every tag path resolves. */
   const tagCatalog = () => replicas.settings().doc;
 
   /** Normalize directory descriptions and resolve tags through the settings catalog. */
-  const decisionEntryJson = (entry: DirectoryEntry) => ({
-    ...entry, tags: readDirectoryTags(entry, tagCatalog()),
-    ...(entry.kind === "decision" ? { deleted: decisionTopicArchived(replicas.directory().doc, entry.uuid) } : {}),
+  const decisionEntryJson = (entry: DirectoryEntry, title: string, archived: boolean) => ({
+    ...entry, title, tags: readDirectoryTags(entry, tagCatalog()),
+    ...(entry.kind === "decision" ? { deleted: archived } : {}),
     description: entry.description ?? null,
   });
 
-  const topicJson = (topic: DecisionTopicResolution) => ({
-    topic: topic.topic,
-    inForce: topic.inForce === null ? null : decisionEntryJson(topic.inForce),
-    pending: topic.pending.map(decisionEntryJson),
-    conflicts: topic.conflicts.map(decisionEntryJson),
-    archived: topic.archived,
-  });
+  const topicJson = (topic: DecisionTopicResolution) => {
+    const entryJson = (entry: DirectoryEntry) => decisionEntryJson(entry, decisionTopicTitle(topic), topic.archived);
+    return {
+      topic: topic.topic,
+      inForce: topic.inForce === null ? null : entryJson(topic.inForce),
+      pending: topic.pending.map(entryJson),
+      conflicts: topic.conflicts.map(entryJson),
+      archived: topic.archived,
+    };
+  };
 
   const decisionReadJson = (uuid: string) => {
-    const { predecessors, successors, resolution } = decisionRelations(replicas.directory().doc, uuid);
+    const directory = replicas.directory().doc;
+    const { predecessors, successors, resolution } = decisionRelations(directory, uuid);
+    const topics = new Map(resolveDecisionTopics(directory).map(topic => [topic.topic, topic]));
+    const entryJson = (entry: DirectoryEntry) => decisionEntryJson(entry, titleFor(entry.uuid, entry, topics), decisionTopicArchived(directory, entry.uuid));
     return {
-      predecessors: predecessors.map(decisionEntryJson),
-      successors: successors.map(decisionEntryJson),
-      resolution: resolution === null ? null : { ...decisionEntryJson(resolution.representative), ...topicJson(resolution) },
+      ...(resolution === null ? {} : { title: decisionTopicTitle(resolution) }),
+      predecessors: predecessors.map(entryJson),
+      successors: successors.map(entryJson),
+      resolution: resolution === null ? null : { ...entryJson(resolution.representative), ...topicJson(resolution) },
     };
   };
 

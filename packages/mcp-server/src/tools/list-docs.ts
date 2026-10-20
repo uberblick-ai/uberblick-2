@@ -1,4 +1,4 @@
-import { listDirectory, readDirectoryTags, resolveDecisionTopics } from "@uberblick/schema";
+import { decisionTopicTitle, listDirectory, readDirectoryTags, resolveDecisionTopics } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "../inputs.js";
@@ -36,7 +36,7 @@ export const listDocsOperation = operation("list_docs", inputSchema, (context, {
   const topics = resolveDecisionTopics(entries);
   const decisionRows = !hasPredicate ? [] : include_superseded
     ? topics.filter(topic => include_deleted || !topic.archived)
-      .flatMap(topic => topic.records.filter(matches).map(entry => ({ ...entry, deleted: topic.archived })))
+      .flatMap(topic => topic.records.filter(matches).map(entry => ({ ...entry, title: decisionTopicTitle(topic), deleted: topic.archived })))
     : topics.filter(topic => {
       if ((!include_deleted && topic.archived) || (kind !== undefined && kind !== "decision")) return false;
       const live = topic.records.filter(entry => entry.status !== "rejected" && entry.status !== "withdrawn");
@@ -44,7 +44,7 @@ export const listDocsOperation = operation("list_docs", inputSchema, (context, {
         (tagId === null || live.some(entry => readDirectoryTags(entry, catalog).some(assignment => assignment.id === tagId))) &&
         (has_open_threads !== true || live.some(entry => (entry.openThreadCount ?? 0) > 0));
     })
-      .map(topic => ({ ...topic.representative, deleted: topic.archived, ...topicJson(topic) }));
+      .map(topic => ({ ...topic.representative, title: decisionTopicTitle(topic), deleted: topic.archived, ...topicJson(topic) }));
   // Derived, never stored: the sidebar doc is the one place a pin lives.
   const pinned = pinnedUuids(replicas);
   return {

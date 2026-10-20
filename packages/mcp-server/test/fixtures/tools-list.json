@@ -127,9 +127,9 @@
       "type": "object",
       "properties": {
         "title": {
+          "description": "Display title; required except on a successor. Identity is the document's UUID, never this. A decision topic has one title, stored on its first record, naming the question rather than the answer. A rename through any record renames the topic. Successors take the topic's title; omit title or supply that same title. For decision answers, see lifecycle's Decision answers and topics section. Answer blocks are distinct from recorded answer: {who, when, where}.",
           "type": "string",
-          "minLength": 1,
-          "description": "Display title. Identity is the document's UUID, never this. A decision title names the stable topic or question, never the answer; successors keep the title. For decision answers, see lifecycle's Decision answers and topics section. Answer blocks are distinct from recorded answer: {who, when, where}."
+          "minLength": 1
         },
         "description": {
           "type": "string",
@@ -254,6 +254,20 @@
                 "description": "Code language, e.g. \"ts\". Code blocks only.",
                 "type": "string"
               },
+              "list": {
+                "description": "List style. List items only; omitted means bullet.",
+                "type": "string",
+                "enum": [
+                  "bullet",
+                  "ordered"
+                ]
+              },
+              "indent": {
+                "description": "List depth, an integer from 0 to 3. List items only; omitted means 0.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3
+              },
               "inline": {
                 "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, terminal and chart hold source text and ignore it; tables, cards and figma also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card/:::figma and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
                 "type": "array",
@@ -297,20 +311,6 @@
                   ],
                   "additionalProperties": false
                 }
-              },
-              "list": {
-                "description": "List style. List items only; omitted means bullet.",
-                "type": "string",
-                "enum": [
-                  "bullet",
-                  "ordered"
-                ]
-              },
-              "indent": {
-                "description": "List depth, an integer from 0 to 3. List items only; omitted means 0.",
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 3
               }
             },
             "required": [
@@ -351,14 +351,13 @@
         }
       },
       "required": [
-        "title",
         "description"
       ],
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false,
       "oneOf": [
         {
-          "title": "A decision document (`kind: decision`). A decision title names the stable topic or question, never the answer; successors keep the title. For decision answers, see lifecycle's Decision answers and topics section. Answer blocks are distinct from recorded answer: {who, when, where}.",
+          "title": "A decision document (`kind: decision`). A decision topic has one title, stored on its first record, naming the question rather than the answer. A rename through any record renames the topic. Successors take the topic's title; omit title or supply that same title. For decision answers, see lifecycle's Decision answers and topics section. Answer blocks are distinct from recorded answer: {who, when, where}.",
           "required": [
             "kind"
           ],
@@ -370,6 +369,9 @@
         },
         {
           "title": "An ordinary document",
+          "required": [
+            "title"
+          ],
           "properties": {
             "kind": false,
             "status": false,
@@ -379,7 +381,23 @@
             "discussion": false
           }
         }
-      ]
+      ],
+      "dependencies": {
+        "kind": {
+          "anyOf": [
+            {
+              "required": [
+                "title"
+              ]
+            },
+            {
+              "required": [
+                "supersedes"
+              ]
+            }
+          ]
+        }
+      }
     },
     "outputSchema": {
       "type": "object",
@@ -998,7 +1016,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Create doc/stub; optional blocks/regular-page TL;DR. Require nonblank title/description. List-item seeds accept list bullet/ordered and integer indent 0–3 (defaults bullet and 0). Active tag ids/names (case ignored); unknown/retired refuse. Kind defaults to first status; invalid pairs refuse. Before creating a decision topic, consult get_help({topic: \"lifecycle\"}) for when to create a record. For decision answers, see lifecycle's Decision answers and topics section. Unsupported/excess blocks/TL;DR refuse. Open/decided; deciding needs valid nonblank blocks, no TL;DR/data; decided successors need recorded human answer. related: live, locally readable regular page; successors inherit unless supplied. supersedes: hydrated decision in live topic. Targets validated pre-write. discussion: live, readable non-decision RFC UUID; reuse/create first; ordinary rfc tag in new workspaces. Never inherited; set_metadata corrects/clears while open, then fixed. RFC/page untouched. Separate from curated links/recorded answer {who, when, where}. Sidebar: get_sidebar group id; invalid = group_not_found, no creation; omit = unpinned. Independent rooms: persistence_failed: uuid, completed/failed, rolledBack: false, duplicate-safe recovery. Decisions have no TL;DR; answerPreview: first answer paragraph/list; discussion UUID/null, absent if unknown. Page get_doc: related/linked topics.\n\nHelp: create_doc, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Create doc/stub; optional blocks/regular-page TL;DR. Require nonblank description; title is required except for successors. A decision topic has one title stored on its first record. Renaming any record renames the topic. Successors inherit it: omit title or supply the same title; another refuses. List-item seeds: bullet/ordered list, integer indent 0–3 (defaults bullet/0). Active tags by id/name (case ignored); unknown/retired refuse. Kind defaults first status; invalid pairs refuse. Before creating a decision topic, consult get_help({topic: \"lifecycle\"}) for when to create a record. For decision answers, see lifecycle's Decision answers and topics section. Open/decided only; deciding needs supported nonblank answer blocks, no TL;DR/data; decided successors require recorded human answer. related: live readable regular page; inherited unless supplied. supersedes: hydrated decision in live topic. Targets validated pre-write. discussion: live, readable regular RFC UUID; reuse/create first. Never inherited; set_metadata corrects/clears while open, then fixed. RFC/page untouched. Separate from curated links/recorded answer. Sidebar: get_sidebar group id; invalid = group_not_found, no creation; omit = unpinned. Independent rooms: persistence_failed: uuid, completed/failed, rolledBack: false, duplicate-safe recovery. answerPreview: first answer paragraph/list. Page get_doc: related/linked topics.\n\nHelp: create_doc, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -1013,10 +1031,10 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         }
       },
       "required": [
@@ -3781,10 +3799,10 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
         "collection": {
           "description": "Collection name; omit for the area summary.",
@@ -4093,10 +4111,10 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
         "operations": {
           "type": "array",
@@ -5790,10 +5808,10 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         }
       },
       "required": [
@@ -5940,10 +5958,10 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
         "block_id": {
           "type": "string",
@@ -5956,6 +5974,20 @@
         "new_text": {
           "type": "string",
           "description": "Replacement text. Repeat old_text for a list style or depth change without a text change."
+        },
+        "list": {
+          "description": "New list style on an existing list item; omitted keeps its style. Refused on other block types.",
+          "type": "string",
+          "enum": [
+            "bullet",
+            "ordered"
+          ]
+        },
+        "indent": {
+          "description": "New list depth, an integer from 0 to 3, on an existing list item; omitted keeps its depth. Refused on other block types.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
         },
         "rev": {
           "description": "The block's `rev` from get_doc. Asserted alongside old_text.",
@@ -6004,20 +6036,6 @@
             "columns"
           ],
           "additionalProperties": false
-        },
-        "list": {
-          "description": "New list style on an existing list item; omitted keeps its style. Refused on other block types.",
-          "type": "string",
-          "enum": [
-            "bullet",
-            "ordered"
-          ]
-        },
-        "indent": {
-          "description": "New list depth, an integer from 0 to 3, on an existing list item; omitted keeps its depth. Refused on other block types.",
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 3
         }
       },
       "required": [
@@ -6394,10 +6412,10 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
         "after_block_id": {
           "description": "Insert after this block. Omit or null to insert first.",
@@ -6439,6 +6457,20 @@
         "language": {
           "description": "Code language, e.g. \"ts\". Code blocks only.",
           "type": "string"
+        },
+        "list": {
+          "description": "List style. List items only; omitted means bullet.",
+          "type": "string",
+          "enum": [
+            "bullet",
+            "ordered"
+          ]
+        },
+        "indent": {
+          "description": "List depth, an integer from 0 to 3. List items only; omitted means 0.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
         },
         "inline": {
           "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, terminal and chart hold source text and ignore it; tables, cards and figma also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card/:::figma and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
@@ -6483,20 +6515,6 @@
             ],
             "additionalProperties": false
           }
-        },
-        "list": {
-          "description": "List style. List items only; omitted means bullet.",
-          "type": "string",
-          "enum": [
-            "bullet",
-            "ordered"
-          ]
-        },
-        "indent": {
-          "description": "List depth, an integer from 0 to 3. List items only; omitted means 0.",
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 3
         }
       },
       "required": [
@@ -6871,10 +6889,10 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
         "block_id": {
           "type": "string",
@@ -7019,15 +7037,15 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
         "title": {
+          "description": "Display title. A decision topic has one title stored on its first record; title on any live record renames the topic without changing answer approval. Successors take the topic's title.",
           "type": "string",
-          "minLength": 1,
-          "description": "Display title. Identity is the document's UUID, never this."
+          "minLength": 1
         },
         "description": {
           "type": "string",
@@ -7062,20 +7080,20 @@
         "links": {
           "type": "array",
           "items": {
+            "description": "Target document UUID.",
             "type": "string",
             "format": "uuid",
-            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-            "description": "Target document UUID."
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
           }
         },
         "discussion": {
           "description": "RFC discussion document UUID, or null to clear. Only an open decision record accepts changes; the target must be live, locally readable and not a decision. Distinct from curated links and the recorded answer; no document is created or tagged.",
           "anyOf": [
             {
+              "description": "Document UUID.",
               "type": "string",
               "format": "uuid",
-              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-              "description": "Document UUID."
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             },
             {
               "type": "null"
@@ -7269,6 +7287,38 @@
           "description": "Non-blocking request to assign tags from the active vocabulary.",
           "type": "string"
         },
+        "rooms": {
+          "description": "Independently persisted document, topic-title and directory rooms when a rename targets another record; top-level synced is their conjunction.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "purpose": {
+                "type": "string",
+                "description": "The independently written room's purpose."
+              },
+              "room": {
+                "type": "string"
+              },
+              "applied": {
+                "type": "boolean",
+                "const": true,
+                "description": "The write is durable in this replica's local update log."
+              },
+              "synced": {
+                "type": "boolean",
+                "description": "The hub acknowledged this write; acknowledgement does not mean hub storage."
+              }
+            },
+            "required": [
+              "purpose",
+              "room",
+              "applied",
+              "synced"
+            ],
+            "additionalProperties": false
+          }
+        },
         "title": {
           "type": "string"
         },
@@ -7405,7 +7455,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Set title/description/tldr/tags/links/code_check or decision discussion; require one. Omissions stay; refusals write nothing and field failures name field. Metadata/durability; no TL;DR hint/mark. Title/description cannot be empty/cleared. tldr: null clears, preserving the mark; marked pages refuse with tldr_opted_out unless tldr_opt_in: true accompanies non-null tldr. MCP cannot mark pages. Tags/links replace; [] clears. list_tags active ids/names (case ignored); assigned retired/unresolved ids stay. New links must be directory-known; archived/unchanged accepted. Regular-only code_check: {repository, commit, result}; replaces that case-insensitive repository's entry, writer stamps UTC checked_at. Results: matches (agrees), ahead (intentionally undelivered), drift (unintended disagreement). Content edits preserve checks; decisions refuse. Only open decisions accept discussion: live, readable non-decision RFC UUID/null. Reuse/create RFC first; no creation/RFC/page edits/tags or approvalFingerprint/approvalChanged change. Distinct from curated links/recorded answer; fixed on settling. Decisions have no TL;DR; non-null refuses decision_tldr_unsupported, open null accepted. Decided records refuse tldr/discussion. Title renames preserve approval. See lifecycle's Decision answers and topics section; answerPreview: first answer paragraph/list; get_doc marks related/linked. Archived metadata refuses; lifecycle: set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
+    "description": "Set title/description/tldr/tags/links/code_check or decision discussion; require one. Omissions stay; refusals write nothing and field failures name field. Title/description cannot be empty/cleared. tldr: null clears, preserving the mark; marked pages refuse with tldr_opted_out unless tldr_opt_in: true accompanies non-null tldr. Tags/links replace; [] clears. list_tags active ids/names (case ignored); assigned retired/unresolved ids stay. New links must be directory-known; archived/unchanged accepted. Regular-only code_check replaces one repository's entry (case-insensitive); {repository, commit, result}; writer stamps UTC checked_at. Content edits preserve checks; decisions refuse. Only open decisions accept discussion: live, readable non-decision RFC UUID/null. Reuse/create RFC first; no creation/RFC/page edits/tags or approvalFingerprint/approvalChanged change. Separate from curated links/recorded answer; fixed after open. Decisions have no TL;DR; non-null refuses decision_tldr_unsupported, open null accepted. Decided records refuse tldr/discussion. A decision topic's sole title is stored on its first record; title on any live record renames the topic. Successors inherit that topic title. Title renames preserve approval. See lifecycle's Decision answers and topics section. answerPreview: first answer paragraph/list; get_doc marks related/linked. Archived metadata refuses; lifecycle: set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -7420,10 +7470,10 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
         "status": {
           "type": "string",
@@ -7628,10 +7678,10 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         }
       },
       "required": [
@@ -7805,10 +7855,10 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         }
       },
       "required": [
@@ -7974,10 +8024,10 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         }
       },
       "required": [
@@ -8146,10 +8196,10 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
         "text": {
           "type": "string",
@@ -8449,10 +8499,10 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
         "block_id": {
           "type": "string",
@@ -8628,10 +8678,10 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
         "frontmatter": {
           "description": "Emit a YAML frontmatter block with uuid, title, tags and — when present — description, kind and status. The lifecycle fields record state; they do not authorize execution. Default true.",
@@ -9055,10 +9105,10 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
         "group": {
           "type": "string",
@@ -9271,10 +9321,10 @@
       "type": "object",
       "properties": {
         "uuid": {
+          "description": "Document UUID.",
           "type": "string",
           "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-          "description": "Document UUID."
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         }
       },
       "required": [

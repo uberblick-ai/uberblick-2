@@ -37,9 +37,10 @@ function answer(who = "Ben (@bk-one)", when = new Date(Date.now() - 5 * 86_400_0
   return { who, when, where: "https://example.org/team/decision" };
 }
 
-async function create(writer: McpSession, title: string, text: string, fields: Record<string, unknown> = {}): Promise<StoredDoc> {
+async function create(writer: McpSession, title: string | undefined, text: string, fields: Record<string, unknown> = {}): Promise<StoredDoc> {
   return writer.call<StoredDoc>("create_doc", {
-    title, description: "Browser acceptance fixture.", blocks: [{ type: "paragraph", text }], ...fields,
+    ...(title === undefined ? {} : { title }),
+    description: "Browser acceptance fixture.", blocks: [{ type: "paragraph", text }], ...fields,
   });
 }
 
@@ -205,22 +206,22 @@ for (const touch of [false, true]) {
       ],
     });
     const other = await create(writer, "Another related page", "Other guidance.");
-    const conflict = await create(writer, "Original conflict question", "Original answer.", {
+    const conflict = await create(writer, "Conflict question", "Original answer.", {
       kind: "decision", status: "decided", related: owner.uuid, answer: answer(),
     });
-    const earlierConflict = await create(writer, "Earlier competing answer", "First conflicting answer must stay out of the block.", {
+    const earlierConflict = await create(writer, undefined, "First conflicting answer must stay out of the block.", {
       kind: "decision", status: "decided", supersedes: conflict.uuid, answer: answer("First answerer"),
     });
-    const latestConflict = await create(writer, "Conflict question", "Second conflicting answer must stay out of the block.", {
+    const latestConflict = await create(writer, undefined, "Second conflicting answer must stay out of the block.", {
       kind: "decision", status: "decided", supersedes: conflict.uuid, answer: answer("Second answerer"),
     });
-    const review = await create(writer, "Historical review question", "Historical answer.", {
+    const review = await create(writer, "Review question", "Historical answer.", {
       kind: "decision", status: "decided", related: owner.uuid, answer: answer(),
     });
-    const currentReview = await create(writer, "Review question", "The current answer stays in force during review.", {
+    const currentReview = await create(writer, undefined, "The current answer stays in force during review.", {
       kind: "decision", status: "decided", supersedes: review.uuid, related: other.uuid, answer: answer(),
     });
-    const pendingReview = await create(writer, "Pending question must not replace the current question", "Pending preview must not appear.", {
+    const pendingReview = await create(writer, undefined, "Pending preview must not appear.", {
       kind: "decision", supersedes: currentReview.uuid,
     });
     const alphaQuestion = "Alpha settled question with enough detail to wrap within a narrow reading column?";
@@ -400,7 +401,7 @@ test("a page without headings gains and loses its live Decisions block", async (
   await writer.call("set_status", { uuid: proposal.uuid, status: "decided", answer: answer() });
   await expect(row(page, "In force", "Live question")).toBeVisible();
   await expect(page.locator(".ub-decisions-link")).toHaveText("1 decision in force");
-  const pending = await create(writer, "Proposed replacement question", "The proposed preview never appears on the page.", { kind: "decision", supersedes: proposal.uuid });
+  const pending = await create(writer, undefined, "The proposed preview never appears on the page.", { kind: "decision", supersedes: proposal.uuid });
   await expect(row(page, "Under review", "Live question")).toBeVisible();
   await expect(page.locator(".ub-decisions-link")).toHaveText("1 decision · 1 under review");
   await expect(row(page, "Under review", "Live question").locator(".ub-decisions-row-preview")).toHaveText(proposal.blocks[0]?.text ?? "");

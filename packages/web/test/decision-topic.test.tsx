@@ -1,4 +1,4 @@
-/** Topic navigation reads one record room while directory caches supply history. */
+/** Topic navigation reads selected answers and the first record for renames. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
@@ -62,6 +62,7 @@ const LIVE: RoomStatus = {
 
 const rooms = new Map<string, RoomConnection>();
 const acquired: string[] = [];
+const released: string[] = [];
 function room(name: string): RoomConnection {
   const existing = rooms.get(name);
   if (existing !== undefined) return existing;
@@ -82,12 +83,13 @@ function room(name: string): RoomConnection {
 vi.mock("../src/collab/rooms.js", () => ({
   acquireRoom: (name: string) => {
     acquired.push(name);
-    return { connection: room(name), release: () => {} };
+    return { connection: room(name), release: () => { released.push(name); } };
   },
 }));
 const { App } = await import("../src/ui/App.js");
 
 beforeEach(() => {
+  released.length = 0;
   vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-11-06T10:00:00Z"));
   Element.prototype.scrollIntoView = function scrollIntoView() {};
   const empty = new DOMRect();
@@ -102,6 +104,7 @@ beforeEach(() => {
 afterEach(() => {
   rooms.clear();
   acquired.length = 0;
+  released.length = 0;
   Reflect.deleteProperty(navigator, "clipboard");
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -294,15 +297,15 @@ describe("decision topic navigation and history", () => {
 
   it("uses the current room's identity when its metadata names another record", async () => {
     story();
-    const otherBefore = getDirectoryEntry(directory(), FIRST);
+    const currentBefore = getDirectoryEntry(directory(), CURRENT);
     getMetaMap(room(roomForDoc(WORKSPACE, CURRENT)).ydoc).set("uuid", FIRST);
     const view = await open();
     expect(answer(view.container).textContent).toContain("Use the current answer.");
     const title = within(view.container).getByRole("textbox", { name: "Document title" });
     expect(title).toHaveProperty("readOnly", false);
     await act(async () => fireEvent.change(title, { target: { value: "A corrected title" } }));
-    expect(getDirectoryEntry(directory(), CURRENT)?.title).toBe("A corrected title");
-    expect(getDirectoryEntry(directory(), FIRST)).toEqual(otherBefore);
+    expect(getDirectoryEntry(directory(), FIRST)?.title).toBe("A corrected title");
+    expect(getDirectoryEntry(directory(), CURRENT)?.title).toEqual(currentBefore?.title);
     expect(getMetaMap(room(roomForDoc(WORKSPACE, CURRENT)).ydoc).get("uuid")).toBe(FIRST);
   });
 
@@ -318,25 +321,61 @@ describe("decision topic navigation and history", () => {
     expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
   });
 
-  it("renames only the answer in force during review, then keeps the current title read-only in history", async () => {
+  it("renames only the first record during review, then keeps the topic title read-only in history", async () => {
     story();
     const host = (await open()).container;
     const title = () => within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
     await act(async () => fireEvent.change(title(), { target: { value: "Renamed current question" } }));
-    expect(getMeta(room(roomForDoc(WORKSPACE, CURRENT)).ydoc).title).toBe("Renamed current question");
+    expect(getMeta(room(roomForDoc(WORKSPACE, FIRST)).ydoc).title).toBe("Renamed current question");
+    expect(getMeta(room(roomForDoc(WORKSPACE, CURRENT)).ydoc).title).toBe("Current topic title");
     expect(getMeta(room(roomForDoc(WORKSPACE, OPEN)).ydoc).title).toBe("Open proposal");
     await choose(host, FIRST);
     expect(title().value).toBe("Renamed current question");
     expect(title().readOnly).toBe(true);
     expect(host.querySelector(".ub-lifecycle-badge")?.textContent).toBe("Decision");
     await act(async () => fireEvent.change(title(), { target: { value: "Historical rename" } }));
-    expect(getMeta(room(roomForDoc(WORKSPACE, FIRST)).ydoc).title).toBe("Original title");
-    expect(getMeta(room(roomForDoc(WORKSPACE, CURRENT)).ydoc).title).toBe("Renamed current question");
+    expect(getMeta(room(roomForDoc(WORKSPACE, FIRST)).ydoc).title).toBe("Renamed current question");
+    expect(getMeta(room(roomForDoc(WORKSPACE, CURRENT)).ydoc).title).toBe("Current topic title");
     await act(async () => within(host).getByRole("link", { name: "Go to the current answer" }).click());
     expect(title().readOnly).toBe(false);
   });
 
-  it("renames the latest record during a conflict and keeps the other answer's title", async () => {
+  it("keeps the title read-only until the first record's room is identified", async () => {
+    story();
+    const first = room(roomForDoc(WORKSPACE, FIRST)).ydoc;
+    getMetaMap(first).delete("uuid");
+    const host = (await open()).container;
+    const title = within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
+    expect(title.value).toBe("Original title");
+    expect(title.readOnly).toBe(true);
+    expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
+    await act(async () => fireEvent.change(title, { target: { value: "Premature rename" } }));
+    expect(getMeta(first).title).toBe("Original title");
+    await act(async () => getMetaMap(first).set("uuid", FIRST));
+    expect(title.readOnly).toBe(false);
+    await act(async () => fireEvent.change(title, { target: { value: "Identified topic" } }));
+    expect(getMeta(first).title).toBe("Identified topic");
+    expect(getMeta(room(roomForDoc(WORKSPACE, CURRENT)).ydoc).title).toBe("Current topic title");
+    expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
+  });
+
+  it("keeps the topic title read-only when only the first record's room refuses writes", async () => {
+    story();
+    const first = room(roomForDoc(WORKSPACE, FIRST));
+    Object.defineProperty(first, "status", { value: { ...LIVE, writable: false } });
+    Object.defineProperty(first, "onStatusChange", { value: (listener: (status: RoomStatus) => void) => {
+      listener(first.status);
+      return () => {};
+    } });
+    const host = (await open()).container;
+    const title = within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
+    expect(title.readOnly).toBe(true);
+    await act(async () => fireEvent.change(title, { target: { value: "Refused topic rename" } }));
+    expect(getMeta(first.ydoc).title).toBe("Original title");
+    expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
+  });
+
+  it("renames the topic during a conflict and leaves every successor's stored title intact", async () => {
     record(FIRST, "Initial question", "decided", "Initial stance.", { agent: true });
     record(CURRENT, "Left question", "decided", "Left answer.", { supersedes: FIRST, order: 1 });
     const latest = record(NEXT, "Right question", "decided", "Right answer.", { supersedes: FIRST, order: 2 });
@@ -344,7 +383,8 @@ describe("decision topic navigation and history", () => {
     const title = within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
     expect(title.readOnly).toBe(false);
     await act(async () => fireEvent.change(title, { target: { value: "Renamed conflict question" } }));
-    expect(getMeta(latest).title).toBe("Renamed conflict question");
+    expect(getMeta(room(roomForDoc(WORKSPACE, FIRST)).ydoc).title).toBe("Renamed conflict question");
+    expect(getMeta(latest).title).toBe("Right question");
     expect(getMeta(room(roomForDoc(WORKSPACE, CURRENT)).ydoc).title).toBe("Left question");
     await choose(host, CURRENT);
     expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).readOnly).toBe(true);
@@ -386,7 +426,7 @@ describe("decision topic navigation and history", () => {
     });
     expect(getMeta(first).title).toBe("Original question");
     const title = within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
-    expect(title.value).toBe("Replacement question");
+    expect(title.value).toBe("Original question");
     expect(title.readOnly).toBe(false);
     const connection = room(roomForDoc(WORKSPACE, CURRENT));
     Object.defineProperty(connection, "status", { value: { ...LIVE, writable: false } });
@@ -407,7 +447,7 @@ describe("decision topic navigation and history", () => {
     ydoc.on("update", pageUpdates);
     const host = (await open(docPath(WORKSPACE, RELATED_FIRST))).container;
     const block = within(host).getByRole("region", { name: "Decisions" });
-    expect(within(block).getByRole("link", { name: "Under review: Current topic title" }).getAttribute("href"))
+    expect(within(block).getByRole("link", { name: "Under review: Original title" }).getAttribute("href"))
       .toBe(docPath(WORKSPACE, FIRST));
     expect(block.textContent).toContain("Use the current answer.");
     expect(block.textContent).not.toContain("A replacement under discussion.");
@@ -471,7 +511,7 @@ describe("decision topic navigation and history", () => {
     pinDoc(sidebar, group, pinnedRecord);
     pinDoc(sidebar, group, RELATED_CURRENT);
     const host = (await open(path)).container;
-    const pinnedRow = within(host).getByRole("button", { name: pinnedRecord === FIRST ? "Original title" : "Current topic title" });
+    const pinnedRow = within(host).getByRole("button", { name: "Original title" });
     expect(pinnedRow.getAttribute("aria-current")).toBe("page");
     await act(async () => within(host).getByRole("button", { name: "Document actions" })
       .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
@@ -502,7 +542,7 @@ describe("decision topic navigation and history", () => {
   it("opens a superseded link at the current answer and keeps the named record reachable", async () => {
     story();
     const host = (await open()).container;
-    expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).value).toBe("Current topic title");
+    expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).value).toBe("Original title");
     expect(host.querySelector(".ub-decision-rfc")).toBeNull();
     expect(answer(host).textContent).toContain("Use the current answer.");
     expectAnswerState(host, "In force");
@@ -522,8 +562,51 @@ describe("decision topic navigation and history", () => {
     expect(host.querySelector(".ub-threads-pane")?.textContent ?? host.textContent).toContain("Current record comment");
     expect(host.textContent).not.toContain("Earlier record comment");
     expect(timeline(host).querySelectorAll("li")).toHaveLength(5);
-    expect(acquired.filter((name) => [FIRST, CURRENT, REJECTED, WITHDRAWN, OPEN].some((uuid) => name === roomForDoc(WORKSPACE, uuid)))).toEqual([roomForDoc(WORKSPACE, CURRENT)]);
+    expect(acquired.filter((name) => [FIRST, CURRENT, REJECTED, WITHDRAWN, OPEN].some((uuid) => name === roomForDoc(WORKSPACE, uuid))).sort())
+      .toEqual([roomForDoc(WORKSPACE, CURRENT), roomForDoc(WORKSPACE, FIRST)].sort());
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, RFC));
+  });
+
+  it("retains the first-record title connection throughout topic navigation and releases it on leaving", async () => {
+    story();
+    const firstRoom = roomForDoc(WORKSPACE, FIRST);
+    const currentRoom = roomForDoc(WORKSPACE, CURRENT);
+    const view = await open();
+    const host = view.container;
+    expect(acquired.filter((name) => name === firstRoom)).toHaveLength(1);
+    await choose(host, FIRST);
+    expect(selection(host)).toBe(FIRST);
+    expect(released.filter((name) => name === firstRoom)).toHaveLength(0);
+    expect(acquired.filter((name) => name === firstRoom)).toHaveLength(2);
+    await choose(host, CURRENT);
+    expect(selection(host)).toBe(CURRENT);
+    expect(released.filter((name) => name === firstRoom)).toHaveLength(1);
+    await choose(host, REJECTED);
+    expect(selection(host)).toBe(REJECTED);
+    expect(released.filter((name) => name === firstRoom)).toHaveLength(1);
+    expect(released.filter((name) => name === currentRoom)).toHaveLength(2);
+    await act(async () => {
+      window.history.pushState(null, "", docPath(WORKSPACE, RELATED_CURRENT));
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(released.filter((name) => name === firstRoom)).toHaveLength(2);
+    view.unmount();
+  });
+
+  it("holds the initial record while directory arrival changes its role from answer to topic title", async () => {
+    story();
+    const current = room(roomForDoc(WORKSPACE, CURRENT)).ydoc;
+    getDirectoryMap(directory()).clear();
+    const firstRoom = roomForDoc(WORKSPACE, FIRST);
+    const view = await open();
+    expect(selection(view.container)).toBe(FIRST);
+    expect(acquired.filter((name) => name === firstRoom)).toHaveLength(2);
+    await act(async () => publishRecord(current, { order: 1 }));
+    expect(selection(view.container)).toBe(CURRENT);
+    expect(released.filter((name) => name === firstRoom)).toHaveLength(1);
+    expect(acquired.filter((name) => name === firstRoom)).toHaveLength(2);
+    expect(within(view.container).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).readOnly).toBe(false);
+    view.unmount();
   });
 
   it("renders cached history newest first with matching answer pills and the rail through the answer in force", async () => {
@@ -626,7 +709,7 @@ describe("decision topic navigation and history", () => {
     expect(answer(host).classList.contains("ub-decision-answer-history")).toBe(true);
     expect(host.querySelector(".ub-decision-rejection")?.textContent).toContain("It loses compatibility.");
     expect(answerHeader(host).querySelector(".ub-decision-attribution")?.textContent).toBe("Alex · 3 weeks ago");
-    expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).value).toBe("Current topic title");
+    expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).value).toBe("Original title");
     await copy(host);
     expect(writeText).toHaveBeenLastCalledWith(`${window.location.origin}${rejectedPath}`);
     await choose(host, FIRST);
@@ -656,7 +739,7 @@ describe("decision topic navigation and history", () => {
     }));
     expect(selection(host)).toBe(NEXT);
     expect(answer(host).textContent).toContain("The newly approved answer.");
-    expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).value).toBe("New current title");
+    expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).value).toBe("Original title");
     expect(host.querySelector(".ub-decision-rfc")).toBeNull();
     expect(item(host, CURRENT).textContent).toContain("Linked record");
     expect(window.location.pathname).toBe(docPath(WORKSPACE, CURRENT));
