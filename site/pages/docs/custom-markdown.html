@@ -32,7 +32,7 @@ server --&gt; guidance_required tone=rework : not read
 guidance_required --&gt; get_doc tone=rework
 get_doc --&gt; edit_block tone=rework from=left to=left label=end : calls again
 ```">Copy</button></div>
-  <div class="panel" role="tabpanel" id="p-ablauf-v" aria-labelledby="t-ablauf-v"><img class="l" src="/img/blocks/ablauf-light.svg" alt="The flow as ablauf draws it: an agent calls edit_block, the server checks the guidance lease, an edit applied when the pages were read within ten minutes, otherwise guidance_required, the agent reads the pages with get_doc and calls again" loading="lazy"><img class="d" src="/img/blocks/ablauf-dark.svg" alt="" loading="lazy"></div>
+  <div class="panel" role="tabpanel" id="p-ablauf-v" aria-labelledby="t-ablauf-v"><img class="l" src="/img/blocks/ablauf-light.png" alt="The Ablauf block as the editor shows it: an agent calls edit_block, the server checks the guidance lease, an edit applied when the pages were read within ten minutes, otherwise guidance_required, the agent reads the pages with get_doc and calls again" loading="lazy"><img class="d" src="/img/blocks/ablauf-dark.png" alt="" loading="lazy"></div>
   <div class="panel" role="tabpanel" id="p-ablauf-m" aria-labelledby="t-ablauf-m" hidden><pre>```ablauf
 flow v0
 columns rework main
@@ -50,7 +50,6 @@ server --&gt; guidance_required tone=rework : not read
 guidance_required --&gt; get_doc tone=rework
 get_doc --&gt; edit_block tone=rework from=left to=left label=end : calls again
 ```</pre></div></div>
-  <p>Drawn above by ablauf's own renderer, not yet by the editor.</p>
   </section>
 
   <section class="q" id="wireframe"><h2>Wireframe</h2>

@@ -1522,7 +1522,7 @@ h6.ub-heading {
 .ub-code > code { display: block; font: inherit; }
 .ub-code-caption { min-width: 0; max-width: 100%; pointer-events: none; }
 /* Passive language labels leave caret placement to the source view. */
-.ub-code:not(.ub-wireframe) > .ub-block-caption { pointer-events: none; }
+.ub-code:not(.ub-wireframe, .ub-ablauf) > .ub-block-caption { pointer-events: none; }
 .ub-code-caption-text { display: block; overflow: hidden; text-overflow: ellipsis; }
 .ub-code-caption:has(.ub-code-language-trigger) > .ub-code-caption-text { display: none; }
 

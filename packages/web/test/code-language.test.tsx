@@ -76,7 +76,7 @@ function peerOf(local: Y.Doc): Y.Doc {
 }
 
 describe("code block language", () => {
-  it("attaches to the selected block and lists highlighted languages plus wireframe with one Plain text choice", async () => {
+  it("attaches to the selected block and lists highlighted languages and diagrams with one Plain text choice", async () => {
     const fix = await fixture("ts");
     const caption = fix.element.querySelector(".ub-code-caption");
     expect(caption?.contains(trigger())).toBe(true);
@@ -85,7 +85,7 @@ describe("code block language", () => {
     expect(document.activeElement).toBe(search);
     const labels = options().map((item) => item.textContent?.replace("✓", "").trim());
     expect(labels).toEqual(["Plain text", ...[...createLowlight(common).listLanguages()
-      .filter((name) => name !== "plaintext"), "wireframe"].sort()]);
+      .filter((name) => name !== "plaintext"), "wireframe", "ablauf"].sort()]);
     expect(screen.queryByRole("option", { name: "plaintext" })).toBeNull();
     expect(screen.queryByRole("option", { name: "ts" })).toBeNull();
 
