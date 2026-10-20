@@ -351,7 +351,6 @@ test("decision title renames sync without approving answer changes", async ({ br
     kind: "decision", status: "decided", supersedes: first.uuid, related: owner.uuid, answer: answer(),
   });
   const pending = await create(writer, undefined, "Pending proposal.", { kind: "decision", supersedes: current.uuid });
-  await writer.call("pin_doc", { uuid: current.uuid, group: "Renamed topic" });
   const topicPath = `/${harness().workspace}/${first.uuid}`;
   const page = await openApp(browser, topicPath, { upstream: true });
   const reader = await openApp(browser, topicPath, { upstream: true });
@@ -361,9 +360,12 @@ test("decision title renames sync without approving answer changes", async ({ br
   await expect(page.locator(".ub-lifecycle-badge")).toHaveText("Decision");
   await expect(page.locator(".ub-decision-notice")).toContainText("Under review.");
   const renamed = `Clearer question ${current.uuid}`;
-  await title.fill(renamed);
-  await expect(reader.getByRole("textbox", { name: "Document title" })).toHaveValue(renamed);
-  await expect(reader.locator(".ub-list").getByRole("button", { name: renamed, exact: true })).toBeVisible();
+  await writer.call("pin_doc", { uuid: current.uuid, group: "Renamed topic" });
+  try {
+    await title.fill(renamed);
+    await expect(reader.getByRole("textbox", { name: "Document title" })).toHaveValue(renamed);
+    await expect(reader.locator(".ub-list").getByRole("button", { name: renamed, exact: true })).toBeVisible();
+  } finally { await writer.call("unpin_doc", { uuid: current.uuid }); }
   await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: current.uuid }), doc => {
     expect(doc).toMatchObject({ title: renamed, approvalChanged: false });
   });

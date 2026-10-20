@@ -612,11 +612,13 @@ export function App(): ReactElement {
       : null,
     defaultIdentity,
   );
+  // Keep the first room alive across directory arrival and answer selection;
+  // switching its title/answer holders must not detach and immediately rejoin it.
+  const routedTitleUuid = route.kind === "decision" ? route.topic : route.kind === "doc" ? route.uuid : null;
+  const routedTitleEntry = directory === null || routedTitleUuid === null ? null : getDirectoryEntry(directory.ydoc, routedTitleUuid);
+  const titleUuid = topic?.topic ?? (routedTitleEntry === null || routedTitleEntry.kind === "decision" ? routedTitleUuid : null);
   const topicTitleRoom = useRoom(
-    roomReady && workspace !== null && topic !== null && !topic.archived &&
-      topic.topic !== decisionCurrentRecord(topic)?.uuid &&
-      (selected === decisionCurrentRecord(topic)?.uuid || selected === topic.topic)
-      ? roomForDoc(workspace.uuid, topic.topic) : null,
+    roomReady && workspace !== null && titleUuid !== null ? roomForDoc(workspace.uuid, titleUuid) : null,
     defaultIdentity,
     false,
   );

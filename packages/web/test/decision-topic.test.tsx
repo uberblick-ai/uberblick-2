@@ -562,11 +562,12 @@ describe("decision topic navigation and history", () => {
     expect(host.querySelector(".ub-threads-pane")?.textContent ?? host.textContent).toContain("Current record comment");
     expect(host.textContent).not.toContain("Earlier record comment");
     expect(timeline(host).querySelectorAll("li")).toHaveLength(5);
-    expect(acquired.filter((name) => [FIRST, CURRENT, REJECTED, WITHDRAWN, OPEN].some((uuid) => name === roomForDoc(WORKSPACE, uuid)))).toEqual([roomForDoc(WORKSPACE, CURRENT), roomForDoc(WORKSPACE, FIRST)]);
+    expect(acquired.filter((name) => [FIRST, CURRENT, REJECTED, WITHDRAWN, OPEN].some((uuid) => name === roomForDoc(WORKSPACE, uuid))).sort())
+      .toEqual([roomForDoc(WORKSPACE, CURRENT), roomForDoc(WORKSPACE, FIRST)].sort());
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, RFC));
   });
 
-  it("retains the first-record title connection while its room becomes the selected answer", async () => {
+  it("retains the first-record title connection throughout topic navigation and releases it on leaving", async () => {
     story();
     const firstRoom = roomForDoc(WORKSPACE, FIRST);
     const currentRoom = roomForDoc(WORKSPACE, CURRENT);
@@ -582,8 +583,29 @@ describe("decision topic navigation and history", () => {
     expect(released.filter((name) => name === firstRoom)).toHaveLength(1);
     await choose(host, REJECTED);
     expect(selection(host)).toBe(REJECTED);
-    expect(released.filter((name) => name === firstRoom)).toHaveLength(2);
+    expect(released.filter((name) => name === firstRoom)).toHaveLength(1);
     expect(released.filter((name) => name === currentRoom)).toHaveLength(2);
+    await act(async () => {
+      window.history.pushState(null, "", docPath(WORKSPACE, RELATED_CURRENT));
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(released.filter((name) => name === firstRoom)).toHaveLength(2);
+    view.unmount();
+  });
+
+  it("holds the initial record while directory arrival changes its role from answer to topic title", async () => {
+    story();
+    const current = room(roomForDoc(WORKSPACE, CURRENT)).ydoc;
+    getDirectoryMap(directory()).clear();
+    const firstRoom = roomForDoc(WORKSPACE, FIRST);
+    const view = await open();
+    expect(selection(view.container)).toBe(FIRST);
+    expect(acquired.filter((name) => name === firstRoom)).toHaveLength(2);
+    await act(async () => publishRecord(current, { order: 1 }));
+    expect(selection(view.container)).toBe(CURRENT);
+    expect(released.filter((name) => name === firstRoom)).toHaveLength(1);
+    expect(acquired.filter((name) => name === firstRoom)).toHaveLength(2);
+    expect(within(view.container).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).readOnly).toBe(false);
     view.unmount();
   });
 
