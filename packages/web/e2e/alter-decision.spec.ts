@@ -1,5 +1,6 @@
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
+import type { BlockInput } from "@uberblick/schema";
 import { activateControl, docTitle, editor, setupHarness } from "./app-helpers.js";
 import { placeCaretIn } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
@@ -34,7 +35,7 @@ function session(): McpSession {
   return agent.open({ name: "alter-decision-e2e" });
 }
 
-async function create(writer: McpSession, title: string, blocks = [{ type: "paragraph", text: "Keep the original answer." }], fields: Record<string, unknown> = {}): Promise<StoredDoc> {
+async function create(writer: McpSession, title: string, blocks: BlockInput[] = [{ type: "paragraph", text: "Keep the original answer." }], fields: Record<string, unknown> = {}): Promise<StoredDoc> {
   return writer.call<StoredDoc>("create_doc", {
     title, description: "Alter decision browser acceptance fixture.", blocks, kind: "decision", status: "decided", ...fields,
   });
@@ -171,6 +172,49 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     const screenshot = test.info().outputPath("alter-decision.png");
     await page.screenshot({ path: screenshot, fullPage: true });
     await test.info().attach(`alter-decision-${touch ? "ipad" : "desktop"}-${appearance}`, { path: screenshot, contentType: "image/png" });
+    await activateControl(dialog(page).getByRole("button", { name: "Cancel", exact: true }), { touch });
+    await expect(dialog(page)).toHaveCount(0);
+    await unchanged(writer, source, page);
+  });
+
+  test(`answer references preserve the draft on ${touch ? "iPad touch" : "desktop pointer and Enter"} in ${appearance}${touch ? " @webkit-touch" : ""}`, async ({ browser }) => {
+    const writer = session();
+    const reference = await writer.call<StoredDoc>("create_doc", {
+      title: docTitle("Reference target"), description: "A reference shown in the current answer.",
+      blocks: [{ type: "paragraph", text: "Read this without losing the answer draft." }],
+    });
+    const source = await create(writer, docTitle("Alter references"), [
+      { type: "paragraph", inline: [
+        { text: "Keep ", marks: {} },
+        { text: "the referenced document", marks: { docLink: reference.uuid } },
+        { text: ".", marks: {} },
+      ] },
+    ]);
+    const page = await openApp(browser, `/${harness().workspace}/${source.uuid}`, {
+      contextOptions: { ...(touch ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 1000 } }), colorScheme: appearance },
+    });
+    await openDialog(page, touch);
+    await placeCaretIn(draft(page).locator(":scope > p"), { touch });
+    await page.keyboard.type(" Typed replacement.");
+    await dialog(page).getByLabel(/Why the change/).fill("Keep this typed reason.");
+    const expectDraft = async (): Promise<void> => {
+      await expect(page).toHaveURL(new RegExp(`/${source.uuid}$`));
+      await expect(dialog(page)).toBeVisible();
+      await expect(draft(page)).toHaveText("Keep the referenced document. Typed replacement.");
+      await expect(dialog(page).getByLabel(/Why the change/)).toHaveValue("Keep this typed reason.");
+    };
+    const currentReference = dialog(page).locator(`[aria-label="Current answer"] a[data-doc-id="${reference.uuid}"]`);
+    await expect(currentReference).toHaveAttribute("href", new RegExp(`/${reference.uuid}$`));
+    await activateControl(currentReference, { touch });
+    await expectDraft();
+    if (!touch) {
+      await currentReference.focus();
+      await expect(currentReference).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expectDraft();
+    }
+    await activateControl(draft(page).locator(`a[data-doc-id="${reference.uuid}"]`), { touch });
+    await expectDraft();
     await activateControl(dialog(page).getByRole("button", { name: "Cancel", exact: true }), { touch });
     await expect(dialog(page)).toHaveCount(0);
     await unchanged(writer, source, page);

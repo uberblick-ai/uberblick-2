@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { Editor } from "@tiptap/core";
-import * as Y from "yjs";
-import { decisionAnswerShapeFailure, getBlocks, getBlocksFragment, getBlocksWithInline, getMeta, parseRoom } from "@uberblick/schema";
-import { createDecisionDraft, recordAlteredDecision } from "../../collab/alter-decision.js";
+import type * as Y from "yjs";
+import { getBlocksFragment, getMeta, parseRoom } from "@uberblick/schema";
+import { alteredDecisionAnswerProblem, createDecisionDraft, recordAlteredDecision } from "../../collab/alter-decision.js";
 import type { AlterDecisionResult } from "../../collab/alter-decision.js";
 import type { AwarenessUser } from "../../collab/identity.js";
 import type { RoomConnection } from "../../collab/rooms.js";
 import { bindGuardedEditor } from "../../editor/guarded-binding.js";
 import { findForeignBlocks } from "../../editor/palette.js";
+import { docLinkFromTarget } from "../../editor/doc-links.js";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import { DECISION_ANSWER_MENU_ENTRIES } from "../../editor/block-menu.js";
 import { BlockMenu } from "../editor-controls/BlockMenu.js";
@@ -39,15 +40,13 @@ function answerProblem(draft: Y.Doc): string | null {
   const fragment = getBlocksFragment(draft);
   const foreign = findForeignBlocks(fragment);
   if (foreign.length > 0) return `This client cannot edit these answer types: ${[...new Set(foreign.map((block) => block.nodeName))].join(", ")}. Neither action is available.`;
-  const unsupported = fragment.toArray().filter((node) => !(node instanceof Y.XmlElement) ||
-    !["paragraph", "list-item", "code", "table"].includes(node.nodeName));
-  if (unsupported.length > 0) return `Remove unsupported answer blocks: ${[...new Set(unsupported.map((node) => node instanceof Y.XmlElement ? node.nodeName : "unknown"))].join(", ")}. Use paragraphs, lists, code blocks or tables.`;
-  if (decisionAnswerShapeFailure([...getBlocks(draft), { type: "paragraph" }]) !== null) {
+  const problem = alteredDecisionAnswerProblem(draft);
+  if (problem === null) return null;
+  if (problem.code === "decision_block_unsupported") return `Remove unsupported answer blocks: ${problem.blockTypes.join(", ")}. Use paragraphs, lists, code blocks or tables.`;
+  if (problem.code === "decision_answer_too_long") {
     return "Shorten the answer to at most two blocks; adjacent list items count as one block.";
   }
-  const hasText = getBlocksWithInline(draft).some(({ block, table }) => table === undefined
-    ? block.text.trim() !== "" : table.flat(2).some((run) => run.text.trim() !== ""));
-  return hasText ? null : "Write a non-blank new answer.";
+  return "Write a non-blank new answer.";
 }
 
 function AnswerEditor({ draft, readOnly = false, session, docLinks, displayName, waiting, onEditor }: {
@@ -59,9 +58,10 @@ function AnswerEditor({ draft, readOnly = false, session, docLinks, displayName,
   const frame = useRef<HTMLDivElement | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   useEffect(() => {
-    if (host.current === null) return;
+    const element = host.current;
+    if (element === null) return;
     const binding = bindGuardedEditor({
-      element: host.current, fragment: getBlocksFragment(draft),
+      element, fragment: getBlocksFragment(draft),
       editable: !readOnly, canWrite: () => !readOnly, canNormalize: () => false,
       blockMenuEntries: DECISION_ANSWER_MENU_ENTRIES,
       docLinks, workspaceSettings: session.catalog.ydoc,
@@ -70,7 +70,15 @@ function AnswerEditor({ draft, readOnly = false, session, docLinks, displayName,
     binding.editor?.setOptions({ editorProps: { attributes: { "aria-label": readOnly ? "Current answer" : "New answer" } } });
     setEditor(binding.editor);
     onEditor?.(binding.editor);
-    return () => { setEditor(null); onEditor?.(null); binding.destroy(); };
+    // References in either detached answer must not navigate away from an unsaved draft.
+    const preventNavigation = (event: MouseEvent): void => {
+      if (docLinkFromTarget(event.target) !== null) event.preventDefault();
+    };
+    element.addEventListener("click", preventNavigation);
+    return () => {
+      element.removeEventListener("click", preventNavigation);
+      setEditor(null); onEditor?.(null); binding.destroy();
+    };
   }, [draft, readOnly, session, docLinks, onEditor]);
   useEffect(() => { editor?.setEditable(!readOnly && !waiting); }, [editor, readOnly, waiting]);
   return <div className={`ub-alter-answer${readOnly ? " ub-alter-current" : ""}`}>
