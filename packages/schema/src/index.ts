@@ -42,6 +42,7 @@ export { archiveDocument } from "./lifecycle.js";
 export {
   appendBlock,
   deleteBlock,
+  docRev,
   editBlock,
   findBlockElement,
   getBlock,
@@ -52,6 +53,7 @@ export {
   getBlocksWithInline,
   insertBlock,
   normalizeLegacyTables,
+  observeDocRev,
   removeLegacyMermaidBlocks,
   repairDuplicateBlocks,
   setBlockLanguage,

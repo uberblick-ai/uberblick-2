@@ -239,6 +239,47 @@ export function getBlocks(ydoc: Y.Doc): Block[] {
   return partitionById(getBlocksFragment(ydoc)).visible.map(toBlock);
 }
 
+/** Fold visible content and order, caching by element so re-types invalidate it. */
+function foldDocRev(ydoc: Y.Doc, revs: Map<Y.XmlElement, string>): string {
+  const next = new Map<Y.XmlElement, string>();
+  const lines: string[] = [];
+  for (const element of partitionById(getBlocksFragment(ydoc)).visible) {
+    const rev = revs.get(element) ?? toBlock(element).rev;
+    next.set(element, rev);
+    lines.push(`${element.getAttribute("id") ?? ""} ${rev}`);
+  }
+  revs.clear();
+  for (const [element, rev] of next) revs.set(element, rev);
+  return blockRev({ type: "paragraph", text: lines.join("\n") });
+}
+
+/** The page's visible text revision, excluding metadata and prose marks. */
+export function docRev(ydoc: Y.Doc): string {
+  return foldDocRev(ydoc, new Map());
+}
+
+/**
+ * Seed once, then reread only changed visible blocks. Element identity keeps
+ * re-types fresh and gives distinct ID-less blocks their own revisions.
+ */
+export function observeDocRev(ydoc: Y.Doc, emit: (rev: string) => void): () => void {
+  const fragment = getBlocksFragment(ydoc);
+  const revs = new Map<Y.XmlElement, string>();
+  const onChange = (events: Array<Y.YEvent<Y.AbstractType<unknown>>>): void => {
+    for (const event of events) {
+      let current: Y.AbstractType<unknown> | null = event.target;
+      while (current !== null && current.parent !== fragment) {
+        current = current.parent;
+      }
+      if (current instanceof Y.XmlElement) revs.delete(current);
+    }
+    emit(foldDocRev(ydoc, revs));
+  };
+  emit(foldDocRev(ydoc, revs));
+  fragment.observeDeep(onChange);
+  return () => fragment.unobserveDeep(onChange);
+}
+
 /** One block by id, or null when it does not exist (or was deleted). */
 export function getBlock(ydoc: Y.Doc, blockId: string): Block | null {
   const element = findBlockElement(ydoc, blockId);

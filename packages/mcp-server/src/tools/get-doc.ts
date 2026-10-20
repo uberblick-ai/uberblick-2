@@ -1,4 +1,4 @@
-import { decisionTopicTitle, getMeta, listAnnotations, readDecisions, resolveDecisionTopics, summarizeDocData } from "@uberblick/schema";
+import { decisionTopicTitle, docRev, getMeta, listAnnotations, readDecisions, resolveDecisionTopics, summarizeDocData } from "@uberblick/schema";
 import { strictInput } from "../inputs.js";
 import { uuidArg } from "./schemas.js";
 import { operation } from "./operation.js";
@@ -20,6 +20,7 @@ export const getDocOperation = operation("get_doc", inputSchema, (context, { uui
     !topic.archived && !relatedTopics.has(topic.topic) && topic.records.some(record => backlinks.has(record.uuid)));
   const result = {
     ...meta,
+    rev: docRev(replica.doc),
     ...decisionAuthorityJson(replica),
     tags: documentTags(replica),
     room: replica.room,

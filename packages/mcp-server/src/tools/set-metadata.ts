@@ -2,6 +2,7 @@ import {
   MAX_TLDR_LENGTH,
   CODE_CHECK_RESULTS,
   assignDocumentTags,
+  docRev,
   getMeta,
   getMetaMap,
   normalizeCodeCheck,
@@ -32,8 +33,10 @@ const codeCheckArg = z.unknown().meta({
     repository: { type: "string", description: "Repository as owner/name; identity ignores letter case." },
     commit: { type: "string", description: "Full 40- or 64-character hexadecimal commit id." },
     result: { type: "string", enum: CODE_CHECK_RESULTS, description: "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement." },
+    rev: { type: "string", description: "Page rev read with get_doc and compared with code; must still be current." },
+    paths: { type: "array", minItems: 1, maxItems: 20, items: { type: "string", minLength: 1, maxLength: 200 }, description: "Literal repo-relative files/folders looked at; trailing / marks folders. No leading /, .. segments or globs. Duplicates removed; hints, not complete dependencies." },
   },
-  required: ["repository", "commit", "result"],
+  required: ["repository", "commit", "result", "rev"],
   additionalProperties: false,
 });
 
@@ -97,8 +100,8 @@ export const setMetadataOperation = operation("set_metadata", inputSchema, (cont
   const titleReplica = title === undefined || current.kind !== "decision" ? replica :
     forField("title", () => context.requireWritableDoc(current.topic ?? uuid));
   const codeCheck = code_check === undefined ? undefined : normalizeCodeCheck(code_check);
-  if (codeCheck === null) {
-    throw new ToolError("invalid_code_check", "A code check needs a repository, full hexadecimal commit and matches, ahead or drift result; checked_at is assigned by this replica.", { uuid, field: "code_check" });
+  if (codeCheck === null || (codeCheck !== undefined && (codeCheck.rev === undefined || codeCheck.rev !== docRev(replica.doc)))) {
+    throw new ToolError("invalid_code_check", "A code check needs a repository, full hexadecimal commit, matches, ahead or drift result, the current page rev and optional valid paths. Read the page again with get_doc and compare it with code before recording a check.", { uuid, field: "code_check" });
   }
   if (codeCheck !== undefined && current.kind === "decision") {
     throw new ToolError("decision_code_check_unsupported", "Code checks describe regular pages' comparison with code and cannot be written to decision records.", {

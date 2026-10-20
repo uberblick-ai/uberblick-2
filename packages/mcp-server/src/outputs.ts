@@ -13,6 +13,8 @@ const codeChecks = z.array(z.object({
   commit: z.string().describe("Full hexadecimal commit compared with the page."),
   checked_at: z.string().describe("UTC time this comparison was recorded by its writing replica."),
   result: z.enum(CODE_CHECK_RESULTS).describe("matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."),
+  rev: z.string().optional().describe("Page revision read by this comparison; absent on legacy or older-client entries, whose compared text is unknown."),
+  paths: z.array(z.string()).optional().describe("Repo-relative files or folders looked at; trailing / marks a folder. Hints, not a complete dependency list; absent when unrecorded."),
 }).strict()).describe("Latest code comparison per repository on a regular page; content edits leave these entries unchanged. Empty means never checked.");
 const lifecycle = {
   kind: z.enum(DOCUMENT_KINDS).optional(),
@@ -268,6 +270,7 @@ export const outputSchemas = {
   }).strict(),
   get_doc: z.object({
     uuid,
+    rev: z.string().describe("Revision of the page's ordered block content, identical to the web status row. Applies to regular pages and decisions; excludes metadata and comments."),
     title: z.string(),
     description,
     tldr,

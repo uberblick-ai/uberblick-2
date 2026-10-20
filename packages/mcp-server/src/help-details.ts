@@ -87,10 +87,11 @@ export const toolHelpDetails = {
     "compatible `status`; ordinary documents omit both. When structured data exists, `data` lists collection " +
     "names and record counts and names `get_data` for deliberate reads. It contains no schemas or record " +
     "values; documents without data omit it.\n\n" +
+    "Every document returns a page-level `rev`, identical to the web status row's full revision of its ordered block content. Metadata and comments do not affect it. " +
     "Regular documents return `code_check`: the latest comparison per repository, or [] when never checked. " +
     "Each entry has repository (owner/name), commit, checked_at (writer's UTC recording time) and result: " +
     "matches means agreement, ahead means intentionally undelivered behavior, drift means unintended " +
-    "disagreement. Decision records omit code_check. Content edits and other metadata writes leave these " +
+    "disagreement. Each entry may also carry `rev`, the page revision the comparison read, and `paths`, the repo-relative files or folders looked at. Paths are hints, not a complete dependency list; an absent rev means the compared text is unknown. Earlier entries and entries rewritten by older clients can omit either field. Decision records omit code_check. Content edits and other metadata writes leave these " +
     "entries unchanged; they never appear in blocks or Markdown export.\n\n" +
     "Regular-page `decisions` resolve live topics without opening decision rooms: related topics first, " +
     "then other topics found in backlinks, marked `relation: \"related\"` or `relation: \"linked\"`. Any " +
@@ -171,7 +172,7 @@ export const toolHelpDetails = {
     "Regular entries cache `code_check` without opening document rooms: [] means never checked, while " +
     "absence means not cached yet. Decision entries omit it. Each entry records repository, commit, " +
     "writer-stamped UTC checked_at and result: matches (agreement), ahead (intentionally undelivered " +
-    "behavior) or drift (unintended disagreement). Content edits leave the checks unchanged. A local " +
+    "behavior) or drift (unintended disagreement), plus recorded `rev` and `paths` when known. Paths are hints, not a complete dependency list. A missing rev means the compared text is unknown, including after an older client drops it. The page's current rev is not cached or returned by list_docs. Content edits leave the checks unchanged. A local " +
     "set_metadata code_check write appears in the next listing. As with openThreadCount, hydration and " +
     "peer updates repair this cache; an older whole-stub writer can drop it until a current replica " +
     "recomputes it after a document change or restart.\n\n" +
@@ -415,18 +416,20 @@ export const toolHelpDetails = {
     "must be named, and undeclared fields are refused. Each field keeps its own type and limit; a field " +
     "refusal writes none of the named fields and adds `field` to its existing error. Document-level " +
     "refusals keep their usual shape.\n\n" +
-    "On a regular document, `code_check: {repository, commit, result}` records the latest comparison " +
+    "On a regular document, `code_check: {repository, commit, result, rev, paths?}` records the latest comparison " +
     "with code for one repository. Repository is owner/name, case-insensitive; commit is a full 40- or " +
     "64-character hexadecimal Git commit hash, normalized to lowercase. Results are matches (the page agrees " +
     "with that commit), ahead (intended behavior not yet " +
     "delivered there) and drift (unintended disagreement). Only that repository's entry is replaced; " +
     "other repositories remain and concurrent writes for different repositories survive synchronization. " +
+    "Read the page with get_doc and compare its content with code; `rev` must be that page-level revision and must still match this replica when recording. A missing or stale rev refuses the entire call. Read the page again with get_doc and compare it again before recording; do not just resend with a new rev. " +
+    "Optional `paths` contains 1–20 literal repo-relative files or folders looked at, each at most 200 characters: no leading /, .. segment or glob characters (* ? [ ] { }); trailing / marks a folder. Duplicates are removed. Paths are hints, not a complete dependency list, and unchanged paths do not prove the page is still right. " +
     "The writing replica sets checked_at to the current UTC time; callers do not supply it. Invalid " +
-    "repository, commit or result values and any decision-record code_check write refuse with " +
+    "repository, commit, result, rev or paths values and any decision-record code_check write refuse with " +
     "`field: \"code_check\"`, preserving every field in the call. Entries live only in metadata: " +
     "content edits and other metadata writes leave them unchanged, and Markdown export omits them. " +
     "get_doc returns the entries, or []; list_docs caches them on regular entries, with absence meaning " +
-    "not cached yet. No removal or check history is provided.\n\n" +
+    "not cached yet. Earlier entries and older clients can omit rev and paths; those entries still return without the missing fields. No removal or check history is provided.\n\n" +
     "A title is replaced wholesale without changing the document UUID, so links, backlinks and annotations " +
     "survive a rename. A decision topic has one title, stored on its first record; a rename through any " +
     "record renames the topic by writing only that first record. Successors take the topic's title. " +

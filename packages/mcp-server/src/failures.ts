@@ -387,7 +387,7 @@ const RECOVERIES: Record<string, Recovery> = {
   },
   invalid_code_check: {
     recoveryClass: "manual",
-    guidance: "Supply code_check with only repository (owner/name), a full 40- or 64-character hexadecimal commit, and result (matches, ahead or drift). Omit checked_at; this replica supplies it. Nothing was written.",
+    guidance: "Read the page again with get_doc and compare it with code before recording code_check; do not just resend with a new rev. Supply repository (owner/name), a full 40- or 64-character hexadecimal commit, result (matches, ahead or drift), that page rev and optional paths. Paths must be 1–20 literal repo-relative files/folders, at most 200 characters each, with no leading /, .. segments or glob characters (* ? [ ] { }); trailing / marks a folder. Omit checked_at; this replica supplies it. Nothing was written.",
   },
   decision_code_check_unsupported: {
     recoveryClass: "manual",

@@ -6,27 +6,17 @@
  * shape of that — re-read the document whenever anything changes — hashes every
  * character of every block on every keystroke, for the revision in the header.
  * That is what these tests defend against, and they defend it where it can be
- * observed rather than by timing anything: `getBlocks` is the only read that
- * touches the whole document, so it may run once, to seed, and never again;
- * every later edit may re-read the block it landed in and no other.
- *
- * The schema module is spied through, not replaced — the derivation under test
- * is the real one, and only its calls are counted.
+ * observed rather than by timing anything: reading Y.XmlText deltas touches
+ * block content, so an edit must never reread an unchanged block's text.
  */
 
 import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 
-vi.mock("@uberblick/schema", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@uberblick/schema")>();
-  return { ...actual, getBlock: vi.fn(actual.getBlock), getBlocks: vi.fn(actual.getBlocks) };
-});
-
 import {
   appendBlock,
+  docRev,
   editBlock,
-  getBlock,
-  getBlocks,
   getBlocksFragment,
   initDoc,
   repairDuplicateBlocks,
@@ -40,6 +30,7 @@ interface Fixture {
   alpha: string;
   bravo: string;
   revs: string[];
+  alphaReads: () => number;
   stop: () => void;
 }
 
@@ -53,9 +44,9 @@ function fixture(
   const bravo = appendBlock(ydoc, bravoBlock);
   const revs: string[] = [];
   const stop = observeDocRev(ydoc, (rev) => revs.push(rev));
-  vi.mocked(getBlocks).mockClear();
-  vi.mocked(getBlock).mockClear();
-  return { ydoc, alpha, bravo, revs, stop };
+  const alphaText = (getBlocksFragment(ydoc).get(0) as Y.XmlElement).firstChild as Y.XmlText;
+  const reads = vi.spyOn(alphaText, "toDelta");
+  return { ydoc, alpha, bravo, revs, alphaReads: () => reads.mock.calls.length, stop };
 }
 
 describe("the document rev is recomputed incrementally", () => {
@@ -84,15 +75,14 @@ describe("the document rev is recomputed incrementally", () => {
     },
   ];
 
-  it.each(tableEdits)("refreshes the table rev after $name with one block read", ({ text, tableMapping }) => {
+  it.each(tableEdits)("refreshes the table rev after $name without rereading other blocks", ({ text, tableMapping }) => {
     const fix = fixture({ type: "table", text: tableText });
     try {
       editBlock(fix.ydoc, fix.bravo, tableText, text, tableMapping === undefined ? {} : { tableMapping });
 
       expect(fix.revs).toHaveLength(2);
       expect(fix.revs[1]).not.toBe(fix.revs[0]);
-      expect(vi.mocked(getBlocks)).not.toHaveBeenCalled();
-      expect(vi.mocked(getBlock).mock.calls.map((call) => call[1])).toEqual([fix.bravo]);
+      expect(fix.alphaReads()).toBe(0);
 
       // The independent seeding read comes after the bounded-work assertions.
       const fresh: string[] = [];
@@ -107,7 +97,9 @@ describe("the document rev is recomputed incrementally", () => {
   it("re-reads only the block an edit landed in", () => {
     const fix = fixture();
     try {
-      editBlock(fix.ydoc, fix.bravo, "bravo", "bravo, edited");
+      const bravoText = (getBlocksFragment(fix.ydoc).get(1) as Y.XmlElement).firstChild as Y.XmlText;
+      const bravoReads = vi.spyOn(bravoText, "toDelta");
+      bravoText.insert(bravoText.length, ", edited");
 
       // The rev moved, so the chrome is telling the truth about the change.
       expect(fix.revs).toHaveLength(2);
@@ -115,10 +107,9 @@ describe("the document rev is recomputed incrementally", () => {
 
       // And it cost one block, not the document: `alpha` was never re-read, and
       // the whole-document read did not happen a second time.
-      expect(vi.mocked(getBlocks)).not.toHaveBeenCalled();
-      expect(vi.mocked(getBlock).mock.calls.map((call) => call[1])).toEqual([
-        fix.bravo,
-      ]);
+      expect(fix.alphaReads()).toBe(0);
+      expect(bravoReads).toHaveBeenCalledTimes(1);
+      expect(fix.revs.at(-1)).toBe(docRev(fix.ydoc));
     } finally {
       fix.stop();
     }
@@ -127,14 +118,15 @@ describe("the document rev is recomputed incrementally", () => {
   it("re-reads only the new block when one is inserted", () => {
     const fix = fixture();
     try {
-      const charlie = appendBlock(fix.ydoc, { type: "paragraph", text: "charlie" });
+      const bravoText = (getBlocksFragment(fix.ydoc).get(1) as Y.XmlElement).firstChild as Y.XmlText;
+      const bravoReads = vi.spyOn(bravoText, "toDelta");
+      appendBlock(fix.ydoc, { type: "paragraph", text: "charlie" });
 
       expect(fix.revs).toHaveLength(2);
       expect(fix.revs[1]).not.toBe(fix.revs[0]);
-      expect(vi.mocked(getBlocks)).not.toHaveBeenCalled();
-      expect(vi.mocked(getBlock).mock.calls.map((call) => call[1])).toEqual([
-        charlie,
-      ]);
+      expect(fix.alphaReads()).toBe(0);
+      expect(bravoReads).not.toHaveBeenCalled();
+      expect(fix.revs.at(-1)).toBe(docRev(fix.ydoc));
     } finally {
       fix.stop();
     }
@@ -150,7 +142,7 @@ describe("the document rev is recomputed incrementally", () => {
       // stayed open, so the chrome would say nothing had changed.
       setBlockType(fix.ydoc, fix.alpha, "heading", { level: 2 });
       expect(fix.revs.at(-1)).not.toBe(fix.revs[0]);
-      expect(vi.mocked(getBlocks)).not.toHaveBeenCalled();
+      expect(fix.revs.at(-1)).toBe(docRev(fix.ydoc));
     } finally {
       fix.stop();
     }

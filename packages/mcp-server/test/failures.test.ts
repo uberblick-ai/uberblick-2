@@ -460,7 +460,7 @@ describe("the failure contract", () => {
     record((await rig.call("set_metadata", { uuid: regular.uuid, code_check: {} })).payload);
     record((await rig.call("set_metadata", {
       uuid: firstDecision.uuid,
-      code_check: { repository: "uberblick-ai/uberblick-2", commit: "a".repeat(40), result: "matches" },
+      code_check: { repository: "uberblick-ai/uberblick-2", commit: "a".repeat(40), result: "matches", rev: (await rig.ok("get_doc", { uuid: firstDecision.uuid })).rev },
     })).payload);
     record((await rig.call("create_doc", {
       title: "Wrong discussion kind",
