@@ -117,6 +117,29 @@
   --block-teal-bar: light-dark(oklch(0.55 0.07 185), oklch(0.7 0.07 185));
   --block-teal-tint: light-dark(oklch(0.97 0.006 185), oklch(0.22 0.012 185));
 
+  /* Ablauf diagrams take their palette from these --ab-* properties, so a
+     figure reads like the blocks above. Light tone ink sits at L 0.53, a
+     step under the block bars, to keep text at least 4.5:1 on its tint and
+     on the page. --ab-bg stays opaque: edge-crossing knockouts paint it. */
+  --ab-bg: var(--background);
+  --ab-ink: var(--foreground);
+  --ab-muted: var(--muted-foreground);
+  --ab-line: light-dark(oklch(0.88 0.006 75), oklch(0.3 0 0));
+  --ab-band: light-dark(oklch(0.93 0.01 75), oklch(0.18 0.006 65));
+  --ab-surface: var(--card);
+  --ab-neutral: var(--muted-foreground);
+  --ab-neutral-bg: light-dark(oklch(0.922 0 0), oklch(0.26 0 0));
+  --ab-agent: light-dark(oklch(0.53 0.07 185), var(--block-teal-bar));
+  --ab-agent-bg: var(--block-teal-tint);
+  --ab-system: light-dark(oklch(0.53 0.07 240), var(--block-blue-bar));
+  --ab-system-bg: var(--block-blue-tint);
+  --ab-done: light-dark(oklch(0.53 0.07 145), var(--block-green-bar));
+  --ab-done-bg: var(--block-green-tint);
+  --ab-rework: light-dark(oklch(0.53 0.07 65), oklch(0.7 0.07 65));
+  --ab-rework-bg: light-dark(oklch(0.97 0.006 65), oklch(0.22 0.012 65));
+  --ab-stop: light-dark(oklch(0.53 0.07 10), var(--block-rose-bar));
+  --ab-stop-bg: var(--block-rose-tint);
+
   /* Cursor labels and user tiles keep white ink in both appearances:
      the inline #rrggbb awareness palette in src/collab/identity.ts gives it
      at least 4.69:1 contrast on every color. */
