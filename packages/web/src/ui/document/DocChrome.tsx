@@ -349,6 +349,7 @@ export function DocMetaLine({
   segment,
   copyPath,
   meta,
+  actionTitle,
   archived,
   readOnly = false,
   contentReadOnly = false,
@@ -371,6 +372,7 @@ export function DocMetaLine({
   segment: string;
   copyPath?: string | undefined;
   meta: DocMeta | null;
+  actionTitle?: string | undefined;
   /** Whether the directory tombstones this document: no writes from here. */
   archived: boolean;
   /** Whether the document room currently refuses writes. */
@@ -429,7 +431,7 @@ export function DocMetaLine({
             </button>
             <DocumentActions
               key={`${connection.room}/${archived}`}
-              title={titleOf(meta)}
+              title={actionTitle || titleOf(meta)}
               uuid={meta.uuid}
               archived={archived}
               pinned={pinned}

@@ -266,6 +266,7 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
     : getDirectoryEntry(directoryConnection.ydoc, record.discussion)?.title || undefined;
   return <EditorPane {...editorProps}
     isDecisionTopic
+    actionTitle={current.title}
     decisionView
     copyPath={explicit || (linkedRecord === selected && record.recordArchived === true)
       ? decisionRecordPath(segment, topic.topic, selected) : topicPath}

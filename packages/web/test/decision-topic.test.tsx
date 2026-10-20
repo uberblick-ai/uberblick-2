@@ -998,6 +998,14 @@ describe("decision topic navigation and history", () => {
     expect(screen.getByRole("menuitem", { name: "Archive this record unavailable — it is the decision in force" }).getAttribute("aria-disabled")).toBe("true");
   });
 
+  it("names the displayed topic in a whole-topic confirmation while reading an older answer", async () => {
+    story();
+    const host = (await open(decisionRecordPath(WORKSPACE, FIRST, FIRST))).container;
+    await act(async () => fireEvent.keyDown(within(host).getByRole("button", { name: "Document actions" }), { key: "Enter" }));
+    await act(async () => screen.getByRole("menuitem", { name: "Archive topic" }).click());
+    expect(screen.getByRole("alertdialog").textContent).toContain("Archive topic “Current topic title”?");
+  });
+
   it("restores a topic before its independently archived answer", async () => {
     story();
     archiveDecisionRecord(directory(), room(sidebarRoom(WORKSPACE)).ydoc, REJECTED);

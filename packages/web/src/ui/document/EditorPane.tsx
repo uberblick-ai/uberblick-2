@@ -781,6 +781,7 @@ export function EditorPane({
   onTogglePin = null,
   onArchive = null,
   isDecisionTopic = false,
+  actionTitle,
   showArchiveRecord = false,
   onArchiveRecord = null,
   archiveRecordUnavailable = null,
@@ -830,6 +831,7 @@ export function EditorPane({
   onTogglePin?: (() => void) | null;
   onArchive?: (() => void) | null;
   isDecisionTopic?: boolean;
+  actionTitle?: string | undefined;
   showArchiveRecord?: boolean;
   onArchiveRecord?: (() => void) | null;
   archiveRecordUnavailable?: string | null;
@@ -939,6 +941,7 @@ export function EditorPane({
           catalogConnection={catalogConnection}
           segment={segment}
           meta={meta}
+          actionTitle={actionTitle}
           archived={archived}
           readOnly={!writable}
           contentReadOnly={decision}

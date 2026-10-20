@@ -803,6 +803,9 @@ export function App(): ReactElement {
     }
     const entry = getDirectoryEntry(directory.ydoc, selected);
     if (entry === null || decisionTopicArchived(directory.ydoc, selected)) return;
+    const freshTopic = entry.kind === "decision"
+      ? resolveDecisionTopics(directory.ydoc).find((candidate) => candidate.topic === (entry.topic ?? entry.uuid)) : undefined;
+    const title = (freshTopic === undefined ? getMeta(doc.ydoc).title : decisionCurrentRecord(freshTopic)?.title) || "Untitled";
     if (recordOnly) {
       if (!archiveDecisionRecord(directory.ydoc, sidebar.ydoc, selected)) return;
       if (workspace !== null && entry.kind === "decision") navigate(docPath(workspace.segment, entry.topic ?? entry.uuid));
@@ -811,7 +814,6 @@ export function App(): ReactElement {
       archiveDocument(directory.ydoc, sidebar.ydoc, selected);
     }
     const uuid = selected;
-    const title = getMeta(doc.ydoc).title || "Untitled";
     // Keep the original directory alive while Undo is offered, including
     // navigation to a document in another workspace.
     const held = acquireRoom(directory.room, defaultIdentity, { presence: false });
