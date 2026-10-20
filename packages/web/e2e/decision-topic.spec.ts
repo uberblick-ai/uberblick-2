@@ -577,7 +577,8 @@ for (const { touch, appearance } of [
     await expectMcp(() => writer.call<{ docs: { uuid: string }[] }>("list_docs", { kind: "decision", include_superseded: true }), result => {
       expect(result.docs.some(record => record.uuid === proposal.uuid)).toBe(false);
     });
-    await page.goto(new URL(`/${harness().workspace}/${first.uuid}/record/${proposal.uuid}`, page.url()).href);
+    await page.goto(new URL(`/${harness().workspace}/${proposal.uuid}`, page.url()).href);
+    await expect(page).toHaveURL(new URL(`/${harness().workspace}/${first.uuid}/record/${proposal.uuid}`, page.url()).href);
     await expect(editor(page)).toHaveText(answerText(proposal));
     await expect(page.locator(".ub-archived-banner")).toBeVisible();
     await expect(entry(page, proposal.uuid)).toHaveCount(0);

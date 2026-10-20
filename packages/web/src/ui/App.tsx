@@ -88,6 +88,7 @@ import { createDocumentSearchClient } from "../shell/document-search.js";
 import {
   allPath,
   canonicalPath,
+  decisionRecordPath,
   docIsHydrated,
   docPath,
   parseRoute,
@@ -858,6 +859,13 @@ export function App(): ReactElement {
     const canonical = canonicalPath(parseRoute(path, defaultWorkspace));
     if (canonical !== null && canonical !== path) navigate(canonical, "replace");
   }, [path, navigate, defaultWorkspace]);
+
+  // An archived answer keeps its explicit selection when it is restored.
+  useEffect(() => {
+    if (route.kind !== "doc" || topic === null || route.uuid === topic.topic ||
+      !topic.archivedRecords.some((record) => record.uuid === route.uuid)) return;
+    navigate(decisionRecordPath(route.workspace.segment, topic.topic, route.uuid), "replace");
+  }, [route, topic, navigate]);
 
   /**
    * parseRoute rebuilds workspace each render; splitting its short segment
