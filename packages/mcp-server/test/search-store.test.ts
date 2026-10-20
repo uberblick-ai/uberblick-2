@@ -62,6 +62,18 @@ function olderPeerIndex(db: DatabaseSync, doc: IndexedDoc, throughSeq: number, c
 }
 
 describe("search index upgrade", () => {
+  it("drops the directory dependency when a newer record becomes regular without weakening room cuts", () => {
+    const store = open();
+    const doc = row("1", "Orchard", { kind: "decision" });
+    expect(store.indexDoc(doc, 2, 7, 10)).toBe(true);
+    expect(store.indexDoc({ ...doc, kind: "regular", title: "Meadow" }, 3, 7, 0)).toBe(true);
+    expect(titles(store, "orchard")).toEqual([]);
+    expect(titles(store, "meadow")).toEqual(["Meadow"]);
+    expect(store.indexDoc({ ...doc, kind: "regular", title: "Stale" }, 2, 8, 0)).toBe(false);
+    expect(titles(store, "stale")).toEqual([]);
+    expect(titles(store, "meadow")).toEqual(["Meadow"]);
+  });
+
   it("refreshes a topic title at unchanged record cuts and rejects stale directory derivations", () => {
     const path = tempDatabasePath();
     const store = open(path);

@@ -27,11 +27,43 @@ afterEach(async () => {
 afterAll(removeTempDirs);
 
 describe("the index derivation cut", () => {
+  it("keeps untouched regular-page search rows across unrelated directory changes and reopen", async () => {
+    const databasePath = tempDatabasePath();
+    const first = await server(databasePath);
+    const created = await first.ok("create_doc", {
+      title: "Stable title", description: "An untouched page.",
+      blocks: [{ type: "paragraph", text: "Searchablebody" }],
+    });
+    const db = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const row = db.prepare("SELECT search_rowid FROM doc_index_seq WHERE uuid = ?");
+      const before = row.get(created.uuid);
+      expect(before?.search_rowid).toBeTypeOf("number");
+      const unrelated = await first.ok("create_doc", { title: "Unrelated", description: "Another page." });
+      await first.close();
+
+      const second = await server(databasePath);
+      await second.ok("list_docs", {});
+      expect(row.get(created.uuid)).toEqual(before);
+      expect(second.instance.replicas.indexReconciled(created.uuid)).toBe(true);
+      await second.ok("set_metadata", { uuid: unrelated.uuid, title: "Renamed unrelated" });
+      await second.close();
+
+      const third = await server(databasePath);
+      expect((await third.ok("search", { query: "Searchablebody" })).hits).toMatchObject([{ uuid: created.uuid }]);
+      expect(row.get(created.uuid)).toEqual(before);
+      expect(third.instance.replicas.indexReconciled(created.uuid)).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
   it("retries content rejected by a newer directory cut after idle peer catch-up", async () => {
     const databasePath = tempDatabasePath();
     const first = await server(databasePath);
     const created = await first.ok("create_doc", {
-      title: "Stable title", description: "Stable metadata.", blocks: [{ type: "paragraph", text: "Oldbody" }],
+      title: "Stable title", description: "Stable metadata.", kind: "decision",
+      blocks: [{ type: "paragraph", text: "Stable preview." }, { type: "paragraph", text: "Oldbody" }],
     });
     const unrelated = await first.ok("create_doc", { title: "Unrelated", description: "Another page." });
     const second = await server(databasePath);
@@ -54,7 +86,7 @@ describe("the index derivation cut", () => {
         const firstDirectory = first.instance.replicas.directory().doc;
         upsertDirectoryEntry(firstDirectory, { ...getDirectoryEntry(firstDirectory, unrelated.uuid)!, title: "Unrelated changed" });
         setWorkspaceName(first.instance.replicas.settings().doc, "A peer settings change");
-        const block = getBlocks(replica.doc)[0]!;
+        const block = getBlocks(replica.doc)[1]!;
         editBlock(replica.doc, block.id, block.text, "Newbody", { rev: block.rev });
       }
       return slice;
@@ -65,7 +97,7 @@ describe("the index derivation cut", () => {
       replay.mockRestore();
     }
     expect(injected).toBe(true);
-    expect(getBlocks(replica.doc)[0]?.text).toBe("Newbody");
+    expect(getBlocks(replica.doc)[1]?.text).toBe("Newbody");
     expect(replica.lastSeq).toBe(replica.indexedThroughSeq);
     expect(second.instance.store.search("Newbody", 10)).toEqual([]);
     expect(second.instance.replicas.indexReconciled(created.uuid)).toBe(false);

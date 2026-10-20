@@ -483,8 +483,8 @@ export class MirrorStore {
     markPending: Prepared<[string, number]>;
     clearPending: Prepared<[string, number]>;
     listPending: Prepared<[]>;
-    advanceIndex: Prepared<[string, number, number, number]>;
-    staleIndex: Prepared<[string, number, number, number]>;
+    advanceIndex: Prepared<[string, number, number, number, number]>;
+    staleIndex: Prepared<[string, number, number, number, number]>;
     putDoc: Prepared<[string, string, string, string]>;
     hasDoc: Prepared<[string]>;
     dropDoc: Prepared<[string]>;
@@ -654,7 +654,7 @@ export class MirrorStore {
           "github_refs_indexed = excluded.github_refs_indexed " +
           "WHERE doc_index_seq.indexed_through_seq <= excluded.indexed_through_seq " +
           "AND doc_index_seq.catalog_through_seq <= excluded.catalog_through_seq " +
-          "AND doc_index_seq.directory_through_seq <= excluded.directory_through_seq " +
+          "AND (? = 0 OR doc_index_seq.directory_through_seq <= excluded.directory_through_seq) " +
           "AND (doc_index_seq.indexed_through_seq < excluded.indexed_through_seq " +
           "OR doc_index_seq.catalog_through_seq < excluded.catalog_through_seq " +
           "OR doc_index_seq.directory_through_seq < excluded.directory_through_seq " +
@@ -670,7 +670,7 @@ export class MirrorStore {
       ),
       staleIndex: prepare(
         "SELECT 1 FROM doc_index_seq WHERE uuid = ? AND " +
-          "(indexed_through_seq > ? OR catalog_through_seq > ? OR directory_through_seq > ?)",
+          "(indexed_through_seq > ? OR catalog_through_seq > ? OR (? = 1 AND directory_through_seq > ?))",
       ),
       putDoc: prepare(
         "INSERT INTO doc_index (uuid, title, description, kind) VALUES (?, ?, ?, ?) " +
@@ -821,6 +821,9 @@ export class MirrorStore {
       catalogThroughSeq: number,
       directoryThroughSeq: number,
     ) => {
+      // A client can remove the decision kind. Its regular-page derivation no
+      // longer reads the directory, even if the prior row carried that cut.
+      const readsDirectory = doc.kind === "decision" ? 1 : 0;
       // Reject stale cuts before deleting rows; the winning cuts, metadata and
       // dependent rows must commit together.
       const written =
@@ -829,9 +832,10 @@ export class MirrorStore {
           throughSeq,
           catalogThroughSeq,
           directoryThroughSeq,
+          readsDirectory,
         ).changes > 0;
       if (!written) {
-        return this.statements.staleIndex.get(doc.uuid, throughSeq, catalogThroughSeq, directoryThroughSeq) === undefined;
+        return this.statements.staleIndex.get(doc.uuid, throughSeq, catalogThroughSeq, readsDirectory, directoryThroughSeq) === undefined;
       }
       this.statements.putDoc.run(doc.uuid, doc.title, doc.description, doc.kind ?? "regular");
       this.statements.dropTags.run(doc.uuid);

@@ -712,7 +712,7 @@ export class Replicas {
       },
       replica.indexedThroughSeq,
       this.settings().indexedThroughSeq,
-      directory.indexedThroughSeq,
+      meta.kind === "decision" ? directory.indexedThroughSeq : 0,
     );
     if (current === false) this.pace(replica.id, Date.now() + this.config.reconcileRetryMs);
   }

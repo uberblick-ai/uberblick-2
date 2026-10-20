@@ -1,4 +1,4 @@
-import { getDirectoryEntry, isDirectoryEntryDeleted } from "@uberblick/schema";
+import { getDirectoryEntry, isDirectoryEntryDeleted, resolveDecisionTopics } from "@uberblick/schema";
 import { z } from "zod";
 import { ToolError } from "../failures.js";
 import { githubReference } from "../github-reference.js";
@@ -21,11 +21,12 @@ export const findDecisionsOperation = operation("find_decisions", inputSchema, (
     );
   }
   const directory = replicas.directory().doc;
+  const topics = new Map(resolveDecisionTopics(directory).map(topic => [topic.topic, topic]));
   return {
     github_ref: reference,
     decisions: replicas.store.decisionsForGithub(reference).filter(record => !isDirectoryEntryDeleted(directory, record.uuid)).map((record) => {
       const stub = getDirectoryEntry(directory, record.uuid);
-      return { ...record, title: stub === null ? record.title : titleFor(record.uuid, stub), status: stub?.status ?? null };
+      return { ...record, title: stub === null ? record.title : titleFor(record.uuid, stub, topics), status: stub?.status ?? null };
     }),
   };
 });
