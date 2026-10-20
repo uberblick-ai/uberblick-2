@@ -20,7 +20,7 @@ import { useCallback, useState } from "react";
 import type { ReactElement } from "react";
 import * as Y from "yjs";
 import { Awareness, removeAwarenessStates } from "y-protocols/awareness";
-import { appendBlock, getBlocksFragment, initDoc, insertBlock } from "@uberblick/schema";
+import { appendBlock, docRev, getBlocksFragment, initDoc, insertBlock, setCodeCheck, setKind } from "@uberblick/schema";
 import { SyncPanel } from "../src/ui/status/SyncPanel.js";
 import { StatusLine } from "../src/ui/document/EditorPane.js";
 import { usePresence } from "../src/ui/hooks.js";
@@ -248,6 +248,57 @@ function TimestampSurfaces({
 describe("the sync panel renders the state this client holds", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("shows each repository's recorded comparison, including legacy and absent path facts", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    const commit = "a".repeat(40);
+    const checkedAt = Date.now();
+    setCodeCheck(fix.ydoc, { repository: "owner/matches", commit, result: "matches", rev: docRev(fix.ydoc), paths: ["src/first.ts", "src/second.ts", "README.md"] });
+    setCodeCheck(fix.ydoc, { repository: "owner/ahead", commit, result: "ahead", rev: "b".repeat(16), paths: ["src/only.ts"] });
+    setCodeCheck(fix.ydoc, { repository: "owner/drift", commit, result: "drift" });
+    act(() => void vi.advanceTimersByTime(120_000));
+    const { host, view } = mount(fix);
+    try {
+      expect(within(host).getAllByRole("heading").map((heading) => heading.textContent)).toEqual(["Sync", "Code", "Present now"]);
+      const groups = [...host.querySelectorAll<HTMLElement>(".ub-code-check")];
+      const byRepo = Object.fromEntries(groups.map((group) => [facts(group).Repository, facts(group)]));
+      expect(byRepo["owner/matches"]).toEqual({ Repository: "owner/matches", Compared: "aaaaaaaa · 2 minutes ago", Result: "Matches the code", "Page text": "Unchanged since then", "Looked at": "src/first.ts +2 more" });
+      expect(byRepo["owner/ahead"]).toMatchObject({ Result: "Ahead of the code (intended)", "Page text": "Edited since then", "Looked at": "src/only.ts" });
+      expect(byRepo["owner/drift"]).toMatchObject({ Result: "Differs from the code", "Page text": "Not recorded" });
+      expect(byRepo["owner/drift"]).not.toHaveProperty("Looked at");
+      for (const group of groups) {
+        const link = within(group).getByRole("link", { name: "aaaaaaaa" });
+        expect(link.getAttribute("href")).toBe(`https://github.com/${facts(group).Repository}/commit/${commit}`);
+        expect(link.getAttribute("target")).toBe("_blank");
+        expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+        const time = within(group).getByRole("time");
+        expect(time.getAttribute("datetime")).toBe(new Date(checkedAt).toISOString());
+        expect(time.getAttribute("title")).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(checkedAt));
+      }
+      act(() => void vi.advanceTimersByTime(60_000));
+      expect(facts(groups[0]!).Compared).toContain("3 minutes ago");
+    } finally { view.unmount(); }
+  });
+
+  it("follows content revisions and live checks without inventing code changes", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    const { host, view } = mount(fix);
+    try {
+      expect(within(host).queryByRole("heading", { name: "Code" })).toBeNull();
+      const input = { repository: "owner/project", commit: "a".repeat(40), result: "matches" as const };
+      act(() => { setCodeCheck(fix.ydoc, { ...input, rev: docRev(fix.ydoc) }); });
+      expect(facts(host)["Page text"]).toBe("Unchanged since then");
+      act(() => { blockText(fix.ydoc, 0).insert(0, "Edited immediately "); });
+      expect(facts(host)["Page text"]).toBe("Edited since then");
+      act(() => { setCodeCheck(fix.ydoc, { ...input, rev: docRev(fix.ydoc) }); });
+      expect(facts(host)["Page text"]).toBe("Unchanged since then");
+      act(() => { setKind(fix.ydoc, "decision"); });
+      expect(within(host).queryByRole("heading", { name: "Code" })).toBeNull();
+      expect(host.textContent).not.toMatch(/code changed/i);
+    } finally { view.unmount(); }
   });
 
   it("gives the status line's edit stamp an exact local time at every age", () => {

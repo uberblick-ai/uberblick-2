@@ -17,6 +17,7 @@ import {
   setTitle,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
+import type { CodeCheck } from "@uberblick/schema";
 import { DocumentTitle } from "./DocumentTitle.js";
 import { bindGuardedEditor } from "../../editor/guarded-binding.js";
 import { docLinkFromTarget } from "../../editor/doc-links.js";
@@ -311,6 +312,7 @@ export function StatusLine({
   documentLayout = false,
   statusLink,
   revision = null,
+  codeChecks = [],
 }: {
   connection: RoomConnection;
   /**
@@ -340,6 +342,7 @@ export function StatusLine({
   documentLayout?: boolean;
   statusLink?: ReactNode;
   revision?: string | null;
+  codeChecks?: readonly CodeCheck[] | undefined;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const served = hubAcked !== undefined;
@@ -403,6 +406,11 @@ export function StatusLine({
       </span>
     );
   const shownUpdatedAt = formattedUpdatedAt === null ? undefined : lastUpdated;
+  const codeNote = codeChecks.some((check) => check.result === "drift")
+    ? "Differs from code"
+    : revision !== null && codeChecks.some((check) => check.rev !== undefined && check.rev !== revision)
+      ? "Edited since code check"
+      : null;
   // Report the displayed timestamp before paint, paired with its room
   // including cleanup. The separately mounted details panel must not restart
   // its settle window or invent an omitted stamp.
@@ -419,10 +427,14 @@ export function StatusLine({
           lastConfirmedAt={activity.lastConfirmedAt} pulse={activity.pulse} syncDetails={syncDetails} />}
         <div className="ub-status-left">
           {updatedReading}
+          {codeNote !== null && <>
+            {updatedReading !== null && <span className="ub-status-separator" aria-hidden="true"> · </span>}
+            <span className="ub-code-check-note text-(--status-warning-ink)">{codeNote}</span>
+          </>}
           {refusal !== null && <span className="ub-status-word">{refusal}</span>}
           {unsaved && <span className="ub-not-saved">not saved</span>}
           {offline && <span className="ub-status-offline">Offline. Changes are saved on this device.</span>}
-          {Boolean(statusLink) && (updatedReading !== null || refusal !== null || unsaved || offline) &&
+          {Boolean(statusLink) && (updatedReading !== null || codeNote !== null || refusal !== null || unsaved || offline) &&
             <span className="ub-status-separator" aria-hidden="true"> · </span>}
           {statusLink}
         </div>
@@ -980,6 +992,7 @@ export function EditorPane({
           onActivatePresence={revealPresence}
           statusLink={statusLink}
           revision={revision}
+          codeChecks={meta?.code_check}
         />
         {beforeAnswer}
         <div className={answerClassName}>

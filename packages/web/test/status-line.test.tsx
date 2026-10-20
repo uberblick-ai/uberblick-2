@@ -9,6 +9,9 @@ import { SyncDot } from "../src/ui/status/SyncDot.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { NotSharedReason } from "../src/shell/document-search.js";
 import { toast } from "sonner";
+import { appendBlock, docRev, getMeta, initDoc, setCodeCheck } from "@uberblick/schema";
+import type { CodeCheck } from "@uberblick/schema";
+import { useDocMeta, useDocRev } from "../src/ui/hooks.js";
 
 const copy = vi.hoisted(() => vi.fn(async () => true));
 vi.mock("../src/editor/source-chrome.js", async (original) => ({
@@ -62,6 +65,46 @@ it.each(["offline", "error"] as const)("retires activity interrupted by %s witho
 });
 
 describe("the edited row", () => {
+  it("uses revision equality immediately, while check-only writes leave the note absent", () => {
+    const current = fixture();
+    initDoc(current.connection.ydoc, { uuid: "9f3c1a2b-0000-4000-8000-0123456789ab", title: "Checked page" });
+    appendBlock(current.connection.ydoc, { type: "paragraph", text: "Compared text" });
+    const input = { repository: "owner/project", commit: "a".repeat(40), result: "matches" as const };
+    function Header() {
+      const meta = useDocMeta(current.connection);
+      const revision = useDocRev(current.connection);
+      return <StatusLine connection={current.connection} presence={[]} lastUpdated={Date.now()} revision={revision} codeChecks={meta?.code_check} statusLink={<a href="#decisions">1 decision</a>} />;
+    }
+    const view = render(<Header />);
+    const note = () => view.container.querySelector(".ub-code-check-note")?.textContent;
+    const record = () => act(() => { setCodeCheck(current.connection.ydoc, { ...input, rev: docRev(current.connection.ydoc) }); });
+    record();
+    const checkedRevision = docRev(current.connection.ydoc);
+    record();
+    expect(docRev(current.connection.ydoc)).toBe(checkedRevision);
+    expect(note()).toBeUndefined();
+    act(() => { appendBlock(current.connection.ydoc, { type: "paragraph", text: "Immediate edit" }); });
+    expect(note()).toBe("Edited since code check");
+    expect(view.container.querySelector(".ub-status-left")?.textContent).toBe("Edited just now · Edited since code check · 1 decision");
+    record();
+    expect(note()).toBeUndefined();
+    expect(getMeta(current.connection.ydoc).code_check?.[0]?.rev).toBe(docRev(current.connection.ydoc));
+  });
+
+  it.each([
+    [[], null],
+    [[{ result: "matches" }], null],
+    [[{ result: "ahead", rev: "current" }], null],
+    [[{ result: "matches", rev: "old" }, { result: "ahead", rev: "current" }], "Edited since code check"],
+    [[{ result: "ahead", rev: "old" }, { result: "drift", rev: "current" }], "Differs from code"],
+    [[{ result: "drift" }, { result: "matches", rev: "old" }], "Differs from code"],
+  ] as const)("reduces repository checks %j to a single attention note", (entries, expected) => {
+    const codeChecks: CodeCheck[] = entries.map((entry, index) => ({ repository: `owner/repo${index}`, commit: "a".repeat(40), checked_at: new Date().toISOString(), ...entry }));
+    const view = render(<StatusLine connection={fixture().connection} presence={[]} lastUpdated={Date.now()} revision="current" codeChecks={codeChecks} />);
+    expect(view.container.querySelector(".ub-code-check-note")?.textContent ?? null).toBe(expected);
+    expect(view.container.textContent).not.toMatch(/code changed/i);
+  });
+
   it("keeps edit freshness visible before sync is known, with the existing exact-time hover", () => {
     const stamp = Date.now() - 120_000;
     const current = fixture();

@@ -92,6 +92,8 @@
   --status-success: light-dark(oklch(0.65 0.18 145), oklch(0.7 0.2 145));
   --status-warning: light-dark(oklch(0.75 0.18 75), oklch(0.8 0.2 75));
   --status-warning-subtle: light-dark(oklch(0.95 0.04 75), oklch(0.25 0.04 75));
+  /* Warning text needs darker light-mode ink than the fill/stroke accent. */
+  --status-warning-ink: light-dark(oklch(0.48 0.1 75), var(--status-warning));
 
   /* Running prose steps back from heading ink to preserve contrast hierarchy. */
   --prose-text: light-dark(oklch(0.3 0 0), oklch(0.92 0 0));
