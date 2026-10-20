@@ -1,6 +1,6 @@
 /**
- * Display client-held endpoint, room, provider and awareness facts plus the
- * shell's local /api/status answer. Never query the remote hub or wait on
+ * Display client-held sync, code-check and awareness facts plus the shell's
+ * local /api/status answer. Never query the remote hub or wait on
  * HTTP for local durability. Omit local-update count because this client has
  * no update log.
  */
@@ -14,9 +14,9 @@ import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
 import { statusReading } from "./status-reading.js";
 import { documentSyncFacts } from "./sync-facts.js";
 import type { RemotePresence } from "./doc-chrome.js";
-import { useRoomStatus } from "../hooks.js";
+import { useDocMeta, useDocRev, useRoomStatus } from "../hooks.js";
 import { PeerAvatar } from "./PeerAvatar.js";
-import { formatExactTimestamp } from "../timestamps.js";
+import { formatExactTimestamp, formatTimestamp, useTimestampClock } from "../timestamps.js";
 
 /** What a fact reads as before this client knows it. */
 const UNKNOWN = "—";
@@ -69,6 +69,10 @@ export function SyncPanel({
   lastUpdated?: number | undefined;
 }): ReactElement {
   const status = useRoomStatus(connection);
+  const meta = useDocMeta(connection);
+  const revision = useDocRev(connection);
+  const now = useTimestampClock();
+  const codeChecks = meta?.code_check ?? [];
   const raw = rawSyncState(status);
   const state = useCalmSyncState(raw, connection);
   // Show the same calm word as the opening status control; only redraw
@@ -126,6 +130,36 @@ export function SyncPanel({
           />
         )}
       </dl>
+      {codeChecks.length > 0 && (
+        <section className="mb-5">
+          <h2 className="m-0 mb-[0.4rem] ub-type-caption tracking-[0.06em] uppercase text-muted-foreground">Code</h2>
+          {codeChecks.map((check) => {
+            const checked = formatTimestamp(check.checked_at, now, true);
+            return (
+              <dl key={check.repository} className="ub-code-check m-0 mb-3 last:mb-0">
+                <Fact label="Repository" value={check.repository} />
+                <Fact label="Compared" value={
+                  <>
+                    <a href={`https://github.com/${check.repository}/commit/${check.commit}`} target="_blank" rel="noopener noreferrer" className="font-mono text-foreground underline">
+                      {check.commit.slice(0, 8)}
+                    </a>
+                    {checked !== null && <> · <time dateTime={checked.dateTime} title={checked.title}>{checked.label}</time></>}
+                  </>
+                } />
+                <Fact label="Result" value={
+                  <span className={check.result === "drift" ? "text-(--status-warning-ink)" : check.result === "ahead" ? "text-muted-foreground" : undefined}>
+                    {check.result === "matches" ? "Matches the code" : check.result === "ahead" ? "Ahead of the code (intended)" : "Differs from the code"}
+                  </span>
+                } />
+                <Fact label="Page text" value={check.rev === undefined ? "Not recorded" : check.rev === revision ? "Unchanged since then" : "Edited since then"} />
+                {check.paths !== undefined && check.paths.length > 0 && (
+                  <Fact label="Looked at" value={`${check.paths[0]}${check.paths.length > 1 ? ` +${check.paths.length - 1} more` : ""}`} mono />
+                )}
+              </dl>
+            );
+          })}
+        </section>
+      )}
       <h2 className="m-0 mb-[0.4rem] ub-type-caption tracking-[0.06em] uppercase text-muted-foreground">Present now</h2>
       {presence.length === 0 ? (
         <p className="ub-muted">Nobody else is in this room.</p>
