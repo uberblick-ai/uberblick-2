@@ -7,7 +7,9 @@ import { DatabaseSync } from "node:sqlite";
 import { PassThrough, Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { adminSocketPath } from "../src/admin-setup.js";
+import { HubClaimState } from "../src/hub-claim.js";
 import { backupDatabase, checkDatabaseIntegrity, restoreDatabase } from "../src/operator-database.js";
+import { HubDatabase } from "../src/persistence.js";
 
 const directories: string[] = [];
 const databases: DatabaseSync[] = [];
@@ -129,16 +131,41 @@ describe("offline restore", () => {
     expect(readdirSync(root)).toEqual(["hub.sqlite"]);
   });
 
-  it("restores stdin into an empty volume, including access state before documents", async () => {
-    const candidate = join(directory(), "access.sqlite");
+  it("restores a sealed installation without documents from stdin into an empty volume, keeping claiming closed", async () => {
+    const candidate = join(directory(), "sealed.sqlite");
     const db = new DatabaseSync(candidate);
-    db.exec("CREATE TABLE documents (name TEXT, data BLOB); CREATE TABLE hub_claim_state (claimed INTEGER); INSERT INTO hub_claim_state VALUES (1)");
+    db.exec(`CREATE TABLE documents (name TEXT UNIQUE, data BLOB);
+      CREATE TABLE hub_claim_state (id INTEGER PRIMARY KEY, default_workspace_id TEXT, unclaimed INTEGER NOT NULL);
+      INSERT INTO hub_claim_state VALUES (1, NULL, 0)`);
     db.close();
     const live = join(directory(), "hub.sqlite");
     await restoreDatabase(live, Readable.from(readFileSync(candidate)));
-    const restored = new DatabaseSync(live, { readOnly: true });
-    try { expect(restored.prepare("SELECT claimed FROM hub_claim_state").get()?.claimed).toBe(1); }
-    finally { restored.close(); }
+    const restored = new HubDatabase(live, () => {});
+    restored.open();
+    try {
+      expect(new HubClaimState(restored).state(true)).toEqual({ unclaimed: false, canClaim: false });
+      expect(restored.connection.prepare("SELECT * FROM hub_claim_state").all())
+        .toEqual([{ id: 1, default_workspace_id: null, unclaimed: 0 }]);
+      expect(restored.connection.prepare("SELECT count(*) AS count FROM documents").get()?.count).toBe(0);
+    } finally { restored.close(); }
+  });
+
+  it("restores a first-admin grant and receipt without documents over a document-only database", async () => {
+    const live = join(directory(), "hub.sqlite");
+    database(live, "old").close();
+    const candidate = join(directory(), "first-admin.sqlite");
+    const db = new DatabaseSync(candidate);
+    db.exec(`CREATE TABLE documents (name TEXT, data BLOB);
+      CREATE TABLE hub_principals (id TEXT, github_account_id TEXT, github_username TEXT);
+      CREATE TABLE hub_memberships (workspace_id TEXT, principal_id TEXT, role TEXT);
+      CREATE TABLE hub_admin_setup_grants (setup_id TEXT, workspace_id TEXT, principal_id TEXT,
+        github_account_id TEXT, github_username TEXT, had_documents INTEGER);
+      INSERT INTO hub_principals VALUES ('principal', '1234', 'first-admin');
+      INSERT INTO hub_memberships VALUES ('workspace', 'principal', 'admin');
+      INSERT INTO hub_admin_setup_grants VALUES ('setup', 'workspace', 'principal', '1234', 'first-admin', 0)`);
+    db.close();
+    await restoreDatabase(live, candidate);
+    expect(readFileSync(live)).toEqual(readFileSync(candidate));
   });
 
   it.each(["empty", "corrupt"])("refuses a %s candidate without touching the volume", async (kind) => {
@@ -149,8 +176,9 @@ describe("offline restore", () => {
     const candidate = join(directory(), "bad.sqlite");
     if (kind === "corrupt") writeFileSync(candidate, "not sqlite");
     else {
+      // An access table that exists but holds no rows is not state worth restoring.
       const db = new DatabaseSync(candidate);
-      db.exec("CREATE TABLE documents (name TEXT, data BLOB)");
+      db.exec("CREATE TABLE documents (name TEXT, data BLOB); CREATE TABLE hub_memberships (workspace_id TEXT, principal_id TEXT, role TEXT)");
       db.close();
     }
     await expect(restoreDatabase(live, candidate)).rejects.toThrow("live database was unchanged");

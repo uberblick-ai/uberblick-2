@@ -17,7 +17,6 @@ const osSensitive = [
   "data-sync",
   "doctor",
   "doctor-persistence",
-  "hub-backup-restore",
   "init-lock",
   "install",
   "launcher",
