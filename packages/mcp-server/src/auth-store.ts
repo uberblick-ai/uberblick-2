@@ -3,7 +3,7 @@ import { createPrivateKey } from "node:crypto";
 import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
-import { sanitizeGithubName } from "@uberblick/schema/github-identity";
+import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 export { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
 import { credentialsPath } from "./storage.js";
 export { CREDENTIALS_FILE, credentialsPath } from "./storage.js";
@@ -50,6 +50,13 @@ export interface HubLogins {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Optional public display data must never carry a credential or flow secret. */
+function sanitizeGithubName(value: unknown, ...secrets: (string | undefined)[]): string | undefined {
+  const name = sanitizeDeviceName(value);
+  return name !== undefined && !secrets.some((secret) => secret !== undefined && secret !== "" && name.includes(secret))
+    ? name : undefined;
+}
 
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

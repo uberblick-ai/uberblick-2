@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { sanitizeGithubName } from "@uberblick/schema/github-identity";
+import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import { type HubLogger, stderrLogger } from "./log.js";
 import { RequestBudget } from "./request-budget.js";
 
@@ -206,8 +206,10 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
       if (!this.active(request)) return { status: request.status as TerminalStatus };
       if (typeof identity.id !== "number" || !Number.isSafeInteger(identity.id) || identity.id < 1 ||
           typeof identity.login !== "string") throw new Error();
-      const name = sanitizeGithubName(identity.name, request.secret, request.deviceCode, result.access_token,
-        typeof result.refresh_token === "string" ? result.refresh_token : undefined);
+      const profileName = sanitizeDeviceName(identity.name);
+      const name = profileName === undefined || [request.secret, request.deviceCode, result.access_token, result.refresh_token]
+        .some((secret) => typeof secret === "string" && secret !== "" && profileName.includes(secret))
+        ? undefined : profileName;
       step = "issuance";
       const completed = this.complete({ accountId: String(identity.id), username: identity.login,
         ...(name === undefined ? {} : { name }) }, request.deviceName, request.context);
