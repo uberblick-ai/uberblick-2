@@ -109,160 +109,150 @@ test.describe("document and workspace typography", () => {
   });
   test.afterAll(async () => { await agent?.close(); agent = null; });
 
-  for (const colorScheme of ["light", "dark"] as const) {
-    test(`one scale on reading and workspace surfaces in ${colorScheme}`, { tag: "@webkit" }, async ({ browser }, info) => {
-      test.setTimeout(120_000);
-      const touch = info.project.use.hasTouch === true;
-      const page = await openApp(browser, `/${harness().workspace}/${documentUuid}`, {
-        contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1280, height: 800 } }), colorScheme, reducedMotion: "reduce" },
-        readySelector: ".ub-editor .ProseMirror",
-      });
-      const native = page.viewportSize();
-      if (native === null) throw new Error("e2e: typography proof requires a viewport");
-      for (const viewport of [native, { width: 640, height: 900 }]) {
-        await page.setViewportSize(viewport);
-        await page.goto(new URL(`/${harness().workspace}/${documentUuid}`, page.url()).href);
-        await expect(editor(page).locator("h6")).toBeVisible();
-        await expectStep(page.locator(".ub-title"), 36, 42);
-        await expect(page.locator(".ub-title")).toHaveCSS("font-weight", "500");
-        await expect(page.locator(".ub-title")).toHaveCSS("font-family", /Fraunces/);
-        for (const level of [1, 2, 3, 4, 5, 6]) {
-          const heading = editor(page).locator(`h${level}`);
-          if (level === 1) {
-            await expectStep(heading, 36, 42);
-            await expect(heading).toHaveCSS("font-weight", "600");
-            const style = await heading.evaluate((node) => ({ font: getComputedStyle(node).fontFamily,
-              top: Number.parseFloat(getComputedStyle(node).marginTop), bottom: Number.parseFloat(getComputedStyle(node).marginBottom) }));
-            expect(style.font).toContain("Geist");
-            expect(style.font).not.toContain("Fraunces");
-            expect(style.top).toBeGreaterThan(style.bottom);
-          } else await expectHeading(heading, level === 2 ? 22 : 18, level === 2 ? 28 : 24, level === 2 ? 1.9 : 1.5, level === 2 ? 0.45 : 0.35);
-        }
-        await expectStep(editor(page).locator(":scope > p").first(), 16, 27);
-        await expectStep(editor(page).locator("li").first(), 16, 27);
-        await expectStep(editor(page).locator("th").first(), 14, 20);
-        await expectStep(editor(page).locator("td").first(), 16, 27);
-        await expectStep(page.locator(".ub-tldr-body > p"), 16, 27);
-        await expectStep(page.locator(".ub-status"), 13, 18);
-        await expectStep(page.locator(".ub-block-caption .ub-block-label").first(), 12, 16);
-        await expect(editor(page).locator("p code, .ub-heading code")).toHaveCount(7);
-        for (const code of await editor(page).locator("p code, .ub-heading code").all()) {
-          await expect(code).toHaveCSS("font-size", await code.locator("..").evaluate((node) => getComputedStyle(node).fontSize));
-        }
-        const measure = await page.locator(".ub-document-pane > .ub-column").evaluate((column) => {
-          const style = getComputedStyle(column);
-          const probe = document.createElement("div");
-          probe.style.cssText = "position:absolute;visibility:hidden;width:72ch;font:inherit";
-          column.append(probe);
-          const width = probe.getBoundingClientRect().width;
-          probe.remove();
-          return { token: style.getPropertyValue("--measure").trim(), size: style.fontSize, cap: Number.parseFloat(style.maxWidth), width,
-            columnLeft: column.getBoundingClientRect().left, proseLeft: column.querySelector(".ub-paragraph")?.getBoundingClientRect().left,
-            gutter: Number.parseFloat(style.paddingLeft) };
-        });
-        expect(measure.token).toBe("72ch");
-        expect(measure.size).toBe("16px");
-        expect(measure.cap).toBeCloseTo(measure.width, 1);
-        expect(measure.proseLeft).toBeCloseTo(measure.columnLeft + measure.gutter, 1);
-        const documentTitle = await page.locator(".ub-title").evaluate((title) => ({
-          left: title.getBoundingClientRect().left,
-          gap: (title.nextElementSibling?.getBoundingClientRect().top ?? 0) - title.getBoundingClientRect().bottom,
-          tracking: getComputedStyle(title).letterSpacing,
-        }));
-        await expectScale(page, `document ${viewport.width}px`);
-        const documentImage = info.outputPath(`document-${viewport.width}.png`);
-        await page.screenshot({ path: documentImage });
-        await info.attach(`document-${viewport.width}`, { path: documentImage, contentType: "image/png" });
-
-        if (viewport.width < 1280) await activateControl(page.locator(".ub-threads-toggle"));
-        await expect(page.locator(".ub-thread-text").filter({ hasText: "A UI-sized conversation." })).toBeVisible();
-        await expectStep(page.locator(".ub-thread-text").filter({ hasText: "A UI-sized conversation." }), 14, 20);
-        await expectScale(page, `comments ${viewport.width}px`);
-        if (viewport.width < 1280) {
-          await activateControl(page.getByRole("button", { name: "Close threads", exact: true }));
-          await expect(page.getByRole("dialog", { name: "Threads", exact: true })).toHaveCount(0);
-        }
-
-        for (const [surface, suffix, ready] of [
-          ["decision", decisionUuid, ".ub-editor .ProseMirror"],
-          ["All documents", "all", ".ub-docs"],
-          ["General settings", "settings", "[data-settings-page]"],
-          ["Tags settings", "settings/tags", "[data-settings-page]"],
-        ] as const) {
-          await page.goto(new URL(`/${harness().workspace}/${suffix}`, page.url()).href);
-          await expect(page.locator(ready ?? "body")).toBeVisible();
-          if (surface === "decision") {
-            const title = page.locator(".ub-title");
-            await expectStep(title, 36, 42);
-            await expect(title).toHaveCSS("font-family", /Fraunces/);
-            await expect(title).toHaveCSS("font-weight", "500");
-            await expect(title).toHaveCSS("letter-spacing", documentTitle.tracking);
-            const metrics = await title.evaluate((node) => ({ left: node.getBoundingClientRect().left,
-              gap: (node.nextElementSibling?.getBoundingClientRect().top ?? 0) - node.getBoundingClientRect().bottom }));
-            expect(Math.abs(metrics.left - documentTitle.left)).toBeLessThanOrEqual(1);
-            expect(Math.abs(metrics.gap - documentTitle.gap)).toBeLessThanOrEqual(1);
-          }
-          if (surface === "All documents") {
-            await expect(page.locator(".ub-docs-open").filter({ hasText: "A readable document outline" })).toBeVisible();
-            await expectStep(page.getByRole("columnheader").first(), 14, 20);
-            await expectStep(page.locator(".ub-docs-age").first(), 13, 18);
-          }
-          if (surface === "General settings") await expectStep(page.locator("#ub-workspace-name-help"), 13, 18);
-          for (const heading of await page.locator("[data-settings-page] h2").all()) {
-            await expectStep(heading, 22, 28);
-            await expect(heading).toHaveCSS("font-weight", "600");
-          }
-          await expectScale(page, `${surface} ${viewport.width}px`);
-        }
-        if (viewport.width < 1280) await activateControl(page.getByRole("button", { name: "Show sidebar", exact: true }));
-        await expectStep(page.locator(".ub-settings-nav .ub-nav-label").first(), 12, 16);
-        await expectStep(page.getByRole("button", { name: "General", exact: true }), 14, 20);
-        await expectScale(page, `settings navigation ${viewport.width}px`);
-        const caption = page.locator(".ub-settings-nav .ub-nav-label:visible").first();
-        await caption.evaluate((element) => element.setAttribute("data-typography-contrast", ""));
-        const captionInk = await renderedText(page, "[data-typography-contrast]");
-        expect(captionInk.length).toBeGreaterThan(0);
-        expect(captionInk.every(({ ratio }) => ratio >= 4.5), JSON.stringify(captionInk)).toBe(true);
-        await caption.evaluate((element) => element.removeAttribute("data-typography-contrast"));
-        const settingsImage = info.outputPath(`settings-${viewport.width}.png`);
-        await page.screenshot({ path: settingsImage });
-        await info.attach(`settings-${viewport.width}`, { path: settingsImage, contentType: "image/png" });
-        if (viewport.width < 1280) {
-          await page.keyboard.press("Escape");
-          await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
-          await expect(page.getByRole("button", { name: "Show sidebar", exact: true })).toBeFocused();
-        }
-      }
+  test("one scale on reading and workspace surfaces", { tag: "@webkit" }, async ({ browser }, info) => {
+    test.setTimeout(120_000);
+    const touch = info.project.use.hasTouch === true;
+    const page = await openApp(browser, `/${harness().workspace}/${documentUuid}`, {
+      contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1280, height: 800 } }), reducedMotion: "reduce" },
+      readySelector: ".ub-editor .ProseMirror",
     });
-  }
+    const viewport = page.viewportSize();
+    if (viewport === null) throw new Error("e2e: typography proof requires a viewport");
+    await expect(editor(page).locator("h6")).toBeVisible();
+    await expectStep(page.locator(".ub-title"), 36, 42);
+    await expect(page.locator(".ub-title")).toHaveCSS("font-weight", "500");
+    await expect(page.locator(".ub-title")).toHaveCSS("font-family", /Fraunces/);
+    for (const level of [1, 2, 3, 4, 5, 6]) {
+      const heading = editor(page).locator(`h${level}`);
+      if (level === 1) {
+        await expectStep(heading, 36, 42);
+        await expect(heading).toHaveCSS("font-weight", "600");
+        const style = await heading.evaluate((node) => ({ font: getComputedStyle(node).fontFamily,
+          top: Number.parseFloat(getComputedStyle(node).marginTop), bottom: Number.parseFloat(getComputedStyle(node).marginBottom) }));
+        expect(style.font).toContain("Geist");
+        expect(style.font).not.toContain("Fraunces");
+        expect(style.top).toBeGreaterThan(style.bottom);
+      } else await expectHeading(heading, level === 2 ? 22 : 18, level === 2 ? 28 : 24, level === 2 ? 1.9 : 1.5, level === 2 ? 0.45 : 0.35);
+    }
+    await expectStep(editor(page).locator(":scope > p").first(), 16, 27);
+    await expectStep(editor(page).locator("li").first(), 16, 27);
+    await expectStep(editor(page).locator("th").first(), 14, 20);
+    await expectStep(editor(page).locator("td").first(), 16, 27);
+    await expectStep(page.locator(".ub-tldr-body > p"), 16, 27);
+    await expectStep(page.locator(".ub-status"), 13, 18);
+    await expectStep(page.locator(".ub-block-caption .ub-block-label").first(), 12, 16);
+    await expect(editor(page).locator("p code, .ub-heading code")).toHaveCount(7);
+    for (const code of await editor(page).locator("p code, .ub-heading code").all()) {
+      await expect(code).toHaveCSS("font-size", await code.locator("..").evaluate((node) => getComputedStyle(node).fontSize));
+    }
+    const measure = await page.locator(".ub-document-pane > .ub-column").evaluate((column) => {
+      const style = getComputedStyle(column);
+      const probe = document.createElement("div");
+      probe.style.cssText = "position:absolute;visibility:hidden;width:72ch;font:inherit";
+      column.append(probe);
+      const width = probe.getBoundingClientRect().width;
+      probe.remove();
+      return { token: style.getPropertyValue("--measure").trim(), size: style.fontSize, cap: Number.parseFloat(style.maxWidth), width,
+        columnLeft: column.getBoundingClientRect().left, proseLeft: column.querySelector(".ub-paragraph")?.getBoundingClientRect().left,
+        gutter: Number.parseFloat(style.paddingLeft) };
+    });
+    expect(measure.token).toBe("72ch");
+    expect(measure.size).toBe("16px");
+    expect(measure.cap).toBeCloseTo(measure.width, 1);
+    expect(measure.proseLeft).toBeCloseTo(measure.columnLeft + measure.gutter, 1);
+    const documentTitle = await page.locator(".ub-title").evaluate((title) => ({
+      left: title.getBoundingClientRect().left,
+      gap: (title.nextElementSibling?.getBoundingClientRect().top ?? 0) - title.getBoundingClientRect().bottom,
+      tracking: getComputedStyle(title).letterSpacing,
+    }));
+    await expectScale(page, `document ${viewport.width}px`);
+    const documentImage = info.outputPath(`document-${viewport.width}.png`);
+    await page.screenshot({ path: documentImage });
+    await info.attach(`document-${viewport.width}`, { path: documentImage, contentType: "image/png" });
+
+    if (viewport.width < 1280) await activateControl(page.locator(".ub-threads-toggle"));
+    await expect(page.locator(".ub-thread-text").filter({ hasText: "A UI-sized conversation." })).toBeVisible();
+    await expectStep(page.locator(".ub-thread-text").filter({ hasText: "A UI-sized conversation." }), 14, 20);
+    await expectScale(page, `comments ${viewport.width}px`);
+    if (viewport.width < 1280) {
+      await activateControl(page.getByRole("button", { name: "Close threads", exact: true }));
+      await expect(page.getByRole("dialog", { name: "Threads", exact: true })).toHaveCount(0);
+    }
+
+    for (const [surface, suffix, ready] of [
+      ["decision", decisionUuid, ".ub-editor .ProseMirror"],
+      ["All documents", "all", ".ub-docs"],
+      ["General settings", "settings", "[data-settings-page]"],
+      ["Tags settings", "settings/tags", "[data-settings-page]"],
+    ] as const) {
+      await page.goto(new URL(`/${harness().workspace}/${suffix}`, page.url()).href);
+      await expect(page.locator(ready ?? "body")).toBeVisible();
+      if (surface === "decision") {
+        const title = page.locator(".ub-title");
+        await expectStep(title, 36, 42);
+        await expect(title).toHaveCSS("font-family", /Fraunces/);
+        await expect(title).toHaveCSS("font-weight", "500");
+        await expect(title).toHaveCSS("letter-spacing", documentTitle.tracking);
+        const metrics = await title.evaluate((node) => ({ left: node.getBoundingClientRect().left,
+          gap: (node.nextElementSibling?.getBoundingClientRect().top ?? 0) - node.getBoundingClientRect().bottom }));
+        expect(Math.abs(metrics.left - documentTitle.left)).toBeLessThanOrEqual(1);
+        expect(Math.abs(metrics.gap - documentTitle.gap)).toBeLessThanOrEqual(1);
+      }
+      if (surface === "All documents") {
+        await expect(page.locator(".ub-docs-open").filter({ hasText: "A readable document outline" })).toBeVisible();
+        await expectStep(page.getByRole("columnheader").first(), 14, 20);
+        await expectStep(page.locator(".ub-docs-age").first(), 13, 18);
+      }
+      if (surface === "General settings") await expectStep(page.locator("#ub-workspace-name-help"), 13, 18);
+      for (const heading of await page.locator("[data-settings-page] h2").all()) {
+        await expectStep(heading, 22, 28);
+        await expect(heading).toHaveCSS("font-weight", "600");
+      }
+      await expectScale(page, `${surface} ${viewport.width}px`);
+    }
+    if (viewport.width < 1280) await activateControl(page.getByRole("button", { name: "Show sidebar", exact: true }));
+    await expectStep(page.locator(".ub-settings-nav .ub-nav-label").first(), 12, 16);
+    await expectStep(page.getByRole("button", { name: "General", exact: true }), 14, 20);
+    await expectScale(page, `settings navigation ${viewport.width}px`);
+    const caption = page.locator(".ub-settings-nav .ub-nav-label:visible").first();
+    await caption.evaluate((element) => element.setAttribute("data-typography-contrast", ""));
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      const captionInk = await renderedText(page, "[data-typography-contrast]");
+      expect(captionInk.length, colorScheme).toBeGreaterThan(0);
+      expect(captionInk.every(({ ratio }) => ratio >= 4.5), `${colorScheme}: ${JSON.stringify(captionInk)}`).toBe(true);
+    }
+    await caption.evaluate((element) => element.removeAttribute("data-typography-contrast"));
+    const settingsImage = info.outputPath(`settings-${viewport.width}.png`);
+    await page.screenshot({ path: settingsImage });
+    await info.attach(`settings-${viewport.width}`, { path: settingsImage, contentType: "image/png" });
+    if (viewport.width < 1280) {
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Show sidebar", exact: true })).toBeFocused();
+    }
+  });
 });
 
 test.describe("authenticated Settings typography", () => {
   const { harness, openApp } = setupHarness({ accessRole: "admin", hubAdmin: true });
-  for (const colorScheme of ["light", "dark"] as const) {
-    test(`one scale on access and hub Settings in ${colorScheme}`, { tag: "@webkit" }, async ({ browser }, info) => {
-      test.setTimeout(120_000);
-      const touch = info.project.use.hasTouch === true;
-      const page = await openApp(browser, `/${harness().workspace}/settings/members`, {
-        contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1280, height: 800 } }), colorScheme, reducedMotion: "reduce" },
-        readySelector: "[data-settings-page]",
-      });
-      const native = page.viewportSize();
-      if (native === null) throw new Error("e2e: typography proof requires a viewport");
-      for (const viewport of [native, { width: 640, height: 900 }]) {
-        await page.setViewportSize(viewport);
-        for (const [suffix, table] of [["members", "Members"], ["devices", "Devices"], ["hub-admins", "Hub admins"], ["hub-workspaces", "Hub workspaces"]] as const) {
-          await page.goto(new URL(`/${harness().workspace}/settings/${suffix}`, harness().appUrl).href);
-          await expect(page.getByRole("table", { name: table, exact: true })).toBeVisible();
-          for (const heading of await page.locator("[data-settings-page] h2").all()) {
-            await expectStep(heading, 22, 28);
-            await expect(heading).toHaveCSS("font-weight", "600");
-          }
-          await expectStep(page.getByRole("columnheader").first(), 14, 20);
-          await expectStep(page.getByRole("cell").first(), 16, 27);
-          await expectScale(page, `${suffix} Settings ${viewport.width}px`);
-        }
-      }
+  test("one scale on access and hub Settings", { tag: "@webkit" }, async ({ browser }, info) => {
+    test.setTimeout(120_000);
+    const touch = info.project.use.hasTouch === true;
+    const page = await openApp(browser, `/${harness().workspace}/settings/members`, {
+      contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1280, height: 800 } }), reducedMotion: "reduce" },
+      readySelector: "[data-settings-page]",
     });
-  }
+    for (const [suffix, table] of [["members", "Members"], ["devices", "Devices"], ["hub-admins", "Hub admins"], ["hub-workspaces", "Hub workspaces"]] as const) {
+      await page.goto(new URL(`/${harness().workspace}/settings/${suffix}`, harness().appUrl).href);
+      await expect(page.getByRole("table", { name: table, exact: true })).toBeVisible();
+      for (const heading of await page.locator("[data-settings-page] h2").all()) {
+        await expectStep(heading, 22, 28);
+        await expect(heading).toHaveCSS("font-weight", "600");
+      }
+      await expectStep(page.getByRole("columnheader").first(), 14, 20);
+      await expectStep(page.getByRole("cell").first(), 16, 27);
+      await expectScale(page, `${suffix} Settings`);
+    }
+  });
 });

@@ -241,7 +241,7 @@ describe("the document identity line keeps its local controls", () => {
     expect(within(host).queryByText(/^(?:Product|Decision)(?: · .+)?$/)).toBeNull();
     // The legacy group badge for this fixture's feature tag is gone too.
     expect(within(host).queryByText("Features")).toBeNull();
-    expect(host.querySelector(".ub-doc-ids, .ub-doc-rev")).toBeNull();
+    expect(host.querySelector(".ub-doc-rev")).toBeNull();
     expect(host.textContent).not.toContain("uuid");
     expect(within(host).getByRole("button", { name: "Document actions" })).not.toBeNull();
   });

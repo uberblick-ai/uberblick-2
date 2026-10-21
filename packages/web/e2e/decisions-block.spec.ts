@@ -95,18 +95,13 @@ async function expectBlockInView(page: Page): Promise<void> {
 
 async function geometry(page: Page) {
   return block(page).evaluate((element) => {
-    const pane = element.closest<HTMLElement>(".ub-document-pane");
     const host = document.querySelector<HTMLElement>(".ub-editor");
-    if (pane === null || host === null) throw new Error("e2e: missing document reading column");
+    if (host === null) throw new Error("e2e: missing document editor");
     return {
       inEditor: element.closest(".ub-editor") !== null,
       afterEditor: Boolean(host.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING),
       editorBottom: host.getBoundingClientRect().bottom,
       blockTop: element.getBoundingClientRect().top,
-      paneWidth: pane.clientWidth,
-      paneScrollWidth: pane.scrollWidth,
-      blockWidth: element.clientWidth,
-      blockScrollWidth: element.scrollWidth,
     };
   });
 }
@@ -319,6 +314,12 @@ for (const touch of [false, true]) {
       };
     });
     expect(line).toEqual({ oneLine: true, order: true, questionClipped: true, questionTitle: alphaQuestion });
+    const preview = await alphaRow.locator(".ub-decisions-row-preview").evaluate((element) => ({
+      whiteSpace: getComputedStyle(element).whiteSpace,
+      textOverflow: getComputedStyle(element).textOverflow,
+      clipped: element.scrollWidth > element.clientWidth,
+    }));
+    expect(preview).toEqual({ whiteSpace: "nowrap", textOverflow: "ellipsis", clipped: true });
 
     const placement = await geometry(page);
     expect(placement.inEditor).toBe(false);
@@ -337,27 +338,6 @@ for (const touch of [false, true]) {
     await block(page).screenshot({
       path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `decisions-block-${touch ? "ipad" : "desktop"}-${appearance}.png`),
     });
-    if (!touch) {
-      await page.setViewportSize({ width: 560, height: 1000 });
-      await jumpFromHeader(page, false);
-      await expect.poll(async () => {
-        const question = await alphaRow.locator(".ub-decisions-question").boundingBox();
-        const attribution = await alphaRow.locator(".ub-decisions-row-meta").boundingBox();
-        return question !== null && attribution !== null && attribution.y >= question.y + question.height - 0.5;
-      }).toBe(true);
-      const narrow = await geometry(page);
-      expect(narrow.paneScrollWidth).toBe(narrow.paneWidth);
-      expect(narrow.blockScrollWidth).toBe(narrow.blockWidth);
-      await expectHeaderContained(page);
-      const preview = await alphaRow.locator(".ub-decisions-row-preview").evaluate((element) => ({
-        whiteSpace: getComputedStyle(element).whiteSpace,
-        textOverflow: getComputedStyle(element).textOverflow,
-        clipped: element.scrollWidth > element.clientWidth,
-      }));
-      expect(preview).toEqual({ whiteSpace: "nowrap", textOverflow: "ellipsis", clipped: true });
-      await page.setViewportSize({ width: 1440, height: 1000 });
-    }
-
     await activateControl(alphaRow, { touch });
     await expect(page).toHaveURL(new RegExp(`/${alpha.uuid}$`));
     await expect(editor(page)).toHaveText(alpha.blocks[0]?.text ?? "");

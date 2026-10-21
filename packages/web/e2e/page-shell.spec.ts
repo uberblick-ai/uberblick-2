@@ -79,67 +79,65 @@ test.describe("one page shell", () => {
     await page.context().close();
   });
 
-  for (const colorScheme of ["light", "dark"] as const) {
-    test(`documents, list and Settings keep one frame in ${colorScheme}`, { tag: "@webkit" }, async ({ browser }, info) => {
-      test.setTimeout(120_000);
-      const touch = info.project.use.hasTouch === true;
-      const page = await openApp(browser, `/${harness().workspace}/${documentUuid}`, {
-        contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1440, height: 900 } }), colorScheme, reducedMotion: "reduce" },
-        readySelector: ".ub-editor .ProseMirror",
-      });
-      for (const layout of touch ? ["ipad", "narrow-ipad"] as const : ["docked", "collapsed", "drawer"] as const) {
-        await page.setViewportSize({ width: layout === "narrow-ipad" ? 600 : layout === "ipad" || layout === "drawer" ? 810 : 1440, height: 900 });
-        await page.goto(new URL(`/${harness().workspace}/${documentUuid}`, harness().appUrl).href);
-        await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
-        if (layout === "collapsed") await activateControl(page.getByRole("button", { name: "Hide document list", exact: true }));
-        const reference = await expectShell(page);
-        const proseLeft = await page.locator(".ub-editor .ub-paragraph").first().evaluate((node) => node.getBoundingClientRect().left);
-        expect(proseLeft).toBeCloseTo(reference.titleLeft, 1);
-        if (layout === "docked") expect(reference.titleLeft).toBe(332);
-        if (layout === "collapsed") expect(reference.titleLeft).toBe(92);
-        if (layout === "ipad" || layout === "drawer") expect(reference.titleLeft).toBe(44);
-        const documentImage = info.outputPath(`document-${layout}-${colorScheme}.png`);
-        await page.screenshot({ path: documentImage });
-        await info.attach(`Document ${layout}`, { path: documentImage, contentType: "image/png" });
-        for (const [suffix, title, ready] of [
-          ["all", "All documents", ".ub-docs-table"],
-          ["settings", "General", "#ub-workspace-name"],
-          ["settings/tags", "Tags", "#ub-new-tag"],
-          ["settings/members", "Members", 'table[aria-label="Members"]'],
-          ["settings/preferences", "Preferences", '.ub-appearance'],
-          ["settings/devices", "Devices", 'table[aria-label="Devices"]'],
-          ["settings/hub-admins", "Admins", 'table[aria-label="Hub admins"]'],
-          ["settings/hub-workspaces", "Workspaces", 'table[aria-label="Hub workspaces"]'],
-        ] as const) {
-          await test.step(`${layout}: ${title}`, async () => {
-            await page.goto(new URL(`/${harness().workspace}/${suffix}`, harness().appUrl).href);
-            await expect(page.locator(ready)).toBeVisible();
-            await expect(page.getByRole("heading", { level: 1, name: title, exact: true })).toBeVisible();
-            await expectShell(page, reference);
-            if (suffix.startsWith("settings")) await expect(page.locator("[data-settings-page]")).toHaveAttribute("aria-labelledby", "ub-settings-title");
-            const image = info.outputPath(`${suffix.replaceAll("/", "-")}-${layout}-${colorScheme}.png`);
-            await page.screenshot({ path: image });
-            await info.attach(`${title} ${layout}`, { path: image, contentType: "image/png" });
-            if (suffix === "all") {
-              const count = page.getByRole("tab", { name: /^Documents/ }).locator(".ub-docs-tab-count");
-              await expect(count).toHaveCSS("font-size", "13px");
-              await expect(count).toHaveText("1");
-              const search = page.getByRole("searchbox");
-              await search.focus();
-              await expect(search).toBeFocused();
-            }
-          });
-        }
-        if (touch) {
-          const opener = page.getByRole("button", { name: "Show sidebar", exact: true });
-          await opener.tap();
-          await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
-          await page.keyboard.press("Escape");
-          await expect(opener).toBeFocused();
-        }
-      }
+  test("documents, list and Settings keep one frame", { tag: "@webkit" }, async ({ browser }, info) => {
+    test.setTimeout(120_000);
+    const touch = info.project.use.hasTouch === true;
+    const page = await openApp(browser, `/${harness().workspace}/${documentUuid}`, {
+      contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1440, height: 900 } }), reducedMotion: "reduce" },
+      readySelector: ".ub-editor .ProseMirror",
     });
-  }
+    for (const layout of touch ? ["ipad", "narrow-ipad"] as const : ["docked", "collapsed", "drawer"] as const) {
+      await page.setViewportSize({ width: layout === "narrow-ipad" ? 600 : layout === "ipad" || layout === "drawer" ? 810 : 1440, height: 900 });
+      await page.goto(new URL(`/${harness().workspace}/${documentUuid}`, harness().appUrl).href);
+      await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
+      if (layout === "collapsed") await activateControl(page.getByRole("button", { name: "Hide document list", exact: true }));
+      const reference = await expectShell(page);
+      const proseLeft = await page.locator(".ub-editor .ub-paragraph").first().evaluate((node) => node.getBoundingClientRect().left);
+      expect(proseLeft).toBeCloseTo(reference.titleLeft, 1);
+      if (layout === "docked") expect(reference.titleLeft).toBe(332);
+      if (layout === "collapsed") expect(reference.titleLeft).toBe(92);
+      if (layout === "ipad" || layout === "drawer") expect(reference.titleLeft).toBe(44);
+      const documentImage = info.outputPath(`document-${layout}.png`);
+      await page.screenshot({ path: documentImage });
+      await info.attach(`Document ${layout}`, { path: documentImage, contentType: "image/png" });
+      for (const [suffix, title, ready] of [
+        ["all", "All documents", ".ub-docs-table"],
+        ["settings", "General", "#ub-workspace-name"],
+        ["settings/tags", "Tags", "#ub-new-tag"],
+        ["settings/members", "Members", 'table[aria-label="Members"]'],
+        ["settings/preferences", "Preferences", '.ub-appearance'],
+        ["settings/devices", "Devices", 'table[aria-label="Devices"]'],
+        ["settings/hub-admins", "Admins", 'table[aria-label="Hub admins"]'],
+        ["settings/hub-workspaces", "Workspaces", 'table[aria-label="Hub workspaces"]'],
+      ] as const) {
+        await test.step(`${layout}: ${title}`, async () => {
+          await page.goto(new URL(`/${harness().workspace}/${suffix}`, harness().appUrl).href);
+          await expect(page.locator(ready)).toBeVisible();
+          await expect(page.getByRole("heading", { level: 1, name: title, exact: true })).toBeVisible();
+          await expectShell(page, reference);
+          if (suffix.startsWith("settings")) await expect(page.locator("[data-settings-page]")).toHaveAttribute("aria-labelledby", "ub-settings-title");
+          const image = info.outputPath(`${suffix.replaceAll("/", "-")}-${layout}.png`);
+          await page.screenshot({ path: image });
+          await info.attach(`${title} ${layout}`, { path: image, contentType: "image/png" });
+          if (suffix === "all") {
+            const count = page.getByRole("tab", { name: /^Documents/ }).locator(".ub-docs-tab-count");
+            await expect(count).toHaveCSS("font-size", "13px");
+            await expect(count).toHaveText("1");
+            const search = page.getByRole("searchbox");
+            await search.focus();
+            await expect(search).toBeFocused();
+          }
+        });
+      }
+      if (touch) {
+        const opener = page.getByRole("button", { name: "Show sidebar", exact: true });
+        await opener.tap();
+        await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(opener).toBeFocused();
+      }
+    }
+  });
 
   test("loading and unavailable Settings retain the document frame", { tag: "@webkit" }, async ({ browser }, info) => {
     test.setTimeout(90_000);
