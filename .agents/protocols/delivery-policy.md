@@ -125,13 +125,14 @@ withholds its body, which pastes third-party release notes (ub-agents
   move to the named versions and nothing else changes. It needs no linked
   issue, and the withheld body is never read or fetched.
 - **Reviews owed.** A diff by Dependabot alone that touches only package
-  manifests, `pnpm-lock.yaml` and the `uses:` pins of workflow actions owes no `agent` review,
-  even though it changes runtime dependencies. Any commit by someone else
-  falls under "Reviews owed" as usual.
-- **Merge.** With all gates green it merges as tier 2 with the merge report.
-  Tier-3 triggers still apply, judged from the diff and what the bumped
-  packages do here: a bump that changes auth, sync, persistence, CRDT or
-  protocol behavior escalates.
+  manifests, `pnpm-lock.yaml` and the `uses:` pins of workflow actions owes no
+  `agent` review, even though it changes runtime dependencies. Any commit by
+  someone else falls under "Reviews owed" as usual.
+- **Merge.** With all gates green a minor or patch update merges as tier 2
+  with the merge report. A major update, including a group with one major in
+  it, is tier 3 and waits for a person's approval. Other tier-3 triggers still
+  apply, judged from the diff and what the bumped packages do here: a bump that
+  changes auth, sync, persistence, CRDT or protocol behavior escalates.
 - **One fix round.** A failed gate or a conflict goes to the implementer once
   with `changes`. Escalate instead of a second `changes` when an implementer
   round already ran on this PR, or when the fix needs a product, architecture
@@ -159,7 +160,10 @@ withholds its body, which pastes third-party release notes (ub-agents
   or break in persisted-data compatibility; a change to CRDT or concurrency
   semantics; a change to decided architecture or to guarantees defined by
   their owning corpus documents; a new *runtime* dependency, subject to the
-  web UI exception below; auth or token semantics; any change to
+  web UI exception below; a major-version update of a dependency or of the
+  toolchain (such as Yjs 13 to 14 or Node 22 to 24; for a `0.x` package, a
+  minor update counts as major; minor and patch updates do not trigger this,
+  owner decision 2026-10-21); auth or token semantics; any change to
   `SYNC_PROTOCOL_VERSION`; overruling a major reviewer
   finding; a process change that alters
   authority, eligibility, merge or approval rules, or destructive automation;

@@ -9,7 +9,9 @@ Read `.agents/roles/README.md` first and follow its conditional references.
 
 A pull request a reviewer approved or an implementer sent to integration.
 A Dependabot pull request arrives directly, labelled `dependencies`; apply
-[delivery-policy.md's Dependabot pull requests](../protocols/delivery-policy.md#dependabot-pull-requests).
+[delivery-policy.md's Dependabot pull requests](../protocols/delivery-policy.md#dependabot-pull-requests):
+minor and patch updates merge without approval, and a major update escalates
+for a person's approval.
 
 ## Task
 
