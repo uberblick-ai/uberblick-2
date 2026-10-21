@@ -2,6 +2,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { seedTagCatalog, setWorkspaceName } from "@uberblick/schema";
 import * as Y from "yjs";
+import { tableHasRows } from "./database-backup.js";
 import type { MembershipRegistry } from "./memberships.js";
 import type { HubDatabase } from "./persistence.js";
 import { HubAdminRegistry } from "./hub-admins.js";
@@ -25,9 +26,7 @@ export class HubClaimState {
       if (db.prepare("SELECT 1 FROM hub_claim_state WHERE id = 1").get() === undefined) {
         // Schema presence and file existence say nothing about freshness. A
         // sealed row records the upgrade even if its old data is later removed.
-        const existing = HUB_DATA_TABLES.some((table) =>
-          db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== undefined &&
-          db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get() !== undefined);
+        const existing = HUB_DATA_TABLES.some((table) => tableHasRows(db, table));
         const workspaceId = existing ? null : crypto.randomUUID();
         if (workspaceId !== null) {
           const settings = new Y.Doc();

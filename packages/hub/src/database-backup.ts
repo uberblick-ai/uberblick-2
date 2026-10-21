@@ -11,6 +11,12 @@ export function checkDatabaseIntegrity(database: DatabaseSync): void {
   }
 }
 
+/** Databases from earlier releases can lack newer tables; a missing table holds no rows. */
+export function tableHasRows(database: DatabaseSync, table: string): boolean {
+  return database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== undefined &&
+    database.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get() !== undefined;
+}
+
 export function syncDatabaseFile(path: string): void {
   const file = openSync(path, "r");
   try { fsyncSync(file); } finally { closeSync(file); }

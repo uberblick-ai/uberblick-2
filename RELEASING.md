@@ -179,8 +179,9 @@ mise exec -- node scripts/hub-release-proof.mjs 0.5.0 0.6.0 "$(git rev-parse HEA
 ```
 
 This probe requires Docker Engine 28.0.0 and Compose 2.24.4 or newer, the release
-floors. It extracts host files into empty directories and starts an isolated,
-disposable project on loopback HTTP, then checks backup, restore, setup
+floors, and two hub releases that ship `ub-hub` (0.4.5 or newer). It extracts
+host files into empty directories and starts an isolated, disposable project on
+loopback HTTP, then checks backup, restore, setup
 status and replacement retaining documents, private history and Caddy state.
 Crossing from HMAC to public-key device credentials must retain the credential
 rows as revoked history without keys, including after restoring the older
