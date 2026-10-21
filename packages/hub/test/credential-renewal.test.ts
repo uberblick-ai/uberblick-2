@@ -122,6 +122,47 @@ describe("device credential renewal", () => {
     expect(store.get(renewed.record.id)?.revokedAt).toBe(now);
   });
 
+  it.each(["during verification", "after verification"] as const)(
+    "keeps a replacement when a spent proof crosses expiry %s", async when => {
+      let now = Date.now();
+      let advanceAfterClamp = false;
+      const db = database();
+      const log = vi.fn();
+      const store = new CredentialRegistry(db, undefined, log, () => {
+        if (advanceAfterClamp) {
+          advanceAfterClamp = false;
+          queueMicrotask(() => { now += 1_000; });
+        }
+        return now;
+      });
+      const memberships = new MembershipRegistry(db);
+      const original = issue(store);
+      const iat = Math.floor(now / 1000);
+      const request = await proof(original, { iat });
+      const winner = replacement(await renewCredential(store, request, memberships));
+      const before = states(db);
+      const closed = vi.fn();
+      store.onRevoke(closed);
+      now = (iat + REQUEST_PROOF_LIFETIME_SECONDS) * 1000;
+
+      if (when === "during verification") {
+        const barrier = holdVerification();
+        const renewing = renewCredential(store, request, memberships);
+        await barrier.reached;
+        now += 1_000;
+        barrier.release();
+        expect(await renewing).toEqual({ status: "sign-in-required" });
+      } else {
+        advanceAfterClamp = true;
+        expect(await renewCredential(store, request, memberships)).toEqual({ status: "sign-in-required" });
+      }
+      expect(states(db)).toEqual(before);
+      expect(store.get(winner.record.id)?.revokedAt).toBeNull();
+      expect(log).not.toHaveBeenCalled();
+      expect(closed).not.toHaveBeenCalled();
+    },
+  );
+
   it("omits suspended workspaces once, polls without retiring healthy rooms, and rediscovers restored access", async () => {
     const { db, store, memberships } = registry();
     const admins = new HubAdminRegistry(db);

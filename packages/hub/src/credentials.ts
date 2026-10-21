@@ -270,14 +270,14 @@ export class CredentialRegistry {
     return { record: current.record, claims: proof };
   }
 
-  /** Signature and lifetime only; callers then check the credential row as it stands. */
+  /** Signature only; callers then check current authority and consume the proof. */
   private async signedProof(token: string, request: RequestAction): Promise<RequestProofClaims | null> {
     const lookup = readTokenKeyId(token);
     if ("failure" in lookup || lookup.kid === null) return null;
     const key = await this.publicKey(lookup.kid);
     if (key === null) return null;
     const proof = await inspectRequestProof(key, token, request);
-    return "failure" in proof || clampToken(proof, Math.floor(this.now() / 1000)) !== null ? null : proof;
+    return "failure" in proof ? null : proof;
   }
 
   private async publicKey(id: string): Promise<CryptoKey | null> {
@@ -286,9 +286,11 @@ export class CredentialRegistry {
   }
 
   private consumeProof(token: string, proof: RequestProofClaims): boolean {
+    const nowSeconds = Math.floor(this.now() / 1000);
+    if (clampToken(proof, nowSeconds) !== null) return false;
     // Expiry itself is still admissible. Cleanup and the unique insert never
     // yield, so another request cannot consume the same proof between them.
-    this.deleteExpiredProofs.run({ now: Math.floor(this.now() / 1000) });
+    this.deleteExpiredProofs.run({ now: nowSeconds });
     // Read-only management proofs may repeat within their lifetime; a proof
     // for anything that changes state is spent once.
     if (proof.operation !== "renew-credential" && !MANAGEMENT_OPERATIONS[proof.operation].changesState) return true;
