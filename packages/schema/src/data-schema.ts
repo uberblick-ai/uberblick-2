@@ -138,11 +138,6 @@ export function canonicalJson(value: unknown, maxDepth = MAX_DATA_DEPTH): string
   return encode(value);
 }
 
-/** Detach nested objects and arrays as well as the root. */
-export function cloneJson(value: unknown, maxDepth = MAX_DATA_DEPTH): JSONValue {
-  return JSON.parse(canonicalJson(value, maxDepth)) as JSONValue;
-}
-
 const TYPES = new Set<string>(["object", "array", "string", "number", "integer", "boolean", "null"]);
 const KEYWORDS = new Set([
   "type", "properties", "required", "additionalProperties", "items", "enum", "const",

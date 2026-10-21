@@ -7,17 +7,15 @@ import {
   addComment,
   appendBlock,
   createAnnotation,
-  deleteAnnotation,
   deleteBlock,
   editBlock,
   exportMarkdown,
   getAnnotation,
-  getBlockText,
+  getBlock,
   getBlocksFragment,
   initDoc,
   listAnnotationRanges,
   listAnnotations,
-  listAnnotationsForBlock,
   resolveAnnotationRange,
   setAnnotationResolved,
 } from "../src/index.js";
@@ -43,7 +41,7 @@ function annotatedText(
 ): string | null {
   const range = resolveAnnotationRange(doc, threadId);
   if (range === null) return null;
-  return getBlockText(doc, blockId).slice(range.start, range.end);
+  return getBlock(doc, blockId)!.text.slice(range.start, range.end);
 }
 
 /** Two replicas already sharing one block and one open thread. */
@@ -270,30 +268,10 @@ describe("annotations", () => {
     );
     expect(setAnnotationResolved(doc, threadId, true)?.resolved).toBe(true);
     expect(getAnnotation(doc, threadId)?.comments).toHaveLength(2);
-    expect(listAnnotationsForBlock(doc, blockId)).toHaveLength(1);
     // A resolved thread stays anchored so the editor can still show it in place.
     expect(annotatedText(doc, blockId, threadId)).toBe("brave");
     expect(addComment(doc, "unknown", "a", "b")).toBeNull();
     expect(setAnnotationResolved(doc, "unknown", true)).toBeNull();
-  });
-
-  it("clears the mark when the thread is deleted", () => {
-    const { doc, blockId, threadId } = annotated();
-
-    expect(deleteAnnotation(doc, threadId)).toBe(true);
-    expect(deleteAnnotation(doc, threadId)).toBe(false);
-    expect(listAnnotations(doc)).toEqual([]);
-    expect(listAnnotationRanges(doc, blockId)).toEqual([]);
-    expect(deltaOf(doc, blockId)).toEqual([[SENTENCE, null]]);
-    expect(getBlockText(doc, blockId)).toBe(SENTENCE);
-
-    // The freed range can be annotated again, and inherits nothing: the deleted
-    // thread's comments went with it.
-    const again = createAnnotation(doc, blockId, 6, 11, "reviewer", "again");
-    expect(annotatedText(doc, blockId, again.id)).toBe("brave");
-    expect(getAnnotation(doc, again.id)?.comments).toEqual([
-      { author: "reviewer", text: "again", createdAt: expect.any(String) },
-    ]);
   });
 
   it("tracks the range through a concurrent edit from another replica", () => {
@@ -309,8 +287,8 @@ describe("annotations", () => {
     editBlock(b, blockId, SENTENCE, "Say: Hello braZZve world");
     syncDocs(a, b);
 
-    expect(getBlockText(a, blockId)).toBe("Say: Hello braZZve world");
-    expect(getBlockText(b, blockId)).toBe(getBlockText(a, blockId));
+    expect(getBlock(a, blockId)!.text).toBe("Say: Hello braZZve world");
+    expect(getBlock(b, blockId)!.text).toBe(getBlock(a, blockId)!.text);
     // The concurrently inserted characters land inside the annotated span, and
     // both replicas agree on where the span is.
     expect(annotatedText(a, blockId, thread.id)).toBe("braZZve");
@@ -407,27 +385,6 @@ describe("annotations", () => {
         "Too much?",
         "One more thing.",
       ]);
-    }
-  });
-
-  // Delete the thread and conversation together; a racing write cannot retain
-  // a thread whose conversation was independently emptied.
-  it("removes a thread whole when a delete races a resolve or a reply", () => {
-    const resolving = threadedPair();
-    deleteAnnotation(resolving.a, resolving.threadId);
-    setAnnotationResolved(resolving.b, resolving.threadId, true);
-    syncDocs(resolving.a, resolving.b);
-
-    const replying = threadedPair();
-    deleteAnnotation(replying.a, replying.threadId);
-    addComment(replying.b, replying.threadId, "agent", "One more thing.");
-    syncDocs(replying.a, replying.b);
-
-    for (const { a, b, threadId } of [resolving, replying]) {
-      for (const replica of [a, b]) {
-        expect(getAnnotation(replica, threadId)).toBeNull();
-        expect(listAnnotations(replica)).toEqual([]);
-      }
     }
   });
 

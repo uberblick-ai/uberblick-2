@@ -1,12 +1,16 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import { type HubLogger, stderrLogger } from "./log.js";
 import { RequestBudget } from "./request-budget.js";
+import { GITHUB_HEADERS, readGithubJson } from "./http.js";
 
 export interface GithubSignInConfig {
   clientId: string;
   /** Test seams; production always uses the fixed github.com endpoints. */
   fetch?: typeof globalThis.fetch;
   now?: () => number;
+  /** Test-only ceiling for the collect gate; approval lifetimes stay intact. */
+  pollMaxWaitMs?: number;
   /** Host setup's real wait between polls; GitHub's interval when absent. */
   setupPollMs?: number;
 }
@@ -33,11 +37,6 @@ export type DeviceFlowCollection<Result extends object> =
   | { status: "pending"; interval: number }
   | { status: TerminalStatus | "unknown-request" }
   | ({ status: "complete" } & Result);
-
-function object(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error();
-  return value as Record<string, unknown>;
-}
 
 function seconds(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) throw new Error();
@@ -70,7 +69,7 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
 
   constructor(
     private readonly config: GithubSignInConfig,
-    private readonly complete: (identity: { accountId: string; username: string }, deviceName?: string, context?: Context) => Result,
+    private readonly complete: (identity: { accountId: string; username: string; name?: string }, deviceName?: string, context?: Context) => Result,
     private readonly log: HubLogger = stderrLogger,
     private readonly event = "hub.github.sign-in.failed",
   ) {
@@ -134,7 +133,7 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
         ...(deviceName === undefined ? {} : { deviceName }),
         ...(context === undefined ? {} : { context }),
         ...(client === undefined ? {} : { client }),
-        intervalMs, nextPollAt: this.now() + intervalMs, polling: false, status: "pending",
+        intervalMs, nextPollAt: this.now() + this.pollWait(intervalMs), polling: false, status: "pending",
       });
       return {
         status: "pending", requestId, collectionSecret,
@@ -168,7 +167,7 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
     if (!this.active(request)) return { status: request.status as TerminalStatus };
     if (request.polling || this.now() < request.nextPollAt) return this.pending(request);
     request.polling = true;
-    request.nextPollAt = this.now() + request.intervalMs;
+    request.nextPollAt = this.now() + this.pollWait(request.intervalMs);
     let step = "token";
     try {
       if (request.deviceCode === undefined) throw new Error();
@@ -184,7 +183,7 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
       if (result.error === "slow_down") {
         request.intervalMs = Math.max(request.intervalMs + 5000,
           typeof result.interval === "number" ? seconds(result.interval) * 1000 : 0);
-        request.nextPollAt = this.now() + request.intervalMs;
+        request.nextPollAt = this.now() + this.pollWait(request.intervalMs);
         return this.pending(request);
       }
       if (result.error !== undefined) {
@@ -196,8 +195,8 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
       }
       if (typeof result.access_token !== "string" || result.access_token.length < 1 ||
           result.token_type !== "bearer" || result.scope !== "") throw new Error();
-      // Only /user's numeric durable ID and current login are read. Neither
-      // access_token nor refresh_token is copied into any retained state.
+      // Only /user's public identity is read. Neither access_token nor
+      // refresh_token is copied into any retained state.
       step = "identity";
       const identity = await this.github("https://api.github.com/user", {
         headers: { Authorization: `Bearer ${result.access_token}` },
@@ -205,8 +204,13 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
       if (!this.active(request)) return { status: request.status as TerminalStatus };
       if (typeof identity.id !== "number" || !Number.isSafeInteger(identity.id) || identity.id < 1 ||
           typeof identity.login !== "string") throw new Error();
+      const profileName = sanitizeDeviceName(identity.name);
+      const name = profileName === undefined || [request.secret, request.deviceCode, result.access_token, result.refresh_token]
+        .some((secret) => typeof secret === "string" && secret !== "" && profileName.includes(secret))
+        ? undefined : profileName;
       step = "issuance";
-      const completed = this.complete({ accountId: String(identity.id), username: identity.login }, request.deviceName, request.context);
+      const completed = this.complete({ accountId: String(identity.id), username: identity.login,
+        ...(name === undefined ? {} : { name }) }, request.deviceName, request.context);
       // Completion is synchronous: cancellation/expiry cannot interleave with
       // the commit, and another collector cannot complete a second time.
       this.finish(request, "collected");
@@ -253,30 +257,16 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
     return { status: "pending", interval: Math.max(1, Math.ceil((request.nextPollAt - this.now()) / 1000)) };
   }
 
+  private pollWait(intervalMs: number): number {
+    return Math.min(intervalMs, this.config.pollMaxWaitMs ?? intervalMs);
+  }
+
   private async github(url: string, init: RequestInit): Promise<Record<string, unknown>> {
+    const signal = AbortSignal.any([this.closed.signal, AbortSignal.timeout(10_000)]);
     const response = await this.fetch(url, {
-      ...init, redirect: "error",
-      signal: AbortSignal.any([this.closed.signal, AbortSignal.timeout(10_000)]),
-      headers: { Accept: "application/json", "User-Agent": "Uberblick-Hub", "X-GitHub-Api-Version": "2026-03-10", ...init.headers },
+      ...init, redirect: "error", signal, headers: { ...GITHUB_HEADERS, ...init.headers },
     });
     if (!response.ok) throw new GithubFailure("http-error", response.status);
-    // Even a successful provider response is bounded before parsing. Only a
-    // public identity or a small OAuth result is needed, never a large payload.
-    if (response.body === null) throw new Error();
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    try {
-      for (;;) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        size += chunk.value.length;
-        if (size > 65_536) throw new Error();
-        chunks.push(chunk.value);
-      }
-    } finally {
-      await reader.cancel();
-    }
-    return object(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    return readGithubJson(response, signal);
   }
 }

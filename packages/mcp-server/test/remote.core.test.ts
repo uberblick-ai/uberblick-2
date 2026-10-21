@@ -24,6 +24,7 @@ const UUID = "3f0a3d4c-6f6c-4e5f-9b9a-1f2e3d4c5b6a";
 const DECISION_A = "11111111-1111-4111-8111-111111111111";
 const DECISION_B = "22222222-2222-4222-8222-222222222222";
 const DECISION_C = "33333333-3333-4333-8333-333333333333";
+const RECORD_KEY = JSON.stringify(["record", "observations", "row-a"]);
 
 function source(): Y.Doc {
   const ydoc = new Y.Doc();
@@ -178,25 +179,18 @@ describe("docFingerprint", () => {
     expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
   });
 
-  it("changes when only the title changes", () => {
-    const doc = source();
-    const copy = replicate(doc);
-    setTitle(doc, "Another note");
-    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
-  });
-
   // Fingerprint coverage follows getMeta, including descriptive and lifecycle fields.
-  it("changes when only the description changes", () => {
+  it.each<[string, (doc: Y.Doc) => void, ((doc: Y.Doc) => void)?]>([
+    ["title", (doc) => setTitle(doc, "Another note")],
+    ["description", (doc) => setDescription(doc, "what this note is for")],
+    ["TL;DR", (doc) => setTldr(doc, "A short person-facing summary.")],
+    ["kind", (doc) => setKind(doc, "decision")],
+    ["status", (doc) => setStatus(doc, "open"), (doc) => setKind(doc, "decision")],
+  ])("changes when only the %s changes", (_field, change, setup) => {
     const doc = source();
+    setup?.(doc);
     const copy = replicate(doc);
-    setDescription(doc, "what this note is for");
-    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
-  });
-
-  it("changes when only the TL;DR changes", () => {
-    const doc = source();
-    const copy = replicate(doc);
-    setTldr(doc, "A short person-facing summary.");
+    change(doc);
     expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
   });
 
@@ -213,21 +207,6 @@ describe("docFingerprint", () => {
     expect(isIdentical(compareCorpus([entry(doc)], [entry(unwritten)]))).toBe(true);
     doc.destroy();
     unwritten.destroy();
-  });
-
-  it("changes when only the kind changes", () => {
-    const doc = source();
-    const copy = replicate(doc);
-    setKind(doc, "decision");
-    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
-  });
-
-  it("changes when only the status changes", () => {
-    const doc = source();
-    setKind(doc, "decision");
-    const copy = replicate(doc);
-    setStatus(doc, "open");
-    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
   });
 
   // The other direction, and the reason the hash reads `getMeta` rather than
@@ -261,6 +240,41 @@ describe("docFingerprint", () => {
     expect(docFingerprint(doc)).not.toBe(docFingerprint(copy));
   });
 
+  it("detects a data-only deletion that state vectors cannot detect", () => {
+    const doc = source();
+    doc.getMap("data").set(RECORD_KEY, { value: 1 });
+    const copy = replicate(doc);
+    expect(docFingerprint(copy)).toBe(docFingerprint(doc));
+    doc.getMap("data").delete(RECORD_KEY);
+    expect(Y.encodeStateVector(doc)).toEqual(Y.encodeStateVector(copy));
+    expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(doc));
+    expect(docFingerprint(copy)).toBe(docFingerprint(doc));
+  });
+
+  it("is unmoved by empty data and JSON property insertion order", () => {
+    const doc = source();
+    const before = docFingerprint(doc);
+    doc.getMap("data");
+    expect(docFingerprint(doc)).toBe(before);
+    const copy = replicate(doc);
+    doc.getMap("data").set(RECORD_KEY, { a: 1, b: { c: 2, d: 3 } });
+    copy.getMap("data").set(RECORD_KEY, { b: { d: 3, c: 2 }, a: 1 });
+    expect(docFingerprint(copy)).toBe(docFingerprint(doc));
+    doc.getMap("data").clear();
+    expect(docFingerprint(doc)).toBe(before);
+  });
+
+  it("covers unsupported schemas and invalid records without validating or repairing them", () => {
+    const doc = source();
+    const data = doc.getMap("data");
+    data.set(JSON.stringify(["schema", "observations"]), { version: 99, schema: { type: "object" } });
+    const before = docFingerprint(doc);
+    data.set(RECORD_KEY, "invalid merged record");
+    const stored = Y.encodeStateAsUpdate(doc);
+    expect(docFingerprint(doc)).not.toBe(before);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(stored);
+  });
 });
 
 describe("compareCorpus", () => {

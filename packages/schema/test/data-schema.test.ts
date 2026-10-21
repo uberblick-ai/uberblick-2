@@ -4,7 +4,6 @@ import {
   DataError,
   assertJSON,
   canonicalJson,
-  cloneJson,
   compareCodePoints,
   validateCollectionSchema,
   validateDataRecord,
@@ -143,12 +142,8 @@ describe("closed document data schema vocabulary", () => {
 });
 
 describe("plain canonical JSON", () => {
-  it("detaches records, sorts keys by Unicode code point and preserves safe property names", () => {
+  it("sorts keys by Unicode code point and preserves safe property names", () => {
     const original = JSON.parse('{"😀":2,"\\ue000":1,"nested":{"b":2,"a":[true]},"prototype":{"constructor":"__proto__"}}') as JSONValue;
-    const copy = cloneJson(original);
-    expect(copy).toEqual(original);
-    expect(copy).not.toBe(original);
-    expect(Object.hasOwn(copy as object, "prototype")).toBe(true);
     expect(canonicalJson(original)).toBe('{"nested":{"a":[true],"b":2},"prototype":{"constructor":"__proto__"},"\ue000":1,"😀":2}');
     expect(compareCodePoints("\ue000", "😀")).toBe(-1);
     expect(compareCodePoints("a", "ab")).toBe(-1);

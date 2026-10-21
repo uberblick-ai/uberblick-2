@@ -56,9 +56,7 @@ async function main() {
 		cpSync(join(root, file), join(release, file));
 	}
 	mkdirSync(join(release, "bin"));
-	for (const file of ["remote-compose.sh", "hub-backup.sh", "hub-restore.sh"]) {
-		cpSync(join(root, "bin", file), join(release, "bin", file));
-	}
+	cpSync(join(root, "bin/remote-compose.sh"), join(release, "bin/remote-compose.sh"));
 	const compose = readFileSync(join(root, "compose.release.yml"), "utf8")
 		.replaceAll("__HUB_IMAGE__", hubImage).replaceAll("__WEB_IMAGE__", webImage);
 	writeFileSync(join(release, "docker-compose.yml"), compose);

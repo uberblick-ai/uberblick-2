@@ -1,17 +1,14 @@
-import { parseWorkspaceId } from "@uberblick/schema";
 import { useEffect, useMemo, useState } from "react";
 import type { LocalServing } from "../../config.js";
 import { createDeviceLoginClient } from "../../shell/account.js";
 import { useServingAccount } from "../status/serving-account.js";
-import { useAccessReading } from "./hub-administration.js";
+import { servesWorkspace, useAccessReading } from "./hub-administration.js";
 
 /** Local workspaces have no roles; hub roles and own devices are independent. */
 export function useSettingsAccess(workspace: string | null, serving: LocalServing | null,
   subject: string, path: string, ready: boolean, localFallback: boolean) {
   const devices = useAccessReading(workspace, serving, subject, path, "list-devices");
-  let bound = false;
-  try { bound = serving?.workspace != null && parseWorkspaceId(serving.workspace).uuid === workspace && !serving.rebound; }
-  catch { /* Invalid bindings grant no settings authority. */ }
+  const bound = servesWorkspace(serving, workspace);
   const hub = serving?.remoteHubUrl;
   const loginClient = useMemo(() => bound && hub != null && workspace !== null
     ? createDeviceLoginClient(workspace, subject) : null, [bound, hub, subject, workspace]);

@@ -526,7 +526,7 @@ describe("the pending watermark", () => {
     expect(outside.updatesAfter(room, injected - 1).length).toBeGreaterThan(0);
   });
 
-  it("backfills a pre-watermark marker instead of orphaning its document", async () => {
+  it("attaches a document known only from its marker instead of orphaning it", async () => {
     // A crash window: a local update logged and marked, with the
     // directory stub never written. The marker is the only record that this
     // room exists, so deleting it would strand the document — nothing would
@@ -539,25 +539,11 @@ describe("the pending watermark", () => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid, title: "Offline only" });
     appendBlock(doc, { type: "paragraph", text: "never announced" });
-    const seq = seeded.appendUpdate(room, Y.encodeStateAsUpdate(doc), "local");
+    seeded.appendUpdate(room, Y.encodeStateAsUpdate(doc), "local");
     seeded.close();
 
-    // Rewrite the marker in the pre-watermark shape, and leave no stub.
-    const legacy = new DatabaseSync(databasePath);
-    legacy.exec(
-      "DROP TABLE pending_rooms;" +
-        "CREATE TABLE pending_rooms (room TEXT PRIMARY KEY, since INTEGER NOT NULL);" +
-        `INSERT INTO pending_rooms (room, since) VALUES ('${room}', 1);`,
-    );
-    legacy.close();
-
-    const migrated = store(databasePath);
-    expect(migrated.pendingRooms()).toEqual([{ room, seq }]);
-    migrated.close();
-    stores.pop();
-
-    // And the document comes back: the marker attaches the room, hydration
-    // replays it, and the stub is repaired from the document itself.
+    // The marker attaches the room, hydration replays it, and the stub is
+    // repaired from the document itself.
     const rig = await startServer(testConfig({ databasePath }));
     rigs.push(rig);
     const status = await rig.ok("sync_status", {});

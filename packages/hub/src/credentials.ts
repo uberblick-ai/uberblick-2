@@ -19,7 +19,8 @@ import {
   readTokenKeyId,
 } from "@uberblick/schema/token";
 import { type HubLogger, stderrLogger } from "./log.js";
-import { CREDENTIAL_SCHEMA, revokeHmacCredentials } from "./credentials-schema.js";
+import { CREDENTIAL_SCHEMA } from "./credentials-schema.js";
+import { MANAGEMENT_OPERATIONS } from "./access-management.js";
 
 export interface CredentialRecord {
   id: string;
@@ -56,15 +57,14 @@ export type CredentialRenewal =
   | { status: "already-replaced" }
   | { status: "sign-in-required" };
 
-/** Specific internal causes; admission sends a single safe refusal. */
-export type CredentialFailure =
-  | TokenFailure
-  | ClampFailure
-  | "root-key"
+export type UnusableCredential =
   | "unknown-credential"
   | "revoked-credential"
   | "replaced-credential"
   | "expired-credential";
+
+/** Specific internal causes; admission sends a single safe refusal. */
+export type CredentialFailure = TokenFailure | ClampFailure | "root-key" | UnusableCredential;
 
 export type CredentialVerification =
   | { record: CredentialRecord; claims: TokenClaims }
@@ -123,9 +123,10 @@ export class CredentialRegistry {
 
   constructor(database: HubDatabase, private readonly hubAdmins = new HubAdminRegistry(database),
     private readonly log: HubLogger = stderrLogger, private readonly now: () => number = () => Date.now()) {
+    // Opening the database already revoked HMAC-era credentials, and every
+    // public-key table was created with this schema's columns.
     const db = database.connection;
     this.db = db;
-    revokeHmacCredentials(db);
     db.exec(CREDENTIAL_SCHEMA);
     db.exec(`CREATE TABLE IF NOT EXISTS hub_used_request_proofs (
       proof TEXT PRIMARY KEY NOT NULL,
@@ -138,16 +139,6 @@ export class CredentialRegistry {
     `);
     this.deleteExpiredProofs = db.prepare("DELETE FROM hub_used_request_proofs WHERE expires_at < $now");
     this.deleteExpiredProofs.run({ now: Math.floor(this.now() / 1000) });
-    // CREATE IF NOT EXISTS leaves existing tables unchanged. Add nullable
-    // columns without changing existing rows' issued/revoked meaning.
-    if (!db.prepare("PRAGMA table_info(hub_credentials)").all()
-      .some((column) => column.name === "replaced_at")) {
-      db.exec("ALTER TABLE hub_credentials ADD COLUMN replaced_at INTEGER");
-    }
-    if (!db.prepare("PRAGMA table_info(hub_credentials)").all()
-      .some((column) => column.name === "device_name")) {
-      db.exec("ALTER TABLE hub_credentials ADD COLUMN device_name TEXT");
-    }
     this.insert = db.prepare(`
       INSERT INTO hub_credentials
         (id, principal_id, device_id, device_name, workspaces, public_key, issued_at)
@@ -246,6 +237,14 @@ export class CredentialRegistry {
     return this.remainingLifetime(record) <= 0;
   }
 
+  /** Callers pass a fresh read after every await: a revoke, replacement or expiry meanwhile wins. */
+  usable(record: CredentialRecord | null): { record: CredentialRecord } | { failure: UnusableCredential } {
+    if (record === null) return { failure: "unknown-credential" };
+    if (record.revokedAt !== null) return { failure: "revoked-credential" };
+    if (record.replacedAt !== null) return { failure: "replaced-credential" };
+    return this.isExpired(record) ? { failure: "expired-credential" } : { record };
+  }
+
   /** Principal-level management; only devices with a current credential exist here. */
   listDevices(principalId: string): DeviceRecord[] {
     return this.selectDevices.all({ principalId, oldestIssuedAt: this.now() - DEVICE_CREDENTIAL_LIFETIME_MS }).map((row) => {
@@ -264,66 +263,56 @@ export class CredentialRegistry {
    * synchronously re-read authority and clamp the proof at the operation's time.
    */
   async verifyRequest(token: string, request: RequestAction): Promise<CredentialRequestVerification | null> {
+    const proof = await this.signedProof(token, request);
+    if (proof === null) return null;
+    const current = this.usable(this.get(proof.kid));
+    if ("failure" in current || !this.consumeProof(token, proof)) return null;
+    return { record: current.record, claims: proof };
+  }
+
+  /** Signature only; callers then check current authority and consume the proof. */
+  private async signedProof(token: string, request: RequestAction): Promise<RequestProofClaims | null> {
     const lookup = readTokenKeyId(token);
     if ("failure" in lookup || lookup.kid === null) return null;
-    const row = this.selectKey.get({ id: lookup.kid });
-    if (!(row?.public_key instanceof Uint8Array)) return null;
-    const proof = await inspectRequestProof(
-      await importCredentialPublicKey(row.public_key), token, request,
-    );
-    if ("failure" in proof || clampToken(proof, Math.floor(this.now() / 1000)) !== null) {
-      return null;
-    }
-    const current = this.get(proof.kid);
-    if (current === null || current.revokedAt !== null || current.replacedAt !== null || this.isExpired(current) ||
-      !this.consumeProof(token, proof)) return null;
-    return { record: current, claims: proof };
+    const key = await this.publicKey(lookup.kid);
+    if (key === null) return null;
+    const proof = await inspectRequestProof(key, token, request);
+    return "failure" in proof ? null : proof;
+  }
+
+  private async publicKey(id: string): Promise<CryptoKey | null> {
+    const row = this.selectKey.get({ id });
+    return row?.public_key instanceof Uint8Array ? importCredentialPublicKey(row.public_key) : null;
   }
 
   private consumeProof(token: string, proof: RequestProofClaims): boolean {
+    const nowSeconds = Math.floor(this.now() / 1000);
+    if (clampToken(proof, nowSeconds) !== null) return false;
     // Expiry itself is still admissible. Cleanup and the unique insert never
     // yield, so another request cannot consume the same proof between them.
-    this.deleteExpiredProofs.run({ now: Math.floor(this.now() / 1000) });
-    switch (proof.operation) {
-      case "own-role":
-      case "list-members":
-      case "list-devices":
-      case "own-hub-role":
-      case "list-hub-admins":
-      case "list-hub-workspaces":
-      case "resolve-account":
-        return true;
-      default:
-        return this.insertUsedProof.run({ proof: token, expiresAt: proof.exp }).changes === 1;
-    }
+    this.deleteExpiredProofs.run({ now: nowSeconds });
+    // Read-only management proofs may repeat within their lifetime; a proof
+    // for anything that changes state is spent once.
+    if (proof.operation !== "renew-credential" && !MANAGEMENT_OPERATIONS[proof.operation].changesState) return true;
+    return this.insertUsedProof.run({ proof: token, expiresAt: proof.exp }).changes === 1;
   }
 
   async verify(token: string): Promise<CredentialVerification> {
     const lookup = readTokenKeyId(token);
     if ("failure" in lookup) return { failure: lookup.failure };
     if (lookup.kid === null) return { failure: "root-key" };
-    const record = this.get(lookup.kid);
-    if (record === null) return { failure: "unknown-credential" };
-    if (record.revokedAt !== null) return { failure: "revoked-credential" };
-    if (record.replacedAt !== null) return { failure: "replaced-credential" };
-    if (this.isExpired(record)) return { failure: "expired-credential" };
-    const row = this.selectKey.get({ id: record.id });
-    const keyBytes = row?.public_key;
-    if (!(keyBytes instanceof Uint8Array)) {
-      throw new Error("CredentialRegistry.verify: public key is missing");
-    }
-    const inspected = await inspectToken(await importCredentialPublicKey(keyBytes), token);
+    const found = this.usable(this.get(lookup.kid));
+    if ("failure" in found) return found;
+    const key = await this.publicKey(lookup.kid);
+    if (key === null) throw new Error("CredentialRegistry.verify: public key is missing");
+    const inspected = await inspectToken(key, token);
     if ("failure" in inspected) return { failure: inspected.failure };
     const clampFailure = clampToken(inspected, Math.floor(this.now() / 1000));
     if (clampFailure !== null) return { failure: clampFailure };
     // Both key import and signature verification yield. A revoke in either
     // interval must win over a signature that was already being checked.
-    const current = this.get(record.id);
-    if (current === null) return { failure: "unknown-credential" };
-    if (current.revokedAt !== null) return { failure: "revoked-credential" };
-    if (current.replacedAt !== null) return { failure: "replaced-credential" };
-    if (this.isExpired(current)) return { failure: "expired-credential" };
-    return { record: current, claims: inspected };
+    const current = this.usable(this.get(lookup.kid));
+    return "failure" in current ? current : { record: current.record, claims: inspected };
   }
 
   /** A request proof grants this exchange only, never room admission. */
@@ -332,16 +321,8 @@ export class CredentialRegistry {
     ifWorkspacesChanged?: boolean;
   }): Promise<CredentialRenewal> {
     const refusal = { status: "sign-in-required" } as const;
-    const lookup = readTokenKeyId(token);
-    if ("failure" in lookup || lookup.kid === null) return refusal;
-    const row = this.selectKey.get({ id: lookup.kid });
-    if (!(row?.public_key instanceof Uint8Array)) return refusal;
-    const proof = await inspectRequestProof(
-      await importCredentialPublicKey(row.public_key), token, { operation: "renew-credential", publicKey: options.publicKey },
-    );
-    if ("failure" in proof || clampToken(proof, Math.floor(this.now() / 1000)) !== null) {
-      return refusal;
-    }
+    const proof = await this.signedProof(token, { operation: "renew-credential", publicKey: options.publicKey });
+    if (proof === null) return refusal;
 
     // No await follows verification. Current-row checks, proof consumption,
     // membership snapshot, issuance and retirement share one transaction:
@@ -351,21 +332,20 @@ export class CredentialRegistry {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const current = this.get(proof.kid);
-      if (current === null || current.revokedAt !== null || !this.consumeProof(token, proof)) {
+      const usable = this.usable(current);
+      // A replaced key that signs a fresh proof is reuse, whatever its age.
+      const reused = "failure" in usable && usable.failure === "replaced-credential";
+      if (current === null || ("failure" in usable && !reused) || !this.consumeProof(token, proof)) {
         this.db.exec("ROLLBACK");
         return refusal;
       }
-      if (current.replacedAt !== null) {
+      if (reused) {
         const ids = this.selectDeviceCredentials.all({ principalId: current.principalId, deviceId: current.deviceId })
           .map((credential) => credential.id as string);
         this.markDeviceRevoked.run({ principalId: current.principalId, deviceId: current.deviceId, revokedAt: this.now() });
         this.db.exec("COMMIT");
         exchanged = { reused: current, ids };
       } else {
-        if (this.isExpired(current)) {
-          this.db.exec("ROLLBACK");
-          return refusal;
-        }
         const workspaces = this.hubAdmins.availableWorkspaces(memberships.workspacesFor(current.principalId)).sort();
         if (options.ifWorkspacesChanged === true &&
           workspaces.length === current.workspaces.length &&

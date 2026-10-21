@@ -35,13 +35,13 @@ import { hubIdentity } from "./remote-url.js";
  * Bridges move a whole corpus over potentially slow links, so their finite
  * connect budget is more generous than an ordinary tool call's.
  */
-export const BRIDGE_CONNECT_TIMEOUT_MS = 5_000;
+const BRIDGE_CONNECT_TIMEOUT_MS = 5_000;
 
 /**
  * A connected hub can still fail to serve a room. Expiry must leave that room
  * unsettled rather than count as successful verification.
  */
-export const BRIDGE_SYNC_TIMEOUT_MS = 15_000;
+const BRIDGE_SYNC_TIMEOUT_MS = 15_000;
 
 /** The same configuration, pointed at another hub with a bridge's patience. */
 export function bridgeConfig(
@@ -108,11 +108,6 @@ export interface Corpus {
    * about hub contents and must not permit attachment.
    */
   complete: boolean;
-}
-
-/** The untombstoned documents of a corpus. */
-export function liveDocs(corpus: Corpus): CorpusDoc[] {
-  return corpus.entries.filter((entry) => !entry.deleted);
 }
 
 /**

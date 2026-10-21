@@ -2,11 +2,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactElement } from "react";
 import type { LocalServing } from "../../config.js";
-import { parseWorkspaceId } from "@uberblick/schema";
 import { toast } from "sonner";
 import { createWorkspaceAccessClient } from "../../shell/workspace-access.js";
 import type { AccessAction, AccessAnswer, AccessMember, AccessRole } from "../../shell/workspace-access.js";
 import type { Workspace } from "../route.js";
+import { servesWorkspace } from "./hub-administration.js";
 import { Button } from "../shadcn/button.js";
 import { Input } from "../shadcn/input.js";
 import { CELL, ConfirmAction, FeedbackLine, ROW_HEADER, SettingsPage, TableHead, acknowledged, askHub, loginFailure, useHubMutation } from "./settings-kit.js";
@@ -65,10 +65,7 @@ function MemberRow({ member, current, disabled, change, remove }: {
 export function AccessSettings({ workspace, serving, subject, verifiedHandle }: {
   workspace: Workspace; serving: LocalServing | null; subject: string; verifiedHandle: string | null;
 }): ReactElement {
-  let servedWorkspace: string | null = null;
-  try { if (serving?.workspace !== null && serving?.workspace !== undefined) servedWorkspace = parseWorkspaceId(serving.workspace).uuid; }
-  catch { /* A refused configuration must never name a management target. */ }
-  const available = serving !== null && servedWorkspace === workspace.uuid && !serving.rebound;
+  const available = servesWorkspace(serving, workspace.uuid);
   const client = useMemo(() => createWorkspaceAccessClient(workspace.uuid, subject), [workspace.uuid, subject]);
   const [ownRole, setOwnRole] = useState<AccessAnswer | null>(null);
   const [members, setMembers] = useState<AccessAnswer | null>(null);

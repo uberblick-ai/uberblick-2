@@ -38,7 +38,7 @@ import {
 import type { Hocuspocus, ServerConfiguration } from "@hocuspocus/server";
 import { Server } from "@hocuspocus/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { messageYjsSyncStep2, messageYjsUpdate } from "y-protocols/sync";
+import { messageYjsUpdate } from "y-protocols/sync";
 import * as Y from "yjs";
 import { TEXT_KEY, waitUntil } from "./helpers.js";
 
@@ -101,12 +101,10 @@ function connect(options: {
    * explained by the client having come back.
    */
   reconnectDelayMs?: number;
-  /** A pre-populated document exercises the reconnect SyncStep2 path. */
-  document?: Y.Doc;
   /** Share one multiplexed socket across several document providers. */
   websocketProvider?: HocuspocusProviderWebsocket;
 }) {
-  const doc = options.document ?? new Y.Doc();
+  const doc = new Y.Doc();
   const provider = new HocuspocusProvider({
     ...(options.websocketProvider === undefined
       ? { url: `ws://127.0.0.1:${options.port}` }
@@ -144,7 +142,6 @@ function connect(options: {
 
   return {
     provider,
-    doc,
     text: doc.getText(TEXT_KEY),
     synced,
     authenticationFailed,
@@ -776,57 +773,6 @@ describe("MessageReceiver.ts:206-297 — beforeSync gates apply and acknowledgem
         () =>
           observer.text.toString() === "held update" &&
           !sender.provider.hasUnsyncedChanges,
-      );
-    } finally {
-      held.open();
-    }
-  });
-
-  it.skip("awaits beforeSync before applying or acknowledging a reconnect messageYjsSyncStep2 diff", async () => {
-    const room = randomUUID();
-    const held = gate();
-    let armed = false;
-    let entered = false;
-
-    const { port, hocuspocus } = await startServer({
-      beforeSync: async ({ type }) => {
-        if (!armed || type !== messageYjsSyncStep2) return;
-        entered = true;
-        await held.opened;
-      },
-    });
-    const observer = connect({ port, room });
-    const firstConnection = connect({ port, room, awareness: null });
-    await Promise.all([observer.synced, firstConnection.synced]);
-
-    // Detach before editing, then attach a fresh provider to the same Y.Doc:
-    // the edit can reach the server only as the reconnect handshake's Step2
-    // diff, rather than as an ordinary live messageYjsUpdate.
-    firstConnection.provider.destroy();
-    firstConnection.text.insert(0, "offline reconnect diff");
-    armed = true;
-    const reconnect = connect({
-      port,
-      room,
-      awareness: null,
-      document: firstConnection.doc,
-    });
-
-    try {
-      await waitUntil("the reconnect diff to enter beforeSync", () => entered);
-
-      expect(hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString()).toBe(
-        "",
-      );
-      expect(observer.text.toString()).toBe("");
-      expect(reconnect.provider.hasUnsyncedChanges).toBe(true);
-
-      held.open();
-      await waitUntil(
-        "the released reconnect diff to be applied and acknowledged",
-        () =>
-          observer.text.toString() === "offline reconnect diff" &&
-          !reconnect.provider.hasUnsyncedChanges,
       );
     } finally {
       held.open();

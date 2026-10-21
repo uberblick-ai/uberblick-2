@@ -2,7 +2,7 @@ import { decisionCurrentRecord, decisionTopicState, decisionTopicTitle } from "@
 import type { DecisionTopicResolution, DirectoryEntry } from "@uberblick/schema";
 import type { ReactElement } from "react";
 import { TOPIC_STATES, TOPIC_STATE_ORDER } from "./decision-state.js";
-import { docPath } from "../route.js";
+import { docPath, isPlainClick } from "../route.js";
 import type { Navigate } from "../route.js";
 import { formatShortTimestamp, useTimestampClock } from "../timestamps.js";
 
@@ -27,7 +27,7 @@ export function DecisionsLink({ topics, id }: {
 }): ReactElement | null {
   if (topics.length === 0) return null;
   return <a className="ub-decisions-link" href={`#${id}`} onClick={(event) => {
-    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (!isPlainClick(event)) return;
     event.preventDefault();
     focusDecisions(id);
   }}>{decisionsSummary(topics)}</a>;
@@ -69,7 +69,7 @@ export function DecisionsBlock({ topics, segment, navigate, id }: {
             aria-label={`${TOPIC_STATES[state]}: ${question}`}
             data-state={state}
             onClick={(event) => {
-              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              if (!isPlainClick(event)) return;
               event.preventDefault();
               navigate(event.currentTarget.pathname);
             }}>

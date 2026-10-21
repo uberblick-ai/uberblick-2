@@ -169,19 +169,6 @@ describe("authenticated hub access management", () => {
     expect(github).not.toHaveBeenCalled();
   });
 
-  it("replies with a refusal when a parsed operation has no declaration", async () => {
-    const { hub } = await rig();
-    const owner = person(hub, "1234", "owner");
-    const declaration = MANAGEMENT_OPERATIONS["list-devices"];
-    Reflect.deleteProperty(MANAGEMENT_OPERATIONS, "list-devices");
-    try {
-      expect(await manage(hub, owner.issued, { operation: "list-devices" }))
-        .toEqual({ code: 400, result: { status: "invalid-request" } });
-    } finally {
-      Object.defineProperty(MANAGEMENT_OPERATIONS, "list-devices", { value: declaration, enumerable: true, configurable: true, writable: true });
-    }
-  });
-
   it("refuses expired device credentials for every management operation and omits them from device lists", async () => {
     const { hub, github } = await rig();
     const owner = person(hub, "1234", "owner", [[WORKSPACE, "admin"]]);

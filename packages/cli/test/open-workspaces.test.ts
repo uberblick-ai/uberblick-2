@@ -208,7 +208,8 @@ describe("ub open: this machine's workspaces", () => {
         await waitUntil(`${workspace} replica search index`, async () => (await search(index === 0 ? "Primary" : "Secondary")).hits.length === 1);
         expect((await search(index === 0 ? "Secondary" : "Primary")).hits).toEqual([]);
         expect(await (await fetch(`${app.url}api/account`, { headers: auth[index]! })).json())
-          .toEqual({ state: "signed-in", handle: `${index === 0 ? "primary" : "secondary"}-person` });
+          .toEqual({ state: "signed-in", handle: `${index === 0 ? "primary" : "secondary"}-person`,
+            githubAccountId: target.login.identity.githubAccountId });
         const access = await fetch(`${app.url}api/access`, { method: "POST",
           headers: { ...auth[index], "content-type": "application/json", origin: new URL(app.url).origin },
           body: JSON.stringify({ operation: "own-role", workspaceId: workspace }) });

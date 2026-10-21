@@ -1,18 +1,4 @@
-/**
- * Three properties of the store that are about the SQLite binding rather than
- * the data model, and that nothing else in the suite would notice losing.
- *
- * 1. **The file format is the format.** The better-sqlite3 fixture (see
- *    `fixtures/make-legacy.ts`) must stay independently generated; `node:sqlite`
- *    opens it and finds the same log, the same snapshot and the same FTS index.
- *    Compatibility migrations leave the authoritative log intact.
- * 2. **BLOBs are the bytes handed in**, including when those bytes are a view
- *    into a longer buffer.
- * 3. **All-or-nothing writes.** `node:sqlite` has no `.transaction()` wrapper,
- *    so the store issues BEGIN/COMMIT/ROLLBACK itself. A body that throws
- *    part-way through must leave nothing behind — proven on `indexDoc`, the
- *    longest of the six bodies, by aborting one of its later statements.
- */
+/** Store migrations that separate processes race to apply to one file. */
 
 import { builtWorker } from "./process-helpers.js";
 import { execFile } from "node:child_process";
@@ -22,13 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { MirrorStore } from "../src/store.js";
 import { PACKAGE_ROOT, WORKSPACE, removeTempDirs, tempDatabasePath } from "./helpers.js";
 
-/** Expected content of the independently generated better-sqlite3 fixture. */
-const LEGACY = {
-  uuid: "3f2b0a6c-8b1e-4a55-9c47-0d5d1e6b7a90",
-  linked: "9a1c7d2e-4f60-4b18-8f3a-2c5e9b0d6c11",
-  title: "Written by better-sqlite3",
-  blocks: ["seeded by the old binding", "appended after the snapshot"],
-} as const;
+const UUID = "3f2b0a6c-8b1e-4a55-9c47-0d5d1e6b7a90";
 
 const GITHUB_ITEM = "uberblick-ai/uberblick-2#1125";
 const execFileAsync = promisify(execFile);
@@ -53,7 +33,7 @@ describe("derived GitHub references", () => {
   it("allows simultaneous processes to upgrade an existing database", async () => {
     const databasePath = tempDatabasePath();
     const record = {
-      uuid: LEGACY.uuid,
+      uuid: UUID,
       title: "Existing decision",
       tags: [],
       description: "",
@@ -84,13 +64,13 @@ describe("derived GitHub references", () => {
       if (result.status === "rejected") throw result.reason;
     }
     expect(store(databasePath).decisionsForGithub(GITHUB_ITEM)).toEqual([
-      { uuid: LEGACY.uuid, title: record.title },
+      { uuid: UUID, title: record.title },
     ]);
     const inspector = new DatabaseSync(databasePath);
     expect(
       inspector
         .prepare("SELECT indexed_through_seq, catalog_through_seq FROM doc_index_seq WHERE uuid = ?")
-        .get(LEGACY.uuid),
+        .get(UUID),
     ).toEqual({ indexed_through_seq: 2, catalog_through_seq: 7 });
     inspector.close();
   });

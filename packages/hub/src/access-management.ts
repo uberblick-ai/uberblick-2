@@ -7,6 +7,7 @@ import { MembershipRefusal, type MembershipRegistry } from "./memberships.js";
 import type { PrincipalRegistry } from "./principals.js";
 import { protocolMismatchReason } from "@uberblick/schema/protocol";
 import { clampToken, readRequestAction, type RequestAction } from "@uberblick/schema/token";
+import { isJsonPost, readJsonRequest, replyJson } from "./http.js";
 
 import type { WorkspacePromotions } from "./workspace-promotion.js";
 import { HubAdminRefusal, type HubAdminRegistry } from "./hub-admins.js";
@@ -44,17 +45,7 @@ function undeclaredOperation(_action: never): { status: "invalid-request" } {
 }
 
 async function readManagementRequest(request: IncomingMessage): Promise<{ token: string; version: number; action: ManagementAction }> {
-  let size = 0;
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    const bytes = Buffer.from(chunk as Uint8Array);
-    size += bytes.length;
-    if (size > 4096) throw new Error();
-    chunks.push(bytes);
-  }
-  const body: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  if (body === null || typeof body !== "object" || Array.isArray(body)) throw new Error();
-  const { token, protocolVersion, ...fields } = body as Record<string, unknown>;
+  const { token, protocolVersion, ...fields } = (await readJsonRequest(request)).body;
   const action = readRequestAction(fields);
   if (typeof token !== "string" || !Number.isSafeInteger(protocolVersion) ||
     (protocolVersion as number) <= 0 || action === null || action.operation === "renew-credential" ||
@@ -77,16 +68,12 @@ export async function handleAccessManagement(
   hubVersion?: string,
 ): Promise<boolean> {
   if (request.url !== "/auth/manage") return false;
-  const reply = (status: number, body: unknown): void => {
-    response.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    response.end(JSON.stringify(body));
-  };
+  const reply = (status: number, body: unknown): void => replyJson(response, status, body);
   if (credentials === undefined || memberships === undefined || principals === undefined) {
     reply(503, { status: "not-configured" });
     return true;
   }
-  if (request.method !== "POST" || request.headers.authorization !== undefined ||
-    request.headers["content-type"]?.split(";")[0] !== "application/json") {
+  if (!isJsonPost(request)) {
     reply(400, { status: "invalid-request" });
     return true;
   }
@@ -102,24 +89,24 @@ export async function handleAccessManagement(
     reply(409, { status: "protocol-mismatch", reason: protocolMismatchReason(protocolVersion) });
     return true;
   }
-  if (!Object.hasOwn(MANAGEMENT_OPERATIONS, action.operation)) {
-    reply(400, { status: "invalid-request" });
-    return true;
-  }
   const policy = MANAGEMENT_OPERATIONS[action.operation];
   let closesAccess = false;
   try {
     const verified = await credentials.verifyRequest(token, action);
+    if (verified === null) {
+      reply(401, { status: "sign-in-required" });
+      return true;
+    }
     // Verification and GitHub lookup both yield. Each continuation must read
     // the credential and proof time again, then check current actor authority
     // synchronously with the write, on the hub's shared database handle.
     const readCurrent = () => {
-      const current = verified === null ? null : credentials.get(verified.record.id);
-      if (current === null || current.revokedAt !== null || current.replacedAt !== null || credentials.isExpired(current) ||
-        verified === null || clampToken(verified.claims, Math.floor(Date.now() / 1000)) !== null) {
+      const usable = credentials.usable(credentials.get(verified.record.id));
+      if ("failure" in usable || clampToken(verified.claims, Math.floor(Date.now() / 1000)) !== null) {
         reply(401, { status: "sign-in-required" });
         return null;
       }
+      const current = usable.record;
       if (policy.scope === "workspace") {
         if (!("workspaceId" in action) || !current.workspaces.includes(action.workspaceId) || hubAdmins?.isSuspended(action.workspaceId)) {
           reply(403, { status: "forbidden" });

@@ -29,7 +29,7 @@ import {
   deleteBlock,
   editBlock,
   getAnnotation,
-  getBlockText,
+  getBlock,
   getBlocks,
   initDoc,
   getBlocksFragment,
@@ -241,7 +241,7 @@ describe("a thread whose range is deleted is orphaned, not dropped", () => {
 
     // Delete every annotated character, the way an editor keystroke or an
     // agent's `edit_block` does: the mark goes with the text.
-    editBlock(ydoc, paragraph, getBlockText(ydoc, paragraph), "The fox jumps.");
+    editBlock(ydoc, paragraph, getBlock(ydoc, paragraph)!.text, "The fox jumps.");
 
     const [card] = threadsFromDoc(ydoc);
     expect(card).toMatchObject({
@@ -322,7 +322,7 @@ describe("the rail follows the document", () => {
     await flush();
     expect(watcher.latest()[0]?.replyCount).toBe(1);
 
-    editBlock(remote, paragraph, getBlockText(remote, paragraph), "The fox jumps.");
+    editBlock(remote, paragraph, getBlock(remote, paragraph)!.text, "The fox jumps.");
     await flush();
     expect(watcher.latest()[0]).toMatchObject({
       orphaned: true,
@@ -580,7 +580,7 @@ describe("the rail renders its cards", () => {
     const { ydoc, blocks } = annotatedDoc();
     const paragraph = blocks[1]!;
     createAnnotation(ydoc, paragraph, 4, 15, "ben", "why quick?");
-    editBlock(ydoc, paragraph, getBlockText(ydoc, paragraph), "The fox jumps.");
+    editBlock(ydoc, paragraph, getBlock(ydoc, paragraph)!.text, "The fox jumps.");
 
     const view = renderRail(ydoc);
     const card = cards(view.host)[0];
@@ -678,7 +678,7 @@ describe("a highlight and its card focus each other", () => {
     const { ydoc, blocks } = annotatedDoc();
     const paragraph = blocks[1]!;
     createAnnotation(ydoc, paragraph, 4, 15, "ben", "why?");
-    editBlock(ydoc, paragraph, getBlockText(ydoc, paragraph), "The fox jumps.");
+    editBlock(ydoc, paragraph, getBlock(ydoc, paragraph)!.text, "The fox jumps.");
     const { editor, element } = mountEditor(ydoc);
     const view = render(
       <LiveThreadsPane

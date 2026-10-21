@@ -392,6 +392,43 @@ function SidebarContent({
   );
 }
 
+interface SettingsLink {
+  page: SettingsPage;
+  label: string;
+  Icon: () => ReactElement;
+}
+
+const WORKSPACE_SETTINGS: readonly SettingsLink[] = [
+  { page: "general", label: "General", Icon: GearIcon },
+  { page: "tags", label: "Tags", Icon: TagIcon },
+  { page: "members", label: "Members", Icon: MembersIcon },
+];
+const USER_SETTINGS: readonly SettingsLink[] = [
+  { page: "preferences", label: "Preferences", Icon: PreferencesIcon },
+  { page: "devices", label: "Devices", Icon: DevicesIcon },
+];
+const HUB_SETTINGS: readonly SettingsLink[] = [
+  { page: "hub-admins", label: "Admins", Icon: AdminsIcon },
+  { page: "hub-workspaces", label: "Workspaces", Icon: GridIcon },
+];
+
+function SettingsSection({ label, links, page, onSelect }: {
+  label: string;
+  links: readonly SettingsLink[];
+  page: SettingsPage | null;
+  onSelect: (page: SettingsPage) => void;
+}): ReactElement {
+  return <section className="ub-nav ub-settings-nav" aria-label={label}>
+    <p className="ub-nav-label">{label}</p>
+    <ul>
+      {links.map(({ page: target, label: name, Icon }) => <li key={target}>
+        <button type="button" className={SIDEBAR_NAV_CLASSES} aria-current={page === target ? "page" : undefined}
+          onClick={() => onSelect(target)}><Icon />{name}</button>
+      </li>)}
+    </ul>
+  </section>;
+}
+
 /** The navigation pane that replaces the document sidebar in settings mode. */
 function SettingsNavigation({
   workspaceLabel: label,
@@ -437,66 +474,11 @@ function SettingsNavigation({
         </button>
       </SidebarHeader>
       <SidebarScrollContent className="px-2 pb-2 [&>*]:shrink-0">
-        {!personal && workspaceAdmin && <section className="ub-nav ub-settings-nav" aria-label="Workspace">
-          <p className="ub-nav-label">Workspace</p>
-          <ul>
-            <li>
-              <button
-                type="button"
-                className={SIDEBAR_NAV_CLASSES}
-                aria-current={page === "general" ? "page" : undefined}
-                onClick={() => onSelect("general")}
-              >
-                <GearIcon />
-                General
-              </button>
-            </li>
-            <li>
-              <button
-                type="button"
-                className={SIDEBAR_NAV_CLASSES}
-                aria-current={page === "tags" ? "page" : undefined}
-                onClick={() => onSelect("tags")}
-              >
-                <TagIcon />
-                Tags
-              </button>
-            </li>
-            <li>
-              <button
-                type="button"
-                className={SIDEBAR_NAV_CLASSES}
-                aria-current={page === "members" ? "page" : undefined}
-                onClick={() => onSelect("members")}
-              >
-                <MembersIcon />
-                Members
-              </button>
-            </li>
-          </ul>
-        </section>}
-        {personal && <section className="ub-nav ub-settings-nav" aria-label="User">
-          <p className="ub-nav-label">User</p>
-          <ul>
-            <li><button type="button" className={SIDEBAR_NAV_CLASSES}
-              aria-current={page === "preferences" ? "page" : undefined}
-              onClick={() => onSelect("preferences")}><PreferencesIcon />Preferences</button></li>
-            {devicesAvailable && <li><button type="button" className={SIDEBAR_NAV_CLASSES}
-              aria-current={page === "devices" ? "page" : undefined}
-              onClick={() => onSelect("devices")}><DevicesIcon />Devices</button></li>}
-          </ul>
-        </section>}
-        {!personal && hubAdmin && <section className="ub-nav ub-settings-nav" aria-label="Hub">
-          <p className="ub-nav-label">Hub</p>
-          <ul>
-            <li><button type="button" className={SIDEBAR_NAV_CLASSES}
-              aria-current={page === "hub-admins" ? "page" : undefined}
-              onClick={() => onSelect("hub-admins")}><AdminsIcon />Admins</button></li>
-            <li><button type="button" className={SIDEBAR_NAV_CLASSES}
-              aria-current={page === "hub-workspaces" ? "page" : undefined}
-              onClick={() => onSelect("hub-workspaces")}><GridIcon />Workspaces</button></li>
-          </ul>
-        </section>}
+        {!personal && workspaceAdmin &&
+          <SettingsSection label="Workspace" links={WORKSPACE_SETTINGS} page={page} onSelect={onSelect} />}
+        {personal && <SettingsSection label="User" page={page} onSelect={onSelect}
+          links={USER_SETTINGS.filter((link) => link.page !== "devices" || devicesAvailable)} />}
+        {!personal && hubAdmin && <SettingsSection label="Hub" links={HUB_SETTINGS} page={page} onSelect={onSelect} />}
       </SidebarScrollContent>
     </nav>
   );

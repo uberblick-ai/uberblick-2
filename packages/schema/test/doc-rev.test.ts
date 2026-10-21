@@ -12,9 +12,9 @@ import {
   initDoc,
   observeDocRev,
   repairDuplicateBlocks,
-  setBlockType,
   setTitle,
 } from "../src/index.js";
+import { retype } from "./helpers.js";
 
 function seeded(): Y.Doc {
   const doc = new Y.Doc();
@@ -46,7 +46,7 @@ describe("docRev", () => {
       expect(observed.at(-1)).not.toBe(original);
       expect(observed.at(-1)).toBe(docRev(doc));
       const afterEdit = docRev(doc);
-      setBlockType(doc, alpha, "heading", { level: 2 });
+      retype(doc, alpha, "heading");
       expect(docRev(doc)).not.toBe(afterEdit);
       expect(observed.at(-1)).toBe(docRev(doc));
       const afterType = docRev(doc);

@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { generateCredentialKeyPair } from "@uberblick/schema/token";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox, sleep, waitUntil } from "./helpers.js";
+import { DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox, waitUntil } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 import {
   GITHUB_TOKEN, SIGNING_SECRET, type Login,
@@ -65,15 +65,17 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
   it("cancels a timed-out collection before slow GitHub reads can issue a device", async () => {
     const remote = await rig();
     remote.github.lifetime = 30;
-    // Both provider reads fit the hub's individual ten-second budgets; their
-    // combined wait exceeds the CLI's collection request limit.
-    remote.github.tokenHook = () => sleep(6_000);
-    let identityRead: Promise<void> | undefined;
-    remote.github.identityHook = () => { identityRead = sleep(6_000); return identityRead; };
+    let signalIdentityStarted = () => {};
+    const identityStarted = new Promise<void>(resolve => { signalIdentityStarted = resolve; });
+    let releaseIdentity = () => {};
+    const identityRead = new Promise<void>(resolve => { releaseIdentity = resolve; });
+    remote.github.identityHook = () => { signalIdentityStarted(); return identityRead; };
     const box = sandbox({ credentials: { hubLogins: { [remote.origin]: fixture() } } });
     const before = readFileSync(credentialPath(box));
+    const running = runInProcess(["auth", "login", remote.origin], box, {}, { authCollectTimeoutMs: 400 });
     try {
-      const run = await runInProcess(["auth", "login", remote.origin], box);
+      await Promise.race([identityStarted, running.then(() => { throw new Error("sign-in ended before the identity request"); })]);
+      const run = await running;
       expect(run.status).toBe(1);
       expect(run.stderr).toMatch(/unreachable|timed out/i);
       const cancellation = remote.requests.find((request) => request.path === "/auth/github/cancel");
@@ -81,14 +83,13 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
       if (!cancellation) throw new Error("missing cancellation after collection timeout");
       expect((await (await remote.cancel(cancellation.body)).json() as { status: string }).status).toBe("abandoned");
       expect(remote.github.calls).toContain("https://api.github.com/user");
-      expect(identityRead).toBeDefined();
-      await identityRead;
+      releaseIdentity();
       await waitUntil("slow hub collection finished after cancellation", () => remote.collectionStatuses.length === 1, 5_000);
       expect(remote.collectionStatuses).toEqual(["abandoned"]);
       expect(readFileSync(credentialPath(box))).toEqual(before);
       expect(privateDeviceRows(remote.databasePath)).toHaveLength(0);
       assertPublicOnly(run, remote);
-    } finally { await identityRead; }
+    } finally { releaseIdentity(); await running; }
   });
 
   it("reports a device already issued when failure cleanup finds a collected attempt", async () => {
@@ -190,7 +191,7 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     assertPublicOnly(run, remote, issuedKey);
   });
 
-  it.each(["pending", "hung-body"])("ends %s by announced lifetime even with the shorter unrelated test seam", async (kind) => {
+  it.each(["pending", "hung-body"])("ends %s by announced lifetime", async (kind) => {
     const remote = await rig();
     remote.github.lifetime = 3;
     remote.github.tokenResult = { error: "authorization_pending" };
@@ -199,7 +200,9 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     remote.controls.onStart = (result) => { announcedLifetime = result.expiresIn as number; };
     const box = sandbox();
     const startedAt = Date.now();
-    const run = await runUbAsync(["auth", "login", remote.origin], box, { UB_TEST_MAX_WAIT_MS: "1" }, 12_000);
+    // Both cases keep short polling and production request budgets, so only
+    // the announced approval lifetime can end the pending or stalled collect.
+    const run = await runUbAsync(["auth", "login", remote.origin], box, {}, 12_000);
     const elapsed = Date.now() - startedAt;
     expect(run.status).toBe(1);
     expect(run.stderr).toMatch(/expired|timed out|timeout/i);

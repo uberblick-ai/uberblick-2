@@ -2,9 +2,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { seedTagCatalog, setWorkspaceName } from "@uberblick/schema";
 import * as Y from "yjs";
+import { tableHasRows } from "./database-backup.js";
 import type { MembershipRegistry } from "./memberships.js";
 import type { HubDatabase } from "./persistence.js";
 import { HubAdminRegistry } from "./hub-admins.js";
+import { replyJson } from "./http.js";
 
 const HUB_DATA_TABLES = [
   "documents", "hub_principals", "hub_credentials", "hub_memberships", "hub_admin_setup_grants", "hub_admins", "hub_workspace_promotions",
@@ -25,9 +27,7 @@ export class HubClaimState {
       if (db.prepare("SELECT 1 FROM hub_claim_state WHERE id = 1").get() === undefined) {
         // Schema presence and file existence say nothing about freshness. A
         // sealed row records the upgrade even if its old data is later removed.
-        const existing = HUB_DATA_TABLES.some((table) =>
-          db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== undefined &&
-          db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get() !== undefined);
+        const existing = HUB_DATA_TABLES.some((table) => tableHasRows(db, table));
         const workspaceId = existing ? null : crypto.randomUUID();
         if (workspaceId !== null) {
           const settings = new Y.Doc();
@@ -80,12 +80,8 @@ export function handleHubClaimState(
 ): boolean {
   if (request.url !== "/auth/claim-state") return false;
   const valid = request.method === "GET";
-  response.writeHead(valid ? 200 : 405, {
-    "Content-Type": "application/json", "Cache-Control": "no-store",
-    ...(valid ? {} : { Allow: "GET" }),
-  });
-  response.end(JSON.stringify(valid
+  replyJson(response, valid ? 200 : 405, valid
     ? claims?.state(githubConfigured) ?? { unclaimed: false, canClaim: false }
-    : { status: "invalid-request" }));
+    : { status: "invalid-request" }, valid ? {} : { Allow: "GET" });
   return true;
 }

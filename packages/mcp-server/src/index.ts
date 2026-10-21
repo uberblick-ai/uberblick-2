@@ -25,17 +25,7 @@ export type {
   ServingReplicaHolder,
   ServingReplicaRole,
 } from "./serving-role.js";
-export {
-  BRIDGE_CONNECT_TIMEOUT_MS,
-  BRIDGE_SYNC_TIMEOUT_MS,
-  bridgeConfig,
-  compareCorpus,
-  docFingerprint,
-  inspectRemote,
-  isIdentical,
-  liveDocs,
-  syncWorkspace,
-} from "./remote.js";
+export { bridgeConfig, compareCorpus, inspectRemote, isIdentical, syncWorkspace } from "./remote.js";
 export type { Corpus, CorpusDifference, CorpusDoc } from "./remote.js";
 export { importSeedDir, readSeedDocs } from "./seed.js";
 export type { SeedDoc, SeedImport, StarterSeed } from "./seed.js";
@@ -55,5 +45,5 @@ export type {
   ServingSyncStatus,
   SyncStatus,
 } from "./status.js";
-export { log, logAt, withLoggingDisabled } from "./log.js";
+export { withLoggingDisabled } from "./log.js";
 export type { LogLevel } from "./log.js";

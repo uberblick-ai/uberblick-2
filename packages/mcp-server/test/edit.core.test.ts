@@ -9,7 +9,7 @@
  */
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { getBlocksFragment, getDirectoryEntry, setBlockType, setTags, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
+import { getBlocksFragment, getDirectoryEntry, setTags, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
 import { blockText } from "../src/replica.js";
 import { removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
@@ -128,7 +128,7 @@ describe("duplicate blocks from concurrent re-types", () => {
   // This package's own claim: observing a duplicate-producing update triggers
   // the repair, so the document is fixed and not merely read around. That two
   // replicas repairing independently still converge on one element is a schema
-  // property, pinned in schema/test/retype.test.ts.
+  // property, pinned in schema/test/duplicate-blocks.test.ts.
   it("repairs them the moment the replica observes them", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
@@ -146,7 +146,15 @@ describe("duplicate blocks from concurrent re-types", () => {
       const scratch = new Y.Doc();
       Y.applyUpdate(scratch, state);
       const before = Y.encodeStateVector(scratch);
-      setBlockType(scratch, blockId, type);
+      // Yjs node names are immutable, so a retype swaps in a same-id element.
+      const replacement = new Y.XmlElement(type);
+      replacement.setAttribute("id", blockId);
+      replacement.insert(0, [new Y.XmlText("shared text")]);
+      const fragment = getBlocksFragment(scratch);
+      scratch.transact(() => {
+        fragment.insert(1, [replacement]);
+        fragment.delete(0, 1);
+      });
       return Y.encodeStateAsUpdate(scratch, before);
     });
 

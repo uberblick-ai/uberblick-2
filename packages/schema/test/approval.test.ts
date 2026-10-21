@@ -8,24 +8,24 @@ import {
   decisionApprovalChanged,
   decisionApprovalFingerprint,
   decisionDirectoryFields,
-  deleteAnnotation,
   deleteBlock,
   directoryStubDiffers,
   editBlock,
+  getBlock,
   getBlocks,
-  getBlockText,
+  getBlocksFragment,
   findBlockElement,
   getDirectoryEntry,
   getMeta,
   getMetaMap,
   initDoc,
   listDirectory,
+  normalizeLegacyTables,
   restoreDirectoryEntry,
   setAnnotationResolved,
   setDescription,
   setDiscussion,
   setInlineLink,
-  setBlockType,
   setKind,
   setLinks,
   setStatus,
@@ -265,7 +265,6 @@ describe("decision approval content", () => {
     addComment(doc, thread.id, "another-person", "A reply");
     setAnnotationResolved(doc, thread.id, true);
     expect(decisionApprovalChanged(doc)).toBe(false);
-    deleteAnnotation(doc, thread.id);
     setInlineLink(doc, block.id, { start: 0, end: 5 }, TARGET);
     setDescription(doc, "Changed description");
     setTags(doc, ["another-tag"]);
@@ -289,13 +288,18 @@ describe("decision approval content", () => {
   it("retains historical plain table approval when cell marks and document links change", () => {
     const doc = decision([]);
     const source = writeGfmTable([["Header"], ["**Alpha** <tag> & \\|"], ["Beta"]]);
-    const id = appendBlock(doc, { type: "paragraph", text: source });
-    setBlockType(doc, id, "table");
+    // A legacy table normalizes to literal cells, as plain tables were approved.
+    const id = crypto.randomUUID();
+    const legacy = new Y.XmlElement("table");
+    legacy.setAttribute("id", id);
+    legacy.insert(0, [new Y.XmlText(source)]);
+    getBlocksFragment(doc).push([legacy]);
+    normalizeLegacyTables(doc);
     const historical = blockRev({
       type: "paragraph", text: JSON.stringify(["The topic", "The decision.", [source]]),
     });
     getMetaMap(doc).set("approvalFingerprint", historical);
-    expect(getBlockText(doc, id)).not.toBe(source);
+    expect(getBlock(doc, id)!.text).not.toBe(source);
     expect(decisionApprovalFingerprint(doc)).toBe(historical);
     expect(decisionApprovalChanged(doc)).toBe(false);
     const table = findBlockElement(doc, id)!;
@@ -305,7 +309,7 @@ describe("decision approval content", () => {
     expect(decisionApprovalChanged(doc)).toBe(false);
     text.format(2, 5, { bold: null, docLink: { docId: UUID } });
     expect(decisionApprovalChanged(doc)).toBe(false);
-    const before = getBlockText(doc, id);
+    const before = getBlock(doc, id)!.text;
     editBlock(doc, id, before, before.replace("Beta", "Gamma"));
     expect(decisionApprovalChanged(doc)).toBe(true);
     doc.destroy();
