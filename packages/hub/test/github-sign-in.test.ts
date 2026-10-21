@@ -192,7 +192,7 @@ describe("hub-driven GitHub identity", () => {
     // account. Discovery must preserve the principal created for the grant.
     const granted = first.hub.principals!.identify("1234", "first-name");
     first.hub.memberships!.grantMember({
-      workspaceId: WORKSPACE, actorPrincipalId: admin.id, principalId: granted.id, role: "member",
+      workspaceId: WORKSPACE, principalId: granted.id, role: "member",
     });
     expect(privateRows(first.databasePath).credentials).toEqual([]);
 

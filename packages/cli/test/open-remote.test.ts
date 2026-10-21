@@ -435,7 +435,7 @@ describe("ub open: sharing through the upstream hub", () => {
       expect(localBrowserKey(WORKSPACE, box.env)).toBe(localKey);
       const current = readHubLogins(box.env).logins[origin]!;
       if (refusal === "revocation") hub.credentials!.revoke(current.credential.record.id);
-      else hub.memberships!.remove({ workspaceId: WORKSPACE, principalId: person.id, actorPrincipalId: admin.id });
+      else hub.memberships!.remove({ workspaceId: WORKSPACE, principalId: person.id });
       // Renewal cooldown plus the random polling ceiling can span two bands.
       await waitUntil("live remote authority ended", async () => (await status()).notSharedReason === (refusal === "revocation" ? "sign-in-required" : "no-workspace-access"), 80_000);
       const remedy = refusal === "revocation"

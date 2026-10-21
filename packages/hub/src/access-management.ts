@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { CredentialRegistry } from "./credentials.js";
 import type { GithubAccountLookup } from "./github-account-lookup.js";
 import type { HubLogger } from "./log.js";
-import { MembershipRefusal, type MembershipRegistry } from "./memberships.js";
+import { MembershipRefusal, type MembershipRegistry, type MembershipRole } from "./memberships.js";
 import type { PrincipalRegistry } from "./principals.js";
 import { protocolMismatchReason } from "@uberblick/schema/protocol";
 import { clampToken, readRequestAction, type RequestAction } from "@uberblick/schema/token";
@@ -100,6 +100,7 @@ export async function handleAccessManagement(
     // Verification and GitHub lookup both yield. Each continuation must read
     // the credential and proof time again, then check current actor authority
     // synchronously with the write, on the hub's shared database handle.
+    let workspaceRole: MembershipRole | undefined;
     const readCurrent = () => {
       const usable = credentials.usable(credentials.get(verified.record.id));
       if ("failure" in usable || clampToken(verified.claims, Math.floor(Date.now() / 1000)) !== null) {
@@ -113,7 +114,7 @@ export async function handleAccessManagement(
           return null;
         }
         if (policy.role === "admin") memberships.requireAdmin(action.workspaceId, current.principalId);
-        else memberships.ownRole(action.workspaceId, current.principalId);
+        else workspaceRole = memberships.ownRole(action.workspaceId, current.principalId);
       }
       if (policy.scope === "hub" && policy.role === "admin") hubAdmins?.requireAdmin(current.principalId);
       return current;
@@ -143,7 +144,7 @@ export async function handleAccessManagement(
         const principal = principals.getByGithubAccountId(account.githubAccountId) ??
           principals.identify(account.githubAccountId, account.githubUsername);
         const existing = memberships.roleFor(action.workspaceId, principal.id);
-        const member = memberships.grantMember({ workspaceId: action.workspaceId, actorPrincipalId: refreshed.principalId,
+        const member = memberships.grantMember({ workspaceId: action.workspaceId,
           principalId: principal.id, role: action.role ?? "member" });
         reply(200, { status: existing === null ? "ok" : "already-member", member: {
           principalId: principal.id, githubAccountId: principal.githubAccountId,
@@ -173,11 +174,11 @@ export async function handleAccessManagement(
         }
         if (action.operation === "own-hub-role") reply(200, { status: "ok", role: "admin" });
         else if (action.operation === "list-hub-admins") reply(200, { status: "ok", ...hubAdmins.pageAdmins(current.principalId, action.cursor) });
-        else if (action.operation === "list-hub-workspaces") reply(200, { status: "ok", ...hubAdmins.pageWorkspaces(current.principalId, action.cursor) });
+        else if (action.operation === "list-hub-workspaces") reply(200, { status: "ok", ...hubAdmins.pageWorkspaces(action.cursor) });
         else if (action.operation === "suspend-workspace" || action.operation === "restore-workspace") {
           closesAccess = action.operation === "suspend-workspace";
           const workspaceStatus = action.operation === "suspend-workspace" ? "suspended" : "active";
-          hubAdmins.setWorkspaceStatus(current.principalId, action.workspaceId, workspaceStatus);
+          hubAdmins.setWorkspaceStatus(action.workspaceId, workspaceStatus);
           reply(200, { status: "ok", workspaceId: action.workspaceId, workspaceStatus });
         }
         else {
@@ -198,10 +199,10 @@ export async function handleAccessManagement(
         break;
       }
       case "own-role":
-        reply(200, { status: "ok", role: memberships.ownRole(action.workspaceId, current.principalId) });
+        reply(200, { status: "ok", role: workspaceRole });
         break;
       case "list-members": {
-        const members = memberships.listMembers(action.workspaceId, current.principalId).map(member => {
+        const members = memberships.listMembers(action.workspaceId).map(member => {
           const principal = principals.get(member.principalId);
           if (principal === null) throw new Error("Access management: member identity is missing");
           return { principalId: member.principalId, githubAccountId: principal.githubAccountId,
@@ -211,12 +212,12 @@ export async function handleAccessManagement(
         break;
       }
       case "change-role":
-        memberships.changeRole({ ...action, actorPrincipalId: current.principalId });
+        memberships.changeRole(action);
         reply(200, { status: "ok" });
         break;
       case "remove-member":
         closesAccess = true;
-        memberships.remove({ ...action, actorPrincipalId: current.principalId });
+        memberships.remove(action);
         reply(200, { status: "ok" });
         break;
       default:

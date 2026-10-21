@@ -381,7 +381,7 @@ describe("workspace creation and promotion", () => {
     hub.memberships!.grant({ workspaceId: selected(box).workspaceId, principalId: login.identity.id, role: "admin" });
     const before = accessRows(hub);
     const binding = bindingBytes(box);
-    hub.hubAdmins!.setWorkspaceStatus(login.identity.id, selected(box).workspaceId, "suspended");
+    hub.hubAdmins!.setWorkspaceStatus(selected(box).workspaceId, "suspended");
     const suspended = await runInProcess(["workspace", "promote", endpoint], box);
     expect(suspended.status, suspended.output).toBe(1);
     expect(suspended.stderr).toContain("workspace is suspended on this hub");
@@ -390,7 +390,7 @@ describe("workspace creation and promotion", () => {
     expect(suspended.stderr).toContain("local workspace remains usable");
     expect(bindingBytes(box)).toBe(binding);
     expect(accessRows(hub)).toEqual(before);
-    hub.hubAdmins!.setWorkspaceStatus(login.identity.id, selected(box).workspaceId, "active");
+    hub.hubAdmins!.setWorkspaceStatus(selected(box).workspaceId, "active");
     const conflict = await runInProcess(["workspace", "promote", endpoint], box);
     expect(conflict.status, conflict.output).toBe(1);
     expect(conflict.stderr).toContain("already holds this workspace UUID");
@@ -435,7 +435,7 @@ describe("workspace creation and promotion", () => {
     const attemptPath = readdirSync(join(box.configHome, "uberblick"))
       .find(name => name.startsWith(".workspace-promotion-") && name.endsWith(".json"))!;
     const attempt = readFileSync(join(box.configHome, "uberblick", attemptPath));
-    hub.hubAdmins!.setWorkspaceStatus(other.id, selected(box).workspaceId, "suspended");
+    hub.hubAdmins!.setWorkspaceStatus(selected(box).workspaceId, "suspended");
     const suspended = await runInProcess(["workspace", "promote", endpoint], box);
     expect(suspended.status, suspended.output).toBe(1);
     expect(suspended.stderr).toContain("workspace is suspended on this hub");
@@ -443,7 +443,7 @@ describe("workspace creation and promotion", () => {
     expect(accessRows(hub)).toEqual(before);
     expect(bindingBytes(box)).toBe(binding);
     expect(readFileSync(join(box.configHome, "uberblick", attemptPath))).toEqual(attempt);
-    hub.hubAdmins!.setWorkspaceStatus(other.id, selected(box).workspaceId, "active");
+    hub.hubAdmins!.setWorkspaceStatus(selected(box).workspaceId, "active");
     const retried = await runInProcess(["workspace", "promote", endpoint], box, { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(retried.status, retried.output).toBe(0);
     expect(accessRows(hub)).toEqual(before);

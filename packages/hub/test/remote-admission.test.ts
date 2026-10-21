@@ -139,7 +139,7 @@ describe("remote createHub admission", () => {
       .find(connection => "credentialId" in connection.context && connection.context.credentialId === issued.record.id)!.context;
     if (!("authorization" in context)) throw new Error("remote context missing credential authority");
     if (operation === "revoke") hub.credentials!.revoke(issued.record.id);
-    else hub.memberships!.remove({ workspaceId: WORKSPACE, principalId: member.id, actorPrincipalId: admin.id });
+    else hub.memberships!.remove({ workspaceId: WORKSPACE, principalId: member.id });
     expect(context.authorization.active).toBe(false);
     await waitUntil("remote member room closes", () => hub.hocuspocus.documents.get(room)!.getConnections().length === 1);
     writer.text.insert(writer.text.length, " local pending edit");

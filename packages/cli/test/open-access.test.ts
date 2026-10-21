@@ -226,7 +226,7 @@ describe("ub open: live Access bridge", () => {
   });
 
   it("reflects removed and replaced logins and live workspace refusal without restarting", async () => {
-    const { app, box, hub, login, other, headers, origin } = await rig();
+    const { app, box, hub, login, headers, origin } = await rig();
     const account = async () => await (await fetch(`${app.url}api/account`, { headers })).json() as Record<string, unknown>;
     try {
       await waitUntil("initial verified account", async () => (await account()).state === "signed-in");
@@ -235,7 +235,7 @@ describe("ub open: live Access bridge", () => {
       const replacement = issue(hub, "9876", "replacement-person", "member");
       await writeHubLogin(origin, replacement, box.env);
       await waitUntil("replacement account without restart", async () => (await account()).handle === "replacement-person", 80_000);
-      hub.memberships!.remove({ workspaceId: WORKSPACE, actorPrincipalId: other.identity.id, principalId: replacement.identity.id });
+      hub.memberships!.remove({ workspaceId: WORKSPACE, principalId: replacement.identity.id });
       expect(await account()).toEqual({ state: "unavailable" });
       await writeHubLogin(origin, login, box.env);
       await waitUntil("original account returns", async () => (await account()).handle === "this-person", 80_000);

@@ -164,7 +164,7 @@ describe("authenticated hub access management", () => {
       });
       let activeAnswer: Awaited<ReturnType<typeof manage>> | undefined;
       for (const status of ["active", "suspended"] as const) {
-        hub.hubAdmins!.setWorkspaceStatus(owner.principal.id, OTHER_WORKSPACE, status);
+        hub.hubAdmins!.setWorkspaceStatus(OTHER_WORKSPACE, status);
         const before = snapshot();
         const answer = await manage(hub, actor.issued, action);
         expect(answer.code).toBe(403);
@@ -338,9 +338,9 @@ describe("authenticated hub access management", () => {
     expect(hub.memberships!.roleFor(WORKSPACE, admin.principal.id)).toBe("admin");
     const stale = envelope(await proof(admin.issued, listMembers), listMembers);
     hub.memberships!.changeRole({ workspaceId: WORKSPACE, principalId: admin.principal.id,
-      actorPrincipalId: laterAdmin.principal.id, role: "member" });
+      role: "member" });
     expect(await post(hub, stale)).toEqual({ code: 403, result: { status: "forbidden" } });
-    hub.memberships!.remove({ workspaceId: WORKSPACE, principalId: member.principal.id, actorPrincipalId: laterAdmin.principal.id });
+    hub.memberships!.remove({ workspaceId: WORKSPACE, principalId: member.principal.id });
     expect(await manage(hub, member.issued, { operation: "own-role", workspaceId: WORKSPACE }))
       .toEqual({ code: 403, result: { status: "forbidden" } });
   });
@@ -496,7 +496,7 @@ describe("authenticated hub access management", () => {
   it.each(["demote", "expire"] as const)("rechecks %s after asynchronous proof verification before acting", async change => {
     const { hub } = await rig();
     const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
-    const backup = person(hub, "5678", "backup-admin", [[WORKSPACE, "admin"]]);
+    person(hub, "5678", "backup-admin", [[WORKSPACE, "admin"]]);
     const action = { operation: "list-members", workspaceId: WORKSPACE } as const;
     const presented = await proof(admin.issued, action);
     const verify = hub.credentials!.verifyRequest.bind(hub.credentials!);
@@ -504,7 +504,7 @@ describe("authenticated hub access management", () => {
       const verified = await verify(requestProof, request);
       expect(verified).not.toBeNull();
       if (change === "demote") hub.memberships!.changeRole({ workspaceId: WORKSPACE,
-        principalId: admin.principal.id, actorPrincipalId: backup.principal.id, role: "member" });
+        principalId: admin.principal.id, role: "member" });
       if (change === "expire") vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
       return verified;
     });
@@ -648,7 +648,7 @@ describe("direct GitHub account grants", () => {
     expect(await manage(hub, spare, { operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "5678" }))
       .toEqual({ code: 503, result: { status: "lookup-unavailable" } });
     expect(identify).not.toHaveBeenCalled();
-    expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(1);
+    expect(hub.memberships!.listMembers(WORKSPACE)).toHaveLength(1);
     expect(github).toHaveBeenCalledTimes(12);
     expect(await manage(hub, other.issued, { ...resolve, workspaceId: OTHER_WORKSPACE }))
       .toMatchObject({ code: 200, result: { status: "ok" } });
@@ -676,7 +676,7 @@ describe("direct GitHub account grants", () => {
 
   it("does not spend a workspace or account allowance on member and outsider requests", async () => {
     const { hub, github } = await rig({ githubFetch: async () => Response.json({ id: 5678, login: "new-account", type: "User" }) });
-    const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
+    person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
     const member = person(hub, "9012", "member", [[WORKSPACE, "member"]]);
     const outsider = person(hub, "3456", "outsider");
     const resolve = { operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "new-account" } as const;
@@ -686,7 +686,7 @@ describe("direct GitHub account grants", () => {
         .toEqual({ code: 403, result: { status: "forbidden" } });
     }
     expect(github).not.toHaveBeenCalled();
-    hub.memberships!.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: admin.principal.id,
+    hub.memberships!.changeRole({ workspaceId: WORKSPACE,
       principalId: member.principal.id, role: "admin" });
     for (let attempt = 0; attempt < 12; attempt++) {
       expect(await manage(hub, member.issued, resolve)).toMatchObject({ code: 200, result: { status: "ok" } });
@@ -711,7 +711,7 @@ describe("direct GitHub account grants", () => {
     expect(await manage(hub, admin.issued, resolve)).toEqual({ code: 200, result: { status: "ok",
       githubAccountId: "5678", githubUsername: "old-handle" } });
     expect(identify).not.toHaveBeenCalled();
-    expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(1);
+    expect(hub.memberships!.listMembers(WORKSPACE)).toHaveLength(1);
     const granted = await manage(hub, admin.issued, { operation: "grant-member", workspaceId: WORKSPACE,
       githubAccountId: "5678" });
     expect(granted).toEqual({ code: 200, result: { status: "ok", member: {
@@ -747,7 +747,7 @@ describe("direct GitHub account grants", () => {
     } } });
     expect(await manage(hub, admin.issued, { ...action, role: "member" })).toEqual({ code: 200,
       result: { ...granted.result, status: "already-member" } });
-    expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(3);
+    expect(hub.memberships!.listMembers(WORKSPACE)).toHaveLength(3);
     expect(github).toHaveBeenCalledTimes(3);
   });
 
@@ -769,7 +769,7 @@ describe("direct GitHub account grants", () => {
     expect(results[0]!.result.member).toEqual(results[1]!.result.member);
     const member = results[0]!.result.member as { principalId: string; role: MembershipRole };
     expect(hub.memberships!.roleFor(WORKSPACE, member.principalId)).toBe(member.role);
-    expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(2);
+    expect(hub.memberships!.listMembers(WORKSPACE)).toHaveLength(2);
   });
 
   it("accepts one concurrent use of a grant proof while the GitHub lookup is pending", async () => {
@@ -799,7 +799,7 @@ describe("direct GitHub account grants", () => {
     expect(grant).toHaveBeenCalledTimes(1);
     const member = hub.principals!.getByGithubAccountId("5678")!;
     expect(hub.memberships!.roleFor(WORKSPACE, member.id)).toBe("admin");
-    expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(2);
+    expect(hub.memberships!.listMembers(WORKSPACE)).toHaveLength(2);
   });
 
   it("never resolves a handle from stale stored logins or grants a different account that reused it", async () => {
@@ -855,7 +855,7 @@ describe("direct GitHub account grants", () => {
         .toEqual({ code: 401, result: { status: "sign-in-required" } });
     }
     expect(github).not.toHaveBeenCalled();
-    expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(5);
+    expect(hub.memberships!.listMembers(WORKSPACE)).toHaveLength(5);
   });
 
   it.each(["resolve-account", "grant-member"] as const)("binds %s proofs to all targets and rejects client-supplied identity text", async operation => {
@@ -879,7 +879,7 @@ describe("direct GitHub account grants", () => {
       ...envelope(signed, action), githubUsername: "client-supplied-login",
     })).toEqual({ code: 400, result: { status: "invalid-request" } });
     expect(github).not.toHaveBeenCalled();
-    expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(1);
+    expect(hub.memberships!.listMembers(WORKSPACE)).toHaveLength(1);
   });
 
   it("rejects malformed handles, account IDs and roles without outbound requests or writes", async () => {
@@ -897,7 +897,7 @@ describe("direct GitHub account grants", () => {
     for (const role of ["owner", "", null]) expect(await post(hub, { ...grant, githubAccountId: "5678", role }))
       .toEqual({ code: 400, result: { status: "invalid-request" } });
     expect(github).not.toHaveBeenCalled();
-    expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(1);
+    expect(hub.memberships!.listMembers(WORKSPACE)).toHaveLength(1);
   });
 
   it.each(["resolve-account", "grant-member"] as const)("distinguishes missing accounts from unavailable %s lookups and writes nothing", async operation => {
@@ -933,7 +933,7 @@ describe("direct GitHub account grants", () => {
     for (const [answer, code, status] of cases) {
       github.mockImplementationOnce(answer);
       expect(await manage(hub, admin.issued, action)).toEqual({ code, result: { status } });
-      expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(1);
+      expect(hub.memberships!.listMembers(WORKSPACE)).toHaveLength(1);
       now += 3_600_000;
     }
     expect(identify).not.toHaveBeenCalled();
@@ -959,22 +959,26 @@ describe("direct GitHub account grants", () => {
     }
     expect(await request).toEqual({ code: 503, result: { status: "lookup-unavailable" } });
     expect(identify).not.toHaveBeenCalled();
-    expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(1);
+    expect(hub.memberships!.listMembers(WORKSPACE)).toHaveLength(1);
   });
 
-  // resolve-account and grant-member share this await and its re-read; the
-  // write-bearing one shows nothing is written.
-  it.each(["demote", "revoke"] as const)("rechecks %s after the provider await before any write", async change => {
+  it.each([
+    ["resolve-account", "demote"], ["resolve-account", "revoke"],
+    ["grant-member", "demote"], ["grant-member", "revoke"],
+  ] as const)("rechecks %s after %s during the provider await before any write", async (operation, change) => {
     const release = deferred<Response>();
     const { hub, github } = await rig({ githubFetch: () => release.promise });
     const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
-    const backup = person(hub, "5678", "backup-admin", [[WORKSPACE, "admin"]]);
+    person(hub, "5678", "backup-admin", [[WORKSPACE, "admin"]]);
     const identify = vi.spyOn(hub.principals!, "identify");
-    const request = manage(hub, admin.issued, { operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "9012" });
+    const action = operation === "grant-member"
+      ? { operation, workspaceId: WORKSPACE, githubAccountId: "9012" }
+      : { operation, workspaceId: WORKSPACE, githubUsername: "new-account" };
+    const request = manage(hub, admin.issued, action);
     try {
       await waitUntil("account lookup started", () => github.mock.calls.length === 1);
       if (change === "demote") hub.memberships!.changeRole({ workspaceId: WORKSPACE,
-        principalId: admin.principal.id, actorPrincipalId: backup.principal.id, role: "member" });
+        principalId: admin.principal.id, role: "member" });
       if (change === "revoke") hub.credentials!.revoke(admin.issued.record.id);
     } finally {
       release.resolve(Response.json({ id: 9012, login: "new-account", type: "User" }));
@@ -984,7 +988,7 @@ describe("direct GitHub account grants", () => {
       ? { code: 403, result: { status: "forbidden" } }
       : { code: 401, result: { status: "sign-in-required" } });
     expect(identify).not.toHaveBeenCalled();
-    expect(hub.memberships!.listMembers(WORKSPACE, backup.principal.id)).toHaveLength(2);
+    expect(hub.memberships!.listMembers(WORKSPACE)).toHaveLength(2);
   });
 
   it("keeps every other management operation local and preserves its existing answer", async () => {
@@ -1061,12 +1065,12 @@ describe("hub administration", () => {
     const { hub } = await rig();
     const owner = person(hub, "1234", "hub-admin", [[WORKSPACE, "admin"]]);
     hub.hubAdmins!.grant(owner.principal.id);
-    hub.hubAdmins!.setWorkspaceStatus(owner.principal.id, WORKSPACE, "suspended");
+    hub.hubAdmins!.setWorkspaceStatus(WORKSPACE, "suspended");
     const action = { operation: "restore-workspace", workspaceId: WORKSPACE } as const;
     const request = envelope(await proof(owner.issued, action), action);
     expect(await post(hub, request)).toEqual({ code: 200,
       result: { status: "ok", workspaceId: WORKSPACE, workspaceStatus: "active" } });
-    hub.hubAdmins!.setWorkspaceStatus(owner.principal.id, WORKSPACE, "suspended");
+    hub.hubAdmins!.setWorkspaceStatus(WORKSPACE, "suspended");
     expect(await post(hub, request)).toEqual({ code: 401, result: { status: "sign-in-required" } });
     expect(hub.hubAdmins!.isSuspended(WORKSPACE)).toBe(true);
   });
@@ -1077,7 +1081,7 @@ describe("hub administration", () => {
     const backup = person(hub, "5678", "backup", [[WORKSPACE, "admin"]]);
     hub.hubAdmins!.grant(owner.principal.id);
     hub.hubAdmins!.grant(backup.principal.id);
-    hub.hubAdmins!.setWorkspaceStatus(owner.principal.id, WORKSPACE, "suspended");
+    hub.hubAdmins!.setWorkspaceStatus(WORKSPACE, "suspended");
     const action = { operation, workspaceId: WORKSPACE };
     const signed = await proof(owner.issued, action);
     for (const changed of [{ ...action, workspaceId: OTHER_WORKSPACE },
@@ -1258,7 +1262,7 @@ describe("workspace promotion authority", () => {
     expect(hub.memberships!.hasMembership(action.workspaceId)).toBe(false);
     // The credential does not include the new UUID; current hub authority does.
     expect(await post(hub, request)).toMatchObject({ code: 200, result: { status: "created" } });
-    expect(hub.memberships!.listMembers(action.workspaceId, actor.principal.id)).toEqual([
+    expect(hub.memberships!.listMembers(action.workspaceId)).toEqual([
       { workspaceId: action.workspaceId, principalId: actor.principal.id, role: "admin" },
     ]);
     expect(await post(hub, request)).toEqual({ code: 401, result: { status: "sign-in-required" } });
@@ -1273,7 +1277,7 @@ describe("workspace promotion authority", () => {
     expect(await manage(hub, actor.issued, action)).toMatchObject({ code: 200, result: { status: "resumed" } });
     expect(await manage(hub, actor.issued, { ...action, workspaceId: randomUUID(), attemptId: randomUUID() }))
       .toMatchObject({ code: 403, result: { status: "hub-admin-required" } });
-    expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(1);
+    expect(hub.memberships!.listMembers(WORKSPACE)).toHaveLength(1);
     expect(hub.memberships!.workspacesFor(stranger.principal.id)).toEqual([]);
   });
 

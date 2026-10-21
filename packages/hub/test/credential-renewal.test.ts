@@ -173,7 +173,7 @@ describe("device credential renewal", () => {
     const device = store.listDevices(PRINCIPAL)[0]!;
     const closed = vi.fn();
     store.onRevoke(closed);
-    admins.setWorkspaceStatus("hub-admin", WORKSPACE, "suspended");
+    admins.setWorkspaceStatus(WORKSPACE, "suspended");
     expect(store.get(original.record.id)).toEqual(original.record);
     expect(issueCredential(store, { principalId: "new-device", deviceId: "new", workspaces: [WORKSPACE, OTHER_WORKSPACE] })
       .record.workspaces).toEqual([OTHER_WORKSPACE]);
@@ -192,7 +192,7 @@ describe("device credential renewal", () => {
     expect(memberships.workspacesFor(PRINCIPAL)).toEqual([WORKSPACE, OTHER_WORKSPACE].sort());
     expect(memberships.roleFor(WORKSPACE, PRINCIPAL)).toBe("admin");
 
-    admins.setWorkspaceStatus("hub-admin", WORKSPACE, "active");
+    admins.setWorkspaceStatus(WORKSPACE, "active");
     const restored = replacement(await renewCredential(store, await proof(renewed, { iat: now + 3 }), memberships, { ifWorkspacesChanged: true }));
     expect(restored.record.workspaces).toEqual([WORKSPACE, OTHER_WORKSPACE].sort());
     expect(store.listDevices(PRINCIPAL)).toEqual([{ ...device, workspaces: restored.record.workspaces }]);
@@ -208,7 +208,7 @@ describe("device credential renewal", () => {
     const barrier = holdVerification();
     const renewing = renewCredential(store, request, memberships);
     await barrier.reached;
-    try { admins.setWorkspaceStatus("hub-admin", WORKSPACE, "suspended"); }
+    try { admins.setWorkspaceStatus(WORKSPACE, "suspended"); }
     finally { barrier.release(); }
     expect(replacement(await renewing).record.workspaces).toEqual([]);
     expect(memberships.roleFor(WORKSPACE, PRINCIPAL)).toBe("admin");
@@ -316,8 +316,8 @@ describe("device credential renewal", () => {
     const request = await proof(original);
     memberships.grant({ principalId: "admin", workspaceId: WORKSPACE, role: "admin" });
     memberships.grant({ principalId: "admin", workspaceId: OTHER_WORKSPACE, role: "admin" });
-    memberships.grantMember({ actorPrincipalId: "admin", principalId: PRINCIPAL, workspaceId: WORKSPACE, role: "member" });
-    memberships.grantMember({ actorPrincipalId: "admin", principalId: PRINCIPAL, workspaceId: OTHER_WORKSPACE, role: "admin" });
+    memberships.grantMember({ principalId: PRINCIPAL, workspaceId: WORKSPACE, role: "member" });
+    memberships.grantMember({ principalId: PRINCIPAL, workspaceId: OTHER_WORKSPACE, role: "admin" });
     memberships.grant({ principalId: "another-person", workspaceId: crypto.randomUUID(), role: "admin" });
     const membersBefore = db.connection.prepare("SELECT * FROM hub_memberships ORDER BY workspace_id, principal_id").all();
     const github = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("GitHub is unreachable"));
@@ -352,7 +352,7 @@ describe("device credential renewal", () => {
     memberships.grant({ principalId: "admin", workspaceId: WORKSPACE, role: "admin" });
     memberships.grant({ principalId: PRINCIPAL, workspaceId: WORKSPACE, role: "member" });
     const original = issue(store);
-    memberships.remove({ actorPrincipalId: "admin", principalId: PRINCIPAL, workspaceId: WORKSPACE });
+    memberships.remove({ principalId: PRINCIPAL, workspaceId: WORKSPACE });
 
     const renewed = replacement(await renewCredential(store, await proof(original), memberships));
     expect(renewed.record).toEqual(expect.objectContaining({ principalId: PRINCIPAL, deviceId: DEVICE, workspaces: [] }));
