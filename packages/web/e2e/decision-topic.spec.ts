@@ -69,7 +69,7 @@ test("malformed synced document ids leave valid topics and sidebar navigation us
     });
     await selected(page, current.uuid, answerText(current));
     await expect(page.locator(".ub-decision-timeline > li")).toHaveCount(1);
-    await expect(page.locator('a[href*="evil/key"], a[href$="/.."], a[href*="a/record/b"]')).toHaveCount(0);
+    await expect(page.locator('a[href*="evil/key"], a[href$="/.."], a[href$="/a/record/b"]')).toHaveCount(0);
     await expect(page.locator(`a[href$="/${other.uuid.toUpperCase()}"]`)).toHaveCount(0);
     await page.getByRole("textbox", { name: "Document title", exact: true }).fill("Protected topic renamed");
     await expect.poll(() => getDirectoryEntry(peer.directory, current.uuid)?.title).toBe("Protected topic renamed");

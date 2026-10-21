@@ -229,7 +229,6 @@ for (const touch of [false, true]) {
   for (const appearance of ["light", "dark"] as const) {
     test(`shared frames, source actions and AA paint on ${touch ? "narrow iPad" : "desktop"} — ${appearance}`,
       { tag: "@webkit" }, async ({ browser }, info) => {
-      test.fixme(!touch, "https://github.com/uberblick-ai/uberblick-2/issues/1865");
       const session = writer();
       const uuid = await fixture(session, "One block frame");
       const before = await session.call<Document>("get_doc", { uuid });
