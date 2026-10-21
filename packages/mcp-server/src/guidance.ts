@@ -9,8 +9,6 @@ import type { Replicas } from "./replica.js";
 import type { ServerWork } from "./server-work.js";
 import { ClientSafeResourceError, guardedResource } from "./resource-adapter.js";
 
-export { GuidanceBriefing, GUIDANCE_INSTRUCTIONS } from "./briefing.js";
-
 export function registerGuidanceResources(
   server: McpServer,
   replicas: Replicas,

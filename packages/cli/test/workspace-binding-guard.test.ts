@@ -256,7 +256,7 @@ console.log(JSON.stringify(readStoredSyncStatus(${JSON.stringify(path)}, ${JSON.
     expect(existsSync(defaultWorkspaceDatabasePath(WORKSPACE, box.env))).toBe(false);
   });
 
-  it("reads legacy pending flags without migrating or claiming the replica", async () => {
+  it("reads an unclaimed replica's pending watermarks without claiming it", async () => {
     const trap = await hubTrap();
     try {
       const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: trap.url } });
@@ -265,11 +265,11 @@ console.log(JSON.stringify(readStoredSyncStatus(${JSON.stringify(path)}, ${JSON.
       const store = new MirrorStore(path, WORKSPACE);
       const doc = new Y.Doc();
       try {
-        doc.getText("legacy").insert(0, "Pending before the watermark schema");
+        doc.getText("unclaimed").insert(0, "Pending in an unclaimed replica");
         store.appendUpdate(`${WORKSPACE}/${DOCUMENT}`, Y.encodeStateAsUpdate(doc), "local");
       } finally { doc.destroy(); store.close(); }
       const database = new DatabaseSync(path);
-      try { database.exec("ALTER TABLE pending_rooms DROP COLUMN seq; DROP TABLE meta;"); }
+      try { database.exec("DROP TABLE meta"); }
       finally { database.close(); }
       const before = readFileSync(path);
       const run = await runUbAsync(["status", "--json"], box);

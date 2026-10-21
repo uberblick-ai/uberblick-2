@@ -19,8 +19,8 @@ packages/*/data/
 *.sqlite3
 *.db
 # …except the databases that are test inputs rather than local state: bytes
-# written by the better-sqlite3 builds (the MCP mirror, the hub's Hocuspocus
-# SQLite extension), which `node:sqlite` has to keep reading.
+# written by older builds (a released MCP mirror, the hub's Hocuspocus SQLite
+# extension), which current code has to keep reading.
 !packages/*/test/fixtures/*.sqlite
 
 # env / secrets

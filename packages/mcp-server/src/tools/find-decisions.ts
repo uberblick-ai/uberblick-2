@@ -1,7 +1,6 @@
-import { getDirectoryEntry, isDirectoryEntryArchived, isDirectoryEntryDeleted, resolveDecisionTopics } from "@uberblick/schema";
+import { getDirectoryEntry, githubReference, isDirectoryEntryArchived, isDirectoryEntryDeleted, resolveDecisionTopics } from "@uberblick/schema";
 import { z } from "zod";
 import { ToolError } from "../failures.js";
-import { githubReference } from "../github-reference.js";
 import { strictInput } from "../inputs.js";
 import { operation } from "./operation.js";
 

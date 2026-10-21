@@ -485,16 +485,7 @@ describe("ub doctor observational database reading", () => {
     }
     const old = new DatabaseSync(databasePath);
     try {
-      old.exec(
-        "DROP TABLE meta;" +
-        "ALTER TABLE pending_rooms RENAME TO current_pending_rooms;" +
-        "CREATE TABLE pending_rooms (room TEXT PRIMARY KEY);" +
-        "INSERT INTO pending_rooms SELECT room FROM current_pending_rooms;" +
-        "DROP TABLE current_pending_rooms;" +
-        "ALTER TABLE doc_index DROP COLUMN description;" +
-        "ALTER TABLE doc_index_seq DROP COLUMN catalog_through_seq;" +
-        "ALTER TABLE doc_index_seq DROP COLUMN github_refs_indexed;",
-      );
+      old.exec("DROP TABLE meta; ALTER TABLE doc_index_seq DROP COLUMN github_refs_indexed;");
     } finally {
       old.close();
     }
