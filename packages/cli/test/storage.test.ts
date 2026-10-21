@@ -2,9 +2,8 @@
  * Where `ub` puts a user's files, and what it says about it.
  *
  * The layout itself is proved in the CLI storage-layout suite; this one is about
- * the commands: that whoever creates the tree first leaves it owner-only, that
- * `ub status` reports the resolved replica path, and that there is
- * no layout question left for `ub doctor` to have an opinion about.
+ * the commands: that whoever creates the tree first leaves it owner-only, and
+ * that there is no layout question left for `ub doctor` to have an opinion about.
  */
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
@@ -15,13 +14,10 @@ import { createHub, silentLogger } from "@uberblick/hub";
 import { hubDatabasePath } from "../src/hub-config.js";
 import { credentialsPath, resolveConfig, userConfigPath, writeCredentials } from "@uberblick/mcp-server/project-config";
 import { doctorReport } from "../src/doctor.js";
-import { renderStatus, statusReport } from "../src/status.js";
-import { DEAD_HUB_URL, REPO_ROOT, SECRET_IN_ENV, SECRET_ON_FILE, removeTempDirs, sandbox, tracesOf } from "./helpers.js";
-import { runInProcess } from "./in-process.js";
+import { statusReport } from "../src/status.js";
+import { REPO_ROOT, removeTempDirs } from "./helpers.js";
 
 const WORKSPACE = "0d4a1e7c-2b93-4f18-9a55-6c7e8d1b2f30";
-/** A second workspace, for the case where two layers name different ones. */
-const PINNED = "7b6e5d4c-3a29-4180-b5c6-1d2e3f405162";
 
 const tempDirs: string[] = [];
 
@@ -112,98 +108,15 @@ describe("the resolved roots", () => {
     const env = homeEnv(root, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" });
     const { report } = await statusReport({ env, cwd: root });
 
-    if (report.workspace === null) throw new Error("expected the explicit binding");
+    if (report.binding === null) throw new Error("expected the explicit binding");
 
     // 0600 because the replica is the whole corpus. The chmod happens before
     // the WAL exists, so the files SQLite creates beside it inherit the mode.
-    expect(statSync(report.storage.workspace).mode & 0o777).toBe(0o600);
+    expect(statSync(report.databasePath).mode & 0o777).toBe(0o600);
     expect(statSync(dataRoot(root)).mode & 0o077).toBe(0);
 
     writeCredentials({ signingSecret: "ordering-secret" }, env);
     expect(statSync(configRoot(root)).mode & 0o077).toBe(0);
-  });
-});
-
-describe("workspace storage and selection", () => {
-  it("keeps resolved paths in the diagnostic reading and shows the replica in status", async () => {
-    const box = sandbox({
-      credentials: { signingSecret: "storage-test-secret-91af3c" },
-      projectBinding: { workspaceId: WORKSPACE, hubUrl: "ws://127.0.0.1:9/dead" },
-    });
-
-    // The command must yield while this worker's hub answers it.
-    const run = await runInProcess(["status"], box);
-    expect(run.status).toBe(0);
-    const { report } = await statusReport({ env: box.env, cwd: box.cwd });
-    if (report.workspace === null) throw new Error("expected the project binding");
-
-    expect(report.storage).toEqual({
-      // The diagnostic reading has the same layout on every platform.
-      layout: "xdg",
-      config: join(box.configHome, "uberblick", "config.json"),
-      data: join(box.dataHome, "uberblick"),
-      hub: join(box.dataHome, "uberblick", "hub.sqlite"),
-      workspace: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`),
-    });
-    expect(run.stdout).toContain(`stored in   ${report.storage.workspace}\n`);
-    expect(run.output).not.toContain("storage-test-secret-91af3c");
-  });
-
-  it("says two signing secrets differ without leaking either, in text and JSON", async () => {
-    // The conflict remains in warnings and the diagnostic reading: the two secrets are distinct and of
-    // different lengths, and neither may survive in either stream — not whole,
-    // not in four-character fragments, not as a size. See `tracesOf`.
-    const box = sandbox({
-      credentials: { signingSecret: SECRET_ON_FILE },
-      projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
-    });
-    const pinned = { HUB_AUTH_TOKEN: SECRET_IN_ENV };
-
-    const text = await runInProcess(["status"], box, pinned);
-    expect(text.status).toBe(0);
-    expect(text.stderr).toContain("holds a different signing secret");
-    expect(text.stdout).not.toMatch(/shadowed|credential/);
-    expect(tracesOf(SECRET_IN_ENV, text.output)).toEqual([]);
-    expect(tracesOf(SECRET_ON_FILE, text.output)).toEqual([]);
-
-    const json = await runInProcess(["status", "--json"], box, pinned);
-    expect(json.status).toBe(0);
-    const { report } = await statusReport({ env: { ...box.env, ...pinned }, cwd: box.cwd });
-    if (report.workspace === null) throw new Error("expected the project binding");
-    // Which layer lost, and that one is in force. Never a value out of either.
-    expect(report.shadowed).toEqual([
-      { setting: "credential", layer: "credentials file" },
-    ]);
-    expect(report.credentialSource).toBe("environment");
-    expect(report.credentialPresent).toBe(true);
-    expect(tracesOf(SECRET_IN_ENV, json.output)).toEqual([]);
-    expect(tracesOf(SECRET_ON_FILE, json.output)).toEqual([]);
-  });
-
-  it("shows the complete environment binding instead of merging it with the project", async () => {
-    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: "https://project.example.test" } });
-    const selected = await statusReport({
-      env: { ...box.env, UB_WORKSPACE_ID: PINNED, UB_HUB_URL: "local" },
-      cwd: box.cwd,
-    });
-    if (selected.report.workspace === null) throw new Error("expected an environment binding");
-
-    expect(selected.report.sources).toEqual({ workspace: "environment", hubUrl: "environment" });
-    expect(selected.report.binding).toEqual({ workspaceId: PINNED, hubUrl: null });
-    expect(selected.report.projectConfig).toBeNull();
-    expect(selected.report.shadowed).toBeUndefined();
-    const text = renderStatus(selected.report, selected.accountOrigin, selected.workspaceName);
-    expect(text).toMatch(/chosen by\s+environment/);
-    expect(text).toMatch(/hub\s+local, this computer only/);
-    expect(selected.warnings).toEqual([]);
-  });
-
-  it("shows the replica storage path in the human overview", async () => {
-    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
-    const run = await runInProcess(["status"], box);
-
-    expect(run.status).toBe(0);
-    expect(run.stdout).toContain(`stored in   ${join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`)}\n`);
   });
 });
 

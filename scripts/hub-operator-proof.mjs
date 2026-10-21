@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -123,10 +123,11 @@ try {
   const release = JSON.parse(readFileSync(join(deployment, "release.json"), "utf8"));
   assert.equal(release.sourceCommit, sha);
   assert.equal(release.version, "0.0.1");
+  assert.deepEqual(readdirSync(join(deployment, "bin")), ["remote-compose.sh"]);
   writeFileSync(join(deployment, "docker-compose.yml"), `services:\n  hub:\n    image: ${tag}\n    volumes:\n      - hub-data:/data\nvolumes:\n  hub-data:\n`);
   const files = JSON.parse((await docker(["run", "--rm", "--entrypoint", "node", tag, "-e",
-    'const fs=require("node:fs"); console.log(JSON.stringify({user:process.getuid(), executable:fs.statSync("/usr/local/bin/ub-hub").mode&0o111, legacyBundle:fs.existsSync("/app/hub-admin-setup.mjs"), legacyWrapper:fs.existsSync("/release/bin/hub-admin-setup.sh")}));'])).stdout);
-  assert.equal(files.user, 1000); assert.ok(files.executable); assert.equal(files.legacyBundle, false); assert.equal(files.legacyWrapper, false);
+    'const fs=require("node:fs"); console.log(JSON.stringify({user:process.getuid(), executable:fs.statSync("/usr/local/bin/ub-hub").mode&0o111, legacyBundle:fs.existsSync("/app/hub-admin-setup.mjs")}));'])).stdout);
+  assert.equal(files.user, 1000); assert.ok(files.executable); assert.equal(files.legacyBundle, false);
   for (const args of [[], ["--help"]]) {
     const result = await offline(["ub-hub", ...args]);
     for (const name of ["status", "doctor", "admin-setup", "backup", "restore"]) assert.match(result.stdout, new RegExp(name));
@@ -164,7 +165,10 @@ try {
     assert.deepEqual(await textState(), beforeReadonly); await serving();
   } finally { await live(`require("node:fs").chmodSync("/data",${mode});`); }
   console.log("Online backup verified at 0600; write-denied backup published nothing and the hub kept serving.");
-  await command("sh", ["bin/hub-backup.sh", "legacy.sqlite"], { cwd: deployment, timeout: 90_000 });
+  // Operators may still hold a stop-and-copy file from the shell backup earlier releases shipped.
+  await compose(["stop", "hub"]);
+  await compose(["cp", "hub:/data/hub.sqlite", "legacy.sqlite"]);
+  await compose(["start", "hub"]);
   const legacy = readFileSync(join(deployment, "legacy.sqlite"));
   await serving();
   const liveRestore = await offline(["ub-hub", "restore", "-"], { input: legacy, allowFailure: true });

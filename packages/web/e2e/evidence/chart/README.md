@@ -5,12 +5,19 @@ and a separate `ub mcp serve` writer. The chart specification regenerates these
 screenshots and measures drawing from the browser's full data availability.
 Its observers inspect the existing Yjs document without a product test hook.
 
+Views whose assertions read no colour run in one appearance:
+
+| View | Light |
+| --- | --- |
+| Two independently scaled units | ![Light chart](light.png) |
+| Seven daily observations, desktop | ![Light daily desktop chart](daily-desktop-light.png) |
+| Seven daily observations, iPad touch | ![Light daily iPad chart](daily-ipad-light.png) |
+| Three percentage panels, document width | ![Light desktop panels](panels-desktop-light.png) |
+
+Views whose assertions read series or reference colours run in both:
+
 | View | Light | Dark |
 | --- | --- | --- |
-| Two independently scaled units | ![Light chart](light.png) | ![Dark chart](dark.png) |
-| Seven daily observations, desktop | ![Light daily desktop chart](daily-desktop-light.png) | ![Dark daily desktop chart](daily-desktop-dark.png) |
-| Seven daily observations, iPad touch | ![Light daily iPad chart](daily-ipad-light.png) | ![Dark daily iPad chart](daily-ipad-dark.png) |
-| Three percentage panels, document width | ![Light desktop panels](panels-desktop-light.png) | ![Dark desktop panels](panels-desktop-dark.png) |
 | Score line in front of response bars, document width | ![Light mixed chart](mixed-desktop-light.png) | ![Dark mixed chart](mixed-desktop-dark.png) |
 | Survey scale and references, overlay | ![Light survey overlay](survey-overlay-light.png) | ![Dark survey overlay](survey-overlay-dark.png) |
 | Survey scale and references, panels | ![Light survey panels](survey-panels-light.png) | ![Dark survey panels](survey-panels-dark.png) |
@@ -28,8 +35,8 @@ Daily labels are one month/day line in a single year; tied observations and
 empty rows do not introduce time labels. Full tooltips retain date, time and UTC
 context. Daily endpoint glyphs stay inside 311–317 px canvases across responsive
 draws.
-The desktop and explicit iPad touch
-contexts run in both appearances, with paired Chromium and WebKit coverage.
+Chromium checks the desktop context and WebKit the explicit iPad touch
+context.
 The suite also checks legend placement, opposite-side unit ticks, the editor's
 font, same-x tooltips for sparse series and a visible single-x point.
 The two-unit and mixed screenshots show each sole-series value axis's numbers
@@ -44,7 +51,7 @@ Panel fixtures check one accessible image, ordered series headers, the latest
 plotted tooltip values, an empty series, comparable unit-group ranges,
 observation-only labels, per-panel hover, mapping/layout changes and zero
 renderer writes. Equal-width percentage panels show matching labels and ticks
-in both appearances, with at least 6 px between retained x labels; panel
+with at least 6 px between retained x labels; panel
 canvases remain hidden from accessibility APIs. Independent point geometry
 checks that each compact y label equals its gridline's value across rounded
 positive and negative ranges, keeps tick text inside the canvas and leaves
@@ -83,22 +90,24 @@ Regenerate the chart screenshots, with shared-frame table regression coverage:
 mise run e2e -- chart.spec.ts data-table.spec.ts --project=chromium
 ```
 
-The tests attach cropped blocks named `chart-light.png`, `chart-dark.png`,
-`chart-daily-desktop-light.png`, `chart-daily-desktop-dark.png`,
-`chart-daily-ipad-light.png` and `chart-daily-ipad-dark.png`. Copy the fresh Chromium
-attachments into the committed evidence (the command refuses missing or
-ambiguous matches):
+The Chromium run attaches cropped blocks named `chart-light.png` and
+`chart-daily-desktop-light.png`. Copy them into the committed evidence (the
+command refuses missing or ambiguous matches):
 
 ```sh
-python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path("packages/web/test-results"); target = Path("packages/web/e2e/evidence/chart"); files = {"chart-light.png": "light.png", "chart-dark.png": "dark.png", "chart-daily-desktop-light.png": "daily-desktop-light.png", "chart-daily-desktop-dark.png": "daily-desktop-dark.png", "chart-daily-ipad-light.png": "daily-ipad-light.png", "chart-daily-ipad-dark.png": "daily-ipad-dark.png"}; matches = {name: [path for path in source.rglob(name) if path.parent.name.endswith("-chromium")] for name in files}; assert all(len(paths) == 1 for paths in matches.values()), matches; [copyfile(matches[name][0], target / destination) for name, destination in files.items()]'
+python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path("packages/web/test-results"); target = Path("packages/web/e2e/evidence/chart"); files = {"chart-light.png": "light.png", "chart-daily-desktop-light.png": "daily-desktop-light.png"}; matches = {name: [path for path in source.rglob(name) if path.parent.name.endswith("-chromium")] for name in files}; assert all(len(paths) == 1 for paths in matches.values()), matches; [copyfile(matches[name][0], target / destination) for name, destination in files.items()]'
 ```
 
-The paired desktop/iPad test is tagged for WebKit; it explicitly creates the
-iPad context instead of treating a narrow desktop viewport as a touch device.
-Run the WebKit project; the paired test opens both contexts:
-`mise run e2e -- chart.spec.ts --project=webkit-ipad`.
+The daily test is tagged for WebKit, where it creates an explicit iPad touch
+context instead of treating a narrow desktop viewport as a touch device.
 Copy the Chromium evidence before this second run, because Playwright clears
-its prior output directory.
+its prior output directory. Then run
+`mise run e2e -- chart.spec.ts --project=webkit-ipad --grep 'daily observation labels'`
+and copy its attachment:
+
+```sh
+python3 -c 'from pathlib import Path; from shutil import copyfile; matches = [path for path in Path("packages/web/test-results").rglob("chart-daily-ipad-light.png") if path.parent.name.endswith("-webkit-ipad")]; assert len(matches) == 1, matches; copyfile(matches[0], "packages/web/e2e/evidence/chart/daily-ipad-light.png")'
+```
 
 Run the isolated chart and data-table timing probes:
 
@@ -129,10 +138,10 @@ Copy the mixed-chart screenshots from a fresh Chromium run:
 python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path("packages/web/test-results"); target = Path("packages/web/e2e/evidence/chart"); names = ["mixed-desktop-light", "mixed-desktop-dark"]; matches = {name: [path for path in source.rglob("chart-" + name + ".png") if path.parent.name.endswith("-chromium")] for name in names}; assert all(len(paths) == 1 for paths in matches.values()), matches; [copyfile(matches[name][0], target / (name + ".png")) for name in names]'
 ```
 
-Regenerate and copy the two panel screenshots with the chart suite above:
+Regenerate and copy the panel screenshot with the chart suite above:
 
 ```sh
-python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path("packages/web/test-results"); target = Path("packages/web/e2e/evidence/chart"); names = ["panels-desktop-light", "panels-desktop-dark"]; matches = {name: [path for path in source.rglob("chart-" + name + ".png") if path.parent.name.endswith("-chromium")] for name in names}; assert all(len(paths) == 1 for paths in matches.values()), matches; [copyfile(matches[name][0], target / (name + ".png")) for name in names]'
+python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path("packages/web/test-results"); target = Path("packages/web/e2e/evidence/chart"); names = ["panels-desktop-light"]; matches = {name: [path for path in source.rglob("chart-" + name + ".png") if path.parent.name.endswith("-chromium")] for name in names}; assert all(len(paths) == 1 for paths in matches.values()), matches; [copyfile(matches[name][0], target / (name + ".png")) for name in names]'
 ```
 
 The timing test also attaches `chart-timing-bound-panels.json`; its ten live

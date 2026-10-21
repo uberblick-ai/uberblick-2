@@ -2,7 +2,6 @@ import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { isGithubUsername } from "@uberblick/schema/github-identity";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
-import { hubDatabasePath } from "./hub-config.js";
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { sanitizeHubVersion } from "@uberblick/mcp-server/management-client";
 import { authenticationOrigin, hubTransportProblem } from "@uberblick/mcp-server/remote-url";
@@ -10,7 +9,7 @@ import { collectSyncStatus, formatHubFailure, openWorkspaceReplicas, readStoredS
 import type { McpConfig, SyncStatus, WorkspaceReplicaSet } from "@uberblick/mcp-server";
 import { displayUsername } from "./auth.js";
 import { resolveMcpConfig } from "./budget.js";
-import type { CredentialOrigin, Origin, ShadowedLayer } from "@uberblick/mcp-server/project-config";
+import type { Origin } from "@uberblick/mcp-server/project-config";
 import { resolveConfig } from "@uberblick/mcp-server/project-config";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
@@ -21,58 +20,28 @@ import { cliVersion } from "./version.js";
 import { recentDevicesNotice, requestRecentDevices, type RecentDevice } from "./recent-devices.js";
 import { ensureWorkspaceBinding, WorkspaceBindingMismatch } from "@uberblick/mcp-server/workspace-registry";
 
-/** Diagnostic paths contain no credentials or values read from them. */
-export interface StorageReport {
-  /** Keep the constant field for consumers; it does not detect a platform. */
-  layout: "xdg";
-  /** The user config file, `config.json`. `credentials.json` sits beside it. */
-  config: string;
-  /** The data root: the one directory to name when somebody asks. */
-  data: string;
-  /** The database a hub started here would open (`HUB_DB_PATH` wins). */
-  hub: string;
-  /** This workspace's replica (`UBERBLICK_DB` wins) — the same as `databasePath`. */
-  workspace: string;
-}
-
-/** Diagnostic reading, separate from the public status JSON. */
+/** What `ub status` text and `--json` are rendered from. */
 export interface StatusReport {
   binding: ProjectBinding;
   projectConfig: string | null;
   version: string;
   hubVersion?: string | null;
-  /** The workspace id as configured — the spelling its owner typed. */
-  workspace: string;
   /** Bare identity for room names, token claims and database paths; no display slug. */
   workspaceUuid: string;
-  /** Configured endpoint, even when absent credentials make `hub.url` null. */
-  hubUrl: string;
+  workspaceOrigin: Origin;
   /** Validated local refusal, kept separate from untrusted hub reasons. */
   hubTransportProblem?: { reason: string; fix: string };
   bindingProblem?: { reason: string; fix: string };
   /** The account stored on this computer, independent of live hub acceptance. */
   account: { login: string; provider: "github" } | null;
   databasePath: string;
-  /** Whether the endpoint’s local secret or stored device login is present. */
-  credentialPresent: boolean;
-  credentialSource: CredentialOrigin | null;
-  sources: { workspace: Origin; hubUrl: Origin };
-  /** Absent unless a lower configuration layer disagrees with the winning value. */
-  shadowed?: ShadowedLayer[] | undefined;
   /** `disabled` means no signing secret, so this machine is local-only. */
   hub: SyncStatus["hub"];
-  rooms: SyncStatus["rooms"];
   /** Rooms holding local changes the hub has not acknowledged. Counts ROOMS. */
   unsyncedChanges: number;
-  /** Unacknowledged log sequences grouped by room. */
-  pendingRooms: SyncStatus["pendingRooms"];
   /** Last time this replica was caught up with its hub; null for local workspaces. */
   lastSync: SyncStatus["lastSync"];
-  /** Provider sync MESSAGES awaiting acknowledgement. Not a count of updates. */
-  inFlightUpdates: number;
-  logEntries: number;
   persistence: SyncStatus["persistence"];
-  storage: StorageReport;
 }
 
 /** Use MCP's replica set and diagnostic snapshot; always release the replica. */
@@ -91,17 +60,11 @@ export async function readSyncStatus(
 }
 
 export interface UnboundStatusReport {
-  version: string;
-  workspace: null;
   binding: null;
-  hubUrl: null;
-  account: null;
-  lastSync: null;
-  projectConfig: null;
   message: string;
 }
 
-/** Keep workspace name and recent devices outside the diagnostic report. */
+/** Keep workspace name and recent devices outside the report. */
 export async function statusReport(
   options: { env?: NodeJS.ProcessEnv; cwd?: string } = {},
 ): Promise<{
@@ -113,10 +76,7 @@ export async function statusReport(
 }> {
   const resolved = resolveConfig(options);
   if (resolved.binding === null) {
-    return { warnings: resolved.warnings, report: {
-      version: cliVersion(), workspace: null, binding: null, hubUrl: null,
-      account: null, lastSync: null, projectConfig: null, message: resolved.bindingProblem ?? NO_BINDING,
-    } };
+    return { warnings: resolved.warnings, report: { binding: null, message: resolved.bindingProblem ?? NO_BINDING } };
   }
   const config = resolveMcpConfig(resolved.env);
   let bindingProblem: WorkspaceBindingMismatch | undefined;
@@ -131,9 +91,9 @@ export async function statusReport(
   const [sync, deviceReading] = await Promise.all([
     stored === undefined ? readSyncStatus(config) : {
       hub: { status: "disabled", url: null, protocolVersion: SYNC_PROTOCOL_VERSION },
-      rooms: [], unsyncedChanges: stored.pendingRooms.length, pendingRooms: stored.pendingRooms,
+      unsyncedChanges: stored.pendingRooms.length,
       lastSync: stored.lastSync === null ? null : new Date(stored.lastSync).toISOString().replace(/\.\d{3}Z$/, "Z"),
-      inFlightUpdates: 0, logEntries: stored.logEntries, persistence: null,
+      persistence: null,
     } satisfies Partial<SyncStatus>,
     bindingProblem !== undefined || config.deviceLogin === undefined || transport !== null ? null
       : requestRecentDevices({ ...resolved.binding, env: resolved.env }, AbortSignal.timeout(Math.floor(config.connectTimeoutMs))),
@@ -152,44 +112,22 @@ export async function statusReport(
       projectConfig: resolved.paths.projectConfig,
       version: cliVersion(),
       hubVersion: deviceReading?.hubVersion ?? null,
-      workspace: resolved.env.WORKSPACE_ID ?? config.workspaceId,
       workspaceUuid: config.workspaceId,
-      hubUrl: config.hubUrl,
+      workspaceOrigin: resolved.origins.workspace,
       ...(transport === null ? {} : { hubTransportProblem: transport }),
       ...(bindingProblem === undefined ? {} : { bindingProblem: { reason: bindingProblem.reason, fix: bindingProblem.fix } }),
       account: accountOrigin !== undefined && deviceLogin?.status === "ready"
         ? { login: deviceLogin.login.identity.githubUsername, provider: "github" } : null,
       databasePath: config.databasePath,
-      credentialPresent: deviceLogin === undefined ? config.authSecret !== null : deviceLogin.status === "ready",
-      credentialSource: resolved.origins.credential,
-      sources: {
-        workspace: resolved.origins.workspace,
-        hubUrl: resolved.origins.hubUrl,
-      },
-      ...(resolved.shadowed.length === 0
-        ? {}
-        : { shadowed: resolved.shadowed }),
       hub: sync.hub,
-      rooms: sync.rooms,
       unsyncedChanges: sync.unsyncedChanges,
-      pendingRooms: sync.pendingRooms,
       lastSync: resolved.binding.hubUrl === null && bindingProblem === undefined ? null : sync.lastSync,
-      inFlightUpdates: sync.inFlightUpdates,
-      logEntries: sync.logEntries,
       persistence: sync.persistence,
-      storage: {
-        layout: "xdg",
-        config: resolved.paths.userConfig,
-        data: resolved.storage.dataDir,
-        // Use the hub's own path resolver so its reported and opened paths agree.
-        hub: hubDatabasePath(resolved.env),
-        workspace: config.databasePath,
-      },
     },
   };
 }
 
-/** The public `ub status --json` contract, independent of diagnostics. */
+/** The public `ub status --json` contract. */
 export interface ShortStatusReport {
   workspace: { id: string; name: string | null };
   hub: string | null;
@@ -220,7 +158,7 @@ function connectionState(report: StatusReport): NonNullable<ShortStatusReport["c
 }
 
 function workspaceSelection(report: StatusReport): ShortStatusReport["chosenBy"] {
-  return report.sources.workspace === "project config" && report.projectConfig !== null
+  return report.workspaceOrigin === "project config" && report.projectConfig !== null
     ? { source: "project-config", path: report.projectConfig }
     : { source: "environment", path: null };
 }
@@ -335,12 +273,11 @@ const UNREACHABLE_CAUSES: Record<NonNullable<SyncStatus["hub"]["cause"]>, string
 };
 
 export function renderStatus(
-  report: StatusReport | UnboundStatusReport,
+  report: StatusReport,
   accountOrigin?: string,
   workspaceName: string | null = null,
   recentDevices: RecentDevice[] | null = null,
 ): string {
-  if (report.binding === null) return "";
   const short = shortStatusReport(report, workspaceName);
   let text = field("workspace", short.workspace.name === null
     ? short.workspace.id : `${short.workspace.name} (${short.workspace.id})`);

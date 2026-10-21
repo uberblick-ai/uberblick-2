@@ -267,6 +267,11 @@ export function replicaHasAnswered(
 /** Push a new address, or replace the current one without growing the history. */
 export type Navigate = (path: string, mode?: "push" | "replace") => void;
 
+/** Only a plain primary click navigates in-app; modified and middle clicks stay the browser's. */
+export function isPlainClick(event: Pick<MouseEvent, "button" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey">): boolean {
+  return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+}
+
 /**
  * popstate handles browser history; Navigate updates local state for
  * pushState, which emits no popstate. Both carry the pathname and entry state.

@@ -1,9 +1,6 @@
 /** Schema runtime primitives remain limited to Yjs and fast-diff. */
 
 export {
-  ANNOTATIONS_KEY,
-  BLOCKS_KEY,
-  META_KEY,
   decisionContentLocked,
   getAnnotationsMap,
   getBlocksFragment,
@@ -22,20 +19,18 @@ export {
   setTags,
   setTitle,
 } from "./doc.js";
-export type { InitDocOptions } from "./doc.js";
 export { CODE_CHECK_RESULTS, normalizeCodeCheck } from "./code-check.js";
 export {
-  DATA_KEY, DATA_LIMITS, applyDocData, prepareDocData, getDocDataEntries, hasDocData, readDocData, summarizeDocData,
+  DATA_KEY, DATA_LIMITS, applyDocData, prepareDocData, getDocDataEntries, readDocData, summarizeDocData,
 } from "./data.js";
-export type { DataCollection, DataCollectionChange, DataUpdatePlan, DataIssue, DataOperation, DataRecord, DocData } from "./data.js";
-export { DataError, canonicalJson, compareCodePoints, validateCollectionSchema, validateDataRecord } from "./data-schema.js";
+export type { DataCollection, DataCollectionChange, DataOperation, DataRecord, DocData } from "./data.js";
+export { DataError, canonicalJson, compareCodePoints, validateCollectionSchema } from "./data-schema.js";
 export type { CollectionSchema, DataSchema, JSONObject, JSONValue } from "./data-schema.js";
 export { decisionCurrentRecord, decisionRelations, decisionTopicState, decisionTopicTitle, readDecisions, relatedDecisionTopics, resolveDecisionTopics } from "./decisions.js";
 export type { DecisionTopicState } from "./decisions.js";
 export {
   decisionAnswerFailure, decisionAnswerShapeFailure, decisionDocAnswerFailure,
 } from "./decision-answer.js";
-export type { DecisionAnswerFailure, DecisionAnswerShapeFailure } from "./decision-answer.js";
 export { decisionApprovalChanged, decisionApprovalFingerprint } from "./approval.js";
 export { archiveDecisionRecord, archiveDocument } from "./lifecycle.js";
 
@@ -48,7 +43,6 @@ export {
   getBlock,
   getBlockInline,
   getBlockRev,
-  getBlockText,
   getBlocks,
   getBlocksWithInline,
   insertBlock,
@@ -56,16 +50,7 @@ export {
   observeDocRev,
   removeLegacyMermaidBlocks,
   repairDuplicateBlocks,
-  setBlockLanguage,
-  setBlockLevel,
-  setBlockType,
   setInlineLink,
-} from "./blocks.js";
-export type {
-  BlockTypeAttrs,
-  EditBlockOptions,
-  InlineLinkRange,
-  SetInlineLinkOptions,
 } from "./blocks.js";
 
 export { isDocId, isExternalHref, readsAsMark } from "./marks.js";
@@ -82,45 +67,39 @@ export {
   COMMENT_MARK,
   addComment,
   createAnnotation,
-  deleteAnnotation,
   getAnnotation,
   listAnnotationRanges,
   listAnnotations,
-  listAnnotationsForBlock,
   resolveAnnotationRange,
   setAnnotationResolved,
 } from "./annotations.js";
-export type { CommentRun } from "./annotations.js";
 
 export { listNumbers } from "./lists.js";
 export type { ListMarkerInput } from "./lists.js";
 
 export {
-  TABLE_CELL_MARKS, buildTableCell, buildTableElement, buildTableRow,
+  TABLE_CELL_MARKS,
   isSupportedTable, isSupportedColumnWidth, parseGfmTable, parseTableInput, parseTableCell, plainXmlText,
   seedNewTableCells, tableCellText, tableCellTexts, tableRows, tableText, writeGfmTable,
 } from "./table.js";
-export type { ColumnAlign, GfmTable, TableMapping } from "./table.js";
+export type { GfmTable, TableMapping } from "./table.js";
 
 export {
-  CARD_PARTS, CARD_NODE_NAMES, CARD_BUTTON_STYLES, CARD_BUTTON_COLORS, buildCardElement, cardButtons, cardInline, cardPartElement,
-  cardPartTexts, cardText, cardTextParts, isCardButtonHref, isSupportedCard, parseCardButton, parseCardButtons, parseCardInput,
-  seedNewCardParts, writeCardButton, writeCardButtons, writeCardText,
+  CARD_PARTS, CARD_NODE_NAMES, CARD_BUTTON_STYLES, CARD_BUTTON_COLORS, cardButtons, cardPartElement,
+  cardPartTexts, isCardButtonHref, isSupportedCard, parseCardButtons, parseCardInput,
+  seedNewCardParts, writeCardButton, writeCardButtons,
 } from "./card.js";
-export type { CardButton, CardButtonStyle, CardButtonColor, CardInline, CardPart, CardText } from "./card.js";
+export type { CardButton, CardButtonStyle, CardButtonColor, CardPart } from "./card.js";
 export {
   FIGMA_DEFAULT_HEIGHT, FIGMA_MAX_HEIGHT, FIGMA_MIN_HEIGHT,
-  buildFigmaElement, editFigma, figmaCaptionElement, figmaCaptionTexts, figmaFields,
-  figmaInline, figmaText, figmaTextParts, isSupportedFigma, parseFigmaHeight, parseFigmaInput,
-  seedNewFigmaCaptions, writeFigmaInline, writeFigmaText,
+  figmaCaptionElement, figmaCaptionTexts,
+  isSupportedFigma, parseFigmaHeight, parseFigmaInput,
+  seedNewFigmaCaptions,
 } from "./figma.js";
-export type { FigmaInline, FigmaText } from "./figma.js";
-export { FIGMA_PROVIDER, figmaEmbedAddress, normalizeFigmaLink } from "./providers/figma.js";
-export type { FigmaAppearance, FigmaFields } from "./providers/figma.js";
+export { FIGMA_PROVIDER, normalizeFigmaLink } from "./providers/figma.js";
 
 export { exportMarkdown, importMarkdown, parseInline } from "./markdown.js";
 export type {
-  ExportMarkdownOptions,
   ImportedBlock,
   ImportedDoc,
 } from "./markdown.js";
@@ -130,7 +109,6 @@ export {
   MAX_ROOM_NAME_LENGTH,
   SETTINGS_SUFFIX,
   SIDEBAR_SUFFIX,
-  assertCanonicalRoom,
   canonicalDocumentUuid,
   directoryRoom,
   isCanonicalRoom,
@@ -140,13 +118,10 @@ export {
   settingsRoom,
   sidebarRoom,
 } from "./rooms.js";
-export type { ParsedRoom } from "./rooms.js";
 
 export { parseWorkspaceId } from "./workspace.js";
-export type { WorkspaceId } from "./workspace.js";
 
 export {
-  MAX_WORKSPACE_NAME_LENGTH,
   WORKSPACE_SETTINGS_KEY,
   getWorkspaceMainRepository,
   getWorkspaceName,
@@ -156,17 +131,8 @@ export {
 } from "./workspace-settings.js";
 
 export {
-  SIDEBAR_FLAGS_KEY,
-  SIDEBAR_GROUPS_KEY,
-  SIDEBAR_ORDER_KEY,
-  SIDEBAR_UNPINNED_KEY,
   createGroup,
   deleteGroup,
-  getOrCreateGroup,
-  getSidebarFlags,
-  getSidebarGroups,
-  getSidebarOrder,
-  getSidebarUnpinned,
   isSidebarSeeded,
   markSidebarSeeded,
   moveDoc,
@@ -175,7 +141,6 @@ export {
   readSidebar,
   renameGroup,
   unpinDoc,
-  unpinDocIncludingUnseen,
 } from "./sidebar.js";
 
 export {
@@ -199,19 +164,13 @@ export {
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "./directory.js";
-export type { DecisionDirectoryFields, DirectoryUpsert, DocumentDirectoryFields, ListDirectoryOptions } from "./directory.js";
 
 export {
   EXAMPLE_TAGS,
   MAX_TAG_NAME_LENGTH,
-  TAG_CATALOG_FLAGS_KEY,
-  TAG_CATALOG_IDENTITIES_KEY,
-  TAG_CATALOG_RESTORED_KEY,
-  TAG_CATALOG_RETIRED_KEY,
   assignDocumentTags,
   createTagCatalogEntry,
   getTagCatalogEntry,
-  getTagCatalogFlags,
   getTagCatalogIdentities,
   isTagCatalogSeeded,
   isTagName,
@@ -228,23 +187,12 @@ export {
   AnnotationCellError,
   AnnotationRangeError,
   BlockNotFoundError,
-  CardAnnotationError,
-  CardConversionError,
-  FigmaAnnotationError,
-  FigmaConversionError,
   ConflictingLinkMarksError,
   InvalidDocumentLifecycleError,
-  InvalidSupersedesReferenceError,
   InvalidTagAssignmentError,
-  InvalidTagIdentityError,
-  InvalidTagNameError,
   InlineLinkRangeError,
-  InvalidDocLinkTargetError,
-  InvalidLinkHrefError,
   InvalidListAttributesError,
-  InvalidRoomError,
   InvalidWorkspaceIdError,
-  MarksNotAllowedError,
   OldTextMismatchError,
   StaleBlockError,
   InvalidTableError,
@@ -252,15 +200,6 @@ export {
   InvalidFigmaError,
   InvalidTableMappingError,
   TableMappingRequiredError,
-  TableAnnotationError,
-} from "./errors.js";
-export type {
-  AnnotationRangeErrorReason,
-  SupersedesReferenceErrorReason,
-  InlineLinkRangeErrorReason,
-  OldTextMismatchDetails,
-  StaleBlockDetails,
-  InvalidTagIdentityReason,
 } from "./errors.js";
 
 export {
@@ -273,24 +212,18 @@ export {
   MAX_TLDR_LENGTH,
   MAX_LIST_INDENT,
   PROSE_BLOCK_TYPES,
-  isDocumentKind,
   isDocumentStatusForKind,
   isBlockType,
-  isInlineMark,
-  isListStyle,
   isProseBlockType,
 } from "./types.js";
 export type {
   Annotation,
   AnnotationComment,
-  AnnotationRange,
   Block,
   BlockInput,
   BlockType,
   CommentMark,
   CodeCheck,
-  CodeCheckInput,
-  DecisionReference,
   DecisionTopicResolution,
   DirectoryEntry,
   DecisionStatus,
@@ -298,14 +231,11 @@ export type {
   DocumentKind,
   DocumentStatus,
   HeadingLevel,
-  InlineMarkName,
   InlineMarkSet,
   InlineRun,
   ListIndent,
   ListStyle,
-  ProseBlockType,
   SidebarGroup,
   TagAssignment,
   TagCatalogEntry,
-  UnresolvedTagAssignment,
 } from "./types.js";

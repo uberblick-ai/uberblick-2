@@ -14,9 +14,9 @@ import {
   deleteBlock,
   editBlock,
   exportMarkdown,
+  findBlockElement,
   initDoc,
   insertBlock,
-  setBlockLanguage,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { redo, undo, yUndoPluginKey } from "y-prosemirror";
@@ -88,10 +88,8 @@ function expectKeywords(element: HTMLElement, expected: string[]): void {
 
 describe("code syntax highlighting", () => {
   it.each([
-    ["json", "JSON"], ["typescript", "TypeScript"], ["ts", "TypeScript"],
-    ["bash", "Bash"], ["sh", "Bash"], ["xml", "HTML, XML"],
-    ["wireframe", "Wireframe"], ["plaintext", "Plain text"], ["", "Plain text"],
-    ["my-language", "My-language"],
+    ["json", "JSON"], ["ts", "TypeScript"], ["wireframe", "Wireframe"],
+    ["plaintext", "Plain text"], ["", "Plain text"], ["my-language", "My-language"],
   ])("shows the grammar's display name for %s without changing its stored id", (language, label) => {
     const ydoc = new Y.Doc();
     const id = appendBlock(ydoc, { type: "code", language, text: "literal source" });
@@ -173,7 +171,7 @@ describe("code syntax highlighting", () => {
     const { element: liveElement } = mount(live);
     expect(code(liveElement, "unknown").querySelector("[class^=hljs-]")).toBeNull();
 
-    setBlockLanguage(live, liveBlockId, "typescript");
+    findBlockElement(live, liveBlockId)!.setAttribute("language", "typescript");
     editBlock(live, liveBlockId, "plain words", 'const ready = "yes";');
 
     const updated = code(liveElement, "typescript");
@@ -299,7 +297,7 @@ describe("code syntax highlighting", () => {
     expect(calls.highlight).not.toHaveBeenCalled();
     expectKeywords(element, ["const", "let"]);
 
-    setBlockLanguage(peer, first, "javascript");
+    findBlockElement(peer, first)!.setAttribute("language", "javascript");
     receive();
     expect(calls.highlight.mock.calls).toEqual([["javascript", "const first = 1;"]]);
     expectKeywords(element, ["const", "let"]);

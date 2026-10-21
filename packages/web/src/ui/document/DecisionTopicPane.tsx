@@ -6,7 +6,7 @@ import type { RoomConnection } from "../../collab/rooms.js";
 import { EditorPane } from "./EditorPane.js";
 import { DocumentTitle } from "./DocumentTitle.js";
 import { readRoomMeta, useDocMeta, useRoomStatus } from "../hooks.js";
-import { decisionRecordPath, docPath } from "../route.js";
+import { decisionRecordPath, docPath, isPlainClick } from "../route.js";
 import type { Navigate } from "../route.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
 import { TOPIC_STATES } from "./decision-state.js";
@@ -14,7 +14,7 @@ import { Button } from "../shadcn/button.js";
 import { DialogTrigger } from "../shadcn/dialog.js";
 
 function navigateLink(event: MouseEvent<HTMLAnchorElement>, navigate: Navigate): void {
-  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  if (!isPlainClick(event)) return;
   event.preventDefault();
   navigate(event.currentTarget.pathname);
 }
@@ -29,7 +29,7 @@ function DocumentReference({ uuid, label, context, compact = false, chip = compa
   return <a className={className === undefined ? "ub-doclink" : `ub-doclink ${className}`} href={context.href(uuid)}
     data-doc-link-state={link.state} data-archived-chip={chip || undefined}
     onClick={(event) => {
-      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (!isPlainClick(event)) return;
       event.preventDefault();
       context.open(uuid);
     }}>{chip ? <>

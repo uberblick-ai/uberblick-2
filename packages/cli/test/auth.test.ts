@@ -222,6 +222,29 @@ describe("ub auth local selection and command surface", () => {
     expect(readFileSync(credentialPath(box), "utf8")).toBe(before);
   });
 
+  it("keeps human and JSON auth and status output unchanged when a profile name is stored", async () => {
+    const origin = authenticationOrigin(DEAD_HUB_URL);
+    const old = fixture();
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
+      credentials: { hubLogins: { [origin]: old } },
+    });
+    const commands = [["auth", "status"], ["auth", "status", "--json"], ["status"], ["status", "--json"]];
+    const before: Run[] = [];
+    for (const args of commands) {
+      const run = await runInProcess(args, box);
+      expect(run.status, run.stderr).toBe(0);
+      before.push(run);
+    }
+    writeFileSync(credentialPath(box), JSON.stringify({ hubLogins: {
+      [origin]: { ...old, identity: { ...old.identity, name: "Synthetic 🧭 Profile" } },
+    } }));
+    for (const [index, args] of commands.entries()) {
+      const after = await runInProcess(args, box);
+      expect(after).toEqual(before[index]);
+      expect(after.output).not.toContain("Synthetic 🧭 Profile");
+    }
+  });
+
   it("keeps malformed names and names without issued workspaces out of status rows", async () => {
     for (const [workspaces, workspaceNames] of [
       [[WORKSPACE], "not a map"], [[], { [WORKSPACE]: "Not issued" }],
@@ -295,6 +318,46 @@ describe("ub auth local selection and command surface", () => {
 });
 
 describe("hub-driven CLI GitHub sign-in", () => {
+  it("stores the GitHub profile name privately without changing login output", async () => {
+    const remote = await rig();
+    const name = "Synthetic 🧭 Profile";
+    Object.assign(remote.github.identity, { name });
+    const box = sandbox();
+    const login = await runInProcess(["auth", "login", remote.origin], box);
+    expect(login.status, login.stderr).toBe(0);
+    const stored = savedLogin(box, remote.origin);
+    expect(stored.identity).toMatchObject({ githubAccountId: "1234", githubUsername: USERNAME, name });
+    expect(login.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\nsigned in  ${USERNAME} on ${remote.origin}\navailable workspaces: none\n`);
+    expect(login.stderr).toBe("");
+    assertPublicOnly(login, remote, stored.credential.key);
+  });
+
+  it.each(["older hub", "null", "multiline", "collection secret"])("accepts a collected login without storing a %s profile name", async (kind) => {
+    const remote = await rig();
+    Object.assign(remote.github.identity, { name: "Synthetic Profile" });
+    remote.controls.transform = (path, status, result, body) => {
+      if (path !== "/auth/github/collect" || result.status !== "complete") return { status, result };
+      const identity = { ...(result.identity as Record<string, unknown>) };
+      if (kind === "older hub") delete identity.name;
+      else identity.name = kind === "null" ? null : kind === "multiline" ? "Unsafe\nProfile"
+        : `secret ${String(body.collectionSecret)}`;
+      return { status, result: { ...result, identity } };
+    };
+    const box = sandbox();
+    const login = await runInProcess(["auth", "login", remote.origin], box);
+    expect(login.status, login.stderr).toBe(0);
+    const stored = savedLogin(box, remote.origin);
+    expect(stored.identity).toEqual({ id: stored.identity.id, githubAccountId: "1234", githubUsername: USERNAME });
+    expect(login.stdout).toContain(`signed in  ${USERNAME} on ${remote.origin}\n`);
+    expect(login.stderr).toBe("");
+    const persisted = readFileSync(credentialPath(box), "utf8");
+    for (const request of remote.requests) {
+      const secret = request.body.collectionSecret;
+      if (typeof secret === "string") expect(persisted.includes(secret)).toBe(false);
+    }
+    assertPublicOnly(login, remote, stored.credential.key);
+  });
+
   it("replaces an old HMAC login without warning about an already-invalid previous device", async () => {
     const remote = await rig();
     const old = fixture();

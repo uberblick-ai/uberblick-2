@@ -7,7 +7,7 @@
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { GuidanceBriefing } from "./guidance.js";
+import type { GuidanceBriefing } from "./briefing.js";
 import type { Replicas } from "./replica.js";
 import type { ServerWork } from "./server-work.js";
 import { HelpCatalog } from "./help.js";

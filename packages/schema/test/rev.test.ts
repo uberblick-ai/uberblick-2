@@ -10,9 +10,6 @@ import {
   getBlocks,
   getBlocksFragment,
   initDoc,
-  setBlockLanguage,
-  setBlockLevel,
-  setBlockType,
 } from "../src/index.js";
 import { replicaPair, syncDocs } from "./helpers.js";
 
@@ -48,7 +45,7 @@ describe("blockRev", () => {
     );
   });
 
-  it("is what reads report, and follows every kind of write", () => {
+  it("is what reads report, and follows an edit", () => {
     const doc = seeded();
     const id = appendBlock(doc, { type: "heading", text: "Title", level: 2 });
 
@@ -58,19 +55,7 @@ describe("blockRev", () => {
     expect(getBlocks(doc)[0]?.rev).toBe(first);
 
     editBlock(doc, id, "Title", "Title, revised");
-    const afterEdit = getBlockRev(doc, id);
-    expect(afterEdit).not.toBe(first);
-
-    setBlockLevel(doc, id, 3);
-    const afterLevel = getBlockRev(doc, id);
-    expect(afterLevel).not.toBe(afterEdit);
-
-    setBlockType(doc, id, "code", { language: "ts" });
-    const afterType = getBlockRev(doc, id);
-    expect(afterType).not.toBe(afterLevel);
-
-    setBlockLanguage(doc, id, "python");
-    expect(getBlockRev(doc, id)).not.toBe(afterType);
+    expect(getBlockRev(doc, id)).not.toBe(first);
   });
 
   it("ignores every mark, so formatting does not invalidate a pending edit", () => {

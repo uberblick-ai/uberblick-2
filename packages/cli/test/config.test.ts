@@ -110,36 +110,6 @@ describe("resolveConfig", () => {
     }
   });
 
-  it("uses legacy admission only for its validated matching endpoint and never for selection", () => {
-    const legacyHub = "http://localhost:8080/custom-path";
-    const endpoint = "ws://localhost:8080/custom-path";
-    const box = unboundSandbox({
-      userConfig: { workspace: FROM_USER, hubUrl: legacyHub, hubAdmission: "device" },
-      credentials: { signingSecret: SECRET_ON_FILE },
-    });
-    const unbound = resolveConfig({ env: box.env, cwd: box.cwd });
-    expect(unbound.binding).toBeNull();
-    expect(unbound.env.HUB_ADMISSION).toBeUndefined();
-    const equivalent = "ws://LOCALHOST:8080/a/../custom-path";
-    for (const hub of [endpoint, equivalent, "ws://localhost:1234"]) {
-      const resolved = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: FROM_ENV, UB_HUB_URL: hub }, cwd: box.cwd });
-      expect(resolved.env.HUB_ADMISSION).toBe(hub !== "ws://localhost:1234" ? "device" : undefined);
-      expect(resolved.env.HUB_AUTH_TOKEN).toBe(hub !== "ws://localhost:1234" ? undefined : SECRET_ON_FILE);
-    }
-  });
-
-  it("does not echo or use unsafe legacy admission endpoints", () => {
-    const box = sandbox({
-      projectBinding: { workspaceId: FROM_USER, hubUrl: "ws://localhost:1234" },
-      userConfig: { hubUrl: "http://user:PRIVATE_SENTINEL@localhost:1234/ws", hubAdmission: "device" },
-      credentials: { signingSecret: SECRET_ON_FILE },
-    });
-    const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
-    expect(resolved.env.HUB_ADMISSION).toBeUndefined();
-    expect(resolved.env.HUB_AUTH_TOKEN).toBe(SECRET_ON_FILE);
-    expect(resolved.warnings.join(" ")).not.toContain("PRIVATE_SENTINEL");
-  });
-
   it("does not use a legacy workspace or hub, and does not pass either to children", () => {
     const box = unboundSandbox({ userConfig: { workspace: FROM_USER, hubUrl: "wss://old.example.test/ws" } });
     const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
@@ -275,7 +245,7 @@ describe("resolveConfig", () => {
         "make them equal, or unset one",
     ]);
     // And nothing of either value survives anywhere in it — not a fragment,
-    // not a size. (`ub status`'s own output is checked in storage.test.ts.)
+    // not a size. (`ub status`'s own output is checked in cli.test.ts.)
     expect(tracesOf(SECRET_IN_ENV, resolved.warnings.join("\n"))).toEqual([]);
     expect(tracesOf(SECRET_ON_FILE, resolved.warnings.join("\n"))).toEqual([]);
 
@@ -307,12 +277,12 @@ describe("writeHubAdmission", () => {
     expect(resolved.env.HUB_ADMISSION).toBe("device");
   });
 
-  it("clears every equivalent old key and legacy admission without clearing other targets", () => {
+  it("clears every equivalent old key without clearing other targets", () => {
     const spellings = ["ws://localhost:8080/ws", "WS://LOCALHOST:8080/ws", "ws://localhost:8080/a/../ws"];
     const other = "ws://localhost:8080/ws/";
     const box = sandbox({
       userConfig: {
-        displayName: "keep-me", hubUrl: spellings[1], hubAdmission: "device",
+        displayName: "keep-me", hubUrl: spellings[1],
         hubAdmissions: { [spellings[0]!]: "device", [spellings[1]!]: "device", [other]: "device" },
       },
       credentials: { signingSecret: SECRET_ON_FILE },

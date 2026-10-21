@@ -1,16 +1,18 @@
 import * as Y from "yjs";
 import { describe, expect, it } from "vitest";
 import {
-  CARD_PARTS, CardAnnotationError, CardConversionError, InvalidCardError,
+  CARD_PARTS, InvalidCardError,
   InlineLinkRangeError, OldTextMismatchError, StaleBlockError,
-  appendBlock, buildCardElement, cardButtons, cardInline, cardPartElement, cardPartTexts,
-  createAnnotation, decisionApprovalFingerprint, deleteAnnotation, editBlock,
+  appendBlock, cardButtons, cardPartElement, cardPartTexts,
+  createAnnotation, decisionApprovalFingerprint, editBlock,
   exportMarkdown, findBlockElement, getBlock, getBlocks, getBlocksFragment,
-  getBlockText, importMarkdown, initDoc, insertBlock, isCardButtonHref, isSupportedCard,
-  listAnnotationRanges, parseCardButton, parseCardButtons, parseCardInput, parseInline, resolveAnnotationRange,
-  setAnnotationResolved, setBlockType, setInlineLink, writeCardButton, writeCardButtons,
+  importMarkdown, initDoc, insertBlock, isCardButtonHref, isSupportedCard,
+  listAnnotationRanges, parseCardButtons, parseCardInput, parseInline, resolveAnnotationRange,
+  setAnnotationResolved, setInlineLink, writeCardButton, writeCardButtons,
   type CardButton, type CardPart,
 } from "../src/index.js";
+import { buildCardElement, cardInline, parseCardButton } from "../src/card.js";
+import { CardAnnotationError } from "../src/errors.js";
 import { replicaPair, syncDocs } from "./helpers.js";
 
 const UUID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
@@ -38,7 +40,7 @@ function imported(markdown: string): Y.Doc {
 describe("card block contract", () => {
   it("keeps existing cards' canonical text, revision and approval fingerprint", () => {
     const { doc, id, card } = fixture();
-    expect(getBlockText(doc, id)).toBe(SOURCE);
+    expect(getBlock(doc, id)!.text).toBe(SOURCE);
     expect(card.getAttributes()).toEqual({ id });
     expect(getBlock(doc, id)!.rev).toBe("a0c7c7a974288d67");
     expect(decisionApprovalFingerprint(doc)).toBe("71a456ed645bb13b");
@@ -49,14 +51,14 @@ describe("card block contract", () => {
     const { doc, id, card } = fixture(source);
     expect(isSupportedCard(card)).toBe(true);
     expect(card.toArray().map((part) => (part as Y.XmlElement).nodeName)).toEqual(["cardLabel", "cardTitle", "cardBody", "cardFooter"]);
-    expect(getBlockText(doc, id)).toBe(`label: "Literal quotes"\ntitle: **Title** and *emphasis*\nfooter: [target](${TARGET})\n\nA ~~struck~~ body with \`code\` and [web](https://example.test).`);
+    expect(getBlock(doc, id)!.text).toBe(`label: "Literal quotes"\ntitle: **Title** and *emphasis*\nfooter: [target](${TARGET})\n\nA ~~struck~~ body with \`code\` and [web](https://example.test).`);
     expect(cardInline(card).footer).toEqual([{ text: "target", marks: { docLink: TARGET } }]);
     const before = getBlock(doc, id)!.rev;
     partText(card, "label").format(0, 7, { bold: {} });
     expect(getBlock(doc, id)!.rev).not.toBe(before);
   });
 
-  it("refuses invalid writes, source conversions and block offsets before writing", () => {
+  it("refuses invalid writes and block offsets before writing", () => {
     const { doc, id } = fixture();
     let updates = 0;
     doc.on("update", () => { updates += 1; });
@@ -66,8 +68,6 @@ describe("card block contract", () => {
     }
     expect(() => createAnnotation(doc, id, 0, 2, "Reader", "question")).toThrow(CardAnnotationError);
     expect(() => setInlineLink(doc, id, { start: 0, end: 2 }, TARGET)).toThrow(InlineLinkRangeError);
-    expect(() => setBlockType(doc, id, "paragraph")).toThrow(CardConversionError);
-    expect(() => setBlockType(doc, id, "card")).not.toThrow();
     expect(updates).toBe(0);
     expect(getBlocks(doc)).toHaveLength(1);
   });
@@ -80,7 +80,7 @@ describe("card block contract", () => {
     card.setAttribute("future", "shape");
     expect(isSupportedCard(card)).toBe(false);
     const before = Y.encodeStateAsUpdate(doc);
-    expect(() => editBlock(doc, id, getBlockText(doc, id), SOURCE.replace("body", "content"))).toThrow(InvalidCardError);
+    expect(() => editBlock(doc, id, getBlock(doc, id)!.text, SOURCE.replace("body", "content"))).toThrow(InvalidCardError);
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
   });
 
@@ -91,7 +91,7 @@ describe("card block contract", () => {
     const titleThread = createAnnotation(doc, id, 2, 8, "Reader", "title?", { part: "title" });
     const footerThread = createAnnotation(doc, id, 0, 8, "Reader", "footer?", { part: "footer" });
     const footerDelta = footer.toDelta();
-    const before = getBlockText(doc, id);
+    const before = getBlock(doc, id)!.text;
     editBlock(doc, id, before, before.replace("title**", "title extended**").replace("body text", "body prose"));
     expect(partText(card, "title")).toBe(title);
     expect(partText(card, "footer")).toBe(footer);
@@ -112,8 +112,6 @@ describe("card block contract", () => {
       setAnnotationResolved(doc, thread.id, true);
       setAnnotationResolved(doc, thread.id, false);
       expect(decisionApprovalFingerprint(doc)).toBe(approval);
-      deleteAnnotation(doc, thread.id);
-      expect(decisionApprovalFingerprint(doc)).toBe(approval);
     }
   });
 
@@ -128,8 +126,8 @@ describe("card block contract", () => {
     expect(getBlocks(copy).map(({ type }) => type)).toEqual(["card", "card", "paragraph"]);
     expect(getBlocks(copy).map(({ text }) => text)).toEqual(getBlocks(doc).map(({ text }) => text));
     expect(cardInline(findBlockElement(copy, getBlocks(copy)[0]!.id)!)).toEqual(cardInline(card));
-    expect(getBlockText(copy, getBlocks(copy)[2]!.id)).toBe(prose);
-    expect(getBlockText(doc, id)).toContain("\\:::");
+    expect(getBlock(copy, getBlocks(copy)[2]!.id)!.text).toBe(prose);
+    expect(getBlock(doc, id)!.text).toContain("\\:::");
   });
 
   it.each([
@@ -155,19 +153,19 @@ describe("card block contract", () => {
     title.delete(0, title.length);
     title.insert(0, "Hello\nthere");
     const footerThread = createAnnotation(doc, id, 0, 8, "Reader", "footer?", { part: "footer" });
-    expect(parseCardInput(getBlockText(doc, id)).title).toBe("Hello there");
-    const before = getBlockText(doc, id);
+    expect(parseCardInput(getBlock(doc, id)!.text).title).toBe("Hello there");
+    const before = getBlock(doc, id)!.text;
     editBlock(doc, id, before, before.replace("Hello there", "Hello there changed"));
     expect((partText(card, "title").toDelta() as Array<{ insert?: unknown }>).some((op) => typeof op.insert === "string" && op.insert.includes("\n"))).toBe(true);
     expect(cardInline(card).title).toEqual([{ text: "Hello\nthere changed", marks: {} }]);
     expect(resolveAnnotationRange(doc, footerThread.id)).toEqual({ part: "footer", start: 0, end: 8, collapsed: false });
     title.insert(6, "\n");
-    const twoNewlines = getBlockText(doc, id);
+    const twoNewlines = getBlock(doc, id)!.text;
     expect(parseCardInput(twoNewlines).title).toBe("Hello  there changed");
     editBlock(doc, id, twoNewlines, twoNewlines.replace("there changed", "there changed again"));
     expect(cardInline(card).title).toEqual([{ text: "Hello\n\nthere changed again", marks: {} }]);
     title.delete(0, title.length);
-    const empty = getBlockText(doc, id);
+    const empty = getBlock(doc, id)!.text;
     expect(empty).not.toContain("title:");
     expect(() => editBlock(doc, id, empty, empty)).toThrow(InvalidCardError);
     editBlock(doc, id, empty, empty.replace("label: A lever", "label: A lever\ntitle: Repaired"));
@@ -185,10 +183,10 @@ describe("card block contract", () => {
     const cardB = findBlockElement(b, id)!;
     partText(cardA, "footer").insert(0, "agent A ");
     partText(cardB, "footer").insert(0, "agent B ");
-    editBlock(a, id, getBlockText(a, id), getBlockText(a, id).replace("Original", "Changed"));
+    editBlock(a, id, getBlock(a, id)!.text, getBlock(a, id)!.text.replace("Original", "Changed"));
     partText(cardB, "body").insert(0, "Concurrent body");
     syncDocs(a, b);
-    expect(getBlockText(a, id)).toBe(getBlockText(b, id));
+    expect(getBlock(a, id)!.text).toBe(getBlock(b, id)!.text);
     expect(cardPartTexts(cardA, "footer")).toHaveLength(1);
     expect(cardInline(cardA).footer.map(({ text }) => text).join("")).toContain("agent A ");
     expect(cardInline(cardA).footer.map(({ text }) => text).join("")).toContain("agent B ");
@@ -221,12 +219,12 @@ describe("card link button", () => {
     const source = SOURCE.replace("footer: Metadata", "footer: Metadata\nbutton: [Discuss](codex://new)");
     const { doc, id, card } = fixture(source);
     expect(card.getAttribute("button")).toBe("[Discuss](codex://new)");
-    expect(getBlockText(doc, id)).toBe(source);
+    expect(getBlock(doc, id)!.text).toBe(source);
     expect(getBlock(doc, id)!.rev).toBe("4cda8e09ed946563");
     expect(decisionApprovalFingerprint(doc)).toBe("6bf5ef896d475499");
     const canonicalRev = getBlock(doc, id)!.rev;
     editBlock(doc, id, source, source.replace("(codex://new)", "(codex://new) neutral outline"));
-    expect(getBlockText(doc, id)).toBe(source);
+    expect(getBlock(doc, id)!.text).toBe(source);
     expect(getBlock(doc, id)!.rev).toBe(canonicalRev);
   });
 
@@ -249,9 +247,9 @@ describe("card link button", () => {
     ];
     const { doc, id, card } = fixture(`title: Actions\n${values.map((value) => `button: ${value}`).join("\n")}\nfooter: Metadata\n\nBody`);
     expect(card.getAttribute("button")).toBe(canonical.join("\n"));
-    expect(getBlockText(doc, id)).toBe(`title: Actions\nfooter: Metadata\n${canonical.map((value) => `button: ${value}`).join("\n")}\n\nBody`);
+    expect(getBlock(doc, id)!.text).toBe(`title: Actions\nfooter: Metadata\n${canonical.map((value) => `button: ${value}`).join("\n")}\n\nBody`);
     const copy = imported(exportMarkdown(doc, { frontmatter: false }));
-    expect(getBlocks(copy)[0]!.text).toBe(getBlockText(doc, id));
+    expect(getBlocks(copy)[0]!.text).toBe(getBlock(doc, id)!.text);
     expect(cardButtons(findBlockElement(copy, getBlocks(copy)[0]!.id)!)).toEqual(cardButtons(card));
     expect(cardButtons(card)[0]).toEqual({ text: "First", href: "https://example.test" });
   });
@@ -260,7 +258,7 @@ describe("card link button", () => {
     const buttons = Array.from({ length: 50 }, (_, index) => ({ text: `Action ${index}`, href: `https://example.test/${index}` }));
     const { doc, id, card } = fixture(`title: Many actions\n${buttons.map((button) => `button: ${writeCardButton(button)}`).join("\n")}\n\n`);
     expect(cardButtons(card)).toEqual(buttons);
-    expect(getBlockText(doc, id).match(/^button:/gm)).toHaveLength(50);
+    expect(getBlock(doc, id)!.text.match(/^button:/gm)).toHaveLength(50);
   });
 
   it("refuses long malformed appearance suffixes without backtracking", () => {
@@ -307,7 +305,7 @@ describe("card link button", () => {
     expect(isSupportedCard(card)).toBe(false);
     expect(cardButtons(card)).toEqual([]);
     const before = Y.encodeStateAsUpdate(doc);
-    expect(() => editBlock(doc, id, getBlockText(doc, id), SOURCE)).toThrow(InvalidCardError);
+    expect(() => editBlock(doc, id, getBlock(doc, id)!.text, SOURCE)).toThrow(InvalidCardError);
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
   });
 
@@ -331,7 +329,7 @@ describe("card link button", () => {
     const buttons = cardButtons(card);
     editBlock(doc, id, source, source.replace("Body", "Changed body"));
     expect(cardButtons(card)).toEqual(buttons);
-    const before = getBlockText(doc, id);
+    const before = getBlock(doc, id)!.text;
     editBlock(doc, id, before, before.replace("[First]", "[Updated first]"));
     expect(cardButtons(card)[1]).toEqual(buttons[1]);
   });
@@ -357,7 +355,7 @@ describe("card link button", () => {
     expect(cardInline(findBlockElement(a, id)!).title[0]!.text).toBe("Changed A useful title");
     expect(cardInline(findBlockElement(a, id)!).body[0]!.text).toBe("Concurrent The body text.");
     expect(writeCardButtons([])).toBe("");
-    const current = getBlockText(a, id);
+    const current = getBlock(a, id)!.text;
     editBlock(a, id, current, current.replace(/^button:.*\n/gm, ""));
     syncDocs(a, b);
     expect(findBlockElement(b, id)!.getAttribute("button")).toBeUndefined();
@@ -375,9 +373,9 @@ describe("card link button", () => {
     const { doc, id, card } = fixture(`button: ${source}\n${SOURCE}`);
     expect(isSupportedCard(card)).toBe(true);
     expect(card.getAttribute("button")).toBe(source);
-    expect(getBlockText(doc, id)).toBe(SOURCE.replace("footer: Metadata", `footer: Metadata\nbutton: ${source}`));
+    expect(getBlock(doc, id)!.text).toBe(SOURCE.replace("footer: Metadata", `footer: Metadata\nbutton: ${source}`));
     const copy = imported(exportMarkdown(doc, { frontmatter: false }));
-    expect(getBlocks(copy).map(({ text }) => text)).toEqual([getBlockText(doc, id)]);
+    expect(getBlocks(copy).map(({ text }) => text)).toEqual([getBlock(doc, id)!.text]);
     expect(cardButtons(findBlockElement(copy, getBlocks(copy)[0]!.id)!)).toEqual([{ text: "Author's text", href }]);
   });
 
@@ -421,7 +419,7 @@ describe("card link button", () => {
     const { doc, id, card } = fixture(`title: Action\nbutton: ${writeCardButton(button)}\n\nBody`);
     expect(cardButtons(card)).toEqual([button]);
     const copy = imported(exportMarkdown(doc, { frontmatter: false }));
-    expect(getBlocks(copy)[0]!.text).toBe(getBlockText(doc, id));
+    expect(getBlocks(copy)[0]!.text).toBe(getBlock(doc, id)!.text);
     expect(cardButtons(findBlockElement(copy, getBlocks(copy)[0]!.id)!)).toEqual([button]);
     for (const value of ["", " ", "line\nbreak", "line\rbreak"]) {
       expect(() => writeCardButton({ text: value, href })).toThrow(InvalidCardError);
@@ -468,12 +466,12 @@ describe("card link button", () => {
     partText(findBlockElement(a, id)!, "title").insert(0, "Changed ");
     partText(findBlockElement(b, id)!, "body").insert(0, "Concurrent ");
     syncDocs(a, b);
-    expect(getBlockText(a, id)).toBe(getBlockText(b, id));
+    expect(getBlock(a, id)!.text).toBe(getBlock(b, id)!.text);
     const winner = cardButtons(findBlockElement(a, id)!);
     expect([[{ text: "First", href: "codex://new" }], [{ text: "Second", href: "claude-cli://open?q=second" }]]).toContainEqual(winner);
     expect(cardInline(findBlockElement(a, id)!).title).toEqual([{ text: "Changed A useful title", marks: {} }]);
     expect(cardInline(findBlockElement(a, id)!).body).toEqual([{ text: "Concurrent The body text.", marks: {} }]);
-    const current = getBlockText(a, id);
+    const current = getBlock(a, id)!.text;
     editBlock(a, id, current, current.replace(/^button:.*\n/m, ""));
     syncDocs(a, b);
     expect(cardButtons(findBlockElement(b, id)!)).toEqual([]);

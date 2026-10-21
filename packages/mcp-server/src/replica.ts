@@ -44,11 +44,11 @@ import {
   figmaCaptionElement,
   CARD_PARTS,
   upsertDirectoryEntry,
+  githubReference,
 } from "@uberblick/schema";
 import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
 import type { Block, CardPart, DocMeta, InlineRun } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
-import { githubReference } from "./github-reference.js";
 import { log } from "./log.js";
 import { collectReplicaSyncState } from "./status.js";
 import type { MirrorStore, UpdateOrigin } from "./store.js";

@@ -20,7 +20,6 @@ import {
   getBlocksFragment,
   initDoc,
   repairDuplicateBlocks,
-  setBlockType,
   type TableMapping,
 } from "@uberblick/schema";
 import { observeDocRev } from "../src/ui/status/doc-chrome.js";
@@ -135,12 +134,19 @@ describe("the document rev is recomputed incrementally", () => {
   it("moves the rev when a re-type replaces a block's element under its id", () => {
     const fix = fixture();
     try {
-      // The trap this test exists for: `setBlockType` keeps the block id and
-      // swaps the element beneath it, and Yjs reports that as a structural
-      // change on the fragment alone — no event names the block. A cache keyed
-      // by id would answer with the paragraph's rev for as long as the document
+      // The trap this test exists for: a retype keeps the block id and swaps
+      // the element beneath it, and Yjs reports that as a structural change on
+      // the fragment alone — no event names the block. A cache keyed by id
+      // would answer with the paragraph's rev for as long as the document
       // stayed open, so the chrome would say nothing had changed.
-      setBlockType(fix.ydoc, fix.alpha, "heading", { level: 2 });
+      const heading = new Y.XmlElement("heading");
+      heading.setAttribute("id", fix.alpha);
+      heading.insert(0, [new Y.XmlText("alpha, at length")]);
+      const fragment = getBlocksFragment(fix.ydoc);
+      fix.ydoc.transact(() => {
+        fragment.insert(1, [heading]);
+        fragment.delete(0, 1);
+      });
       expect(fix.revs.at(-1)).not.toBe(fix.revs[0]);
       expect(fix.revs.at(-1)).toBe(docRev(fix.ydoc));
     } finally {

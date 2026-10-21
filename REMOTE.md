@@ -1602,10 +1602,10 @@ docker compose start hub
 ```
 
 Only start the hub after restore reports success. To restore a backup kept on
-the host, including one made by an older `bin/hub-backup.sh`, stream it through
-standard input. `-T` keeps the container terminal from changing binary input;
-`--yes` confirms any access changes because this route has no terminal for a
-confirmation prompt:
+the host, including one made by an earlier release's `bin/hub-backup.sh`, stream
+it through standard input. `-T` keeps the container terminal from changing
+binary input; `--yes` confirms any access changes because this route has no
+terminal for a confirmation prompt:
 
 ```sh
 docker compose stop hub

@@ -26,7 +26,9 @@ afterEach(async () => {
 
 class GithubFake {
   time = 1000;
-  account = { id: 1234, login: "first-name", email: "ignore@example.com", organizations: ["ignored"] };
+  account: { id: number; login: string; name?: unknown; email: string; organizations: string[] } = {
+    id: 1234, login: "first-name", email: "ignore@example.com", organizations: ["ignored"],
+  };
   tokenResult: Record<string, unknown> = { access_token: GITHUB_TOKEN, refresh_token: REFRESH_TOKEN, token_type: "bearer", scope: "" };
   calls: { url: string; body: URLSearchParams; headers: Headers }[] = [];
   pauseIdentity: (() => Promise<void>) | undefined;
@@ -105,6 +107,50 @@ function privateRows(path: string) {
 }
 
 describe("hub-driven GitHub identity", () => {
+  it("returns a profile name only with the collected device identity without persisting it", async () => {
+    const testRig = await rig();
+    testRig.github.account.name = "Ada Lovelace";
+    const named = await complete(testRig);
+    const principal = testRig.hub.principals!.get(named.result.identity.id)!;
+    expect(named.result.identity).toEqual({ ...principal, name: "Ada Lovelace" });
+    expect(JSON.stringify({ rows: privateRows(testRig.databasePath), logs: testRig.logs })).not.toContain("Ada Lovelace");
+
+    testRig.github.account.name = null;
+    const unnamed = await complete(testRig);
+    expect(unnamed.result.identity).toEqual(principal);
+    expect(unnamed.result.identity).not.toHaveProperty("name");
+  });
+
+  it.each([undefined, null, 42, {}, [], "", "  ", "line\nbreak", "format\u200dcharacter", "control\u0000character", "a".repeat(254)])(
+    "omits an absent or invalid GitHub profile name without refusing sign-in", async (name) => {
+      const testRig = await rig();
+      testRig.github.account.name = name;
+      const signedIn = await complete(testRig);
+      expect(signedIn.result.identity).not.toHaveProperty("name");
+      expect(signedIn.result.identity).toEqual(testRig.hub.principals!.get(signedIn.result.identity.id));
+    },
+  );
+
+  it("refuses profile names containing the collection secret", async () => {
+    const testRig = await rig();
+    const request = await start(testRig.hub);
+    testRig.github.account.name = `display ${request.collectionSecret}`;
+    testRig.github.time += 5000;
+    const collected = (await post(testRig.hub, "collect", request)).result;
+    expect(collected).toMatchObject({ status: "complete" });
+    expect(collected.identity).not.toHaveProperty("name");
+    expect(JSON.stringify(collected)).not.toContain(request.collectionSecret);
+  });
+
+  it.each([GITHUB_TOKEN, REFRESH_TOKEN, DEVICE_CODE])("refuses profile names containing upstream secrets", async (secret) => {
+    const testRig = await rig();
+    testRig.github.account.name = `display ${secret}`;
+    const signedIn = await complete(testRig);
+    expect(signedIn.result.identity).not.toHaveProperty("name");
+    expect(JSON.stringify({ result: signedIn.result, rows: privateRows(testRig.databasePath), logs: testRig.logs }))
+      .not.toContain(secret);
+  });
+
   it("keeps each CLI hostname on its device without copying it to GitHub or credential replies", async () => {
     const testRig = await rig();
     const laptop = await start(testRig.hub, { deviceName: "laptop" });
@@ -283,6 +329,44 @@ describe("bounded device requests", () => {
     expect(await post(testRig.hub, "collect", request)).toMatchObject({ result: { status: "pending", interval: 1 } });
     expect(testRig.github.calls).toHaveLength(3);
     expect(privateRows(testRig.databasePath).credentials).toHaveLength(0);
+  });
+
+  it("caps only the poll gate when injected, including pending and slow_down", async () => {
+    const github = new GithubFake();
+    const flow = new GithubDeviceFlow({ clientId: CLIENT_ID, fetch: github.fetch,
+      now: () => github.time, pollMaxWaitMs: 20 }, () => ({}), () => {});
+    try {
+      const started = await flow.start();
+      if (started.status !== "pending") throw new Error("missing sign-in attempt");
+      expect(started).toMatchObject({ interval: 5, expiresIn: 900 });
+      const collect = () => flow.collect(started.requestId, started.collectionSecret);
+      github.tokenResult = { error: "authorization_pending" };
+      github.time += 19;
+      expect(await collect()).toMatchObject({ status: "pending" });
+      expect(github.calls).toHaveLength(1);
+      github.time++;
+      expect(await collect()).toMatchObject({ status: "pending" });
+      expect(github.calls).toHaveLength(2);
+      github.time += 19;
+      await collect();
+      expect(github.calls).toHaveLength(2);
+      github.time++;
+      github.tokenResult = { error: "slow_down", interval: 12 };
+      await collect();
+      expect(github.calls).toHaveLength(3);
+      github.time += 19;
+      await collect();
+      expect(github.calls).toHaveLength(3);
+      github.time++;
+      github.tokenResult = { error: "authorization_pending" };
+      expect(await collect()).toMatchObject({ status: "pending" });
+      expect(github.calls).toHaveLength(4);
+      github.time = 900_999;
+      expect(await collect()).toMatchObject({ status: "pending" });
+      github.time++;
+      expect(await collect()).toEqual({ status: "expired" });
+      expect(github.calls).toHaveLength(5);
+    } finally { flow.stop(); }
   });
 
   it.each(["denied", "expired"])("%s ends distinctly and issues nothing", async (status) => {

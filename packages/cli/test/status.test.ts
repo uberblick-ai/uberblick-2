@@ -22,38 +22,23 @@ import { cliVersion } from "../src/version.js";
 afterAll(removeTempDirs);
 
 const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
+const OTHER = "4d8e0000-1111-4222-8333-444455556666";
 const HUB = "wss://hub.example.test/ws";
 const ORIGIN = "https://hub.example.test";
 
 function report(overrides: Partial<StatusReport> = {}): StatusReport {
   return {
     version: "1.2.3",
-    workspace: WORKSPACE,
     workspaceUuid: WORKSPACE,
+    workspaceOrigin: "project config",
     binding: { workspaceId: WORKSPACE, hubUrl: HUB },
     projectConfig: "/project/.uberblick.json",
-    hubUrl: HUB,
     account: { login: "bk-one", provider: "github" },
     databasePath: "/workspace/replica.sqlite",
-    credentialPresent: true,
-    credentialSource: "credentials file",
-    sources: { workspace: "project config", hubUrl: "project config" },
-    shadowed: [{ setting: "credential", layer: "credentials file" }],
     hub: { status: "connected", url: HUB, protocolVersion: SYNC_PROTOCOL_VERSION },
-    rooms: [{ room: `${WORKSPACE}/a-room`, appliedSeq: 912345, synced: true }],
     unsyncedChanges: 0,
-    pendingRooms: [],
     lastSync: null,
-    inFlightUpdates: 0,
-    logEntries: 5284,
     persistence: null,
-    storage: {
-      layout: "xdg",
-      config: "/config/config.json",
-      data: "/data/root",
-      hub: "/data/hub.sqlite",
-      workspace: "/workspace/replica.sqlite",
-    },
     ...overrides,
   };
 }
@@ -171,26 +156,20 @@ describe("the short status report", () => {
     });
   });
 
-  it("uses the bare UUID when this replica has no workspace name", () => {
-    const reading = report({ workspace: `notes-${WORKSPACE}` });
-    expect(row(renderStatus(reading), "workspace")).toBe(`workspace   ${WORKSPACE}`);
-    expect(shortStatusReport(reading).workspace).toEqual({ id: WORKSPACE, name: null });
-  });
-
-  it.each([0, 1, 4])("reports %d pending rooms without counting messages or log records", (count) => {
-    const reading = report({ unsyncedChanges: count, inFlightUpdates: 37, logEntries: 5284 });
+  it.each([0, 1, 4])("reports %d pending rooms as changes without internal diagnostics", (count) => {
+    const reading = report({ unsyncedChanges: count });
     expect(row(renderStatus(reading), "pending")).toBe(count === 0
       ? "pending     none"
       : `pending     ${count} change${count === 1 ? "" : "s"} not yet on the hub`);
     expect(shortStatusReport(reading).pending).toEqual({ count });
-    expect(renderStatus(reading)).not.toMatch(/37|5284|rooms|local log|selection|recovery|failures|uuid/);
+    expect(renderStatus(reading)).not.toMatch(/rooms|local log|selection|recovery|failures|uuid/);
   });
 
   it.each([null, "2026-10-05T19:58:12Z"])("prints the local report regardless of stored sync time %s", (lastSync) => {
     const reading = report({
       binding: { workspaceId: WORKSPACE, hubUrl: null },
       hubVersion: "1.2.3",
-      lastSync, unsyncedChanges: 5, inFlightUpdates: 7,
+      lastSync, unsyncedChanges: 5,
     });
     expect(renderStatus(reading, ORIGIN, "My Workspace")).toBe(
       `workspace   My Workspace (${WORKSPACE})\n` +
@@ -494,6 +473,43 @@ describe("the real project's short report", () => {
       `workspace   ${WORKSPACE}\nhub         local, this computer only\nversion     client ${cliVersion()}\naccount     none needed for a local workspace\n` +
       `chosen by   project config in ${box.cwd}\nstored in   ${defaultWorkspaceDatabasePath(WORKSPACE, box.env)}\nproblems    none\n`,
     );
+  });
+
+  it("shows a complete environment override instead of merging it with the project binding", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: HUB } });
+    const env = { UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "local" };
+    const text = await runInProcess(["status"], box, env);
+    expect(text.status, text.output).toBe(0);
+    expect(text.stderr).toBe("");
+    expect(row(text.stdout, "workspace")).toBe(`workspace   ${OTHER}`);
+    expect(row(text.stdout, "hub")).toBe("hub         local, this computer only");
+    expect(row(text.stdout, "chosen by")).toBe("chosen by   environment");
+    const json = await runInProcess(["status", "--json"], box, env);
+    expect(JSON.parse(json.stdout)).toMatchObject({
+      workspace: { id: OTHER }, hub: null,
+      chosenBy: { source: "environment", path: null },
+      storedIn: defaultWorkspaceDatabasePath(OTHER, box.env),
+    });
+  });
+
+  it("identifies a decorated, unnamed workspace by its bare UUID and canonical replica", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: `notes-${WORKSPACE}`, hubUrl: null } });
+    const text = await runInProcess(["status"], box);
+    expect(text.status, text.output).toBe(0);
+    expect(row(text.stdout, "workspace")).toBe(`workspace   ${WORKSPACE}`);
+    const json = await runInProcess(["status", "--json"], box);
+    expect(JSON.parse(json.stdout)).toMatchObject({
+      workspace: { id: WORKSPACE, name: null }, storedIn: defaultWorkspaceDatabasePath(WORKSPACE, box.env),
+    });
+  });
+
+  it("resolves a relative custom replica path against the working directory", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    const env = { UBERBLICK_DB: "custom.sqlite" };
+    const text = await runInProcess(["status"], box, env);
+    expect(row(text.stdout, "stored in")).toBe(`stored in   ${join(box.cwd, "custom.sqlite")}`);
+    const json = await runInProcess(["status", "--json"], box, env);
+    expect(JSON.parse(json.stdout).storedIn).toBe(join(box.cwd, "custom.sqlite"));
   });
 
   it.each([DEAD_HUB_URL, null])("reads the local name and counts reserved pending rooms only for a hub %s", async (hubUrl) => {

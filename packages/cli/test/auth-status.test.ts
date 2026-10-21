@@ -218,19 +218,36 @@ describe("ub auth status bounded read-only check", () => {
   });
 
   it.each(["headers", "body"])("caps a hung %s request including response consumption", async phase => {
-    const requests: string[] = [];
-    const remote = await serve((request, response) => {
-      requests.push(request.url ?? "");
-      if (phase === "body") { response.writeHead(200); response.write('{"status":"ok",'); }
+    let requestSignal: AbortSignal | undefined;
+    let bodyAborted = false;
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+      const signal = options?.signal;
+      if (signal == null) throw new Error("management request needs an abort signal");
+      requestSignal = signal;
+      if (phase === "headers") return await new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        signal.throwIfAborted();
+      });
+      return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"status":"ok",'));
+          signal.addEventListener("abort", () => {
+            bodyAborted = true;
+            controller.error(signal.reason);
+          }, { once: true });
+          signal.throwIfAborted();
+        },
+      }));
     });
-    const box = sandbox({ credentials: { hubLogins: { [remote.origin]: fixture() } } });
+    const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: fixture() } } });
     const before = storedBytes(box);
-    const started = Date.now();
-    const run = await runInProcess(["auth", "status", remote.origin, "--json"], box, { UB_TEST_MAX_WAIT_MS: "60" });
-    expect(Date.now() - started).toBeLessThan(2_000);
+    const run = await runInProcess(["auth", "status", OTHER_HUB, "--json"], box);
     expect(run.status).toBe(1);
     expect(report(run)).toMatchObject({ outcome: "hub-unreachable", loginAccepted: null, hubAdmin: null, storedLogin: snapshot });
-    expect(requests).toEqual(["/auth/manage"]);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls[0]?.[0]).toBe(`${OTHER_HUB}/auth/manage`);
+    expect(requestSignal?.aborted).toBe(true);
+    if (phase === "body") expect(bodyAborted).toBe(true);
     expect(storedBytes(box)).toEqual(before);
   });
 

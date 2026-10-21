@@ -542,20 +542,16 @@ describe("workspace link configuration", () => {
     const second = "ws://localhost:8081/two";
     const box = sandbox({
       projectBinding: { workspaceId: WORKSPACE, hubUrl: first },
-      userConfig: { displayName: "Synthetic operator", hubUrl: first, hubAdmission: "device" },
+      userConfig: { displayName: "Synthetic operator", hubUrl: first },
     });
     const readPrivate = () => JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"));
-    // Even an already-known mode must move out of legacy selector fields before
-    // those obsolete keys can be removed during project migration.
     setRemote(first, { env: box.env, cwd: box.cwd, deviceAdmission: true });
     expect(readPrivate().hubAdmissions).toEqual({ [first]: "device" });
-    expect(readPrivate().hubAdmission).toBeUndefined();
     setRemote(second, { env: box.env, cwd: box.cwd, deviceAdmission: true });
     expect(readPrivate()).toEqual({ displayName: "Synthetic operator", hubUrl: first, hubAdmissions: { [first]: "device", [second]: "device" } });
     expect(readConfigFile(box, "config.json")).toEqual({ workspaceId: WORKSPACE, hubUrl: second });
     setRemote(first, { env: box.env, cwd: box.cwd });
     expect(readPrivate().hubAdmissions).toEqual({ [second]: "device" });
-    expect(readPrivate().hubAdmission).toBeUndefined();
   });
 
   it("leaves the project binding intact when private admission persistence fails", () => {
@@ -801,9 +797,9 @@ describe("ub workspace use <link>", () => {
     await webName(hub, "Shared workspace");
     const uuid = await webDoc(hub, "Shared note");
     const box = unboundSandbox({ credentials: { signingSecret: SECRET } });
-    // Any networking dependency can log through console. Emit deterministic
-    // library noise at the same socket seam without replacing the real fetch.
-    const preload = "import {Socket} from 'node:net'; const original = Socket.prototype.connect; Socket.prototype.connect = function (...args) { console.log('[yjs] Changed the client-id because another client seems to be using it.'); console.warn('dependency warning'); console.error('dependency error'); return original.apply(this, args); };";
+    // The first network call starts the directory fetch. Emit once so later
+    // background connections cannot inject noise after the command finishes.
+    const preload = "import {Socket} from 'node:net'; const original = Socket.prototype.connect; let injected = false; Socket.prototype.connect = function (...args) { if (!injected) { injected = true; console.log('[yjs] Changed the client-id because another client seems to be using it.'); console.warn('dependency warning'); console.error('dependency error'); } return original.apply(this, args); };";
     const run = await runUbAsync(["workspace", "use", localJoinUrl(hub, box, SECRET)], box, {
       NODE_OPTIONS: `--import=data:text/javascript,${encodeURIComponent(preload)}`,
     });
@@ -1361,45 +1357,31 @@ describe("ub workspace use <link>", () => {
     expect(readConfigFile(local, "config.json")).toEqual({ workspaceId: WORKSPACE, hubUrl: url(source) });
   });
 
-  it.each([
-    ["fetch", 2],
-    ["verification", 3],
-  ] as const)("persists no binding or hub record when the hub stops during %s", async (phase, failedConnection) => {
+  it.each(["fetch", "verification"] as const)("persists no binding or hub record when the hub stops during %s", async phase => {
     const local = sandbox();
     const remote = await startHub(OTHER_SECRET);
-    const sockets = new Set<Socket>();
-    let connections = 0;
+    let hydrationSocket: string | undefined;
+    let stopped = false;
     let stopping: Promise<void> | undefined;
-    const proxy = createServer((socket) => {
-      sockets.add(socket);
-      socket.on("error", () => {});
-      socket.on("close", () => sockets.delete(socket));
-      connections += 1;
-      // Preflight, hydration and verification each open a fresh WebSocket.
-      // Fail the selected phase without relying on CLI detail output, which is
-      // deliberately hidden unless requested.
-      if (connections >= failedConnection) {
-        socket.destroy();
-        if (stopping === undefined) {
-          stopping = remote.stop();
-        }
-        return;
-      }
-      const upstream = createConnection({ host: "127.0.0.1", port: remote.port });
-      sockets.add(upstream);
-      upstream.on("error", () => socket.destroy());
-      upstream.on("close", () => sockets.delete(upstream));
-      socket.on("close", () => upstream.destroy());
-      socket.pipe(upstream).pipe(socket);
+    remote.hocuspocus.configuration.extensions.push({
+      async beforeSync({ documentName, connection }) {
+        if (documentName !== settingsRoom(WORKSPACE)) return;
+        // The directory-only preflight never requests settings. Hydration and
+        // fresh-client verification read them on separate authenticated sockets.
+        hydrationSocket ??= connection.socketId;
+        if (phase === "verification" && connection.socketId === hydrationSocket) return;
+        stopped = true;
+        stopping ??= remote.stop();
+        throw new Error("hub stopped at the selected workspace read");
+      },
     });
-    await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
     try {
-      const address = proxy.address();
-      if (address === null || typeof address === "string") throw new Error("missing proxy port");
-      const target = `ws://127.0.0.1:${address.port}/${WORKSPACE}`;
-      const run = await runInProcess(["workspace", "use", target], local, { HUB_AUTH_TOKEN: OTHER_SECRET });
+      const target = `${url(remote)}/${WORKSPACE}`;
+      const run = await runInProcess(["workspace", "use", target], local, {
+        HUB_AUTH_TOKEN: OTHER_SECRET, UB_TEST_MAX_WAIT_MS: "2000",
+      });
       if (stopping !== undefined) await stopping;
-      expect(connections).toBeGreaterThanOrEqual(failedConnection);
+      expect(stopped).toBe(true);
       expect(run.status).toBe(1);
       expect(run.stderr).toContain(phase === "fetch"
         ? "What did arrive is in the local update log already"
@@ -1409,8 +1391,6 @@ describe("ub workspace use <link>", () => {
       expect(readWorkspaceHub(WORKSPACE, local.env)).toBeUndefined();
       expect(existsSync(join(local.configHome, "uberblick", "config.json"))).toBe(false);
     } finally {
-      for (const socket of sockets) socket.destroy();
-      await new Promise<void>((resolve) => proxy.close(() => resolve()));
       if (stopping !== undefined) await stopping;
     }
   });

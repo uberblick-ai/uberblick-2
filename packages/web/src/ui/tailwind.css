@@ -12,36 +12,12 @@
 @import "tailwindcss/utilities.css" layer(utilities) source(none);
 
 /*
- * source(none) disables automatic scanning; @source only adds paths. Keep the
- * explicit component list so editor prose cannot generate unintended utility
- * classes.
+ * source(none) disables automatic scanning; @source only adds paths. Scan the
+ * component sources and leave src/editor out, so editor prose and the DOM
+ * classes it renders cannot generate unintended utility classes.
  */
-@source "./shadcn";
-@source "./comments/CommentForm.tsx";
-@source "./comments/CommentComposer.tsx";
-@source "./sidebar/Sidebar.tsx";
-@source "./App.tsx";
-@source "./CommandPalette.tsx";
-@source "./document/RemoteHubGuide.tsx";
-@source "./comments/ThreadsPane.tsx";
-@source "./editor-controls/BlockMenu.tsx";
-@source "./editor-controls/CaretMenu.tsx";
-@source "./editor-controls/MentionMenu.tsx";
-@source "./settings/WorkspaceSettings.tsx";
-@source "./settings/AccessSettings.tsx";
-@source "./settings/HubSettings.tsx";
-@source "./settings/PreferencesSettings.tsx";
-@source "./settings/DevicesSettings.tsx";
-@source "./sidebar/WorkspaceSwitcher.tsx";
-@source "./sidebar/UserMenu.tsx";
-@source "./document/DocChrome.tsx";
-@source "./PickerList.tsx";
-@source "./editor-controls/CodeLanguageControl.tsx";
-@source "./editor-controls/CardButtonControls.tsx";
-@source "./document/EditorPane.tsx";
-@source "../shell/DocumentList.tsx";
-@source "./status/PeerCluster.tsx";
-@source "./status/SyncPanel.tsx";
+@source "./**/*.tsx";
+@source "../shell/**/*.tsx";
 
 /*
  * Bridge names to existing product tokens without defining colors. Sidebar-

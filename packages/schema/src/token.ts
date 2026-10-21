@@ -88,8 +88,6 @@ export type RequestAction =
   | { operation: "change-role"; workspaceId: string; principalId: string; role: "admin" | "member" }
   | { operation: "remove-member"; workspaceId: string; principalId: string };
 
-export type RequestOperation = RequestAction["operation"];
-
 export type RequestProofClaims = RequestAction & {
   typ: "request";
   /** A credential key, never the shared root secret. */

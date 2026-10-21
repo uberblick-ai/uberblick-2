@@ -143,7 +143,7 @@ export async function rig(workspaces: string[] = [], configured = true, initiali
     const hub = await createHub({
       authSecret: SIGNING_SECRET, port: 0, databasePath, log: (line) => logs.push(line),
       ...(protocolVersion === undefined ? {} : { protocolVersion }),
-      ...(configured ? { github: { clientId: "Iv23AbCdEF0123456789", fetch: github.fetch } } : {}),
+      ...(configured ? { github: { clientId: "Iv23AbCdEF0123456789", fetch: github.fetch, pollMaxWaitMs: 1 } } : {}),
     }, { initializeDefaultWorkspace, ...(deviceCredentials ? { deviceCredentials: true } : {}),
       ...(hubVersion === undefined ? {} : { hubVersion }) });
     hubs.push(hub);

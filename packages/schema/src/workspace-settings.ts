@@ -3,7 +3,6 @@ import { githubRepository } from "./github-reference.js";
 
 /** A root in the workspace's _settings room, beside the tag catalog roots. */
 export const WORKSPACE_SETTINGS_KEY = "workspace-settings";
-export const MAX_WORKSPACE_NAME_LENGTH = 64;
 
 // Count Unicode characters rather than UTF-16 code units.
 const NAME_PATTERN = /^[^\p{Cc}\p{Cf}]{1,64}$/u;

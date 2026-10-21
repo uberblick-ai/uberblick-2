@@ -295,7 +295,12 @@ async function deviceRequest(origin: string, action: DeviceAction, login: Stored
   if (transport !== null) throw new DeviceFailure(`${transport.reason}; ${transport.fix}`);
   let body: Record<string, unknown>;
   // The sanitizer pairs each status with its HTTP code and validates every device row.
-  try { ({ body } = sanitizeManagementReply(action, await manageRequest(origin, action, login), login)); } catch (error) {
+  try {
+    const timeoutMs = budget(10_000);
+    const reply = await manageRequest(origin, action, login, timeoutMs < 10_000
+      ? { signal: AbortSignal.timeout(Math.max(1, Math.ceil(timeoutMs))) } : {});
+    ({ body } = sanitizeManagementReply(action, reply, login));
+  } catch (error) {
     throw new DeviceFailure(error instanceof ManagementResponseError
       ? "the hub returned an invalid device-management response"
       : "the hub is unreachable or the device-management request timed out");
@@ -532,7 +537,7 @@ function terminal(result: Record<string, unknown>): never {
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
-async function login(selection: Selection, io: Io): Promise<number> {
+async function login(selection: Selection, io: Io, collectTimeoutMs?: number): Promise<number> {
   try { preflightHubLoginStore(); } catch (error) {
     io.err(`ub auth: ${error instanceof Error ? error.message : "credential store is not writable"}\n`);
     return 1;
@@ -594,10 +599,10 @@ async function login(selection: Selection, io: Io): Promise<number> {
     for (;;) {
       const remaining = deadline - performance.now();
       if (remaining <= 0) throw new SignInFailure("GitHub sign-in expired; run login again");
-      await delay(Math.min(interval * 1000, remaining), undefined, { signal: interrupted.signal });
+      await delay(Math.min(budget(interval * 1000), remaining), undefined, { signal: interrupted.signal });
       const left = deadline - performance.now();
       if (left <= 0) throw new SignInFailure("GitHub sign-in expired; run login again");
-      const result = await post(selection.origin, "collect", attempt, interrupted.signal, Math.min(REQUEST_MS, left));
+      const result = await post(selection.origin, "collect", attempt, interrupted.signal, Math.min(collectTimeoutMs ?? REQUEST_MS, left));
       if (result.status === "pending" && seconds(result.interval)) { interval = result.interval; continue; }
       if (result.status !== "complete") terminal(result);
       collected = true;
@@ -675,7 +680,7 @@ async function login(selection: Selection, io: Io): Promise<number> {
   }
 }
 
-export async function authCommand(argv: string[], io: Io): Promise<number> {
+export async function authCommand(argv: string[], io: Io, options: { collectTimeoutMs?: number } = {}): Promise<number> {
   const [sub, ...args] = argv;
   if (sub === undefined || sub === "help" || sub === "--help" || sub === "-h") {
     io.out(AUTH_HELP);
@@ -724,7 +729,7 @@ export async function authCommand(argv: string[], io: Io): Promise<number> {
   }
   if (sub === "login") {
     authField(io, "hub", selection.origin);
-    return await login(selection, io);
+    return await login(selection, io, options.collectTimeoutMs);
   }
   if (sub === "status") return await status(selection, io, json);
   return await logout(selection, io, allDevices);

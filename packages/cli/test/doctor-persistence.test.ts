@@ -485,16 +485,7 @@ describe("ub doctor observational database reading", () => {
     }
     const old = new DatabaseSync(databasePath);
     try {
-      old.exec(
-        "DROP TABLE meta;" +
-        "ALTER TABLE pending_rooms RENAME TO current_pending_rooms;" +
-        "CREATE TABLE pending_rooms (room TEXT PRIMARY KEY);" +
-        "INSERT INTO pending_rooms SELECT room FROM current_pending_rooms;" +
-        "DROP TABLE current_pending_rooms;" +
-        "ALTER TABLE doc_index DROP COLUMN description;" +
-        "ALTER TABLE doc_index_seq DROP COLUMN catalog_through_seq;" +
-        "ALTER TABLE doc_index_seq DROP COLUMN github_refs_indexed;",
-      );
+      old.exec("DROP TABLE meta; ALTER TABLE doc_index_seq DROP COLUMN github_refs_indexed;");
     } finally {
       old.close();
     }
@@ -530,7 +521,7 @@ describe("ub doctor observational database reading", () => {
     expect(snapshot.connection.state).toBe("failed");
     expect(snapshot.problems).toEqual([{ name: "persistence-failed", fix: "ub doctor for details" }]);
     const { report } = await statusReport({ env: { ...box.env, ...env }, cwd: box.cwd });
-    if (report.workspace === null) throw new Error("expected the hub binding");
+    if (report.binding === null) throw new Error("expected the hub binding");
     expect(report.persistence?.room).toBe(directoryRoom(WORKSPACE));
     expect(report.persistence?.message).toContain(REFUSED);
     expect(report.hub.status).toBe("quarantined");

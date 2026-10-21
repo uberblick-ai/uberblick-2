@@ -7,6 +7,7 @@
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
@@ -121,6 +122,27 @@ import {
 const SIDEBAR_COLLAPSED_KEY = "uberblick.sidebar.collapsed";
 /** Exact complement of Tailwind xl, including fractional CSS widths. */
 const NARROW_LAYOUT_QUERY = "(width < 80rem)";
+
+/**
+ * The sidebar and the threads rail share one narrow layout. `beforeChange`
+ * runs on every reading, before React switches the layout branches.
+ */
+function useNarrowLayout(beforeChange: (narrow: boolean) => void): boolean {
+  const [narrow, setNarrow] = useState(() => window.matchMedia?.(NARROW_LAYOUT_QUERY).matches ?? false);
+  const notify = useEffectEvent(beforeChange);
+  useEffect(() => {
+    const query = window.matchMedia?.(NARROW_LAYOUT_QUERY);
+    if (query === undefined) return;
+    const update = (): void => {
+      notify(query.matches);
+      setNarrow(query.matches);
+    };
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return narrow;
+}
 
 const REPLICA_UNAVAILABLE_DETAIL = {
   "replica-held": "This workspace’s replica is serving another ub open. Stop that run, then restart this ub open to view it here.",
@@ -476,33 +498,22 @@ export function App(): ReactElement {
   // sidebar's entry for it is the current page at either one.
   const listing = route.kind === "all" || route.kind === "list";
   const documentListState = documentList ?? INITIAL_DOCUMENT_LIST_STATE;
-  const [narrowSidebar, setNarrowSidebar] = useState(
-    () => window.matchMedia?.(NARROW_LAYOUT_QUERY).matches ?? false,
-  );
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const hideSidebar = useRef<HTMLButtonElement | null>(null);
   const restoreSidebar = useRef<HTMLButtonElement | null>(null);
   const focusAfterNarrowing = useRef(false);
+  const narrowLayout = useNarrowLayout((narrow) => {
+    // Capture focus before switching branches unmounts the docked sidebar.
+    focusAfterNarrowing.current = narrow && hideSidebar.current
+      ?.closest('[data-slot="sidebar-container"]')
+      ?.contains(document.activeElement) === true;
+    setSidebarOpen(false);
+  });
   useEffect(() => {
-    const query = window.matchMedia?.(NARROW_LAYOUT_QUERY);
-    if (query === undefined) return;
-    const update = (): void => {
-      // Capture focus before switching branches unmounts the docked sidebar.
-      focusAfterNarrowing.current = query.matches && hideSidebar.current
-        ?.closest('[data-slot="sidebar-container"]')
-        ?.contains(document.activeElement) === true;
-      setNarrowSidebar(query.matches);
-      setSidebarOpen(false);
-    };
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-  useEffect(() => {
-    if (!narrowSidebar || !focusAfterNarrowing.current) return;
+    if (!narrowLayout || !focusAfterNarrowing.current) return;
     focusAfterNarrowing.current = false;
     restoreSidebar.current?.focus();
-  }, [narrowSidebar]);
+  }, [narrowLayout]);
   const closeSidebarDrawer = useCallback(() => setSidebarOpen(false), []);
   const [collapsed, setCollapsed] = useStoredFlag(SIDEBAR_COLLAPSED_KEY, false);
   const previousCollapsed = useRef(collapsed);
@@ -513,8 +524,8 @@ export function App(): ReactElement {
   useEffect(() => {
     if (previousCollapsed.current === collapsed) return;
     previousCollapsed.current = collapsed;
-    if (!narrowSidebar) (collapsed ? restoreSidebar : hideSidebar).current?.focus();
-  }, [collapsed, narrowSidebar]);
+    if (!narrowLayout) (collapsed ? restoreSidebar : hideSidebar).current?.focus();
+  }, [collapsed, narrowLayout]);
   const restoreSidebarFocus = useCallback((event: Event) => {
     event.preventDefault();
     (restoreSidebar.current ?? hideSidebar.current)?.focus();
@@ -526,18 +537,6 @@ export function App(): ReactElement {
    * always remains a non-modal column.
    */
   const [threadsOpen, setThreadsOpen] = useState(false);
-  // Both panes use Tailwind xl; retain the rail's open state across resizing.
-  const [narrowThreads, setNarrowThreads] = useState(
-    () => window.matchMedia?.(NARROW_LAYOUT_QUERY).matches ?? false,
-  );
-  useEffect(() => {
-    const query = window.matchMedia?.(NARROW_LAYOUT_QUERY);
-    if (query === undefined) return;
-    const update = (): void => setNarrowThreads(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
   const threadsOpenNow = useRef(threadsOpen);
   threadsOpenNow.current = threadsOpen;
   /** Whether the sync detail panel is open. */
@@ -1114,10 +1113,10 @@ export function App(): ReactElement {
     return () => { for (const stop of stops) stop(); };
   }, [doc, topicTitleRoom, directory]);
 
-  const sidebarHidden = narrowSidebar ? !sidebarOpen : collapsed;
+  const sidebarHidden = narrowLayout ? !sidebarOpen : collapsed;
   const sidebarName = settings ? "sidebar" : "document list";
   const sidebarToggleLabel = `${sidebarHidden ? "Show" : "Hide"} ${sidebarName}`;
-  const sidebarCloseLabel = narrowSidebar ? `Close ${sidebarName}` : sidebarToggleLabel;
+  const sidebarCloseLabel = narrowLayout ? `Close ${sidebarName}` : sidebarToggleLabel;
 
   return (
     <Dialog open={alterDecision !== null} onOpenChange={(open) => {
@@ -1136,33 +1135,33 @@ export function App(): ReactElement {
       )}
       <SidebarProvider
         open={!collapsed}
-        narrow={narrowSidebar}
+        narrow={narrowLayout}
         openMobile={sidebarOpen}
         onOpenMobileChange={setSidebarOpen}
         onCloseAutoFocus={restoreSidebarFocus}
         className="ub-body"
         data-sidebar-collapsed={sidebarHidden}
       >
-        {(narrowSidebar || collapsed) && (
+        {(narrowLayout || collapsed) && (
           /* Pane-local and out of flow: restoring the sidebar costs no global
              row and leaves every route at the application's top edge. */
           <button
             ref={restoreSidebar}
             type="button"
             className={`${SIDEBAR_TOGGLE_CLASSES} ub-sidebar-toggle ub-sidebar-restore top-2 left-2 border-(--border) bg-(--card-accent) text-(--secondary-foreground)`}
-            aria-expanded={narrowSidebar ? sidebarOpen : false}
+            aria-expanded={narrowLayout ? sidebarOpen : false}
             aria-label={`Show ${sidebarName}`}
             title={`Show ${sidebarName}`}
-            onClick={() => narrowSidebar ? setSidebarOpen(true) : setCollapsed(false)}
+            onClick={() => narrowLayout ? setSidebarOpen(true) : setCollapsed(false)}
           >
             »
           </button>
         )}
         <Sidebar
-          collapsed={narrowSidebar ? false : collapsed}
+          collapsed={narrowLayout ? false : collapsed}
           collapseButtonRef={hideSidebar}
           collapseLabel={sidebarCloseLabel}
-          onCollapse={() => narrowSidebar ? closeSidebarDrawer() : setCollapsed(true)}
+          onCollapse={() => narrowLayout ? closeSidebarDrawer() : setCollapsed(true)}
           connection={directory}
           sidebar={sidebar}
           groups={sidebarGroups}
@@ -1336,7 +1335,7 @@ export function App(): ReactElement {
               author={identity.name}
               readOnly={archived || !docStatus.writable || (meta?.kind === "decision" && (topic === null || topic.first === null))}
               onFocus={onFocusThread}
-              narrow={narrowThreads}
+              narrow={narrowLayout}
               open={threadsOpen}
               onOpenChange={setThreadsOpen}
               onCloseAutoFocus={restoreThreadsFocus}

@@ -5,13 +5,9 @@
  * the block id and the text delta, marks included. That is what makes annotation
  * anchors and inbound references survive a user pressing "H2".
  *
- * The UI re-type is an INDEPENDENT path to that invariant, not a caller of the
- * schema one: `retypeSelectedBlock` dispatches ProseMirror `setNodeMarkup`, and
- * y-prosemirror then replaces the Y.XmlElement and re-converts its marks, where
- * `schema.setBlockType` replaces the element and replays the delta itself. So
- * the mark has to be asserted on both paths — `packages/schema/test/retype.test.ts`
- * pins the schema one, and the first test here pins this bridge. Deleting either
- * leaves a way for annotations to be orphaned with the suite green.
+ * `retypeSelectedBlock` dispatches ProseMirror `setNodeMarkup`, and
+ * y-prosemirror then replaces the Y.XmlElement and re-converts its marks. The
+ * first test here pins that the annotation mark survives that bridge.
  */
 
 import { afterEach, describe, expect, it } from "vitest";

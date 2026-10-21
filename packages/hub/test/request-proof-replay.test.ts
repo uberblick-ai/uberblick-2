@@ -20,11 +20,11 @@ const mutations: RequestAction[] = [
   { operation: "promote-workspace", workspaceId: WORKSPACE, attemptId: deviceId },
 ];
 
-function rig(path = ":memory:") {
+function rig(path = ":memory:", now?: () => number) {
   const db = new HubDatabase(path, error => { throw error; });
   db.open();
   databases.push(db);
-  return { db, store: new CredentialRegistry(db), memberships: new MembershipRegistry(db) };
+  return { db, store: new CredentialRegistry(db, undefined, undefined, now), memberships: new MembershipRegistry(db) };
 }
 
 function issue(store: CredentialRegistry) {
@@ -48,6 +48,30 @@ afterEach(() => {
 });
 
 describe("durable request proof consumption", () => {
+  it.each([{ operation: "list-devices" } as const, mutations[2]!])(
+    "refuses a fresh $operation proof that expires before consumption without recording it", async action => {
+      let now = Date.now();
+      let advanceOnRead = false;
+      const { db, store } = rig(":memory:", () => {
+        const sampled = now;
+        if (advanceOnRead) {
+          advanceOnRead = false;
+          now += 1_000;
+        }
+        return sampled;
+      });
+      const issued = issue(store);
+      const iat = Math.floor(now / 1000);
+      const token = await proof(issued, action, iat);
+      now = (iat + 60) * 1000;
+      advanceOnRead = true;
+
+      expect(await store.verifyRequest(token, action)).toBeNull();
+      expect(used(db)).toEqual([]);
+      expect(store.get(issued.record.id)).toEqual(issued.record);
+    },
+  );
+
   it.each(mutations)("accepts concurrent $operation verification once across registries", async action => {
     const { db, store } = rig();
     const other = new CredentialRegistry(db);

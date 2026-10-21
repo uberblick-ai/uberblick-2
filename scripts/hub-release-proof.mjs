@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -131,7 +131,6 @@ async function main() {
   let cleaningUp = false;
   let namedRoute = false;
   const extractionContainers = new Set();
-  const imageOperators = new Map();
   const imageProtocols = new Map();
   const cancel = (signal) => { if (!cleaningUp) { interrupted = signal; stopChild("SIGTERM"); } };
   const onInterrupt = () => cancel("SIGINT");
@@ -146,9 +145,7 @@ async function main() {
   const operator = (name, args, options = {}) => command("sh", [join("bin", name), ...args], {
     cwd: deployment, env: environment, ...options,
   });
-  const setupCommand = (args, options = {}) => imageOperators.get(deployment)
-    ? compose(["exec", "-T", "hub", "ub-hub", "admin-setup", ...args], options)
-    : operator("hub-admin-setup.sh", args, options);
+  const setupCommand = (args, options = {}) => compose(["exec", "-T", "hub", "ub-hub", "admin-setup", ...args], options);
   const offline = (source) => compose(["run", "--rm", "--no-deps", "-T", "--entrypoint", "node", "hub", "-e", source]);
   const live = (source) => compose(["exec", "-T", "hub", "node", "-e", source]);
   const snapshotSource = `const { DatabaseSync } = require("node:sqlite");
@@ -180,12 +177,10 @@ db.close(); console.log(JSON.stringify(result));`;
     extractionContainers.delete(name);
     assert.deepEqual(readdirSync(directory).sort(), ["REMOTE.md", "RELEASING.md", "bin", "docker-compose.yml",
       "release.json", "remote-settings.sh", "remote.env.example", "remote.https.yml", "remote.tailscale.yml"].sort());
-    const commands = JSON.parse((await command("docker", ["run", "--rm", "--entrypoint", "node", hub, "-e",
-      'const fs = require("node:fs"); console.log(JSON.stringify({operator: fs.existsSync("/usr/local/bin/ub-hub"), legacy: fs.existsSync("/app/hub-admin-setup.mjs")}));'])).stdout);
-    assert.equal(commands.legacy, !commands.operator, "the image ships one first-admin entry point");
-    imageOperators.set(directory, commands.operator);
-    assert.deepEqual(readdirSync(join(directory, "bin")).sort(),
-      ["remote-compose.sh", "hub-backup.sh", "hub-restore.sh", ...(commands.operator ? [] : ["hub-admin-setup.sh"])].sort());
+    const operatorCommand = JSON.parse((await command("docker", ["run", "--rm", "--entrypoint", "node", hub, "-e",
+      'console.log(require("node:fs").existsSync("/usr/local/bin/ub-hub"))'])).stdout);
+    assert.ok(operatorCommand, `hub ${version} ships no ub-hub; the proof needs two releases that do`);
+    if (index === 1) assert.deepEqual(readdirSync(join(directory, "bin")), ["remote-compose.sh"]);
     const metadata = JSON.parse(readFileSync(join(directory, "release.json"), "utf8"));
     imageProtocols.set(directory, metadata.syncProtocolVersion);
     assert.equal(metadata.version, version);
@@ -331,33 +326,16 @@ db.exec("COMMIT"); db.close();`);
     const status = await setupCommand(["status", SETUP]);
     assert.match(status.stdout, /complete: release-proof/);
     console.log("Bundled setup reaches the private host socket; membership refusal and durable receipt lookup work without a checkout.");
-    const hubId = (await compose(["ps", "--quiet", "hub"])).stdout.trim();
-    const started = (await command("docker", ["inspect", "--format", "{{.State.StartedAt}}", hubId])).stdout;
-    writeFileSync(join(deployment, "corrupt.sqlite"), "synthetic corrupt candidate", { mode: 0o600 });
-    const corrupt = await operator("hub-restore.sh", ["corrupt.sqlite"], { allowFailure: true });
-    assert.equal(corrupt.code, 1);
-    assert.match(corrupt.stderr, /nothing was stopped and nothing was changed/);
-    assert.equal((await command("docker", ["inspect", "--format", "{{.State.StartedAt}}", hubId])).stdout, started);
+    const olderBackupPath = (await compose(["exec", "-T", "hub", "ub-hub", "backup"])).stdout.match(/\/data\/[^\s]+\.sqlite/)?.[0];
+    assert.ok(olderBackupPath, "online backup reports its private volume path");
+    await compose(["cp", `hub:${olderBackupPath}`, "backup.sqlite"]);
     assert.deepEqual(await snapshot(), original);
-    await operator("hub-backup.sh", ["backup.sqlite"]);
-    assert.equal(statSync(join(deployment, "backup.sqlite")).mode & 0o777, 0o600);
-    await compose(["stop", "hub"]);
-    await offline(`const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync("/data/hub.sqlite");
-db.exec("BEGIN IMMEDIATE"); for (const table of ["hub_admin_setup_grants", "hub_credentials", "hub_memberships", "hub_principals", "documents"]) db.exec("DELETE FROM " + table);
-db.exec("UPDATE hub_claim_state SET unclaimed = 1 WHERE id = 1");
-db.exec("COMMIT"); db.close();`);
-    await compose(["start", "hub"]);
-    await serving();
-    assert.notDeepEqual(await snapshot(), original);
-    await operator("hub-restore.sh", ["backup.sqlite"]);
-    await serving();
-    assert.deepEqual(await snapshot(), original);
-    console.log("Backup is mode 0600; corrupt restore leaves the running hub untouched; whole-database restore retains documents and every private record.");
+    console.log("The older release's online backup reached the host while its hub kept serving.");
     await compose(["exec", "-T", "caddy", "sh", "-c", "mkdir -p /data/release-proof-certificates; printf 'synthetic certificate state\\n' > /data/release-proof-certificates/retained.crt; printf 'synthetic key state\\n' > /data/release-proof-certificates/retained.key; printf 'synthetic certificate-volume marker\\n' > /data/release-proof; printf 'synthetic config-volume marker\\n' > /config/release-proof"]);
     const certificates = await certificateState();
     assert.match(certificates, /release-proof-certificates\/retained\.crt/);
     const before = (await compose(["ps", "--quiet", "hub"])).stdout.trim();
-    const legacyBackup = readFileSync(join(deployment, "backup.sqlite"));
+    const olderBackup = readFileSync(join(deployment, "backup.sqlite"));
     deployment = await extract(versions[1], 1);
     const replacedAt = Date.now();
     await compose(["up", "--detach", "--no-build", "--pull", "never", "--force-recreate"]);
@@ -384,32 +362,35 @@ db.exec("COMMIT"); db.close();`);
     assert.match((await setupCommand(["status", SETUP])).stdout, /complete: release-proof/);
     console.log(`Recreated ${versions[0]} as ${versions[1]} from newly extracted files; documents, private history, claim and Caddy volumes survived; legacy HMAC credentials are revoked when crossing to public keys.`);
 
-    if (imageOperators.get(deployment)) {
-      const help = await compose(["exec", "-T", "hub", "ub-hub", "--help"]);
-      for (const name of ["status", "doctor", "admin-setup", "backup", "restore"]) assert.match(help.stdout, new RegExp(name));
-      const status = await compose(["exec", "-T", "hub", "ub-hub", "status"]);
-      assert.ok(status.stdout.includes(versions[1]), status.stdout);
-      assert.match(status.stdout, /\/data\/hub\.sqlite/);
-      const backup = await compose(["exec", "-T", "hub", "ub-hub", "backup"]);
-      const backupPath = backup.stdout.match(/\/data\/[^\s]+\.sqlite/)?.[0];
-      assert.ok(backupPath, "online backup reports its private volume path");
-      const mode = await live(`const fs = require("node:fs"); console.log(fs.statSync(${JSON.stringify(backupPath)}).mode & 0o777);`);
-      assert.equal(Number(mode.stdout), 0o600);
-      assert.deepEqual(await snapshot(), upgraded);
-      const running = await compose(["run", "--rm", "--no-deps", "-T", "hub", "ub-hub", "restore", "-"],
-        { input: legacyBackup, allowFailure: true });
-      assert.equal(running.code, 1);
-      assert.match(running.stdout + running.stderr, /docker compose stop hub/);
-      assert.deepEqual(await snapshot(), upgraded);
-      await compose(["stop", "hub"]);
-      await compose(["run", "--rm", "--no-deps", "-T", "hub", "ub-hub", "restore", "-"], { input: legacyBackup });
-      await compose(["start", "hub"]);
-      await serving();
-      const restored = await snapshot();
-      assertHubDatabaseUpgrade(restored, original);
-      upgraded = restored;
-      console.log("ub-hub is on PATH; online backup remains private and keeps serving; restore refuses a running hub and accepts a legacy backup through standard input.");
-    }
+    const help = await compose(["exec", "-T", "hub", "ub-hub", "--help"]);
+    for (const name of ["status", "doctor", "admin-setup", "backup", "restore"]) assert.match(help.stdout, new RegExp(name));
+    const hubStatus = await compose(["exec", "-T", "hub", "ub-hub", "status"]);
+    assert.ok(hubStatus.stdout.includes(versions[1]), hubStatus.stdout);
+    assert.match(hubStatus.stdout, /\/data\/hub\.sqlite/);
+    const backup = await compose(["exec", "-T", "hub", "ub-hub", "backup"]);
+    const backupPath = backup.stdout.match(/\/data\/[^\s]+\.sqlite/)?.[0];
+    assert.ok(backupPath, "online backup reports its private volume path");
+    const mode = await live(`const fs = require("node:fs"); console.log(fs.statSync(${JSON.stringify(backupPath)}).mode & 0o777);`);
+    assert.equal(Number(mode.stdout), 0o600);
+    assert.deepEqual(await snapshot(), upgraded);
+    const running = await compose(["run", "--rm", "--no-deps", "-T", "hub", "ub-hub", "restore", "-"],
+      { input: olderBackup, allowFailure: true });
+    assert.equal(running.code, 1);
+    assert.match(running.stdout + running.stderr, /docker compose stop hub/);
+    assert.deepEqual(await snapshot(), upgraded);
+    await compose(["stop", "hub"]);
+    await offline(`const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync("/data/hub.sqlite");
+db.exec("BEGIN IMMEDIATE"); for (const table of ["hub_admin_setup_grants", "hub_credentials", "hub_memberships", "hub_principals", "documents"]) db.exec("DELETE FROM " + table);
+db.exec("UPDATE hub_claim_state SET unclaimed = 1 WHERE id = 1");
+db.exec("COMMIT"); db.close();`);
+    const restore = await compose(["run", "--rm", "--no-deps", "-T", "hub", "ub-hub", "restore", "--yes", "-"], { input: olderBackup });
+    assert.match(restore.stdout, /workspace member removal: "release-proof"/);
+    await compose(["start", "hub"]);
+    await serving();
+    const restored = await snapshot();
+    assertHubDatabaseUpgrade(restored, original);
+    upgraded = restored;
+    console.log("ub-hub is on PATH; online backup remains private and keeps serving; restore refuses a running hub, names the removals it undoes and brings the older release's backup back over a wiped database through standard input.");
 
     await compose(["stop"]);
     writeFileSync(join(deployment, ".env"), `${localSettings}WEB_HOST=release-proof.example.com\n`, { mode: 0o600 });

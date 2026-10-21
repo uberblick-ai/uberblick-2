@@ -1,9 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { requestClient } from "./client-address.js";
 import type { GithubSignIn } from "./github-sign-in.js";
-
-const ROUTES = ["/auth/browser/start", "/auth/browser/collect", "/auth/browser/cancel",
-  "/auth/browser/session", "/auth/browser/sign-out"];
+import { BROWSER_SIGN_IN_ROUTES, isJsonPost, readJsonRequest, replyJson } from "./http.js";
 
 /** Exact origins include ports: localhost services must never share a session. */
 function browserOrigin(request: IncomingMessage): string | null {
@@ -24,11 +22,8 @@ export async function handleBrowserSignIn(
 ): Promise<boolean> {
   const path = request.url ?? "";
   if (!path.startsWith("/auth/browser/")) return false;
-  const reply = (code: number, body: unknown) => {
-    response.writeHead(code, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    response.end(JSON.stringify(body));
-  };
-  if (!ROUTES.includes(path)) {
+  const reply = (code: number, body: unknown) => replyJson(response, code, body);
+  if (!BROWSER_SIGN_IN_ROUTES.includes(path)) {
     reply(404, { status: "unknown-request" });
     return true;
   }
@@ -37,24 +32,13 @@ export async function handleBrowserSignIn(
     return true;
   }
   const origin = browserOrigin(request);
-  if (origin === null || request.method !== "POST" || request.headers.authorization !== undefined ||
-      request.headers["content-type"]?.split(";")[0] !== "application/json") {
+  if (origin === null || !isJsonPost(request)) {
     reply(400, { status: "invalid-request" });
     return true;
   }
   let body: Record<string, unknown>;
   try {
-    let size = 0;
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) {
-      const bytes = Buffer.from(chunk as Uint8Array);
-      size += bytes.length;
-      if (size > 4096) throw new Error();
-      chunks.push(bytes);
-    }
-    const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error();
-    body = value as Record<string, unknown>;
+    body = (await readJsonRequest(request)).body;
     if (path.endsWith("/collect") || path.endsWith("/cancel")) {
       if (Object.keys(body).length !== 2 || typeof body.requestId !== "string" || typeof body.collectionSecret !== "string") throw new Error();
     } else if (Object.keys(body).length !== 0) throw new Error();

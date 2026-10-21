@@ -1,9 +1,10 @@
 import * as Y from "yjs";
 import { describe, expect, it } from "vitest";
 import {
-  appendBlock, exportMarkdown, figmaInline, findBlockElement, getBlocks,
+  appendBlock, exportMarkdown, findBlockElement, getBlocks,
   importMarkdown, initDoc,
 } from "../src/index.js";
+import { figmaInline } from "../src/figma.js";
 
 const UUID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const TARGET = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
