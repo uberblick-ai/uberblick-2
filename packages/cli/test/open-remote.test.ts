@@ -31,7 +31,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { localBrowserKey } from "../src/browser-key.js";
-import { ensureWorkspaceBinding } from "../src/workspace-registry.js";
+import { ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 import { pointAt, runUbAsync, sleep, waitUntil, WAIT_TIMEOUT_MS } from "./helpers.js";
 import {
   FIRST_REMOTE,

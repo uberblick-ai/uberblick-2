@@ -3,7 +3,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, inject, it } from "vitest";
-import { resolveProjectBinding, writeProjectBinding } from "../src/project-binding.js";
+import { resolveProjectBinding, writeProjectBinding } from "@uberblick/mcp-server/project-binding";
 import { PACKAGE_ROOT, removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);

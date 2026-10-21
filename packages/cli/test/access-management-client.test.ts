@@ -1,6 +1,6 @@
 /** Transport bounds remain shared by promotion and member management. */
 import { afterEach, expect, it, vi } from "vitest";
-import { ManagementResponseError, manageRequest } from "../src/access-management.js";
+import { ManagementResponseError, manageRequest } from "@uberblick/mcp-server/management-client";
 import { WORKSPACE, cleanUp, fixture, serve } from "./auth-fixtures.js";
 
 afterEach(cleanUp);

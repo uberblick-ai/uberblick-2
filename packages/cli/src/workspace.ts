@@ -1,9 +1,9 @@
 import { createWorkspaceCommand } from "./workspace-create.js";
 import { forkWorkspaceCommand } from "./workspace-fork.js";
 import { promoteWorkspaceCommand } from "./workspace-promote.js";
-import { parseJoinTarget, useRemoteWorkspace } from "./remote.js";
-import { assertHubTransport } from "@uberblick/mcp-server/remote-url";
-import { displayWorkspaceHub, useBindingLines } from "./workspace-use-output.js";
+import { useRemoteWorkspace } from "./remote.js";
+import { assertHubTransport, parseJoinTarget } from "@uberblick/mcp-server/remote-url";
+import { ORIGIN_LABELS, displayWorkspaceHub, useBindingLines } from "./workspace-use-output.js";
 
 import { readdirSync, rmSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
@@ -11,18 +11,17 @@ import { parseArgs } from "node:util";
 import { WORKSPACE_DATABASE_FILE, resolveStorage } from "@uberblick/mcp-server/storage";
 import { acquireWorkspaceRemovalRole, defaultWorkspaceDatabasePath, readWorkspaceName, usesDeviceLogin } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
-import type { Origin } from "./config.js";
-import { migrateHubAdmissions, resolveConfig, writeHubAdmission } from "./config.js";
-import { type ProjectBinding, resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
-import { forgetWorkspace, hasWorkspaceReplica, readWorkspaceHub, recordedWorkspaceIds, workspaceRegistryPath } from "./workspace-registry.js";
+import type { Origin } from "@uberblick/mcp-server/project-config";
+import { migrateHubAdmissions, resolveConfig, writeHubAdmission } from "@uberblick/mcp-server/project-config";
+import { type ProjectBinding, resolveProjectBinding, writeProjectBinding } from "@uberblick/mcp-server/project-binding";
+import { forgetWorkspace, hasWorkspaceReplica, readWorkspaceHub, recordedWorkspaceIds, workspaceRegistryPath } from "@uberblick/mcp-server/workspace-registry";
 import { takeHelp } from "./help.js";
 import { workspaceMemberCommand } from "./workspace-member.js";
-import type { InitLock } from "./init-lock.js";
-import { acquireInitLock } from "./init-lock.js";
+import type { InitLock } from "@uberblick/mcp-server/init-lock";
+import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
 import type { Io } from "./io.js";
-import { processIo, shellArgument } from "./io.js";
-import { describeFsError } from "./safe-write.js";
-import { ORIGIN_LABELS } from "./status.js";
+import { processIo, shellArgument, warn } from "./io.js";
+import { describeFsError } from "@uberblick/mcp-server/safe-write";
 import { fillMainRepositoryFromOrigin } from "./workspace-main-repository.js";
 
 export const WORKSPACE_HELP = `usage: ub workspace [command]
@@ -123,12 +122,6 @@ export function listWorkspaces(
     };
   });
   return { entries, warnings: current.warnings, selectionNote: current.selectionNote };
-}
-
-function warn(io: Io, warnings: readonly string[]): void {
-  for (const warning of warnings) {
-    io.err(`ub: warning: ${warning}\n`);
-  }
 }
 
 export const WORKSPACE_REMOVE_OPTIONS = {

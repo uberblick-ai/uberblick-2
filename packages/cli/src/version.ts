@@ -1,9 +1,18 @@
 import { readFileSync } from "node:fs";
 
+function manifest(): Record<string, unknown> {
+  return JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+}
+
 export function cliVersion(): string {
-  const manifest = new URL("../package.json", import.meta.url);
-  const parsed = JSON.parse(readFileSync(manifest, "utf8")) as {
-    version?: unknown;
-  };
-  return typeof parsed.version === "string" ? parsed.version : "0.0.0";
+  const { version } = manifest();
+  return typeof version === "string" ? version : "0.0.0";
+}
+
+export function isInstallPayload(): boolean {
+  try {
+    return manifest().uberblickInstallPayload === true;
+  } catch {
+    return false;
+  }
 }

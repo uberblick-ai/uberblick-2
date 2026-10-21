@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { hubDatabasePath } from "../src/hub-config.js";
-import { credentialsPath, resolveConfig, userConfigPath, writeCredentials } from "../src/config.js";
+import { credentialsPath, resolveConfig, userConfigPath, writeCredentials } from "@uberblick/mcp-server/project-config";
 import { doctorReport } from "../src/doctor.js";
 import { renderStatus, statusReport } from "../src/status.js";
 import { DEAD_HUB_URL, REPO_ROOT, SECRET_IN_ENV, SECRET_ON_FILE, removeTempDirs, sandbox, tracesOf } from "./helpers.js";

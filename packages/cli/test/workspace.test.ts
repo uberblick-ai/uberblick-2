@@ -8,9 +8,9 @@ import { writeHubLogin, removeHubLogin } from "@uberblick/mcp-server/auth-store"
 import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import { acquireServingReplicaRole } from "../../mcp-server/src/serving-role.js";
 import { startServer, testConfig } from "../../mcp-server/test/helpers.js";
-import { resolveConfig } from "../src/config.js";
-import { readWorkspaceHub, workspaceRegistryPath } from "../src/workspace-registry.js";
-import { acquireInitLock } from "../src/init-lock.js";
+import { resolveConfig } from "@uberblick/mcp-server/project-config";
+import { readWorkspaceHub, workspaceRegistryPath } from "@uberblick/mcp-server/workspace-registry";
+import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
 import { removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 import { fixture } from "./auth-fixtures.js";

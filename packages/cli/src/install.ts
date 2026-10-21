@@ -2,10 +2,11 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, rmdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
-import { findProjectConfig, PROJECT_CONFIG_FILE, resolveProjectBinding } from "./project-binding.js";
+import { findProjectConfig, PROJECT_CONFIG_FILE, resolveProjectBinding } from "@uberblick/mcp-server/project-binding";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
+import { field } from "./strings.js";
 import type { Entry, Scope, TargetFile, TargetName } from "./mcp-config.js";
 import {
   DEFAULT_ENTRY,
@@ -124,10 +125,6 @@ function workspaceReport(project: ProjectContext | null, io: Io): string {
       "Run `ub workspace create <name>` or `ub workspace use <link|id>`.\n");
   }
   return field("workspace", `follows ${project.path}`);
-}
-
-function field(name: string, value: string): string {
-  return `${name.padEnd(12)}${value}\n`;
 }
 
 interface Vendor {
