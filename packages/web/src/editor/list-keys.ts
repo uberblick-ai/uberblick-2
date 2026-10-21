@@ -34,7 +34,7 @@ function listItemAt(
  * Move the item under the caret `delta` levels, clamped to the range the model
  * holds. Handled even when it cannot move — see the module comment on Tab.
  */
-export function changeListIndent(delta: number): Command {
+function changeListIndent(delta: number): Command {
   return (state, dispatch) => {
     const item = listItemAt(state);
     if (item === null) return false;
@@ -51,7 +51,7 @@ export function changeListIndent(delta: number): Command {
  * Continue with the same list style/depth; core splitBlock would create a
  * paragraph for the new half.
  */
-export const splitListItem: Command = (state, dispatch) => {
+const splitListItem: Command = (state, dispatch) => {
   const item = listItemAt(state);
   if (item === null) return false;
   if (dispatch === undefined) return true;
@@ -69,7 +69,7 @@ export const splitListItem: Command = (state, dispatch) => {
  * At an item's start, retype through setNodeMarkup to preserve its id,
  * annotations and backlinks.
  */
-export const liftListItem: Command = (state, dispatch) => {
+const liftListItem: Command = (state, dispatch) => {
   const item = listItemAt(state);
   if (item === null) return false;
   const { $head, empty } = state.selection;
@@ -81,7 +81,7 @@ export const liftListItem: Command = (state, dispatch) => {
   return true;
 };
 
-export function listKeymap(): Plugin {
+function listKeymap(): Plugin {
   return keymap({
     Tab: changeListIndent(1),
     "Shift-Tab": changeListIndent(-1),

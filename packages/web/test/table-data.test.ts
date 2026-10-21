@@ -3,7 +3,7 @@ import * as Y from "yjs";
 import { applyDocData, DATA_KEY, DATA_LIMITS, getDocDataEntries, initDoc, readDocData } from "@uberblick/schema";
 import type { CollectionSchema, DataRecord, DocData, JSONValue } from "@uberblick/schema";
 import { formatChartNumber, formatChartX, parseChartConfig } from "../src/editor/chart-data.js";
-import { formatTableCell, parseTableConfig, prepareTable, sortTableRows, tableAccessibleName, tableCellFormatter, tableDiagnosticsText } from "../src/editor/table-data.js";
+import { parseTableConfig, prepareTable, sortTableRows, tableAccessibleName, tableCellFormatter, tableDiagnosticsText } from "../src/editor/table-data.js";
 import type { TableColumnMapping, TableConfig, TableReady } from "../src/editor/table-data.js";
 
 const mapping: TableConfig = {
@@ -94,6 +94,9 @@ describe("table mapping", () => {
     expect(parseTableConfig(JSON.stringify({ ...mapping, columns: [{ field: "value", format: "number", decimals: 0 }] }))).toMatchObject({ ok: true });
   });
 });
+
+const formatTableCell = (column: TableColumnMapping, record: DataRecord, locale?: string) =>
+  tableCellFormatter(column, locale)(record);
 
 describe("table cell values", () => {
   it("shows strings verbatim and every other non-null text value as compact JSON", () => {

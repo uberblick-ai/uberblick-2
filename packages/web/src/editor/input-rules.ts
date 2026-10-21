@@ -14,19 +14,16 @@ import { Extension } from "@tiptap/core";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
 import type { Transaction } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
-import {
-  BLOCK_MENU_ENTRIES,
-  endUndoCapture,
-  findBlockById,
-} from "./block-menu.js";
+import { BLOCK_MENU_ENTRIES } from "./block-menu.js";
 import type { BlockMenuEntry } from "./block-menu.js";
+import { endUndoCapture, findBlockById } from "./blocks.js";
 import { retypeBlockInTransaction } from "./retype.js";
 
 /**
  * Match the whole paragraph against a literal registry trigger, including 1.
  * for ordered lists. Mid-text prefixes and other authored numbers stay prose.
  */
-export function entryForTrigger(
+function entryForTrigger(
   text: string,
   entries: readonly BlockMenuEntry[] = BLOCK_MENU_ENTRIES,
 ): BlockMenuEntry | null {
@@ -97,7 +94,7 @@ function convertOnTrigger(
   return true;
 }
 
-export function blockInputRulePlugin(entries: readonly BlockMenuEntry[] = BLOCK_MENU_ENTRIES): Plugin {
+function blockInputRulePlugin(entries: readonly BlockMenuEntry[] = BLOCK_MENU_ENTRIES): Plugin {
   return new Plugin({
     props: {
       handleTextInput(view, from, to, text, defaultTransaction) {

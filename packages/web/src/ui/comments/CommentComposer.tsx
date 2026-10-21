@@ -18,7 +18,7 @@ import {
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
-import { endUndoCapture } from "../../editor/block-menu.js";
+import { endUndoCapture } from "../../editor/blocks.js";
 import { cellTextTargetOf, commentTargetOf } from "../../editor/selection.js";
 import type { CardTextTarget, CellTextTarget, CommentTarget, FigmaTextTarget } from "../../editor/selection.js";
 import { CommentForm } from "./CommentForm.js";

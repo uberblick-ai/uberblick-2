@@ -30,9 +30,9 @@ import {
 /**
  * A missing directory entry is unresolved, because synchronization may be late.
  */
-export type DocLinkState = "resolved" | "unresolved" | "archived";
+type DocLinkState = "resolved" | "unresolved" | "archived";
 
-export interface DocLinkTarget {
+interface DocLinkTarget {
   state: DocLinkState;
   /**
    * Null for unknown, archived or untitled targets; callers must fall back to the
@@ -271,7 +271,7 @@ export function docLinkFromTarget(target: EventTarget | null): string | null {
     : canonicalDocumentUuid(anchor.getAttribute("data-doc-id"));
 }
 
-export interface DocLinkOptions {
+interface DocLinkOptions {
   /** Null in an editor with no workspace behind it — the rules still work. */
   context: DocLinkContext | null;
 }

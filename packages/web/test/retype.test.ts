@@ -6,7 +6,7 @@
  * anchors and inbound references survive a user pressing "H2".
  *
  * The UI re-type is an INDEPENDENT path to that invariant, not a caller of the
- * schema one: `retypeSelectedBlock` dispatches ProseMirror `setNodeMarkup`, and
+ * schema one: `retypeBlockInTransaction` uses ProseMirror `setNodeMarkup`, and
  * y-prosemirror then replaces the Y.XmlElement and re-converts its marks, where
  * `schema.setBlockType` replaces the element and replays the delta itself. So
  * the mark has to be asserted on both paths — `packages/schema/test/retype.test.ts`
@@ -27,8 +27,7 @@ import {
   resolveAnnotationRange,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
-import { retypeSelectedBlock } from "../src/editor/retype.js";
-import { mountEditor } from "./helpers.js";
+import { mountEditor, retypeAtCaret } from "./helpers.js";
 
 let editors: Editor[] = [];
 afterEach(() => {
@@ -49,7 +48,7 @@ function docWithParagraph(): { ydoc: Y.Doc; blockId: string; editor: Editor } {
   return { ydoc, blockId, editor };
 }
 
-describe("retypeSelectedBlock", () => {
+describe("retypeBlockInTransaction", () => {
   it("keeps the block id, the text and the annotation mark when promoting to a heading", () => {
     const ydoc = new Y.Doc();
     initDoc(ydoc, { uuid: "retype-doc", title: "Retype" });
@@ -64,7 +63,7 @@ describe("retypeSelectedBlock", () => {
     editors.push(editor);
     editor.commands.setTextSelection(3);
 
-    expect(retypeSelectedBlock(editor, "heading", { level: 2 })).toBe(true);
+    expect(retypeAtCaret(editor, "heading", { level: 2 })).toBe(true);
 
     const blocks = getBlocks(ydoc);
     expect(blocks).toHaveLength(1);
@@ -101,14 +100,14 @@ describe("retypeSelectedBlock", () => {
 
   it("stores level as the string the schema package expects", () => {
     const { ydoc, editor } = docWithParagraph();
-    retypeSelectedBlock(editor, "heading", { level: 4 });
+    retypeAtCaret(editor, "heading", { level: 4 });
     const element = ydoc.getXmlFragment("blocks").get(0) as Y.XmlElement;
     expect(element.getAttribute("level")).toBe("4");
   });
 
   it("carries a code language, and preserves it across a level-less re-type", () => {
     const { ydoc, blockId, editor } = docWithParagraph();
-    retypeSelectedBlock(editor, "code", { language: "ts" });
+    retypeAtCaret(editor, "code", { language: "ts" });
     expect(getBlocks(ydoc)[0]).toMatchObject({
       id: blockId,
       type: "code",
@@ -118,17 +117,17 @@ describe("retypeSelectedBlock", () => {
 
     // Re-typing code → code with no language given keeps the existing one, and
     // reports the no-op — the same answer a re-type to the current type gives.
-    expect(retypeSelectedBlock(editor, "code")).toBe(false);
+    expect(retypeAtCaret(editor, "code")).toBe(false);
     expect(getBlocks(ydoc)[0]?.language).toBe("ts");
 
     // Leaving `code` drops the language attribute entirely, in the document as
     // well as in the read.
-    retypeSelectedBlock(editor, "terminal");
+    retypeAtCaret(editor, "terminal");
     expect(getBlocks(ydoc)[0]?.type).toBe("terminal");
     expect(getBlocks(ydoc)[0]?.language).toBeUndefined();
     const element = ydoc.getXmlFragment("blocks").get(0) as Y.XmlElement;
     expect(element.getAttribute("language")).toBeUndefined();
-    expect(retypeSelectedBlock(editor, "terminal")).toBe(false);
+    expect(retypeAtCaret(editor, "terminal")).toBe(false);
   });
 
   /**
@@ -143,7 +142,7 @@ describe("retypeSelectedBlock", () => {
     expect(editor.commands.toggleMark("bold")).toBe(true);
 
     for (const type of ["code", "terminal", "chart"] as const) {
-      expect(retypeSelectedBlock(editor, type), type).toBe(false);
+      expect(retypeAtCaret(editor, type), type).toBe(false);
     }
     expect(getBlocks(ydoc)[0]).toMatchObject({
       id: blockId,
@@ -158,7 +157,7 @@ describe("retypeSelectedBlock", () => {
     // Clearing the formatting makes the same re-type work, which is the whole
     // point of refusing rather than mangling.
     expect(editor.commands.toggleMark("bold")).toBe(true);
-    expect(retypeSelectedBlock(editor, "code", { language: "ts" })).toBe(true);
+    expect(retypeAtCaret(editor, "code", { language: "ts" })).toBe(true);
     expect(getBlocks(ydoc)[0]?.type).toBe("code");
   });
 });

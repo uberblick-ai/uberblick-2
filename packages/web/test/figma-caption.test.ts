@@ -6,10 +6,9 @@ import {
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { findForeignBlocks, findLinkConflicts, LINK_CONFLICT } from "../src/editor/palette.js";
-import { retypeSelectedBlock } from "../src/editor/retype.js";
 import { commentTargetOf } from "../src/editor/selection.js";
 import { threadsFromDoc } from "../src/ui/comments/threads.js";
-import { mountEditor } from "./helpers.js";
+import { mountEditor, retypeAtCaret } from "./helpers.js";
 import { onTestCleanup } from "./test-cleanup.js";
 
 function figmaDoc(caption = "Caption words") {
@@ -108,9 +107,9 @@ describe("Figma caption integration", () => {
     const { editor } = mountEditor(ydoc);
     const before = getBlocks(ydoc);
     editor.commands.setTextSelection(captionPosition(editor));
-    expect(retypeSelectedBlock(editor, "paragraph")).toBe(false);
+    expect(retypeAtCaret(editor, "paragraph")).toBe(false);
     editor.commands.setTextSelection(editor.state.doc.firstChild!.nodeSize + 1);
-    expect(retypeSelectedBlock(editor, "figma")).toBe(false);
+    expect(retypeAtCaret(editor, "figma")).toBe(false);
     expect(getBlocks(ydoc)).toEqual(before);
   });
 

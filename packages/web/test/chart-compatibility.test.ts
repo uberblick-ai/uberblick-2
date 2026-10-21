@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import {
+  BLOCK_TYPES,
   appendBlock,
   editBlock,
   getBlocksFragment,
@@ -11,7 +12,6 @@ import {
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { bindGuardedEditor } from "../src/editor/guarded-binding.js";
 import {
-  BLOCK_NODE_NAMES,
   describeForeignBlocks,
   findForeignBlocks,
 } from "../src/editor/palette.js";
@@ -72,7 +72,7 @@ describe("chart content on the previous web vocabulary", () => {
     const fix = fixture(sourceMapping);
     const before = Y.encodeStateAsUpdate(fix.ydoc);
     const source = fix.chart.firstChild;
-    expect(BLOCK_NODE_NAMES).not.toContain("chart");
+    expect(BLOCK_TYPES).not.toContain("chart");
     const foreign = findForeignBlocks(fix.fragment);
     expect(foreign).toEqual([expect.objectContaining({ index: 1, id: fix.id, nodeName: "chart" })]);
     expect(describeForeignBlocks(foreign)).toContain("unsupported type (chart)");

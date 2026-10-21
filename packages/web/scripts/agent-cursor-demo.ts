@@ -85,7 +85,7 @@ import {
   MAX_TOKEN_LIFETIME_SECONDS,
   importRootSecret,
   mintToken,
-} from "../src/collab/token.js";
+} from "@uberblick/schema/token";
 
 const config = resolveDevProjectConfig();
 for (const warning of config.warnings) console.error(warning);

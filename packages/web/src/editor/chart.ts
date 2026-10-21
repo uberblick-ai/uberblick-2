@@ -6,13 +6,11 @@
 import { Extension } from "@tiptap/core";
 import type { NodeViewRenderer, NodeViewRendererProps } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { TextSelection } from "@tiptap/pm/state";
 import type { NodeView } from "@tiptap/pm/view";
 import {
   Chart, LineController, LineElement, PointElement, BarController, BarElement, LinearScale, Legend, Tooltip,
 } from "chart.js";
 import type { ChartConfiguration, ChartDataset, Scale } from "chart.js";
-import { COMMENT_MARK } from "@uberblick/schema";
 import type { DocData } from "@uberblick/schema";
 import type * as Y from "yjs";
 import {
@@ -20,14 +18,16 @@ import {
   CHART_RECORD_LIMIT, chartAccessibleDescription, chartDiagnosticsText,
 } from "./chart-data.js";
 import type { ChartReady } from "./chart-data.js";
-import { blockCaption, chartChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js";
+import {
+  blockCaption, carriesComment, chartChrome, chromeFilters, copyButton, openSource, sourceButton, sourceEditingPlugin,
+} from "./source-chrome.js";
 import { prepareTable, tableDiagnosticsText } from "./table-data.js";
 import { dataTableView } from "./table-view.js";
 import { bindDocView } from "./view-bindings.js";
 import { observationEndpoints, observationTicks } from "./chart-ticks.js";
 import { chartAxes, chartPanelRanges, chartValueRanges, chartPointRadius, formatChartTick } from "./chart-presentation.js";
 import type { ChartAxes, ChartPanelRange } from "./chart-presentation.js";
-import { recordDraw } from "./render-state.js";
+import { DRAW_ATTRIBUTES, recordDraw } from "./render-state.js";
 
 // Both axes are linear. Epoch milliseconds plus Intl date labels require no
 // date adapter. No auto registry, decimator, transform or chart plugin package.
@@ -289,9 +289,9 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
   return { configurationFor, formatValue };
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Its length is the node view it returns, which states the exception.
 export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
-  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: One closure owns the chart instances, data snapshot and chrome that draw, update and destroy share.
   return ({ node, editor, getPos }: NodeViewRendererProps): NodeView => {
     let current: PMNode = node;
     let instances: Chart<Mark, Point[]>[] = [];
@@ -311,11 +311,10 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     const title = document.createElement("span");
     title.className = "ub-chart-title";
     header.label.append(title);
-    const openButton = document.createElement("button");
+    // Read-only readers open the source too, to inspect the mapping.
+    const open = openSource(editor, getPos);
+    const openButton = sourceButton("Open chart source", open);
     openButton.className = "ub-chart-open";
-    openButton.type = "button";
-    openButton.textContent = "Source";
-    openButton.setAttribute("aria-label", "Open chart source");
     const screen = document.createElement("div");
     screen.className = "ub-chart-screen";
     const canvas = document.createElement("canvas");
@@ -362,7 +361,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
       element.hidden = value === "";
     };
 
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: One pass sets every chrome element for each projection state, so no state keeps another's output.
     const draw = (data: DocData | null, readError: unknown, dataRev: string): void => {
       if (destroyed) return;
       let succeeded = false;
@@ -502,21 +501,10 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     // Reuse the shared frame and snapshot; a removed view schedules nothing.
     void document.fonts?.ready.then(schedule);
 
-    const open = (event: Event): void => {
-      event.preventDefault();
-      const pos = typeof getPos === "function" ? getPos() : undefined;
-      if (pos === undefined) return;
-      editor.view.dispatch(editor.state.tr.setSelection(TextSelection.near(editor.state.doc.resolve(pos + 1))));
-      editor.view.focus();
-    };
-    openButton.addEventListener("mousedown", event => event.preventDefault());
-    openButton.addEventListener("click", open);
     screen.addEventListener("mousedown", open);
     const syncChrome = (): void => {
       chartChrome.sync(current, dom);
-      let annotated = false;
-      current.forEach(child => { if (child.marks.some(mark => mark.type.name === COMMENT_MARK)) annotated = true; });
-      dom.setAttribute("data-annotated", String(annotated));
+      dom.setAttribute("data-annotated", String(carriesComment(current)));
     };
     syncChrome();
     schedule();
@@ -535,20 +523,14 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         if (dirty) schedule();
         return true;
       },
-      stopEvent: event => event.target instanceof Node &&
-        (header.row.contains(event.target) || panel.contains(event.target) || footer.contains(event.target)),
       // The derived root presentation is chrome too, never content to reparse.
-      ignoreMutation: mutation =>
-        (mutation.type === "attributes" && mutation.target === dom &&
-          ["data-view", "data-source-rev", "data-data-rev", "data-draw-state"].includes(mutation.attributeName ?? "")) ||
-        header.row.contains(mutation.target) || panel.contains(mutation.target) || footer.contains(mutation.target),
+      ...chromeFilters(dom, [header.row, panel, footer], ["data-view", ...DRAW_ATTRIBUTES]),
       destroy: () => {
         destroyed = true;
         binding.destroy();
         releaseChart();
         theme.disconnect();
         appearance?.removeEventListener("change", schedule);
-        openButton.removeEventListener("click", open);
         screen.removeEventListener("mousedown", open);
       },
     };

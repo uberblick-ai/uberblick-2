@@ -4,12 +4,13 @@
  * caret and dispatch no transaction or undo step.
  */
 
-import type { NodeViewRenderer, NodeViewRendererProps } from "@tiptap/core";
+import type { Editor, NodeViewRenderer, NodeViewRendererProps } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { NodeSelection, Plugin } from "@tiptap/pm/state";
+import { NodeSelection, Plugin, TextSelection } from "@tiptap/pm/state";
 import type { EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import type { NodeView } from "@tiptap/pm/view";
+import type { NodeView, ViewMutationRecord } from "@tiptap/pm/view";
+import { COMMENT_MARK } from "@uberblick/schema";
 import { toast } from "sonner";
 import { codeLanguageLabel } from "./syntax-highlighting.js";
 
@@ -104,13 +105,120 @@ export function blockCaption(text: string): {
   return { row, label, actions };
 }
 
+/**
+ * Place the caret inside the block, which shows its source. `editableOnly`
+ * refuses in a read-only editor, for blocks whose Source is an authoring control.
+ */
+export function openSource(
+  editor: Editor,
+  getPos: () => number | undefined,
+  editableOnly = false,
+): (event: Event) => void {
+  return (event) => {
+    event.preventDefault();
+    if (editableOnly && !editor.isEditable) return;
+    const pos = getPos();
+    if (pos === undefined) return;
+    editor.view.dispatch(editor.state.tr.setSelection(TextSelection.near(editor.state.doc.resolve(pos + 1))));
+    editor.view.focus();
+  };
+}
+
+/** A Source button. Its mousedown is prevented, so only the click moves the caret. */
+export function sourceButton(label: string, open: (event: Event) => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Source";
+  button.setAttribute("aria-label", label);
+  button.addEventListener("mousedown", (event) => event.preventDefault());
+  button.addEventListener("click", open);
+  return button;
+}
+
+/** Whether any of the block's text carries an annotation's anchor. */
+export function carriesComment(node: PMNode): boolean {
+  let found = false;
+  node.forEach((child) => {
+    if (child.marks.some((mark) => mark.type.name === COMMENT_MARK)) found = true;
+  });
+  return found;
+}
+
+/**
+ * Keep events and mutations inside chrome away from ProseMirror, and ignore the
+ * root attributes the view writes outside an update. Everything else must reach
+ * it: a click in the block's padding places the caret, and suppressed contentDOM
+ * repair can show keystrokes that are never stored.
+ */
+export function chromeFilters(
+  dom: HTMLElement,
+  chrome: readonly HTMLElement[],
+  rootAttributes: readonly string[] = [],
+): Required<Pick<NodeView, "stopEvent" | "ignoreMutation">> {
+  const inChrome = (target: EventTarget | Node | null): boolean =>
+    target instanceof Node && chrome.some((element) => element.contains(target));
+  return {
+    stopEvent: (event) => inChrome(event.target),
+    ignoreMutation: (mutation: ViewMutationRecord) => inChrome(mutation.target) ||
+      (mutation.type === "attributes" && mutation.target === dom && rootAttributes.includes(mutation.attributeName ?? "")),
+  };
+}
+
+/**
+ * Load a renderer when the first block needs it. Browsers cache a failed
+ * dynamic import by URL, so a retry imports the bundled `url` with a fresh
+ * query, which Vite must leave intact.
+ */
+export function lazyRenderer<T>(load: () => Promise<T>, url: string): {
+  current: () => T | null;
+  load: () => Promise<T>;
+} {
+  let module: T | null = null;
+  let loading: Promise<T> | null = null;
+  let failures = 0;
+  return {
+    current: () => module,
+    load: () => {
+      loading ??= (failures === 0 ? load() : import(/* @vite-ignore */ `${url}?retry=${failures}`) as Promise<T>).then(
+        (loaded) => (module = loaded),
+        (cause: unknown) => { failures += 1; loading = null; throw cause; },
+      );
+      return loading;
+    },
+  };
+}
+
+function listItem(text: string): HTMLLIElement {
+  const item = document.createElement("li");
+  item.textContent = text;
+  return item;
+}
+
+/** List a renderer's source-line diagnostics, hiding the list when there are none. */
+export function showDiagnostics(
+  list: HTMLElement,
+  diagnostics: readonly { line: number; severity: string; message: string }[],
+): void {
+  list.replaceChildren(...diagnostics.map((diagnostic) =>
+    listItem(`Line ${diagnostic.line}: ${diagnostic.severity}: ${diagnostic.message}`)));
+  list.hidden = diagnostics.length === 0;
+}
+
+/** Show why a preview could not load or draw in place of its diagnostics. */
+export function showFailure(list: HTMLElement, prefix: string, cause: unknown): void {
+  const message = cause !== null && typeof cause === "object" && "message" in cause
+    ? String(cause.message) : String(cause);
+  list.replaceChildren(listItem(`${prefix}: ${message}`));
+  list.hidden = false;
+}
+
 /** Mirror one node attribute onto the DOM, or remove it when unset. */
 function mirrorAttribute(element: HTMLElement, name: string, value: unknown): void {
   if (typeof value === "string") element.setAttribute(name, value);
   else element.removeAttribute(name);
 }
 
-export interface SourceBlockChrome {
+interface SourceBlockChrome {
   /** The NodeView's root element, matching what `renderHTML` would emit. */
   root: () => HTMLElement;
   /** The element that holds the editable text. */
@@ -160,14 +268,7 @@ export function sourceBlockView(chrome: SourceBlockChrome): NodeViewRenderer {
         if (captionText !== null && captionText.textContent !== label) captionText.textContent = label;
         return true;
       },
-      // Only the chrome's own events. A click anywhere else in the block —
-      // including the padding around the text — must still place the caret.
-      stopEvent: (event: Event): boolean =>
-        event.target instanceof Node && header.row.contains(event.target),
-      // Ignore only chrome mutations; suppressing contentDOM repair can make
-      // later keystrokes visible without storing them in the document.
-      ignoreMutation: (mutation: { target: Node }): boolean =>
-        header.row.contains(mutation.target),
+      ...chromeFilters(dom, [header.row]),
     };
   };
 }

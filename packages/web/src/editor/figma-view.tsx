@@ -6,7 +6,7 @@ import type { Root } from "react-dom/client";
 import { FIGMA_DEFAULT_HEIGHT, FIGMA_PROVIDER, normalizeFigmaLink } from "@uberblick/schema";
 import { toast } from "sonner";
 import { blockCaption } from "./source-chrome.js";
-import { endUndoCapture } from "./block-menu.js";
+import { endUndoCapture } from "./blocks.js";
 import { FigmaFields } from "./figma-fields.js";
 import type { FigmaFieldValues } from "./figma-fields.js";
 import { observeFigma } from "./figma-loading.js";

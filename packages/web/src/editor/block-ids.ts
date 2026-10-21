@@ -10,9 +10,9 @@ import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { Transaction } from "@tiptap/pm/state";
 
-export const blockIdPluginKey = new PluginKey("uberblick/block-ids");
+const blockIdPluginKey = new PluginKey("uberblick/block-ids");
 
-export interface BlockIdOptions {
+interface BlockIdOptions {
   /** Id source. Injectable so tests can assert exact values. */
   newId: () => string;
   /** Whether this replica may repair the shared document right now. */

@@ -6,7 +6,7 @@ import { localSessionHeaders } from "../collab/local-session.js";
 export interface DocumentSearchStatus {
   readonly caughtUp: boolean;
   readonly rooms: Readonly<Record<string, { readonly hubAcked: boolean }>>;
-  /** Why this serving run cannot share local edits, absent on older servers. */
+  /** Why this serving run cannot share local edits; null when it can. */
   readonly notSharedReason?: NotSharedReason | null;
   readonly replicaUnavailable?: ReplicaUnavailable | null;
 }

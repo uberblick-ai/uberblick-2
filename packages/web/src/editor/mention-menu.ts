@@ -8,7 +8,7 @@
 import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
-import { endUndoCapture, isTypedHere } from "./block-menu.js";
+import { endUndoCapture, isTypedHere } from "./blocks.js";
 import { replaceWithDocLink } from "./doc-links.js";
 import type { DocLinkCandidate, DocLinkContext } from "./doc-links.js";
 import { foldForTitleMatch } from "../title-fold.js";
@@ -39,7 +39,7 @@ const MENTION_QUERY = /(?:^|\s)@([^\s@]*)$/;
 /**
  * Bound per-keystroke rendering; further typing narrows the directory candidates.
  */
-export const MENTION_LIMIT = 8;
+const MENTION_LIMIT = 8;
 
 /**
  * Admit identified prose blocks and paragraphs in editable table cells.

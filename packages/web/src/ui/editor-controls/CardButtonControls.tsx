@@ -9,7 +9,7 @@ import {
 } from "@uberblick/schema";
 import type { CardButton, CardButtonColor, CardButtonStyle } from "@uberblick/schema";
 import { yUndoPluginKey } from "y-prosemirror";
-import { findBlockById } from "../../editor/block-menu.js";
+import { findBlockById } from "../../editor/blocks.js";
 import { openCardButton } from "../../editor/card-button.js";
 import { Button } from "../shadcn/button.js";
 import { Input } from "../shadcn/input.js";

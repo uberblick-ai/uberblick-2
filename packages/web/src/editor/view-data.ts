@@ -18,7 +18,7 @@ export function optionalText(value: Record<string, unknown>, key: string): boole
 export function numeric(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value); }
 export function own(value: JSONObject, key: string): unknown { return Object.hasOwn(value, key) ? value[key] : undefined; }
 
-export interface CollectionProblem {
+interface CollectionProblem {
   status: "collection-absent" | "collection-unusable";
   message: string;
 }

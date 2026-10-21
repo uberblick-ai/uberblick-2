@@ -15,10 +15,9 @@ import { tableFromRows } from "./table.js";
 import { cardTitleOffset, emptyCard } from "./card.js";
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
-import type { EditorState, Transaction } from "@tiptap/pm/state";
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
-import { ySyncPluginKey, yUndoPluginKey } from "y-prosemirror";
+import type { Transaction } from "@tiptap/pm/state";
 import type { BlockType } from "@uberblick/schema";
+import { endUndoCapture, findBlockById, isTypedHere } from "./blocks.js";
 import { retypeBlockInTransaction } from "./retype.js";
 import type { RetypeAttrs } from "./retype.js";
 
@@ -236,20 +235,6 @@ export interface SlashTrigger {
 /** `/` plus a run of non-space characters, and nothing else in the block. */
 const SLASH_QUERY = /^\/(\S*)$/;
 
-/** The top-level block carrying `id`, with its current position. */
-export function findBlockById(
-  doc: ProseMirrorNode,
-  id: string,
-): { pos: number; node: ProseMirrorNode } | null {
-  let pos = 0;
-  for (let index = 0; index < doc.childCount; index += 1) {
-    const node = doc.child(index);
-    if (node.attrs.id === id) return { pos, node };
-    pos += node.nodeSize;
-  }
-  return null;
-}
-
 /**
  * Require an identified top-level paragraph, a caret at its end and only a
  * slash plus non-space query text. Re-derive this on each state change.
@@ -276,25 +261,6 @@ export function slashTriggerAt(editor: Editor): SlashTrigger | null {
   return { blockId: block.attrs.id, query: match[1] ?? "" };
 }
 
-/** Whether `transaction` is a remote change, an undo or a redo — not typing. */
-function isChangeFromElsewhere(transaction: Transaction): boolean {
-  const sync = transaction.getMeta(ySyncPluginKey) as
-    | { isChangeOrigin?: boolean }
-    | undefined;
-  return sync?.isChangeOrigin === true;
-}
-
-/**
- * Only local typing may open a picker. Yjs undo/redo returns through ySync with
- * isChangeOrigin, just like remote edits; paste, drop and cut also stay prose.
- */
-export function isTypedHere(transaction: Transaction): boolean {
-  if (!transaction.docChanged) return false;
-  if (isChangeFromElsewhere(transaction)) return false;
-  const uiEvent = transaction.getMeta("uiEvent");
-  return uiEvent !== "paste" && uiEvent !== "drop" && uiEvent !== "cut";
-}
-
 /**
  * Only typing into an empty paragraph opens slash mode. Editing stored /query
  * prose must not open it; slashTriggerAt keeps an existing session alive.
@@ -309,17 +275,6 @@ export function opensSlashSession(
   const before = findBlockById(transaction.before, trigger.blockId);
   if (before === null || before.node.type.name !== "paragraph") return false;
   return before.node.textContent === "";
-}
-
-/**
- * Separate conversion from typing: undo must restore the typed trigger, not the
- * empty paragraph. Yjs otherwise coalesces both within its capture interval.
- */
-export function endUndoCapture(state: EditorState): void {
-  const undo = yUndoPluginKey.getState(state) as
-    | { undoManager?: { stopCapturing: () => void } }
-    | undefined;
-  undo?.undoManager?.stopCapturing();
 }
 
 /** Node attributes for a *new* block: a null id, which the block-id plugin fills. */

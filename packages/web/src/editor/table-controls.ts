@@ -3,7 +3,7 @@ import type { Editor } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import * as Y from "yjs";
 import { ySyncPluginKey } from "y-prosemirror";
-import { endUndoCapture, findBlockById } from "./block-menu.js";
+import { endUndoCapture, findBlockById } from "./blocks.js";
 import { isOrdinaryTable } from "./table.js";
 
 export interface TableRowTarget {
@@ -12,7 +12,7 @@ export interface TableRowTarget {
   row: Y.XmlElement;
 }
 
-export interface ResolvedTableRow {
+interface ResolvedTableRow {
   node: ProseMirrorNode;
   pos: number;
   rowIndex: number;
@@ -25,7 +25,7 @@ export interface TableColumnTarget {
   cell: Y.XmlElement;
 }
 
-export interface ResolvedTableColumn {
+interface ResolvedTableColumn {
   node: ProseMirrorNode;
   pos: number;
   columnIndex: number;
