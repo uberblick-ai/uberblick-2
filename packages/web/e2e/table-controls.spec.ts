@@ -428,10 +428,11 @@ test("column moves swap every row, focus the moved column and each undo separate
   await expect(page.getByRole("menuitem", { name: "Move column left", exact: true })).toBeDisabled();
   await expect.poll(() => page.getByRole("menu").evaluate(element => element.contains(element.ownerDocument.activeElement))).toBe(true);
   await page.keyboard.press("Home");
-  for (let step = 0; step < 5; step += 1) {
-    if (await page.getByRole("menuitem", { name: "Move column right", exact: true }).evaluate((element) => element === document.activeElement)) break;
-    await page.keyboard.press("ArrowDown");
-  }
+  // Radix defers roving focus; observe each destination before the next key.
+  await expect(page.getByRole("menuitem", { name: "Insert column left", exact: true })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menuitem", { name: "Insert column right", exact: true })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
   await expect(page.getByRole("menuitem", { name: "Move column right", exact: true })).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("menu")).toHaveCount(0);
