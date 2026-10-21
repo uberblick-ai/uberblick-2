@@ -280,9 +280,9 @@ describe("ub open: live Access bridge", () => {
         return await response.json() as Record<string, unknown>;
       };
       await waitUntil("verified served account", async () => (await account()).state === "signed-in");
-      expect(await account()).toEqual({ state: "signed-in", handle: "this-person" });
+      expect(await account()).toEqual({ state: "signed-in", handle: "this-person", githubAccountId: login.identity.githubAccountId });
       writeBinding(box, "wss://another-hub.example/ws", REBOUND_WORKSPACE);
-      expect(await account()).toEqual({ state: "signed-in", handle: "this-person" });
+      expect(await account()).toEqual({ state: "signed-in", handle: "this-person", githubAccountId: login.identity.githubAccountId });
       for (const request of [
         { headers: { authorization: "" } },
         { headers: bearer(await authMessage(SECRET)) },

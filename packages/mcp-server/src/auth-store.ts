@@ -3,6 +3,7 @@ import { createPrivateKey } from "node:crypto";
 import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
+import { sanitizeGithubName } from "@uberblick/schema/github-identity";
 export { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
 import { credentialsPath } from "./storage.js";
 export { CREDENTIALS_FILE, credentialsPath } from "./storage.js";
@@ -15,6 +16,7 @@ export interface StoredHubLogin {
     id: string;
     githubAccountId: string;
     githubUsername: string;
+    name?: string;
   };
   credential: {
     record: {
@@ -169,7 +171,11 @@ function readStore(env: NodeJS.ProcessEnv): Store {
       const names = sanitizeWorkspaceNames(login.credential.workspaceNames,
         login.credential.record.workspaces, login.credential.key);
       const { workspaceNames: _workspaceNames, ...credential } = login.credential;
-      logins[origin] = { ...login, credential: {
+      const name = sanitizeGithubName(login.identity.name, login.credential.key);
+      const { name: _name, ...identity } = login.identity;
+      logins[origin] = { ...login, identity: {
+        ...identity, ...(name === undefined ? {} : { name }),
+      }, credential: {
         ...credential, ...(names === undefined ? {} : { workspaceNames: names }),
       } };
     }
@@ -232,11 +238,13 @@ export function projectLoginFields(login: StoredHubLogin, collectionSecret?: str
   const { record } = credential;
   const workspaceNames = sanitizeWorkspaceNames(credential.workspaceNames, record.workspaces,
     credential.key, collectionSecret);
+  const name = sanitizeGithubName(identity.name, credential.key, collectionSecret);
   return {
     identity: {
       id: identity.id,
       githubAccountId: identity.githubAccountId,
       githubUsername: identity.githubUsername,
+      ...(name === undefined ? {} : { name }),
     },
     credential: {
       record: {

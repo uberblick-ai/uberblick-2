@@ -18,6 +18,7 @@ import {
   isHubLogin,
   preflightHubLoginStore,
   readHubLogins,
+  replaceHubLogin,
   removeHubLogin,
   writeHubLogin,
 } from "../src/auth-store.js";
@@ -372,6 +373,48 @@ describe("hub login store", () => {
     expect(stored.credential.record.workspaces).toEqual([WORKSPACE]);
     expect(JSON.parse(before).hubLogins[HUB]).toEqual(stored);
     expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  it("keeps optional GitHub display data through storage and renewal without refreshing it", async () => {
+    const box = sandbox();
+    const value = login();
+    value.identity.name = " Synthetic 🧭 Person ";
+    await writeHubLogin(HUB, value, box.env);
+    const path = credentialsPath(box.env);
+    const before = readFileSync(path, "utf8");
+    expect(readHubLogins(box.env).logins[HUB]).toEqual(value);
+    expect(readFileSync(path, "utf8")).toBe(before);
+    const replacement = login();
+    replacement.identity.name = "A different upstream name";
+    replacement.credential.record.id = crypto.randomUUID();
+    expect(await replaceHubLogin(HUB, value, replacement, box.env)).toBe(true);
+    expect(readHubLogins(box.env).logins[HUB]).toEqual({ ...value, credential: replacement.credential });
+  });
+
+  it.each([
+    undefined, null, 42, {}, [], "", " \t ", "one\ntwo", "one\rtwo", "control\u009b",
+    "format\u200b", "bidi\u202e", "line\u2028separator", "paragraph\u2029separator", "surrogate\ud800",
+    "🧭".repeat(254), `secret ${login().credential.key}`,
+  ])("drops unsafe GitHub display metadata on reads and writes without losing the login (%j)", async (name) => {
+    const original = login();
+    const supplied = { ...original, identity: { ...original.identity, name } };
+    expect(isHubLogin(supplied)).toBe(true);
+    const box = sandbox({ credentials: { hubLogins: { [HUB]: supplied } } });
+    const path = credentialsPath(box.env);
+    const before = readFileSync(path, "utf8");
+    expect(readHubLogins(box.env).logins[HUB]).toEqual(original);
+    expect(readFileSync(path, "utf8")).toBe(before);
+    if (!isHubLogin(supplied)) throw new Error("display metadata must not invalidate a login");
+    await writeHubLogin(HUB, supplied, box.env);
+    expect(JSON.parse(readFileSync(path, "utf8")).hubLogins[HUB]).toEqual(original);
+  });
+
+  it("accepts a profile name at the Unicode character bound", async () => {
+    const box = sandbox();
+    const value = login();
+    value.identity.name = "🧭".repeat(253);
+    await writeHubLogin(HUB, value, box.env);
+    expect(readHubLogins(box.env).logins[HUB]).toEqual(value);
   });
 
   it.each([
