@@ -631,11 +631,18 @@ export function getDirectoryEntry(
 }
 
 /**
- * List entries in replica-stable code-unit order: title, then uuid.
- *
- * Deliberately `<` / `>`, not locale collation: this order is mirrored by the
- * web pane so it and `list_docs` produce the same sequence on every replica.
+ * Replica-stable code-unit order: title, then uuid. Deliberately `<` / `>`,
+ * not locale collation, so the web list and `list_docs` agree on every replica.
  */
+export function compareDirectoryEntries(
+  a: Pick<DirectoryEntry, "title" | "uuid">,
+  b: Pick<DirectoryEntry, "title" | "uuid">,
+): number {
+  if (a.title !== b.title) return a.title < b.title ? -1 : 1;
+  return a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0;
+}
+
+/** List entries in {@link compareDirectoryEntries} order. */
 export function listDirectory(
   dirDoc: Y.Doc,
   options: ListDirectoryOptions = {},
@@ -666,9 +673,6 @@ export function listDirectory(
     }
     return [entry];
   });
-  normalized.sort((a, b) => {
-    if (a.title !== b.title) return a.title < b.title ? -1 : 1;
-    return a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0;
-  });
+  normalized.sort(compareDirectoryEntries);
   return normalized;
 }

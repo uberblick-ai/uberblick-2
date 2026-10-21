@@ -3,7 +3,7 @@ import { parseArgs } from "node:util";
 import { hostname } from "node:os";
 import { isGithubUsername } from "@uberblick/schema/github-identity";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
-import { parseWorkspaceId } from "@uberblick/schema";
+import { isUuid, parseWorkspaceId } from "@uberblick/schema";
 import {
   type StoredHubLogin,
   isHubLogin,
@@ -405,7 +405,6 @@ const CLAIM_STATE_MS = 2_000;
 const CANCEL_MS = 2_000;
 const MAX_LIFETIME_SECONDS = 900;
 const MAX_RESPONSE_BYTES = 65_536;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 class SignInFailure extends Error {}
 
@@ -565,7 +564,7 @@ async function login(selection: Selection, io: Io, collectTimeoutMs?: number): P
     const start = (body: object) => post(selection.origin, "start", body, new AbortController().signal, REQUEST_MS, (result) => {
       // Valid authority permits cleanup even if the envelope or public fields
       // are malformed. Never display any of the private start fields.
-      if (typeof result.requestId === "string" && UUID.test(result.requestId) &&
+      if (isUuid(result.requestId) &&
           typeof result.collectionSecret === "string" && /^[A-Za-z0-9_-]{43}$/.test(result.collectionSecret)) {
         attempt = { requestId: result.requestId, collectionSecret: result.collectionSecret, publicKey };
       }
@@ -617,7 +616,7 @@ async function login(selection: Selection, io: Io, collectTimeoutMs?: number): P
       }
       const credential = projectLoginFields(supplied, attempt.collectionSecret);
       if (Object.hasOwn(result, "claimedWorkspaceId")) {
-        if (typeof result.claimedWorkspaceId !== "string" || !UUID.test(result.claimedWorkspaceId) ||
+        if (!isUuid(result.claimedWorkspaceId) ||
             !credential.credential.record.workspaces.includes(result.claimedWorkspaceId)) {
           throw new SignInFailure("the hub returned an invalid sign-in claim result; run login again");
         }

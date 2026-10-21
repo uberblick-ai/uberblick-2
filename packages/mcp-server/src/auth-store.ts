@@ -2,6 +2,7 @@
 import { createPrivateKey } from "node:crypto";
 import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
+import { isUuid } from "@uberblick/schema";
 import { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 export { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
@@ -49,8 +50,6 @@ export interface HubLogins {
   fix?: string;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
 /** Optional public display data must never carry a credential or flow secret. */
 function sanitizeGithubName(value: unknown, ...secrets: (string | undefined)[]): string | undefined {
   const name = sanitizeDeviceName(value);
@@ -62,10 +61,6 @@ function object(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function uuid(value: unknown): value is string {
-  return typeof value === "string" && UUID.test(value);
-}
-
 function timestamp(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
@@ -74,12 +69,12 @@ function hasLoginFields(value: unknown): value is StoredHubLogin {
   if (!object(value) || !object(value.identity) || !object(value.credential)) return false;
   const { identity, credential } = value;
   const record = credential.record;
-  if (!object(record) || !uuid(identity.id) ||
+  if (!object(record) || !isUuid(identity.id) ||
       typeof identity.githubAccountId !== "string" || !/^[1-9][0-9]*$/.test(identity.githubAccountId) ||
       typeof identity.githubUsername !== "string" || identity.githubUsername.length < 1 ||
-      !uuid(record.id) || !uuid(record.principalId) || record.principalId !== identity.id ||
-      !uuid(record.deviceId) || !Array.isArray(record.workspaces) ||
-      !record.workspaces.every(uuid) || !timestamp(record.issuedAt) ||
+      !isUuid(record.id) || !isUuid(record.principalId) || record.principalId !== identity.id ||
+      !isUuid(record.deviceId) || !Array.isArray(record.workspaces) ||
+      !record.workspaces.every(isUuid) || !timestamp(record.issuedAt) ||
       (record.revokedAt !== null && !timestamp(record.revokedAt)) ||
       typeof credential.key !== "string") return false;
   return !identity.githubUsername.includes(credential.key);

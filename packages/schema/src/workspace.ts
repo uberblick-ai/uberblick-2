@@ -7,11 +7,19 @@
 import { InvalidWorkspaceIdError } from "./errors.js";
 
 /**
- * Optional slug uses exactly one joining hyphen; a trailing hyphen is invalid.
- * Lowercase UUIDs accept any version/variant, including other generators' ids.
+ * Lowercase keeps one spelling per id, so case-sensitive room keys and claims
+ * never split it. Any version/variant is accepted, including other generators' ids.
  */
-const WORKSPACE_ID =
-  /^(?:([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)-)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const BARE_UUID = new RegExp(`^${UUID}$`);
+
+/** Optional slug uses exactly one joining hyphen; a trailing hyphen is invalid. */
+const WORKSPACE_ID = new RegExp(`^(?:([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)-)?(${UUID})$`);
+
+/** The 8-4-4-4-12 lowercase spelling every UUID identity uses. */
+export function isUuid(value: unknown): value is string {
+  return typeof value === "string" && BARE_UUID.test(value);
+}
 
 export interface WorkspaceId {
   /** The identity. Everything two machines compare is this string. */

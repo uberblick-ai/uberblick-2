@@ -5,7 +5,7 @@
  * bind typ, sub, workspace, scope, kid, iat and exp.
  */
 
-import { parseWorkspaceId } from "./workspace.js";
+import { isUuid, parseWorkspaceId } from "./workspace.js";
 import { isGithubAccountId, isGithubUsername } from "./github-identity.js";
 
 /** What a token is allowed to do. Read-only connections can sync down only. */
@@ -168,9 +168,6 @@ export async function importRootSecret(secret: string): Promise<CryptoKey> {
   return hmacKey(textEncoder.encode(secret));
 }
 
-/** A credential id, and the same 8-4-4-4-12 lowercase spelling as a uuid. */
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
 /**
  * Generate each credential on the device. Only its raw public key goes to the
  * hub; the PKCS8 private key belongs in the owner's private credential store.
@@ -262,7 +259,7 @@ function isEpochSeconds(value: unknown): value is number {
 
 /** A credential id, or `null` for the root secret. Nothing else is a `kid`. */
 function isKeyId(value: unknown): value is string | null {
-  return value === null || (typeof value === "string" && UUID.test(value));
+  return value === null || isUuid(value);
 }
 
 /**
@@ -316,7 +313,7 @@ export async function mintRequestProof(
   key: CryptoKey,
   claims: RequestProofRequest,
 ): Promise<string> {
-  if (typeof claims.kid !== "string" || !UUID.test(claims.kid)) {
+  if (!isUuid(claims.kid)) {
     throw new Error("mintRequestProof: kid must be a credential uuid");
   }
   const action = readRequestAction(claims);
@@ -384,7 +381,7 @@ export function readRequestAction(payload: Record<string, unknown>): RequestActi
       action = { operation, publicKey };
       break;
     case "promote-workspace":
-      if (!isWorkspace(workspaceId) || typeof attemptId !== "string" || !UUID.test(attemptId)) return null;
+      if (!isWorkspace(workspaceId) || !isUuid(attemptId)) return null;
       action = { operation, workspaceId, attemptId };
       break;
     case "list-devices":
@@ -447,8 +444,7 @@ function parseRequestProofClaims(
   const expectedAction = readRequestAction(expected);
   if (
     typ !== "request" ||
-    typeof kid !== "string" ||
-    !UUID.test(kid) ||
+    !isUuid(kid) ||
     action === null ||
     expectedAction === null ||
     Object.keys(action).length !== Object.keys(expectedAction).length ||

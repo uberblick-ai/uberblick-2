@@ -12,10 +12,13 @@ const FLAGS = ["bold", "italic", "strike", "inlineCode"] as const;
 
 /**
  * Link targets are external http(s) URLs; UUIDs belong to docLink. Writers,
- * import and the editor gate share this check to keep the two spaces disjoint.
+ * import, the editor gate and MCP input schemas share this pattern to keep
+ * the two spaces disjoint.
  */
+export const EXTERNAL_HREF = /^https?:\/\/\S+$/i;
+
 export function isExternalHref(href: unknown): href is string {
-  return typeof href === "string" && /^https?:\/\/\S+$/i.test(href);
+  return typeof href === "string" && EXTERNAL_HREF.test(href);
 }
 
 /**

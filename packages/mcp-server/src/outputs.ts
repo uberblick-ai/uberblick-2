@@ -1,4 +1,4 @@
-import { CODE_CHECK_RESULTS, DECISION_STATUSES, DOCUMENT_KINDS } from "@uberblick/schema";
+import { CODE_CHECK_RESULTS, DECISION_STATUSES, DOCUMENT_KINDS, LIST_STYLES, MAX_LIST_INDENT } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "./inputs.js";
 
@@ -133,7 +133,7 @@ function blockSchema(withLinks: boolean) {
   return z.union([
     z.object({ ...prose, type: z.enum(["paragraph", "quote"]) }).strict(),
     z.object({ ...prose, type: z.literal("heading"), level: z.number().int().min(1).max(6) }).strict(),
-    z.object({ ...prose, type: z.literal("list-item"), list: z.enum(["bullet", "ordered"]), indent: z.number().int().min(0).max(3) }).strict(),
+    z.object({ ...prose, type: z.literal("list-item"), list: z.enum(LIST_STYLES), indent: z.number().int().min(0).max(MAX_LIST_INDENT) }).strict(),
     z.object({ ...blockFields, type: z.literal("code"), language: z.string() }).strict(),
     z.object({ ...blockFields, type: z.enum(["table", "terminal", "chart", "card"]) }).strict(),
     z.object({ ...blockFields, type: z.literal("figma"), figma: z.object({
