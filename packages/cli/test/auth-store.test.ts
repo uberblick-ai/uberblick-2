@@ -417,6 +417,21 @@ describe("hub login store", () => {
     expect(readHubLogins(box.env).logins[HUB]).toEqual(value);
   });
 
+  it.each(["invalid stored name", "replacement key"])("omits unsafe cached profile data on renewal (%s)", async (kind) => {
+    const original = login();
+    const replacement = login();
+    replacement.credential.key = Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), Buffer.alloc(32, 18)]).toString("base64url");
+    replacement.credential.record.id = crypto.randomUUID();
+    const name = kind === "replacement key" ? `Synthetic ${replacement.credential.key}` : "Unsafe\nProfile";
+    const named = { ...original, futureLogin: "opaque", identity: { ...original.identity, name, futureIdentity: "opaque" } };
+    const box = sandbox({ credentials: { hubLogins: { [HUB]: named } } });
+    expect(await replaceHubLogin(HUB, named, replacement, box.env)).toBe(true);
+    const stored = JSON.parse(readFileSync(credentialsPath(box.env), "utf8")).hubLogins[HUB];
+    expect(stored.identity).toEqual({ ...original.identity, futureIdentity: "opaque" });
+    expect(stored.futureLogin).toBe("opaque");
+    expect(stored.credential.key).toBe(replacement.credential.key);
+  });
+
   it.each([
     { label: "null", workspaceNames: null }, { label: "array", workspaceNames: [] },
     { label: "string", workspaceNames: "not a map" },

@@ -325,9 +325,13 @@ export async function replaceHubLogin(
     if (current?.credential.record.id !== expected.credential.record.id ||
       current.credential.key !== expected.credential.key) return false;
     const entries = (store.raw?.hubLogins ?? {}) as Record<string, unknown>;
-    // Replace only the credential; preserve identity and unknown sibling fields.
+    const raw = entries[origin] as Record<string, unknown>;
+    const { name: _name, ...identity } = raw.identity as StoredHubLogin["identity"];
+    const name = sanitizeGithubName(current.identity.name, replacement.credential.key);
+    // Preserve the stored identity and unknown siblings without retaining unsafe display data.
     publish(store, { ...entries, [origin]: {
-      ...(entries[origin] as Record<string, unknown>),
+      ...raw,
+      identity: { ...identity, ...(name === undefined ? {} : { name }) },
       credential: projectLoginFields(replacement).credential,
     } }, "ub auth login");
     return true;
