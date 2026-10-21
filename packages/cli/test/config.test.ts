@@ -275,7 +275,7 @@ describe("resolveConfig", () => {
         "make them equal, or unset one",
     ]);
     // And nothing of either value survives anywhere in it — not a fragment,
-    // not a size. (`ub status`'s own output is checked in storage.test.ts.)
+    // not a size. (`ub status`'s own output is checked in cli.test.ts.)
     expect(tracesOf(SECRET_IN_ENV, resolved.warnings.join("\n"))).toEqual([]);
     expect(tracesOf(SECRET_ON_FILE, resolved.warnings.join("\n"))).toEqual([]);
 

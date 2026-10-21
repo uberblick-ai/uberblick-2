@@ -530,7 +530,7 @@ describe("ub doctor observational database reading", () => {
     expect(snapshot.connection.state).toBe("failed");
     expect(snapshot.problems).toEqual([{ name: "persistence-failed", fix: "ub doctor for details" }]);
     const { report } = await statusReport({ env: { ...box.env, ...env }, cwd: box.cwd });
-    if (report.workspace === null) throw new Error("expected the hub binding");
+    if (report.binding === null) throw new Error("expected the hub binding");
     expect(report.persistence?.room).toBe(directoryRoom(WORKSPACE));
     expect(report.persistence?.message).toContain(REFUSED);
     expect(report.hub.status).toBe("quarantined");
