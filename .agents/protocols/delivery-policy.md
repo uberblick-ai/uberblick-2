@@ -136,7 +136,9 @@ withholds its body, which pastes third-party release notes (ub-agents
 - **One fix round.** A failed gate or a conflict goes to the implementer once
   with `changes`. Escalate instead of a second `changes` when an implementer
   round already ran on this PR, or when the fix needs a product, architecture
-  or API-migration decision rather than mechanical adaptation.
+  or API-migration decision rather than mechanical adaptation. The
+  [implementer checks the limit before editing](../roles/implementer.md#revising-a-pull-request)
+  too, including conflicts ub-agents routes without starting the integrator.
 
 ## Merge policy — the rules are the authority, not a session
 

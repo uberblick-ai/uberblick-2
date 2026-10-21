@@ -13,7 +13,7 @@ stop-labels: [needs-human]
 
 # Dependabot PRs need no maintainer start or head approval, and their bodies
 # (upstream release notes) never reach agents. Needs the ub-agents release that
-# adds trusted-pr-authors (ub-agents#624).
+# adds trusted-pr-authors.
 trusted-pr-authors: [dependabot]
 
 cleanup:
