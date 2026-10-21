@@ -77,8 +77,8 @@ describe("stored requirement documents", () => {
       new_text: "Edited answer.", rev: page.blocks[0].rev,
     });
     await rig.ok("annotate", { uuid: page.uuid, block_id: edited.block.id, start: 0, end: 6, text: "New comment." });
-    const extra = await rig.ok("insert_block", { uuid: page.uuid, type: "paragraph", text: "Temporary answer." });
-    await rig.ok("delete_block", { uuid: page.uuid, block_id: extra.block.id });
+    const extra = await rig.ok("insert_block", { uuid: page.uuid, blocks: [{ type: "paragraph", text: "Temporary answer." }] });
+    await rig.ok("delete_block", { uuid: page.uuid, block_id: extra.blocks[0].id });
     await rig.ok("update_data", {
       uuid: page.uuid, operations: [{ collection: "notes", schema: { version: 1, schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } }, upsert: [{ id: "one", value: { text: "Editable data." } }] }],
     });

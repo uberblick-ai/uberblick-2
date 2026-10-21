@@ -154,17 +154,17 @@ describe("structured tables through MCP", () => {
     ]);
     expect(cell(doc, table.id, 1, 0).toDelta()).toEqual([{ insert: "Alpha", attributes: { bold: {} } }]);
     expect((await rig.ok("search", { query: "Alpha" })).hits.map((hit: { uuid: string }) => hit.uuid)).toContain(created.uuid);
-    const inserted = await rig.ok("insert_block", { uuid: created.uuid, type: "table", text: GFM });
-    expect(inserted.block.text).toBe(GFM);
-    expect(blockText(doc, inserted.block.id)).toBe(cell(doc, inserted.block.id, 1, 1));
+    const inserted = await rig.ok("insert_block", { uuid: created.uuid, blocks: [{ type: "table", text: GFM }] });
+    expect(inserted.blocks[0].text).toBe(GFM);
+    expect(blockText(doc, inserted.blocks[0].id)).toBe(cell(doc, inserted.blocks[0].id, 1, 1));
     const cursor = rig.instance.replicas.replica(created.uuid).awareness.getLocalState()!.cursor;
     const position = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(cursor.head), doc);
-    expect(position?.type).toBe(cell(doc, inserted.block.id, 1, 1));
+    expect(position?.type).toBe(cell(doc, inserted.blocks[0].id, 1, 1));
     const exported = await rig.ok("export_markdown", { uuid: created.uuid, frontmatter: false });
     expect(exported.markdown).toContain(table.text);
     expect(exported.markdown).toContain(GFM);
-    const empty = await rig.ok("insert_block", { uuid: created.uuid, type: "table", text: "|  |\n| --- |\n|  |" });
-    const emptyTable = findBlockElement(doc, empty.block.id)!;
+    const empty = await rig.ok("insert_block", { uuid: created.uuid, blocks: [{ type: "table", text: "|  |\n| --- |\n|  |" }] });
+    const emptyTable = findBlockElement(doc, empty.blocks[0].id)!;
     const emptyParagraph = tableRows(emptyTable)[1]![0]!.firstChild;
     const emptyCursor = rig.instance.replicas.replica(created.uuid).awareness.getLocalState()!.cursor;
     const emptyPosition = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(emptyCursor.head), doc);
@@ -222,7 +222,7 @@ describe("structured tables through MCP", () => {
     const writes = rig.instance.store.logSize();
     let updates = 0;
     doc.on("update", () => { updates += 1; });
-    const inserted = await rig.call("insert_block", { uuid: created.uuid, type: "table", text: unknown });
+    const inserted = await rig.call("insert_block", { uuid: created.uuid, blocks: [{ type: "table", text: unknown }] });
     expect(inserted.payload).toMatchObject({ error: "doclink_target_not_known_locally", applied: false, partial: false });
     const edited = await rig.call("edit_block", { uuid: created.uuid, block_id: created.blocks[0].id,
       old_text: GFM, new_text: GFM.replace("Alpha", `[unknown](${randomUUID()})`), rev: created.blocks[0].rev });
@@ -334,7 +334,7 @@ describe("structured tables through MCP", () => {
     });
     const replica = rig.instance.replicas.replica(created.uuid);
     const state = Y.encodeStateVector(replica.doc);
-    const inserted = await rig.call("insert_block", { uuid: created.uuid, type: "table", text: "not a table" });
+    const inserted = await rig.call("insert_block", { uuid: created.uuid, blocks: [{ type: "table", text: "not a table" }] });
     expect(inserted.payload).toMatchObject({ error: "invalid_table", applied: false, partial: false });
     const edited = await rig.call("edit_block", {
       uuid: created.uuid, block_id: created.blocks[0].id,

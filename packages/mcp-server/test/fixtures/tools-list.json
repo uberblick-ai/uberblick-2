@@ -757,7 +757,7 @@
   },
   {
     "name": "insert_block",
-    "title": "Insert a block",
+    "title": "Insert blocks",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -779,102 +779,116 @@
             }
           ]
         },
-        "type": {
-          "type": "string",
-          "enum": [
-            "paragraph",
-            "heading",
-            "code",
-            "list-item",
-            "quote",
-            "table",
-            "terminal",
-            "chart",
-            "card",
-            "figma"
-          ]
-        },
-        "text": {
-          "description": "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer at most once, a required nonempty title, any number of button lines, then a blank line and optional prose body. Prose header values are one-line inline Markdown, not YAML; quotes stay literal. Each button has one [Text](destination) link: nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, alone or with ?query. At most one style (outline/filled) and color (neutral/blue/green/violet) may follow in either order; defaults are outline neutral. Invalid buttons, other trailing text, unknown, duplicate prose or non-key headers refuse with invalid_card. Prose parts support code, bold, italic, strike, external and document links. Export orders label, title, footer, then buttons in authored order, writes style before color and omits default words. Empty prose keys are omitted, prose header newlines fold to spaces, and prose lines starting ::: are escaped. Figma takes the content between :::figma and :::; required url, optional literal plain one-line title and whole-pixel height 240–960 (default 480), then a blank line and optional caption with the same inline marks. Keys are lowercase, each at most once. Only https figma.com/www.figma.com links to design, file, proto, board, slides or community/file are accepted, with a key/id and optional name; saving keeps those path parts and node-id, starting-point-node-id and version-id on https://www.figma.com, dropping other query fields and fragments. Invalid content refuses with invalid_figma and writes nothing; figma blocks take figma.com links only; use a plain link for other sites. get_doc returns canonical text and read-only figma kind, file, optional fileName and node. Source blocks remain literal text.",
-          "type": "string"
-        },
-        "level": {
-          "description": "Heading level. Headings only.",
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 6
-        },
-        "language": {
-          "description": "Code language, e.g. \"ts\". Code blocks only.",
-          "type": "string"
-        },
-        "list": {
-          "description": "List style. List items only; omitted means bullet.",
-          "type": "string",
-          "enum": [
-            "bullet",
-            "ordered"
-          ]
-        },
-        "indent": {
-          "description": "List depth, an integer from 0 to 3. List items only; omitted means 0.",
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 3
-        },
-        "inline": {
-          "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, terminal and chart hold source text and ignore it; tables, cards and figma also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card/:::figma and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
+        "blocks": {
+          "minItems": 1,
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "paragraph",
+                  "heading",
+                  "code",
+                  "list-item",
+                  "quote",
+                  "table",
+                  "terminal",
+                  "chart",
+                  "card",
+                  "figma"
+                ]
+              },
               "text": {
+                "description": "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer at most once, a required nonempty title, any number of button lines, then a blank line and optional prose body. Prose header values are one-line inline Markdown, not YAML; quotes stay literal. Each button has one [Text](destination) link: nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, alone or with ?query. At most one style (outline/filled) and color (neutral/blue/green/violet) may follow in either order; defaults are outline neutral. Invalid buttons, other trailing text, unknown, duplicate prose or non-key headers refuse with invalid_card. Prose parts support code, bold, italic, strike, external and document links. Export orders label, title, footer, then buttons in authored order, writes style before color and omits default words. Empty prose keys are omitted, prose header newlines fold to spaces, and prose lines starting ::: are escaped. Figma takes the content between :::figma and :::; required url, optional literal plain one-line title and whole-pixel height 240–960 (default 480), then a blank line and optional caption with the same inline marks. Keys are lowercase, each at most once. Only https figma.com/www.figma.com links to design, file, proto, board, slides or community/file are accepted, with a key/id and optional name; saving keeps those path parts and node-id, starting-point-node-id and version-id on https://www.figma.com, dropping other query fields and fragments. Invalid content refuses with invalid_figma and writes nothing; figma blocks take figma.com links only; use a plain link for other sites. get_doc returns canonical text and read-only figma kind, file, optional fileName and node. Source blocks remain literal text.",
                 "type": "string"
               },
-              "marks": {
-                "type": "object",
-                "properties": {
-                  "bold": {
-                    "type": "boolean"
+              "level": {
+                "description": "Heading level. Headings only.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 6
+              },
+              "language": {
+                "description": "Code language, e.g. \"ts\". Code blocks only.",
+                "type": "string"
+              },
+              "list": {
+                "description": "List style. List items only; omitted means bullet.",
+                "type": "string",
+                "enum": [
+                  "bullet",
+                  "ordered"
+                ]
+              },
+              "indent": {
+                "description": "List depth, an integer from 0 to 3. List items only; omitted means 0.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3
+              },
+              "inline": {
+                "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, terminal and chart hold source text and ignore it; tables, cards and figma also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card/:::figma and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "marks": {
+                      "type": "object",
+                      "properties": {
+                        "bold": {
+                          "type": "boolean"
+                        },
+                        "italic": {
+                          "type": "boolean"
+                        },
+                        "strike": {
+                          "type": "boolean"
+                        },
+                        "inlineCode": {
+                          "type": "boolean"
+                        },
+                        "link": {
+                          "type": "string",
+                          "pattern": "^https?:\\/\\/\\S+$"
+                        },
+                        "docLink": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
                   },
-                  "italic": {
-                    "type": "boolean"
-                  },
-                  "strike": {
-                    "type": "boolean"
-                  },
-                  "inlineCode": {
-                    "type": "boolean"
-                  },
-                  "link": {
-                    "type": "string",
-                    "pattern": "^https?:\\/\\/\\S+$"
-                  },
-                  "docLink": {
-                    "type": "string",
-                    "format": "uuid",
-                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                  }
-                },
-                "additionalProperties": false
+                  "required": [
+                    "text",
+                    "marks"
+                  ],
+                  "additionalProperties": false
+                }
               }
             },
             "required": [
-              "text",
-              "marks"
+              "type"
             ],
             "additionalProperties": false
-          }
+          },
+          "description": "Blocks to insert consecutively, in order. A single block is a one-entry array."
         }
       },
       "required": [
         "uuid",
-        "type"
+        "blocks"
       ],
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Insert one block after after_block_id, or at the top when omitted; lists use adjacent list-item blocks with list/indent (default bullet/0). Tables take one GFM table or invalid_table refuses. Cards take :::card content without delimiters: nonempty title, optional label/footer, repeated button: [Text](destination) lines and inline-Markdown prose. Button labels are plain text; destinations are https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet may follow in either order; defaults are outline neutral. Output keeps authored order, writes style before color and omits defaults. Bad cards refuse with invalid_card. Figma takes :::figma content without delimiters: required url, optional plain one-line title and height 240–960, blank line and marked caption. HTTPS figma.com/www.figma.com design/file/proto/board/slides/community/file links retain the key/id, optional name and node-id, starting-point-node-id, version-id on www.figma.com; other query fields and fragments disappear. invalid_figma refuses bad headers, paths or height without writing; other sites require a plain link. Document targets must be known locally or doclink_target_not_known_locally refuses. get_doc derives Figma kind/file/fileName/node; this tool contacts no Figma service. Other text is plain or literal source; chart source maps document data.\n\nHelp: insert_block, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Insert a nonempty blocks array consecutively after after_block_id, or at the top when omitted. Use the same entries as create_doc; one block is a one-entry array. Returns the new blocks in order, each with id and rev. Every entry is checked before anything is written: a refusal keeps its error code, names the 1-based entry_index and says nothing was written. Decision answers must keep their supported shape across the whole batch. Success sends one document update and moves the cursor once, to the end of the last inserted block's stored text. Lists use adjacent list-item entries with list/indent (default bullet/0). Container syntax lives in each entry's text field. Document-link targets must be known locally; chart source stays literal.\n\nHelp: insert_block, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,

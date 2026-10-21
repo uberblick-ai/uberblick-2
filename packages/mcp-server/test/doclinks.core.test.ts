@@ -119,12 +119,10 @@ describe("inline document references", () => {
     // A label the caller wrote is kept, and a reference sits beside the other
     // marks rather than instead of them.
     await rig.ok("insert_block", {
-      uuid: created.uuid,
-      after_block_id: created.blocks[0].id,
-      type: "paragraph",
-      inline: [
+      uuid: created.uuid, after_block_id: created.blocks[0].id,
+      blocks: [{ type: "paragraph", inline: [
         { text: "the hub itself", marks: { docLink: target.uuid, bold: true } },
-      ],
+      ] }],
     });
     const read = await rig.ok("get_doc", { uuid: created.uuid });
     expect(read.blocks[1].text).toBe("the hub itself");
@@ -196,13 +194,12 @@ describe("inline document references", () => {
     // meaning, so it never reaches a handler.
     const refused = await rig.call("insert_block", {
       uuid: doc.uuid,
-      type: "paragraph",
-      inline: [
+      blocks: [{ type: "paragraph", inline: [
         {
           text: "both at once",
           marks: { link: "https://example.com/hub", docLink: target.uuid },
         },
-      ],
+      ] }],
     });
     expect(refused.isError).toBe(true);
     expect(refused.payload.error).toBe("schema_validation");
@@ -258,8 +255,7 @@ describe("inline document references", () => {
 
     const refusedInsert = await rig.call("insert_block", {
       uuid: doc.uuid,
-      type: "paragraph",
-      inline: [{ text: "x", marks: { docLink: unknown } }],
+      blocks: [{ type: "paragraph", inline: [{ text: "x", marks: { docLink: unknown } }] }],
     });
     expect(refusedInsert.payload.error).toBe("doclink_target_not_known_locally");
     expect(refusedInsert.payload.applied).toBe(false);
@@ -311,10 +307,7 @@ describe("inline document references", () => {
     // `create_doc` takes the same path, so one handler proves both.
     const inserted = await rig.ok("insert_block", {
       uuid: doc.uuid,
-      type: "code",
-      text: "const x = 1;",
-      language: "ts",
-      inline: [{ text: "x", marks: { docLink: randomUUID() } }],
+      blocks: [{ type: "code", text: "const x = 1;", language: "ts", inline: [{ text: "x", marks: { docLink: randomUUID() } }] }],
     });
     expect(inserted.applied).toBe(true);
 

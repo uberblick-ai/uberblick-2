@@ -60,7 +60,7 @@ describe("open comment threads through directory stubs", () => {
     for (const doc of [live, archived, decision]) forgetCount(author, doc.uuid);
     expect(await rows(author, { has_open_threads: true })).toEqual([]);
     expect((await rows(author, { include_deleted: true })).find(row => row.uuid === live.uuid)).not.toHaveProperty("openThreadCount");
-    await author.ok("insert_block", { uuid: live.uuid, type: "paragraph", text: "A later document change" });
+    await author.ok("insert_block", { uuid: live.uuid, blocks: [{ type: "paragraph", text: "A later document change" }] });
     expect(await rows(author, { has_open_threads: true })).toMatchObject([{ uuid: live.uuid, openThreadCount: 1 }]);
     forgetCount(author, live.uuid);
     await author.close();

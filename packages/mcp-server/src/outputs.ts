@@ -326,7 +326,7 @@ export const outputSchemas = {
     decisions: z.array(z.object({ uuid, title: z.string(), status: status.nullable() }).strict()),
   }).strict(),
   edit_block: z.object({ uuid, block: block.nullable(), ...documentDurability, ...contentReview }).strict(),
-  insert_block: z.object({ uuid, block: block.nullable(), ...documentDurability, ...contentReview }).strict(),
+  insert_block: z.object({ uuid, blocks: z.array(block).min(1), ...documentDurability, ...contentReview }).strict(),
   delete_block: z.object({ uuid, blockId: z.string(), ...documentDurability, ...contentReview }).strict(),
   set_metadata: z.object({
     uuid,

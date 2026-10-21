@@ -44,7 +44,7 @@ describe("MCP list attributes", () => {
     const input = { type: "list-item", text: "Nested", list: "ordered", indent: 2 };
     const doc = await create(rig, tool === "create_doc" ? { blocks: [input] } : {});
     const block = tool === "create_doc" ? doc.blocks[0] : tool === "insert_block"
-      ? (await rig.ok(tool, { uuid: doc.uuid, ...input })).block
+      ? (await rig.ok(tool, { uuid: doc.uuid, blocks: [input] })).blocks[0]
       : (await rig.ok(tool, { uuid: doc.uuid, block_id: doc.blocks[0].id,
         old_text: doc.blocks[0].text, new_text: input.text, rev: doc.blocks[0].rev,
         list: input.list, indent: input.indent })).block;
@@ -63,7 +63,8 @@ describe("MCP list attributes", () => {
       blocks: [{ type: "paragraph", text: "Must not be seeded." }, { type: "list-item", text: "Invalid", ...fields }],
     }, "schema_validation", doc.uuid);
     await refuse(rig, "insert_block", {
-      uuid: doc.uuid, type: "list-item", text: "Invalid", ...fields,
+      uuid: doc.uuid,
+      blocks: [{ type: "list-item", text: "Invalid", ...fields }],
     }, "schema_validation", doc.uuid);
     await refuse(rig, "edit_block", {
       uuid: doc.uuid, block_id: block.id, old_text: block.text, new_text: "Must not change.", rev: block.rev, ...fields,

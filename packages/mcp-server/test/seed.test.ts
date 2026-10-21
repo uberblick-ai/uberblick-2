@@ -332,10 +332,8 @@ describe("seed import", () => {
     });
     await editing.ok("set_metadata", { uuid, tags: ["mcp"] });
     const added = await editing.ok("insert_block", {
-      uuid,
-      after_block_id: paragraph.id,
-      type: "paragraph",
-      text: "A block the template never had.",
+      uuid, after_block_id: paragraph.id,
+      blocks: [{ type: "paragraph", text: "A block the template never had." }],
     });
     await editing.close();
 
@@ -362,7 +360,7 @@ describe("seed import", () => {
         },
       ]);
       expect((doc.blocks as { id: string }[])[1]?.id).toBe(paragraph.id);
-      expect((doc.blocks as { id: string }[])[2]?.id).toBe(added.block.id);
+      expect((doc.blocks as { id: string }[])[2]?.id).toBe(added.blocks[0].id);
     } finally {
       await rig.close();
     }

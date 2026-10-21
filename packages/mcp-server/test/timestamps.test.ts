@@ -54,7 +54,7 @@ function stub(rig: Rig, uuid: string): DirectoryEntry {
 /** Count updates published by the directory room from now on. */
 
 async function typeInto(rig: Rig, uuid: string, text: string): Promise<void> {
-  await rig.ok("insert_block", { uuid, type: "paragraph", text });
+  await rig.ok("insert_block", { uuid, blocks: [{ type: "paragraph", text }] });
 }
 
 beforeEach(() => {

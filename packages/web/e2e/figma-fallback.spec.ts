@@ -57,7 +57,8 @@ for (const arrivesWhileBound of [false, true]) {
     if (arrivesWhileBound) {
       await expect(editor(page)).toHaveAttribute("contenteditable", "true");
       await writer.call("insert_block", {
-        uuid: created.uuid, after_block_id: created.blocks[0]?.id, ...reference,
+        uuid: created.uuid, after_block_id: created.blocks[0]?.id,
+        blocks: [{ ...reference }],
       });
     }
     const before = await writer.call<StoredDoc>("get_doc", { uuid: created.uuid });

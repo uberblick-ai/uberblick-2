@@ -334,7 +334,15 @@ export const toolHelpDetails = {
     "There is no cross-replica compare-and-swap — an edit made elsewhere that has not reached this replica " +
     "yet cannot be detected, and the window widens the longer this server stays offline.",
   insert_block:
-    "Insert one block after `after_block_id`, or at the top of the document when it is omitted. Block types " +
+    "Insert the ordered, nonempty `blocks` array consecutively after `after_block_id`, or at the top " +
+    "when it is omitted. Each entry has the same shape as a `create_doc` seed; a single block uses a " +
+    "one-entry array. The answer's `blocks` lists the inserted blocks in order, each with id and rev. " +
+    "Every entry is checked before the live write. A refusal retains its error code, gives the " +
+    "1-based `entry_index` in both the message and structured detail, says what to do next and that " +
+    "nothing was written. Call-level refusals, such as an unknown anchor or a content lock, have no " +
+    "entry index and also write nothing. Decision answer limits are checked against each resulting " +
+    "prefix, naming the first entry that breaks the shape. Success reaches peers as one document " +
+    "update and moves the cursor once to the end of the last inserted block's stored text. Block types " +
     `are the closed set the schema owns — ${BLOCK_TYPES.join(", ")}. ` +
     "A list is a run of adjacent list-item blocks. Optional `list` is `bullet` or `ordered` (default " +
     "`bullet`), and `indent` is an integer 0–3 (default 0); both apply only to list-item blocks. " +

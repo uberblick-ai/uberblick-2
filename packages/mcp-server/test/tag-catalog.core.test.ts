@@ -51,8 +51,7 @@ describe("the workspace tag catalog", () => {
 
     const inserted = await rig.ok("insert_block", {
       uuid: created.uuid,
-      type: "paragraph",
-      text: "The write still lands while the hint points out the next step.",
+      blocks: [{ type: "paragraph", text: "The write still lands while the hint points out the next step." }],
     });
     expect(inserted).toMatchObject({
       applied: true,
@@ -90,8 +89,7 @@ describe("the workspace tag catalog", () => {
     retireTagCatalogEntry(rig.instance.replicas.settings().doc, AUTH.id);
     const retained = await rig.ok("insert_block", {
       uuid: assigned.uuid,
-      type: "paragraph",
-      text: "The only assignment is retired, but it remains an assignment.",
+      blocks: [{ type: "paragraph", text: "The only assignment is retired, but it remains an assignment." }],
     });
     expect(retained.tagHint).toBeUndefined();
 

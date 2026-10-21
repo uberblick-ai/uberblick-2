@@ -67,7 +67,7 @@ describe("delete_doc", () => {
     const calls: [string, Record<string, unknown>][] = [
       ["get_doc", { uuid }], ["get_data", { uuid }], ["export_markdown", { uuid }], ["backlinks", { uuid }],
       ["set_metadata", { uuid, title: "Return" }], ["set_status", { uuid, status: "open" }],
-      ["insert_block", { uuid, text: "Return", type: "paragraph" }],
+      ["insert_block", { uuid, blocks: [{ text: "Return", type: "paragraph" }] }],
       ["edit_block", { uuid, block_id: block.id, old_text: block.text, new_text: "Return", rev: block.rev }],
       ["delete_block", { uuid, block_id: block.id }], ["update_data", { uuid, operations: [] }],
       ["annotate", { uuid, block_id: block.id, start: 0, end: 1, text: "Return" }],

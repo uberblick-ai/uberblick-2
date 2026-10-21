@@ -259,8 +259,8 @@ describe("set_metadata", () => {
       uuid: source.uuid, block_id: original.id, old_text: original.text,
       new_text: "Changed content", rev: original.rev,
     });
-    const inserted = await rig.ok("insert_block", { uuid: source.uuid, type: "paragraph", text: "Temporary block" });
-    await rig.ok("delete_block", { uuid: source.uuid, block_id: inserted.block.id });
+    const inserted = await rig.ok("insert_block", { uuid: source.uuid, blocks: [{ type: "paragraph", text: "Temporary block" }] });
+    await rig.ok("delete_block", { uuid: source.uuid, block_id: inserted.blocks[0].id });
     const read = await rig.ok("get_doc", { uuid: source.uuid });
     expect(read.code_check).toEqual(written.code_check);
     expect(read.blocks).toEqual([expect.objectContaining({ text: "Changed content" })]);

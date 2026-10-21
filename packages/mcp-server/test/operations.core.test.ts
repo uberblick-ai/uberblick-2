@@ -112,7 +112,7 @@ it("retains decided-content locks without locking editable metadata", async () =
   if (block === undefined) throw new Error("Missing decision fixture block");
   const writes = [
     ["edit_block", () => editBlockOperation(rig.context, { uuid: decided.uuid, block_id: block.id, old_text: block.text, new_text: "Changed", rev: block.rev }, request)],
-    ["insert_block", () => insertBlockOperation(rig.context, { uuid: decided.uuid, type: "paragraph", text: "Changed" }, request)],
+    ["insert_block", () => insertBlockOperation(rig.context, { uuid: decided.uuid, blocks: [{ type: "paragraph", text: "Changed" }] }, request)],
     ["delete_block", () => deleteBlockOperation(rig.context, { uuid: decided.uuid, block_id: block.id }, request)],
     ["link_range", () => linkRangeOperation(rig.context, { uuid: decided.uuid, block_id: block.id, start: 0, end: 1, doc_id: decided.uuid, rev: block.rev }, request)],
     ["set_metadata", () => setMetadataOperation(rig.context, { uuid: decided.uuid, tldr: "Changed" }, request)],
