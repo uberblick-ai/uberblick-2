@@ -35,7 +35,7 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
-import { RoutePane } from "../src/ui/App.js";
+import { RoutePane } from "../src/ui/shell/RoutePane.js";
 import { DocMetaLine } from "../src/ui/document/DocChrome.js";
 import { toast } from "sonner";
 import { useDocMeta } from "../src/ui/hooks.js";
