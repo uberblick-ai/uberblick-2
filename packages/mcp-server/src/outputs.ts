@@ -1,6 +1,7 @@
 import { CODE_CHECK_RESULTS, DECISION_STATUSES, DOCUMENT_KINDS } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "./inputs.js";
+import { formatDiagnostics } from "./format-checks.js";
 
 const count = z.number().int().nonnegative();
 const uuid = z.string().describe("Document identity; a UUID, never a title or path.");
@@ -266,6 +267,7 @@ export const outputSchemas = {
     tldrHint: contentReview.tldrHint.optional(),
     ...decisionAuthority,
     blocks: readBlocks,
+    diagnostics: formatDiagnostics,
     sidebar: z.object({ group: groupIdentity, position: z.number().int() }).strict().optional(),
   }).strict(),
   get_doc: z.object({
@@ -325,8 +327,8 @@ export const outputSchemas = {
     github_ref: z.string(),
     decisions: z.array(z.object({ uuid, title: z.string(), status: status.nullable() }).strict()),
   }).strict(),
-  edit_block: z.object({ uuid, block: block.nullable(), ...documentDurability, ...contentReview }).strict(),
-  insert_block: z.object({ uuid, block: block.nullable(), ...documentDurability, ...contentReview }).strict(),
+  edit_block: z.object({ uuid, block: block.nullable(), diagnostics: formatDiagnostics, ...documentDurability, ...contentReview }).strict(),
+  insert_block: z.object({ uuid, block: block.nullable(), diagnostics: formatDiagnostics, ...documentDurability, ...contentReview }).strict(),
   delete_block: z.object({ uuid, blockId: z.string(), ...documentDurability, ...contentReview }).strict(),
   set_metadata: z.object({
     uuid,

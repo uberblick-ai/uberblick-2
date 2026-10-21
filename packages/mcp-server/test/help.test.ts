@@ -11,7 +11,7 @@ import { INTERNAL_RESOURCE_ERROR_MESSAGE } from "../src/resource-adapter.js";
 import { FailingStore, removeTempDirs, startServer, TEST_SECRET, testConfig } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
-const concepts = ["orientation", "workspaces", "lifecycle", "markdown", "data", "tools", "tool-contracts"];
+const concepts = ["orientation", "workspaces", "lifecycle", "markdown", "ablauf", "wireframe", "data", "tools", "tool-contracts"];
 const rigs: Rig[] = [];
 
 async function local(config = testConfig(), store?: FailingStore): Promise<Rig> {
@@ -114,7 +114,7 @@ it.each(["list", "read"] as const)("contains an unexpected help resource %s fail
   expect(stderr).toHaveBeenCalledWith(expect.stringContaining(cause.stack!));
 });
 
-it("renders each tool's actual full description and schemas, with an accepted example and owning-topic links", async () => {
+it("renders each tool's actual full description and top-level fields, with an accepted example and owning-topic links", async () => {
   const rig = await local();
   const { tools } = await rig.client.listTools();
   const validator = new AjvJsonSchemaValidator();
@@ -123,9 +123,16 @@ it("renders each tool's actual full description and schemas, with an accepted ex
     const { text } = await rig.ok("get_help", { topic: tool.name });
     expect(text, tool.name).toContain(tool.title);
     expect(text, tool.name).toContain(tool.description);
-    const inputSchema = jsonSection(text, "Arguments");
-    expect(inputSchema, tool.name).toEqual(tool.inputSchema);
-    expect(jsonSection(text, "Output"), tool.name).toEqual(tool.outputSchema);
+    const section = (heading: string) => text.split(`## ${heading}\n`)[1]?.split("\n## ")[0] ?? "";
+    const required = new Set(tool.inputSchema.required ?? []);
+    const listed = [...section("Arguments").matchAll(/^- `([^`]+)` \(.*?, (required|optional)\)/gm)]
+      .map(([, name, presence]) => [name, presence]);
+    expect(listed, tool.name).toEqual(Object.keys(tool.inputSchema.properties ?? {})
+      .map((name) => [name, required.has(name) ? "required" : "optional"]));
+    const output = section("Output");
+    expect(output, tool.name).toContain("outputSchema in tools/list");
+    for (const name of Object.keys(tool.outputSchema?.properties ?? {})) expect(output, tool.name).toContain(`\`${name}\``);
+    expect(text, `${tool.name} repeats a JSON Schema`).not.toContain('"$schema"');
     const entry = toolHelpEntries[tool.name];
     expect(entry, `${tool.name} has no per-tool help entry`).toBeDefined();
     const details = entry!.details;
@@ -133,7 +140,7 @@ it("renders each tool's actual full description and schemas, with an accepted ex
       const constraints = text.split("## Constraints\n")[1]?.split("\n## ")[0];
       expect(constraints, `${tool.name} loses its expanded tool-specific contract`).toContain(details);
     }
-    const checked = validator.getValidator(inputSchema)(jsonSection(text, "Example"));
+    const checked = validator.getValidator(tool.inputSchema as any)(jsonSection(text, "Example"));
     expect(checked.valid, `${tool.name}: ${checked.errorMessage ?? "invalid example"}`).toBe(true);
     const related = text.split("## Related\n")[1] ?? "";
     expect(related, tool.name).toContain("uberblick://help/tool-contracts");

@@ -1,6 +1,7 @@
 import { BlockNotFoundError, decisionAnswerShapeFailure, getBlock, getBlocks, getMeta, insertBlock } from "@uberblick/schema";
 import { z } from "zod";
 import { ToolError } from "../failures.js";
+import { diagnosticsFor } from "../format-checks.js";
 import { strictInput } from "../inputs.js";
 import { blockShape, uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
@@ -35,5 +36,6 @@ export const insertBlockOperation = documentOperation("insert_block", inputSchem
   return {
     uuid,
     block,
+    ...diagnosticsFor([block]),
   };
 });

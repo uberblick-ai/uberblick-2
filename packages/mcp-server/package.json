@@ -28,8 +28,10 @@
   "dependencies": {
     "@hocuspocus/provider": "4.7.1",
     "@modelcontextprotocol/sdk": "1.32.1",
+    "@uberblick/ablauf": "catalog:",
     "@uberblick/hub": "workspace:*",
     "@uberblick/schema": "workspace:*",
+    "@uberblick/wireframe": "catalog:",
     "y-protocols": "catalog:",
     "yjs": "catalog:",
     "zod": "^4.4.3"

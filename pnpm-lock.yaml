@@ -4,6 +4,15 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    '@uberblick/ablauf':
+      specifier: 0.2.0
+      version: 0.2.0
+    '@uberblick/wireframe':
+      specifier: 0.3.0
+      version: 0.3.0
+
 overrides:
   yjs: 13.6.32
   y-protocols: 1.0.7
@@ -118,12 +127,18 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.32.1
         version: 1.32.1(zod@4.4.3)
+      '@uberblick/ablauf':
+        specifier: 'catalog:'
+        version: 0.2.0
       '@uberblick/hub':
         specifier: workspace:*
         version: link:../hub
       '@uberblick/schema':
         specifier: workspace:*
         version: link:../schema
+      '@uberblick/wireframe':
+        specifier: 'catalog:'
+        version: 0.3.0
       y-protocols:
         specifier: 1.0.7
         version: 1.0.7(yjs@13.6.32)
@@ -220,7 +235,7 @@ importers:
         specifier: ^3.30.5
         version: 3.30.5
       '@uberblick/ablauf':
-        specifier: ^0.2.0
+        specifier: 'catalog:'
         version: 0.2.0
       '@uberblick/hub':
         specifier: workspace:*
@@ -232,7 +247,7 @@ importers:
         specifier: workspace:*
         version: link:../schema
       '@uberblick/wireframe':
-        specifier: ^0.3.0
+        specifier: 'catalog:'
         version: 0.3.0
       chart.js:
         specifier: 4.5.1

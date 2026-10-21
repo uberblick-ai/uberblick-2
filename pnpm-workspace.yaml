@@ -23,6 +23,10 @@ catalog:
   yjs: 13.6.32
   y-protocols: 1.0.7
   y-prosemirror: 1.3.7
+  # The web editor draws these formats and MCP checks them and serves their
+  # authoring guides, so both packages must resolve the same version.
+  "@uberblick/ablauf": 0.2.0
+  "@uberblick/wireframe": 0.3.0
 
 # ...and overrides pin transitive requests (y-prosemirror's yjs peer and
 # @hocuspocus/*'s y-protocols) to that same version, so

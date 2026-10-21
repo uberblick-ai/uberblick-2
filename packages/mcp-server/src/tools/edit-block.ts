@@ -4,6 +4,7 @@ import { z } from "zod";
 import { strictInput } from "../inputs.js";
 import { listIndentArg, listStyleArg, uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
+import { diagnosticsFor } from "../format-checks.js";
 
 export const inputSchema = strictInput({
   uuid: uuidArg,
@@ -44,8 +45,10 @@ export const editBlockOperation = documentOperation("edit_block", inputSchema, (
     ...(table_mapping === undefined ? {} : { tableMapping: table_mapping }),
   });
   replicas.publishCursor(replica, block_id, new_text.length);
+  const block = getBlock(replica.doc, block_id);
   return {
     uuid,
-    block: getBlock(replica.doc, block_id),
+    block,
+    ...diagnosticsFor([block]),
   };
 });

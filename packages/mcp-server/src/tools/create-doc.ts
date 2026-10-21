@@ -1,4 +1,4 @@
-import { DECISION_STATUSES, InvalidDocumentLifecycleError, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionAnswerFailure, decisionAnswerShapeFailure, decisionDirectoryFields, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setDiscussion, setKind, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
+import { DECISION_STATUSES, InvalidDocumentLifecycleError, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionAnswerFailure, decisionAnswerShapeFailure, decisionDirectoryFields, getBlocks, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setDiscussion, setKind, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
 import type { DocumentKind, DocumentStatus } from "@uberblick/schema";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -13,6 +13,7 @@ import { blockInputSchema, decisionAnswerArg, descriptionArg, documentKindArg, d
 import { operation } from "./operation.js";
 import type { ToolContext } from "./context.js";
 import { discussionTarget } from "./discussion.js";
+import { diagnosticsFor } from "../format-checks.js";
 
 const DECISION_GUIDANCE =
   "A decision topic has one title, stored on its first record, naming the question rather than the answer. " +
@@ -356,6 +357,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
     ...(tldr === undefined ? {} : { tldr: getMeta(replica.doc, replica.id).tldr }),
     ...decisionAuthorityJson(replica),
     blocks: blocksJson(replica),
+    ...diagnosticsFor(getBlocks(replica.doc)),
     ...(placement === null ? {} : { sidebar: placement }),
     ...durabilityAcross(replica, completed),
     ...(inputs.length === 0 || lifecycle?.status === "decided" ? {} : tldrReview(replica)),

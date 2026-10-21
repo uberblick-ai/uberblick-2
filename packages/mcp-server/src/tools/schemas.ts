@@ -158,7 +158,7 @@ export const blockShape = {
   language: z
     .string()
     .optional()
-    .describe("Code language, e.g. \"ts\". Code blocks only."),
+    .describe("Code language, e.g. \"ts\". Code blocks only. The editor draws `ablauf` as a diagram and `wireframe` as a UI sketch; read get_help(\"ablauf\") or get_help(\"wireframe\") before writing one."),
   list: listStyleArg.optional().describe("List style. List items only; omitted means bullet."),
   indent: listIndentArg.optional().describe("List depth, an integer from 0 to 3. List items only; omitted means 0."),
   inline: inlineArg,

@@ -2,6 +2,7 @@
 import { BLOCK_TYPES, DATA_LIMITS, INLINE_ICONS, MAX_DESCRIPTION_LENGTH, MAX_TLDR_LENGTH } from "@uberblick/schema";
 import { GUIDANCE_INSTRUCTIONS } from "./briefing.js";
 import { FAILURE_INSTRUCTIONS } from "./failures.js";
+import { FORMAT_GUIDES } from "./generated/format-guides.js";
 import { TLDR_AFTER_CONTENT_CHANGE } from "./tools/descriptions.js";
 
 export interface HelpTopic {
@@ -22,7 +23,7 @@ export const STARTUP_ORIENTATION =
   "through MCP resources, or call `get_help(topic)`, for concepts, lifecycle, supported Markdown syntax and tool usage. " +
   "Built-in help is workspace-agnostic; workspace conventions are ordinary documents, not initialization " +
   "instructions or help resources. Follow recovery guidance on failures. " +
-  "Help topics: orientation, workspaces, lifecycle, markdown, data, tools, tool-contracts. " +
+  "Help topics: orientation, workspaces, lifecycle, markdown, ablauf, wireframe, data, tools, tool-contracts. " +
   "Read uberblick://help/{topic} or get_help({topic}). Registered tool names are per-tool topic ids; " +
   "discover them with get_help({}) or tools.";
 
@@ -144,9 +145,7 @@ Markdown supports paragraphs, ATX headings \`#\` through \`######\`, bullet and 
 
 Stored Mermaid blocks are deleted automatically, including in archived documents and decision records; their source is not retained. Their comment threads remain available with no anchor. Removing an approved answer block reports \`approvalChanged: true\` without recording another approval.
 
-A \`\`\`\` \`\`\`wireframe \`\`\`\` fence is an ordinary code block that the web editor draws as a wireframe.
-
-An \`ablauf\` fence is an ordinary code block that the web editor draws as a diagram. It supports \`flow v0\` and \`fan-out v0\`; see the [Ablauf authoring primer](https://github.com/uberblick-ai/ablauf/blob/main/spike/PRIMER.md). Import, export and MCP preserve its literal source.
+Code blocks with language \`ablauf\` or \`wireframe\` are drawn as diagrams and UI sketches; their syntax, editing rules and write diagnostics are in [ablauf](uberblick://help/ablauf) and [wireframe](uberblick://help/wireframe). Import, export and MCP preserve their literal source.
 
 Prose supports \`**bold**\`, \`*italic*\`, \`~~strikethrough~~\`, inline code, \`[label](https://example.com)\` and \`[label](document-uuid)\` document links. Underscore emphasis (\`__bold__\` and \`_italic_\`) is also read; export uses asterisks. Source blocks keep literal text. Tables read inline Markdown inside cells and escape literal punctuation and pipes. Alignment markers are accepted but not stored. Table rows are projected to the widest row with virtual empty padding.
 
@@ -314,6 +313,31 @@ ${GUIDANCE_INSTRUCTIONS}
 [Lifecycle and content locks](uberblick://help/lifecycle) · [Workspaces and metadata](uberblick://help/workspaces) · [Structured data](uberblick://help/data) · [sync_status](uberblick://help/sync_status)`;
 
 /** One owner for each shared contract; per-tool pages link to these topics. */
+/** Nest a guide under its topic title: shift headings down one level outside fences. */
+function nestHeadings(text: string): string {
+  let fenced = false;
+  return text.split("\n").map((line) => {
+    if (line.startsWith("```")) fenced = !fenced;
+    return !fenced && /^#{1,5} /.test(line) ? `#${line}` : line;
+  }).join("\n");
+}
+
+/** A drawn format's packaged guide, wrapped with how MCP writes and checks it. */
+function formatGuideTopic(format: keyof typeof FORMAT_GUIDES, title: string, what: string): string {
+  const guide = FORMAT_GUIDES[format];
+  return `# ${title}
+
+${what} Write one with insert_block (\`type: "code"\`, \`language: "${format}"\`, \`text\` is the source without fences). Change it with edit_block, passing the whole current source as \`old_text\`. In Markdown it is a fence whose info string is \`${format}\`.
+
+Every insert_block, edit_block or create_doc that writes this block answers with \`diagnostics\` from the renderer the web editor uses, ${guide.name} ${guide.version}: line, severity and message. An error means nothing draws; a warning still draws but looks wrong. The write has happened either way, so fix each reported line with edit_block until the answer has no \`diagnostics\`.
+
+The rest of this topic is the authoring guide of ${guide.name} ${guide.version}.
+
+${nestHeadings(guide.text)}
+
+Source: [${guide.name} ${guide.version} guide](${guide.url})`;
+}
+
 export const conceptTopics: readonly HelpTopic[] = [
   {
     id: "orientation",
@@ -338,6 +362,18 @@ export const conceptTopics: readonly HelpTopic[] = [
     title: "Supported Markdown",
     description: "Supported block and inline syntax, tables, content writes and Markdown export behavior.",
     text: markdown,
+  },
+  {
+    id: "ablauf",
+    title: "Ablauf diagrams",
+    description: "Writing and editing ablauf flow and fan-out diagrams, and the diagnostics their writes return.",
+    text: formatGuideTopic("ablauf", "Ablauf diagrams", "An ablauf block is a flow or outcome fan-out diagram that the web editor draws from text."),
+  },
+  {
+    id: "wireframe",
+    title: "Wireframes",
+    description: "Writing and editing wireframe UI sketches, and the diagnostics their writes return.",
+    text: formatGuideTopic("wireframe", "Wireframes", "A wireframe block is a static UI sketch that the web editor draws from indented lines."),
   },
   {
     id: "data",

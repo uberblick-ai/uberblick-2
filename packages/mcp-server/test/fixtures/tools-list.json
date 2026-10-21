@@ -251,7 +251,7 @@
                 "maximum": 6
               },
               "language": {
-                "description": "Code language, e.g. \"ts\". Code blocks only.",
+                "description": "Code language, e.g. \"ts\". Code blocks only. The editor draws `ablauf` as a diagram and `wireframe` as a UI sketch; read get_help(\"ablauf\") or get_help(\"wireframe\") before writing one.",
                 "type": "string"
               },
               "list": {
@@ -968,6 +968,51 @@
             ]
           },
           "description": "Visible document blocks in stored order."
+        },
+        "diagnostics": {
+          "description": "Problems the web renderer reports for written ablauf or wireframe blocks. The write happened; fix each problem with edit_block. Absent when the drawing is clean. See get_help ablauf or wireframe.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "block": {
+                "type": "string",
+                "description": "The checked block's id."
+              },
+              "format": {
+                "type": "string",
+                "enum": [
+                  "ablauf",
+                  "wireframe"
+                ]
+              },
+              "line": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "1-based line in the block text."
+              },
+              "severity": {
+                "type": "string",
+                "enum": [
+                  "error",
+                  "warning"
+                ],
+                "description": "An error stops the drawing; a warning still draws."
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "block",
+              "format",
+              "line",
+              "severity",
+              "message"
+            ],
+            "additionalProperties": false
+          }
         },
         "sidebar": {
           "type": "object",
@@ -6472,6 +6517,51 @@
             }
           ]
         },
+        "diagnostics": {
+          "description": "Problems the web renderer reports for written ablauf or wireframe blocks. The write happened; fix each problem with edit_block. Absent when the drawing is clean. See get_help ablauf or wireframe.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "block": {
+                "type": "string",
+                "description": "The checked block's id."
+              },
+              "format": {
+                "type": "string",
+                "enum": [
+                  "ablauf",
+                  "wireframe"
+                ]
+              },
+              "line": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "1-based line in the block text."
+              },
+              "severity": {
+                "type": "string",
+                "enum": [
+                  "error",
+                  "warning"
+                ],
+                "description": "An error stops the drawing; a warning still draws."
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "block",
+              "format",
+              "line",
+              "severity",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
         "applied": {
           "type": "boolean",
           "const": true,
@@ -6636,7 +6726,7 @@
           "maximum": 6
         },
         "language": {
-          "description": "Code language, e.g. \"ts\". Code blocks only.",
+          "description": "Code language, e.g. \"ts\". Code blocks only. The editor draws `ablauf` as a diagram and `wireframe` as a UI sketch; read get_help(\"ablauf\") or get_help(\"wireframe\") before writing one.",
           "type": "string"
         },
         "list": {
@@ -6948,6 +7038,51 @@
               "type": "null"
             }
           ]
+        },
+        "diagnostics": {
+          "description": "Problems the web renderer reports for written ablauf or wireframe blocks. The write happened; fix each problem with edit_block. Absent when the drawing is clean. See get_help ablauf or wireframe.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "block": {
+                "type": "string",
+                "description": "The checked block's id."
+              },
+              "format": {
+                "type": "string",
+                "enum": [
+                  "ablauf",
+                  "wireframe"
+                ]
+              },
+              "line": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "1-based line in the block text."
+              },
+              "severity": {
+                "type": "string",
+                "enum": [
+                  "error",
+                  "warning"
+                ],
+                "description": "An error stops the drawing; a warning still draws."
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "block",
+              "format",
+              "line",
+              "severity",
+              "message"
+            ],
+            "additionalProperties": false
+          }
         },
         "applied": {
           "type": "boolean",

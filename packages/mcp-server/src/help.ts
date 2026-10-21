@@ -27,6 +27,47 @@ function jsonBlock(value: unknown): string {
   return `\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``;
 }
 
+/** The JSON Schema subset the registered Zod schemas render to. */
+interface FieldSchema {
+  type?: string | string[];
+  enum?: unknown[];
+  const?: unknown;
+  anyOf?: FieldSchema[];
+  oneOf?: FieldSchema[];
+  items?: FieldSchema;
+  description?: string;
+  properties?: Record<string, FieldSchema>;
+  required?: string[];
+}
+
+function typeName(schema: FieldSchema): string {
+  const union = schema.anyOf ?? schema.oneOf;
+  if (union !== undefined) return union.map(typeName).join(" | ");
+  if (schema.enum !== undefined) return schema.enum.map(String).join("|");
+  if (schema.const !== undefined) return JSON.stringify(schema.const);
+  if (Array.isArray(schema.type)) return schema.type.join(" | ");
+  if (schema.type === "array") {
+    const item = typeName(schema.items ?? {});
+    return `array of ${item.includes(" | ") ? `(${item})` : item}`;
+  }
+  return schema.type ?? "any";
+}
+
+/** Both schemas are in tools/list, so help lists only top-level fields to keep each topic small. */
+function argumentList(input: FieldSchema): string {
+  const required = new Set(input.required ?? []);
+  const fields = Object.entries(input.properties ?? {}).map(([name, field]) =>
+    `- \`${name}\` (${typeName(field)}, ${required.has(name) ? "required" : "optional"})` +
+    (field.description === undefined ? "" : `: ${field.description}`));
+  return fields.length === 0 ? "None." : fields.join("\n");
+}
+
+function outputSummary(output: FieldSchema): string {
+  const fields = Object.keys(output.properties ?? {}).map((name) => `\`${name}\``);
+  return "Output fields are declared in the tool's outputSchema in tools/list. " +
+    `Top-level fields: ${fields.length === 0 ? "none" : fields.join(", ")}.`;
+}
+
 export class HelpCatalog {
   private readonly topics = new Map<string, HelpTopic>(conceptTopics.map((topic) => [topic.id, topic]));
 
@@ -45,9 +86,9 @@ export class HelpCatalog {
       title: tool.title,
       description: `Purpose, arguments, example, output and constraints for ${name}.`,
       text: `# ${name}\n\n## Purpose\n\n${tool.title}\n\n## Description\n\n${tool.description}` +
-        `\n\n## Arguments\n\n${jsonBlock(tool.inputSchema)}` +
+        `\n\n## Arguments\n\n${argumentList(tool.inputSchema as FieldSchema)}` +
         `\n\n## Example\n\nCall \`${name}\` with these arguments; replace document and block identities with returned values.\n\n${jsonBlock(entry.example)}` +
-        `\n\n## Output\n\n${jsonBlock(tool.outputSchema)}` +
+        `\n\n## Output\n\n${outputSummary(tool.outputSchema as FieldSchema)}` +
         (entry.details === undefined ? "" : `\n\n## Constraints\n\n${entry.details}`) +
         `\n\n## Related\n\n${related}\n`,
     });
