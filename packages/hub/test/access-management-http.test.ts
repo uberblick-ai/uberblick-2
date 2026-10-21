@@ -1,5 +1,6 @@
 import { credentialPrivateKey, deviceFetch as fetch } from "./device-credentials.js";
-import { issueCredential, mintDeviceRequestProof as mintRequestProof, renewCredential, type TestCredential as IssuedCredential } from "./device-credentials.js";
+import { issueCredential, MANAGEMENT_OPERATION_NAMES, managementAction, mintDeviceRequestProof as mintRequestProof, renewCredential,
+  type TestCredential as IssuedCredential } from "./device-credentials.js";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +11,7 @@ import type { HubLogRecord } from "../src/log.js";
 import type { MembershipRole } from "../src/memberships.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
-import { DEVICE_CREDENTIAL_LIFETIME_MS, importCredentialKey, importRootSecret, mintToken, readRequestAction, type RequestAction } from "@uberblick/schema/token";
+import { DEVICE_CREDENTIAL_LIFETIME_MS, importCredentialKey, importRootSecret, mintToken, type RequestAction } from "@uberblick/schema/token";
 import { createClient, OTHER_WORKSPACE, removeTempDatabases, tempDatabasePath, TEST_SECRET, testRoom,
   type TestClient, token, waitForText, waitUntil, WORKSPACE } from "./helpers.js";
 
@@ -84,6 +85,18 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+/** The hub's private access tables, to show a request changed none of them. Spent proofs are not access. */
+function accessState(hub: Hub) {
+  const db = new DatabaseSync(hub.databasePath, { readOnly: true });
+  try {
+    return Object.fromEntries(["hub_principals", "hub_memberships", "hub_credentials", "hub_admins",
+      "hub_workspace_suspensions", "hub_workspace_promotions"]
+      .map(table => [table, db.prepare(`SELECT * FROM ${table}`).all()]));
+  } finally {
+    db.close();
+  }
+}
+
 function expireCredential(hub: Hub, credential: IssuedCredential): void {
   const db = new DatabaseSync(hub.databasePath);
   try {
@@ -124,9 +137,9 @@ describe("authenticated hub access management", () => {
       .toEqual({ code: 503, result: { status: "not-configured" } });
   });
 
-  it.each(Object.entries(MANAGEMENT_OPERATIONS).filter(([, declaration]) =>
-    declaration.target.some(field => field === "workspaceId")))
-  ("refuses cross-workspace %s identically while active and suspended without changing the target", async (operation, declaration) => {
+  it.each(MANAGEMENT_OPERATION_NAMES.filter(operation =>
+    MANAGEMENT_OPERATIONS[operation].target.some(field => field === "workspaceId")))
+  ("refuses cross-workspace %s identically while active and suspended without changing the target", async operation => {
     const { hub, github } = await rig();
     const actor = person(hub, "1201", "workspace-a-admin", [[WORKSPACE, "admin"]]);
     const owner = person(hub, "1202", "hub-admin");
@@ -134,11 +147,8 @@ describe("authenticated hub access management", () => {
     expect(await manage(hub, owner.issued, { operation: "promote-workspace", workspaceId: OTHER_WORKSPACE, attemptId: randomUUID() }))
       .toMatchObject({ code: 200, result: { status: "created" } });
     const target = person(hub, "1203", "workspace-b-member", [[OTHER_WORKSPACE, "member"]]);
-    const values = { workspaceId: OTHER_WORKSPACE, attemptId: randomUUID(), principalId: target.principal.id,
-      deviceId: target.issued.record.deviceId, githubUsername: "new-account", githubAccountId: "5678" };
-    const fields = { operation, ...Object.fromEntries(declaration.target.map(field => [field, values[field]])) };
-    const action = readRequestAction({ ...fields, role: "member" }) ?? readRequestAction(fields);
-    if (action === null || action.operation === "renew-credential") throw new Error(`Missing valid fixture for ${operation}`);
+    const action = managementAction(operation, { workspaceId: OTHER_WORKSPACE, attemptId: randomUUID(), principalId: target.principal.id,
+      deviceId: target.issued.record.deviceId, githubUsername: "new-account", githubAccountId: "5678" });
     const document = new Y.Doc();
     document.getText("content").insert(0, "workspace B document");
     const db = new DatabaseSync(hub.databasePath);
@@ -175,20 +185,11 @@ describe("authenticated hub access management", () => {
     hub.hubAdmins!.grant(owner.principal.id);
     const current = issueCredential(hub.credentials!, { principalId: owner.principal.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
     expireCredential(hub, owner.issued);
-    const actions: Action[] = [
-      { operation: "list-devices" }, { operation: "revoke-device", deviceId: current.record.deviceId },
-      { operation: "own-role", workspaceId: WORKSPACE }, { operation: "list-members", workspaceId: WORKSPACE },
-      { operation: "change-role", workspaceId: WORKSPACE, principalId: owner.principal.id, role: "member" },
-      { operation: "remove-member", workspaceId: WORKSPACE, principalId: owner.principal.id },
-      { operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "new-account" },
-      { operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "5678" },
-      { operation: "promote-workspace", workspaceId: OTHER_WORKSPACE, attemptId: randomUUID() },
-      { operation: "own-hub-role" }, { operation: "list-hub-admins" }, { operation: "list-hub-workspaces" },
-      { operation: "remove-hub-admin", principalId: owner.principal.id },
-      { operation: "suspend-workspace", workspaceId: WORKSPACE }, { operation: "restore-workspace", workspaceId: WORKSPACE },
-    ];
-    for (const action of actions) {
-      expect(await manage(hub, owner.issued, action)).toEqual({ code: 401, result: { status: "sign-in-required" } });
+    const targets = { workspaceId: WORKSPACE, attemptId: randomUUID(), principalId: owner.principal.id,
+      deviceId: current.record.deviceId, githubUsername: "new-account", githubAccountId: "5678" };
+    for (const operation of MANAGEMENT_OPERATION_NAMES) {
+      expect(await manage(hub, owner.issued, managementAction(operation, targets)), operation)
+        .toEqual({ code: 401, result: { status: "sign-in-required" } });
     }
     expect(await manage(hub, current, { operation: "list-devices" })).toMatchObject({ code: 200, result: {
       status: "ok", devices: [{ deviceId: current.record.deviceId, current: true }],
@@ -283,20 +284,21 @@ describe("authenticated hub access management", () => {
     expect(hub.memberships!.roleFor(WORKSPACE, member.principal.id)).toBe("member");
   });
 
-  it("keeps each read-only management proof reusable within its lifetime", async () => {
+  it("keeps each read-only management proof reusable within its lifetime and changes no access state", async () => {
     const { hub, github } = await rig({ githubFetch: async () => Response.json({ id: 5678, login: "new-account", type: "User" }) });
     const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
     hub.hubAdmins!.grant(admin.principal.id);
-    const actions: Action[] = [{ operation: "own-role", workspaceId: WORKSPACE },
-      { operation: "list-members", workspaceId: WORKSPACE }, { operation: "list-devices" },
-      { operation: "own-hub-role" }, { operation: "list-hub-admins" }, { operation: "list-hub-workspaces" },
-      { operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "new-account" }];
-    for (const action of actions) {
+    const targets = { workspaceId: WORKSPACE, attemptId: randomUUID(), principalId: admin.principal.id,
+      deviceId: admin.issued.record.deviceId, githubUsername: "new-account", githubAccountId: "5678" };
+    const before = accessState(hub);
+    for (const operation of MANAGEMENT_OPERATION_NAMES.filter(name => !MANAGEMENT_OPERATIONS[name].changesState)) {
+      const action = managementAction(operation, targets);
       const request = envelope(await proof(admin.issued, action), action);
       const result = await post(hub, request);
-      expect(result.code).toBe(200);
-      expect(await post(hub, request)).toEqual(result);
+      expect(result.code, operation).toBe(200);
+      expect(await post(hub, request), operation).toEqual(result);
     }
+    expect(accessState(hub)).toEqual(before);
     expect(github).toHaveBeenCalledTimes(2);
   });
 
@@ -325,16 +327,8 @@ describe("authenticated hub access management", () => {
     const member = person(hub, "5678", "member", [[WORKSPACE, "member"]]);
     const laterAdmin = person(hub, "9012", "later-admin");
     hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: laterAdmin.principal.id, role: "admin" });
-    const adminActions: Action[] = [
-      { operation: "list-members", workspaceId: WORKSPACE },
-      { operation: "change-role", workspaceId: WORKSPACE, principalId: admin.principal.id, role: "member" },
-      { operation: "remove-member", workspaceId: WORKSPACE, principalId: admin.principal.id },
-    ];
-    for (const actor of [member, laterAdmin]) {
-      for (const action of adminActions) {
-        expect(await manage(hub, actor.issued, action)).toEqual({ code: 403, result: { status: "forbidden" } });
-      }
-    }
+    const listMembers = { operation: "list-members", workspaceId: WORKSPACE } as const;
+    expect(await manage(hub, laterAdmin.issued, listMembers)).toEqual({ code: 403, result: { status: "forbidden" } });
     for (const action of [{ operation: "own-role", workspaceId: WORKSPACE },
       { operation: "own-role", workspaceId: OTHER_WORKSPACE }] as Action[]) {
       expect(await manage(hub, laterAdmin.issued, action)).toEqual({ code: 403, result: { status: "forbidden" } });
@@ -342,13 +336,35 @@ describe("authenticated hub access management", () => {
     expect(await manage(hub, member.issued, { operation: "list-members", workspaceId: OTHER_WORKSPACE }))
       .toEqual({ code: 403, result: { status: "forbidden" } });
     expect(hub.memberships!.roleFor(WORKSPACE, admin.principal.id)).toBe("admin");
-    const stale = envelope(await proof(admin.issued, adminActions[0]!), adminActions[0]!);
+    const stale = envelope(await proof(admin.issued, listMembers), listMembers);
     hub.memberships!.changeRole({ workspaceId: WORKSPACE, principalId: admin.principal.id,
       actorPrincipalId: laterAdmin.principal.id, role: "member" });
     expect(await post(hub, stale)).toEqual({ code: 403, result: { status: "forbidden" } });
     hub.memberships!.remove({ workspaceId: WORKSPACE, principalId: member.principal.id, actorPrincipalId: laterAdmin.principal.id });
     expect(await manage(hub, member.issued, { operation: "own-role", workspaceId: WORKSPACE }))
       .toEqual({ code: 403, result: { status: "forbidden" } });
+  });
+
+  it("refuses every admin operation to members, outsiders and the other scope's admins before any write", async () => {
+    const { hub, github } = await rig();
+    const workspaceAdmin = person(hub, "1201", "workspace-admin", [[WORKSPACE, "admin"]]);
+    const hubAdmin = person(hub, "1202", "hub-admin");
+    hub.hubAdmins!.grant(hubAdmin.principal.id);
+    const member = person(hub, "1203", "member", [[WORKSPACE, "member"]]);
+    const outsider = person(hub, "1204", "outsider");
+    const before = accessState(hub);
+    for (const operation of MANAGEMENT_OPERATION_NAMES.filter(name => MANAGEMENT_OPERATIONS[name].role === "admin")) {
+      const hubScope = MANAGEMENT_OPERATIONS[operation].scope === "hub";
+      const action = managementAction(operation, { workspaceId: WORKSPACE, attemptId: randomUUID(),
+        principalId: (hubScope ? hubAdmin : workspaceAdmin).principal.id, deviceId: member.issued.record.deviceId,
+        githubUsername: "new-account", githubAccountId: "5678" });
+      for (const actor of [member, outsider, hubScope ? workspaceAdmin : hubAdmin]) {
+        expect(await manage(hub, actor.issued, action), `${operation} by ${actor.principal.githubUsername}`)
+          .toEqual({ code: 403, result: { status: "forbidden" } });
+      }
+    }
+    expect(accessState(hub)).toEqual(before);
+    expect(github).not.toHaveBeenCalled();
   });
 
   it("lists only the caller's current devices, preserves sign-in time through renewal, and permits self-service with no workspace", async () => {
@@ -474,8 +490,10 @@ describe("authenticated hub access management", () => {
     expect((await post(hub, valid)).code).toBe(200);
   });
 
-  // One change per mechanism: credential state, membership and the clock.
-  it.each(["revoke", "demote", "expire", "credential expiry"] as const)("rechecks %s after asynchronous proof verification before acting", async change => {
+  // One authority and one credential change per await point. This point takes
+  // the proof's lifetime and the GitHub lookup below takes revocation, so both
+  // halves of the shared re-read lose a race; the registry tests own the rest.
+  it.each(["demote", "expire"] as const)("rechecks %s after asynchronous proof verification before acting", async change => {
     const { hub } = await rig();
     const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
     const backup = person(hub, "5678", "backup-admin", [[WORKSPACE, "admin"]]);
@@ -485,11 +503,9 @@ describe("authenticated hub access management", () => {
     vi.spyOn(hub.credentials!, "verifyRequest").mockImplementationOnce(async (requestProof, request) => {
       const verified = await verify(requestProof, request);
       expect(verified).not.toBeNull();
-      if (change === "revoke") hub.credentials!.revoke(admin.issued.record.id);
       if (change === "demote") hub.memberships!.changeRole({ workspaceId: WORKSPACE,
         principalId: admin.principal.id, actorPrincipalId: backup.principal.id, role: "member" });
       if (change === "expire") vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
-      if (change === "credential expiry") expireCredential(hub, admin.issued);
       return verified;
     });
     expect(await post(hub, envelope(presented, action))).toEqual(change === "demote"
@@ -946,42 +962,29 @@ describe("direct GitHub account grants", () => {
     expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(1);
   });
 
-  describe.each(["resolve-account", "grant-member"] as const)("%s lookup authority", operation => {
-    it.each(["demote", "remove", "revoke", "replace", "expire", "credential expiry"] as const)("rechecks %s after the provider await before any write", async change => {
-      const release = deferred<Response>();
-      const { hub, github } = await rig({ githubFetch: () => release.promise });
-      const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
-      const backup = person(hub, "5678", "backup-admin", [[WORKSPACE, "admin"]]);
-      const identify = vi.spyOn(hub.principals!, "identify");
-      const action: Action = operation === "resolve-account"
-        ? { operation, workspaceId: WORKSPACE, githubUsername: "new-account" }
-        : { operation, workspaceId: WORKSPACE, githubAccountId: "9012" };
-      const request = manage(hub, admin.issued, action);
-      try {
-        await waitUntil("account lookup started", () => github.mock.calls.length === 1);
-        if (change === "demote") hub.memberships!.changeRole({ workspaceId: WORKSPACE,
-          principalId: admin.principal.id, actorPrincipalId: backup.principal.id, role: "member" });
-        if (change === "remove") hub.memberships!.remove({ workspaceId: WORKSPACE,
-          principalId: admin.principal.id, actorPrincipalId: backup.principal.id });
-        if (change === "revoke") hub.credentials!.revoke(admin.issued.record.id);
-        if (change === "replace") {
-          const renewal = await mintRequestProof(await importCredentialKey(admin.issued.keyBytes), {
-            kid: admin.issued.record.id, operation: "renew-credential", lifetimeSeconds: 60,
-          });
-          expect((await renewCredential(hub.credentials!, renewal, hub.memberships!)).status).toBe("renewed");
-        }
-        if (change === "expire") vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
-        if (change === "credential expiry") expireCredential(hub, admin.issued);
-      } finally {
-        release.resolve(Response.json({ id: 9012, login: "new-account", type: "User" }));
-        await request;
-      }
-      expect(await request).toEqual(change === "demote" || change === "remove"
-        ? { code: 403, result: { status: "forbidden" } }
-        : { code: 401, result: { status: "sign-in-required" } });
-      expect(identify).not.toHaveBeenCalled();
-      expect(hub.memberships!.listMembers(WORKSPACE, backup.principal.id)).toHaveLength(change === "remove" ? 1 : 2);
-    });
+  // resolve-account and grant-member share this await and its re-read; the
+  // write-bearing one shows nothing is written.
+  it.each(["demote", "revoke"] as const)("rechecks %s after the provider await before any write", async change => {
+    const release = deferred<Response>();
+    const { hub, github } = await rig({ githubFetch: () => release.promise });
+    const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
+    const backup = person(hub, "5678", "backup-admin", [[WORKSPACE, "admin"]]);
+    const identify = vi.spyOn(hub.principals!, "identify");
+    const request = manage(hub, admin.issued, { operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "9012" });
+    try {
+      await waitUntil("account lookup started", () => github.mock.calls.length === 1);
+      if (change === "demote") hub.memberships!.changeRole({ workspaceId: WORKSPACE,
+        principalId: admin.principal.id, actorPrincipalId: backup.principal.id, role: "member" });
+      if (change === "revoke") hub.credentials!.revoke(admin.issued.record.id);
+    } finally {
+      release.resolve(Response.json({ id: 9012, login: "new-account", type: "User" }));
+      await request;
+    }
+    expect(await request).toEqual(change === "demote"
+      ? { code: 403, result: { status: "forbidden" } }
+      : { code: 401, result: { status: "sign-in-required" } });
+    expect(identify).not.toHaveBeenCalled();
+    expect(hub.memberships!.listMembers(WORKSPACE, backup.principal.id)).toHaveLength(2);
   });
 
   it("keeps every other management operation local and preserves its existing answer", async () => {
@@ -1008,21 +1011,12 @@ describe("direct GitHub account grants", () => {
 });
 
 describe("hub administration", () => {
-  it("requires current hub authority independently of workspace membership and credential workspace snapshots", async () => {
+  it("serves hub administration independently of workspace membership and credential workspace snapshots", async () => {
     const { hub } = await rig();
     const admin = person(hub, "1234", "hub-admin");
-    const workspaceAdmin = person(hub, "5678", "workspace-admin", [[WORKSPACE, "admin"]]);
-    const member = person(hub, "9012", "member", [[WORKSPACE, "member"]]);
-    const outsider = person(hub, "3456", "signed-in");
+    person(hub, "5678", "workspace-admin", [[WORKSPACE, "admin"]]);
+    person(hub, "9012", "member", [[WORKSPACE, "member"]]);
     hub.hubAdmins!.grant(admin.principal.id);
-    const actions: Action[] = [{ operation: "own-hub-role" }, { operation: "list-hub-admins" },
-      { operation: "list-hub-workspaces" }, { operation: "remove-hub-admin", principalId: admin.principal.id },
-      { operation: "suspend-workspace", workspaceId: WORKSPACE }, { operation: "restore-workspace", workspaceId: WORKSPACE }];
-    for (const actor of [workspaceAdmin, member, outsider]) {
-      for (const action of actions) {
-        expect(await manage(hub, actor.issued, action)).toEqual({ code: 403, result: { status: "forbidden" } });
-      }
-    }
     expect(await manage(hub, admin.issued, { operation: "own-hub-role" }))
       .toEqual({ code: 200, result: { status: "ok", role: "admin" } });
     expect(await manage(hub, admin.issued, { operation: "list-hub-admins" })).toEqual({ code: 200,

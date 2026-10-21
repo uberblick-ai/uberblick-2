@@ -8,8 +8,8 @@
  *
  * 1. the line names the peer, and behind the deployment's proxy that is the
  *    client's own address rather than the proxy's;
- * 2. the cause tells a fleet of pre-v2 clients apart from a wrong secret, an
- *    expired token or a token minted for another workspace;
+ * 2. the cause tells a wrong secret apart from an expired token or a token
+ *    minted for another workspace;
  * 3. whatever went wrong, the line never carries the token, its signature or
  *    the hub's secret.
  */
@@ -20,7 +20,6 @@ import * as Y from "yjs";
 import type { HubLogRecord } from "../src/log.js";
 import type { Hub } from "../src/server.js";
 import { PEER_ADDRESS_HEADER, resolvePeer } from "../src/server.js";
-import { MAX_TOKEN_LIFETIME_SECONDS } from "@uberblick/schema/token";
 import {
   createClient,
   forgeToken,
@@ -119,13 +118,10 @@ interface Case {
   token: () => Promise<string>;
 }
 
+// One row per branch the hub logs from: nothing readable, an identity read from
+// a failed inspection, a failed lifetime clamp and a workspace mismatch. Which
+// cause each malformed, forged or mistimed token gets is schema's to test.
 const cases: Case[] = [
-  {
-    name: "a string that is not a token at all",
-    cause: "unparseable",
-    identity: "unparseable",
-    token: async () => "not-a-token",
-  },
   {
     // The secret signs tokens; it is not one. An opaque-string auth scheme
     // would have accepted it.
@@ -135,20 +131,6 @@ const cases: Case[] = [
     token: async () => TEST_SECRET,
   },
   {
-    // Refused on length before anything decodes it: a real token is a few
-    // hundred bytes, and an unauthenticated caller does not get to choose how
-    // much work the hub does.
-    //
-    // Past MAX_TOKEN_LENGTH and still inside MAX_AUTH_MESSAGE_LENGTH, so it is
-    // the *token* ceiling this case reaches. The envelope's own bound is the
-    // outer one and refuses a longer string earlier, under a different cause —
-    // see `protocol.test.ts`, which pins that one.
-    name: "a token far longer than any token",
-    cause: "unparseable",
-    identity: "unparseable",
-    token: async () => `${"A".repeat(2074)}.${"B".repeat(2075)}`,
-  },
-  {
     name: "a token signed with somebody else's secret",
     cause: "bad-signature",
     identity: { typ: "room", sub: "wrong-secret-client" },
@@ -156,50 +138,6 @@ const cases: Case[] = [
       token("read-write", {
         secret: "not-this-hub's-secret",
         sub: "wrong-secret-client",
-      }),
-  },
-  {
-    // A parseable legacy payload has sub but no typ; diagnostics identify
-    // malformed claims without trusting them.
-    name: "a pre-v2 token from a client that was never restarted",
-    cause: "unsupported-claims",
-    identity: { typ: null, sub: "pre-v2-client" },
-    token: () =>
-      forgeToken({
-        sub: "pre-v2-client",
-        workspace: WORKSPACE,
-        scope: "read-write",
-        iat: NOW,
-      }),
-  },
-  {
-    name: "a token that claimed a decade",
-    cause: "lifetime-too-long",
-    identity: { typ: "room", sub: "a-compromised-machine" },
-    token: () =>
-      forgeToken({
-        typ: "room",
-        sub: "a-compromised-machine",
-        workspace: WORKSPACE,
-        scope: "read-write",
-        kid: null,
-        iat: NOW,
-        exp: NOW + 10 * 365 * 24 * 60 * 60,
-      }),
-  },
-  {
-    name: "a token from a clock that runs ahead",
-    cause: "not-yet-issued",
-    identity: { typ: "room", sub: "tomorrow" },
-    token: () =>
-      forgeToken({
-        typ: "room",
-        sub: "tomorrow",
-        workspace: WORKSPACE,
-        scope: "read-write",
-        kid: null,
-        iat: NOW + 3_600,
-        exp: NOW + 3_600 + MAX_TOKEN_LIFETIME_SECONDS,
       }),
   },
   {
@@ -245,9 +183,11 @@ describe("a rejected connection", () => {
     expectNoSecrets(record, presented);
   });
 
-  it("names token-in-query without reading any token", async () => {
+  it("refuses and names token-in-query without reading any token", async () => {
     // Refused on the URL, before a token has been read — so the parameter is
-    // the whole finding, and there is no identity to report.
+    // the whole finding, and there is no identity to report. The auth message
+    // carries a valid token too: query strings leak into access logs and proxy
+    // traces, so their presence alone is fatal.
     const presented = await token("read-write");
     const provider = new HocuspocusProvider({
       url: `ws://127.0.0.1:${hub.port}/?token=${presented}`,
@@ -262,7 +202,7 @@ describe("a rejected connection", () => {
     });
 
     try {
-      await denied;
+      expect(await denied).toBe("token-in-query");
       const record = records.find(
         (entry) => entry.event === "hub.auth.rejected",
       );

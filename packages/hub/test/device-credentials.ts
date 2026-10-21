@@ -1,5 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
-import { mintRequestProof as mintProof, type RequestProofRequest } from "@uberblick/schema/token";
+import { mintRequestProof as mintProof, readRequestAction, type RequestAction, type RequestProofRequest } from "@uberblick/schema/token";
+import { MANAGEMENT_OPERATIONS } from "../src/access-management.js";
 import type { CredentialRegistry, CredentialRenewal, IssuedCredential, IssueCredentialRequest } from "../src/credentials.js";
 import type { MembershipRegistry } from "../src/memberships.js";
 import type { GithubSignIn } from "../src/github-sign-in.js";
@@ -59,6 +60,22 @@ export function replacementCredential(result: CredentialRenewal, proof?: string)
   if (keyBytes === undefined) throw new Error("fixture device did not retain its private key");
   credentialKeys.set(result.credential.record.id, keyBytes);
   return { record: result.credential.record, keyBytes };
+}
+
+export type ManagementOperation = keyof typeof MANAGEMENT_OPERATIONS;
+type ManagementAction = Exclude<RequestAction, { operation: "renew-credential" }>;
+type TargetField = (typeof MANAGEMENT_OPERATIONS)[ManagementOperation]["target"][number];
+
+/** Every management operation, so a new policy row gets each table-driven test. */
+export const MANAGEMENT_OPERATION_NAMES = Object.keys(MANAGEMENT_OPERATIONS) as ManagementOperation[];
+
+/** A valid request carrying the targets its policy row declares; change-role asks for member. */
+export function managementAction(operation: ManagementOperation, targets: Record<TargetField, string>): ManagementAction {
+  const fields: Record<string, unknown> = Object.fromEntries(MANAGEMENT_OPERATIONS[operation].target
+    .map((field: TargetField) => [field, targets[field]]));
+  const action = readRequestAction({ operation, ...fields, ...(operation === "change-role" ? { role: "member" } : {}) });
+  if (action === null || action.operation === "renew-credential") throw new Error(`No valid fixture for ${operation}`);
+  return action;
 }
 
 export function credentialPrivateKey(record: { id: string }): Uint8Array {
