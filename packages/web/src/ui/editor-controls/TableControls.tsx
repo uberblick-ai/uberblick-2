@@ -82,10 +82,13 @@ function rowGap(geometry: Geometry, base: DOMRect, point: { x: number; y: number
 
 /** Map the live pointer to a column gap, from before the first column to after the last. */
 function columnGap(geometry: Geometry, base: DOMRect, point: { x: number; y: number }): number | null {
-  const x = point.x - base.left - geometry.left + geometry.scrollLeft;
+  // A release beside the visible table cancels, like one above or below it.
+  const visible = point.x - base.left - geometry.left;
+  const x = visible + geometry.scrollLeft;
   const y = point.y - base.top - geometry.top;
   const last = geometry.rows.at(-1);
-  if (last === undefined || geometry.columns.length < 2 || y < -24 || y > last.bottom + 22) return null;
+  if (last === undefined || geometry.columns.length < 2 || visible < 0 || visible > geometry.width
+    || y < -24 || y > last.bottom + 22) return null;
   for (let index = 0; index < geometry.columns.length - 2; index += 1) {
     const left = geometry.columns[index];
     const right = geometry.columns[index + 1];
@@ -105,7 +108,6 @@ function resolveDrag(editor: Editor, data: TableDragData): boolean {
   return data.kind === "row" ? resolveTableRow(editor, data.target) !== null : resolveTableColumn(editor, data.target) !== null;
 }
 
-/** Each eligible table reveals independently, including a hovered second table. */
 type TableMenuIcon = "row-before" | "row-after" | "row-up" | "row-down" | "row-delete"
   | "column-before" | "column-after" | "column-left" | "column-right" | "column-delete";
 
@@ -133,6 +135,7 @@ function TableMenuGlyph({ icon }: { icon: TableMenuIcon }): ReactElement {
   );
 }
 
+/** Each eligible table reveals independently, including a hovered second table. */
 export function TableControls({ editor, host }: {
   editor: Editor;
   host: RefObject<HTMLElement | null>;

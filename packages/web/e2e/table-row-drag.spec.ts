@@ -286,6 +286,18 @@ test.fixme("Move entries keep the caret in the moved row and typing in separate 
   } finally { fixture.close(); }
 });
 
+async function pickUpColumn(page: Page, table: Locator, column: number): Promise<void> {
+  await table.locator("th").nth(column).hover();
+  const pill = page.getByRole("button", { name: `Column ${column + 1} actions`, exact: true });
+  await pill.hover();
+  const bounds = await box(pill);
+  const x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y + 8);
+  await expect(page.locator(".ub-table-column-drop")).toHaveCount(1);
+}
+
 test("a column pill drags its column to another gap, keeps the caret there and undoes", { tag: "@webkit" }, async ({ page }, info) => {
   test.skip(info.project.use.hasTouch === true, "Mouse pickup requires a pointer device");
   const source = "| A | B | C |\n| --- | --- | --- |\n| a1 | b1 | c1 |\n| a2 | b2 | c2 |";
@@ -293,17 +305,7 @@ test("a column pill drags its column to another gap, keeps the caret there and u
   try {
     const table = await openTable(page, fixture.uuid, 3);
     const columnIndicator = page.locator(".ub-table-column-drop");
-    const pickUp = async (column: number): Promise<void> => {
-      await table.locator("th").nth(column).hover();
-      const pill = page.getByRole("button", { name: `Column ${column + 1} actions`, exact: true });
-      await pill.hover();
-      const bounds = await box(pill);
-      const x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height / 2;
-      await page.mouse.move(x, y);
-      await page.mouse.down();
-      await page.mouse.move(x, y + 8);
-      await expect(columnIndicator).toHaveCount(1);
-    };
+    const pickUp = (column: number): Promise<void> => pickUpColumn(page, table, column);
     const overColumn = async (column: number, fraction: number): Promise<void> => {
       const cell = await box(table.locator("th").nth(column));
       await page.mouse.move(cell.x + cell.width * fraction, cell.y + cell.height * 2, { steps: 8 });
@@ -339,6 +341,39 @@ test("a column pill drags its column to another gap, keeps the caret there and u
     await expect(columnIndicator).toHaveCount(0);
     await page.mouse.up();
     await expect(table.locator("th")).toHaveText(["A", "B", "C"]);
+    await proveBrowserArrival(page, { path: "upstream", readTags: () => getMeta(fixture.doc).tags });
+    expect(getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text).toBe(source);
+  } finally { fixture.close(); }
+});
+
+test("releasing a column beside a scrolled wide table cancels without a write", { tag: "@webkit" }, async ({ page }, info) => {
+  test.skip(info.project.use.hasTouch === true, "Mouse pickup requires a pointer device");
+  const names = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Last"];
+  const source = `| ${names.join(" | ")} |\n|${" --- |".repeat(names.length)}\n| ${names.map((name) => name.toLowerCase()).join(" | ")} |`;
+  const fixture = await publishTable(source);
+  try {
+    const table = await openTable(page, fixture.uuid, 2);
+    const wrapper = table.locator("..");
+    const columnIndicator = page.locator(".ub-table-column-drop");
+    await expect.poll(() => wrapper.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+    const releaseBeside = async (side: "left" | "right"): Promise<void> => {
+      const frame = await box(wrapper);
+      const x = side === "left" ? frame.x - 60 : frame.x + frame.width + 60;
+      await page.mouse.move(x, frame.y + frame.height / 2, { steps: 8 });
+      await expect(columnIndicator).toHaveCount(0);
+      await page.mouse.up();
+      await expect(table.locator("th")).toHaveText(names);
+    };
+
+    await pickUpColumn(page, table, 0);
+    await releaseBeside("right");
+    await pickUpColumn(page, table, 1);
+    await releaseBeside("left");
+    await wrapper.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+    await pickUpColumn(page, table, names.length - 1);
+    await releaseBeside("left");
+    await pickUpColumn(page, table, names.length - 2);
+    await releaseBeside("right");
     await proveBrowserArrival(page, { path: "upstream", readTags: () => getMeta(fixture.doc).tags });
     expect(getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text).toBe(source);
   } finally { fixture.close(); }
