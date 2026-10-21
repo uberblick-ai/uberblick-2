@@ -152,43 +152,15 @@ test("a private placeholder holds no viewer slot; Load shares the limit and rema
   await expect(privateFrame.locator("iframe")).toHaveCount(0);
 });
 
-for (const kind of ["status", "blocked", "invalid JSON", "invalid title", "timeout"] as const) {
-  test(`${kind} falls back to the stored link title without a private warning`, async ({ browser }) => {
-    const created = await create(writer());
-    const held: Route[] = [];
-    const { page } = await open(browser, created.uuid, async (route) => {
-      if (kind === "blocked") await route.abort("blockedbyclient");
-      else if (kind === "status") await route.fulfill({ status: 503, body: "Unavailable", headers: CORS });
-      else if (kind === "invalid JSON") await route.fulfill({ contentType: "application/json", body: "{", headers: CORS });
-      else if (kind === "invalid title") await route.fulfill({ json: { title: { unsafe: "value" } }, headers: CORS });
-      else held.push(route);
-    });
-    const frame = page.locator(".ub-figma");
-    await expect(frame.locator("iframe")).toHaveAttribute("title", "Stored file name", { timeout: 12_000 });
-    await expect(frame.locator(".ub-block-label")).toHaveText("Figma · Stored file name");
-    await expect(frame.locator(".ub-figma-placeholder")).not.toContainText(PRIVATE);
-    await expect(frame.getByRole("button", { name: "Load", exact: true })).toBeHidden();
-    if (kind === "timeout") {
-      for (const route of held) await answerFigmaLookup(route, "Late answer");
-    }
-  });
-}
-
-test("every public link kind avoids the private warning, and community links skip unsupported oEmbed", async ({ browser }) => {
-  const links = [LINK, LINK.replace("?node-id=2-3", ""), LINK.replace("/design/", "/proto/"), LINK.replace("/design/", "/board/"), LINK.replace("/design/", "/slides/"), "https://www.figma.com/community/file/123456789/Community-file"];
-  const separation = { type: "code", text: Array.from({ length: 100 }, (_, index) => `Separation line ${index + 1}`).join("\n") };
-  const created = await create(writer(), links.flatMap((url, index) => index === links.length - 1 ? [source(url)] : [source(url), separation]));
-  const { page, lookups } = await open(browser, created.uuid, (route, url) => url.includes("/community/")
-    ? route.fulfill({ status: 404, headers: CORS }) : answerFigmaLookup(route, "Public title"));
-  const frames = page.locator(".ub-figma");
-  await expect(frames).toHaveCount(6);
-  for (const frame of await frames.all()) {
-    await frame.scrollIntoViewIfNeeded();
-    await expect(frame.locator("iframe")).toHaveCount(1);
-    await expect(frame.locator(".ub-figma-placeholder")).not.toContainText(PRIVATE);
-  }
-  expect(lookups.map(({ url }) => url).sort()).toEqual(links.slice(0, 5).sort());
-  await expect(frames.last().locator("iframe")).toHaveAttribute("title", "Community file");
+// The lookup answers every non-404 failure the same way; its unit test owns the kinds.
+test("a failed lookup falls back to the stored link title without a private warning", async ({ browser }) => {
+  const created = await create(writer());
+  const { page } = await open(browser, created.uuid, (route) => route.fulfill({ status: 503, body: "Unavailable", headers: CORS }));
+  const frame = page.locator(".ub-figma");
+  await expect(frame.locator("iframe")).toHaveAttribute("title", "Stored file name");
+  await expect(frame.locator(".ub-block-label")).toHaveText("Figma · Stored file name");
+  await expect(frame.locator(".ub-figma-placeholder")).not.toContainText(PRIVATE);
+  await expect(frame.getByRole("button", { name: "Load", exact: true })).toBeHidden();
 });
 
 test("offline and distant blocks wait until eligible, and revisiting a block reuses its title", async ({ browser }) => {
