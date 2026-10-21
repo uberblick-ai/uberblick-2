@@ -108,7 +108,8 @@ it.each(["admin", "member"] as const)("fills fetched hub settings only for a con
   await writeHubLogin(endpoint, login, box.env);
   writeHubAdmission(endpoint, true, box.env);
   gitOrigin(box, "https://github.com/acme/notes.git");
-  const result = await runInProcess(["workspace", "use", `${endpoint}/notes-${WORKSPACE}`, "--json"], box);
+  const result = await runInProcess(["workspace", "use", `${endpoint}/notes-${WORKSPACE}`, "--json"], box,
+    { UB_TEST_MAX_WAIT_MS: "5000" });
   expect(result.status, result.output).toBe(0);
   expect(await repository(box)).toBe(role === "admin" ? "acme/notes" : null);
 });

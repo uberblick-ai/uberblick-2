@@ -487,7 +487,8 @@ describe("stored device renewal and hub failures", () => {
     expect(granted.status, granted.output).toBe(0);
     expect(binding(remote.box)).toBe(beforeAdmin);
     expect(binding(other)).toBe(beforeOther);
-    const joined = await runInProcess(["workspace", "use", `${joinOrigin}/${WORKSPACE}`], other);
+    const joined = await runInProcess(["workspace", "use", `${joinOrigin}/${WORKSPACE}`], other,
+      { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(joined.status, joined.output).toBe(0);
     expect(JSON.parse(binding(other)).workspaceId).toBe(WORKSPACE);
     const renewed = savedLogin(other, joinOrigin);

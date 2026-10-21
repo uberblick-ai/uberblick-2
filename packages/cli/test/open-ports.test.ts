@@ -204,6 +204,7 @@ describe("ub open: hub, ports and serving role", () => {
     expect(sameStore.output).not.toContain(`port ${port} is`);
 
     const other = configured();
+    pointAt(other.box, `ws://127.0.0.1:${await freePort()}`);
     const samePort = await openFails(other.box, args, other.env);
     expect(samePort.status).toBe(1);
     expect(samePort.output).toContain(`port ${port} is already serving an uberblick web app`);
@@ -230,6 +231,7 @@ describe("ub open: hub, ports and serving role", () => {
       existsSync(browser.opened) && readFileSync(browser.opened, "utf8").endsWith("\n"));
     expect(readFileSync(browser.opened, "utf8").trim()).toBe(app.printed);
     const other = configured();
+    pointAt(other.box, `ws://127.0.0.1:${await freePort()}`);
     const collision = await openFails(other.box, [], other.env);
     expect(collision.status).toBe(1);
     expect(collision.output).toContain("port 13379 is already serving an uberblick web app");

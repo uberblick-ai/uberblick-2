@@ -137,7 +137,9 @@ describe("workspace creation and promotion", () => {
     const { hub, endpoint } = await hubFor(box);
     const before = bindingBytes(box);
     const result = await new Promise<{ status: number | null; output: string }>((resolve, reject) => {
-      const child = spawn(process.execPath, [UB_BIN, "workspace", "promote", endpoint], { cwd: box.cwd, env: box.env, timeout: 25_000 });
+      const child = spawn(process.execPath, [UB_BIN, "workspace", "promote", endpoint], {
+        cwd: box.cwd, env: { ...box.env, UB_TEST_MAX_WAIT_MS: "5000" }, timeout: 60_000,
+      });
       let output = "";
       let injected = false;
       child.stdout.on("data", data => { output += String(data); });
@@ -154,6 +156,7 @@ describe("workspace creation and promotion", () => {
     expect(result.status, result.output).toBe(1);
     expect(accessRows(hub).receipts).toHaveLength(1);
     expect(bindingBytes(box)).toBe(before);
+    expect(result.output).toContain(join(box.configHome, "uberblick", "config.json"));
     expect(result.output).toContain("Project binding unchanged");
     expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBeNull();
   });
@@ -206,7 +209,7 @@ describe("workspace creation and promotion", () => {
     // An earlier no-access check must not suppress renewal after the grant.
     expect((await ensureDeviceLogin(endpoint, selected(box).workspaceId, { env: box.env })).status).toBe("no-access");
     const result = await runInProcess(["workspace", "promote", endpoint], box,
-      { UB_WORKSPACE_ID: selected(box).workspaceId, UB_HUB_URL: "local" });
+      { UB_WORKSPACE_ID: selected(box).workspaceId, UB_HUB_URL: "local", UB_TEST_MAX_WAIT_MS: "5000" });
     expect(result.status, result.output).toBe(0);
     expect(result.stderr).toContain("environment binding still takes precedence");
     expect(result.stderr).not.toContain("ub mcp install");
@@ -233,7 +236,8 @@ describe("workspace creation and promotion", () => {
     const freshCredential = issueCredential(hub.credentials!, { principalId: login.identity.id, deviceId: randomUUID(), workspaces: [selected(box).workspaceId] });
     await writeHubLogin(`http://127.0.0.1:${hub.port}`, { identity: login.identity,
       credential: { record: freshCredential.record, key: Buffer.from(freshCredential.keyBytes).toString("base64url") } }, other.env);
-    const joined = await runInProcess(["workspace", "use", `${endpoint}/${selected(box).workspaceId}`], other);
+    const joined = await runInProcess(["workspace", "use", `${endpoint}/${selected(box).workspaceId}`], other,
+      { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(joined.status, joined.output).toBe(0);
     expect(selected(other).workspaceId).toBe(selected(box).workspaceId);
     const hydrated = await syncWorkspace(offline(other));
@@ -301,7 +305,7 @@ describe("workspace creation and promotion", () => {
       setWorkspaceMainRepository(seeded.replicas.settings().doc, "acme/shared-project");
     } finally { await seeded.close(); }
     const { hub, endpoint } = await hubFor(box);
-    const promotedSource = await runInProcess(["workspace", "promote", endpoint], box);
+    const promotedSource = await runInProcess(["workspace", "promote", endpoint], box, { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(promotedSource.status, promotedSource.output).toBe(0);
     const colleague = hub.principals!.identify("1203", "source-colleague");
     hub.memberships!.grant({ workspaceId: sourceId, principalId: colleague.id, role: "member" });
@@ -336,7 +340,7 @@ describe("workspace creation and promotion", () => {
         expect(() => fork.replicas.replica(deletedId)).toThrow("permanently deleted");
       } finally { await fork.close(); }
       await writeHubLogin(`http://127.0.0.1:${hub.port}`, login, box.env);
-      const promotedFork = await runInProcess(["workspace", "promote", endpoint], box);
+      const promotedFork = await runInProcess(["workspace", "promote", endpoint], box, { UB_TEST_MAX_WAIT_MS: "5000" });
       expect(promotedFork.status, promotedFork.output).toBe(0);
       expect(selected(box)).toEqual({ workspaceId: forkId, hubUrl: endpoint });
       const remoteFork = await inspectRemote(resolveMcpConfig({ ...box.env, WORKSPACE_ID: forkId, HUB_URL: endpoint, HUB_ADMISSION: "device" }), { documents: true, workspace: true });
@@ -401,7 +405,9 @@ describe("workspace creation and promotion", () => {
     const { hub, endpoint, login } = await hubFor(box);
     const binding = bindingBytes(box);
     const interrupted = await new Promise<{ status: number | null; output: string }>((resolve, reject) => {
-      const child = spawn(process.execPath, [UB_BIN, "workspace", "promote", endpoint], { cwd: box.cwd, env: box.env, timeout: 25_000 });
+      const child = spawn(process.execPath, [UB_BIN, "workspace", "promote", endpoint], {
+        cwd: box.cwd, env: { ...box.env, UB_TEST_MAX_WAIT_MS: "5000" }, timeout: 60_000,
+      });
       let output = "";
       let sent = false;
       child.stdout.on("data", data => { output += String(data); });
@@ -433,7 +439,7 @@ describe("workspace creation and promotion", () => {
     expect(bindingBytes(box)).toBe(binding);
     expect(readFileSync(join(box.configHome, "uberblick", attemptPath))).toEqual(attempt);
     hub.hubAdmins!.setWorkspaceStatus(other.id, selected(box).workspaceId, "active");
-    const retried = await runInProcess(["workspace", "promote", endpoint], box);
+    const retried = await runInProcess(["workspace", "promote", endpoint], box, { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(retried.status, retried.output).toBe(0);
     expect(accessRows(hub)).toEqual(before);
     expect(readFileSync(join(box.configHome, "uberblick", attemptPath))).toEqual(attempt);
@@ -562,7 +568,7 @@ it("silently renews a refused stored credential and retries promotion without Gi
     }
     return handler(payload);
   });
-  const result = await runInProcess(["workspace", "promote", endpoint], box);
+  const result = await runInProcess(["workspace", "promote", endpoint], box, { UB_TEST_MAX_WAIT_MS: "5000" });
   expect(result.status, result.output).toBe(0);
   expect(reservations).toBe(2);
   expect(renewals).toBe(2); // Retry the refused key, then admit the newly granted workspace.
@@ -618,7 +624,8 @@ it("resumes a lost grant reply using another URL spelling of the same authentica
   expect(bindingBytes(box)).toBe(before);
   const reserved = accessRows(hub);
   expect(reserved.receipts).toHaveLength(1);
-  const retry = await runInProcess(["workspace", "promote", endpoint.replace("ws:", "http:")], box);
+  const retry = await runInProcess(["workspace", "promote", endpoint.replace("ws:", "http:")], box,
+    { UB_TEST_MAX_WAIT_MS: "5000" });
   expect(retry.status, retry.output).toBe(0);
   expect(accessRows(hub)).toEqual(reserved);
 });
