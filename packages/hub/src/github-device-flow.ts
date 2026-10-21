@@ -1,4 +1,5 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import { type HubLogger, stderrLogger } from "./log.js";
 import { RequestBudget } from "./request-budget.js";
 
@@ -72,7 +73,7 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
 
   constructor(
     private readonly config: GithubSignInConfig,
-    private readonly complete: (identity: { accountId: string; username: string }, deviceName?: string, context?: Context) => Result,
+    private readonly complete: (identity: { accountId: string; username: string; name?: string }, deviceName?: string, context?: Context) => Result,
     private readonly log: HubLogger = stderrLogger,
     private readonly event = "hub.github.sign-in.failed",
   ) {
@@ -198,8 +199,8 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
       }
       if (typeof result.access_token !== "string" || result.access_token.length < 1 ||
           result.token_type !== "bearer" || result.scope !== "") throw new Error();
-      // Only /user's numeric durable ID and current login are read. Neither
-      // access_token nor refresh_token is copied into any retained state.
+      // Only /user's public identity is read. Neither access_token nor
+      // refresh_token is copied into any retained state.
       step = "identity";
       const identity = await this.github("https://api.github.com/user", {
         headers: { Authorization: `Bearer ${result.access_token}` },
@@ -207,8 +208,13 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
       if (!this.active(request)) return { status: request.status as TerminalStatus };
       if (typeof identity.id !== "number" || !Number.isSafeInteger(identity.id) || identity.id < 1 ||
           typeof identity.login !== "string") throw new Error();
+      const profileName = sanitizeDeviceName(identity.name);
+      const name = profileName === undefined || [request.secret, request.deviceCode, result.access_token, result.refresh_token]
+        .some((secret) => typeof secret === "string" && secret !== "" && profileName.includes(secret))
+        ? undefined : profileName;
       step = "issuance";
-      const completed = this.complete({ accountId: String(identity.id), username: identity.login }, request.deviceName, request.context);
+      const completed = this.complete({ accountId: String(identity.id), username: identity.login,
+        ...(name === undefined ? {} : { name }) }, request.deviceName, request.context);
       // Completion is synchronous: cancellation/expiry cannot interleave with
       // the commit, and another collector cannot complete a second time.
       this.finish(request, "collected");

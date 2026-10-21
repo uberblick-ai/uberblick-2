@@ -22,6 +22,7 @@ function login(handle = "account-person"): StoredHubLogin {
 async function rig() {
   const { box } = configured();
   const stored = login();
+  stored.identity.name = "Synthetic Account Person";
   await writeHubLogin(ORIGIN, stored, box.env);
   const binding = { workspaceId: WORKSPACE, hubUrl: `${ORIGIN}/proxy/ws`, env: box.env };
   const read = (reason: () => ServingSyncStatus["notSharedReason"] = () => null) => requestAccount(binding, reason, new AbortController().signal);
@@ -61,7 +62,7 @@ describe("ub open: account projection", () => {
     expect(await requestAccount(binding, () => null, new AbortController().signal)).toEqual({ state: "unavailable" });
     expect(fetch).not.toHaveBeenCalled();
     binding.env.UB_INSECURE_HUBS = "account-hub.example:1234";
-    expect(await requestAccount(binding, () => null, new AbortController().signal)).toEqual({ state: "signed-in", handle: "account-person" });
+    expect(await requestAccount(binding, () => null, new AbortController().signal)).toEqual({ state: "signed-in", handle: "account-person", githubAccountId: "1234" });
     expect(fetch).toHaveBeenCalledOnce();
   });
   it("reads only the bound hub's stored public login without membership or a hub request", async () => {
@@ -92,12 +93,13 @@ describe("ub open: account projection", () => {
     expect(requestDeviceLogin(binding)).toEqual({ state: "unavailable" });
   });
 
-  it("projects only the handle and state after a live bound-workspace check", async () => {
+  it("projects only public account fields after a live bound-workspace check", async () => {
     const { stored, read } = await rig();
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ status: "ok", role: "admin",
+      name: "Untrusted upstream name", githubAccountId: "9999",
       credential: stored.credential, token: "private-upstream-token", signingSecret: "private-signing-secret" }));
     const answer = await read();
-    expect(answer).toEqual({ state: "signed-in", handle: "account-person" });
+    expect(answer).toEqual({ state: "signed-in", handle: "account-person", name: "Synthetic Account Person", githubAccountId: "1234" });
     expect(JSON.stringify(answer)).not.toContain(stored.credential.key);
     expect(JSON.stringify(answer)).not.toContain(stored.identity.id);
     expect(JSON.stringify(answer)).not.toContain(stored.credential.record.deviceId);
@@ -105,6 +107,18 @@ describe("ub open: account projection", () => {
     expect(fetch.mock.calls[0]?.[0]).toBe(`${ORIGIN}/auth/manage`);
     const request = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body));
     expect(request).toMatchObject({ operation: "own-role", workspaceId: WORKSPACE });
+  });
+
+  it("omits absent or unsafe stored profile names while still verifying the account", async () => {
+    const { box, stored, read } = await rig();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({ status: "ok", role: "member" }));
+    for (const name of [undefined, null, "", " \n ", "Synthetic\u200bPerson", "x".repeat(254), stored.credential.key]) {
+      const supplied = { ...stored, identity: { ...stored.identity, name } };
+      writeFileSync(join(configDir(box), "credentials.json"), JSON.stringify({ hubLogins: { [ORIGIN]: supplied } }));
+      const answer = await read();
+      expect(answer).toEqual({ state: "signed-in", handle: "account-person", githubAccountId: "1234" });
+      expect(Object.hasOwn(answer, "name")).toBe(false);
+    }
   });
 
   it("returns no handle for local, missing, unreadable or refused stores without contacting a hub", async () => {

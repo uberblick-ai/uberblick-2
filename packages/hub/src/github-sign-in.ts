@@ -15,7 +15,7 @@ import { isCredentialPublicKey } from "@uberblick/schema/token";
 
 export type { GithubSignInConfig } from "./github-device-flow.js";
 interface SignInResult {
-  identity: PrincipalRecord;
+  identity: PrincipalRecord & { name?: string };
   credential: { record: CredentialRecord; workspaceNames?: Record<string, string> };
   claimedWorkspaceId?: string;
 }
@@ -32,7 +32,7 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult | BrowserSignInR
     credentials: CredentialRegistry, memberships: MembershipRegistry, log: HubLogger = stderrLogger,
     claims?: HubClaimState, private readonly workspaceNames = new WorkspaceNameReader(database),
     private readonly sessions = new BrowserSessions(database, config.now)) {
-    const complete = ({ accountId, username }: { accountId: string; username: string }, deviceName?: string,
+    const complete = ({ accountId, username, name }: { accountId: string; username: string; name?: string }, deviceName?: string,
       context?: string, browser = false) => {
       // Completion is synchronous and shares host setup's connection. Starting
       // or polling a flow reserves nothing; only this commit can win the claim.
@@ -52,7 +52,7 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult | BrowserSignInR
           ...(deviceName === undefined ? {} : { deviceName }),
           publicKey: Buffer.from(context ?? "", "base64url"),
           workspaces: memberships.workspacesFor(identity.id) });
-        const result = { identity,
+        const result = { identity: { ...identity, ...(name === undefined ? {} : { name }) },
           credential: { record: issued.record },
           ...(claimedWorkspaceId === undefined ? {} : { claimedWorkspaceId }) };
         db.exec("COMMIT");
