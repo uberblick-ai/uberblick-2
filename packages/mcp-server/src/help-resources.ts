@@ -3,43 +3,24 @@ import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { normalizeObjectSchema } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { toJsonSchemaCompat, parseWithCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
-import { toolHelpEntries } from "./help-examples.js";
-import type { HelpCatalog } from "./help.js";
+import type { HelpCatalog, ToolHelp } from "./help.js";
 import type { ServerWork } from "./server-work.js";
 import { ClientSafeResourceError, guardedResource } from "./resource-adapter.js";
-import { TOOL_ANNOTATIONS } from "./failures.js";
 
-/** Registrations need only this public SDK method, allowing help to capture its result. */
-export type ToolRegistrar = Pick<McpServer, "registerTool">;
-
-function captureTool(help: HelpCatalog, name: string, tool: RegisteredTool): void {
-  const entry = toolHelpEntries[name as keyof typeof toolHelpEntries];
-  if (entry === undefined) throw new Error(`No help example and related topics for registered tool: ${name}`);
+/** Render the schemas as tools/list advertises them, and refuse an example they reject. */
+export function captureTool(help: HelpCatalog, entry: ToolHelp, tool: RegisteredTool): void {
   const input = normalizeObjectSchema(tool.inputSchema);
   const output = normalizeObjectSchema(tool.outputSchema);
   if (input === undefined || output === undefined || tool.title === undefined || tool.description === undefined) {
-    throw new Error(`Help requires the full registered contract for ${name}`);
+    throw new Error(`Help requires the full registered contract for ${entry.name}`);
   }
   parseWithCompat(input, entry.example);
-  help.addTool(name, {
+  help.addTool(entry, {
     title: tool.title,
     description: tool.description,
     inputSchema: toJsonSchemaCompat(input, { strictUnions: true, pipeStrategy: "input" }),
     outputSchema: toJsonSchemaCompat(output, { strictUnions: true, pipeStrategy: "output" }),
   });
-}
-
-export function createToolRegistrar(server: McpServer, help: HelpCatalog): ToolRegistrar {
-  const sdkRegisterTool = server.registerTool.bind(server);
-  return {
-    registerTool: (name, config, handler) => {
-      const annotations = TOOL_ANNOTATIONS[name];
-      if (annotations === undefined) throw new Error(`No annotations for registered tool: ${name}`);
-      const tool = sdkRegisterTool(name, { ...config, annotations }, handler);
-      captureTool(help, name, tool);
-      return tool;
-    },
-  };
 }
 
 export function registerHelpResources(server: McpServer, help: HelpCatalog, work: ServerWork): void {

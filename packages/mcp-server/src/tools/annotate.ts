@@ -47,7 +47,7 @@ export const inputSchema = strictInput(
   ANNOTATE_MODES,
 );
 
-export const annotateOperation = documentOperation("annotate", inputSchema, (context, { uuid, text, thread_id, block_id, start, end, row, column, resolved, author }, _request, replica) => {
+export const annotateOperation = documentOperation({ content: false, contentDurability: false }, inputSchema, (context, { uuid, text, thread_id, block_id, start, end, row, column, resolved, author }, _request, replica) => {
   const { replicas, annotationJson } = context;
 
   const who = author ?? replicas.name;

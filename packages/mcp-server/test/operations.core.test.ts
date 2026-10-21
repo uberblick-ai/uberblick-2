@@ -2,22 +2,26 @@ import { randomUUID } from "node:crypto";
 import { createTagCatalogEntry, getMeta, setTags, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
 import { GuidanceBriefing } from "../src/briefing.js";
-import { startServer, testConfig } from "./core-helpers.js";
+import { startServer, testConfig, toolNamed } from "./core-helpers.js";
 import { INTERNAL_ERROR_MESSAGE, toFailure } from "../src/failures.js";
-import { operations } from "../src/operations.js";
 import { PersistenceError, Replicas } from "../src/replica.js";
 import { pinDocOperation, unpinDocOperation } from "../src/sidebar-tools.js";
 import { MirrorStore } from "../src/store.js";
 import { ServerWork } from "../src/server-work.js";
 import type { UpdateOrigin } from "../src/store.js";
 import { guarded } from "../src/tool-adapter.js";
+import { tools } from "../src/tool-table.js";
 import { createToolContext } from "../src/tools/context.js";
 import { createDocOperation } from "../src/tools/create-doc.js";
+import { deleteBlockOperation } from "../src/tools/delete-block.js";
 import { editBlockOperation } from "../src/tools/edit-block.js";
 import { getDocOperation } from "../src/tools/get-doc.js";
+import { insertBlockOperation } from "../src/tools/insert-block.js";
+import { linkRangeOperation } from "../src/tools/link-range.js";
 import type { OperationRequest } from "../src/tools/operation.js";
 import { setMetadataOperation } from "../src/tools/set-metadata.js";
 import { syncStatusOperation } from "../src/tools/sync-status.js";
+import { updateDataOperation } from "../src/tools/update-data.js";
 
 const workspaceId = "9c1f0b4a-6d27-4e83-9b5a-1f2e3d4c5b6a";
 const request: OperationRequest = { signal: new AbortController().signal };
@@ -63,7 +67,7 @@ async function refused(tool: string, answer: Promise<object>) {
   try {
     await answer;
   } catch (error) {
-    return toFailure(tool, error);
+    return toFailure(toolNamed(tool), error);
   }
   throw new Error(`Expected ${tool} to refuse`);
 }
@@ -107,12 +111,12 @@ it("retains decided-content locks without locking editable metadata", async () =
   const block = decided.blocks[0];
   if (block === undefined) throw new Error("Missing decision fixture block");
   const writes = [
-    ["edit_block", () => operations.edit_block(rig.context, { uuid: decided.uuid, block_id: block.id, old_text: block.text, new_text: "Changed", rev: block.rev }, request)],
-    ["insert_block", () => operations.insert_block(rig.context, { uuid: decided.uuid, type: "paragraph", text: "Changed" }, request)],
-    ["delete_block", () => operations.delete_block(rig.context, { uuid: decided.uuid, block_id: block.id }, request)],
-    ["link_range", () => operations.link_range(rig.context, { uuid: decided.uuid, block_id: block.id, start: 0, end: 1, doc_id: decided.uuid, rev: block.rev }, request)],
-    ["set_metadata", () => operations.set_metadata(rig.context, { uuid: decided.uuid, tldr: "Changed" }, request)],
-    ["update_data", () => operations.update_data(rig.context, { uuid: decided.uuid, operations: [] }, request)],
+    ["edit_block", () => editBlockOperation(rig.context, { uuid: decided.uuid, block_id: block.id, old_text: block.text, new_text: "Changed", rev: block.rev }, request)],
+    ["insert_block", () => insertBlockOperation(rig.context, { uuid: decided.uuid, type: "paragraph", text: "Changed" }, request)],
+    ["delete_block", () => deleteBlockOperation(rig.context, { uuid: decided.uuid, block_id: block.id }, request)],
+    ["link_range", () => linkRangeOperation(rig.context, { uuid: decided.uuid, block_id: block.id, start: 0, end: 1, doc_id: decided.uuid, rev: block.rev }, request)],
+    ["set_metadata", () => setMetadataOperation(rig.context, { uuid: decided.uuid, tldr: "Changed" }, request)],
+    ["update_data", () => updateDataOperation(rig.context, { uuid: decided.uuid, operations: [] }, request)],
   ] as const;
   const size = rig.store.logSize();
   for (const [tool, write] of writes) {
@@ -169,13 +173,13 @@ it.each(["progress-token", 0])("forwards the signal, metadata and %s token throu
   const signal = new AbortController().signal;
   const _meta = { progressToken, customField: { retained: true } };
   const payload = { workspace: workspaceId, groups: [], hub: rig.replicas.sync.state() };
-  const operation = vi.fn(async (_context, _args: Record<string, never>, forwarded: OperationRequest) => {
+  const operation = vi.fn(async (_context, _args: Record<string, unknown>, forwarded: OperationRequest) => {
     expect(forwarded.signal).toBe(signal);
     expect(forwarded._meta).toBe(_meta);
     expect(forwarded.progressToken).toBe(progressToken);
     return payload;
   });
-  const answer = await guarded("get_sidebar", rig.context, operation)({}, { signal, _meta });
+  const answer = await guarded({ ...toolNamed("get_sidebar"), operation }, rig.context)({}, { signal, _meta });
   expect(operation).toHaveBeenCalledWith(rig.context, {}, { signal, _meta, progressToken });
   expect(answer.structuredContent).toEqual(payload);
   expect(answer.content).toEqual([{ type: "text", text: JSON.stringify(payload, null, 2) }]);
@@ -183,7 +187,7 @@ it.each(["progress-token", 0])("forwards the signal, metadata and %s token throu
   const core = await startServer();
   close.push(() => core.close());
   const size = core.instance.store.logSize();
-  for (const name of Object.keys(operations)) {
+  for (const { name } of tools) {
     expect(await core.call(name, { unexpected: true }), name).toMatchObject({
       isError: true, payload: { error: "schema_validation" },
     });

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
 import { uuidArg } from "./schemas.js";
-import { operation } from "./operation.js";
+import { READ, operation } from "./operation.js";
 
 const encoder = new TextEncoder();
 
@@ -19,7 +19,7 @@ export const inputSchema = strictInput({
   { title: "Collection page", when: { field: "collection", present: true } },
 ]);
 
-export const getDataOperation = operation("get_data", inputSchema, (context, { uuid, collection, after, limit = 100, max_bytes = 64 * 1024, ids }, _request) => {
+export const getDataOperation = operation(READ, inputSchema, (context, { uuid, collection, after, limit = 100, max_bytes = 64 * 1024, ids }, _request) => {
   const { requireDoc } = context;
 
   const data = readDocData(requireDoc(uuid).doc);

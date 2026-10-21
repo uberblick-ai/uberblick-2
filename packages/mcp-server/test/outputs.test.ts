@@ -10,7 +10,7 @@ import { guarded } from "../src/tool-adapter.js";
 import { ServerWork } from "../src/server-work.js";
 import type { ToolContext } from "../src/tools/context.js";
 import { outputSchemas } from "../src/outputs.js";
-import { removeTempDirs, startServer } from "./helpers.js";
+import { removeTempDirs, startServer, toolNamed } from "./helpers.js";
 
 const close: (() => Promise<void>)[] = [];
 const hub = { status: "disabled", url: null, protocolVersion: 1 };
@@ -31,7 +31,10 @@ async function probe(
   server.registerTool(tool, {
     inputSchema: z.object({}).strict(),
     outputSchema: outputSchemas[tool],
-  }, guarded(tool, { work: new ServerWork() } as ToolContext, async () => typeof answer === "function" ? answer() : answer));
+  }, guarded({
+    ...toolNamed(tool),
+    operation: async () => typeof answer === "function" ? answer() : answer,
+  }, { work: new ServerWork() } as ToolContext));
   const client = new Client({ name: "output-contract-client", version: "0.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   close.push(async () => {

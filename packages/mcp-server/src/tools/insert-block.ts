@@ -15,7 +15,7 @@ export const inputSchema = strictInput({
   ...blockShape,
 });
 
-export const insertBlockOperation = documentOperation("insert_block", inputSchema, (context, { uuid, after_block_id, type, text, level, language, list, indent, inline }, _request, replica) => {
+export const insertBlockOperation = documentOperation({ content: true, contentDurability: true }, inputSchema, (context, { uuid, after_block_id, type, text, level, language, list, indent, inline }, _request, replica) => {
   const { replicas, blockInputFor } = context;
 
   if (getMeta(replica.doc, replica.id).kind === "decision") {

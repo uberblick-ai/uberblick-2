@@ -2,13 +2,12 @@ import { randomUUID } from "node:crypto";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { createTagCatalogEntry, setTags } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
-import { FAILURE_INSTRUCTIONS, READ_ONLY_TOOLS } from "../src/failures.js";
+import { FAILURE_INSTRUCTIONS } from "../src/failures.js";
 import { GUIDANCE_INSTRUCTIONS } from "../src/briefing.js";
-import { toolHelpEntries } from "../src/help-examples.js";
 import { HelpCatalog } from "../src/help.js";
 import { log } from "../src/log.js";
 import { INTERNAL_RESOURCE_ERROR_MESSAGE } from "../src/resource-adapter.js";
-import { FailingStore, removeTempDirs, startServer, TEST_SECRET, testConfig } from "./helpers.js";
+import { FailingStore, removeTempDirs, startServer, TEST_SECRET, testConfig, toolNamed } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
 const concepts = ["orientation", "workspaces", "lifecycle", "markdown", "ablauf", "data", "tools", "tool-contracts"];
@@ -83,7 +82,6 @@ it("refuses unknown topics through the tool failure contract and the resource-no
     message: expect.any(String), recoveryClass: "manual", recovery: expect.any(String),
   } });
   for (const key of ["applied", "partial", "synced"]) expect(refused.payload).not.toHaveProperty(key);
-  expect(READ_ONLY_TOOLS.has("get_help")).toBe(true);
   const uri = `uberblick://help/${topic}`;
   await expect(rig.client.readResource({ uri })).rejects.toMatchObject({
     code: -32002, data: { uri }, message: `MCP error -32002: MCP error -32002: Resource not found: ${uri}`,
@@ -136,9 +134,7 @@ it("renders each tool's actual full description and schemas, with an accepted ex
     const inputSchema = jsonSection(text, "Arguments");
     expect(inputSchema, tool.name).toEqual(tool.inputSchema);
     expect(jsonSection(text, "Output"), tool.name).toEqual(tool.outputSchema);
-    const entry = toolHelpEntries[tool.name];
-    expect(entry, `${tool.name} has no per-tool help entry`).toBeDefined();
-    const details = entry!.details;
+    const { details } = toolNamed(tool.name);
     if (details !== undefined) {
       const constraints = text.split("## Constraints\n")[1]?.split("\n## ")[0];
       expect(constraints, `${tool.name} loses its expanded tool-specific contract`).toContain(details);

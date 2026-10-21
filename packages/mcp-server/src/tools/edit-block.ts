@@ -25,7 +25,7 @@ export const inputSchema = strictInput({
   }).strict().optional().describe("Explicit surviving table positions. Both arrays are required; omitted old positions are deleted."),
 });
 
-export const editBlockOperation = documentOperation("edit_block", inputSchema, (context, { uuid, block_id, old_text, new_text, list, indent, rev, table_mapping }, _request, replica) => {
+export const editBlockOperation = documentOperation({ content: true, contentDurability: true }, inputSchema, (context, { uuid, block_id, old_text, new_text, list, indent, rev, table_mapping }, _request, replica) => {
   const { replicas, validateTableTargets, validateCardTargets, validateFigmaTargets } = context;
 
   const current = getBlock(replica.doc, block_id);

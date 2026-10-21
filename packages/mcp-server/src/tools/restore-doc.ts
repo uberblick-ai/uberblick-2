@@ -2,12 +2,12 @@ import { isDirectoryEntryArchived, restoreDirectoryEntry } from "@uberblick/sche
 import { strictInput } from "../inputs.js";
 import { roomStages } from "./helpers.js";
 import { uuidArg } from "./schemas.js";
-import { operation } from "./operation.js";
+import { DOCUMENT_WRITE, operation } from "./operation.js";
 
 export const inputSchema = strictInput({ uuid: uuidArg });
 
 // Restore writes only the directory and never repins or changes document content.
-export const restoreDocOperation = operation("restore_doc", inputSchema, (context, { uuid }, _request) => {
+export const restoreDocOperation = operation(DOCUMENT_WRITE, inputSchema, (context, { uuid }, _request) => {
   const { replicas, requireStub, titleFor, durabilityAcross } = context;
 
   const stub = requireStub(uuid);

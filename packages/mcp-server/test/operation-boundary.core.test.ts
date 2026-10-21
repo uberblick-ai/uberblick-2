@@ -12,11 +12,11 @@ it("keeps the transitive operation and failure path free of SDK value and type i
   // Compiler resolution follows workspace package exports and type-only edges.
   // Exclude automatically included test globals; they are outside this path.
   const program = ts.createProgram({
-    rootNames: ["operations.ts", "tools/context.ts", "failures.ts"].map(file => join(packageRoot, "src", file)),
+    rootNames: ["tool-table.ts", "tools/context.ts", "failures.ts"].map(file => join(packageRoot, "src", file)),
     options: { ...config.options, types: [] },
   });
   const sources = program.getSourceFiles();
-  expect(sources.some(source => source.fileName.endsWith("/src/operations.ts"))).toBe(true);
+  expect(sources.some(source => source.fileName.endsWith("/src/tool-table.ts"))).toBe(true);
   const sdkEdges = sources.flatMap(source => {
     const imports = ts.preProcessFile(source.text, true, true).importedFiles;
     return imports

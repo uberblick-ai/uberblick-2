@@ -2,7 +2,7 @@ import { exportMarkdown } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "../inputs.js";
 import { uuidArg } from "./schemas.js";
-import { operation } from "./operation.js";
+import { READ, operation } from "./operation.js";
 
 export const inputSchema = strictInput({
   uuid: uuidArg,
@@ -19,7 +19,7 @@ export const inputSchema = strictInput({
     .describe("How to render annotation threads. Default drop."),
 });
 
-export const exportMarkdownOperation = operation("export_markdown", inputSchema, (context, { uuid, frontmatter, annotations }, _request) => {
+export const exportMarkdownOperation = operation(READ, inputSchema, (context, { uuid, frontmatter, annotations }, _request) => {
   const { replicas, requireDoc, tagCatalog } = context;
 
   const replica = requireDoc(uuid);

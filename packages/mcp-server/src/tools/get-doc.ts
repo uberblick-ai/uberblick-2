@@ -1,11 +1,11 @@
 import { decisionTopicTitle, docRev, getMeta, listAnnotations, readDecisions, resolveDecisionTopics, summarizeDocData } from "@uberblick/schema";
 import { strictInput } from "../inputs.js";
 import { uuidArg } from "./schemas.js";
-import { operation } from "./operation.js";
+import { READ, operation } from "./operation.js";
 
 export const inputSchema = strictInput({ uuid: uuidArg });
 
-export const getDocOperation = operation("get_doc", inputSchema, (context, { uuid }, _request) => {
+export const getDocOperation = operation(READ, inputSchema, (context, { uuid }, _request) => {
   const { replicas, requireDoc, decisionAuthorityJson, documentTags, decisionEntryJson, topicJson, decisionReadJson, blocksJson, annotationJson, briefing } = context;
 
   const replica = requireDoc(uuid);
