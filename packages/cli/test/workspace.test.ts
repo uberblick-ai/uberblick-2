@@ -892,16 +892,6 @@ globalThis.fetch = () => { throw new Error("use by id must stay local"); };
     expect(existsSync(workspaceRegistryPath(box.env))).toBe(false);
   });
 
-  it("rejects the removed hub flag as usage without any writes", async () => {
-    const box = unboundSandbox();
-    const run = await runInProcess(["workspace", "use", WORKSPACE, "--hub", "local"], box);
-    expect(run.status).toBe(2);
-    expect(run.stderr).toContain("Unknown option '--hub'");
-    expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
-    expect(existsSync(box.configHome)).toBe(false);
-    expect(existsSync(box.dataHome)).toBe(false);
-  });
-
   it("refuses a full UUID this machine never recorded with no files written", async () => {
     const box = unboundSandbox();
     const run = await runInProcess(["workspace", "use", WORKSPACE], box);

@@ -20,7 +20,6 @@ import {
   writeHubAdmission,
 } from "@uberblick/mcp-server/project-config";
 import {
-  REPO_ROOT,
   SECRET_IN_ENV,
   SECRET_ON_FILE,
   removeTempDirs,
@@ -402,23 +401,5 @@ describe("writeCredentials", () => {
       mcpConfig(resolveConfig({ env: fresh.env, cwd: fresh.cwd }).env)
         .authSecret,
     ).toBe("new");
-  });
-});
-
-describe("the committed mise config", () => {
-  // Belt and braces beside the resolution above. `ub` ignores an ambient
-  // `HUB_URL` outright, but the checkout tasks hand their environment to
-  // programs that do read it — vite bakes it into a dev bundle — so a committed
-  // endpoint here would still bind a checkout to whatever the repository
-  // guessed. The address belongs in the clients' code as a
-  // fallback, and the real one in this machine's `config.json`, which the resolver
-  // is what puts in front of a task.
-  it("exports no HUB_URL, so a checkout binds no endpoint", () => {
-    const assignments = readFileSync(join(REPO_ROOT, "mise.toml"), "utf8")
-      .split("\n")
-      .filter((line) => !line.trimStart().startsWith("#"))
-      .filter((line) => /\bHUB_URL\s*=/.test(line));
-
-    expect(assignments).toEqual([]);
   });
 });

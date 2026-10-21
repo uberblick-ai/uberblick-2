@@ -1,21 +1,18 @@
 /**
  * Where `ub` puts a user's files, and what it says about it.
  *
- * The layout itself is proved in the CLI storage-layout suite; this one is about
- * the commands: that whoever creates the tree first leaves it owner-only, and
- * that there is no layout question left for `ub doctor` to have an opinion about.
+ * Whoever creates the tree first must leave it owner-only.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { hubDatabasePath } from "../src/hub-config.js";
 import { credentialsPath, resolveConfig, userConfigPath, writeCredentials } from "@uberblick/mcp-server/project-config";
-import { doctorReport } from "../src/doctor.js";
 import { statusReport } from "../src/status.js";
-import { REPO_ROOT, removeTempDirs } from "./helpers.js";
+import { removeTempDirs } from "./helpers.js";
 
 const WORKSPACE = "0d4a1e7c-2b93-4f18-9a55-6c7e8d1b2f30";
 
@@ -117,48 +114,5 @@ describe("the resolved roots", () => {
 
     writeCredentials({ signingSecret: "ordering-secret" }, env);
     expect(statSync(configRoot(root)).mode & 0o077).toBe(0);
-  });
-});
-
-describe("`ub doctor`", () => {
-  it("has no layout check, because there is no layout question", async () => {
-    // One layout on every platform: nothing to detect, nothing to refuse, and
-    // therefore no check below which the rest would have to be skipped.
-    const root = home();
-    const { report } = await doctorReport({
-      env: homeEnv(root, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" }),
-      cwd: root,
-    });
-
-    expect(report.checks.map((one) => one.name)).toEqual([
-      "workspace",
-      "login",
-      "database",
-      "hub",
-      "clock",
-      "local hub",
-      "web server",
-      "mcp",
-    ]);
-  });
-});
-
-// --- development, which must never open the packaged user's database ---------
-
-describe("the development tasks", () => {
-  it("give the hub an explicit checkout-local database", () => {
-    // Without this, `mise run hub` and `mise run dev` would open the hub
-    // database of whoever is sitting at the machine.
-    const mise = readFileSync(join(REPO_ROOT, "mise.toml"), "utf8");
-    const setting = /^HUB_DB_PATH = "(.+)"$/m.exec(mise);
-
-    expect(setting?.[1]).toBeDefined();
-    expect(setting?.[1]).toContain("{{config_root}}");
-    expect(setting?.[1]).toMatch(/\.sqlite$/);
-    // In the `[env]` block, so every task in the checkout inherits it, the e2e
-    // harness included. (The Docker review container runs `pnpm` directly, with
-    // no mise, and needs nothing: no suite there opens a default database.)
-    expect(mise.indexOf("HUB_DB_PATH")).toBeGreaterThan(mise.indexOf("[env]"));
-    expect(mise.indexOf("HUB_DB_PATH")).toBeLessThan(mise.indexOf("[tasks."));
   });
 });

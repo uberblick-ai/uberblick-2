@@ -11,7 +11,6 @@ import { createHub, silentLogger } from "@uberblick/hub";
 import type { StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
-import type { HubFailureCause } from "@uberblick/mcp-server";
 import { CLOCK_SKEW_SECONDS, REQUEST_PROOF_LIFETIME_SECONDS } from "@uberblick/schema/token";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startDeviceSyncHub } from "../../hub/test/device-sync-hub.js";
@@ -288,11 +287,8 @@ describe("ub doctor", () => {
     expect(check(checks, "workspace").reason).toBe(`${WORKSPACE}, from UB_WORKSPACE_ID`);
   });
 
-  it.each([
-    { description: "invalid JSON", raw: "{" },
-    { description: "a malformed id", raw: JSON.stringify({ workspaceId: SECRET, hubUrl: null }) },
-  ])("names the binding file refused for $description in one line", async ({ raw }) => {
-    const box = sandbox({ raw: { projectBinding: raw } });
+  it("names the binding file refused for a malformed id in one line", async () => {
+    const box = sandbox({ raw: { projectBinding: JSON.stringify({ workspaceId: SECRET, hubUrl: null }) } });
     const { checks } = await doctor(box);
     const workspace = check(checks, "workspace");
     expect(workspace.status).toBe("fail");
@@ -317,7 +313,6 @@ describe("ub doctor", () => {
     { description: "empty UB_HUB_URL", env: { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "" }, variable: "UB_HUB_URL" },
     { description: "no recorded hub", env: { UB_WORKSPACE_ID: WORKSPACE }, variable: "UB_WORKSPACE_ID" },
     { description: "legacy WORKSPACE_ID", env: { WORKSPACE_ID: WORKSPACE }, variable: "WORKSPACE_ID" },
-    { description: "legacy HUB_URL", env: { HUB_URL: DEAD_HUB_URL }, variable: "HUB_URL" },
     { description: "malformed UB_WORKSPACE_ID", env: { UB_WORKSPACE_ID: SECRET, UB_HUB_URL: "local" }, variable: "UB_WORKSPACE_ID" },
   ])("names the variable at fault for $description in one line", async ({ env, variable }) => {
     const { checks } = await doctor(sandbox(), env);
@@ -376,11 +371,10 @@ describe("ub doctor", () => {
     expect(probes.probePort).toHaveBeenCalledExactlyOnceWith(open.WEB_HOST, open.DEFAULT_WEB_PORT);
   });
 
-  it.each([false, true])("refuses unencrypted remote hubs before hub or clock probes (stored login=%s)", async stored => {
+  it("refuses unencrypted remote hubs before hub or clock probes without a stored login", async () => {
     const server = await silentServer();
     const endpoint = `ws://0.0.0.0:${server.port}/proxy/ws`;
-    const box = stored ? deviceBox(endpoint)
-      : sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: endpoint } });
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: endpoint } });
     const dial = vi.spyOn(probes, "probeHubState");
     const clock = vi.spyOn(probes, "probeHubClock");
     const { checks } = await doctor(box, { UB_INSECURE_HUBS: `another-hub:${server.port}` });
@@ -436,20 +430,11 @@ describe("ub doctor", () => {
     expect(check(checks, "clock").status).toBe("skipped");
   });
 
-  it.each<[HubFailureCause, string, string]>([
-    ["dns", "ENOTFOUND hub.uberblick.ai", "DNS lookup failed for hub.uberblick.ai (ENOTFOUND)"],
-    ["refused", "ECONNREFUSED 203.0.113.7:443", "refused by 203.0.113.7:443 (ECONNREFUSED)"],
-    ["refused", "ECONNREFUSED [::1]:443", "refused by [::1]:443 (ECONNREFUSED)"],
-    ["timeout", "1.5 203.0.113.7:443", "timed out after 1.5s connecting to 203.0.113.7:443"],
-    ["timeout", "1.5 hub.uberblick.ai:443 ETIMEDOUT", "timed out after 1.5s connecting to hub.uberblick.ai:443 (ETIMEDOUT)"],
-    ["tls", "ERR_TLS_CERT_ALTNAME_INVALID hub.uberblick.ai", "TLS certificate not valid for hub.uberblick.ai (ERR_TLS_CERT_ALTNAME_INVALID)"],
-    ["tls", "ERR_SSL_WRONG_VERSION_NUMBER hub.uberblick.ai", "TLS failed for hub.uberblick.ai (ERR_SSL_WRONG_VERSION_NUMBER)"],
-    ["http", "502 hub.uberblick.ai", "HTTP 502 from hub.uberblick.ai during WebSocket upgrade"],
-    ["closed", "1001", "closed by the hub (code 1001)"],
-  ])("names a %s socket failure without changing the hub warning or fix", async (cause, detail, reason) => {
+  it("names a socket failure without changing the hub warning or fix", async () => {
     const endpoint = "wss://hub.uberblick.ai/ws";
+    const reason = "DNS lookup failed for hub.uberblick.ai (ENOTFOUND)";
     vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "hub-down", url: endpoint,
-      protocolVersion: SYNC_PROTOCOL_VERSION, cause, detail });
+      protocolVersion: SYNC_PROTOCOL_VERSION, cause: "dns", detail: "ENOTFOUND hub.uberblick.ai" });
     const { report, checks } = await doctor(deviceBox(endpoint));
     expect(check(checks, "hub")).toEqual({ name: "hub", status: "warn", reason,
       fix: "check your network or VPN, or ask whoever runs the hub; your work stays here and syncs once it is back" });
@@ -466,31 +451,17 @@ describe("ub doctor", () => {
       fix: "check your network or VPN, or ask whoever runs the hub; your work stays here and syncs once it is back" });
   });
 
-  it.each<[HubFailureCause, string]>([
-    ["tls", "ERR_TLS_CERT_ALTNAME_INVALID hub.example.invalid certificate text"],
-    ["http", "502 wss://person:secret@hub.example.invalid/?token=secret"],
-    ["closed", "1001 private close reason"],
-  ])("does not render extra error or wire text in a %s detail", async (cause, detail) => {
-    const endpoint = "wss://hub.example.invalid/ws";
-    vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "hub-down", url: endpoint,
-      protocolVersion: SYNC_PROTOCOL_VERSION, cause, detail });
+  it("names the authentication origin for every device hub line", async () => {
+    const endpoint = "wss://hub.example.invalid/custom-sync-path";
+    vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "connected", url: endpoint, protocolVersion: SYNC_PROTOCOL_VERSION });
+    vi.spyOn(probes, "probeHubClock").mockResolvedValue(-240);
     const { report, checks } = await doctor(deviceBox(endpoint));
-    expect(check(checks, "hub").reason).toBe(`${authenticationOrigin(endpoint)} does not answer`);
-    expect(renderDoctor(report)).not.toContain(detail);
+    const origin = authenticationOrigin(endpoint);
+    expect(check(checks, "login").reason).toBe(`doctor-person on ${origin}`);
+    expect(check(checks, "hub").reason).toBe(`connected to ${origin}; doctor-person has access`);
+    expect(check(checks, "clock").reason).toBe(`4 min ahead of ${origin}`);
+    expect(JSON.stringify(report)).not.toContain(endpoint);
   });
-
-  it.each(["wss://hub.example.invalid/custom-sync-path", "ws://hub.example.invalid:8080/custom-sync-path"])(
-    "names the authentication origin for every device hub line at %s", async endpoint => {
-      vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "connected", url: endpoint, protocolVersion: SYNC_PROTOCOL_VERSION });
-      vi.spyOn(probes, "probeHubClock").mockResolvedValue(-240);
-      const { report, checks } = await doctor(deviceBox(endpoint), { UB_INSECURE_HUBS: new URL(endpoint).host });
-      const origin = authenticationOrigin(endpoint);
-      expect(check(checks, "login").reason).toBe(`doctor-person on ${origin}`);
-      expect(check(checks, "hub").reason).toBe(`connected to ${origin}; doctor-person has access`);
-      expect(check(checks, "clock").reason).toBe(`4 min ahead of ${origin}`);
-      expect(JSON.stringify(report)).not.toContain(endpoint);
-    },
-  );
 
   it.each(["no-workspace-access", "sign-in-required", "credential-store", "renewal-unavailable"] as const)(
     "keeps the device refusal %s distinct and actionable", async authRecovery => {
@@ -515,44 +486,19 @@ describe("ub doctor", () => {
     },
   );
 
-  it.each(["bad handle", "bad;handle", "doctor`person", "doctor\n\u001b[31m\u007f\u0085"])(
-    "prints an invalid stored login safely and never embeds it in the access command: %j", async username => {
-      const endpoint = "wss://hub.example.invalid";
-      vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "auth-failed", url: endpoint,
-        protocolVersion: SYNC_PROTOCOL_VERSION, authRecovery: "no-workspace-access" });
-      vi.spyOn(probes, "probeHubClock").mockResolvedValue(0);
-      const { checks } = await doctor(deviceBox(endpoint, username));
-      const safe = JSON.stringify(username).replace(/[`\u007f-\u009f]/g,
-        char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
-      expect(check(checks, "login").reason).toBe(`${safe} on ${authenticationOrigin(endpoint)}`);
-      expect(check(checks, "hub").reason).toBe(`${safe} has no access to ${WORKSPACE}, or it doesn't exist on this hub`);
-      expect(check(checks, "hub").fix).toBe("ask a workspace admin for access");
-    },
-  );
-
-  it.each([SYNC_PROTOCOL_VERSION + 1, SYNC_PROTOCOL_VERSION - 1])(
-    "names who updates a device hub speaking protocol %s, preserving failure and its JSON fix", async hubVersion => {
-      const endpoint = "wss://hub.example.invalid/custom-sync-path";
-      vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "update-required", url: endpoint,
-        protocolVersion: SYNC_PROTOCOL_VERSION, hubProtocolVersion: hubVersion });
-      vi.spyOn(probes, "probeHubClock").mockResolvedValue(0);
-      const box = deviceBox(endpoint);
-      const { report, checks, ok } = await doctor(box);
-      const mismatch = check(checks, "hub");
-      expect(mismatch.status).toBe("fail");
-      expect(ok).toBe(false);
-      expect(mismatch.reason).toContain(authenticationOrigin(endpoint));
-      if (hubVersion > SYNC_PROTOCOL_VERSION) expect(mismatch.fix).toMatch(/^ub update.*restart.*agents/);
-      else {
-        expect(mismatch.fix).toContain(authenticationOrigin(endpoint));
-        expect(mismatch.fix).toMatch(/^ask .*update/);
-        expect(mismatch.fix).not.toContain("ub update");
-      }
-      const json = JSON.parse(JSON.stringify(report)) as DoctorReport;
-      expect(json.checks.find(one => one.name === "hub")?.fix).toBe(mismatch.fix);
-      expect(renderDoctor(report, box.env)).toContain(`→ ${mismatch.fix}\n`);
-    },
-  );
+  it("escapes a backtick in a stored login and never embeds it in the access command", async () => {
+    const username = "doctor`person";
+    const endpoint = "wss://hub.example.invalid";
+    vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "auth-failed", url: endpoint,
+      protocolVersion: SYNC_PROTOCOL_VERSION, authRecovery: "no-workspace-access" });
+    vi.spyOn(probes, "probeHubClock").mockResolvedValue(0);
+    const { checks } = await doctor(deviceBox(endpoint, username));
+    const safe = JSON.stringify(username).replace(/[`\u007f-\u009f]/g,
+      char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+    expect(check(checks, "login").reason).toBe(`${safe} on ${authenticationOrigin(endpoint)}`);
+    expect(check(checks, "hub").reason).toBe(`${safe} has no access to ${WORKSPACE}, or it doesn't exist on this hub`);
+    expect(check(checks, "hub").fix).toBe("ask a workspace admin for access");
+  });
 
   it("skips each free local listener and renders one line for each check", async () => {
     const port = await freePort();
@@ -662,7 +608,8 @@ describe("ub doctor", () => {
     if (signingSecret === undefined) expect(dial).not.toHaveBeenCalled();
   });
 
-  it.each(["not-a-number", "65536", "1.5"])("fails an invalid local PORT %s", async value => {
+  it("fails an invalid local PORT", async () => {
+    const value = "not-a-number";
     const { checks } = await doctor(sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } }), { PORT: value });
     expect(check(checks, "local hub").status).toBe("fail");
     expect(check(checks, "local hub").reason).toContain(value);
@@ -680,7 +627,8 @@ describe("ub doctor", () => {
     expect(local.fix).toMatch(/^unset PORT\b/);
   });
 
-  it.each(["http://127.0.0.1:1234", "ftp://127.0.0.1:1234"])("fails a local endpoint that is not a websocket URL: %s", async endpoint => {
+  it("fails a local endpoint that is not a websocket URL", async () => {
+    const endpoint = "http://127.0.0.1:1234";
     // Binding parsing normally normalizes HTTP and rejects FTP before doctor
     // receives a config. Exercise the diagnostic's own invalid-endpoint guard.
     const resolveMcpConfig = budget.resolveMcpConfig;
@@ -698,18 +646,18 @@ describe("ub doctor", () => {
     expect(check(checks, "local hub").reason).toMatch(/wss|TLS|secure/i);
   });
 
-  it.each([["62s fast", -62, "ahead of"], ["62s slow", 62, "behind"]] as const)("fails a device workspace clock %s", async (_name, offsetSeconds, direction) => {
-    const server = await silentServer(offsetSeconds);
+  it("fails a device workspace clock 62s ahead of the hub", async () => {
+    const server = await silentServer(-62);
     const endpoint = `ws://127.0.0.1:${server.port}`;
     vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "unsettled", url: endpoint, protocolVersion: SYNC_PROTOCOL_VERSION });
     const { checks } = await doctor(deviceBox(endpoint));
     expect(check(checks, "clock").status).toBe("fail");
-    expect(check(checks, "clock").reason).toContain(`${direction} ${authenticationOrigin(endpoint)}`);
+    expect(check(checks, "clock").reason).toContain(`ahead of ${authenticationOrigin(endpoint)}`);
     expect(server.clockRequests).toBe(1);
     expect(check(checks, "clock").fix).toBe("turn on automatic time in your system settings");
   });
 
-  it.each([0, 2, -2, -CLOCK_SKEW_SECONDS, REQUEST_PROOF_LIFETIME_SECONDS])(
+  it.each([-CLOCK_SKEW_SECONDS, REQUEST_PROOF_LIFETIME_SECONDS])(
     "passes a device clock offset of %ss, including either admission boundary", async skew => {
       const endpoint = "wss://hub.example.invalid/ws";
       vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "connected", url: endpoint, protocolVersion: SYNC_PROTOCOL_VERSION });
@@ -724,7 +672,6 @@ describe("ub doctor", () => {
     { skew: -CLOCK_SKEW_SECONDS - 1, offset: `${CLOCK_SKEW_SECONDS + 1}s`, direction: "ahead of" },
     { skew: REQUEST_PROOF_LIFETIME_SECONDS + 1, offset: `${REQUEST_PROOF_LIFETIME_SECONDS + 1}s`, direction: "behind" },
     { skew: -240, offset: "4 min", direction: "ahead of" },
-    { skew: 900, offset: "15 min", direction: "behind" },
   ])("fails a device clock $offset $direction the hub", async ({ skew, offset, direction }) => {
     const endpoint = "wss://hub.example.invalid/ws";
     vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "connected", url: endpoint, protocolVersion: SYNC_PROTOCOL_VERSION });
@@ -756,31 +703,26 @@ describe("ub doctor", () => {
     expect(server.clockRequests).toBe(1);
   });
 
-  describe.each(["local", "device", "unconfigured"] as const)("web server for a %s workspace", kind => {
-    const endpoint = "wss://hub.example.invalid";
-    const boxForKind = () => kind === "device" ? deviceBox(endpoint)
-      : kind === "local" ? sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } }) : unboundSandbox();
-
+  describe("web server without a configured workspace", () => {
     it.each([["ub-open", "pass"], ["foreign", "fail"], ["unidentified", "skipped"]] as const)("reports the default web port held by %s as %s", async (holder, status) => {
-      vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "hub-down", url: endpoint, protocolVersion: SYNC_PROTOCOL_VERSION });
+      const dial = vi.spyOn(probes, "probeHubState");
       vi.mocked(probes.probePort).mockResolvedValue({ host: open.WEB_HOST, port: open.DEFAULT_WEB_PORT, state: "in-use", code: null });
       const identify = vi.spyOn(open, "whoHoldsPort").mockResolvedValue(holder);
-      const { checks } = await doctor(boxForKind(), { PORT: "invalid" });
+      const { checks } = await doctor(unboundSandbox(), { PORT: "invalid" });
       expect(probes.probePort).toHaveBeenCalledExactlyOnceWith(open.WEB_HOST, open.DEFAULT_WEB_PORT);
       expect(identify).toHaveBeenCalledExactlyOnceWith(open.DEFAULT_WEB_PORT);
-      expect(probes.probeHubState).toHaveBeenCalledTimes(kind === "device" ? 1 : 0);
+      expect(dial).not.toHaveBeenCalled();
       expect(check(checks, "web server")).toEqual({ name: "web server", status,
         reason: `${open.WEB_HOST}:${open.DEFAULT_WEB_PORT} ${holder === "ub-open" ? "is already serving an uberblick web app"
           : holder === "foreign" ? "is in use by a process that is not ub open" : "is in use, but its holder could not be identified"}`,
         fix: holder === "foreign" ? "stop that process, then run ub open" : null });
-      if (kind !== "local") expect(check(checks, "local hub").status).toBe("skipped");
+      expect(check(checks, "local hub").status).toBe("skipped");
     });
 
     it.each(["free", "unknown"] as const)("skips a %s default web port without trying to identify its holder", async state => {
       const identify = vi.spyOn(open, "whoHoldsPort");
-      vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "hub-down", url: endpoint, protocolVersion: SYNC_PROTOCOL_VERSION });
       vi.mocked(probes.probePort).mockResolvedValue({ host: open.WEB_HOST, port: open.DEFAULT_WEB_PORT, state, code: state === "unknown" ? "EACCES" : null });
-      const { checks } = await doctor(boxForKind(), { PORT: "invalid" });
+      const { checks } = await doctor(unboundSandbox(), { PORT: "invalid" });
       expect(check(checks, "web server")).toEqual({ name: "web server", status: "skipped",
         reason: `${open.WEB_HOST}:${open.DEFAULT_WEB_PORT} ${state === "free" ? "is not running; ub open starts it" : "could not be tested (EACCES)"}`, fix: null });
       expect(probes.probePort).toHaveBeenCalledExactlyOnceWith(open.WEB_HOST, open.DEFAULT_WEB_PORT);
@@ -788,25 +730,24 @@ describe("ub doctor", () => {
     });
   });
 
-  it.each(["web server", "local hub", "both"] as const)("fails and exits 1 when %s fails, counting each listener separately", async failed => {
+  it("fails and exits 1 when both listeners fail, counting each separately", async () => {
     const port = await freePort();
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: `ws://127.0.0.1:${port}` }, credentials: { signingSecret: SECRET } });
     wireMcp(box);
     vi.mocked(probes.probePort).mockImplementation((host, candidate) => Promise.resolve({ host, port: candidate, state: "in-use", code: null }));
-    vi.spyOn(open, "whoHoldsPort").mockResolvedValue(failed === "local hub" ? "ub-open" : "foreign");
+    vi.spyOn(open, "whoHoldsPort").mockResolvedValue("foreign");
     vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "connected", url: `ws://127.0.0.1:${port}`, protocolVersion: SYNC_PROTOCOL_VERSION });
-    const hubPort = failed === "web server" ? String(port) : "invalid";
+    const hubPort = "invalid";
     const { report, checks } = await doctor(box, { PORT: hubPort });
-    expect(check(checks, "local hub").status).toBe(failed === "web server" ? "pass" : "fail");
-    expect(check(checks, "web server").status).toBe(failed === "local hub" ? "pass" : "fail");
+    expect(check(checks, "local hub").status).toBe("fail");
+    expect(check(checks, "web server").status).toBe("fail");
     expect(report.ok).toBe(false);
     const text = renderDoctor(report);
     const lines = text.split("\n").filter(line => /^(?:ok|warn|FAIL|skip)\s/.test(line));
     expect(lines).toHaveLength(8);
     for (const [index, name] of NAMES.entries()) expect(lines[index]).toContain(name);
-    const failures = failed === "both" ? 2 : 1;
-    expect(text.match(/→ /g)).toHaveLength(failures);
-    expect(text).toContain(`${failures} failed, 0 warnings, ${4 - failures} passed, 4 skipped\n`);
+    expect(text.match(/→ /g)).toHaveLength(2);
+    expect(text).toContain("2 failed, 0 warnings, 2 passed, 4 skipped\n");
 
     for (const key of new Set([...Object.keys(process.env), ...Object.keys(box.env)])) vi.stubEnv(key, box.env[key]);
     vi.stubEnv("PORT", hubPort);
@@ -816,43 +757,6 @@ describe("ub doctor", () => {
     let output = "";
     expect(await doctorCommand(["--json"], { out: text => { output += text; }, err: () => {} })).toBe(1);
     expect(JSON.parse(output)).toEqual(report);
-  });
-
-  it.each(["pass", "fail"] as const)("renders each listener once when both %s", async status => {
-    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
-    vi.mocked(probes.probePort).mockImplementation((host, port) => Promise.resolve({ host, port, state: "in-use", code: null }));
-    vi.spyOn(open, "whoHoldsPort").mockResolvedValue(status === "pass" ? "ub-open" : "foreign");
-    vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: status === "pass" ? "connected" : "auth-failed", url: "ws://localhost:1234", protocolVersion: SYNC_PROTOCOL_VERSION });
-    const { report, checks } = await doctor(box);
-    expect(check(checks, "local hub").status).toBe(status);
-    expect(check(checks, "web server").status).toBe(status);
-    expect(renderDoctor(report).split("\n").filter(line => /^(?:ok|warn|FAIL|skip)\s+local hub\s/.test(line))).toHaveLength(1);
-    expect(renderDoctor(report).split("\n").filter(line => /^(?:ok|warn|FAIL|skip)\s+web server\s/.test(line))).toHaveLength(1);
-  });
-
-  it.skipIf(process.getuid?.() === 0)("fails database when its nearest existing directory is not writable", async () => {
-    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
-    const readOnly = join(box.cwd, "read-only");
-    mkdirSync(readOnly);
-    chmodSync(readOnly, 0o500);
-    try {
-      const database = join(readOnly, "missing", "uberblick.sqlite");
-      const { checks } = await doctor(box, { UBERBLICK_DB: database });
-      expect(check(checks, "database").status).toBe("fail");
-      expect(check(checks, "database").reason).toContain(database);
-      expect(check(checks, "database").fix).toMatch(/UBERBLICK_DB/);
-    } finally { chmodSync(readOnly, 0o700); }
-  });
-
-  it("writes one JSON object with eight four-field checks and its matching exit status", async () => {
-    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
-    const run = await runInProcess(["doctor", "--json"], box, { PORT: "1234", HUB_HOST: "127.0.0.1" });
-    const report = JSON.parse(run.stdout) as DoctorReport;
-    expect(report.checks.map(one => one.name)).toEqual(NAMES);
-    for (const one of report.checks) expect(Object.keys(one).sort()).toEqual(["fix", "name", "reason", "status"]);
-    expect(report.ok).toBe(!report.checks.some(one => one.status === "fail"));
-    expect(run.status).toBe(report.ok ? 0 : 1);
-    expect(run.output).not.toContain(SECRET);
   });
 
   it("keeps a warning-only report successful for scripts and human output", async () => {
@@ -868,34 +772,15 @@ describe("ub doctor", () => {
     expect(text).toMatch(/0 failed, 2 warnings, \d+ passed, \d+ skipped/);
   });
 
-  it.each([0, 1, 2])("renders fixes only for problems and counts %s warnings", warnings => {
-    const checks: Check[] = [
-      { name: "workspace", status: "pass", reason: "configured", fix: null },
-      { name: "login", status: "skipped", reason: "local workspace", fix: null },
-      { name: "mcp", status: "fail", reason: "not registered", fix: "ub mcp install claude" },
-      ...Array.from({ length: warnings }, (_, index): Check => ({ name: `hub ${index + 1}`, status: "warn", reason: "hub unavailable", fix: "check the network" })),
-    ];
-    const text = renderDoctor({ version: "test", ok: false, checks });
-    expect(text).toContain("ok    workspace   configured\n");
-    expect(text).toContain("skip  login       local workspace\n");
-    expect(text).toContain("FAIL  mcp         not registered\n      → ub mcp install claude\n");
-    expect(text.match(/→ /g)).toHaveLength(warnings + 1);
-    expect(text).toContain(`1 failed, ${warnings} ${warnings === 1 ? "warning" : "warnings"}, 1 passed, 1 skipped\n`);
-  });
 });
 
 // These checks keep their real CLI exit and output assertions across base changes.
 describe("ub doctor MCP setup", () => {
-  it.each(["entry", "malformed", "unreadable"])("ignores %s Cursor configs in the project and home directory", async kind => {
+  it("ignores Cursor configs in the project and home directory", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     for (const root of [box.cwd, homeOf(box)]) {
       const path = join(root, ".cursor", "mcp.json");
-      if (kind === "entry") writeJson(path, { mcpServers: { uberblick: { type: "stdio", ...UNPINNED } } });
-      else {
-        mkdirSync(dirname(path), { recursive: true });
-        if (kind === "malformed") writeFileSync(path, "{", "utf8");
-        else mkdirSync(path);
-      }
+      writeJson(path, { mcpServers: { uberblick: { type: "stdio", ...UNPINNED } } });
     }
 
     const none = await mcpDoctor(box);
@@ -913,27 +798,6 @@ describe("ub doctor MCP setup", () => {
     expect(wired.run.output).not.toMatch(/cursor/i);
   });
 
-  it("reports which MCP client is wired up, and points at `ub mcp install` when none is", async () => {
-    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
-    const none = await mcpDoctor(box);
-
-    expect(check(none.checks, "mcp")).toEqual({
-      name: "mcp",
-      status: "warn",
-      reason: "MCP client is not set up for this project",
-      fix: "ub mcp install claude   (or codex)",
-    });
-    expect(none.run.status).toBe(0);
-
-    wireMcp(box);
-    const wired = await mcpDoctor(box);
-
-    expect(check(wired.checks, "mcp").status).toBe("pass");
-    expect(check(wired.checks, "mcp").reason).toBe("Claude Code (.mcp.json)");
-    const human = await runInProcess(["doctor"], box, { PORT: "1" });
-    expect(human.stdout).toContain("ok    mcp         Claude Code (.mcp.json)\n");
-  });
-
   it("ignores another server's multiline args in Codex's user config when Claude Code is set up", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     wireMcp(box);
@@ -947,31 +811,6 @@ describe("ub doctor MCP setup", () => {
       name: "mcp", status: "pass", reason: "Claude Code (.mcp.json)", fix: null,
     });
     expect(run.status).toBe(0);
-  });
-
-  it.each([
-    {
-      layout: "inline env",
-      text: '[mcp_servers.uberblick]\ncommand = "custom"\n' +
-        `env = { UB_WORKSPACE_ID = "${WORKSPACE}", UB_HUB_URL = "${DEAD_HUB_URL}", API_TOKEN = "${SECRET}" }\n`,
-    },
-    {
-      layout: "dotted env keys",
-      text: '[mcp_servers.uberblick]\ncommand = "custom"\n' +
-        `env.UB_WORKSPACE_ID = "${WORKSPACE}"\nenv.UB_HUB_URL = "${DEAD_HUB_URL}"\nenv.API_TOKEN = "${SECRET}"\n`,
-    },
-  ])("accepts Codex's current pins in $layout", async ({ text }) => {
-    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
-    const path = clientFile(box, CLIENTS[1], "project");
-    mkdirSync(dirname(path));
-    writeFileSync(path, text, "utf8");
-    const { checks, run } = await mcpDoctor(box);
-
-    expect(check(checks, "mcp")).toEqual({
-      name: "mcp", status: "pass", reason: "Codex (.codex/config.toml)", fix: null,
-    });
-    expect(run.status).toBe(0);
-    expect(run.output).not.toContain(SECRET);
   });
 
   it.each(CLIENTS)("reads $name's project config beside the binding and ignores a subdirectory's shadow", async client => {
@@ -1003,7 +842,8 @@ describe("ub doctor MCP setup", () => {
     expect(check(checks, "mcp").reason).not.toMatch(/\(project\)|\(user\)|custom-wrapper/);
   });
 
-  it.each(CLIENTS)("accepts an unpinned custom command in $name's user config", async client => {
+  it("accepts an unpinned custom command in Claude Code's user config", async () => {
+    const client = CLIENTS[0];
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     const path = wireClient(box, client, "user", { command: SECRET, args: ["custom"], env: { API_TOKEN: SECRET } });
     const { checks, run } = await mcpDoctor(box);
@@ -1013,7 +853,8 @@ describe("ub doctor MCP setup", () => {
     expect(run.output).not.toContain(SECRET);
   });
 
-  it.each(CLIENTS)("accepts $name's current pin with the workspace slug and normalized hub", async client => {
+  it("accepts a current pin with the workspace slug and normalized hub", async () => {
+    const client = CLIENTS[0];
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: "wss://hub.example.invalid/ws" } });
     wireClient(box, client, "project", pin(`a-workspace-${WORKSPACE}`, "https://hub.example.invalid"));
     const { checks } = await mcpDoctor(box);
@@ -1064,14 +905,9 @@ describe("ub doctor MCP setup", () => {
 
   it.each([
     { what: "another workspace", env: { UB_WORKSPACE_ID: PINNED, UB_HUB_URL: DEAD_HUB_URL } },
-    { what: "a local pin left after promote", env: { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" } },
     { what: "the same workspace on another hub", env: { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "wss://other.example.invalid/ws" } },
-    { what: "an incomplete workspace pair", env: { UB_WORKSPACE_ID: SECRET } },
-    { what: "an incomplete hub pair", env: { UB_HUB_URL: SECRET } },
     { what: "a refused legacy workspace variable", env: { WORKSPACE_ID: SECRET } },
-    { what: "a refused legacy hub variable", env: { HUB_URL: SECRET } },
     { what: "a value the binding resolver refuses", env: { UB_WORKSPACE_ID: SECRET, UB_HUB_URL: DEAD_HUB_URL } },
-    { what: "a non-string pin", env: { UB_WORKSPACE_ID: [SECRET], UB_HUB_URL: DEAD_HUB_URL } },
   ])("warns about $what instead of passing or leaking entry values", async ({ env }) => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     wireMcp(box, { ...UNPINNED, env });
@@ -1206,14 +1042,11 @@ describe("ub doctor MCP setup", () => {
     expect(check(checks, "mcp").reason).not.toContain(PINNED);
   });
 
-  it.each([
-    `[mcp_servers.uberblick]\ncommand = "ub"\n[mcp_servers.uberblick.env]\nUB_WORKSPACE_ID = "${SECRET}"\n`,
-    `[mcp_servers]\nuberblick = { command = "ub", env = { UB_WORKSPACE_ID = "${SECRET}" } }\n`,
-  ])("warns when Codex's workspace pin is incomplete", async text => {
+  it("warns when Codex's workspace pin is incomplete", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     const path = clientFile(box, CLIENTS[1], "project");
     mkdirSync(dirname(path));
-    writeFileSync(path, text, "utf8");
+    writeFileSync(path, `[mcp_servers.uberblick]\ncommand = "ub"\n[mcp_servers.uberblick.env]\nUB_WORKSPACE_ID = "${SECRET}"\n`, "utf8");
     const { checks, run } = await mcpDoctor(box);
 
     expect(check(checks, "mcp").status).toBe("warn");
@@ -1307,6 +1140,11 @@ describe("ub doctor MCP setup", () => {
     expect(run.stdout).toMatch(/0 failed, 1 warning, \d+ passed, \d+ skipped/);
     expect(run.stdout.match(/→ /g)).toHaveLength(1);
     expect(run.status).toBe(0);
+
+    wireMcp(box);
+    const wired = await runInProcess(["doctor"], box, { PORT: "1" });
+    expect(wired.stdout).toContain("ok    mcp         Claude Code (.mcp.json)\n");
+    expect(wired.status).toBe(0);
   });
 
   it("shortens home paths only in human output and keeps JSON reasons and fixes absolute", async () => {

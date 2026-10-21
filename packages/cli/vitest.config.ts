@@ -21,7 +21,6 @@ const osSensitive = [
   "install",
   "launcher",
   "local-browser-server",
-  "mise-welcome",
   "open",
   "open-account",
   "open-ports",

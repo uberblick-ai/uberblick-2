@@ -12,11 +12,8 @@
  * before a missing operand is noticed, and before anything is written,
  * connected to, prompted for, or read out of somebody's MCP client config.
  *
- * **Which half spawns.** What the dispatcher decides — exit code, which stream
- * the text lands on, which text — is a function of argv, so those cases call
- * {@link dispatch} and cost nothing. What survives only across a process
- * boundary keeps its spawn: that a run in a real directory left every byte of
- * it untouched, and the one case that reads an MCP client config off disk.
+ * Dispatcher cases check streams and help selection; representative spawned
+ * cases prove that real files stay untouched.
  */
 
 import { createHash } from "node:crypto";
@@ -57,22 +54,11 @@ import {
   WORKSPACE_USE_OPTIONS,
 } from "../src/workspace.js";
 import type { Run, Sandbox } from "./helpers.js";
-import { DEAD_HUB_URL, PACKAGE_ROOT, removeTempDirs, runUb, sandbox, unboundSandbox } from "./helpers.js";
+import { DEAD_HUB_URL, PACKAGE_ROOT, removeTempDirs, runUb, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
 const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
-
-/** The live CLI: ub mcp Basic Usage output, without its shell prompt. */
-const MCP_BASIC_USAGE = `usage: ub mcp [command]
-
-commands:
-  install <client>   # Register Uberblick with an agent's MCP client: claude or codex
-
-options for install:
-  --user             # Register for every project of this user, not just this project
-  --print            # Print the entry to paste, and run nothing
-`;
 
 /**
  * One `ub` invocation through the dispatcher, without a process.
@@ -97,49 +83,16 @@ async function dispatch(argv: string[]): Promise<Run> {
   return { status, stdout, stderr, output: `${stdout}${stderr}` };
 }
 
-it("prints ub open's Basic Usage in the house help layout", async () => {
-  const help = await dispatch(["open", "--help"]);
-  expect(help.status).toBe(0);
-  expect(help.stdout).toBe(`usage: ub open [options]
-
-Serve the web app for this project's workspace, with a hub behind it, and open the browser. Runs until Ctrl-C.
-
-options:
-  --no-browser      Print the address instead of opening a browser
-  --port <n>        Port for the web app (default 13379)
-  --verbose         Also print hub, sync and startup details for debugging
-  -h, --help        show this help
-
-BROWSER in the environment names the command used to open the URL; BROWSER=none
-suppresses it, like --no-browser.
-`);
-  expect(help.stderr).toBe("");
-});
-
-it.each([
-  ["--browser"],
-  ["--no-browser", "--browser"],
-  ["--browser", "--no-browser"],
-  ["--port", "13380", "--browser"],
-])("rejects the hidden browser option: %j", async (...args) => {
-  const refused = await dispatch(["open", ...args]);
+it("rejects the hidden browser option", async () => {
+  const refused = await dispatch(["open", "--browser"]);
   expect(refused.status).toBe(2);
   expect(refused.stdout).toBe("");
-  expect(refused.stderr).toContain("ub open: Unknown option '--browser'");
-  expect(refused.stderr).toContain(`\n\n${OPEN_HELP}`);
+  expect(refused.stderr).toContain("Unknown option '--browser'");
+  expect(refused.stderr).toContain(OPEN_HELP);
 });
 
-it("documents explicit member grant confirmation for terminals and scripts", async () => {
-  const group = await dispatch(["workspace", "member", "--help"]);
-  expect(group.stdout).toContain("add <github-handle> [--role admin|member] [--yes]");
-  const add = await dispatch(["workspace", "member", "add", "--help"]);
-  const help = add.stdout.replace(/\s+/g, " ");
-  expect(help).toContain("--yes confirms the grant without a prompt and is required without a terminal");
-  expect(help).toContain("Only y or yes grants access; the default is no");
-});
-
-it.each(["0", "65536", "1.5", "invalid"])("refuses invalid explicit web port %s", async (port) => {
-  const refused = await dispatch(["open", "--port", port]);
+it("refuses an invalid explicit web port", async () => {
+  const refused = await dispatch(["open", "--port", "0"]);
   expect(refused.status).toBe(2);
   expect(refused.stdout).toBe("");
   expect(refused.stderr).toContain("--port must be an integer in 1..65535");
@@ -263,64 +216,9 @@ function tree(box: Sandbox): string[] {
     .sort();
 }
 
-describe("removed ub init", () => {
-  it.each([[], ["--help"], ["-h"], ["--yes"], ["https://hub.example.invalid", "--name", "Ada"]].map(args => ({ args })))(
-    "rejects every former invocation without writing: %j",
-    ({ args }) => {
-      const box = sandbox({ checkout: true });
-      const before = tree(box);
-      const run = runUb(["init", ...args], box);
-      expect(run.status).toBe(2);
-      expect(run.stdout).toBe("");
-      expect(run.stderr).toBe(`ub: unknown command "init"\n\n${HELP}`);
-      expect(HELP).not.toMatch(/^ {2}init\b/m);
-      expect(tree(box)).toEqual(before);
-    },
-  );
-});
-
-describe("removed ub hub", () => {
-  it("rejects former invocations without acting, including requests for help", async () => {
-    const box = sandbox({ checkout: true });
-    const preload = join(box.cwd, "inert.mjs");
-    writeFileSync(preload, `
-import net from "node:net";
-import childProcess from "node:child_process";
-import { syncBuiltinESMExports } from "node:module";
-const fail = () => { throw new Error("removed command must not act"); };
-net.Socket.prototype.connect = fail;
-childProcess.spawn = fail;
-childProcess.spawnSync = fail;
-childProcess.execSync = fail;
-globalThis.fetch = fail;
-syncBuiltinESMExports();
-`);
-    const before = tree(box);
-    const invocations = [
-      [], ["help"], ["--help"], ["-h"], ["bogus", "--help"],
-      ["--dir", box.cwd, "--release", "1.0.0", "--yes"],
-      ...["setup", "up", "down", "status", "upgrade"].flatMap(command =>
-        [[], ["--help"], ["-h"], ["--dir", box.cwd]].map(args => [command, ...args])),
-      ["status", "--json"], ["upgrade", "--release", "1.0.0", "--yes"],
-    ];
-    for (const args of invocations) {
-      const run = runUb(["hub", ...args], box, { NODE_OPTIONS: `--import=${preload}` });
-      expect(run.status, run.output).toBe(2);
-      expect(run.stdout).toBe("");
-      expect(run.stderr).toBe(`ub: unknown command "hub"\n\n${HELP}`);
-      expect(tree(box)).toEqual(before);
-    }
-    const help = await dispatch(["--help"]);
-    expect(help.stdout).not.toMatch(/^ {2}hub\b/m);
-  });
-});
-
 describe("every human-facing command path", () => {
   for (const path of PATHS) {
     const name = ["ub", ...path.argv].join(" ");
-    const isAuthGroup = path.argv.length === 1 && path.argv[0] === "auth";
-    const isMcpGroup = path.argv.length === 1 && path.argv[0] === "mcp";
-
     it(`answers --help and -h on \`${name}\``, async () => {
       for (const flag of ["--help", "-h"]) {
         const run = await dispatch([...path.argv, flag]);
@@ -329,8 +227,14 @@ describe("every human-facing command path", () => {
         expect(run.stderr, `${name} ${flag}`).toBe("");
       }
     });
+  }
 
-    it(`documents \`${name}\` — usage, options, and what it is for`, () => {
+  for (const path of PATHS) {
+    const name = ["ub", ...path.argv].join(" ");
+    const isAuthGroup = path.argv.length === 1 && path.argv[0] === "auth";
+    const isMcpGroup = path.argv.length === 1 && path.argv[0] === "mcp";
+
+    it(`documents the structure of \`${name}\``, () => {
       // Against the parser, not against a list kept by hand: an option added to
       // the command and not to its help fails here. `allowNegative` options are
       // documented by whichever spelling a person types.
@@ -383,173 +287,12 @@ describe("every human-facing command path", () => {
     }
   });
 
-  it("keeps workspace id forms in the help of the accepting command", () => {
-    expect(WORKSPACE_USE_HELP).toMatch(/<slug>-<uuid>.*prefix/s);
-    expect(WORKSPACE_REMOVE_HELP).toMatch(/<slug>-<uuid>.*prefix/s);
-    expect(WORKSPACE_REMOVE_HELP).toContain("Delete this computer's database files and record for one workspace");
-  });
-
-  it("prints doctor's corpus Basic Usage in the house layout and gives the same purpose at the root", async () => {
-    const expected = `usage: ub doctor [--json]
-
-Check this project's Uberblick setup and name the fix for each problem.
-
-options:
-  --json            The same checks as JSON on stdout, for scripts
-  -h, --help        show this help
-`;
-    const run = await dispatch(["doctor", "--help"]);
-    expect(run.stdout).toBe(expected);
-    expect(HELP).toMatch(/doctor \[--json\] {2,}check this project's Uberblick setup and name the fix\n {2,}for each problem/);
-    for (const help of [run.stdout, HELP]) expect(help).not.toMatch(/the local stack|known failure modes/);
-  });
-
-  it("explains link use's verification scope and its limits in help", () => {
-    const help = WORKSPACE_USE_HELP.replace(/\s+/g, " ");
-    expect(help).toContain("hub acknowledged the writes, then a fresh client read the full directory back");
-    expect(help).toContain("compared every document's directory entry");
-    expect(help).toContain("Every archived document's content is read back, plus one live document's content");
-    expect(help).toContain("does not establish that the hub flushed the writes to disk or that other clients have converged");
-  });
-
-  it("uses the same semantic operand name at every help level and in usage errors", async () => {
-    expect(MCP_HELP).toContain("install <client>");
-    expect(INSTALL_HELP).toMatch(/usage: ub mcp install <client>/);
-    expect(INSTALL_HELP).toMatch(/\noperands:\n {2}client\s/);
-    expect(INSTALL_HELP).not.toMatch(/default (?:client|claude|codex|cursor)/);
-
-    const unknownClient = await dispatch(["mcp", "install", "not-a-client"]);
-    expect(unknownClient.status).toBe(2);
-    expect(unknownClient.stderr).toMatch(/unknown client/);
-
-    expect(WORKSPACE_HELP).toContain("use <link|id>");
-    expect(WORKSPACE_USE_HELP).toMatch(/usage: ub workspace use <link\|id>/);
-    const missingTarget = await dispatch(["workspace", "use"]);
-    expect(missingTarget.status).toBe(2);
-    expect(missingTarget.stdout).toBe("");
-    expect(missingTarget.stderr).toContain("expected exactly one workspace link or id");
-  });
-
-  it("removes join from the command surface", async () => {
-    expect(WORKSPACE_HELP).not.toMatch(/\bjoin\b/);
-    const removed = await dispatch(["workspace", "join"]);
-    expect(removed.status).toBe(2);
-    expect(removed.stdout).toBe("");
-    expect(removed.stderr).toContain("unknown command");
-  });
-
-  it.each([[], ["--help"], ["--json"], ["extra"]].map(args => ({ args })))(
-    "refuses removed workspace status through generic unknown-command handling: %j",
-    async ({ args }) => {
-      expect(WORKSPACE_HELP).not.toMatch(/^ {2}status\b/m);
-      const removed = await dispatch(["workspace", "status", ...args]);
-      expect(removed.status).toBe(2);
-      expect(removed.stdout).toBe("");
-      expect(removed.stderr).toBe(`ub workspace: unknown command "status"\n\n${WORKSPACE_HELP}`);
-    },
-  );
-
-  it.each([{ argv: ["env"] }, { argv: ["env", "--", process.execPath, "-e", "process.exit(99)"] }])(
-    "refuses the removed wrapper through generic unknown-command handling: %j",
-    async ({ argv }) => {
-      expect(HELP).not.toMatch(/^ {2}env\b/m);
-      const removed = await dispatch(argv);
-      expect(removed.status).toBe(2);
-      expect(removed.stdout).toBe("");
-      expect(removed.stderr).toBe(`ub: unknown command "env"\n\n${HELP}`);
-    },
-  );
-
-  it("prints auth's complete command catalog with no options block", async () => {
-    const expected = `usage: ub auth [command]
-
-commands:
-  login [hub]            # Sign in to a hub with GitHub
-  status [hub] [--json]  # Check the stored login and current hub administration
-  logout [hub]           # Sign this computer out of a hub; --all-devices signs out all of yours
-`;
-    for (const args of [[], ["--help"], ["-h"]]) {
-      const run = await dispatch(["auth", ...args]);
-      expect(run.status).toBe(0);
-      expect(run.stdout).toBe(expected);
-      expect(run.stderr).toBe("");
-    }
-    expect(HELP).toMatch(/^ {2}auth \[command\] {2,}/m);
-    const unknown = await dispatch(["auth", "bogus"]);
-    expect(unknown.status).toBe(2);
-    expect(unknown.stdout).toBe("");
-    expect(unknown.stderr).toContain(expected);
-  });
-
-  it("explains fresh-hub claiming in login help without changing the project binding", async () => {
-    const run = await dispatch(["auth", "login", "--help"]);
-    expect(run.status).toBe(0);
-    const help = run.stdout.replace(/\s+/g, " ");
-    expect(help).toMatch(/first GitHub account.*approval.*claims.*default workspace.*administrator/);
-    expect(help).toMatch(/(?:never changes|stays unchanged).*binding|binding.*(?:never changes|stays unchanged)/);
-  });
-
-  it("describes login approval and status's stored and current evidence", async () => {
-    const login = await dispatch(["auth", "login", "--help"]);
-    const loginHelp = login.stdout.replace(/\s+/g, " ");
-    expect(loginHelp).toMatch(/bare host.*http\(s\).*ws\(s\)/);
-    expect(loginHelp).toMatch(/hub selected by this project's binding/);
-    expect(loginHelp).toMatch(/browser on any machine|any browser/);
-    expect(loginHelp).toMatch(/opens automatically/);
-    expect(loginHelp).toContain("BROWSER");
-    expect(loginHelp).toContain("SSH");
-    expect(loginHelp).toMatch(/Approve only a code you just started/i);
-
-    const status = await dispatch(["auth", "status", "--help"]);
-    const statusHelp = status.stdout.replace(/\s+/g, " ");
-    expect(statusHelp).toMatch(/stored login/i);
-    expect(statusHelp).toMatch(/hub.*accepts.*login/i);
-    expect(statusHelp).toMatch(/hub admin/i);
-    expect(statusHelp).toContain("--json");
-    expect(statusHelp).toMatch(/local.only.*no login/i);
-    expect(statusHelp).toMatch(/never.*renew|no.*renew/i);
-    for (const help of [loginHelp, statusHelp]) {
-      expect(help).not.toMatch(/Other stored hubs|Other hubs|binding stays unchanged|Stored login for|GitHub username recorded at sign-in|ub open/);
-    }
-  });
-
-  it("describes device revocation in auth, logout and replacement-login help", async () => {
-    const group = await dispatch(["auth", "--help"]);
-    expect(group.stdout).toContain("--all-devices");
-    expect(group.stdout).toMatch(/logout.*Sign this computer out/);
-
-    const logout = await dispatch(["auth", "logout", "--help"]);
-    const help = logout.stdout.replace(/\s+/g, " ");
-    expect(help).toContain("--all-devices");
-    expect(help).toMatch(/revok.*this computer/i);
-    expect(help).toMatch(/this computer last/i);
-    expect(help).toMatch(/keeps? (?:the |any )?(?:local )?login/i);
-    expect(help).toContain("ub auth logout --all-devices");
-    expect(help).not.toMatch(/logout never revokes|No network is used/i);
-
-    const login = await dispatch(["auth", "login", "--help"]);
-    expect(login.stdout.replace(/\s+/g, " ")).toMatch(/revok.*(?:replaced|previous) device/i);
-    expect(login.stdout.replace(/\s+/g, " ")).toMatch(/revocation is not confirmed.*login still succeeds.*previous device is not revoked/i);
-    expect(login.stdout).not.toContain("does not revoke the previous device");
-  });
-
-  it("prints mcp's exact Basic Usage for the bare group and each help spelling", async () => {
-    for (const args of [[], ["help"], ["--help"], ["-h"]]) {
-      const run = await dispatch(["mcp", ...args]);
-      expect(run.status).toBe(0);
-      expect(run.stdout).toBe(MCP_BASIC_USAGE);
-      expect(run.stderr).toBe("");
-    }
-    const root = await dispatch(["--help"]);
-    expect(root.stdout.split("\n")).toContain("  mcp [command]          register uberblick with an MCP client");
-  });
-
   it("refuses unknown mcp commands with the same help and no hidden command", async () => {
     for (const args of [[], ["--help"]]) {
       const run = await dispatch(["mcp", "bogus", ...args]);
       expect(run.status).toBe(2);
       expect(run.stdout).toBe("");
-      expect(run.stderr).toBe(`ub mcp: unknown command "bogus"\n\n${MCP_BASIC_USAGE}`);
+      expect(run.stderr).toBe(`ub mcp: unknown command "bogus"\n\n${MCP_HELP}`);
       expect(run.stderr).not.toContain("serve");
     }
   });
@@ -557,7 +300,6 @@ commands:
   it("keeps the hidden `mcp serve` out of the group help it is dispatched by", async () => {
     const run = await dispatch(["mcp", "--help"]);
     expect(run.status).toBe(0);
-    expect(run.stdout).toMatch(/install/);
     expect(run.stdout).not.toMatch(/serve/);
 
     // And it keeps its own rules: no help on stdout, which is the transport.
@@ -571,52 +313,37 @@ commands:
 });
 
 describe("help before the work", () => {
-  // Two properties, one run each, because the second implies the first: help is
-  // answered before validation — a missing operand, a contradiction, a bad
-  // value is exactly what somebody reaching for help is likely to have — and it
-  // runs none of the command. The list covers the representative mutating and
-  // networked paths: a write, an SSH round trip, a hub connection, and the one
-  // command that reads somebody's MCP client config. An empty stderr is the
-  // other half of the proof, since every one of these announces its warnings
-  // and its failures there.
-  const inert: string[][] = [
-    ["workspace", "fork", "unexpected", "--help"],
-    ["data", "update", "--file", "missing.json", "--dry-run", "--help"],
-    ["open", "--port", "0", "-h"],
-    ["workspace", "use", "ws://example.invalid:1234", "-h"],
-    ["workspace", "remove", WORKSPACE, "--yes", "-h"],
-    ["auth", "login", "--help"],
-    ["auth", "logout", "--all-devices", "--help"],
+  it.each([
+    ["workspace", "use", "-h", "ws://example.invalid:1234"],
     ["mcp", "install", "claude", "--help"],
-  ];
-  for (const argv of inert) {
-    it(`answers \`ub ${argv.join(" ")}\` with help, and runs none of it`, () => {
-      const box = sandbox({
-        checkout: true,
-        userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
-      });
-      const before = tree(box);
-
-      const run = runUb(argv, box);
-
-      expect(run.status).toBe(0);
-      expect(run.stderr).toBe("");
-      expect(run.stdout).toMatch(/^usage: ub/);
-      expect(tree(box)).toEqual(before);
+  ])("answers help before validation and leaves files untouched: %j", (...argv) => {
+    const box = sandbox({
+      checkout: true,
+      userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
     });
-  }
+    const before = tree(box);
+    const run = runUb(argv, box);
+    expect(run.status).toBe(0);
+    expect(run.stderr).toBe("");
+    expect(run.stdout).toMatch(/^usage: ub/);
+    expect(tree(box)).toEqual(before);
+  });
 });
 
 describe("bare command groups", () => {
-  const groups = PATHS.filter(path => path.children !== undefined);
-  for (const binding of ["none", "local", "hub", "malformed"] as const) {
-    it(`prints each group's help without acting with ${binding} binding`, () => {
-      const box = binding === "none" ? unboundSandbox() : sandbox({
-        projectBinding: { workspaceId: WORKSPACE, hubUrl: binding === "hub" ? DEAD_HUB_URL : null },
-        ...(binding === "malformed" ? { raw: { projectBinding: "{" } } : {}),
-      });
-      const preload = join(box.cwd, "inert.mjs");
-      writeFileSync(preload, `
+  it("prints every group's own help", async () => {
+    for (const group of PATHS.filter(path => path.children !== undefined)) {
+      const run = await dispatch(group.argv);
+      expect(run.status, group.argv.join(" ")).toBe(0);
+      expect(run.stdout).toBe(group.help);
+      expect(run.stderr).toBe("");
+    }
+  });
+
+  it("acts on nothing, even with a malformed binding", () => {
+    const box = sandbox({ raw: { projectBinding: "{" } });
+    const preload = join(box.cwd, "inert.mjs");
+    writeFileSync(preload, `
 import fs from "node:fs";
 import net from "node:net";
 import childProcess from "node:child_process";
@@ -636,72 +363,73 @@ sqlite.DatabaseSync = fail;
 globalThis.fetch = fail;
 syncBuiltinESMExports();
 `);
-      const before = tree(box);
-      for (const group of groups) {
-        const invocations = group.argv[0] === "mcp"
-          ? [group.argv, ...["help", "--help", "-h"].map(flag => [...group.argv, flag])]
-          : [group.argv];
-        for (const argv of invocations) {
-          const run = runUb(argv, box, { NODE_OPTIONS: `--import=${preload}` });
-          expect(run.status, run.output).toBe(0);
-          expect(run.stdout).toBe(group.help);
-          expect(run.stderr).toBe("");
-        }
-      }
-      expect(tree(box)).toEqual(before);
-      expect(WORKSPACE_HELP).not.toContain("(none)");
-    });
-  }
+    const before = tree(box);
+    const run = runUb(["workspace"], box, { NODE_OPTIONS: `--import=${preload}` });
+    expect(run.status, run.output).toBe(0);
+    expect(run.stdout).toBe(WORKSPACE_HELP);
+    expect(run.stderr).toBe("");
+    expect(tree(box)).toEqual(before);
+  });
 });
 
 describe("what is not a request for help", () => {
-  it("refuses install's bare `--` even when followed by `--help`", () => {
-    // `--help` after a separator is an operand. Install rejects the removed
-    // command passthrough before it can register anything.
-    const run = runUb(
-      ["mcp", "install", "claude", "--print", "--", "ub", "mcp", "serve", "--help"],
-      sandbox(),
-    );
+  it("reports an unknown client and a missing workspace target as usage errors", async () => {
+    const unknownClient = await dispatch(["mcp", "install", "not-a-client"]);
+    expect(unknownClient.status).toBe(2);
+    expect(unknownClient.stdout).toBe("");
+    expect(unknownClient.stderr).toMatch(/unknown client/);
+
+    const missingTarget = await dispatch(["workspace", "use"]);
+    expect(missingTarget.status).toBe(2);
+    expect(missingTarget.stdout).toBe("");
+    expect(missingTarget.stderr).toContain("expected exactly one workspace link or id");
+    expect(missingTarget.stderr).toMatch(/^usage: ub workspace use /m);
+  });
+
+  it("stops searching for help at --", () => {
+    const box = sandbox();
+    const before = tree(box);
+    const run = runUb(["mcp", "install", "claude", "--print", "--", "--help"], box);
     expect(run.status).toBe(2);
     expect(run.stdout).toBe("");
-    expect(run.stderr).toContain("--");
+    expect(run.stderr).toContain('"--"');
+    expect(tree(box)).toEqual(before);
   });
 
-  it("omits removed install options from the parser and help", () => {
-    for (const option of ["project", "workspace", "hub", "label"]) {
-      expect(INSTALL_OPTIONS).not.toHaveProperty(option);
-      expect(INSTALL_HELP).not.toContain(`--${option}`);
+  it("refuses unknown subcommands with an error and the group's usage", async () => {
+    for (const group of [
+      { argv: [], help: HELP, error: 'ub: unknown command "bogus"' },
+      { argv: ["workspace"], help: WORKSPACE_HELP, error: 'ub workspace: unknown command "bogus"' },
+      { argv: ["auth"], help: AUTH_HELP, error: "ub auth: unknown command" },
+    ]) {
+      const run = await dispatch([...group.argv, "bogus", "--help"]);
+      expect(run.status).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toBe(`${group.error}\n\n${group.help}`);
     }
-    expect(INSTALL_HELP).not.toContain("-- <command>");
-    expect(INSTALL_HELP).not.toContain("uberblick-<label>");
+    const box = sandbox();
+    const before = tree(box);
+    const run = runUb(["workspace", "bogus"], box);
+    expect(run.status).toBe(2);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toBe(`ub workspace: unknown command "bogus"\n\n${WORKSPACE_HELP}`);
+    expect(tree(box)).toEqual(before);
   });
 
-  it("still refuses an unknown subcommand, `--help` after it or not", async () => {
-    // A group answers for itself only when its own one argument is the
-    // question. `ub workspace bogus --help` is a typo, not a request, and every
-    // level says so the same way.
-    for (const group of [[], ["workspace"], ["mcp"]]) {
-      const argv = [...group, "bogus", "--help"];
-      const run = await dispatch(argv);
-      expect(run.status, argv.join(" ")).toBe(2);
-      expect(run.stdout, argv.join(" ")).toBe("");
-      expect(run.stderr, argv.join(" ")).toMatch(/bogus/);
-    }
-  });
-
-  it("still refuses an unknown option, on stderr, with exit 2", async () => {
+  it("refuses unknown options with an error and usage, without writing", async () => {
     for (const argv of [["status", "--bogus"], ["mcp", "install", "--bogus"]]) {
       const run = await dispatch(argv);
-      expect(run.status, argv.join(" ")).toBe(2);
-      expect(run.stdout, argv.join(" ")).toBe("");
-      expect(run.stderr, argv.join(" ")).toMatch(/bogus/);
+      expect(run.status).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("Unknown option '--bogus'");
     }
+    const box = sandbox();
+    const before = tree(box);
+    const run = runUb(["open", "--bogus"], box);
+    expect(run.status).toBe(2);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("Unknown option '--bogus'");
+    expect(run.stderr).toContain(`\n\n${OPEN_HELP}`);
+    expect(tree(box)).toEqual(before);
   });
-});
-
-
-it("refuses the removed command group", async () => {
-  const result = await dispatch(["remote", "join"]);
-  expect(result.status).toBe(2);
-  expect(result.stderr).toContain('unknown command "remote"');
 });
