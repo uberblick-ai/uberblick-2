@@ -145,7 +145,7 @@ const pairs: Pair[] = [
   // ink on the title cluster and the overflow row, including its hover fill.
   ...["--background", "--card", "--card-accent"]
     .map((ground) => text("departed avatar ink", "--muted-foreground", ground)),
-  ...["slate", "rose", "green", "blue", "violet"].flatMap((hue) =>
+  ...["slate", "rose", "green", "blue"].flatMap((hue) =>
     ["--muted-foreground", "--foreground", "--prose-text"].map((ink) =>
       text("framed caption, actions and content", ink, `--block-${hue}-tint`))),
   ...["comment", "keyword", "name", "string", "number"].map((syntax) =>

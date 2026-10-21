@@ -12,17 +12,17 @@ export interface HubAdministration {
   request: (action: AccessAction, signal: AbortSignal) => Promise<AccessAnswer>;
 }
 
-function boundWorkspace(serving: LocalServing | null): string | null {
-  if (serving?.workspace === null || serving?.workspace === undefined ||
-    serving.remoteHubUrl === null || serving.rebound) return null;
-  try { return parseWorkspaceId(serving.workspace).uuid; }
-  catch { return null; }
+/** An absent, invalid or rebound binding serves no workspace, so it grants no settings authority. */
+export function servesWorkspace(serving: LocalServing | null, workspace: string | null): boolean {
+  if (workspace === null || serving?.workspace == null || serving.rebound) return false;
+  try { return parseWorkspaceId(serving.workspace).uuid === workspace; }
+  catch { return false; }
 }
 
 /** Independent live readings share lifecycle mechanics, never permission results. */
 export function useAccessReading(workspace: string | null, serving: LocalServing | null,
   subject: string, path: string, operation: "own-hub-role" | "own-role" | "list-devices", account: string | null = null): HubAdministration {
-  const available = workspace !== null && boundWorkspace(serving) === workspace;
+  const available = serving?.remoteHubUrl != null && servesWorkspace(serving, workspace);
   const binding = serving?.remoteHubUrl;
   const client = useMemo(() => available && workspace !== null
     ? { send: createWorkspaceAccessClient(workspace, subject), binding, account } : null, [available, binding, subject, workspace, account]);
