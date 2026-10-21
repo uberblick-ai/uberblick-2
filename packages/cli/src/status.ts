@@ -9,15 +9,16 @@ import { collectSyncStatus, formatHubFailure, openWorkspaceReplicas, readStoredS
 import type { McpConfig, SyncStatus, WorkspaceReplicaSet } from "@uberblick/mcp-server";
 import { displayUsername } from "./auth.js";
 import { resolveMcpConfig } from "./budget.js";
-import type { Origin } from "./config.js";
-import { resolveConfig } from "./config.js";
+import type { Origin } from "@uberblick/mcp-server/project-config";
+import { resolveConfig } from "@uberblick/mcp-server/project-config";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
-import { NO_BINDING, type ProjectBinding } from "./project-binding.js";
+import { field, plural, timeAgo } from "./strings.js";
+import { NO_BINDING, type ProjectBinding } from "@uberblick/mcp-server/project-binding";
 import { cliVersion } from "./version.js";
 import { recentDevicesNotice, requestRecentDevices, type RecentDevice } from "./recent-devices.js";
-import { ensureWorkspaceBinding, WorkspaceBindingMismatch } from "./workspace-registry.js";
+import { ensureWorkspaceBinding, WorkspaceBindingMismatch } from "@uberblick/mcp-server/workspace-registry";
 
 /** What `ub status` text and `--json` are rendered from. */
 export interface StatusReport {
@@ -42,14 +43,6 @@ export interface StatusReport {
   lastSync: SyncStatus["lastSync"];
   persistence: SyncStatus["persistence"];
 }
-
-/** How an origin reads in the human output. Shared with `ub workspace`. */
-export const ORIGIN_LABELS: Record<Origin, string> = {
-  environment: "environment",
-  "user config": "user config",
-  "project config": "project config",
-  default: "built-in default",
-};
 
 /** Use MCP's replica set and diagnostic snapshot; always release the replica. */
 export async function readSyncStatus(
@@ -132,28 +125,6 @@ export async function statusReport(
       persistence: sync.persistence,
     },
   };
-}
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
-}
-
-function field(name: string, value: string): string {
-  return `${name.padEnd(12)}${value}\n`;
-}
-
-function lastSyncAge(lastSync: string | null): string {
-  if (lastSync === null) return "never";
-  const seconds = Math.floor((Date.now() - Date.parse(lastSync)) / 1_000);
-  if (seconds < 5) return "just now";
-  for (const [unit, duration] of [
-    ["day", 86_400],
-    ["hour", 3_600],
-    ["minute", 60],
-  ] as const) {
-    if (seconds >= duration) return `${plural(Math.floor(seconds / duration), unit)} ago`;
-  }
-  return `${plural(seconds, "second")} ago`;
 }
 
 /** The public `ub status --json` contract. */
@@ -327,7 +298,7 @@ export function renderStatus(
     text += field("connection", connectionText(report));
     text += field("pending", short.pending.count === 0
       ? "none" : `${plural(short.pending.count, "change")} not yet on the hub`);
-    text += field("last sync", lastSyncAge(short.lastSync));
+    text += field("last sync", short.lastSync === null ? "never" : timeAgo(short.lastSync));
     if (short.hub !== null) text += recentDevicesNotice(recentDevices, short.hub);
   }
   if (short.problems.length === 0) return text + field("problems", "none");

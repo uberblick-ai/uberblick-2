@@ -29,7 +29,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inject } from "vitest";
 import { waitUntil as waitForCondition } from "../../mcp-server/test/lifecycle.js";
-import { findProjectConfig } from "../src/project-binding.js";
+import { findProjectConfig } from "@uberblick/mcp-server/project-binding";
 
 declare module "vitest" {
   export interface ProvidedContext {

@@ -25,6 +25,8 @@ import {
 import {
   isDocDeletedReason,
   readProtocolMismatch,
+  SETTINGS_RESET_REASON,
+  STORE_REFUSED_REASON,
   SYNC_PROTOCOL_VERSION,
   wrapToken,
 } from "@uberblick/schema/protocol";
@@ -96,9 +98,6 @@ const deletedRooms = new Set<string>();
 let lastForcedDrop = 0;
 /** Retain the last drop's window; use the band's maximum before any drop. */
 let forcedDropWindowMs: number = FORCED_DROP_COOLDOWN.maxMs;
-
-/** Store-busy remains retryable through ordinary reconnect backoff. */
-const STORE_REFUSED_REASON = "uberblick:store-refused";
 
 /** A drop asked for during the cooldown, waiting for the window to end. */
 let pendingDrop: ReturnType<typeof setTimeout> | null = null;
@@ -556,7 +555,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     // echo (navigation/remount) and must not churn the shared socket.
     const reason = event?.event?.reason;
     if (reason === "provider_initiated") return;
-    if (reason === "uberblick:settings-reset" && parsed.uuid === SETTINGS_SUFFIX) {
+    if (reason === SETTINGS_RESET_REASON && parsed.uuid === SETTINGS_SUFFIX) {
       replaceSettingsRoom(room, identity, connection);
       return;
     }
@@ -571,6 +570,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     }
     if (status.deleted) return;
     status.hasAnswered = true;
+    // Store-busy remains retryable through ordinary reconnect backoff.
     if (reason === STORE_REFUSED_REASON) {
       storeRefusedRooms.add(room);
       status.storeRefused = true;

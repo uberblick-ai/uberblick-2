@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { writeHubAdmission } from "../src/config.js";
+import { writeHubAdmission } from "@uberblick/mcp-server/project-config";
 import {
   OTHER_WORKSPACE, USERNAME, WORKSPACE, assertPublicOnly, cleanUp, credentialPath,
   privateDeviceRows, rig, savedLogin, seedLogin,

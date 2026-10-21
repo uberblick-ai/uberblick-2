@@ -4,7 +4,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { manageRequest } from "../src/access-management.js";
+import { manageRequest } from "@uberblick/mcp-server/management-client";
 import {
   cleanUp, credentialPath, fixture, rig, savedLogin, serve,
 } from "./auth-fixtures.js";

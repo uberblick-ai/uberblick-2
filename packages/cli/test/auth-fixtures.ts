@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { hostname } from "node:os";
-import { writeHubLogin } from "../src/auth-store.js";
+import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { DatabaseSync } from "node:sqlite";
 import { createTeamHub as createHub, type TeamHub as Hub } from "@uberblick/hub/team";
 import { issueCredential } from "@uberblick/hub/test-device-credentials";

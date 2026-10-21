@@ -18,7 +18,7 @@ import {
   acquireInitLock,
   LockWaitTimeoutError,
   tryAcquireInitLock,
-} from "../src/init-lock.js";
+} from "@uberblick/mcp-server/init-lock";
 import { removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);

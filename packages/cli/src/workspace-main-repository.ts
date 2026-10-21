@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fillWorkspaceMainRepository } from "@uberblick/mcp-server";
-import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
+import { readDeviceLogin, sameCredential } from "@uberblick/mcp-server/device-login";
 import { manageRequest, sanitizeManagementReply } from "@uberblick/mcp-server/management-client";
 import { githubRepository, parseWorkspaceId } from "@uberblick/schema";
 
@@ -43,6 +43,5 @@ async function confirmedWorkspaceAdmin(workspaceId: string, hubUrl: string): Pro
   }));
   if (reply.status !== 200 || reply.body.status !== "ok" || reply.body.role !== "admin") return false;
   const latest = readDeviceLogin(hubUrl, workspaceId);
-  return latest.status === "ready" && latest.login.credential.record.id === current.login.credential.record.id &&
-    latest.login.credential.key === current.login.credential.key;
+  return latest.status === "ready" && sameCredential(latest.login, current.login);
 }

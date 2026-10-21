@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { workspaceRegistryPath } from "../src/workspace-registry.js";
+import { workspaceRegistryPath } from "@uberblick/mcp-server/workspace-registry";
 import { cleanUp, credentialPath, fixture, readStore, rig, WORKSPACE } from "./auth-fixtures.js";
 import { removeTempDirs, sandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";

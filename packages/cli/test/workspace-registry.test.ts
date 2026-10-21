@@ -3,9 +3,9 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { publishOwnerOnly } from "@uberblick/mcp-server/safe-write";
-import { acquireInitLock } from "../src/init-lock.js";
-import { writeProjectBinding } from "../src/project-binding.js";
-import { assertWorkspaceBinding, readWorkspaceHub, ensureWorkspaceBinding, workspaceRegistryPath } from "../src/workspace-registry.js";
+import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
+import { writeProjectBinding } from "@uberblick/mcp-server/project-binding";
+import { assertWorkspaceBinding, readWorkspaceHub, ensureWorkspaceBinding, workspaceRegistryPath } from "@uberblick/mcp-server/workspace-registry";
 import { removeTempDirs, sandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 

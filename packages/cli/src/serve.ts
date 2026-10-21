@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runChild } from "./child.js";
-import { resolveConfig, requireBinding } from "./config.js";
-import { isInstallPayload } from "./installation.js";
-import { ensureWorkspaceBinding } from "./workspace-registry.js";
+import { resolveConfig, requireBinding } from "@uberblick/mcp-server/project-config";
+import { isInstallPayload } from "./version.js";
+import { ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 
 /**
  * Resolve the source loader from this package, not the caller's directory.

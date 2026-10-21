@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterAll, describe, expect, it } from "vitest";
-import { readWorkspaceHub, ensureWorkspaceBinding } from "../src/workspace-registry.js";
+import { readWorkspaceHub, ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 import { DEAD_HUB_URL, UB_BIN, WAIT_TIMEOUT_MS, removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
 import type { Sandbox } from "./helpers.js";
 

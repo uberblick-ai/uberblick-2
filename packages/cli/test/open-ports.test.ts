@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { localBrowserKey } from "../src/browser-key.js";
 import { whoHoldsPort } from "../src/open.js";
-import { probeHub, probePort } from "../src/probes.js";
+import { probeHubState, probePort } from "../src/probes.js";
 import { pointAt, waitUntil } from "./helpers.js";
 import {
   BANNER,
@@ -63,8 +63,8 @@ describe("ub open: hub, ports and serving role", () => {
         "Ctrl-C to stop.\n",
       );
       expect(app.stdout() + app.stderr()).not.toContain(secret);
-      expect(await probeHub(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE,
-        HUB_AUTH_TOKEN: secret, UBERBLICK_DB: join(box.cwd, "generated-secret-probe.sqlite") }), hubUrl)).toBe("connected");
+      expect((await probeHubState(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE,
+        HUB_AUTH_TOKEN: secret, UBERBLICK_DB: join(box.cwd, "generated-secret-probe.sqlite") }), hubUrl)).status).toBe("connected");
       const status = async () => await (await fetch(`${app.url}api/status`, {
         headers: bearer(await authMessage(localBrowserKey(WORKSPACE, box.env))),
       })).json() as { caughtUp: boolean };

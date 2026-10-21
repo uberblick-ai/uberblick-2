@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { localBrowserKey } from "../src/browser-key.js";
 import { probePort } from "../src/probes.js";
-import { readWorkspaceHub, ensureWorkspaceBinding } from "../src/workspace-registry.js";
+import { readWorkspaceHub, ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 import { pointAt, runUbAsync, waitUntil, type Sandbox } from "./helpers.js";
 import { authMessage, bearer, cleanUp, configured, FIRST_REMOTE, freePort, get, hubs, open, openFails,
   openStore, SECRET, WORKSPACE, type Running } from "./open-fixtures.js";

@@ -21,8 +21,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { acquireInitLock } from "../src/init-lock.js";
-import { rememberWorkspaceBindings } from "../src/workspace-registry.js";
+import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
+import { rememberWorkspaceBindings } from "@uberblick/mcp-server/workspace-registry";
 import {
   REPO_ROOT,
   freePort,

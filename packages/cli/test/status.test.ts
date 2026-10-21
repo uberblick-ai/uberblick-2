@@ -16,7 +16,7 @@ import { readSyncStatus, renderStatus, shortStatusReport } from "../src/status.j
 import { fixture } from "./auth-fixtures.js";
 import { runUb, DEAD_HUB_URL, removeTempDirs, sandbox, unboundSandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
-import { ensureWorkspaceBinding } from "../src/workspace-registry.js";
+import { ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 import { cliVersion } from "../src/version.js";
 
 afterAll(removeTempDirs);

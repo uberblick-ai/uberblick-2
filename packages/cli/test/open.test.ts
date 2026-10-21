@@ -29,9 +29,9 @@ import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it } from "vitest";
 import { localBrowserKey } from "../src/browser-key.js";
-import { acquireInitLock } from "../src/init-lock.js";
+import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
 import { probePort } from "../src/probes.js";
-import { readWorkspaceHub, ensureWorkspaceBinding } from "../src/workspace-registry.js";
+import { readWorkspaceHub, ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 import { UB_BIN, pointAt, runUbAsync, sandbox, unboundSandbox, sleep } from "./helpers.js";
 import {
   BANNER,

@@ -13,7 +13,7 @@ import { appendBlock, createAnnotation, createTagCatalogEntry, deleteDirectoryEn
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UB_BIN, removeTempDirs, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
-import { readWorkspaceHub } from "../src/workspace-registry.js";
+import { readWorkspaceHub } from "@uberblick/mcp-server/workspace-registry";
 
 const hubs: Hub[] = [];
 afterEach(async () => {

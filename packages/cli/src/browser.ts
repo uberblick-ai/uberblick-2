@@ -1,10 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Io } from "./io.js";
-import { trimmed } from "./strings.js";
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+import { errorMessage, trimmed } from "./strings.js";
 
 export function browserCommand(
   url: string,
@@ -20,9 +16,6 @@ export function browserCommand(
   if (process.platform === "darwin") {
     return { command: "open", args: [url] };
   }
-  if (process.platform === "win32") {
-    return { command: "cmd", args: ["/c", "start", "", url] };
-  }
   return { command: "xdg-open", args: [url] };
 }
 
@@ -37,7 +30,7 @@ export function openBrowser(url: string, env: NodeJS.ProcessEnv, io: Io): void {
     detached: true,
   });
   child.on("error", (error) => {
-    io.err(`ub: warning: could not open a browser (${message(error)})\n`);
+    io.err(`ub: warning: could not open a browser (${errorMessage(error)})\n`);
   });
   child.unref();
 }

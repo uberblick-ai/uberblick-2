@@ -16,15 +16,16 @@ import type { McpConfig } from "@uberblick/mcp-server";
 import { formatHubFailure, inspectExistingStore, readWorkspaceName } from "@uberblick/mcp-server";
 import { displayUsername } from "./auth.js";
 import { resolveMcpConfig } from "./budget.js";
-import type { ResolvedConfig } from "./config.js";
-import { readCredentials, resolveConfig } from "./config.js";
+import type { ResolvedConfig } from "@uberblick/mcp-server/project-config";
+import { readCredentials, resolveConfig } from "@uberblick/mcp-server/project-config";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
+import { errorMessage } from "./strings.js";
 import type { DoctorEntry, TargetFile, TargetName } from "./mcp-config.js";
 import { TARGETS, claudeDoctorEntries, doctorEntry, targetFile } from "./mcp-config.js";
 import { DEFAULT_WEB_PORT, WEB_HOST, whoHoldsPort, whyNotStartable } from "./open.js";
-import { findProjectConfig, resolveProjectBinding } from "./project-binding.js";
+import { findProjectConfig, resolveProjectBinding } from "@uberblick/mcp-server/project-binding";
 import type { Endpoint, HubProbe } from "./probes.js";
 import {
   endpointOf,
@@ -55,10 +56,6 @@ export interface DoctorReport {
   checks: Check[];
 }
 
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function pass(name: string, reason: string): Check {
   return { name, status: "pass", reason, fix: null };
 }
@@ -79,7 +76,7 @@ const WORKSPACE_REMEDY = "ub workspace create <name>, or ub workspace use <link|
 
 /** Resolver errors remain shared; doctor separates a short refusal from its fix. */
 function bindingRefusal(error: unknown, env: NodeJS.ProcessEnv, cwd: string): string {
-  const reason = message(error).replaceAll("`", "");
+  const reason = errorMessage(error).replaceAll("`", "");
   if (env.UB_WORKSPACE_ID !== undefined || env.UB_HUB_URL !== undefined) {
     if (!env.UB_WORKSPACE_ID?.trim()) return "UB_WORKSPACE_ID must not be empty; UB_HUB_URL requires UB_WORKSPACE_ID";
     try { parseWorkspaceId(env.UB_WORKSPACE_ID); }
@@ -197,7 +194,7 @@ function databaseCheck(config: McpConfig | null): DatabaseCheckResult {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       return unread(fail(
         "database",
-        `${path}: cannot inspect the store (${message(error)})`,
+        `${path}: cannot inspect the store (${errorMessage(error)})`,
         "restore access to this workspace's database",
       ));
     }
@@ -230,7 +227,7 @@ function databaseCheck(config: McpConfig | null): DatabaseCheckResult {
   } catch (error) {
     check = fail(
       "database",
-      `${path}: could not read the store (${message(error)})`,
+      `${path}: could not read the store (${errorMessage(error)})`,
       "restore access to a valid database for this workspace",
     );
   }
@@ -709,7 +706,7 @@ export async function doctorCommand(
         allowPositionals: false,
       }).values.json === true;
   } catch (error) {
-    io.err(`ub doctor: ${message(error)}\n`);
+    io.err(`ub doctor: ${errorMessage(error)}\n`);
     return 2;
   }
 

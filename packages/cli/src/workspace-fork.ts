@@ -4,11 +4,11 @@ import { parseArgs } from "node:util";
 import { defaultWorkspaceDatabasePath, readWorkspaceFork, writeWorkspaceFork } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { takeHelp } from "./help.js";
-import { acquireInitLock } from "./init-lock.js";
+import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
 import { type Io, shellArgument } from "./io.js";
-import { NO_BINDING, resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
+import { NO_BINDING, resolveProjectBinding, writeProjectBinding } from "@uberblick/mcp-server/project-binding";
 import { reportEnvironmentBinding } from "./workspace-create.js";
-import { readWorkspaceHub, withWorkspaceBindings } from "./workspace-registry.js";
+import { readWorkspaceHub, withWorkspaceBindings } from "@uberblick/mcp-server/workspace-registry";
 import { useField, workspaceLabel } from "./workspace-use-output.js";
 
 export const WORKSPACE_FORK_HELP = `usage: ub workspace fork
