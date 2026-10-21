@@ -74,6 +74,7 @@ probes.push(await call("timeseries-hourly-7d", nrql(`SELECT ${fields} FROM ${eve
 probes.push(await call("timeseries-daily-30d", nrql(`SELECT ${fields} FROM ${eventType} TIMESERIES 1 day SINCE 30 days ago`)));
 probes.push(await call("facet-top10-1d", nrql(`SELECT count(*) FROM ${eventType} FACET appName SINCE 1 day ago LIMIT 10`)));
 probes.push(await call("timeseries-facet", nrql(`SELECT count(*) FROM ${eventType} FACET appName TIMESERIES 1 hour SINCE 1 day ago LIMIT 5`)));
+probes.push(await call("endpoint-p95-7d", nrql(`SELECT percentile(duration, 95) AS p95 FROM ${eventType} FACET name TIMESERIES 1 hour SINCE 7 days ago LIMIT 5`)));
 probes.push(await call("timeseries-max-buckets", nrql(`SELECT count(*) FROM ${eventType} TIMESERIES 5 minutes SINCE 7 days ago`)));
 probes.push(await call("bad-syntax", nrql(`SELEC count(*) FROM ${eventType}`)));
 probes.push(await call("injection-attempt", nrql(`SELECT count(*) FROM ${eventType}") { results } } } mutation { x`)));
