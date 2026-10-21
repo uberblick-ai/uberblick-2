@@ -1,4 +1,4 @@
-/** Row moves use native input while shared table changes arrive. */
+/** Row and column moves use native input while shared table changes arrive. */
 import { expect, test } from "@playwright/test";
 import type { Browser, CDPSession, Locator, Page, TestInfo } from "@playwright/test";
 import { randomUUID } from "node:crypto";
@@ -283,6 +283,64 @@ test.fixme("Move entries keep the caret in the moved row and typing in separate 
     await activateControl(handle(page, 0), { touch: info.project.use.hasTouch === true });
     await expect(page.getByRole("menuitem", { name: "Move row up", exact: true })).toBeDisabled();
     await expect(page.getByRole("menuitem", { name: "Move row down", exact: true })).toBeDisabled();
+  } finally { fixture.close(); }
+});
+
+test("a column pill drags its column to another gap, keeps the caret there and undoes", { tag: "@webkit" }, async ({ page }, info) => {
+  test.skip(info.project.use.hasTouch === true, "Mouse pickup requires a pointer device");
+  const source = "| A | B | C |\n| --- | --- | --- |\n| a1 | b1 | c1 |\n| a2 | b2 | c2 |";
+  const fixture = await publishTable(source);
+  try {
+    const table = await openTable(page, fixture.uuid, 3);
+    const columnIndicator = page.locator(".ub-table-column-drop");
+    const pickUp = async (column: number): Promise<void> => {
+      await table.locator("th").nth(column).hover();
+      const pill = page.getByRole("button", { name: `Column ${column + 1} actions`, exact: true });
+      await pill.hover();
+      const bounds = await box(pill);
+      const x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height / 2;
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x, y + 8);
+      await expect(columnIndicator).toHaveCount(1);
+    };
+    const overColumn = async (column: number, fraction: number): Promise<void> => {
+      const cell = await box(table.locator("th").nth(column));
+      await page.mouse.move(cell.x + cell.width * fraction, cell.y + cell.height * 2, { steps: 8 });
+    };
+
+    await pickUp(0);
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await overColumn(2, 0.75);
+    await expect(columnIndicator).toHaveAttribute("data-gap", "3");
+    await expect(table.locator("th")).toHaveText(["A", "B", "C"]);
+    await page.mouse.up();
+    await expect(columnIndicator).toHaveCount(0);
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(table.locator("th")).toHaveText(["B", "C", "A"]);
+    await expect(table.locator("tr").nth(2).locator("td")).toHaveText(["b2", "c2", "a2"]);
+    await expect.poll(() => getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text)
+      .toBe("| B | C | A |\n| --- | --- | --- |\n| b1 | c1 | a1 |\n| b2 | c2 | a2 |");
+    await expect(editor(page)).toBeFocused();
+    await expect.poll(() => table.locator("th").nth(2).evaluate((cell) => cell.contains(document.getSelection()?.anchorNode ?? null))).toBe(true);
+    await page.keyboard.press("ControlOrMeta+z");
+    await expect(table.locator("th")).toHaveText(["A", "B", "C"]);
+
+    // Its own gaps and Escape leave the table as it was.
+    await pickUp(1);
+    await overColumn(1, 0.25);
+    await expect(columnIndicator).toHaveAttribute("data-gap", "1");
+    await page.mouse.up();
+    await expect(table.locator("th")).toHaveText(["A", "B", "C"]);
+    await pickUp(1);
+    await overColumn(0, 0.25);
+    await expect(columnIndicator).toHaveAttribute("data-gap", "0");
+    await page.keyboard.press("Escape");
+    await expect(columnIndicator).toHaveCount(0);
+    await page.mouse.up();
+    await expect(table.locator("th")).toHaveText(["A", "B", "C"]);
+    await proveBrowserArrival(page, { path: "upstream", readTags: () => getMeta(fixture.doc).tags });
+    expect(getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text).toBe(source);
   } finally { fixture.close(); }
 });
 

@@ -89,13 +89,24 @@ export function deleteTableColumn(editor: Editor, target: TableColumnTarget): bo
   return true;
 }
 
-/** Clone only the chosen cells so identical neighbours keep their identities. */
+/** Move one column step left or right. */
 export function moveTableColumn(editor: Editor, target: TableColumnTarget, direction: -1 | 1): boolean {
   const live = resolveTableColumn(editor, target);
+  if (live === null || (direction !== -1 && direction !== 1)) return false;
+  return moveTableColumnToGap(editor, target, live.columnIndex + (direction === -1 ? -1 : 2));
+}
+
+/**
+ * Clone only the chosen cells so identical neighbours keep their identities.
+ * Gaps range from before the first column to after the last.
+ */
+export function moveTableColumnToGap(editor: Editor, target: TableColumnTarget, gap: number): boolean {
+  const live = resolveTableColumn(editor, target);
   const doc = target.table.doc;
-  if (live === null || doc === null || (direction !== -1 && direction !== 1)) return false;
-  const destination = live.columnIndex + direction;
-  if (destination < 0 || destination >= live.node.child(0).childCount) return false;
+  if (live === null || doc === null || !Number.isInteger(gap) || gap < 0 || gap > live.node.child(0).childCount) return false;
+  // Both gaps bordering the source have the same order after removing it.
+  if (gap === live.columnIndex || gap === live.columnIndex + 1) return false;
+  const destination = gap > live.columnIndex ? gap - 1 : gap;
   const rows = target.table.toArray() as Y.XmlElement[];
   const copies = rows.map((row) => ({ row, cell: (row.get(live.columnIndex) as Y.XmlElement).clone() }));
   const header = copies[0];

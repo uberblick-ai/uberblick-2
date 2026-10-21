@@ -148,6 +148,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await activateControl(dialog(page).getByRole("menuitem", { name: "Move column right", exact: true }), { touch });
     await expect(table.locator("th")).toHaveText(["Value", "Name"]);
     await expect(dialog(page)).toBeVisible();
+    if (!touch) await table.locator("th").nth(1).hover();
     await activateControl(dialog(page).getByRole("button", { name: "Column 2 actions", exact: true }), { touch });
     await page.keyboard.press("Escape");
     await expect(dialog(page).getByRole("menu")).toHaveCount(0);
