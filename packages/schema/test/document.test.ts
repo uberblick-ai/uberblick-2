@@ -2,9 +2,6 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import type { Block } from "../src/index.js";
 import {
-  ANNOTATIONS_KEY,
-  BLOCKS_KEY,
-  META_KEY,
   BlockNotFoundError,
   InvalidDocumentLifecycleError,
   addComment,
@@ -15,7 +12,6 @@ import {
   createAnnotation,
   deleteBlock,
   getBlock,
-  getBlockText,
   getBlocks,
   getMeta,
   getMetaMap,
@@ -23,8 +19,6 @@ import {
   insertBlock,
   listAnnotations,
   readDocData,
-  setBlockLanguage,
-  setBlockLevel,
   setDescription,
   setKind,
   setLinks,
@@ -35,6 +29,7 @@ import {
   setTitle,
   upsertDirectoryEntry,
 } from "../src/index.js";
+import { ANNOTATIONS_KEY, BLOCKS_KEY, META_KEY } from "../src/doc.js";
 import { syncDocs } from "./helpers.js";
 
 const UUID = "11111111-1111-4111-8111-111111111111";
@@ -619,12 +614,6 @@ describe("document round-trip", () => {
     expect(getBlock(doc, code)).toEqual(
       withRev({ id: code, type: "code", text: "echo hi", language: "" }),
     );
-
-    // Both attributes are also settable in place, without a re-type.
-    setBlockLevel(doc, plain, 3);
-    setBlockLanguage(doc, code, "python");
-    expect(getBlock(doc, plain)?.level).toBe(3);
-    expect(getBlock(doc, code)?.language).toBe("python");
   });
 
   it("deletes blocks and reports unknown ids", () => {
@@ -636,7 +625,6 @@ describe("document round-trip", () => {
     expect(getBlocks(doc).map((block) => block.id)).toEqual([keep]);
     expect(getBlock(doc, drop)).toBeNull();
     expect(() => deleteBlock(doc, drop)).toThrow(BlockNotFoundError);
-    expect(() => getBlockText(doc, drop)).toThrow(BlockNotFoundError);
     expect(() => insertBlock(doc, drop, { type: "paragraph" })).toThrow(
       BlockNotFoundError,
     );

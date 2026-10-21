@@ -43,14 +43,6 @@ export class CardAnnotationError extends Error {
   }
 }
 
-/** Cards have no sanctioned conversion to or from another block type. */
-export class CardConversionError extends Error {
-  constructor() {
-    super("Cards cannot be converted to or from another block type; insert a new block instead");
-    this.name = "CardConversionError";
-  }
-}
-
 /** A Figma write does not match its closed header and provider link grammar. */
 export class InvalidFigmaError extends Error {
   constructor(reason = "A url header is required") {
@@ -69,14 +61,6 @@ export class FigmaAnnotationError extends Error {
   }
 }
 
-/** A Figma block has no conversion to or from another block type. */
-export class FigmaConversionError extends Error {
-  constructor() {
-    super("Figma blocks cannot be converted to or from another block type; insert a new block instead");
-    this.name = "FigmaConversionError";
-  }
-}
-
 /** Structural or batched table edits need the caller's surviving identities. */
 export class TableMappingRequiredError extends Error {
   constructor() {
@@ -90,16 +74,6 @@ export class InvalidTableMappingError extends Error {
   constructor(reason: string) {
     super(`Invalid table mapping: ${reason}`);
     this.name = "InvalidTableMappingError";
-  }
-}
-
-/** Block-level text offsets cannot address a structured table's cell text. */
-export class TableAnnotationError extends Error {
-  readonly blockId: string;
-  constructor(blockId: string) {
-    super("New comment threads on tables are unavailable");
-    this.name = "TableAnnotationError";
-    this.blockId = blockId;
   }
 }
 
@@ -224,30 +198,6 @@ export class AnnotationRangeError extends Error {
     this.reason = reason;
     this.blockId = blockId;
     this.conflictingThreadId = conflictingThreadId;
-  }
-}
-
-/**
- * Refuse before mutation when preserving marks would violate the destination
- * type or editor binding. Source blocks allow only comment; table/flat
- * conversions refuse all marks. Callers can clear named marks before retrying.
- */
-export class MarksNotAllowedError extends Error {
-  readonly blockId: string;
-  /** The block type that cannot hold the marks. */
-  readonly blockType: string;
-  /** The offending mark names, in the document's order, deduplicated. */
-  readonly marks: string[];
-
-  constructor(blockId: string, blockType: string, marks: string[]) {
-    super(
-      `Block ${blockId} cannot become ${blockType} without dropping marks ` +
-        `(${marks.join(", ")}). Clear the marks before changing its type.`,
-    );
-    this.name = "MarksNotAllowedError";
-    this.blockId = blockId;
-    this.blockType = blockType;
-    this.marks = marks;
   }
 }
 

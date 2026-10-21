@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   DIRECTORY_SUFFIX,
-  InvalidRoomError,
   InvalidWorkspaceIdError,
   MAX_ROOM_NAME_LENGTH,
   SETTINGS_SUFFIX,
   SIDEBAR_SUFFIX,
-  assertCanonicalRoom,
   directoryRoom,
   isCanonicalRoom,
   isRoomNameWithinBounds,
@@ -16,6 +14,8 @@ import {
   settingsRoom,
   sidebarRoom,
 } from "../src/index.js";
+import { InvalidRoomError } from "../src/errors.js";
+import { assertCanonicalRoom } from "../src/rooms.js";
 
 const UUID = "77777777-7777-4777-8777-777777777777";
 const WORKSPACE = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";

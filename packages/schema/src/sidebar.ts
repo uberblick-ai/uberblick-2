@@ -17,8 +17,6 @@ const SEEDED_FLAG = "seeded";
 
 const PINS_PREFIX = "pins:";
 
-const NAME_ID_PREFIX = "name:";
-
 const CLIENT_SEPARATOR = "#";
 
 /** One stored pin: a document uuid, and the unpin level it was pinned under. */
@@ -198,28 +196,6 @@ export function createGroup(
     }
   });
   return id;
-}
-
-/**
- * Name-derived ids merge offline creates. If a renamed group occupies the id,
- * generated fallback ids can leave duplicate names, while retaining both pins.
- */
-export function getOrCreateGroup(
-  sidebarDoc: Y.Doc,
-  name: string,
-  index?: number,
-): string {
-  for (const id of orderedGroupIds(sidebarDoc)) {
-    if (groupName(sidebarDoc, id) === name) return id;
-  }
-  const derived = `${NAME_ID_PREFIX}${name}`;
-  const free = groupName(sidebarDoc, derived) === null;
-  return createGroup(
-    sidebarDoc,
-    name,
-    index,
-    free ? derived : crypto.randomUUID(),
-  );
 }
 
 export function renameGroup(

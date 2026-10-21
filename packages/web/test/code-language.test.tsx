@@ -6,9 +6,9 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { common, createLowlight } from "lowlight";
 import { redo, undo } from "y-prosemirror";
 import * as Y from "yjs";
-import { appendBlock, deleteBlock, insertBlock, setBlockType } from "@uberblick/schema";
+import { appendBlock, deleteBlock, insertBlock } from "@uberblick/schema";
 import { CodeLanguageControl } from "../src/ui/editor-controls/CodeLanguageControl.js";
-import { mountEditor, snapshotFragment } from "./helpers.js";
+import { mountEditor, retype, snapshotFragment } from "./helpers.js";
 import { act, renderSettled } from "./react-render.js";
 
 const SOURCE = "const answer = 42;";
@@ -200,7 +200,7 @@ describe("code block language", () => {
     const stale = option("javascript");
     await act(async () => {
       if (change === "deleted") deleteBlock(peer, fix.id);
-      else setBlockType(peer, fix.id, "paragraph");
+      else retype(peer, fix.id, "paragraph");
     });
     expect(screen.queryByRole("listbox")).toBeNull();
     const before = snapshotFragment(fix.ydoc);

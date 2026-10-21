@@ -177,26 +177,6 @@ export function assertInlineWritable(runs: readonly InlineRun[]): void {
 }
 
 /**
- * Source blocks allow only valid comment anchors. Include unknown keys and
- * malformed comments in document order, or a retype could pass this check but
- * produce text the editor refuses to bind.
- */
-export function marksOtherThanComment(text: Y.XmlText | null): string[] {
-  if (text === null) return [];
-  const names: string[] = [];
-  for (const op of text.toDelta() as Array<{ attributes?: unknown }>) {
-    for (const [name, value] of Object.entries(
-      (op.attributes ?? {}) as Record<string, unknown>,
-    )) {
-      if (value === undefined || value === null) continue;
-      if (name === COMMENT_MARK && readsAsMark(name, value)) continue;
-      if (!names.includes(name)) names.push(name);
-    }
-  }
-  return names;
-}
-
-/**
  * Append one text-and-marks delta to attached Y.XmlText; detached text cannot
  * take a delta. Building the complete delta validates every run before writing.
  */

@@ -11,7 +11,8 @@ import {
   getBlockRev,
   initDoc,
 } from "../src/index.js";
-import type { BlockInput, EditBlockOptions, ListIndent } from "../src/index.js";
+import type { BlockInput, ListIndent } from "../src/index.js";
+import type { EditBlockOptions } from "../src/blocks.js";
 
 function seeded(input: BlockInput = { type: "list-item", text: "item" }): { doc: Y.Doc; id: string } {
   const doc = new Y.Doc();

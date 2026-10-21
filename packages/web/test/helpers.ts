@@ -129,6 +129,23 @@ export function pastePlainText(editor: Editor, text: string): void {
   );
 }
 
+/**
+ * Another client's retype: Yjs node names are immutable, so a same-id element
+ * carrying the block's text replaces the old one.
+ */
+export function retype(ydoc: Y.Doc, id: string, type: string): void {
+  const fragment = getBlocksFragment(ydoc);
+  const index = fragment.toArray().findIndex((node) => (node as Y.XmlElement).getAttribute("id") === id);
+  const old = fragment.get(index) as Y.XmlElement;
+  const replacement = new Y.XmlElement(type);
+  replacement.setAttribute("id", id);
+  replacement.insert(0, [new Y.XmlText(plainText(old.firstChild as Y.XmlText))]);
+  ydoc.transact(() => {
+    fragment.insert(index + 1, [replacement]);
+    fragment.delete(index, 1);
+  });
+}
+
 /** A counter-based id source, so assertions can name exact ids. */
 export function sequentialIds(prefix = "fresh"): () => string {
   let n = 0;

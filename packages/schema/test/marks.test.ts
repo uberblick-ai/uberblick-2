@@ -5,7 +5,7 @@
  * formatting keys with ProseMirror-shaped values), the markdown round trip in
  * both directions, that literal markdown stays literal, that source blocks carry
  * no inline marks, and that the CRDT properties the `comment` mark already has
- * hold for these six too — a re-type and a block-scoped edit keep them.
+ * hold for these six too — a block-scoped edit keeps them.
  */
 
 import { describe, expect, it } from "vitest";
@@ -13,9 +13,6 @@ import * as Y from "yjs";
 import {
   ConflictingLinkMarksError,
   InlineLinkRangeError,
-  InvalidDocLinkTargetError,
-  InvalidLinkHrefError,
-  MarksNotAllowedError,
   StaleBlockError,
   appendBlock,
   createAnnotation,
@@ -24,18 +21,16 @@ import {
   getBlock,
   getBlockInline,
   getBlockRev,
-  getBlockText,
   getBlocks,
   getBlocksFragment,
   importMarkdown,
   initDoc,
   listAnnotationRanges,
-  resolveAnnotationRange,
-  setBlockType,
   setInlineLink,
 } from "../src/index.js";
 import type { InlineRun } from "../src/index.js";
 import { parseInline, renderInline } from "../src/markdown.js";
+import { InvalidDocLinkTargetError, InvalidLinkHrefError } from "../src/errors.js";
 import { replicaPair, syncDocs } from "./helpers.js";
 
 const UUID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
@@ -91,7 +86,7 @@ describe("inline marks in the document", () => {
     ]);
 
     // Marks are not text: `text` and `rev` see plain prose.
-    expect(getBlockText(doc, getBlocks(doc)[0]?.id ?? "")).toBe(
+    expect(getBlock(doc, getBlocks(doc)[0]?.id ?? "")!.text).toBe(
       "A word and a link.",
     );
   });
@@ -363,7 +358,7 @@ describe("inline marks in the document", () => {
       const again = importMarkdown(exported).blocks[0];
       const reread = seeded();
       const rereadId = appendBlock(reread, again ?? { type: "paragraph" });
-      expect(getBlockText(reread, rereadId), source).toBe(getBlockText(doc, id));
+      expect(getBlock(reread, rereadId)!.text, source).toBe(getBlock(doc, id)!.text);
       expect(exportMarkdown(reread, { frontmatter: false }), source).toBe(exported);
     }
   });
@@ -388,7 +383,7 @@ describe("inline marks in the document", () => {
       );
       // The space kept the link and lost only the bold, and the text is intact.
       const back = importMarkdown(markdown).blocks[0];
-      expect(back?.text, text).toBe(getBlockText(doc, id));
+      expect(back?.text, text).toBe(getBlock(doc, id)!.text);
       expect(
         back?.inline?.every((run) => run.marks.link === "https://example.com"),
         text,
@@ -425,7 +420,7 @@ describe("inline marks in the document", () => {
     const back = importMarkdown(exported).blocks[0];
     const reread = seeded();
     const rereadId = appendBlock(reread, back ?? { type: "paragraph" });
-    expect(getBlockText(reread, rereadId)).toBe(getBlockText(doc, id));
+    expect(getBlock(reread, rereadId)!.text).toBe(getBlock(doc, id)!.text);
     expect(exportMarkdown(reread, { frontmatter: false })).toBe(exported);
   });
 
@@ -655,7 +650,7 @@ describe("inline marks in the document", () => {
     });
     const exported = exportMarkdown(doc, { frontmatter: false });
     expect(exported).toBe("**`    `**after\n");
-    expect(getBlockText(doc, id)).toBe("  after");
+    expect(getBlock(doc, id)!.text).toBe("  after");
     expect(importMarkdown(exported).blocks[0]?.inline).toEqual(
       getBlockInline(doc, id),
     );
@@ -675,7 +670,7 @@ describe("inline marks in the document", () => {
   it("gives source blocks no inline marks — only the annotation anchor", () => {
     // A fenced block's content is source: the asterisks stay in the text.
     const { doc, ids } = docFromBody("```ts\nconst x = **1**;\n```");
-    expect(getBlockText(doc, ids[0] ?? "")).toBe("const x = **1**;");
+    expect(getBlock(doc, ids[0] ?? "")!.text).toBe("const x = **1**;");
     expect(getBlockInline(doc, ids[0] ?? "")).toEqual([
       { text: "const x = **1**;", marks: {} },
     ]);
@@ -688,7 +683,7 @@ describe("inline marks in the document", () => {
         text: "plain source",
         inline: [{ text: "formatted", marks: { bold: true } }],
       });
-      expect(getBlockText(other, id), type).toBe("plain source");
+      expect(getBlock(other, id)!.text, type).toBe("plain source");
       expect(getBlockInline(other, id), type).toEqual([
         { text: "plain source", marks: {} },
       ]);
@@ -711,7 +706,7 @@ describe("inline marks in the document", () => {
           { text: " point", marks: {} },
         ],
       });
-      expect(getBlockText(doc, id), type).toBe("a loud point");
+      expect(getBlock(doc, id)!.text, type).toBe("a loud point");
       expect(getBlockInline(doc, id), type).toEqual([
         { text: "a ", marks: {} },
         { text: "loud", marks: { bold: true } },
@@ -722,121 +717,6 @@ describe("inline marks in the document", () => {
       expect(listAnnotationRanges(doc, id), type).toEqual([
         { threadId: thread.id, start: 2, end: 6 },
       ]);
-    }
-  });
-
-  /**
-   * The refusal that keeps the two halves of the model consistent. Marks a source
-   * block cannot hold must not get there by the back door, and `setBlockType`
-   * cannot silently drop them either — its whole contract is that it preserves
-   * the delta. So the re-type is refused, before it writes anything.
-   */
-  it("refuses to re-type formatted prose into a source block", () => {
-    const doc = seeded();
-    const id = appendBlock(doc, {
-      type: "paragraph",
-      inline: [
-        { text: "plain ", marks: {} },
-        { text: "bold", marks: { bold: true } },
-      ],
-    });
-    const thread = createAnnotation(doc, id, 0, 5, "reviewer", "hm");
-
-    for (const type of ["code", "table", "terminal", "chart"] as const) {
-      expect(() => setBlockType(doc, id, type), type).toThrow(
-        MarksNotAllowedError,
-      );
-    }
-    // Refused *before* mutating: the block is exactly as it was.
-    expect(getBlock(doc, id)?.type).toBe("paragraph");
-    expect(getBlockInline(doc, id)).toEqual([
-      { text: "plain ", marks: {} },
-      { text: "bold", marks: { bold: true } },
-    ]);
-
-    // The error names what is in the way, so a caller can clear it and retry.
-    try {
-      setBlockType(doc, id, "code");
-      expect.unreachable();
-    } catch (error) {
-      expect((error as MarksNotAllowedError).marks).toEqual(["bold"]);
-      expect((error as MarksNotAllowedError).blockType).toBe("code");
-    }
-
-    // The refusal left the annotation where it was, anchored on its own text.
-    expect(resolveAnnotationRange(doc, thread.id)).toEqual({
-      start: 0,
-      end: 5,
-      collapsed: false,
-    });
-
-    // An annotation anchor is legal on every block type, so a block carrying
-    // only that re-types as it always did.
-    const annotated = seeded();
-    const other = appendBlock(annotated, {
-      type: "paragraph",
-      text: "Hello brave world",
-    });
-    createAnnotation(annotated, other, 6, 11, "reviewer", "hm");
-    setBlockType(annotated, other, "code", { language: "ts" });
-    expect(getBlock(annotated, other)?.type).toBe("code");
-    expect(listAnnotationRanges(annotated, other)).toHaveLength(1);
-  });
-
-  /**
-   * The refusal cannot be a list of marks this package knows. A source block's
-   * node type allows `comment` and nothing else, so a key from a writer nobody
-   * here has heard of makes the block just as unbindable — and a reader that
-   * skipped it would copy it into the new element and hand the editor a document
-   * it must refuse.
-   */
-  it("refuses a re-type over a mark it has never heard of", () => {
-    const doc = seeded();
-    const id = appendBlock(doc, { type: "paragraph", text: "from the future" });
-    text(doc).format(0, 4, { underline: {} });
-
-    expect(() => setBlockType(doc, id, "code")).toThrow(MarksNotAllowedError);
-    try {
-      setBlockType(doc, id, "terminal");
-      expect.unreachable();
-    } catch (error) {
-      expect((error as MarksNotAllowedError).marks).toEqual(["underline"]);
-    }
-
-    // Untouched, foreign mark included: refusing is what keeps it that way.
-    expect(getBlock(doc, id)?.type).toBe("paragraph");
-    expect(delta(doc)).toEqual([
-      ["from", { underline: {} }],
-      [" the future", null],
-    ]);
-  });
-
-  /**
-   * `comment` is exempt from that refusal because every block type allows it —
-   * but only a real anchor is. The editor's gate rejects a malformed one, so
-   * exempting it here would let a re-type produce exactly the document the gate
-   * then refuses to bind.
-   */
-  it("exempts only a comment mark that is really an anchor", () => {
-    const real = seeded();
-    const anchored = appendBlock(real, {
-      type: "paragraph",
-      text: "Hello brave world",
-    });
-    createAnnotation(real, anchored, 6, 11, "reviewer", "hm");
-    setBlockType(real, anchored, "code");
-    expect(getBlock(real, anchored)?.type).toBe("code");
-
-    for (const value of [true, {}, { threadId: "" }, { threadId: 7 }]) {
-      const doc = seeded();
-      const id = appendBlock(doc, { type: "paragraph", text: "not an anchor" });
-      text(doc).format(0, 3, { comment: value });
-      const label = JSON.stringify(value);
-
-      expect(() => setBlockType(doc, id, "code"), label).toThrow(
-        MarksNotAllowedError,
-      );
-      expect(getBlock(doc, id)?.type, label).toBe("paragraph");
     }
   });
 
@@ -1033,7 +913,7 @@ describe("inline marks in the document", () => {
     ]);
 
     // A mark write is not a text write: `text` and `rev` are untouched.
-    expect(getBlockText(a, id)).toBe("see the hub docs");
+    expect(getBlock(a, id)!.text).toBe("see the hub docs");
     expect(getBlockRev(a, id)).toBe(revBefore);
   });
 
@@ -1067,7 +947,7 @@ describe("inline marks in the document", () => {
   it("neither reads nor writes a label-less doc reference", () => {
     const source = `See [](${TARGET}) and [${TARGET}] and [ok](${TARGET}).`;
     const { doc, ids } = docFromBody(source);
-    expect(getBlockText(doc, ids[0] ?? "")).toBe(
+    expect(getBlock(doc, ids[0] ?? "")!.text).toBe(
       `See [](${TARGET}) and [${TARGET}] and ok.`,
     );
     expect(
@@ -1102,7 +982,7 @@ describe("inline marks in the document", () => {
     ]);
   });
 
-  it("survives a re-type, a block-scoped edit and a concurrent merge", () => {
+  it("survives a block-scoped edit and a concurrent merge", () => {
     let id = "";
     const [a, b] = replicaPair((doc) => {
       initDoc(doc, { uuid: UUID, title: "Marks" });
@@ -1116,14 +996,6 @@ describe("inline marks in the document", () => {
       });
     });
 
-    // A re-type replays the delta, marks included.
-    setBlockType(a, id, "heading", { level: 2 });
-    expect(getBlockInline(a, id)).toEqual([
-      { text: "Hello ", marks: {} },
-      { text: "brave", marks: { bold: true } },
-      { text: " world", marks: {} },
-    ]);
-
     // A splice outside the marked run leaves it alone; text spliced into it
     // inherits the formatting, the way every Yjs insert does.
     editBlock(a, id, "Hello brave world", "Hello bravest world!");
@@ -1136,7 +1008,7 @@ describe("inline marks in the document", () => {
     // Meanwhile the other replica edits the same block elsewhere.
     editBlock(b, id, "Hello brave world", "Well, Hello brave world");
     syncDocs(a, b);
-    expect(getBlockText(a, id)).toBe(getBlockText(b, id));
+    expect(getBlock(a, id)!.text).toBe(getBlock(b, id)!.text);
     expect(getBlockInline(a, id)).toEqual(getBlockInline(b, id));
     expect(
       getBlockInline(a, id).filter((run) => run.marks.bold === true),
@@ -1184,7 +1056,7 @@ describe("linking a range to another document", () => {
   it("writes a mark and nothing else, and retargets a range that is already one", () => {
     const doc = seeded();
     const id = appendBlock(doc, { type: "paragraph", text: "See the hub docs" });
-    const text = getBlockText(doc, id);
+    const text = getBlock(doc, id)!.text;
     const rev = getBlockRev(doc, id);
 
     setInlineLink(doc, id, { start: 4, end: 11 }, TARGET, { rev });
@@ -1195,7 +1067,7 @@ describe("linking a range to another document", () => {
     ]);
     // The whole point: marks are not part of a rev, so the edit a caller
     // prepared against this block is still good.
-    expect(getBlockText(doc, id)).toBe(text);
+    expect(getBlock(doc, id)!.text).toBe(text);
     expect(getBlockRev(doc, id)).toBe(rev);
 
     // The same range at another target is a deliberate write of the same kind —
@@ -1405,7 +1277,7 @@ describe("export and import are closed over the marks the model allows", () => {
     const id = appendBlock(doc, imported ?? { type: "paragraph" });
     return {
       runs: getBlockInline(doc, id),
-      text: getBlockText(doc, id),
+      text: getBlock(doc, id)!.text,
       markdown: exportMarkdown(doc, { frontmatter: false }),
     };
   }
@@ -1445,7 +1317,7 @@ describe("export and import are closed over the marks the model allows", () => {
       const runs = randomDocument(next);
       const doc = seeded();
       const id = appendBlock(doc, { type: "paragraph", inline: runs });
-      const plain = getBlockText(doc, id);
+      const plain = getBlock(doc, id)!.text;
       if (plain.trim() === "") {
         // A paragraph of nothing but whitespace, asserted rather than skipped so
         // that a change here has to be deliberate. Which of the two things happens
