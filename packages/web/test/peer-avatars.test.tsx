@@ -310,7 +310,7 @@ describe("the compact collaborator cluster", () => {
         <StatusLine
           connection={fix.connection}
           presence={sessions}
-          endpoint={{ url: "local", source: "document" }}
+          syncReading={{ endpoint: { url: "local", source: "document" } }}
           documentLayout
         />
       </section>

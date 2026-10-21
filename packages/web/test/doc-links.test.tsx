@@ -453,7 +453,7 @@ describe("an unwritable document room", () => {
         author="tester"
         archived={false}
         docLinks={null}
-        onRestore={() => {}}
+        actions={{ onRestore: () => {} }}
         onSelectThread={() => {}}
       />,
     );
@@ -518,7 +518,7 @@ describe("following a reference", () => {
         author="tester"
         archived={false}
         docLinks={context}
-        onRestore={() => {}}
+        actions={{ onRestore: () => {} }}
         onSelectThread={(threadId) => selected.push(threadId)}
       />,
     );

@@ -67,8 +67,8 @@ function mount(
       segment={WORKSPACE}
       meta={getMeta(fix.ydoc)}
       archived={false}
-      onTogglePin={() => {}}
       {...props}
+      actions={{ onTogglePin: () => {}, ...props.actions }}
     />,
   );
   return { host: view.container, view };
@@ -158,7 +158,7 @@ describe("the document identity line keeps its local controls", () => {
     },
   ])("confirms $item with its scope and keeps single-record topics to that action", ({ isDecisionTopic, item, title, description }) => {
     const onArchive = vi.fn();
-    const { host } = mount(fixture(), { isDecisionTopic, onArchive });
+    const { host } = mount(fixture(), { isDecisionTopic, actions: { onArchive } });
     openActions(host);
     expect(screen.queryByRole("menuitem", { name: "Archive this record" })).toBeNull();
     act(() => screen.getByRole("menuitem", { name: item }).click());
@@ -174,9 +174,11 @@ describe("the document identity line keeps its local controls", () => {
     const onArchiveRecord = vi.fn();
     const { host } = mount(fixture(), {
       isDecisionTopic: true,
-      showArchiveRecord: true,
-      onArchive,
-      onArchiveRecord,
+      actions: {
+        showArchiveRecord: true,
+        onArchive,
+        onArchiveRecord,
+      },
     });
     openActions(host);
     expect(screen.getByRole("menuitem", { name: "Archive topic" })).not.toBeNull();
@@ -196,10 +198,12 @@ describe("the document identity line keeps its local controls", () => {
     const onArchiveRecord = vi.fn();
     const { host } = mount(fixture(), {
       isDecisionTopic: true,
-      showArchiveRecord: true,
-      onArchive: vi.fn(),
-      onArchiveRecord,
-      archiveRecordUnavailable,
+      actions: {
+        showArchiveRecord: true,
+        onArchive: vi.fn(),
+        onArchiveRecord,
+        archiveRecordUnavailable,
+      },
     });
     openActions(host);
     const item = screen.getByRole("menuitem", { name: archiveRecordUnavailable });
@@ -218,15 +222,17 @@ describe("the document identity line keeps its local controls", () => {
       meta: getMeta(fix.ydoc),
       archived: false,
       isDecisionTopic: true,
-      showArchiveRecord: true,
-      onArchive: vi.fn(),
-      onArchiveRecord,
+      actions: {
+        showArchiveRecord: true,
+        onArchive: vi.fn(),
+        onArchiveRecord,
+      },
     };
     const { host, view } = mount(fix, props);
     openActions(host);
     act(() => screen.getByRole("menuitem", { name: "Archive this record" }).click());
     const reason = "Archive this record unavailable — it is the decision in force";
-    view.rerender(<DocMetaLine {...props} archiveRecordUnavailable={reason} />);
+    view.rerender(<DocMetaLine {...props} actions={{ ...props.actions, archiveRecordUnavailable: reason }} />);
     const dialog = screen.getByRole("alertdialog", { name: "Archive this record?" });
     expect(within(dialog).getByText(`${reason}. Nothing has been archived.`)).not.toBeNull();
     expect(within(dialog).getByRole("button", { name: "Archive" }).hasAttribute("disabled")).toBe(true);

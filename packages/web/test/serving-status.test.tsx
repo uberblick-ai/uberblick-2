@@ -102,7 +102,7 @@ function connectedRoom() {
 function ServedReading({ api, connection }: { api: DocumentSearchClient; connection: RoomConnection }) {
   const reading = useServingRoomStatus(api, connection.room, connection);
   return <>
-    <StatusLine connection={connection} presence={[]} hubAcked={reading?.hubAcked ?? null} />
+    <StatusLine connection={connection} presence={[]} syncReading={{ hubAcked: reading?.hubAcked ?? null }} />
     <output>{reading?.hubAcked === null ? "unknown" : reading?.hubAcked ? "yes" : "no"}</output>
   </>;
 }

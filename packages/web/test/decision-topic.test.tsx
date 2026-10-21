@@ -1038,7 +1038,7 @@ describe("decision topic navigation and history", () => {
       topic={resolveDecisionTopics(directory())[0]!} selected={FIRST} linkedRecord={null}
       explicit={false} navigate={() => {}} directoryConnection={room(directoryRoom(WORKSPACE))}
       connection={room(roomForDoc(WORKSPACE, FIRST))} segment={WORKSPACE} presence={[]}
-      author="Reader" archived={false} docLinks={null} onRestore={null} onSelectThread={() => {}}
+      author="Reader" archived={false} docLinks={null} actions={{ onRestore: null }} onSelectThread={() => {}}
     />)).container;
     expect(answer(host).textContent).toContain("An answer.");
     expect(host.querySelector(".ub-decision-rfc")).toBeNull();

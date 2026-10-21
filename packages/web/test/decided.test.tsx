@@ -169,7 +169,7 @@ describe("read-only decision records", () => {
       archived={false}
       decisionView
       docLinks={null}
-      onRestore={null}
+      actions={{ onRestore: null }}
       onSelectThread={() => {}}
     />);
     expect(binding.mock.calls[0]?.[0].editable).toBe(false);
