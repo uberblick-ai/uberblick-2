@@ -12,7 +12,7 @@ import { WORKSPACE_DATABASE_FILE, resolveStorage } from "@uberblick/mcp-server/s
 import { acquireWorkspaceRemovalRole, defaultWorkspaceDatabasePath, readWorkspaceName, usesDeviceLogin } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { Origin } from "./config.js";
-import { migrateHubAdmissions, resolveConfig, writeHubAdmission } from "./config.js";
+import { resolveConfig, userConfigWarnings, writeHubAdmission } from "./config.js";
 import { type ProjectBinding, resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
 import { forgetWorkspace, hasWorkspaceReplica, readWorkspaceHub, recordedWorkspaceIds, workspaceRegistryPath } from "./workspace-registry.js";
 import { takeHelp } from "./help.js";
@@ -502,10 +502,9 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
     }
     const registersSelected = hub === undefined;
     hub ??= null;
-    // Preserve endpoint metadata before the user removes obsolete selection keys.
     const admission = hub !== null && usesDeviceLogin(hub, { ...process.env, HUB_ADMISSION: undefined })
       ? writeHubAdmission(hub, true)
-      : migrateHubAdmissions();
+      : { written: [], warnings: userConfigWarnings() };
     warn(io, admission.warnings);
     const registersPrevious = previous !== null && readWorkspaceHub(previous.workspaceId) === undefined;
     path = writeProjectBinding({ workspaceId: id, hubUrl: hub });

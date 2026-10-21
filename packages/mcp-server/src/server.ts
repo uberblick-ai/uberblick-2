@@ -6,7 +6,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpConfig } from "./config.js";
-import { GuidanceBriefing, registerGuidanceResources } from "./guidance.js";
+import { GuidanceBriefing } from "./briefing.js";
+import { registerGuidanceResources } from "./guidance.js";
 import { registerHelpResources } from "./help-resources.js";
 import { STARTUP_ORIENTATION } from "./help-topics.js";
 import { log } from "./log.js";

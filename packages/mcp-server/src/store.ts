@@ -366,12 +366,9 @@ export function readStoredSyncStatus(databasePath: string, workspaceId: string):
       if (owner !== undefined && owner.value !== workspaceId) {
         throw new Error("The database belongs to a different workspace; unset UBERBLICK_DB to use the per-workspace replica.");
       }
-      const columns = db.prepare("SELECT name FROM pragma_table_info('pending_rooms')").all();
-      const pendingRooms = columns.length === 0 ? [] : db.prepare(columns.some(column => column.name === "seq")
-        ? "SELECT room, seq FROM pending_rooms ORDER BY room"
-        : "SELECT p.room, COALESCE((SELECT MAX(u.seq) FROM updates u WHERE u.room = p.room), " +
-          "(SELECT s.through_seq FROM snapshots s WHERE s.room = p.room), 0) AS seq FROM pending_rooms p ORDER BY p.room"
-      ).all() as { room: string; seq: number }[];
+      const pendingRooms = tables.has("pending_rooms")
+        ? db.prepare("SELECT room, seq FROM pending_rooms ORDER BY room").all() as { room: string; seq: number }[]
+        : [];
       const count = tables.has("updates") ? db.prepare("SELECT COUNT(*) AS n FROM updates").get() as { n: number } : { n: 0 };
       return {
         pendingRooms: pendingRooms.map(({ room, seq }) => ({ room, seq })),
@@ -589,10 +586,6 @@ export class MirrorStore {
     this.db.exec(META_SCHEMA);
     this.claimWorkspace(workspaceId, preexisting);
     this.db.exec(SCHEMA);
-    // After the schema, so the backfill can read `updates` and `snapshots`.
-    this.migratePendingRooms();
-    this.migrateDocDescription();
-    this.migrateCatalogIndexSequence();
     this.migrateDirectoryIndexSequence();
     this.migrateGithubRefsIndexSequence();
     this.migrateSearchIndex();
@@ -1275,63 +1268,6 @@ export class MirrorStore {
         workspace: workspaceId,
       });
     }
-  }
-
-  /**
-   * Preserve legacy pending flags: a room may lack a directory stub after a
-   * crash and otherwise never attach or push. Use its highest log seq, snapshot
-   * cut or zero as unacknowledged; duplicate pushes are safe, lost writes are not.
-   */
-  private migratePendingRooms(): void {
-    const columns = this.db
-      .prepare("SELECT name FROM pragma_table_info('pending_rooms')")
-      .all() as { name: string }[];
-    if (columns.length === 0 || columns.some((column) => column.name === "seq")) {
-      return;
-    }
-
-    transactional(this.db, () => {
-      this.db.exec(
-        "CREATE TABLE pending_rooms_migrated (room TEXT PRIMARY KEY, seq INTEGER NOT NULL);" +
-          "INSERT INTO pending_rooms_migrated (room, seq) SELECT p.room, COALESCE(" +
-          "(SELECT MAX(u.seq) FROM updates u WHERE u.room = p.room), " +
-          "(SELECT s.through_seq FROM snapshots s WHERE s.room = p.room), 0) " +
-          "FROM pending_rooms p;" +
-          "DROP TABLE pending_rooms;" +
-          "ALTER TABLE pending_rooms_migrated RENAME TO pending_rooms;",
-      );
-    })();
-  }
-
-  /**
-   * An empty description default preserves cached metadata during the upgrade.
-   */
-  private migrateDocDescription(): void {
-    const columns = this.db
-      .prepare("SELECT name FROM pragma_table_info('doc_index')")
-      .all() as { name: string }[];
-    if (columns.some((column) => column.name === "description")) {
-      return;
-    }
-    this.db.exec(
-      "ALTER TABLE doc_index ADD COLUMN description TEXT NOT NULL DEFAULT ''",
-    );
-  }
-
-  /**
-   * Tags depend on document assignments and settings alias resolution. Rows
-   * lacking a catalog cut start at zero so catalog-aware derivation replaces them.
-   */
-  private migrateCatalogIndexSequence(): void {
-    const columns = this.db
-      .prepare("SELECT name FROM pragma_table_info('doc_index_seq')")
-      .all() as { name: string }[];
-    if (columns.some((column) => column.name === "catalog_through_seq")) {
-      return;
-    }
-    this.db.exec(
-      "ALTER TABLE doc_index_seq ADD COLUMN catalog_through_seq INTEGER NOT NULL DEFAULT 0",
-    );
   }
 
   /** Topic titles depend on the first record's directory entry. */

@@ -541,20 +541,16 @@ describe("workspace link configuration", () => {
     const second = "ws://localhost:8081/two";
     const box = sandbox({
       projectBinding: { workspaceId: WORKSPACE, hubUrl: first },
-      userConfig: { displayName: "Synthetic operator", hubUrl: first, hubAdmission: "device" },
+      userConfig: { displayName: "Synthetic operator", hubUrl: first },
     });
     const readPrivate = () => JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"));
-    // Even an already-known mode must move out of legacy selector fields before
-    // those obsolete keys can be removed during project migration.
     setRemote(first, { env: box.env, cwd: box.cwd, deviceAdmission: true });
     expect(readPrivate().hubAdmissions).toEqual({ [first]: "device" });
-    expect(readPrivate().hubAdmission).toBeUndefined();
     setRemote(second, { env: box.env, cwd: box.cwd, deviceAdmission: true });
     expect(readPrivate()).toEqual({ displayName: "Synthetic operator", hubUrl: first, hubAdmissions: { [first]: "device", [second]: "device" } });
     expect(readConfigFile(box, "config.json")).toEqual({ workspaceId: WORKSPACE, hubUrl: second });
     setRemote(first, { env: box.env, cwd: box.cwd });
     expect(readPrivate().hubAdmissions).toEqual({ [second]: "device" });
-    expect(readPrivate().hubAdmission).toBeUndefined();
   });
 
   it("leaves the project binding intact when private admission persistence fails", () => {
