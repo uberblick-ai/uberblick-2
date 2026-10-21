@@ -297,12 +297,8 @@ async function exerciseTldrOptOut(browser: Browser, touch: boolean): Promise<voi
   await expect(a.locator(".ub-tldr-body > p")).toHaveText("Opted back in from the menu.");
 }
 
-test("Remove TL;DR syncs intentional absence and Add opts back in before cancellation", { tag: "@webkit" }, async ({ browser }) => {
-  await exerciseTldrOptOut(browser, false);
-});
-
-test("TL;DR opt-out menu actions support touch in light and dark appearances", { tag: "@webkit-touch" }, async ({ browser }) => {
-  await exerciseTldrOptOut(browser, true);
+test("Remove TL;DR syncs intentional absence and Add opts back in before cancellation", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  await exerciseTldrOptOut(browser, info.project.use.hasTouch === true);
 });
 
 test("the upstream fact recovers after an acknowledged typing burst", async ({

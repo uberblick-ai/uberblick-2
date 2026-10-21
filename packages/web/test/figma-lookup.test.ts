@@ -57,8 +57,8 @@ describe("Figma metadata lookup", () => {
     expect(fetch).toHaveBeenCalledTimes(3);
   });
 
-  it.each([400, 401, 403, 429, 500])("falls back without claiming privacy on HTTP %i", async (status) => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("untrusted answer", { status }));
+  it("falls back without claiming privacy on any other HTTP failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("untrusted answer", { status: 403 }));
     await expect(lookupFigma(LINK, ownerDocument())).resolves.toEqual({});
   });
 

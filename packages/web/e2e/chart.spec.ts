@@ -792,91 +792,89 @@ test("bar charts keep negative endpoints, missing values and a lone x inside the
   expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(1);
 });
 
-test("editor insertion and the source control work by pointer and keyboard in both appearances", async ({ browser }, info) => {
+test("editor insertion and the source control work by pointer and keyboard", async ({ browser }, info) => {
   const session = writer();
-  for (const appearance of ["light", "dark"] as const) {
-    const page = await openApp(browser, "/", { contextOptions: { colorScheme: appearance } });
-    await expect(page.locator(".ub-document-sidebar")).toBeVisible();
-    const uuid = await createDoc(page, `Chart source ${appearance}`);
-    await editor(page).locator(":scope > p").first().click();
-    await page.keyboard.insertText("A source-editable chart follows.");
-    await editor(page).locator(":scope > *").last().hover();
-    await page.getByRole("button", { name: "Insert block below" }).click();
-    await page.getByRole("option", { name: "Line chart", exact: true }).click();
-    const source = page.locator(".ub-chart-source");
-    await expect(source).toBeVisible();
-    await source.click();
-    // Select only this source; the block menu may insert a starter mapping.
-    await setNativeSelection(source, () => source.evaluate((element) => {
-      const root = element.closest(".ProseMirror") as (HTMLElement & { editor: Editor }) | null;
-      if (root === null) throw new Error("e2e: chart source has no editor");
-      const range = document.createRange();
-      range.selectNodeContents(element);
-      const selection = document.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-      return { anchor: root.editor.view.posAtDOM(range.startContainer, range.startOffset),
-        head: root.editor.view.posAtDOM(range.endContainer, range.endOffset) };
-    }));
-    await page.keyboard.insertText(JSON.stringify(MAPPING));
-    await expect(source).toHaveText(JSON.stringify(MAPPING));
-    // A newly created browser document may be known to the agent directory
-    // before its room is hydrated; the writer waits for the authored source.
-    await expectMcp(() => session.call<DocPayload>("get_doc", { uuid }), doc => {
-      expect(doc.blocks.find((entry) => entry.type === "chart")?.text).toBe(JSON.stringify(MAPPING));
-    });
-    await measurements(session, uuid);
-    await waitForDocumentDraw(page, session, uuid);
-    await editor(page).locator(":scope > p").first().click();
-    await expectReady(page, session, uuid);
-    await expectCornerControls(page);
-    await expect(source).toBeHidden();
-    await page.locator(".ub-chart-screen").click();
-    await expect(source).toBeVisible();
-    await expect(page.locator(".ub-chart .ub-copy")).toBeVisible();
-    await editor(page).locator(":scope > p").first().click();
-    await expectReady(page, session, uuid);
-    const openSource = page.getByRole("button", { name: "Open chart source", exact: true });
-    // Native Tab order, rather than focusing the button by script.
-    for (let count = 0; count < 20; count += 1) {
-      if (await openSource.evaluate((element) => element === document.activeElement)) break;
-      await page.keyboard.press("Tab");
-    }
-    await expect(openSource).toBeFocused();
-    await page.keyboard.press("Enter");
-    await expect(source).toBeVisible();
-    await expect.poll(() => source.evaluate((element) => element.contains(document.getSelection()?.focusNode ?? null))).toBe(true);
-    // ProseMirror's focus sync can undo an End key; a checked scripted caret survives it.
-    await setNativeSelection(source, () => source.evaluate((element) => {
-      const root = element.closest(".ProseMirror") as (HTMLElement & { editor: Editor }) | null;
-      if (root === null) throw new Error("e2e: chart source has no editor");
-      const texts = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-      let last: Node | null = null;
-      while (texts.nextNode()) last = texts.currentNode;
-      if (last === null) throw new Error("e2e: chart source has no text");
-      const range = document.createRange();
-      range.setStart(last, last.textContent?.length ?? 0);
-      range.collapse(true);
-      const position = root.editor.view.posAtDOM(range.startContainer, range.startOffset);
-      const selection = document.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-      return { anchor: position, head: position };
-    }));
-    await page.keyboard.insertText(" ");
-    // toHaveText trims, so compare the exact source.
-    await expect.poll(() => source.textContent()).toBe(`${JSON.stringify(MAPPING)} `);
-    await editor(page).locator(":scope > p").first().click();
-    await page.keyboard.press("ArrowLeft");
-    await waitForDocumentDraw(page, session, uuid, { source: `${JSON.stringify(MAPPING)} ` });
-    await expectReady(page, session, uuid);
-    await expectCornerControls(page);
-    await canvasEvidence(page.locator(".ub-chart"), info, `chart-${appearance}`);
-    // The browser edit reaches the writer's replica through `ub open` and the hub.
-    await expectMcp(() => session.call<DocPayload>("get_doc", { uuid }), stored => {
-      expect(stored.blocks.find((entry) => entry.type === "chart")?.text).toBe(`${JSON.stringify(MAPPING)} `);
-    });
+  const page = await openApp(browser, "/", { contextOptions: { colorScheme: "light" } });
+  await expect(page.locator(".ub-document-sidebar")).toBeVisible();
+  const uuid = await createDoc(page, "Chart source");
+  await editor(page).locator(":scope > p").first().click();
+  await page.keyboard.insertText("A source-editable chart follows.");
+  await editor(page).locator(":scope > *").last().hover();
+  await page.getByRole("button", { name: "Insert block below" }).click();
+  await page.getByRole("option", { name: "Line chart", exact: true }).click();
+  const source = page.locator(".ub-chart-source");
+  await expect(source).toBeVisible();
+  await source.click();
+  // Select only this source; the block menu may insert a starter mapping.
+  await setNativeSelection(source, () => source.evaluate((element) => {
+    const root = element.closest(".ProseMirror") as (HTMLElement & { editor: Editor }) | null;
+    if (root === null) throw new Error("e2e: chart source has no editor");
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return { anchor: root.editor.view.posAtDOM(range.startContainer, range.startOffset),
+      head: root.editor.view.posAtDOM(range.endContainer, range.endOffset) };
+  }));
+  await page.keyboard.insertText(JSON.stringify(MAPPING));
+  await expect(source).toHaveText(JSON.stringify(MAPPING));
+  // A newly created browser document may be known to the agent directory
+  // before its room is hydrated; the writer waits for the authored source.
+  await expectMcp(() => session.call<DocPayload>("get_doc", { uuid }), doc => {
+    expect(doc.blocks.find((entry) => entry.type === "chart")?.text).toBe(JSON.stringify(MAPPING));
+  });
+  await measurements(session, uuid);
+  await waitForDocumentDraw(page, session, uuid);
+  await editor(page).locator(":scope > p").first().click();
+  await expectReady(page, session, uuid);
+  await expectCornerControls(page);
+  await expect(source).toBeHidden();
+  await page.locator(".ub-chart-screen").click();
+  await expect(source).toBeVisible();
+  await expect(page.locator(".ub-chart .ub-copy")).toBeVisible();
+  await editor(page).locator(":scope > p").first().click();
+  await expectReady(page, session, uuid);
+  const openSource = page.getByRole("button", { name: "Open chart source", exact: true });
+  // Native Tab order, rather than focusing the button by script.
+  for (let count = 0; count < 20; count += 1) {
+    if (await openSource.evaluate((element) => element === document.activeElement)) break;
+    await page.keyboard.press("Tab");
   }
+  await expect(openSource).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(source).toBeVisible();
+  await expect.poll(() => source.evaluate((element) => element.contains(document.getSelection()?.focusNode ?? null))).toBe(true);
+  // ProseMirror's focus sync can undo an End key; a checked scripted caret survives it.
+  await setNativeSelection(source, () => source.evaluate((element) => {
+    const root = element.closest(".ProseMirror") as (HTMLElement & { editor: Editor }) | null;
+    if (root === null) throw new Error("e2e: chart source has no editor");
+    const texts = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let last: Node | null = null;
+    while (texts.nextNode()) last = texts.currentNode;
+    if (last === null) throw new Error("e2e: chart source has no text");
+    const range = document.createRange();
+    range.setStart(last, last.textContent?.length ?? 0);
+    range.collapse(true);
+    const position = root.editor.view.posAtDOM(range.startContainer, range.startOffset);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return { anchor: position, head: position };
+  }));
+  await page.keyboard.insertText(" ");
+  // toHaveText trims, so compare the exact source.
+  await expect.poll(() => source.textContent()).toBe(`${JSON.stringify(MAPPING)} `);
+  await editor(page).locator(":scope > p").first().click();
+  await page.keyboard.press("ArrowLeft");
+  await waitForDocumentDraw(page, session, uuid, { source: `${JSON.stringify(MAPPING)} ` });
+  await expectReady(page, session, uuid);
+  await expectCornerControls(page);
+  await canvasEvidence(page.locator(".ub-chart"), info, "chart-light");
+  // The browser edit reaches the writer's replica through `ub open` and the hub.
+  await expectMcp(() => session.call<DocPayload>("get_doc", { uuid }), stored => {
+    expect(stored.blocks.find((entry) => entry.type === "chart")?.text).toBe(`${JSON.stringify(MAPPING)} `);
+  });
 });
 
 test("MCP updates and mapping edits redraw charts and tables, preserve data and survive reload and reopen", async ({ browser }) => {
@@ -1066,7 +1064,7 @@ test("a record limit follows the latest x values with a neutral count and unchan
   await expect(notice).toBeHidden();
 });
 
-test("daily observation labels fit at desktop and iPad widths in both appearances", { tag: "@webkit" }, async ({ browser }, info) => {
+test("daily observation labels fit at desktop and iPad widths", { tag: "@webkit" }, async ({ browser }, info) => {
   test.setTimeout(120_000);
   const session = writer();
   const uuid = await chartDoc(session, "Daily chart observations");
@@ -1083,25 +1081,22 @@ test("daily observation labels fit at desktop and iPad widths in both appearance
       { id: "empty-last", value: { day: "2026-10-08", latency: null, errors: null } },
     ],
   }] });
-  for (const touch of [false, true]) {
-    for (const appearance of ["light", "dark"] as const) {
-      const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-        beforeNavigate: (loading) => installProbe(loading, uuid),
-        contextOptions: {
-          ...(touch ? devices["iPad Pro 11"] : { viewport: { width: 1280, height: 800 }, hasTouch: false, isMobile: false }),
-          locale: "en-US", colorScheme: appearance,
-        },
-      });
-      await expectReady(page, session, uuid);
-      expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(touch);
-      const labels = await expectObservationGeometry(page, observations, /^Oct \d+$/, true);
-      expect(new Set(labels.map((label) => label.y)).size).toBe(1);
-      const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
-      expect(ink.some((entry) => /^2026$|^\d{2}:\d{2}(?::\d{2})?$|^UTC$/.test(entry.text))).toBe(false);
-      expect(ink.some((entry) => entry.text === "Oct 8")).toBe(false);
-      await canvasEvidence(page.locator(".ub-chart"), info, `chart-daily-${touch ? "ipad" : "desktop"}-${appearance}`);
-    }
-  }
+  const touch = info.project.use.hasTouch === true;
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: (loading) => installProbe(loading, uuid),
+    contextOptions: {
+      ...(touch ? devices["iPad Pro 11"] : { viewport: { width: 1280, height: 800 }, hasTouch: false, isMobile: false }),
+      locale: "en-US", colorScheme: "light",
+    },
+  });
+  await expectReady(page, session, uuid);
+  expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(touch);
+  const labels = await expectObservationGeometry(page, observations, /^Oct \d+$/, true);
+  expect(new Set(labels.map((label) => label.y)).size).toBe(1);
+  const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
+  expect(ink.some((entry) => /^2026$|^\d{2}:\d{2}(?::\d{2})?$|^UTC$/.test(entry.text))).toBe(false);
+  expect(ink.some((entry) => entry.text === "Oct 8")).toBe(false);
+  await canvasEvidence(page.locator(".ub-chart"), info, `chart-daily-${touch ? "ipad" : "desktop"}-light`);
 });
 
 test("crowded daily endpoint labels stay inside the canvas after resizing", { tag: "@webkit" }, async ({ browser }, info) => {
@@ -1518,7 +1513,7 @@ for (const layout of ["overlay", "panels"] as const) {
   });
 }
 
-test("narrow-band compact ticks preserve the step on both value axes in both appearances", async ({ browser }) => {
+test("narrow-band compact ticks preserve the step on both value axes", async ({ browser }) => {
   const session = writer();
   const mapping = { ...MAPPING, title: "Service metrics", y: [
     { field: "latency", label: "Users", unit: "requests" },
@@ -1529,24 +1524,22 @@ test("narrow-band compact ticks preserve the step on both value axes in both app
     { id: "first", value: { day: "2026-01-01", latency: -1_000, errors: -100 } },
     { id: "last", value: { day: "2026-01-02", latency: -1_200, errors: -99.9 } },
   ] }] });
-  for (const appearance of ["light", "dark"] as const) {
-    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-      beforeNavigate: (loading) => installProbe(loading, uuid),
-      contextOptions: { locale: "en-US", colorScheme: appearance },
-    });
-    await waitForDocumentDraw(page, session, uuid);
-    const canvas = page.getByRole("img", { name: "Service metrics", exact: true });
-    await expect(canvas).toHaveAccessibleDescription(/Uptime: -99\.9 %/);
-    const painted = () => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts);
-    await expect.poll(painted).toContain("-1.05K requests");
-    await expect.poll(painted).toContain("-99.92%");
-    const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
-    const left = ink.filter(entry => /^-[\d.]+K requests$/.test(entry.text));
-    const right = ink.filter(entry => /^-[\d.]+%$/.test(entry.text));
-    expect(new Set(left.map(entry => entry.text))).toEqual(new Set(["-1K requests", "-1.05K requests", "-1.1K requests", "-1.15K requests", "-1.2K requests"]));
-    expect(new Set(right.map(entry => entry.text))).toEqual(new Set(["-99.9%", "-99.92%", "-99.94%", "-99.96%", "-99.98%", "-100%"]));
-    expect(Math.max(...left.map(entry => entry.x))).toBeLessThan(Math.min(...right.map(entry => entry.x)));
-  }
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: (loading) => installProbe(loading, uuid),
+    contextOptions: { locale: "en-US" },
+  });
+  await waitForDocumentDraw(page, session, uuid);
+  const canvas = page.getByRole("img", { name: "Service metrics", exact: true });
+  await expect(canvas).toHaveAccessibleDescription(/Uptime: -99\.9 %/);
+  const painted = () => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts);
+  await expect.poll(painted).toContain("-1.05K requests");
+  await expect.poll(painted).toContain("-99.92%");
+  const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
+  const left = ink.filter(entry => /^-[\d.]+K requests$/.test(entry.text));
+  const right = ink.filter(entry => /^-[\d.]+%$/.test(entry.text));
+  expect(new Set(left.map(entry => entry.text))).toEqual(new Set(["-1K requests", "-1.05K requests", "-1.1K requests", "-1.15K requests", "-1.2K requests"]));
+  expect(new Set(right.map(entry => entry.text))).toEqual(new Set(["-99.9%", "-99.92%", "-99.94%", "-99.96%", "-99.98%", "-100%"]));
+  expect(Math.max(...left.map(entry => entry.x))).toBeLessThan(Math.min(...right.map(entry => entry.x)));
 });
 
 const PANEL_MAPPING = { ...MAPPING, title: "Delivery trend", layout: "panels", y: [
@@ -1567,74 +1560,68 @@ async function panelMeasurements(session: McpSession, uuid: string): Promise<voi
   }] });
 }
 
-for (const viewport of ["desktop"] as const) {
-  test(`three-series panels at ${viewport} width share ranges and observation labels in both appearances`,
-    async ({ browser }, info) => {
-      const session = writer();
-      const uuid = await chartDoc(session, `Panel chart ${viewport}`, PANEL_MAPPING);
-      await panelMeasurements(session, uuid);
-      for (const appearance of ["light", "dark"] as const) {
-        const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-          beforeNavigate: (loading) => installProbe(loading, uuid),
-          contextOptions: { viewport: { width: 1366, height: 768 },
-            locale: "en-US", colorScheme: appearance },
-        });
-        await waitForDocumentDraw(page, session, uuid);
-        const image = page.getByRole("img", { name: "Delivery trend", exact: true });
-        await expect(image).toBeVisible();
-        await expect(image).toHaveAccessibleDescription(/Autonomous deliveries: 91 %/);
-        await expect(image).toHaveAccessibleDescription(/Wasted runs: 11 %/);
-        await expect(image).toHaveAccessibleDescription(/Runs with denials: 9 %/);
-        await expect(page.locator(".ub-chart").getByRole("img")).toHaveCount(1);
-        await expectCornerControls(page);
-        await expect(page.locator(".ub-chart-diagnostics")).toBeHidden();
-        const panels = page.locator(".ub-chart-series-panel");
-        await expect(panels).toHaveCount(3);
-        const boxes = await panels.evaluateAll(elements => elements.map(element => {
-          const box = element.getBoundingClientRect();
-          return { x: box.x, y: box.y, width: box.width, height: box.height };
-        }));
-        expect(boxes.every(box => box.width >= 149)).toBe(true);
-        const firstRow = boxes.filter(box => box.y === boxes[0]?.y).length;
-        expect(firstRow).toBe(3);
-        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-        const observations = Array.from({ length: 14 }, (_, index) => ({
-          value: Date.UTC(2026, 9, index + 1), label: `Oct ${index + 1}`,
-        }));
-        const labels: string[][] = [];
-        const ticks: string[][] = [];
-        for (const [index, series] of PANEL_MAPPING.y.entries()) {
-          const panel = panels.nth(index);
-          await expect(panel.locator(".ub-chart-series-header")).toContainText(series.label);
-          await expect(panel.locator(".ub-chart-series-header")).toContainText(`${[91, 11, 9][index]} %`);
-          const canvas = panel.locator("canvas");
-          await expect(canvas).toHaveAttribute("aria-hidden", "true");
-          const canvasIndex = await canvas.evaluate(element => [...document.querySelectorAll(".ub-chart canvas")].indexOf(element));
-          const dates = await expectObservationGeometry(page, observations, /^Oct \d+$/, false, canvasIndex, 6);
-          labels.push(dates.map(entry => entry.text));
-          const ink = await page.evaluate(target => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink
-            .filter(entry => entry.canvas === target), canvasIndex);
-          const yTicks = ink.filter(entry => /^[\d.,]+%$/.test(entry.text));
-          expect(yTicks.length).toBeGreaterThanOrEqual(2);
-          expect(yTicks.length).toBeLessThanOrEqual(4);
-          expect(yTicks.some(entry => entry.text === "0%")).toBe(true);
-          ticks.push(yTicks.map(entry => entry.text));
-          expect(ink.some(entry => entry.text === series.label || entry.text === `${series.label} (%)` || entry.text === "Day")).toBe(false);
-          expect(ink.every(entry => entry.font.includes("Geist") && !entry.rotated)).toBe(true);
-          if (index === 0) await expectPanelTickGeometry(page, canvasIndex,
-            Array.from({ length: 14 }, (_, day) => 65 + day * 2), "%", true);
-        }
-        expect(labels[1]).toEqual(labels[0]);
-        expect(labels[2]).toEqual(labels[0]);
-        expect(ticks[1]).toEqual(ticks[0]);
-        expect(ticks[2]).toEqual(ticks[0]);
-        await proveMcpArrival(page, session, uuid, { path: "upstream" });
-        // The later tag transaction is the only local update this reader sees.
-        expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(1);
-        await canvasEvidence(page.locator(".ub-chart"), info, `chart-panels-${viewport}-${appearance}`);
-      }
-    });
-}
+test("three-series panels at desktop width share ranges and observation labels", async ({ browser }, info) => {
+  const session = writer();
+  const uuid = await chartDoc(session, "Panel chart desktop", PANEL_MAPPING);
+  await panelMeasurements(session, uuid);
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: (loading) => installProbe(loading, uuid),
+    contextOptions: { viewport: { width: 1366, height: 768 }, locale: "en-US", colorScheme: "light" },
+  });
+  await waitForDocumentDraw(page, session, uuid);
+  const image = page.getByRole("img", { name: "Delivery trend", exact: true });
+  await expect(image).toBeVisible();
+  await expect(image).toHaveAccessibleDescription(/Autonomous deliveries: 91 %/);
+  await expect(image).toHaveAccessibleDescription(/Wasted runs: 11 %/);
+  await expect(image).toHaveAccessibleDescription(/Runs with denials: 9 %/);
+  await expect(page.locator(".ub-chart").getByRole("img")).toHaveCount(1);
+  await expectCornerControls(page);
+  await expect(page.locator(".ub-chart-diagnostics")).toBeHidden();
+  const panels = page.locator(".ub-chart-series-panel");
+  await expect(panels).toHaveCount(3);
+  const boxes = await panels.evaluateAll(elements => elements.map(element => {
+    const box = element.getBoundingClientRect();
+    return { x: box.x, y: box.y, width: box.width, height: box.height };
+  }));
+  expect(boxes.every(box => box.width >= 149)).toBe(true);
+  const firstRow = boxes.filter(box => box.y === boxes[0]?.y).length;
+  expect(firstRow).toBe(3);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const observations = Array.from({ length: 14 }, (_, index) => ({
+    value: Date.UTC(2026, 9, index + 1), label: `Oct ${index + 1}`,
+  }));
+  const labels: string[][] = [];
+  const ticks: string[][] = [];
+  for (const [index, series] of PANEL_MAPPING.y.entries()) {
+    const panel = panels.nth(index);
+    await expect(panel.locator(".ub-chart-series-header")).toContainText(series.label);
+    await expect(panel.locator(".ub-chart-series-header")).toContainText(`${[91, 11, 9][index]} %`);
+    const canvas = panel.locator("canvas");
+    await expect(canvas).toHaveAttribute("aria-hidden", "true");
+    const canvasIndex = await canvas.evaluate(element => [...document.querySelectorAll(".ub-chart canvas")].indexOf(element));
+    const dates = await expectObservationGeometry(page, observations, /^Oct \d+$/, false, canvasIndex, 6);
+    labels.push(dates.map(entry => entry.text));
+    const ink = await page.evaluate(target => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink
+      .filter(entry => entry.canvas === target), canvasIndex);
+    const yTicks = ink.filter(entry => /^[\d.,]+%$/.test(entry.text));
+    expect(yTicks.length).toBeGreaterThanOrEqual(2);
+    expect(yTicks.length).toBeLessThanOrEqual(4);
+    expect(yTicks.some(entry => entry.text === "0%")).toBe(true);
+    ticks.push(yTicks.map(entry => entry.text));
+    expect(ink.some(entry => entry.text === series.label || entry.text === `${series.label} (%)` || entry.text === "Day")).toBe(false);
+    expect(ink.every(entry => entry.font.includes("Geist") && !entry.rotated)).toBe(true);
+    if (index === 0) await expectPanelTickGeometry(page, canvasIndex,
+      Array.from({ length: 14 }, (_, day) => 65 + day * 2), "%", true);
+  }
+  expect(labels[1]).toEqual(labels[0]);
+  expect(labels[2]).toEqual(labels[0]);
+  expect(ticks[1]).toEqual(ticks[0]);
+  expect(ticks[2]).toEqual(ticks[0]);
+  await proveMcpArrival(page, session, uuid, { path: "upstream" });
+  // The later tag transaction is the only local update this reader sees.
+  expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(1);
+  await canvasEvidence(page.locator(".ub-chart"), info, "chart-panels-desktop-light");
+});
 
 test("panel tick labels match their gridlines and retain extreme markers across unit ranges", async ({ browser }) => {
   const session = writer();

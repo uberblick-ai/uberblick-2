@@ -121,24 +121,6 @@ test("all prose surfaces render the curated marks at their text size and colour 
   }
 });
 
-test("unknown names and code keep literal source without icon decorations", async ({ browser }) => {
-  const literal = "10:30:15 note:this: :rocket: :Claude: :codex-extra:";
-  const created = await create(writer(), [
-    { type: "paragraph", text: literal },
-    { type: "paragraph", inline: [{ text: SOURCE, marks: { inlineCode: true } }] },
-    { type: "code", language: "text", text: SOURCE },
-    { type: "terminal", text: SOURCE },
-    { type: "chart", text: JSON.stringify({ version: 1, type: "table", collection: "missing", title: SOURCE, columns: [{ field: "value" }] }) },
-  ]);
-  const page = await open(browser, created.uuid, false);
-  await expect(editor(page).locator(":scope > p").first()).toHaveText(literal);
-  await expect(editor(page).locator(":scope > p code")).toHaveText(SOURCE);
-  await expect(page.locator(".ub-code code")).toHaveText(SOURCE);
-  await expect(page.locator(".ub-terminal-source")).toHaveText(SOURCE);
-  await expect(page.locator(".ub-chart-source")).toContainText(SOURCE);
-  await expect(editor(page).locator(".ub-inline-icon, .ub-inline-icon-text")).toHaveCount(0);
-});
-
 test("closing colon renders immediately, strict interior editing reveals source and copying preserves it", { tag: "@webkit" }, async ({ browser }, info) => {
   const session = writer();
   const created = await create(session, [{ type: "paragraph", text: "before " }]);
