@@ -140,7 +140,7 @@ test("workspace and every block render, load Figma and sync edits without CSP vi
   const lookup = await lookupResponse;
   expect(lookup.status()).toBe(200);
   expect(await lookup.json()).toEqual({ title: "Figma fixture title" });
-  await expect(page.locator(".ub-figma .ub-block-label")).toHaveText("Figma · Figma fixture title");
+  await expect(page.locator(".ub-figma iframe")).toHaveAttribute("title", "Figma fixture title");
   await expect(page.locator(".ub-figma iframe")).toHaveAttribute("src", /^https:\/\/embed\.figma\.com\//);
   await expect(page.frameLocator(".ub-figma iframe").locator("#viewer")).toHaveText("Live Figma fixture");
 
