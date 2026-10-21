@@ -1170,6 +1170,8 @@ export function App(): ReactElement {
           workspace={workspace}
           workspaceNames={workspaceNames}
           workspaceLocation={workspaceLocation}
+          hubAcked={serving === null ? undefined : servingStatus?.hubAcked ?? null}
+          notSharedReason={servingStatus?.notSharedReason ?? null}
           onWorkspaceMenuOpenChange={setWorkspaceMenuOpen}
           onSwitchWorkspace={onSwitchWorkspace}
           account={servingStatus?.notSharedReason ? { state: "unavailable" } : account}

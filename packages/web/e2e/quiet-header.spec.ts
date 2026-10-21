@@ -21,8 +21,8 @@ async function expectNoRing(dot: Locator): Promise<void> {
 
 /** Sample the CSS separately from sync events, without racing the pulse cleanup timer. */
 async function inspectRing(page: Page, info: TestInfo): Promise<void> {
-  const dot = page.locator(".ub-sync-dot");
-  const geometry = () => page.locator(".ub-sync-dot, .ub-last-updated, .ub-doc-rev").evaluateAll((nodes) =>
+  const dot = page.locator(".ub-status .ub-sync-dot");
+  const geometry = () => page.locator(".ub-status").locator(".ub-sync-dot, .ub-last-updated, .ub-doc-rev").evaluateAll((nodes) =>
     nodes.map((node) => ({ rect: node.getBoundingClientRect().toJSON(), colour: getComputedStyle(node).backgroundColor })));
   const resting = await geometry();
   await dot.evaluate((node) => {
@@ -135,7 +135,7 @@ for (const scheme of ["light", "dark"] as const) {
         state.headerPulses = 0;
         state.revisionCopies = [];
         document.addEventListener("animationstart", (event) => {
-          if (event.target instanceof Element && event.target.matches(".ub-sync-dot")
+          if (event.target instanceof Element && event.target.matches(".ub-status .ub-sync-dot")
             && event.animationName === "ub-sync-ring" && event.pseudoElement === "::after") state.headerPulses += 1;
         });
         Object.defineProperty(navigator, "clipboard", {
@@ -147,7 +147,7 @@ for (const scheme of ["light", "dark"] as const) {
     const page = await openApp(browser, path, { contextOptions: input, beforeNavigate });
     const observer = await openApp(browser, path, { upstream: true, contextOptions: input, beforeNavigate });
     const trigger = page.locator(".ub-status-sync");
-    const dot = page.locator(".ub-sync-dot");
+    const dot = page.locator(".ub-status .ub-sync-dot");
     await expect(trigger).toHaveAttribute("aria-label", /^Synced with hub /);
     await expect(observer.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /);
     expect(await pulseCount(page), "opening and initial sync stay quiet").toBe(0);
@@ -167,7 +167,7 @@ for (const scheme of ["light", "dark"] as const) {
     await expect.poll(() => pulseCount(observer)).toBe(1);
     await expect(page.locator(".ub-sync-announcement")).toHaveText("");
     await expectNoRing(dot);
-    await expectNoRing(observer.locator(".ub-sync-dot"));
+    await expectNoRing(observer.locator(".ub-status .ub-sync-dot"));
 
     await page.emulateMedia({ reducedMotion: "reduce" });
     await placeCaret(page);

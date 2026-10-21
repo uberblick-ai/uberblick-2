@@ -61,7 +61,7 @@ const LIVE: RoomStatus = {
 
 /**
  * What every stubbed room reports. Live unless a test sets it before the
- * rooms are made, which is how the directory line's readings are exercised;
+ * rooms are made, which is how the direct hub's readings are exercised;
  * reset after each test with the rooms that were handed it.
  */
 let roomStatus: RoomStatus = LIVE;
@@ -1065,11 +1065,7 @@ describe("the sidebar's fixed navigation", () => {
   });
 });
 
-/**
- * Only directory problems add a footer row. Refusals keep the shared
- * precedence and their explanation, while normal connection and sync stay quiet.
- */
-describe("the sidebar's directory status", () => {
+describe("the sidebar's direct hub status", () => {
   async function directoryState(status: Partial<RoomStatus>, path = `/${WORKSPACE}`): Promise<HTMLElement> {
     mounted?.unmount();
     mounted = null;
@@ -1085,19 +1081,24 @@ describe("the sidebar's directory status", () => {
   }
 
   it.each([
-    [{ protocolMismatch: { hub: 2, client: 1 } }, "Update required", "this app is older than the hub"],
-    [{ tokenMissing: true }, "No hub token", "this app was served without a hub token"],
-    [{ authFailed: true }, "Not authorized", "this document is not saved"],
-    [{ storeRefused: true }, "Edit refused", "the server refused this edit"],
-  ] as const)("shows %s over the ordinary state with its own explanation", async (refusal, word, detail) => {
+    { protocolMismatch: { hub: 2, client: 1 } },
+    { tokenMissing: true },
+    { authFailed: true },
+    { storeRefused: true },
+  ])("shows a decorative dot for a refusal even while connected: %s", async (refusal) => {
     const host = await directoryState({ connected: true, synced: true, ...refusal });
-    const row = host.querySelector<HTMLElement>(".ub-directory-status");
-    expect(row?.textContent).toBe(word);
-    expect(row?.title).toContain(detail);
-    expect(row?.title).not.toContain("sync when the hub is back");
-    expect(row?.querySelector(".ub-sync-dot")?.getAttribute("data-state")).toBe("offline");
-    expect(row?.parentElement?.getAttribute("data-slot")).toBe("sidebar-footer");
-    expect(row?.nextElementSibling?.textContent).toBe("Workspace settings");
+    const dot = host.querySelector<HTMLElement>(".ub-workspace-location .ub-hub-problem");
+    expect(dot).not.toBeNull();
+    expect(dot?.getAttribute("data-state")).toBe("offline");
+    expect(dot?.getAttribute("aria-hidden")).toBe("true");
+    expect(dot?.closest("[title]")).toBeNull();
+    expect(dot?.matches("[tabindex], [role], [aria-label], [aria-labelledby]")).toBe(false);
+    expect(dot?.textContent).toBe("");
+    expect(dot?.previousElementSibling?.textContent).toBe("localhost:1234");
+    expect(host.querySelector(".ub-directory-status")).toBeNull();
+    const footer = host.querySelector('[data-slot="sidebar-footer"]');
+    expect(footer?.firstElementChild?.textContent).toBe("Workspace settings");
+    expect(footer?.children).toHaveLength(2);
   });
 
   it.each([
@@ -1107,21 +1108,22 @@ describe("the sidebar's directory status", () => {
     { connected: false, synced: false, hasAnswered: false },
   ])("stays quiet during normal or initial connection: %s", async (status) => {
     const host = await directoryState(status);
+    expect(host.querySelector(".ub-hub-problem")).toBeNull();
     expect(host.querySelector(".ub-directory-status")).toBeNull();
     expect(sidebarControls(host).queryByText(/^(directory synced|syncing…|offline)$/)).toBeNull();
   });
 
-  it("shows an answered offline directory above settings with the local sync promise", async () => {
+  it("shows an answered disconnect beside the host without save wording", async () => {
     const host = await directoryState({});
-    const row = host.querySelector<HTMLElement>(".ub-directory-status");
-    expect(row?.textContent).toBe("Offline");
-    expect(row?.title).toBe("Changes are saved on this device and sync when the hub is back.");
-    expect(row?.querySelector(".ub-sync-dot")?.getAttribute("data-state")).toBe("offline");
-    expect(row?.nextElementSibling?.textContent).toBe("Workspace settings");
+    const selector = sidebarControls(host).getByRole("button", { name: "Unnamed workspace localhost:1234" });
+    expect(selector.querySelector(".ub-hub-problem")).not.toBeNull();
+    expect(host.querySelector(".ub-directory-status")).toBeNull();
+    expect(selector.textContent).not.toMatch(/Offline|saved|refused/);
   });
 
   it("does not turn the no-workspace fallback into an offline workspace", async () => {
     const host = await directoryState({}, "/not-a-workspace");
+    expect(host.querySelector(".ub-hub-problem")).toBeNull();
     expect(host.querySelector(".ub-directory-status")).toBeNull();
   });
 
@@ -1132,13 +1134,13 @@ describe("the sidebar's directory status", () => {
       directory.status = { ...directory.status, ...patch };
       for (const listener of statusListeners.get(directory.room) ?? []) listener(directory.status);
     }
-    expect(host.querySelector(".ub-directory-status")).toBeNull();
+    expect(host.querySelector(".ub-hub-problem")).toBeNull();
     act(() => updateDirectory({ connected: false, synced: false, writable: false }));
-    expect(host.querySelector(".ub-directory-status")?.textContent).toBe("Offline");
+    expect(host.querySelector(".ub-hub-problem")).not.toBeNull();
     act(() => updateDirectory({ authFailed: true }));
-    expect(host.querySelector(".ub-directory-status")?.textContent).toBe("Not authorized");
+    expect(host.querySelector(".ub-hub-problem")).not.toBeNull();
     act(() => updateDirectory({ connected: true, authFailed: false }));
-    expect(host.querySelector(".ub-directory-status")).toBeNull();
+    expect(host.querySelector(".ub-hub-problem")).toBeNull();
   });
 });
 

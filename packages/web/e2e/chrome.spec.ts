@@ -529,6 +529,7 @@ for (const scheme of ["light"] as const) {
     const create = page.getByRole("button", { name: "+ New page" });
     await expect(create).toBeDisabled();
     await expect(page.locator(".ub-directory-status")).toHaveCount(0);
+    await expect(page.locator(".ub-hub-problem")).toHaveCount(0);
 
     const disabled = await paintedIn(create, "background-color");
     await create.hover();

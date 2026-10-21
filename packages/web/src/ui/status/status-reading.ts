@@ -32,10 +32,7 @@ export interface StatusReading {
   tone: SyncState;
 }
 
-/**
- * The sidebar uses raw state and reads word only for a non-null refusal
- * detail; document surfaces pass their settled calm state.
- */
+/** The sidebar uses raw state; document surfaces pass their settled calm state. */
 export function statusReading(status: RoomStatus, settled: SyncState): StatusReading {
   const mismatch = status.protocolMismatch;
   if (mismatch !== null) {
