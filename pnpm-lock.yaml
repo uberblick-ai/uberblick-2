@@ -189,6 +189,9 @@ importers:
       '@hocuspocus/provider':
         specifier: 4.7.1
         version: 4.7.1(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
+      '@panzoom/panzoom':
+        specifier: 4.6.0
+        version: 4.6.0
       '@radix-ui/react-alert-dialog':
         specifier: 1.1.23
         version: 1.1.23(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -695,6 +698,9 @@ packages:
 
   '@oxc-project/types@0.146.0':
     resolution: {integrity: sha512-XC0QsnnhVe7sLIWmYmdPw7x5P0h4W8vUU3Nv1ySgWXtvCz8NizoAEpGXA0sOYoJQV2Rl13LgURAHQ5cI5ILCSA==}
+
+  '@panzoom/panzoom@4.6.0':
+    resolution: {integrity: sha512-3KxkY1lNKFn98fW5ZFR6vV0YzsXj3I4EQDyFWSXME6/cic86eSS7VjuqIjrA3PEpySo0r5fFtlX8eYCt4JPUFQ==}
 
   '@playwright/test@1.62.1':
     resolution: {integrity: sha512-DTcUc8qii+cpHvtOwggMtBRMjKZHXYWdw8syRYu2vtzuq4Wxphqq4NfCs5Zt44L6mA8rfDfj+PHnxFc/FeK6mQ==}
@@ -2979,6 +2985,8 @@ snapshots:
       - supports-color
 
   '@oxc-project/types@0.146.0': {}
+
+  '@panzoom/panzoom@4.6.0': {}
 
   '@playwright/test@1.62.1':
     dependencies:

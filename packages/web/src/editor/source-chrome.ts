@@ -18,7 +18,7 @@ import { codeLanguageLabel } from "./syntax-highlighting.js";
  * Try the secure-context Clipboard API, then selection copy for supported plain
  * HTTP deployments or denied transient activation. Report failure explicitly.
  */
-export async function writeToClipboard(text: string, fallbackReady?: Promise<void>): Promise<boolean> {
+export async function writeToClipboard(text: string, fallbackReady?: Promise<void>, fallbackContainer?: HTMLElement): Promise<boolean> {
   if (navigator.clipboard !== undefined) {
     try {
       await navigator.clipboard.writeText(text);
@@ -27,17 +27,18 @@ export async function writeToClipboard(text: string, fallbackReady?: Promise<voi
       // Permission or activation refusal still permits selection-copy fallback.
     }
   }
-  // Modal callers release their focus trap before the selection fallback.
+  // Modal callers supply a container inside the trap, or release their focus
+  // trap before the selection fallback.
   // Start the native API above while the original user gesture is still active.
   if (fallbackReady !== undefined) await fallbackReady;
-  return copyViaSelection(text);
+  return copyViaSelection(text, fallbackContainer);
 }
 
 /**
  * execCommand copies selection: focus a selectable offscreen textarea and
  * restore the prior focus without disturbing the editor caret.
  */
-function copyViaSelection(text: string): boolean {
+function copyViaSelection(text: string, container: HTMLElement = document.body): boolean {
   const previous = document.activeElement;
   const scratch = document.createElement("textarea");
   scratch.value = text;
@@ -46,7 +47,7 @@ function copyViaSelection(text: string): boolean {
   scratch.style.position = "fixed";
   scratch.style.top = "-9999px";
   scratch.style.opacity = "0";
-  document.body.appendChild(scratch);
+  container.appendChild(scratch);
   let copied = false;
   try {
     // Focus explicitly: `select()` alone leaves the selection on an unfocused
