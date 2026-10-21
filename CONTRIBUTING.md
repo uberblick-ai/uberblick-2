@@ -240,7 +240,7 @@ poll gate without shortening approval lifetimes. It is a ceiling, never
 a floor: unset or unusable it changes nothing, and it cannot lengthen a
 default. As environment it reaches spawned children, which is why it is a
 variable rather than an option. In-process tests can pass an explicit
-collection timeout to leave margin for SQLite work while keeping polls short.
+collection timeout to leave margin for healthy requests while keeping polls short.
 It does not shorten unrelated deadlines such as GitHub approval or lock waits.
 The header of
 [`packages/cli/src/budget.ts`](packages/cli/src/budget.ts) owns the exact contract

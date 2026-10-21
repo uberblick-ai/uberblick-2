@@ -6,14 +6,14 @@ let running = false;
 
 /**
  * Commands read process configuration; each worker restores it before the next assertion.
- * Sign-in collection commits SQLite state, so its explicit budget leaves margin
- * for healthy storage work independently of capped polling and timeout tests.
+ * Healthy sign-in collections retain their production request budget; deadline
+ * tests pass a shorter explicit timeout independently of capped polling.
  */
 export async function runInProcess(
   argv: string[],
   box: Sandbox,
   extraEnv: NodeJS.ProcessEnv = {},
-  options: Parameters<typeof runCli>[2] = { authCollectTimeoutMs: 2_000 },
+  options: Parameters<typeof runCli>[2] = { authCollectTimeoutMs: 10_000 },
 ): Promise<Run> {
   if (running) throw new Error("Concurrent CLI invocations require the subprocess helper");
   if (extraEnv.NODE_OPTIONS) throw new Error("Node startup options require the subprocess helper");
