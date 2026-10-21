@@ -8,6 +8,7 @@ import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
 import { setNativeSelection } from "./native-selection.js";
 import { expectMcp, proveMcpArrival, waitForDocumentDraw } from "./settle.js";
+import { alphaOf } from "../test/colour.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
@@ -492,6 +493,7 @@ test("iPad taps open the viewer without an inline toolbar and read-only Copy ret
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
     contextOptions: { ...devices["iPad Pro 11"], viewport: { width: 1024, height: 768 } },
     beforeNavigate: async page => { await page.addInitScript(() => {
+      localStorage.setItem("uberblick.settings.v1", JSON.stringify({ appearance: "dark" }));
       Object.defineProperty(navigator, "clipboard", {
         configurable: true,
         value: { writeText: async (text: string) => document.documentElement.setAttribute("data-copied-source", text) },
@@ -499,11 +501,19 @@ test("iPad taps open the viewer without an inline toolbar and read-only Copy ret
     }); },
   });
   await waitForDocumentDraw(page, session, uuid, { source: TALL });
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   const preview = page.locator(".ub-ablauf-viewport");
   await preview.tap();
   await expect(viewer(page)).toBeVisible();
   await expect.poll(() => zoomLevel(page)).toBeLessThan(25);
+  const surface = await viewer(page).locator(".ub-ablauf-viewer-drawing").evaluate(element => {
+    const svg = element.querySelector(".ub-ablauf-drawing")?.shadowRoot?.querySelector("svg");
+    if (svg === null || svg === undefined) throw new Error("e2e: viewer SVG is missing");
+    return { drawing: getComputedStyle(element).backgroundColor, svg: getComputedStyle(svg).backgroundColor };
+  });
+  expect(surface.svg).toBe(surface.drawing);
+  expect(alphaOf(surface.svg)).toBe(1);
   const fit = await zoomLevel(page);
   await pinch(page, 60, 30);
   await expect.poll(() => zoomLevel(page)).toBe(fit);
