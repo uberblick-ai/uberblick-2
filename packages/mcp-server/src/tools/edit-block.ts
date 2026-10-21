@@ -27,17 +27,13 @@ export const inputSchema = strictInput({
 });
 
 export const editBlockOperation = documentOperation({ content: true, contentDurability: true }, inputSchema, (context, { uuid, block_id, old_text, new_text, list, indent, rev, table_mapping }, _request, replica) => {
-  const { replicas, validateTableTargets, validateCardTargets, validateFigmaTargets } = context;
+  const { replicas, validateBlockTargets } = context;
 
   const current = getBlock(replica.doc, block_id);
   // Keep stale assertions ahead of content validation, as editBlock does.
   // Validate before its transaction: a Yjs write cannot be rolled back.
-  if (current?.type === "table" && current.text === old_text &&
-      (rev === undefined || current.rev === rev)) validateTableTargets(new_text, old_text, table_mapping);
-  if (current?.type === "card" && current.text === old_text &&
-      (rev === undefined || current.rev === rev)) validateCardTargets(new_text, old_text);
-  if (current?.type === "figma" && current.text === old_text &&
-      (rev === undefined || current.rev === rev)) validateFigmaTargets(new_text, old_text);
+  if (current !== null && current.text === old_text &&
+      (rev === undefined || current.rev === rev)) validateBlockTargets(current.type, new_text, old_text, table_mapping);
   preservingOpenAnchors(replica.doc, block_id, draft => editBlock(draft, block_id, old_text, new_text, {
     ...(rev === undefined ? {} : { rev }),
     ...(list === undefined ? {} : { list }),

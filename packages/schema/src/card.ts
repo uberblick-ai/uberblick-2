@@ -1,13 +1,15 @@
 import * as Y from "yjs";
 import { InvalidCardError } from "./errors.js";
+import { parseContainerHeader } from "./container-header.js";
 import { spliceInlineText } from "./inline-edit.js";
-import { applyInlineRuns, assertInlineWritable, inlinePlainText, readInlineRuns, readsAsMark } from "./marks.js";
+import { buildInlinePart, CARD_NODE_NAMES, CARD_PARTS, ensureInlinePartText, inlinePartElement, inlinePartTexts, isSupportedInlinePart, plainXmlText, seedNewInlinePartsOfKind } from "./inline-parts.js";
+import type { CardPart } from "./inline-parts.js";
+import { applyInlineRuns, assertInlineWritable, inlinePlainText, readInlineRuns } from "./marks.js";
 import { parseInline, parseMarkdownLinkPrefix, renderInline, renderMarkdownLink } from "./markdown.js";
-import { plainXmlText, TABLE_CELL_MARKS } from "./table.js";
 import type { InlineRun } from "./types.js";
 
-export const CARD_PARTS = ["label", "title", "body", "footer"] as const;
-export type CardPart = (typeof CARD_PARTS)[number];
+export { CARD_NODE_NAMES, CARD_PARTS } from "./inline-parts.js";
+export type { CardPart } from "./inline-parts.js";
 export const CARD_BUTTON_STYLES = ["outline", "filled"] as const;
 export const CARD_BUTTON_COLORS = ["neutral", "blue", "green", "violet"] as const;
 export type CardButtonStyle = (typeof CARD_BUTTON_STYLES)[number];
@@ -15,10 +17,6 @@ export type CardButtonColor = (typeof CARD_BUTTON_COLORS)[number];
 export interface CardButton { text: string; href: string; style?: CardButtonStyle; color?: CardButtonColor }
 export type CardText = Record<CardPart, string> & { buttons?: CardButton[] };
 export type CardInline = Record<CardPart, InlineRun[]>;
-
-export const CARD_NODE_NAMES: Record<CardPart, string> = {
-  label: "cardLabel", title: "cardTitle", body: "cardBody", footer: "cardFooter",
-};
 
 const CARD_APP_ROUTES = ["claude://code/new", "claude-cli://open", "codex://new"] as const;
 
@@ -93,27 +91,21 @@ export function cardButtons(element: Y.XmlElement): CardButton[] {
 
 /** The container header is inline Markdown, never a YAML mapping. */
 export function parseCardInput(source: string, requireTitle = true): CardText {
-  const lines = source.replace(/\r\n?/g, "\n").split("\n");
   const result: CardText = { label: "", title: "", body: "", footer: "" };
-  const seen = new Set<string>();
-  let bodyStart = lines.length;
-  for (const [index, line] of lines.entries()) {
-    if (line.trim() === "") {
-      bodyStart = index + 1;
-      break;
-    }
-    const match = /^(label|title|footer|button): ?(.*)$/s.exec(line);
-    if (match === null) throw new InvalidCardError("Header lines must use label:, title:, footer: or button:");
-    const key = match[1] as "label" | "title" | "footer" | "button";
-    if (key !== "button" && seen.has(key)) throw new InvalidCardError(`Duplicate header key: ${key}`);
-    seen.add(key);
-    if (key === "button") {
-      result.buttons ??= [];
-      result.buttons.push(parseCardButton(match[2] ?? ""));
-    } else result[key] = match[2] ?? "";
-  }
+  const { seen, body } = parseContainerHeader(source, {
+    keys: ["label", "title", "footer", "button"] as const,
+    repeatable: ["button"],
+    invalidHeader: "Header lines must use label:, title:, footer: or button:",
+    error: (message) => new InvalidCardError(message),
+    accept: (key, value) => {
+      if (key === "button") {
+        result.buttons ??= [];
+        result.buttons.push(parseCardButton(value));
+      } else result[key] = value;
+    },
+  });
   if (requireTitle && (!seen.has("title") || inlinePlainText(parseInline(result.title)).trim() === "")) throw new InvalidCardError();
-  result.body = lines.slice(bodyStart).join("\n");
+  result.body = body;
   return result;
 }
 
@@ -133,15 +125,11 @@ export function writeCardText(parts: Readonly<CardText>): string {
 }
 
 export function cardPartElement(element: Y.XmlElement, part: CardPart): Y.XmlElement | null {
-  return element.toArray().find((node): node is Y.XmlElement =>
-    node instanceof Y.XmlElement && node.nodeName === CARD_NODE_NAMES[part],
-  ) ?? null;
+  return inlinePartElement(element, CARD_NODE_NAMES[part]);
 }
 
 export function cardPartTexts(element: Y.XmlElement, part: CardPart): Y.XmlText[] {
-  const paragraph = cardPartElement(element, part)?.firstChild;
-  if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== "paragraph") return [];
-  return paragraph.toArray().filter((text): text is Y.XmlText => text instanceof Y.XmlText);
+  return inlinePartTexts(cardPartElement(element, part));
 }
 
 export function cardInline(element: Y.XmlElement): CardInline {
@@ -170,17 +158,8 @@ export function isSupportedCard(element: Y.XmlElement): boolean {
   return element.toArray().every((node, index) => {
     const part = CARD_PARTS[index];
     if (part === undefined || !(node instanceof Y.XmlElement) || node.nodeName !== CARD_NODE_NAMES[part] ||
-      Object.keys(node.getAttributes()).length !== 0 || node.length !== 1) return false;
-    const paragraph = node.firstChild;
-    if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== "paragraph" ||
-      Object.keys(paragraph.getAttributes()).length !== 0 || paragraph.length > 1) return false;
-    return paragraph.toArray().every((text) => text instanceof Y.XmlText &&
-      (text.toDelta() as Array<{ insert?: unknown; attributes?: Record<string, unknown> }>).every((op) =>
-        typeof op.insert === "string" && Object.entries(op.attributes ?? {}).every(([key, value]) =>
-          (TABLE_CELL_MARKS as readonly string[]).includes(key) && readsAsMark(key, value),
-        ),
-      ),
-    );
+      Object.keys(node.getAttributes()).length !== 0) return false;
+    return isSupportedInlinePart(node, true);
   });
 }
 
@@ -188,13 +167,7 @@ export function isSupportedCard(element: Y.XmlElement): boolean {
 export function buildCardElement(id: string): Y.XmlElement {
   const element = new Y.XmlElement("card");
   element.setAttribute("id", id);
-  element.insert(0, CARD_PARTS.map((part) => {
-    const node = new Y.XmlElement(CARD_NODE_NAMES[part]);
-    const paragraph = new Y.XmlElement("paragraph");
-    paragraph.insert(0, [new Y.XmlText()]);
-    node.insert(0, [paragraph]);
-    return node;
-  }));
+  element.insert(0, CARD_PARTS.map((part) => buildInlinePart(CARD_NODE_NAMES[part])));
   return element;
 }
 
@@ -208,18 +181,7 @@ export function writeCardInline(element: Y.XmlElement, parts: Readonly<CardText>
 }
 
 export function seedNewCardParts(transaction: Y.Transaction): void {
-  if (!transaction.local) return;
-  const doc = transaction.doc;
-  const start = transaction.beforeState.get(doc.clientID) ?? 0;
-  for (const card of doc.getXmlFragment("blocks").toArray()) {
-    if (!(card instanceof Y.XmlElement) || card.nodeName !== "card") continue;
-    for (const part of CARD_PARTS) {
-      const paragraph = cardPartElement(card, part)?.firstChild;
-      if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== "paragraph" || paragraph.length !== 0) continue;
-      const id = Y.createRelativePositionFromTypeIndex(paragraph, 0).type;
-      if (id?.client === doc.clientID && id.clock >= start) paragraph.insert(0, [new Y.XmlText()]);
-    }
-  }
+  seedNewInlinePartsOfKind(transaction, "card");
 }
 
 export function editCard(element: Y.XmlElement, before: Readonly<CardText>, after: Readonly<CardText>): void {
@@ -239,13 +201,8 @@ export function editCard(element: Y.XmlElement, before: Readonly<CardText>, afte
   });
   // Yjs transactions cannot roll back, so every part is validated before writing.
   for (const edit of edits) {
-    let text = edit.text;
-    if (text === undefined) {
-      const paragraph = cardPartElement(element, edit.part)?.firstChild;
-      if (!(paragraph instanceof Y.XmlElement)) throw new InvalidCardError("Stored card part is missing");
-      text = new Y.XmlText();
-      paragraph.insert(0, [text]);
-    }
+    const text = edit.text ?? ensureInlinePartText(cardPartElement(element, edit.part));
+    if (text === null) throw new InvalidCardError("Stored card part is missing");
     spliceInlineText(text, edit.oldRuns, edit.newRuns, edit.offset);
   }
   if (beforeButtons !== buttons) {

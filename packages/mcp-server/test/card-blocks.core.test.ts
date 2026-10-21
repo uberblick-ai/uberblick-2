@@ -143,6 +143,49 @@ describe("cards through MCP", () => {
     expect(await rig.ok("list_docs")).toEqual(listed);
   });
 
+  it.each(PARTS)("keeps an unresolved link editable only within its existing %s part", async (part) => {
+    const rig = await localRig();
+    const created = await rig.ok("create_doc", { title: "Existing card targets", description: "Each part retains its own target exemption.",
+      blocks: [{ type: "card", text: SOURCE }] });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const id = created.blocks[0].id;
+    const text = partText(doc, id, part);
+    const unknown = randomUUID();
+    text.format(0, text.length, { docLink: { docId: unknown } });
+    const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
+    const source = sourceWithPart(part, `[**Renamed**](${unknown})`);
+    const edited = await rig.ok("edit_block", { uuid: created.uuid, block_id: id,
+      old_text: read.text, new_text: source, rev: read.rev });
+    expect(edited.block.text).toBe(source);
+    expect(partText(doc, id, part)).toBe(text);
+
+    const copied = part === "body"
+      ? source.replace("footer: Evidence", `footer: [Copy](${unknown})`)
+      : source.replace("Keep the body.", `[Copy](${unknown})`);
+    const before = Y.encodeStateAsUpdate(doc);
+    const writes = rig.instance.store.logSize();
+    expect(await rig.call("edit_block", { uuid: created.uuid, block_id: id,
+      old_text: edited.block.text, new_text: copied, rev: edited.block.rev })).toMatchObject({ isError: true, payload: {
+      error: "doclink_target_not_known_locally", applied: false, partial: false,
+    } });
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(rig.instance.store.logSize()).toBe(writes);
+  });
+
+  it("can fill a title left empty in the web without rejecting its previous projection", async () => {
+    const rig = await localRig();
+    const created = await rig.ok("create_doc", { title: "Empty card title", description: "The old web-created title may be empty.",
+      blocks: [{ type: "card", text: SOURCE }] });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const text = partText(doc, created.blocks[0].id, "title");
+    text.delete(0, text.length);
+    const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
+    const edited = await rig.ok("edit_block", { uuid: created.uuid, block_id: read.id,
+      old_text: read.text, new_text: SOURCE, rev: read.rev });
+    expect(edited.block.text).toBe(SOURCE);
+    expect(partText(doc, read.id, "title")).toBe(text);
+  });
+
   it("refuses new MCP anchors and link ranges while preserving existing card thread lifecycle", async () => {
     const rig = await localRig();
     const target = await rig.ok("create_doc", { title: "Card range target", description: "A known target for a refused range." });

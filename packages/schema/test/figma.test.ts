@@ -280,6 +280,19 @@ describe("Figma block contract", () => {
     expect(isSupportedFigma(restored)).toBe(true);
   });
 
+  it("keeps stored caption newlines during a header edit", () => {
+    const { doc, id, figma } = fixture();
+    const caption = figmaCaptionTexts(figma)[0]!;
+    caption.insert(4, "\n");
+    const delta = caption.toDelta();
+    expect(isSupportedFigma(figma)).toBe(true);
+    const before = getBlock(doc, id)!.text;
+    editBlock(doc, id, before, before.replace("Payment, mobile", "Payment, desktop"));
+    expect(caption.toDelta()).toEqual(delta);
+    expect(getBlock(doc, id)!.text).toContain("Card\n form");
+    doc.destroy();
+  });
+
   it("changes only requested headers and preserves caption text, marks and anchors", () => {
     const { doc, id, figma } = fixture(SOURCE.replace("Card form", "**Card form**"));
     const text = figmaCaptionTexts(figma)[0]!;
@@ -345,6 +358,9 @@ describe("Figma block contract", () => {
       (figma: Y.XmlElement) => figmaCaptionElement(figma)!.setAttribute("future", "shape"),
       (figma: Y.XmlElement) => figmaCaptionTexts(figma)[0]!.insertEmbed(0, { hidden: true }),
       (figma: Y.XmlElement) => figmaCaptionTexts(figma)[0]!.format(0, 1, { future: {} }),
+      (figma: Y.XmlElement) => figmaCaptionTexts(figma)[0]!.format(0, 1, { bold: false }),
+      (figma: Y.XmlElement) => (figmaCaptionElement(figma)!.firstChild as Y.XmlElement).setAttribute("future", "shape"),
+      (figma: Y.XmlElement) => (figmaCaptionElement(figma)!.firstChild as Y.XmlElement).insert(1, [new Y.XmlText("extra")]),
     ];
     for (const mutate of mutations) {
       const { doc, id, figma } = fixture();
@@ -352,8 +368,11 @@ describe("Figma block contract", () => {
       expect(isSupportedFigma(figma)).toBe(false);
       const before = Y.encodeStateAsUpdate(doc);
       const oldText = getBlock(doc, id)!.text;
-      expect(() => editBlock(doc, id, oldText, oldText.replace("mobile", "desktop"))).toThrow(InvalidFigmaError);
+      const edit = () => editBlock(doc, id, oldText, oldText.replace("mobile", "desktop"));
+      expect(edit).toThrow(InvalidFigmaError);
+      expect(edit).toThrow("Stored Figma shape is unsupported; it cannot be rewritten");
       expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+      doc.destroy();
     }
   });
 });

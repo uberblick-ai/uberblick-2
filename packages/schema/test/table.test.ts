@@ -726,6 +726,33 @@ describe("structured table contract", () => {
     doc.destroy();
   });
 
+  it("refuses foreign grammar in a late cell before rewriting an earlier cell", () => {
+    const mutations = [
+      (cell: Y.XmlElement) => cell.setAttribute("future", "shape"),
+      (cell: Y.XmlElement) => tableCellText(cell)!.insertEmbed(0, { hidden: true }),
+      (cell: Y.XmlElement) => tableCellText(cell)!.format(0, 1, { future: {} }),
+      (cell: Y.XmlElement) => tableCellText(cell)!.format(0, 1, { bold: false }),
+      (cell: Y.XmlElement) => tableCellText(cell)!.insert(0, "\n"),
+      (cell: Y.XmlElement) => tableCellText(cell)!.insert(0, "\r"),
+      (cell: Y.XmlElement) => (cell.firstChild as Y.XmlElement).setAttribute("future", "shape"),
+      (cell: Y.XmlElement) => (cell.firstChild as Y.XmlElement).insert(1, [new Y.XmlText("extra")]),
+    ];
+    for (const mutate of mutations) {
+      const doc = seeded();
+      const id = appendBlock(doc, { type: "table", text: GFM });
+      const table = element(doc, id);
+      mutate(tableRows(table)[2]![1]!);
+      expect(isSupportedTable(table)).toBe(false);
+      const before = Y.encodeStateAsUpdate(doc);
+      const oldText = getBlock(doc, id)!.text;
+      const edit = () => editBlock(doc, id, oldText, oldText.replace("Alpha", "Alpine"));
+      expect(edit).toThrow(InvalidTableError);
+      expect(edit).toThrow("Table text must be exactly one GFM table");
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+      doc.destroy();
+    }
+  });
+
   it("converges a concurrent row addition and column addition without squaring or repair loops", () => {
     let id = "";
     const [a, b] = replicaPair((doc) => { initDoc(doc, { uuid: UUID, title: "Tables" }); id = appendBlock(doc, { type: "table", text: GFM }); });
