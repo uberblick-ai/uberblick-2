@@ -366,15 +366,13 @@ function refreshRoomStatus(
 }
 
 function settingsRefusalNotifier(uuid: string): (event: { payload: string }) => void {
-  let notified = false;
   return ({ payload }) => {
-    if (uuid !== SETTINGS_SUFFIX || notified) return;
+    if (uuid !== SETTINGS_SUFFIX) return;
     let notice: unknown;
     try { notice = JSON.parse(payload); }
     catch { return; }
     if (notice === null || typeof notice !== "object" || !("type" in notice) ||
       notice.type !== "settings-reset" || !("message" in notice) || typeof notice.message !== "string") return;
-    notified = true;
     toast.error(notice.message, { id: "workspace-settings-refused" });
   };
 }
