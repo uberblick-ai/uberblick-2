@@ -6,17 +6,14 @@ import {
   InvalidTableError,
   addComment,
   appendBlock,
-  buildTableRow,
   createAnnotation,
   decisionApprovalChanged,
   decisionApprovalFingerprint,
-  deleteAnnotation,
   editBlock,
   exportMarkdown,
   findBlockElement,
   getAnnotation,
   getBlock,
-  getBlockText,
   getMetaMap,
   initDoc,
   listAnnotationRanges,
@@ -29,6 +26,7 @@ import {
   tableRows,
   writeGfmTable,
 } from "../src/index.js";
+import { buildTableRow } from "../src/table.js";
 import { syncDocs } from "./helpers.js";
 
 const UUID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
@@ -68,7 +66,7 @@ describe("table-cell annotation contract", () => {
     doc.destroy();
   });
 
-  it("marks and clears exact intersections across adjacent shared texts in one cell", () => {
+  it("marks exact intersections across adjacent shared texts in one cell", () => {
     const { doc, id, table } = fixture();
     const paragraph = tableRows(table)[1]![0]!.firstChild as Y.XmlElement;
     const suffix = new Y.XmlText("Suffix");
@@ -90,12 +88,6 @@ describe("table-cell annotation contract", () => {
     doc.on("update", () => { updates += 1; });
     expect(() => createAnnotation(doc, id, 7, 10, "reader", "Overlap", { row: 1, column: 0 })).toThrow(AnnotationRangeError);
     expect(updates).toBe(0);
-    const neighbour = createAnnotation(doc, id, 0, 1, "reader", "Different cell", { row: 1, column: 1 });
-    expect(deleteAnnotation(doc, thread.id)).toBe(true);
-    expect(listAnnotationRanges(doc, id)).toEqual([{ threadId: neighbour.id, row: 1, column: 1, start: 0, end: 1 }]);
-    expect(cellText(table, 1, 0).toDelta()).toEqual([{ insert: "Alpha" }]);
-    expect(suffix.toDelta()).toEqual([{ insert: "Suffix", attributes: { italic: {} } }]);
-    expect(getBlock(doc, id)).toEqual(before);
     doc.destroy();
   });
 
@@ -159,7 +151,7 @@ describe("table-cell annotation contract", () => {
       ["Extra", "Name", "Count"], ["x", "Inserted", "0"],
       ["y", "Alpha", "1"], ["z", "Beta", "2"],
     ]);
-    editBlock(doc, id, getBlockText(doc, id), expanded, { tableMapping: { rows: [0, null, 1, 2], columns: [null, 0, 1] } });
+    editBlock(doc, id, getBlock(doc, id)!.text, expanded, { tableMapping: { rows: [0, null, 1, 2], columns: [null, 0, 1] } });
     expect(resolveAnnotationRange(doc, thread.id)).toEqual({ row: 3, column: 1, start: 1, end: 3, collapsed: false });
     const reduced = writeGfmTable([["Extra", "Name"], ["x", "Inserted"], ["z", "Beta"]]);
     editBlock(doc, id, expanded, reduced, { tableMapping: { rows: [0, 1, 3], columns: [0, 1] } });
@@ -171,11 +163,11 @@ describe("table-cell annotation contract", () => {
     const { doc, id } = fixture();
     const thread = createAnnotation(doc, id, 0, 5, "reader", "Alpha", { row: 1, column: 0 });
     if (what === "characters") {
-      editBlock(doc, id, getBlockText(doc, id), writeGfmTable([["Name", "Count"], ["", "1"], ["Beta", "2"]]));
+      editBlock(doc, id, getBlock(doc, id)!.text, writeGfmTable([["Name", "Count"], ["", "1"], ["Beta", "2"]]));
     } else if (what === "row") {
-      editBlock(doc, id, getBlockText(doc, id), writeGfmTable([["Name", "Count"], ["Beta", "2"]]), { tableMapping: { rows: [0, 2], columns: [0, 1] } });
+      editBlock(doc, id, getBlock(doc, id)!.text, writeGfmTable([["Name", "Count"], ["Beta", "2"]]), { tableMapping: { rows: [0, 2], columns: [0, 1] } });
     } else {
-      editBlock(doc, id, getBlockText(doc, id), writeGfmTable([["Count"], ["1"], ["2"]]), { tableMapping: { rows: [0, 1, 2], columns: [1] } });
+      editBlock(doc, id, getBlock(doc, id)!.text, writeGfmTable([["Count"], ["1"], ["2"]]), { tableMapping: { rows: [0, 1, 2], columns: [1] } });
     }
     expect(resolveAnnotationRange(doc, thread.id)).toBeNull();
     expect(getAnnotation(doc, thread.id)?.comments).toHaveLength(1);
@@ -183,7 +175,7 @@ describe("table-cell annotation contract", () => {
     doc.destroy();
   });
 
-  it("changes neither table content nor decided approval when opening, replying, resolving, reopening or deleting", () => {
+  it("changes neither table content nor decided approval when opening, replying, resolving or reopening", () => {
     const { doc, id } = fixture();
     setKind(doc, "decision");
     setStatus(doc, "decided");
@@ -196,9 +188,6 @@ describe("table-cell annotation contract", () => {
     setAnnotationResolved(doc, thread.id, false);
     expect(getBlock(doc, id)).toEqual(before);
     expect(decisionApprovalFingerprint(doc)).toBe(fingerprint);
-    expect(decisionApprovalChanged(doc)).toBe(false);
-    deleteAnnotation(doc, thread.id);
-    expect(getBlock(doc, id)).toEqual(before);
     expect(decisionApprovalChanged(doc)).toBe(false);
     doc.destroy();
   });

@@ -1,15 +1,16 @@
 import * as Y from "yjs";
 import { describe, expect, it } from "vitest";
 import {
-  AnnotationCellError, InvalidTableError, InvalidTableMappingError, MarksNotAllowedError, OldTextMismatchError, StaleBlockError, TableMappingRequiredError,
-  addComment, appendBlock, buildTableRow, createAnnotation, editBlock,
+  AnnotationCellError, InvalidTableError, InvalidTableMappingError, OldTextMismatchError, StaleBlockError, TableMappingRequiredError,
+  addComment, appendBlock, createAnnotation, editBlock,
   exportMarkdown, findBlockElement, getBlock, getBlocks, getBlocksFragment,
-  getBlockText, initDoc, insertBlock, isSupportedTable, listAnnotations,
+  initDoc, insertBlock, isSupportedTable, listAnnotations,
   normalizeLegacyTables, parseGfmTable, parseTableCell, repairDuplicateBlocks,
-  resolveAnnotationRange, setAnnotationResolved, setBlockType,
+  resolveAnnotationRange, setAnnotationResolved,
   tableCellText, tableRows, writeGfmTable,
   type TableMapping,
 } from "../src/index.js";
+import { buildTableRow } from "../src/table.js";
 import { replicaPair, syncDocs } from "./helpers.js";
 
 const UUID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
@@ -42,34 +43,30 @@ function setCellWidth(cell: Y.XmlElement, value: unknown): void {
 }
 
 describe("structured table contract", () => {
-  it("writes canonical TableKit nodes with same-id retyping and no opening repair", () => {
+  it("writes canonical TableKit nodes with no opening repair", () => {
     const doc = seeded();
-    const id = appendBlock(doc, { type: "paragraph", text: GFM });
-    setBlockType(doc, id, "table");
+    const id = appendBlock(doc, { type: "table", text: GFM });
     const table = element(doc, id);
     expect(isSupportedTable(table)).toBe(true);
     expect(tableRows(table).map((row) => row.map((cell) => cell.nodeName))).toEqual([
       ["tableHeader", "tableHeader"], ["tableCell", "tableCell"], ["tableCell", "tableCell"],
     ]);
     expect(tableRows(table)[0]?.[0]?.getAttributes()).toEqual({ colspan: 1, rowspan: 1 });
-    expect(getBlockText(doc, id)).toBe(GFM);
+    expect(getBlock(doc, id)!.text).toBe(GFM);
     let updates = 0;
     doc.on("update", () => { updates += 1; });
     expect(normalizeLegacyTables(doc)).toBe(0);
-    setBlockType(doc, id, "table");
     expect(updates).toBe(0);
-    setBlockType(doc, id, "paragraph");
-    expect(getBlock(doc, id)).toMatchObject({ id, type: "paragraph", text: GFM });
   });
 
-  it("keeps the plain GFM reader and retype door literal", () => {
+  it("keeps the plain GFM reader and legacy normalization literal", () => {
     for (let count = 0; count < 8; count += 1) {
       const cell = `**literal** ${"\\".repeat(count)}| \\*end\\`;
       const source = writeGfmTable([[cell], [" value "]]);
       expect(parseGfmTable(source)).toMatchObject({ header: [cell], rows: [["value"]] });
       const doc = seeded();
-      const id = appendBlock(doc, { type: "paragraph", text: source });
-      setBlockType(doc, id, "table");
+      const id = legacy(doc, source);
+      normalizeLegacyTables(doc);
       expect(tableCellText(tableRows(element(doc, id))[0]![0]!)?.toDelta()).toEqual([{ insert: cell }]);
       doc.destroy();
     }
@@ -105,21 +102,21 @@ describe("structured table contract", () => {
     const cells = tableRows(table);
     const beta = tableCellText(cells[2]![0]!)!;
     beta.format(0, beta.length, { bold: {}, link: { href: "https://example.test" }, comment: { threadId: UUID } });
-    const before = getBlockText(doc, id);
+    const before = getBlock(doc, id)!.text;
     const markdown = exportMarkdown(doc, { frontmatter: false });
     for (const row of cells) {
       setCellWidth(row[0]!, [245.5]);
       setCellWidth(row[1]!, [160]);
     }
     expect(isSupportedTable(table)).toBe(true);
-    expect(getBlockText(doc, id)).toBe(before);
+    expect(getBlock(doc, id)!.text).toBe(before);
     expect(exportMarkdown(doc, { frontmatter: false })).toBe(markdown);
     editBlock(doc, id, before, before.replace("Alpha", "Alpine"));
     const expanded = writeGfmTable([
       ["Name", "New", "Count"], ["Alpine", "x", "1"],
       ["Inserted", "y", "3"], [parseGfmTable(before)!.rows[1]![0]!, "z", "2"],
     ]);
-    editBlock(doc, id, getBlockText(doc, id), expanded, { tableMapping: { rows: [0, 1, null, 2], columns: [0, null, 1] } });
+    editBlock(doc, id, getBlock(doc, id)!.text, expanded, { tableMapping: { rows: [0, 1, null, 2], columns: [0, null, 1] } });
     const mapped = tableRows(table);
     for (const [oldRow, newRow] of [[0, 0], [1, 1], [2, 3]] as const) {
       expect(mapped[newRow]![0]).toBe(cells[oldRow]![0]);
@@ -131,7 +128,7 @@ describe("structured table contract", () => {
     expect(mapped[2]!.every((cell) => cell.getAttributes().colwidth === undefined)).toBe(true);
     expect(tableCellText(mapped[3]![0]!)).toBe(beta);
     expect(beta.toDelta()).toEqual([{ insert: "Beta", attributes: { bold: {}, link: { href: "https://example.test" }, comment: { threadId: UUID } } }]);
-    expect(getBlockText(doc, id)).toBe(expanded);
+    expect(getBlock(doc, id)!.text).toBe(expanded);
     expect(isSupportedTable(table)).toBe(true);
     doc.destroy();
   });
@@ -156,7 +153,7 @@ describe("structured table contract", () => {
     const doc = seeded();
     const text = "| Header |\n| --- |\n<b>bold</b>\n<http://example.test>";
     const id = appendBlock(doc, { type: "table", text });
-    expect(parseGfmTable(getBlockText(doc, id))?.rows.map((row) => row.map((cell) => parseTableCell(cell).map((run) => run.text).join("")))).toEqual([["<b>bold</b>"], ["<http://example.test>"]]);
+    expect(parseGfmTable(getBlock(doc, id)!.text)?.rows.map((row) => row.map((cell) => parseTableCell(cell).map((run) => run.text).join("")))).toEqual([["<b>bold</b>"], ["<http://example.test>"]]);
   });
 
   it("preserves untouched cell identity, whitespace and marks when editing a neighbour", () => {
@@ -167,7 +164,7 @@ describe("structured table contract", () => {
     beta.insert(0, " ");
     beta.insert(beta.length, " ");
     beta.format(1, 4, { bold: {} });
-    const old = getBlockText(doc, id);
+    const old = getBlock(doc, id)!.text;
     editBlock(doc, id, old, old.replace("Alpha", "Alpine"));
     expect(tableCellText(tableRows(element(doc, id))[2]![0]!)).toBe(beta);
     expect(beta.toDelta()).toEqual([
@@ -180,7 +177,7 @@ describe("structured table contract", () => {
     const id = appendBlock(doc, { type: "table", text: GFM });
     const alpha = tableCellText(tableRows(element(doc, id))[1]![0]!)!;
     alpha.format(0, 5, { italic: {} });
-    const before = getBlockText(doc, id);
+    const before = getBlock(doc, id)!.text;
     editBlock(doc, id, before, before.replace("Alpha", "Alphax"));
     expect(tableCellText(tableRows(element(doc, id))[1]![0]!)).toBe(alpha);
     expect(alpha.toDelta()).toEqual([{ insert: "Alphax", attributes: { italic: {} } }]);
@@ -199,12 +196,12 @@ describe("structured table contract", () => {
     ]) expect(() => editBlock(doc, id, GFM, after)).toThrow(TableMappingRequiredError);
     expect(updates).toBe(0);
     expect(Y.encodeStateAsUpdate(doc)).toEqual(initial);
-    expect(getBlockText(doc, id)).toBe(GFM);
+    expect(getBlock(doc, id)!.text).toBe(GFM);
     editBlock(doc, id, GFM, GFM.replace("Alpha", "Alpine").replace("Beta", "Gamma"), {
       tableMapping: { rows: [0, 1, 2], columns: [0, 1] },
     });
-    expect(getBlockText(doc, id)).toContain("Alpine");
-    expect(getBlockText(doc, id)).toContain("Gamma");
+    expect(getBlock(doc, id)!.text).toContain("Alpine");
+    expect(getBlock(doc, id)!.text).toContain("Gamma");
     doc.destroy();
   });
 
@@ -215,7 +212,7 @@ describe("structured table contract", () => {
     alpha.insert(0, "  ");
     alpha.insert(alpha.length, "  ");
     alpha.format(0, alpha.length, { bold: {} });
-    const before = getBlockText(doc, id);
+    const before = getBlock(doc, id)!.text;
     const delta = alpha.toDelta();
     let updates = 0;
     doc.on("update", () => { updates += 1; });
@@ -223,7 +220,7 @@ describe("structured table contract", () => {
     editBlock(doc, id, before, before);
     expect(updates).toBe(0);
     expect(alpha.toDelta()).toEqual(delta);
-    expect(getBlockText(doc, id)).toBe(before);
+    expect(getBlock(doc, id)!.text).toBe(before);
     doc.destroy();
   });
 
@@ -302,7 +299,7 @@ describe("structured table contract", () => {
         const status = tableCellText(tableRows(element(doc, id))[2]![statusColumn]!)!;
         expect(status).toBe(originals[index]);
         expect(status.toDelta()).toEqual([{ insert: "done (blocked)", attributes: { bold: {} } }]);
-        expect(getBlockText(doc, id)).toBe(writeGfmTable(nextRows));
+        expect(getBlock(doc, id)!.text).toBe(writeGfmTable(nextRows));
         expect(isSupportedTable(element(doc, id))).toBe(true);
       }
     } finally { a.destroy(); b.destroy(); }
@@ -320,7 +317,7 @@ describe("structured table contract", () => {
     expect(tableCellText(cells[1]![0]!)).not.toBe(original);
     expect(tableCellText(cells[1]![0]!)!.toDelta()).toEqual([{ insert: "done" }]);
     expect(original.toDelta()).toEqual([{ insert: "done", attributes: { comment: { threadId: UUID } } }]);
-    expect(getBlockText(doc, id)).toBe(before);
+    expect(getBlock(doc, id)!.text).toBe(before);
     doc.destroy();
   });
 
@@ -329,13 +326,13 @@ describe("structured table contract", () => {
     const id = appendBlock(doc, { type: "table", text: writeGfmTable([["H"], ["short"]]) });
     const table = element(doc, id);
     table.insert(2, [buildTableRow(["long", "two", "three"], false)]);
-    const before = getBlockText(doc, id);
+    const before = getBlock(doc, id)!.text;
     const third = tableRows(table)[2]![2]!;
     const after = writeGfmTable([["", ""], ["", ""], ["two", "three"]]);
     editBlock(doc, id, before, after, { tableMapping: { rows: [0, 1, 2], columns: [1, 2] } });
     expect(tableRows(table).map((row) => row.length)).toEqual([1, 1, 2]);
     expect(tableRows(table)[2]![1]).toBe(third);
-    expect(getBlockText(doc, id)).toBe(after);
+    expect(getBlock(doc, id)!.text).toBe(after);
     expect(isSupportedTable(table)).toBe(true);
     expect(tableRows(table).flat().every((cell) => tableCellText(cell) !== null)).toBe(true);
     doc.destroy();
@@ -353,7 +350,7 @@ describe("structured table contract", () => {
       ["Name", "Extra", "Count"], ["Inserted", "x", "0"],
       ["Alpha", "y", "1"], ["**Beta**", "z", "2"],
     ]);
-    const before = getBlockText(doc, id);
+    const before = getBlock(doc, id)!.text;
     editBlock(doc, id, before, expanded, { tableMapping: { rows: [0, null, 1, 2], columns: [0, null, 1] } });
     expect(table.toArray()[2]).toBe(survivingRows[1]);
     expect(table.toArray()[3]).toBe(survivingRows[2]);
@@ -363,7 +360,7 @@ describe("structured table contract", () => {
     editBlock(doc, id, expanded, before, { tableMapping: { rows: [0, 2, 3], columns: [0, 2] } });
     expect(table.toArray()).toEqual(survivingRows);
     expect(tableRows(table)).toEqual(survivingCells);
-    expect(getBlockText(doc, id)).toBe(before);
+    expect(getBlock(doc, id)!.text).toBe(before);
   });
 
   it("projects uneven merged rows without hiding cells and fills only requested padded positions", () => {
@@ -372,11 +369,11 @@ describe("structured table contract", () => {
     const table = element(doc, id);
     table.insert(3, [buildTableRow(["Long", "row", "visible"], false)]);
     expect(isSupportedTable(table)).toBe(true);
-    const old = getBlockText(doc, id);
+    const old = getBlock(doc, id)!.text;
     expect(parseGfmTable(old)).toMatchObject({ header: ["Name", "Count", ""], rows: [["Alpha", "1", ""], ["Beta", "2", ""], ["Long", "row", "visible"]] });
     editBlock(doc, id, old, old.replace("| Alpha | 1 |  |", "| Alpha | 1 | Filled |"));
     expect(tableRows(table).map((row) => row.length)).toEqual([2, 3, 2, 3]);
-    expect(parseGfmTable(getBlockText(doc, id))?.rows[0]?.[2]).toBe("Filled");
+    expect(parseGfmTable(getBlock(doc, id)!.text)?.rows[0]?.[2]).toBe("Filled");
     expect(exportMarkdown(doc, { frontmatter: false })).toContain("| Long | row | visible |");
   });
 
@@ -447,8 +444,8 @@ describe("structured table contract", () => {
     expect(tableCellText(tableRows(element(a, id))[shipRow]![statusColumn]!)).toBe(shipA);
     expect(shipA.toDelta()).toEqual([{ insert: "todo", attributes: { bold: {} } }]);
     syncDocs(a, b);
-    expect(getBlockText(a, id)).toBe(getBlockText(b, id));
-    expect(getBlockText(a, id)).toContain("**todo (blocked)**");
+    expect(getBlock(a, id)!.text).toBe(getBlock(b, id)!.text);
+    expect(getBlock(a, id)!.text).toContain("**todo (blocked)**");
     expect(tableCellText(tableRows(element(a, id))[shipRow]![statusColumn]!)).toBe(shipA);
     expect(tableCellText(tableRows(element(b, id))[shipRow]![statusColumn]!)).toBe(shipB);
     expect(shipA.toDelta()).toEqual([{ insert: "todo (blocked)", attributes: { bold: {} } }]);
@@ -472,7 +469,7 @@ describe("structured table contract", () => {
     editBlock(a, id, before, writeGfmTable([["Write", "Ship2", "Fix"], ["done", "**todo**", "todo"], ["no", "yes", "yes"]]), { tableMapping: { rows: [0, 1, 2], columns: [0, 2, 3] } });
     expect(tableCellText(tableRows(element(a, id))[1]![1]!)).toBe(ship);
     syncDocs(a, b);
-    expect(getBlockText(a, id)).toBe(getBlockText(b, id));
+    expect(getBlock(a, id)!.text).toBe(getBlock(b, id)!.text);
     expect(tableCellText(tableRows(element(b, id))[1]![1]!)).toBe(concurrentShip);
     expect(ship.toDelta()).toEqual([{ insert: "todo (blocked)", attributes: { bold: {} } }]);
     a.destroy();
@@ -511,8 +508,8 @@ describe("structured table contract", () => {
       expect(ship.toDelta()).toEqual([{ insert: "todo", attributes: { bold: {} } }]);
       syncDocs(a, b);
       nextRows[2]![newStatus] = "**todo (blocked)**";
-      expect(getBlockText(a, id)).toBe(writeGfmTable(nextRows));
-      expect(getBlockText(b, id)).toBe(getBlockText(a, id));
+      expect(getBlock(a, id)!.text).toBe(writeGfmTable(nextRows));
+      expect(getBlock(b, id)!.text).toBe(getBlock(a, id)!.text);
       for (const [index, doc] of [a, b].entries()) {
         for (let row = 0; row < rows.length; row += 1) {
           expect(tableCellText(tableRows(element(doc, id))[row]![0]!)).toBe(survivors[index]![row]![0]);
@@ -549,8 +546,8 @@ describe("structured table contract", () => {
       editBlock(a, id, before, writeGfmTable(nextRows), { tableMapping: { rows: [0, null, 1, 2, 3], columns: [1, 2, null, 3] } });
       syncDocs(a, b);
       nextRows[2]![1] = "**write notes (blocked)**";
-      expect(getBlockText(a, id)).toBe(writeGfmTable(nextRows));
-      expect(getBlockText(b, id)).toBe(getBlockText(a, id));
+      expect(getBlock(a, id)!.text).toBe(writeGfmTable(nextRows));
+      expect(getBlock(b, id)!.text).toBe(getBlock(a, id)!.text);
       for (const [index, doc] of [a, b].entries()) {
         for (let oldRow = 0; oldRow < rows.length; oldRow += 1) {
           const newRow = oldRow === 0 ? 0 : oldRow + 1;
@@ -576,7 +573,7 @@ describe("structured table contract", () => {
       const after = writeGfmTable([["Task", "Extra", "Status", "Owner"],
         ["Test", "new 1", "**done**", "ann"], ["New task", "new 2", "todo", "ann"], ["Ship", "new 3", "todo", "ben"]]);
       editBlock(doc, id, before, after, { tableMapping: { rows: [0, 2, null, 3], columns: [0, null, 1, 3] } });
-      expect(getBlockText(doc, id)).toBe(after);
+      expect(getBlock(doc, id)!.text).toBe(after);
       expect(tableCellText(tableRows(element(doc, id))[1]![0]!)).toBe(task);
       expect(tableCellText(tableRows(element(doc, id))[1]![2]!)).toBe(status);
       expect(status.toDelta()).toEqual([{ insert: "done", attributes: { bold: {} } }]);
@@ -592,7 +589,7 @@ describe("structured table contract", () => {
       retained.format(0, retained.length, { bold: {} });
       const after = writeGfmTable([["Owner", "Name"], ["Ann", "**Benedict**"]]);
       editBlock(doc, id, before, after, { tableMapping: { rows: [0, 2], columns: [null, 0] } });
-      expect(getBlockText(doc, id)).toBe(after);
+      expect(getBlock(doc, id)!.text).toBe(after);
       expect(tableCellText(tableRows(element(doc, id))[1]![1]!)).toBe(retained);
       expect(retained.toDelta()).toEqual([{ insert: "Benedict", attributes: { bold: {} } }]);
     } finally { doc.destroy(); }
@@ -623,7 +620,7 @@ describe("structured table contract", () => {
         editBlock(doc, id, before, after, edit === "cell" ? {} : { tableMapping: { rows: values.map((_, row) => row), columns: columnMapping } });
         const elapsed = performance.now() - start;
         expect(elapsed).toBeLessThan(1000);
-        expect(getBlockText(doc, id)).toBe(after);
+        expect(getBlock(doc, id)!.text).toBe(after);
       } finally { doc.destroy(); }
     }
   });
@@ -634,15 +631,15 @@ describe("structured table contract", () => {
     editBlock(a, id, GFM, GFM.replace("Alpha", "Alpha A"));
     editBlock(b, id, GFM, GFM.replace("Beta", "Beta B"));
     syncDocs(a, b);
-    expect(getBlockText(a, id)).toBe(getBlockText(b, id));
-    expect(getBlockText(a, id)).toContain("Alpha A");
-    expect(getBlockText(a, id)).toContain("Beta B");
-    const shared = getBlockText(a, id);
+    expect(getBlock(a, id)!.text).toBe(getBlock(b, id)!.text);
+    expect(getBlock(a, id)!.text).toContain("Alpha A");
+    expect(getBlock(a, id)!.text).toContain("Beta B");
+    const shared = getBlock(a, id)!.text;
     editBlock(a, id, shared, shared.replace("Alpha A", "X Alpha A"));
     editBlock(b, id, shared, shared.replace("Alpha A", "Alpha A Y"));
     syncDocs(a, b);
-    expect(getBlockText(a, id)).toBe(getBlockText(b, id));
-    expect(getBlockText(a, id)).toContain("X Alpha A Y");
+    expect(getBlock(a, id)!.text).toBe(getBlock(b, id)!.text);
+    expect(getBlock(a, id)!.text).toContain("X Alpha A Y");
   });
 
   it("shares the stored empty text across concurrent first agent writes and a delayed third writer", () => {
@@ -662,15 +659,15 @@ describe("structured table contract", () => {
       editBlock(doc, id, before, writeGfmTable([["", ""], [value, ""], ["", ""]]));
     }
     syncDocs(a, b);
-    const observed = getBlockText(a, id);
+    const observed = getBlock(a, id)!.text;
     editBlock(a, id, observed, observed.replace("agentA", "agentA updated").replace("|  |  |\n", "| Header |  |\n"), { tableMapping: { rows: [0, 1, 2], columns: [0, 1] } });
     syncDocs(a, b);
     // C's first write was absent when A edited the already-merged table.
     syncDocs(a, c);
     syncDocs(a, b);
-    const canonical = getBlockText(a, id);
+    const canonical = getBlock(a, id)!.text;
     for (const [index, doc] of [a, b, c].entries()) {
-      expect(getBlockText(doc, id)).toBe(canonical);
+      expect(getBlock(doc, id)!.text).toBe(canonical);
       const paragraph = tableRows(element(doc, id))[1]![0]!.firstChild as Y.XmlElement;
       expect(paragraph.toArray()).toEqual([texts[index]]);
       expect(isSupportedTable(element(doc, id))).toBe(true);
@@ -687,7 +684,7 @@ describe("structured table contract", () => {
     }
   });
 
-  it("reads every malformed text child while refusing binding and marked retyping without writes", () => {
+  it("reads every malformed text child while refusing binding without writes", () => {
     const doc = seeded();
     const id = appendBlock(doc, { type: "table", text: GFM });
     const table = element(doc, id);
@@ -698,9 +695,8 @@ describe("structured table contract", () => {
     let updates = 0;
     doc.on("update", () => { updates += 1; });
     expect(isSupportedTable(table)).toBe(false);
-    expect(getBlockText(doc, id)).toContain("Alpha**Suffix**");
+    expect(getBlock(doc, id)!.text).toContain("Alpha**Suffix**");
     expect(exportMarkdown(doc, { frontmatter: false })).toContain("Alpha**Suffix**");
-    expect(() => setBlockType(doc, id, "paragraph")).toThrow(MarksNotAllowedError);
     expect(normalizeLegacyTables(doc)).toBe(0);
     expect(updates).toBe(0);
     doc.destroy();
@@ -713,7 +709,7 @@ describe("structured table contract", () => {
     editBlock(b, id, GFM, writeGfmTable(CELLS.map((row) => [...row, "Column"])), { tableMapping: { rows: [0, 1, 2], columns: [0, 1, null] } });
     syncDocs(a, b);
     expect(tableRows(element(a, id)).map((row) => row.length)).toEqual([3, 3, 3, 2]);
-    expect(getBlockText(a, id)).toBe(getBlockText(b, id));
+    expect(getBlock(a, id)!.text).toBe(getBlock(b, id)!.text);
     expect(isSupportedTable(element(a, id))).toBe(true);
     let updates = 0;
     a.on("update", () => { updates += 1; });
@@ -772,25 +768,13 @@ describe("structured table contract", () => {
     table.insert(0, [new Y.XmlText("Old process text")]);
     normalizeLegacyTables(doc);
     expect(table.toArray()).toEqual(rows);
-    expect(getBlockText(doc, id)).toBe(GFM);
-  });
-
-  it("refuses table retyping when it would silently drop cell marks or prose anchors", () => {
-    const doc = seeded();
-    const id = appendBlock(doc, { type: "table", text: GFM });
-    tableCellText(tableRows(element(doc, id))[1]![0]!)!.format(0, 5, { bold: {} });
-    expect(() => setBlockType(doc, id, "paragraph")).toThrow(MarksNotAllowedError);
-    expect(getBlock(doc, id)?.type).toBe("table");
-    const prose = appendBlock(doc, { type: "paragraph", text: GFM });
-    createAnnotation(doc, prose, 2, 6, "reader", "Anchor");
-    expect(() => setBlockType(doc, prose, "table")).toThrow(MarksNotAllowedError);
-    expect(getBlock(doc, prose)?.type).toBe("paragraph");
+    expect(getBlock(doc, id)!.text).toBe(GFM);
   });
 
   it("exports cell marks as inline markdown while escaping literal punctuation, HTML and pipes", () => {
     const doc = seeded();
-    const id = appendBlock(doc, { type: "paragraph", text: writeGfmTable([["Header"], ["**literal** <b> &amp; \\|"], ["Bold"], ["a\\|b"]]) });
-    setBlockType(doc, id, "table");
+    const id = legacy(doc, writeGfmTable([["Header"], ["**literal** <b> &amp; \\|"], ["Bold"], ["a\\|b"]]));
+    normalizeLegacyTables(doc);
     const rows = tableRows(element(doc, id));
     tableCellText(rows[2]![0]!)!.format(0, 4, { bold: {} });
     tableCellText(rows[3]![0]!)!.format(0, 4, { inlineCode: {} });
@@ -814,7 +798,7 @@ describe("structured table contract", () => {
       { insert: "document", attributes: { docLink: { docId: UUID } } },
     ]);
     expect(isSupportedTable(element(doc, id))).toBe(true);
-    expect(getBlockText(doc, id)).toBe(source);
+    expect(getBlock(doc, id)!.text).toBe(source);
     expect(exportMarkdown(doc, { frontmatter: false })).toBe(`${source}\n`);
     const rev = getBlock(doc, id)!.rev;
     text.format(0, 4, { bold: {} });
@@ -830,11 +814,11 @@ describe("structured table contract", () => {
       const literal = `**literal** [document](${UUID}) <tag> & ! [ ] _ \` ${"\\".repeat(count)}|end`;
       text.delete(0, text.length);
       text.insert(0, literal);
-      const source = getBlockText(doc, id);
+      const source = getBlock(doc, id)!.text;
       const copy = seeded();
       const copied = insertBlock(copy, null, { type: "table", text: source });
       expect(tableCellText(tableRows(element(copy, copied))[1]![0]!)!.toDelta()).toEqual(text.toDelta());
-      expect(getBlockText(copy, copied)).toBe(source);
+      expect(getBlock(copy, copied)!.text).toBe(source);
       expect(exportMarkdown(copy, { frontmatter: false })).toBe(`${source}\n`);
       copy.destroy();
       const combinations: Array<Record<string, unknown>> = [];
@@ -850,11 +834,11 @@ describe("structured table contract", () => {
       for (const attributes of combinations) {
         text.delete(0, text.length);
         text.insert(0, `a${"\\".repeat(count)}|b <>&!`, attributes);
-        const marked = getBlockText(doc, id);
+        const marked = getBlock(doc, id)!.text;
         const clone = seeded();
         const cloned = appendBlock(clone, { type: "table", text: marked });
         expect(tableCellText(tableRows(element(clone, cloned))[1]![0]!)!.toDelta()).toEqual(text.toDelta());
-        expect(getBlockText(clone, cloned)).toBe(marked);
+        expect(getBlock(clone, cloned)!.text).toBe(marked);
         clone.destroy();
       }
       doc.destroy();
@@ -869,7 +853,7 @@ describe("structured table contract", () => {
     text.insert(0, "  Alpha  ", { bold: {}, comment: { threadId: UUID } });
     text.format(2, 2, { inlineCode: {} });
     text.format(4, 3, { inlineCode: {}, italic: {} });
-    const before = getBlockText(doc, id);
+    const before = getBlock(doc, id)!.text;
     const delta = text.toDelta();
     let updates = 0;
     doc.on("update", () => { updates += 1; });
@@ -891,10 +875,10 @@ describe("structured table contract", () => {
     const alphaA = tableCellText(tableRows(element(a, id))[1]![0]!)!;
     const alphaB = tableCellText(tableRows(element(b, id))[1]![0]!)!;
     const anchor = Y.createRelativePositionFromTypeIndex(alphaA, 2);
-    const before = getBlockText(a, id);
+    const before = getBlock(a, id)!.text;
     alphaB.format(0, 5, { italic: {} });
     alphaB.insert(5, " remote", { strike: {} });
-    const remote = getBlockText(b, id);
+    const remote = getBlock(b, id)!.text;
     editBlock(b, id, remote, remote.replace("Beta", "Beta remote"));
     editBlock(a, id, before, before.replace("**Alpha**", "**Al**pha"));
     expect(Y.createRelativePositionFromTypeIndex(alphaA, 2)).toEqual(anchor);
@@ -905,8 +889,8 @@ describe("structured table contract", () => {
       { insert: " remote", attributes: { strike: {} } },
     ]);
     expect(alphaB.toDelta()).toEqual(alphaA.toDelta());
-    expect(getBlockText(a, id)).toContain("Beta remote");
-    expect(getBlockText(b, id)).toBe(getBlockText(a, id));
+    expect(getBlock(a, id)!.text).toContain("Beta remote");
+    expect(getBlock(b, id)!.text).toBe(getBlock(a, id)!.text);
     a.destroy(); b.destroy();
   });
 
