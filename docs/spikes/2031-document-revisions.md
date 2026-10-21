@@ -1,46 +1,79 @@
 # Document revisions spike (#2031)
 
 Recommend full snapshots for #2032 at the measured corpus size, and the proposed
-three-pass matcher for prose. Attribution needs a new origin-preserving protocol:
-today's connection context cannot identify every originating author. Container
-fields and chart data need their own comparison; a text diff alone is insufficient.
+three-pass matcher for prose. Recommend verified delivering accounts with unsigned
+origin metadata that can only downgrade attribution: today's connection context
+cannot identify the originating surface. Container fields and chart data need
+their own comparison; a text diff alone is insufficient.
 These are recommendations for preparation, not an adopted protocol or a revision UI.
 
 ## Person and surface
 
-Record a signed **origin envelope** at the original write, containing the room,
-update bytes (or their digest), unique update ID, credential ID and declared
-surface. The hub verifies the signature and resolves the principal from its own
-credential registry, with current authorization checks. It never trusts a supplied
-person ID. Preserve pending envelopes through local append, peer replay, offline
-catch-up and compaction; verify them before applying changes, deduplicate replay,
-and retain accepted origin facts separately from the delivering connection.
-Plain merged Yjs catch-up must not bypass that validation. Once acknowledged,
-pending payloads can be compacted; this does not require retaining deleted Yjs
-content forever. Envelope transport, causal replay and lifecycle handling still
-need implementation and failure-path tests in #2032.
+Use the **verified delivering principal** with unsigned origin metadata recorded
+at the original write: room, update bytes (or digest), unique update ID, writing
+credential ID and declared surface. The hub derives the account from its currently
+authorized connection, never a supplied person ID. Resolve the writing credential in hub records only
+as a consistency check: attribute to the delivering principal only when it names
+that same principal and device and is not revoked. A missing, unknown or different
+account/device credential downgrades original authorship to unknown; it cannot
+select another author. Always retain the verified `deliveredBy` separately.
 
-Use `(principalId, surface kind/name)` as the author key. Session and device IDs
-are diagnostics, so reconnecting MCP is not a new author. For `ub mcp serve`, use
-the initialized client's `title`, falling back to `name`, then “unknown MCP client”.
+Routine renewal is not a new author. A syncing client renews after 15 days, before
+opening rooms on reconnect, and renewal replaces its signing key while keeping
+the principal/device. A hub-recorded replaced credential with no revocation may
+still supply the consistency check above, even after its original lifetime; its
+ID is historical metadata, not admission authority or proof of the offline writer.
+Only the current credential authorizes delivery. Expired, revoked and replaced
+credentials remain refused for admission, and fresh renewal proof from a replaced
+key still revokes the device. No old-key signature is accepted to authorize or
+positively attribute an update. This covers pending work across renewal, including
+a shared-replica append immediately before another process renews.
+
+Preserve the metadata with each pending update through local append, peer replay,
+offline catch-up and compaction; deduplicate replay and retain accepted facts.
+Plain merged Yjs catch-up must not silently acquire the relay's surface. After
+acknowledgement pending payloads can be compacted without keeping deleted Yjs
+content forever. #2032 still owes transport, causal replay and lifecycle proof.
+
+Use `(principalId, surface kind/name)` as the author key. Session IDs are diagnostics;
+device IDs guard the consistency check, not the author key. Reconnecting MCP is
+not a new author. For `ub mcp serve`, use the initialized client's `title`, falling
+back to `name`, then “unknown MCP client”.
 For `ub open`, stamp “browser” at the browser-to-replica admission point, before
 the raw update is appended. A different process can then relay it without changing
-its origin. This verifies the account whose device credential signed the update,
-not the physical person typing. An agent signed in with its own account is that
-account's principal. The surface remains a declaration: a signature cannot prove
-that the program really was Claude Code.
+its surface. This verifies the account taking responsibility at delivery, not the
+physical person typing or cryptographic proof of who wrote offline. An agent
+signed in with its own account is that account's principal. The surface and
+writing history remain client declarations; a client can mislabel its own work,
+but cannot use metadata to attribute it to another account.
 
-Existing stored state, unsigned pending changes, pre-sign-in edits and local
-shared-root-secret edits have **unknown original person/surface**. Record a verified
-`deliveredBy` where available, without presenting the relay as the original author.
-Never infer origin from token `sub`, awareness or Yjs client IDs. Expired/revoked
-credentials cannot bypass admission; pending origins that cannot be verified must
-remain explicitly unknown. Exact retrospective authorship is a bounded negative.
+Signed origin envelopes are an alternative. They could positively attribute an
+honest cross-account relay, such as pending edits after an account switch, but
+none of the named same-computer relays needs that ability. Both designs need
+per-update transport and compaction; signatures also need key-lifecycle and
+verification rules. Prefer the smaller unsigned design for #2032. Account or
+device changes instead leave original authorship unknown, including a fresh
+sign-in by the same account with a different device ID. This is a deliberate limit,
+not evidence that the new delivering account originally wrote those edits.
+
+Existing stored state, pending changes without origin metadata, pre-sign-in edits
+and local shared-root-secret edits have **unknown original person/surface**. Record
+a verified `deliveredBy` where available, without presenting the relay as the original author.
+Never infer origin from token `sub`, awareness or Yjs client IDs.
+Exact retrospective authorship is a bounded negative.
 A future hosted editor could stamp from a verified document-authorized browser
 session; today's browser sign-in grants no document authority.
 
-Recommend **`SYNC_PROTOCOL_VERSION` 6 → 7** when envelopes become mandatory: old
-clients cannot preserve them and must update before reconnecting. Old state stays
+Before #2032 promises this behavior, test pending edits spanning the 15-day renewal,
+peer append immediately before renewal, replay/compaction and retry after a lost
+acknowledgement. Check that the same principal/device retains attribution, retired
+keys alone cannot deliver or gain attribution, and revocation/current-access
+refusals still win. Account switches, new-device sign-ins and missing/foreign
+metadata must stay unknown while retaining `deliveredBy`. These are implementation
+acceptance cases, not tests performed by this report-only spike.
+
+Recommend **`SYNC_PROTOCOL_VERSION` 6 → 7** when origin metadata becomes mandatory: old
+clients cannot preserve it and must update before reconnecting. Old state stays
 “legacy / original author unknown”; upgrading cannot reconstruct it. #2032 needs
 a maintainer comment explicitly approving that named version change. This PR
 changes neither production code nor the version.
@@ -53,6 +86,15 @@ raw bytes and replays peer writes without their original surface;
 `local-browser-server.ts:337–363` admits raw browser updates. Local hub admission
 (`hub/src/server.ts:202–324`) has no verified account. `schema/src/protocol.ts:3–14`
 requires an incompatible-contract bump. Paths are under `packages/`.
+
+Renewal evidence at that same revision: `mcp-server/src/device-login.ts:17,220–222`
+sets the half-life trigger; `sync.ts:612–624,647–675` renews before admission;
+`hub/src/credentials.ts:229–245,335–364` retains historical records, refuses
+replaced authority, detects reuse and preserves principal/device on replacement.
+`mcp-server/src/auth-store.ts:277–285` stores one login per hub origin;
+`cli/src/auth.ts:635–655` replaces a login and revokes its old device. Permissions
+(`eb9a7801-05f3-417a-81d5-07c18795ac81`) and CLI: ub auth intents and examples
+(`0ad5f7da-edb2-4e53-a6eb-9d95922a3e95`) state the 15/30-day and replaced-key rules.
 
 Yjs 14 does not change the identity conclusion. Its
 [attribution/rendering primitives](https://github.com/yjs/yjs/blob/main/renderer.md)
