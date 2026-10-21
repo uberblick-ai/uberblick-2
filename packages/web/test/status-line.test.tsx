@@ -121,7 +121,7 @@ describe("the old code-check mark", () => {
     initDoc(current.connection.ydoc, { uuid: "9f3c1a2b-0000-4000-8000-0123456789ab", title: "Decision" });
     setKind(current.connection.ydoc, "decision");
     const view = render(<Popover><StatusLine connection={current.connection} presence={[]}
-      endpoint={{ url: "wss://hub.example/ws", source: "document" }} hubAcked codeChecks={[check(20)]} syncDetails /></Popover>);
+      syncReading={{ endpoint: { url: "wss://hub.example/ws", source: "document" }, hubAcked: true, syncDetails: true }} codeChecks={[check(20)]} /></Popover>);
     expect(view.container.querySelector(".ub-sync-code-mark")).toBeNull();
     expect(within(view.container).getByRole("button").getAttribute("aria-label")).not.toContain("code check");
   });
