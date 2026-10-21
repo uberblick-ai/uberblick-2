@@ -33,7 +33,7 @@ export function parseFigmaInput(source: string): FigmaText {
       captionStart = index + 1;
       break;
     }
-    const match = /^(url|title|height): ?(.*)$/.exec(line);
+    const match = /^(url|title|height): ?(.*)$/s.exec(line);
     if (match === null) throw new InvalidFigmaError("Header lines must use url:, title: or height:");
     const key = match[1] as "url" | "title" | "height";
     if (values[key] !== undefined) throw new InvalidFigmaError(`Duplicate header key: ${key}`);

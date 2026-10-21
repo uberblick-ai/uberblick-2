@@ -62,7 +62,7 @@ describe("card block contract", () => {
     const { doc, id } = fixture();
     let updates = 0;
     doc.on("update", () => { updates += 1; });
-    for (const source of ["", "label: only", "title:", "title:   ", "Title: wrong", "title: title\nunknown: key", "title: title\ntitle: again", "title: title\nnot a key"] ) {
+    for (const source of ["", "label: only", "title:", "title:   ", "title: \u2028", "title: \u2029", "Title: wrong", "title: title\nunknown: key", "title: title\ntitle: again", "title: title\nnot a key"] ) {
       expect(() => insertBlock(doc, id, { type: "card", text: source })).toThrow(InvalidCardError);
       expect(() => editBlock(doc, id, SOURCE, source)).toThrow(InvalidCardError);
     }
@@ -132,6 +132,8 @@ describe("card block contract", () => {
 
   it.each([
     ":::card\nlabel: Missing title\n\nBody\n:::",
+    ":::card\ntitle: \u2028\n\nBody\n:::",
+    ":::card\ntitle: \u2029\n\nBody\n:::",
     ":::card\ntitle: A\nunknown: Key\n\n# heading\n<!-- retained -->\n```\n:::",
     ":::card\ntitle: A\ntitle: B\n\nBody\n:::",
     ":::card\n# not a key\n\nBody\n:::",
@@ -174,6 +176,23 @@ describe("card block contract", () => {
     editBlock(doc, id, empty, empty.replace("label: A lever", "label: A lever\ntitle: Repaired"));
     expect(cardInline(card).title).toEqual([{ text: "Repaired", marks: {} }]);
     expect(importMarkdown(exportMarkdown(doc, { frontmatter: false })).blocks[0]!.type).toBe("card");
+  });
+
+  it.each(["\u2028", "\u2029"])("preserves Unicode separators in stored header prose through edits and Markdown: %j", (separator) => {
+    const { doc, id, card } = fixture();
+    for (const part of ["label", "title", "footer"] as const) partText(card, part).insert(1, separator);
+    const before = getBlock(doc, id)!.text;
+    for (const part of ["label", "title", "footer"] as const) expect(before).toContain(`${part}: ${partText(card, part).toString()}\n`);
+    const header = cardInline(card);
+    editBlock(doc, id, before, before);
+    expect(getBlock(doc, id)!.text).toBe(before);
+    const edited = before.replace("body text", "body prose");
+    editBlock(doc, id, before, edited);
+    expect(getBlock(doc, id)!.text).toBe(edited);
+    for (const part of ["label", "title", "footer"] as const) expect(cardInline(card)[part]).toEqual(header[part]);
+    const copy = imported(exportMarkdown(doc, { frontmatter: false }));
+    expect(getBlocks(copy)[0]).toMatchObject({ type: "card", text: edited });
+    expect(cardInline(findBlockElement(copy, getBlocks(copy)[0]!.id)!)).toEqual(cardInline(card));
   });
 
   it("retains independent concurrent edits and first writes into seeded empty parts", () => {
@@ -428,6 +447,29 @@ describe("card link button", () => {
       expect(() => writeCardButton({ text: value, href })).toThrow(InvalidCardError);
     }
     expect(parseInline("[Ordinary](codex://new)")).toEqual([{ text: "[Ordinary](codex://new)", marks: {} }]);
+  });
+
+  it.each(["\u2028", "\u2029"])("preserves web-stored button separators and order through edits and Markdown: %j", (separator) => {
+    const { doc, id, card } = fixture();
+    const buttons: CardButton[] = [
+      { text: "First", href: "https://example.test" },
+      { text: `Discuss${separator}this`, href: "codex://new", style: "filled", color: "blue" },
+      { text: "Query", href: `claude://code/new?prompt=review${separator}this`, color: "violet" },
+      { text: "Last", href: "claude-cli://open" },
+    ];
+    const stored = writeCardButtons(buttons);
+    card.setAttribute("button", stored);
+    const before = getBlock(doc, id)!.text;
+    editBlock(doc, id, before, before);
+    expect(getBlock(doc, id)!.text).toBe(before);
+    const edited = before.replace("body text", "body prose");
+    editBlock(doc, id, before, edited);
+    expect(getBlock(doc, id)!.text).toBe(edited);
+    expect(card.getAttribute("button")).toBe(stored);
+    expect(cardButtons(card)).toEqual(buttons);
+    const copy = imported(exportMarkdown(doc, { frontmatter: false }));
+    expect(getBlocks(copy)[0]).toMatchObject({ type: "card", text: edited });
+    expect(cardButtons(findBlockElement(copy, getBlocks(copy)[0]!.id)!)).toEqual(buttons);
   });
 
   it("keeps the button on unrelated edits and counts its label but not its destination in approval", () => {

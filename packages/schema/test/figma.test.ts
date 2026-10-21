@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   FIGMA_PROVIDER, InlineLinkRangeError, InvalidFigmaError,
   OldTextMismatchError, StaleBlockError, addComment, appendBlock, createAnnotation,
-  editBlock, figmaCaptionElement, figmaCaptionTexts,
-  findBlockElement, getBlock, getBlocks, getBlocksWithInline, initDoc, insertBlock, isSupportedFigma, listAnnotationRanges, normalizeFigmaLink,
+  editBlock, exportMarkdown, figmaCaptionElement, figmaCaptionTexts,
+  findBlockElement, getBlock, getBlocks, getBlocksWithInline, importMarkdown, initDoc, insertBlock, isSupportedFigma, listAnnotationRanges, normalizeFigmaLink,
   parseFigmaHeight, parseFigmaInput, resolveAnnotationRange, seedNewFigmaCaptions, setAnnotationResolved,
   setInlineLink,
 } from "../src/index.js";
@@ -254,6 +254,30 @@ describe("Figma block contract", () => {
     const before = Y.encodeStateAsUpdate(doc);
     expect(() => editBlock(doc, id, SOURCE, SOURCE.replace("mobile", "desktop"))).toThrow(InvalidFigmaError);
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+  });
+
+  it.each(["\u2028", "\u2029"])("keeps a stored title with a Unicode separator supported through edits and Markdown: %j", (separator) => {
+    const { doc, id, figma } = fixture();
+    const title = `Payment,${separator}mobile`;
+    figma.setAttribute("title", title);
+    expect(isSupportedFigma(figma)).toBe(true);
+    const before = getBlock(doc, id)!.text;
+    expect(before).toContain(`title: ${title}\n`);
+    editBlock(doc, id, before, before);
+    expect(getBlock(doc, id)!.text).toBe(before);
+    const edited = before.replace("address step", "address screen");
+    editBlock(doc, id, before, edited);
+    expect(getBlock(doc, id)!.text).toBe(edited);
+    expect(figma.getAttribute("title")).toBe(title);
+    const blocks = importMarkdown(exportMarkdown(doc, { frontmatter: false })).blocks;
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ type: "figma", text: edited });
+    const copy = new Y.Doc();
+    initDoc(copy, { uuid: UUID, title: "Copy" });
+    const copyId = appendBlock(copy, blocks[0]!);
+    const restored = findBlockElement(copy, copyId)!;
+    expect(restored.getAttribute("title")).toBe(title);
+    expect(isSupportedFigma(restored)).toBe(true);
   });
 
   it("changes only requested headers and preserves caption text, marks and anchors", () => {
