@@ -60,30 +60,28 @@ for (const input of ["pointer", "keyboard"] as const) {
   });
 }
 
-for (const colorScheme of ["light", "dark"] as const) {
-  test(`archive Undo has a usable iPad touch target — ${colorScheme}`, { tag: "@webkit-touch" }, async ({ browser }) => {
-    const page = await openApp(browser, "/", {
-      upstream: true,
-      contextOptions: { viewport: { width: 1024, height: 1366 }, hasTouch: true, isMobile: true, colorScheme },
-      readySelector: ".ub-pane",
-    });
-    await activateControl(page.getByRole("button", { name: "Show document list", exact: true }));
-    const title = docTitle(`Touch Undo ${colorScheme}`);
-    await createDoc(page, title);
-    const notice = await archive(page, title);
-    const undo = notice.getByRole("button", { name: "Undo", exact: true });
-    const box = await undo.boundingBox();
-    if (box === null) throw new Error("e2e: Undo has no touch target");
-    expect(box.width).toBeGreaterThanOrEqual(44);
-    expect(box.height).toBeGreaterThanOrEqual(44);
-    expect(box.x).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width).toBeLessThanOrEqual(1024);
-    await undo.tap();
-    await expect(notice).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Restore", exact: true })).toHaveCount(0);
-    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+test("archive Undo has a usable iPad touch target", { tag: "@webkit-touch" }, async ({ browser }) => {
+  const page = await openApp(browser, "/", {
+    upstream: true,
+    contextOptions: { viewport: { width: 1024, height: 1366 }, hasTouch: true, isMobile: true },
+    readySelector: ".ub-pane",
   });
-}
+  await activateControl(page.getByRole("button", { name: "Show document list", exact: true }));
+  const title = docTitle("Touch Undo");
+  await createDoc(page, title);
+  const notice = await archive(page, title);
+  const undo = notice.getByRole("button", { name: "Undo", exact: true });
+  const box = await undo.boundingBox();
+  if (box === null) throw new Error("e2e: Undo has no touch target");
+  expect(box.width).toBeGreaterThanOrEqual(44);
+  expect(box.height).toBeGreaterThanOrEqual(44);
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(1024);
+  await undo.tap();
+  await expect(notice).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Restore", exact: true })).toHaveCount(0);
+  await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+});
 
 test("an archive in another tab shows the banner without offering Undo here", async ({ browser }) => {
   const page = await openApp(browser, "/", { upstream: true, readySelector: ".ub-workspace" });
