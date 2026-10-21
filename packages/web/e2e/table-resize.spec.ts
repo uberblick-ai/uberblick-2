@@ -174,27 +174,26 @@ test("mouse resizing shares one column, contains overflow and undoes separately 
   } finally { fixture.close(); }
 });
 
-test("resized boundaries keep pluses, column moves and row dragging aligned", { tag: "@webkit" }, async ({ page }) => {
+test("resized boundaries keep pills, column moves and row dragging aligned", { tag: "@webkit" }, async ({ page }) => {
   const fixture = await publishTable({ widths: [180, 200, 120] });
   try {
     const table = await openTable(page, fixture.uuid);
     await resize(page, table, 40);
     await expect.poll(() => widths(fixture.doc)[0]?.[0]).toEqual([220]);
-    const plus = page.getByRole("button", { name: "Insert column after 1", exact: true });
     const menu = page.getByRole("button", { name: "Column 1 actions", exact: true });
     await table.locator("th").first().hover();
     await expect.poll(async () => {
       const cell = await geometry(table.locator("th").first());
-      const insert = await geometry(plus);
       const actions = await geometry(menu);
-      return Math.max(Math.abs(insert.x + insert.width / 2 - cell.x - cell.width),
-        Math.abs(actions.x + actions.width / 2 - cell.x - cell.width / 2));
+      return Math.abs(actions.x + actions.width / 2 - cell.x - cell.width / 2);
     }).toBeLessThanOrEqual(1);
     await menu.click();
     await page.getByRole("menuitem", { name: "Move column right", exact: true }).click();
     await expect(table.locator("th")).toHaveText(["B", "A", "C"]);
     await expect.poll(() => widths(fixture.doc)[0]).toEqual([[200], [220], [120]]);
-    await page.getByRole("button", { name: "Insert column after 2", exact: true }).click();
+    await table.locator("th").nth(1).hover();
+    await page.getByRole("button", { name: "Column 2 actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Insert column right", exact: true }).click();
     await expect(table.locator("th")).toHaveText(["B", "A", "", "C"]);
     await expect.poll(() => widths(fixture.doc)[0]).toEqual([[200], [220], null, [120]]);
 
@@ -212,7 +211,9 @@ test("resized boundaries keep pluses, column moves and row dragging aligned", { 
     await page.mouse.up();
     await expect(table.locator("tr:has(td) > td:nth-child(2)")).toHaveText(["beta", "gamma", "alpha"]);
     await expect.poll(() => widths(fixture.doc)[0]).toEqual([[200], [220], null, [120]]);
-    await page.getByRole("button", { name: "Insert row after 4", exact: true }).click();
+    await table.locator("tr").last().locator("td").first().hover();
+    await page.getByRole("button", { name: "Row 4 actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Insert row below", exact: true }).click();
     await expect(table.locator("tr")).toHaveCount(5);
     await expect(table.locator("th")).toHaveText(["B", "A", "", "C"]);
   } finally { fixture.close(); }
@@ -234,6 +235,7 @@ test("moving and deleting a sized column clears its previous rendered width on b
     await expect.poll(() => columnWidths(table)).toEqual([before[1], before[0], before[2]]);
     await expect.poll(() => columnWidths(peerTable)).toEqual([before[1], before[0], before[2]]);
 
+    await table.locator("th").nth(1).hover();
     await page.getByRole("button", { name: "Column 2 actions", exact: true }).click();
     await page.getByRole("menuitem", { name: "Delete column", exact: true }).click();
     await expect(table.locator("th")).toHaveText(["B", "C"]);

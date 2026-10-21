@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { undo } from "y-prosemirror";
 import { appendBlock, createAnnotation, deleteBlock, editBlock, getBlocks, getBlocksFragment, initDoc, listAnnotations, resolveAnnotationRange } from "@uberblick/schema";
-import { actOnTable, deleteTableColumn, moveTableColumn, moveTableRow, resolveTableColumn, resolveTableRow, tableColumnTargets, tableRowTarget } from "../src/editor/table-controls.js";
+import { actOnTable, deleteTableColumn, moveTableColumn, moveTableColumnToGap, moveTableRow, resolveTableColumn, resolveTableRow, tableColumnTargets, tableRowTarget } from "../src/editor/table-controls.js";
 import type { TableAction, TableColumnTarget, TableRowTarget } from "../src/editor/table-controls.js";
 import { isOrdinaryTable } from "../src/editor/table.js";
 import { mountEditor } from "./helpers.js";
@@ -506,6 +506,29 @@ describe("shared table column moves", () => {
       f.a.on("update", () => { updates += 1; });
       for (const direction of [-1, 1] as const) expect(moveTableColumn(f.editor, target, direction)).toBe(false);
       expect(updates).toBe(0);
+      expect(getBlocks(f.a)).toEqual(before);
+    } finally { f.close(); }
+  });
+
+  it("moves a column to any gap in one undo step and writes nothing for its own gaps or invalid gaps", () => {
+    const f = fixture("| A | B | C | D |\n| --- | --- | --- | --- |\n| a | b | c | d |");
+    try {
+      const target = columnTargetOf(f.editor, f.id, 1);
+      const before = getBlocks(f.a);
+      let updates = 0;
+      f.a.on("update", () => { updates += 1; });
+      for (const gap of [1, 2, -1, 5, 1.5]) expect(moveTableColumnToGap(f.editor, target, gap)).toBe(false);
+      expect(updates).toBe(0);
+      expect(getBlocks(f.a)).toEqual(before);
+      expect(moveTableColumnToGap(f.editor, target, 4)).toBe(true);
+      expect(cells(f.editor)).toEqual([["A", "C", "D", "B"], ["a", "c", "d", "b"]]);
+      expect(updates).toBe(1);
+      expect(f.editor.state.selection.$head.index(2)).toBe(3);
+      expect(moveTableColumnToGap(f.editor, columnTargetOf(f.editor, f.id, 3), 0)).toBe(true);
+      expect(cells(f.editor)).toEqual([["B", "A", "C", "D"], ["b", "a", "c", "d"]]);
+      expect(undo(f.editor.state)).toBe(true);
+      expect(cells(f.editor)).toEqual([["A", "C", "D", "B"], ["a", "c", "d", "b"]]);
+      expect(undo(f.editor.state)).toBe(true);
       expect(getBlocks(f.a)).toEqual(before);
     } finally { f.close(); }
   });

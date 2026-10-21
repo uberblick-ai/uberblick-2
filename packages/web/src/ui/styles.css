@@ -1383,10 +1383,58 @@ h6.ub-heading {
   pointer-events: auto;
 }
 
-.ub-table-row-handle {
+.ub-table-handle {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+}
+
+/* Quiet outlined pills: horizontal on a column's top border, vertical on a
+   row's border. The hit target stays larger than the pill. */
+.ub-table-control.ub-table-handle span {
+  width: 20px;
+  height: 6px;
+  border: 1px solid color-mix(in oklab, var(--muted-foreground) 35%, transparent);
+  border-radius: 999px;
+  background: var(--background);
+}
+
+.ub-table-control.ub-table-row-handle span {
+  width: 6px;
+  height: 20px;
+}
+
+/* A mouse row handle starts at the border, clear of the block gutter button,
+   and centres its pill on that border. */
+.ub-table-controls:not([data-touch="true"]) .ub-table-row-handle {
+  justify-content: flex-start;
+  padding-left: 1px;
+}
+
+.ub-table-control.ub-table-handle:hover span,
+.ub-table-control.ub-table-handle:focus-visible span,
+.ub-table-control.ub-table-handle[data-state="open"] span {
+  border-color: var(--muted-foreground);
+}
+
+/* Menu glyphs stay muted; a destructive item's glyph takes its colour. */
+.ub-table-menu-icon { color: var(--muted-foreground); }
+[data-variant="destructive"] > .ub-table-menu-icon { color: inherit; }
+
+.ub-table-column-drop {
+  position: absolute;
+  top: 0;
+  width: 3px;
+  transform: translateX(-50%);
+  background: var(--brand);
+  pointer-events: none;
+}
+
+.ub-table-menu-anchor {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
 }
 
 .ub-table-row-drop {
@@ -1452,11 +1500,24 @@ h6.ub-heading {
 .ub-table .column-resize-handle {
   position: absolute;
   top: 0;
-  right: -2px;
+  right: -1px;
   bottom: -1px;
-  width: 4px;
-  background: var(--muted-foreground);
+  width: 2px;
+  background: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
   pointer-events: none;
+}
+
+/* The hovered row's segment of the border carries a short, brighter grip. */
+.ub-table tr:hover .column-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -1px;
+  width: 4px;
+  height: min(32px, 70%);
+  transform: translateY(-50%);
+  border-radius: 2px;
+  background: var(--muted-foreground);
 }
 
 .ub-editor .resize-cursor, .ub-editor .resize-cursor * { cursor: col-resize; }

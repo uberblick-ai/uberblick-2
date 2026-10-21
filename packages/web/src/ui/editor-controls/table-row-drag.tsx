@@ -1,9 +1,9 @@
-/** A row handle shares a pointer gesture with its standard Radix menu. */
+/** A row or column handle shares a pointer gesture with its standard Radix menu. */
 import { useCallback, useLayoutEffect, useRef } from "react";
-import type { MouseEvent, ReactElement } from "react";
+import type { CSSProperties, MouseEvent, ReactElement } from "react";
 import { useDraggable } from "@dnd-kit/react";
 import { PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
-import type { TableRowTarget } from "../../editor/table-controls.js";
+import type { TableColumnTarget, TableRowTarget } from "../../editor/table-controls.js";
 import { DropdownMenuTrigger } from "../shadcn/dropdown-menu.js";
 
 export const tableRowSensors = [PointerSensor.configure({
@@ -12,21 +12,24 @@ export const tableRowSensors = [PointerSensor.configure({
     : [new PointerActivationConstraints.Distance({ value: 5 })],
 })];
 
-export function TableRowHandle({ target, index, rowKey, bottom, size, revealed, open, clickGuard, resetGuard }: {
-  target: TableRowTarget;
-  index: number;
-  rowKey: number;
-  bottom: number;
-  size: number;
+export type TableDragData = { kind: "row"; target: TableRowTarget } | { kind: "column"; target: TableColumnTarget };
+
+export function TableHandle({ data, dragKey, disabled, axis, label, style, revealed, open, clickGuard, resetGuard, ...position }: {
+  data: TableDragData;
+  dragKey: number;
+  disabled: boolean;
+  axis: "row" | "column";
+  label: string;
+  style: CSSProperties;
   revealed: boolean;
   open: () => void;
   clickGuard: (event: MouseEvent<HTMLButtonElement>) => void;
   resetGuard: () => void;
+  "data-table-row"?: number;
+  "data-table-column"?: number;
 }): ReactElement {
   const button = useRef<HTMLButtonElement | null>(null);
-  const draggable = useDraggable({
-    id: rowKey, disabled: index === 0, data: { target },
-  });
+  const draggable = useDraggable({ id: dragKey, disabled, data });
   // Geometry refreshes must not detach the sensor while a press is pending.
   const dragRef = draggable.ref;
   const attach = useCallback((element: HTMLButtonElement | null): void => {
@@ -45,16 +48,15 @@ export function TableRowHandle({ target, index, rowKey, bottom, size, revealed, 
   }, []);
   return (
     <DropdownMenuTrigger asChild>
-      <button ref={attach}
-        type="button" className="ub-table-control ub-table-row-handle"
-        data-table-row={index} data-revealed={revealed}
-        style={{ right: `calc(${size}px - var(--ub-table-control-overhang))`, top: bottom - size / 2, width: size, height: size }}
-        aria-label={`Row ${index + 1} actions`}
-        title="Row actions · drag to move"
+      <button ref={attach} {...position}
+        type="button" className={`ub-table-control ub-table-handle ub-table-${axis}-handle`}
+        data-revealed={revealed} style={style}
+        aria-label={label}
+        title={disabled ? `${axis === "row" ? "Row" : "Column"} actions` : `${axis === "row" ? "Row" : "Column"} actions · drag to move`}
         onMouseDown={(event) => event.preventDefault()}
         onPointerDownCapture={resetGuard} onKeyDownCapture={resetGuard}
         onClickCapture={clickGuard} onClick={open}>
-        <span aria-hidden="true">⋮</span>
+        <span aria-hidden="true" />
       </button>
     </DropdownMenuTrigger>
   );

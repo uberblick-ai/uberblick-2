@@ -97,15 +97,9 @@ async function tableControls(table: Locator): Promise<Locator> {
 /** Opacity-hidden controls remain in native Tab order, so visibility alone is insufficient. */
 async function revealedRows(table: Locator, rows: number[]): Promise<void> {
   const overlay = await tableControls(table);
-  await expect.poll(() => overlay.locator("button").evaluateAll((elements) => elements.flatMap((element) => {
-    const name = element.getAttribute("aria-label") ?? "";
-    if (!/^(?:Row \d+ actions|Insert row after \d+)$/.test(name)) return [];
-    const style = getComputedStyle(element);
-    return style.opacity !== "0" && style.visibility !== "hidden" && style.display !== "none" ? [name] : [];
-  }))).toEqual([
-    ...rows.map((row) => `Insert row after ${row}`),
-    ...rows.map((row) => `Row ${row} actions`),
-  ]);
+  await expect.poll(() => overlay.getByRole("button", { name: /^Row \d+ actions$/ }).evaluateAll((elements) =>
+    elements.filter((element) => getComputedStyle(element).opacity !== "0").map((element) => element.getAttribute("aria-label"))))
+    .toEqual(rows.map((row) => `Row ${row} actions`));
 }
 
 async function revealedColumns(table: Locator, columns: number[]): Promise<void> {
@@ -115,6 +109,14 @@ async function revealedColumns(table: Locator, columns: number[]): Promise<void>
     .toEqual(columns.map((column) => `Column ${column} actions`));
 }
 
+/** Only the two pills exist: no insertion buttons and no other table controls. */
+async function onlyPills(table: Locator): Promise<void> {
+  const overlay = await tableControls(table);
+  expect(await overlay.locator("button").evaluateAll((elements) => elements.map((element) => element.getAttribute("aria-label") ?? "")
+    .filter((name) => !/^(?:Row|Column) \d+ actions$/.test(name)))).toEqual([]);
+}
+
+/** A column pill sits centred on its column's top border. */
 async function columnMenuBorder(table: Locator, column: number): Promise<void> {
   const target = button(table.page(), `Column ${column} actions`);
   await expect.poll(async () => {
@@ -122,6 +124,32 @@ async function columnMenuBorder(table: Locator, column: number): Promise<void> {
     const cell = await table.locator("th").nth(column - 1).boundingBox();
     return bounds === null || cell === null ? Number.POSITIVE_INFINITY :
       Math.max(Math.abs(bounds.x + bounds.width / 2 - cell.x - cell.width / 2), Math.abs(bounds.y + bounds.height / 2 - cell.y));
+  }).toBeLessThanOrEqual(1);
+}
+
+/** A mouse row pill is centred on the row's left border; a touch target straddles its right border. */
+async function rowBorder(table: Locator, row: number): Promise<void> {
+  const target = button(table.page(), `Row ${row} actions`);
+  const touch = await (await tableControls(table)).getAttribute("data-touch") === "true";
+  await expect.poll(async () => {
+    const expected = await table.evaluate((element, index) => {
+      const wrapper = element.parentElement;
+      const row = element.querySelectorAll("tr")[index - 1];
+      if (wrapper === null || row === undefined) throw new Error("e2e: row border is absent");
+      const box = row.getBoundingClientRect();
+      return { left: wrapper.getBoundingClientRect().left, middle: (box.top + box.bottom) / 2,
+        right: Math.min(element.getBoundingClientRect().right, wrapper.getBoundingClientRect().right) };
+    }, row);
+    const pill = await target.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const mark = element.querySelector("span")?.getBoundingClientRect();
+      return { left: bounds.left, right: bounds.right, centre: mark === undefined ? Number.NaN : (mark.left + mark.right) / 2,
+        middle: (bounds.top + bounds.bottom) / 2 };
+    });
+    const across = touch
+      ? (pill.left < expected.right && pill.right > expected.right ? 0 : Number.POSITIVE_INFINITY)
+      : Math.abs(pill.centre - expected.left);
+    return Math.max(across, Math.abs(pill.middle - expected.middle));
   }).toBeLessThanOrEqual(1);
 }
 
@@ -143,51 +171,10 @@ async function compactTable(table: Locator): Promise<void> {
   expect(Math.abs(geometry.top - geometry.frameTop)).toBeLessThanOrEqual(1);
 }
 
-async function columnBorders(table: Locator): Promise<void> {
-  const geometry = await table.evaluate((element) => {
-    const header = element.querySelector("tr");
-    const cells = Array.from(header?.children ?? []);
-    const first = cells[0];
-    const overlay = Array.from(document.querySelectorAll<HTMLElement>(".ub-table-controls"))
-      .find((candidate) => candidate.dataset.tableId === element.id);
-    if (first === undefined || overlay === undefined) throw new Error("e2e: column controls are absent");
-    const top = element.getBoundingClientRect().top;
-    const edges = [first.getBoundingClientRect().left, ...cells.map((cell) => cell.getBoundingClientRect().right)];
-    return Array.from(overlay.querySelectorAll("button[aria-label^='Insert column']")).map((control, index) => {
-      const bounds = control.getBoundingClientRect();
-      return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2, left: bounds.left, right: bounds.right,
-        edge: edges[index], outer: index === 0 || index === cells.length, touch: overlay.dataset.touch === "true",
-        top, opacity: getComputedStyle(control).opacity };
-    });
-  });
-  expect(geometry.length).toBeGreaterThan(1);
-  for (const boundary of geometry) {
-    expect(boundary.opacity).toBe("1");
-    if (boundary.touch && boundary.outer) {
-      // Touch edge targets move inward only to fit the document pane, while
-      // still crossing their column border. Mouse targets stay centred.
-      expect(boundary.left).toBeLessThan(boundary.edge ?? Number.NaN);
-      expect(boundary.right).toBeGreaterThan(boundary.edge ?? Number.NaN);
-    } else expect(Math.abs(boundary.x - (boundary.edge ?? Number.NaN))).toBeLessThanOrEqual(1);
-    expect(Math.abs(boundary.y - boundary.top)).toBeLessThanOrEqual(1);
-  }
-}
-
-async function rowBorder(table: Locator, row: number): Promise<void> {
-  const target = button(table.page(), `Insert row after ${row}`);
-  const expected = await table.evaluate((element, index) => {
-    const wrapper = element.parentElement;
-    const row = element.querySelectorAll("tr")[index - 1];
-    if (wrapper === null || row === undefined) throw new Error("e2e: row border is absent");
-    return { right: Math.min(element.getBoundingClientRect().right, wrapper.getBoundingClientRect().right), bottom: row.getBoundingClientRect().bottom };
-  }, row);
-  const bounds = await target.boundingBox();
-  if (bounds === null) throw new Error("e2e: row insertion control has no geometry");
-  if (await (await tableControls(table)).getAttribute("data-touch") === "true") {
-    expect(bounds.x).toBeLessThan(expected.right);
-    expect(bounds.x + bounds.width).toBeGreaterThan(expected.right);
-  } else expect(Math.abs(bounds.x + bounds.width / 2 - expected.right)).toBeLessThanOrEqual(1);
-  expect(Math.abs(bounds.y + bounds.height / 2 - expected.bottom)).toBeLessThanOrEqual(1);
+/** Pointer devices reveal by hover; touch reveals the caret's row and column. */
+async function reveal(cell: Locator, info: TestInfo): Promise<void> {
+  if (info.project.use.hasTouch === true) await caretIn(cell, info);
+  else await cell.hover();
 }
 
 async function controlsDoNotOverlap(table: Locator): Promise<void> {
@@ -260,7 +247,8 @@ async function capture(page: Page, info: TestInfo, label: string, colorScheme: "
   await page.emulateMedia({ colorScheme });
 }
 
-test("a caret table and another hovered table reveal their own controls together", async ({ page }) => {
+test("only the hovered table reveals its own row and column pills", async ({ page }, info) => {
+  test.skip(info.project.use.hasTouch === true, "Hover requires a pointer device");
   const initial = await openTable(page);
   const originalId = await initial.getAttribute("id");
   if (originalId === null) throw new Error("e2e: table has no block identity");
@@ -275,17 +263,19 @@ test("a caret table and another hovered table reveal their own controls together
   const hoveredId = await hovered.getAttribute("id");
   if (hoveredId === null || hoveredId === originalId) throw new Error("e2e: second table was not inserted before the first");
   await original.locator("th").first().click();
-  await hovered.locator("tr").last().hover();
-  await expect(controls(page)).toHaveCount(2);
-  await expect(page.locator(`.ub-table-controls[data-table-id="${originalId}"]`)).toBeVisible();
+  await hovered.locator("tr").last().locator("td").nth(1).hover();
   await expect(page.locator(`.ub-table-controls[data-table-id="${hoveredId}"]`)).toBeVisible();
-  await revealedRows(original, [1]);
   await revealedRows(hovered, [3]);
+  await revealedColumns(hovered, [2]);
+  // A pointer device reveals by hover alone, never by the caret.
+  await revealedRows(original, []);
+  await revealedColumns(original, []);
   await pageFits(page);
 });
 
-test("hover reveals quiet controls without moving the table and the pointer reaches them", async ({ page }, info) => {
+test("hover reveals two quiet pills without moving the table and the pointer reaches them", async ({ page }, info) => {
   const colorScheme = "light";
+  test.skip(info.project.use.hasTouch === true, "Hover requires a pointer device");
   await page.emulateMedia({ colorScheme });
   const table = await openTable(page);
   await editor(page).locator(":scope > p").first().click();
@@ -296,42 +286,45 @@ test("hover reveals quiet controls without moving the table and the pointer reac
     const box = cell.getBoundingClientRect();
     return { x: box.x, y: box.y, width: box.width, height: box.height };
   }));
-  await table.locator("tr").nth(1).hover();
+  await table.locator("tr").nth(1).locator("td").nth(1).hover();
   await expect(controls(page)).toBeVisible();
   await revealedRows(table, [2]);
-  await columnBorders(table);
+  await revealedColumns(table, [2]);
+  await onlyPills(table);
   await rowBorder(table, 2);
+  await columnMenuBorder(table, 2);
   await controlsDoNotOverlap(table);
-  await capture(page, info, "table-insertion-controls", colorScheme);
+  await capture(page, info, "table-pills", colorScheme);
   expect(await table.locator("th, td").evaluateAll((cells) => cells.map((cell) => {
     const box = cell.getBoundingClientRect();
     return { x: box.x, y: box.y, width: box.width, height: box.height };
   }))).toEqual(before);
 
-  const target = button(page, "Insert column after 1");
+  const target = button(page, "Row 2 actions");
   const box = await target.boundingBox();
-  if (box === null) throw new Error("e2e: column insertion control has no geometry");
+  if (box === null) throw new Error("e2e: row pill has no geometry");
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 30 });
-  await expect(controls(page)).toBeVisible();
+  await revealedRows(table, [2]);
   await hitTarget(target);
   await page.mouse.down();
   await page.mouse.up();
-  await expect(table.locator("th")).toHaveCount(4);
-  await expect(table.locator("tr").nth(1).locator("td")).toHaveCount(4);
-  await expect(table.locator("tr").nth(2).locator("td")).toHaveCount(4);
+  await expect(page.getByRole("menuitem")).toHaveText(["Insert row above", "Insert row below", "Move row up", "Move row down", "Delete row"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(target).toBeFocused();
   await pageFits(page);
 });
 
-test("column hover reaches its top menu and caret, focus and open menus keep it revealed", { tag: "@webkit" }, async ({ page }, info) => {
+test("column hover reaches its top pill and focus and open menus keep it revealed", { tag: "@webkit" }, async ({ page }, info) => {
   const colorScheme = "light";
   test.skip(info.project.use.hasTouch === true, "Hover requires a pointer device");
   await page.emulateMedia({ colorScheme });
   const table = await openTable(page);
   await caretIn(table.locator("tr").nth(1).locator("td").first(), info);
   await page.mouse.move(0, 0);
-  await revealedColumns(table, [1]);
+  await revealedColumns(table, []);
   await table.locator("tr").last().locator("td").nth(1).hover();
-  await revealedColumns(table, [1, 2]);
+  await revealedColumns(table, [2]);
   await caretIn(editor(page).locator(":scope > p").first(), info);
   await page.mouse.move(0, 0);
   await expect(controls(page)).toHaveCount(0);
@@ -342,7 +335,6 @@ test("column hover reaches its top menu and caret, focus and open menus keep it 
   await table.locator("tr").nth(1).locator("td").nth(1).hover();
   await revealedColumns(table, [2]);
   await columnMenuBorder(table, 2);
-  await columnBorders(table);
   await controlsDoNotOverlap(table);
   expect(await table.locator("th, td").evaluateAll((cells) => cells.map((cell) => {
     const box = cell.getBoundingClientRect();
@@ -350,12 +342,12 @@ test("column hover reaches its top menu and caret, focus and open menus keep it 
   }))).toEqual(before);
   const trigger = button(page, "Column 2 actions");
   const bounds = await trigger.boundingBox();
-  if (bounds === null) throw new Error("e2e: column menu has no geometry");
+  if (bounds === null) throw new Error("e2e: column pill has no geometry");
   await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, { steps: 30 });
   await revealedColumns(table, [2]);
   await hitTarget(trigger);
   await trigger.click();
-  await expect(page.getByRole("menuitem")).toHaveText(["Move column left", "Move column right", "Delete column"]);
+  await expect(page.getByRole("menuitem")).toHaveText(["Insert column left", "Insert column right", "Move column left", "Move column right", "Delete column"]);
   await page.getByRole("menu").hover();
   await page.mouse.move(0, 0);
   await revealedColumns(table, [2]);
@@ -390,7 +382,7 @@ test("touch reveals column menus without moving cells and reaches both wide-tabl
   }))).toEqual(before);
   await button(page, "Column 1 actions").tap();
   await minimumTargets(page.getByRole("menuitem"));
-  await expect(page.getByRole("menuitem")).toHaveText(["Move column left", "Move column right", "Delete column"]);
+  await expect(page.getByRole("menuitem")).toHaveText(["Insert column left", "Insert column right", "Move column left", "Move column right", "Delete column"]);
   await expect(page.getByRole("menuitem", { name: "Move column left", exact: true })).toBeDisabled();
   await expect(page.getByRole("menuitem", { name: "Move column right", exact: true })).toBeEnabled();
   await page.keyboard.press("Escape");
@@ -420,7 +412,7 @@ test("column moves swap every row, focus the moved column and each undo separate
   }
   await caretIn(table.locator("td").nth(1), info);
   await activate(button(page, "Column 2 actions"), info);
-  await expect(page.getByRole("menuitem")).toHaveText(["Move column left", "Move column right", "Delete column"]);
+  await expect(page.getByRole("menuitem")).toHaveText(["Insert column left", "Insert column right", "Move column left", "Move column right", "Delete column"]);
   await expect(page.getByRole("menuitem", { name: "Move column left", exact: true })).toBeEnabled();
   await expect(page.getByRole("menuitem", { name: "Move column right", exact: true })).toBeEnabled();
   await activate(page.getByRole("menuitem", { name: "Move column left", exact: true }), info);
@@ -430,12 +422,17 @@ test("column moves swap every row, focus the moved column and each undo separate
   await expect(table.locator("tr").first().locator("td")).toHaveCount(0);
   await expect(editor(page)).toBeFocused();
   await expect.poll(() => table.locator("th").first().evaluate((cell) => cell.contains(document.getSelection()?.anchorNode ?? null))).toBe(true);
-  await page.mouse.move(0, 0);
-  await revealedColumns(table, [1]);
 
+  await reveal(table.locator("th").first(), info);
   await activate(button(page, "Column 1 actions"), info);
   await expect(page.getByRole("menuitem", { name: "Move column left", exact: true })).toBeDisabled();
+  await expect.poll(() => page.getByRole("menu").evaluate(element => element.contains(element.ownerDocument.activeElement))).toBe(true);
   await page.keyboard.press("Home");
+  // Radix defers roving focus; observe each destination before the next key.
+  await expect(page.getByRole("menuitem", { name: "Insert column left", exact: true })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menuitem", { name: "Insert column right", exact: true })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
   await expect(page.getByRole("menuitem", { name: "Move column right", exact: true })).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("menu")).toHaveCount(0);
@@ -443,8 +440,6 @@ test("column moves swap every row, focus the moved column and each undo separate
   await expect(table.locator("td")).toHaveText(cells);
   await expect(editor(page)).toBeFocused();
   await expect.poll(() => table.locator("th").nth(1).evaluate((cell) => cell.contains(document.getSelection()?.anchorNode ?? null))).toBe(true);
-  await page.mouse.move(0, 0);
-  await revealedColumns(table, [2]);
 
   await page.keyboard.press("ControlOrMeta+z");
   await expect(table.locator("th")).toHaveText(["Middle", "First", "Last"]);
@@ -460,27 +455,49 @@ test("column moves swap every row, focus the moved column and each undo separate
   await pageFits(page);
 });
 
-test("caret and pointer reveal their own rows while hidden controls pass input to cells", { tag: "@webkit" }, async ({ page }, info) => {
+test("column menus insert columns beside their own column", { tag: "@webkit" }, async ({ page }, info) => {
+  const table = await openTable(page);
+  for (const [index, text] of ["A", "B", "C"].entries()) {
+    await caretIn(table.locator("th").nth(index), info);
+    await page.keyboard.insertText(text);
+  }
+  await caretIn(table.locator("td").nth(1), info);
+  await activate(button(page, "Column 2 actions"), info);
+  await activate(page.getByRole("menuitem", { name: "Insert column left", exact: true }), info);
+  await expect(table.locator("th")).toHaveText(["A", "", "B", "C"]);
+  await expect(table.locator("tr").nth(1).locator("td")).toHaveCount(4);
+  await reveal(table.locator("th").nth(2), info);
+  await activate(button(page, "Column 3 actions"), info);
+  await activate(page.getByRole("menuitem", { name: "Insert column right", exact: true }), info);
+  await expect(table.locator("th")).toHaveText(["A", "", "B", "", "C"]);
+  await expect(table.locator("tr").last().locator("td")).toHaveCount(5);
+  await expect(table.locator("tr").first().locator("td")).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(table.locator("th")).toHaveText(["A", "", "B", "C"]);
+});
+
+test("pointer hover alone reveals rows while hidden pills pass input to cells", { tag: "@webkit" }, async ({ page }, info) => {
   test.skip(info.project.use.hasTouch === true, "Hover requires a pointer device");
   const table = await openTable(page);
   await caretIn(table.locator("tr").nth(1).locator("td").first(), info);
   await page.mouse.move(0, 0);
-  await revealedRows(table, [2]);
-  await columnBorders(table);
-  for (const name of ["Insert row after 1", "Row 1 actions"]) {
+  await revealedRows(table, []);
+  await revealedColumns(table, []);
+  for (const name of ["Row 1 actions", "Row 2 actions", "Column 1 actions"]) {
     const hidden = button(page, name);
     expect(await hidden.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
-      const hit = document.elementFromPoint(bounds.x + bounds.width / 4, bounds.y + bounds.height / 4);
+      // The part of the hidden target inside the table, past its border.
+      const hit = document.elementFromPoint(bounds.x + bounds.width * 3 / 4, bounds.y + bounds.height * 3 / 4);
       return getComputedStyle(element).pointerEvents === "none" && hit !== null && hit.closest("th, td") !== null && hit.closest(".ub-table") !== null;
     })).toBe(true);
   }
   await table.locator("tr").last().locator("td").first().hover();
-  await revealedRows(table, [2, 3]);
+  await revealedRows(table, [3]);
   await table.locator("tr").first().locator("th").first().hover();
-  await revealedRows(table, [1, 2]);
+  await revealedRows(table, [1]);
   await page.mouse.move(0, 0);
-  await revealedRows(table, [2]);
+  await revealedRows(table, []);
   await caretIn(editor(page).locator(":scope > p").first(), info);
   await page.mouse.move(0, 0);
   await expect(controls(page)).toHaveCount(0);
@@ -493,7 +510,7 @@ test("caret and pointer reveal their own rows while hidden controls pass input t
   await expect(controls(page)).toHaveCount(0);
 });
 
-test("hover alone reveals one row and reaches its border insertion and adjacent menu", { tag: "@webkit" }, async ({ page }, info) => {
+test("hover reaches the row pill, whose menu inserts and deletes its own row", { tag: "@webkit" }, async ({ page }, info) => {
   const colorScheme = "light";
   test.skip(info.project.use.hasTouch === true, "Hover requires a pointer device");
   await page.emulateMedia({ colorScheme });
@@ -512,20 +529,15 @@ test("hover alone reveals one row and reaches its border insertion and adjacent 
   await revealedRows(table, [2]);
   await rowBorder(table, 2);
   await controlsDoNotOverlap(table);
-  const insertion = button(page, "Insert row after 2");
-  const insertionBox = await insertion.boundingBox();
-  if (insertionBox === null) throw new Error("e2e: row insertion control has no geometry");
-  await page.mouse.move(insertionBox.x + insertionBox.width / 2, insertionBox.y + insertionBox.height / 2, { steps: 30 });
-  await expect(insertion).toBeVisible();
+  const rowMenu = button(page, "Row 2 actions");
+  const menuBox = await rowMenu.boundingBox();
+  if (menuBox === null) throw new Error("e2e: row pill has no geometry");
+  await page.mouse.move(menuBox.x + menuBox.width / 2, menuBox.y + menuBox.height / 2, { steps: 30 });
   await revealedRows(table, [2]);
-  await hitTarget(insertion);
-  await page.mouse.move(0, 0);
-  await expect(controls(page)).toHaveCount(0);
-  await table.locator("tr").nth(1).locator("td").first().hover();
-  await page.mouse.move(insertionBox.x + insertionBox.width / 2, insertionBox.y + insertionBox.height / 2, { steps: 30 });
-  await expect(insertion).toBeVisible();
+  await hitTarget(rowMenu);
   await page.mouse.down();
   await page.mouse.up();
+  await page.getByRole("menuitem", { name: "Insert row below", exact: true }).click();
   await expect(table.locator("tr")).toHaveCount(4);
   await expect(table.locator("tr").nth(1)).toContainText("Target row");
   await expect(table.locator("tr").nth(2).locator("td")).toHaveText(["", "", ""]);
@@ -535,14 +547,7 @@ test("hover alone reveals one row and reaches its border insertion and adjacent 
   await page.mouse.move(0, 0);
   await expect(controls(page)).toHaveCount(0);
   await table.locator("tr").nth(1).locator("td").first().hover();
-  await expect(controls(page)).toBeVisible();
-  const rowMenu = button(page, "Row 2 actions");
-  const menuBox = await rowMenu.boundingBox();
-  if (menuBox === null) throw new Error("e2e: row menu control has no geometry");
   await page.mouse.move(menuBox.x + menuBox.width / 2, menuBox.y + menuBox.height / 2, { steps: 30 });
-  await expect(rowMenu).toBeVisible();
-  await revealedRows(table, [2]);
-  await hitTarget(rowMenu);
   await page.mouse.down();
   await page.mouse.up();
   await expect(page.getByRole("menu")).toBeVisible();
@@ -565,7 +570,7 @@ test("hover alone reveals one row and reaches its border insertion and adjacent 
   await pageFits(page);
 });
 
-test("row menus target their row by trigger and right click and protect the header", { tag: "@webkit" }, async ({ page }, info) => {
+test("row menus target their row by pill and right click and protect the header", { tag: "@webkit" }, async ({ page }, info) => {
   const colorScheme = "light";
   await page.emulateMedia({ colorScheme });
   const table = await openTable(page);
@@ -613,99 +618,120 @@ test("row menus target their row by trigger and right click and protect the head
   await pageFits(page);
 });
 
-test("header-only edge controls follow wide-table scrolling and retain the only header row", { tag: "@webkit" }, async ({ page }, info) => {
+test("right click opens one menu for its cell's row and column", { tag: "@webkit" }, async ({ page }, info) => {
+  const table = await openTable(page);
+  for (const [index, text] of ["A", "B", "C", "a1", "b1", "c1", "a2", "b2", "c2"].entries()) {
+    await caretIn(table.locator("th, td").nth(index), info);
+    await page.keyboard.insertText(text);
+  }
+  await table.locator("tr").nth(1).locator("td").nth(1).click({ button: "right" });
+  await expect(page.getByRole("menuitem")).toHaveText([
+    "Insert row above", "Insert row below", "Insert column left", "Insert column right",
+    "Move row up", "Move row down", "Move column left", "Move column right", "Delete row", "Delete column",
+  ]);
+  await expect(page.getByRole("menuitem", { name: "Move row up", exact: true })).toBeDisabled();
+  await expect(page.getByRole("menuitem", { name: "Move row down", exact: true })).toBeEnabled();
+  await expect(page.getByRole("menuitem", { name: "Move column left", exact: true })).toBeEnabled();
+  await activate(page.getByRole("menuitem", { name: "Move column right", exact: true }), info);
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(table.locator("th")).toHaveText(["A", "C", "B"]);
+  await expect(table.locator("tr").nth(2).locator("td")).toHaveText(["a2", "c2", "b2"]);
+  await expect(editor(page)).toBeFocused();
+
+  await table.locator("tr").nth(2).locator("td").nth(2).click({ button: "right" });
+  await activate(page.getByRole("menuitem", { name: "Delete column", exact: true }), info);
+  await expect(table.locator("th")).toHaveText(["A", "C"]);
+  await table.locator("th").first().click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Insert row above", exact: true })).toBeDisabled();
+  await expect(page.getByRole("menuitem", { name: "Delete row", exact: true })).toBeDisabled();
+  await expect(page.getByRole("menuitem", { name: "Move column left", exact: true })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(editor(page)).toBeFocused();
+  await expect(table.locator("tr")).toHaveCount(3);
+
+  // The keyboard's menu key targets the editor and opens the caret cell's menu.
+  await caretIn(table.locator("tr").nth(1).locator("td").first(), info);
+  await editor(page).evaluate((element) => element.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })));
+  await activate(page.getByRole("menuitem", { name: "Delete row", exact: true }), info);
+  await expect(table.locator("tr")).toHaveCount(2);
+  await expect(table.locator("tr").nth(1).locator("td")).toHaveText(["a2", "c2"]);
+});
+
+test("header-only wide tables keep pills on their borders through scrolling and retain the only header row", { tag: "@webkit" }, async ({ page }, info) => {
   const table = await openTable(page, true);
   const wrapper = table.locator("..");
   await expect.poll(() => wrapper.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
   await activate(table.locator("th").first(), info);
-  await activate(button(page, "Insert column before 1"), info);
+  await activate(button(page, "Column 1 actions"), info);
+  await activate(page.getByRole("menuitem", { name: "Insert column left", exact: true }), info);
   await expect(table.locator("th")).toHaveCount(9);
   await expect(table.locator("td")).toHaveCount(0);
   await expect(table.locator("th").nth(1)).toHaveText("First");
 
-  // Put an inner column boundary close to the visible right edge. The header
-  // handle must stay separate from top-border column targets at partial scroll.
-  const targetSize = (await button(page, "Row 1 actions").boundingBox())?.width;
-  if (targetSize === undefined) throw new Error("e2e: header handle has no geometry");
-  await wrapper.evaluate((element, size) => {
-    const cell = element.querySelector("tr > th:last-child");
-    if (cell === null) throw new Error("e2e: last column is absent");
-    element.scrollLeft += cell.getBoundingClientRect().left - element.getBoundingClientRect().right + size;
-  }, targetSize);
-  const penultimate = button(page, "Insert column after 8");
-  await expect.poll(async () => {
-    const control = await penultimate.boundingBox();
-    const cell = await table.locator("th").last().boundingBox();
-    return control === null || cell === null ? Number.POSITIVE_INFINITY : Math.abs(control.x + control.width / 2 - cell.x);
-  }).toBeLessThanOrEqual(1);
+  await wrapper.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+  await reveal(table.locator("th").last(), info);
   await revealedRows(table, [1]);
+  await revealedColumns(table, [9]);
+  await rowBorder(table, 1);
+  await columnMenuBorder(table, 9);
   await controlsDoNotOverlap(table);
   await hitTarget(button(page, "Row 1 actions"));
-  await rowBorder(table, 1);
-  await hitTarget(penultimate);
+  if (info.project.use.hasTouch === true) await fullyTappable(button(page, "Column 9 actions"));
+  await hitTarget(button(page, "Column 9 actions"));
   await pageFits(page);
-
-  await wrapper.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
-  await activate(table.locator("th").last(), info);
-  await rowBorder(table, 1);
-  const lastColumn = button(page, "Insert column after 9");
-  await expect(lastColumn).toBeVisible();
-  const lastColumnBox = await lastColumn.boundingBox();
-  const lastCellBox = await table.locator("th").last().boundingBox();
-  if (lastColumnBox === null || lastCellBox === null) throw new Error("e2e: scrolled column boundary has no geometry");
-  if (info.project.use.hasTouch === true) {
-    expect(lastColumnBox.x).toBeLessThan(lastCellBox.x + lastCellBox.width);
-    expect(lastColumnBox.x + lastColumnBox.width).toBeGreaterThan(lastCellBox.x + lastCellBox.width);
-    await fullyTappable(lastColumn);
-  } else expect(Math.abs(lastColumnBox.x + lastColumnBox.width / 2 - lastCellBox.x - lastCellBox.width)).toBeLessThanOrEqual(1);
-  await hitTarget(lastColumn);
-  await activate(lastColumn, info);
+  await activate(button(page, "Column 9 actions"), info);
+  await activate(page.getByRole("menuitem", { name: "Insert column right", exact: true }), info);
   await expect(table.locator("th")).toHaveCount(10);
   await expect(table.locator("td")).toHaveCount(0);
   await expect(table.locator("th").nth(8)).toHaveText("Last");
-  await activate(table.locator("th").last(), info);
-  await activate(button(page, "Insert row after 1"), info);
+  await reveal(table.locator("th").last(), info);
+  await activate(button(page, "Row 1 actions"), info);
+  await activate(page.getByRole("menuitem", { name: "Insert row below", exact: true }), info);
   await expect(table.locator("tr")).toHaveCount(2);
   await expect(table.locator("tr").last().locator("td")).toHaveCount(10);
   await expect(table.locator("th")).toHaveCount(10);
   await pageFits(page);
 });
 
-test("touch exposes 44px controls for the caret table and row without hover", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+test("touch exposes 44px pills for the caret row and column without hover", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const page = await touchPage(browser, info);
   const table = await openTable(page);
-  await table.locator("tr").nth(1).locator("td").first().tap();
+  await table.locator("tr").nth(1).locator("td").first().tap({ position: { x: 60, y: 22 } });
   await expect(controls(page)).toBeVisible();
   await revealedRows(table, [2]);
-  await minimumTargets(controls(page).getByRole("button", { name: /^Insert (?:column|row)/ }));
+  await revealedColumns(table, [1]);
+  await onlyPills(table);
   await minimumTargets(button(page, "Row 2 actions"));
+  await minimumTargets(button(page, "Column 1 actions"));
   await compactTable(table);
-  await columnBorders(table);
   await rowBorder(table, 2);
+  await columnMenuBorder(table, 1);
   await controlsDoNotOverlap(table);
-  await fullyTappable(button(page, "Insert row after 2"));
   await fullyTappable(button(page, "Row 2 actions"));
-  await fullyTappable(button(page, "Insert column before 1"));
+  await fullyTappable(button(page, "Column 1 actions"));
   await pageFits(page);
   await table.locator("..").evaluate((element) => { element.scrollLeft = element.scrollWidth; });
   await rowBorder(table, 2);
-  await fullyTappable(button(page, "Insert column after 3"));
+  await fullyTappable(button(page, "Row 2 actions"));
   await pageFits(page);
   await table.locator("..").evaluate((element) => { element.scrollLeft = 0; });
-  await button(page, "Insert row after 2").tap({ position: { x: 43, y: 22 } });
+  await button(page, "Row 2 actions").tap();
+  await minimumTargets(page.getByRole("menuitem"));
+  await page.getByRole("menuitem", { name: "Insert row below", exact: true }).tap();
   await expect(table.locator("tr")).toHaveCount(4);
-  await table.locator("tr").nth(1).locator("td").first().tap();
+  await table.locator("tr").nth(1).locator("td").first().tap({ position: { x: 60, y: 22 } });
   await button(page, "Row 2 actions").tap();
   const deletion = page.getByRole("menuitem", { name: "Delete row", exact: true });
   await expect(deletion).toBeVisible();
-  await minimumTargets(page.getByRole("menuitem"));
   await deletion.tap();
   await expect(table.locator("tr")).toHaveCount(3);
-  // The 44px top-border target covers the centre of a short touch header.
+  // The 44px top-border target covers the top of a short touch header.
   await table.locator("th").first().tap({ position: { x: 30, y: 30 } });
   await revealedRows(table, [1]);
   await controlsDoNotOverlap(table);
-  await button(page, "Insert column after 1").tap();
+  await button(page, "Column 1 actions").tap();
+  await page.getByRole("menuitem", { name: "Insert column right", exact: true }).tap();
   await expect(table.locator("th")).toHaveCount(4);
   await expect(table.locator("tr").last().locator("td")).toHaveCount(4);
   await pageFits(page);
@@ -719,7 +745,7 @@ test("touch sizing survives stationary compatibility hover but real mouse moveme
     return { x: Math.round(box.left + box.width / 4), y: Math.round(box.top + box.height / 2) };
   });
   await page.touchscreen.tap(point.x, point.y);
-  const row = button(page, "Insert row after 2");
+  const row = button(page, "Row 2 actions");
   await expect(row).toHaveCSS("width", "44px");
   await page.evaluate(({ x, y }) => {
     document.elementFromPoint(x, y)?.dispatchEvent(new PointerEvent("pointermove", {
@@ -730,7 +756,7 @@ test("touch sizing survives stationary compatibility hover but real mouse moveme
   await expect(row).toHaveCSS("width", "44px");
   await page.mouse.move(point.x + 10, point.y);
   await expect(controls(page)).toHaveAttribute("data-touch", "false");
-  await expect(row).toHaveCSS("width", "24px");
+  await expect(row).toHaveCSS("width", "12px");
 });
 
 test("archiving hides structural controls and right-click paths cannot write", { tag: "@webkit" }, async ({ page }, info) => {

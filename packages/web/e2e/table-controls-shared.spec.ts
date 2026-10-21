@@ -183,11 +183,9 @@ test("a single-column menu cannot move or delete its last column", async ({ page
     await expect(page.getByRole("menuitem", { name: "Move column left", exact: true })).toBeDisabled();
     await expect(page.getByRole("menuitem", { name: "Move column right", exact: true })).toBeDisabled();
     await expect(page.getByRole("menuitem", { name: "Delete column", exact: true })).toBeDisabled();
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("Escape");
     await expect(table.locator("th")).toHaveText(["A"]);
     await expect(table.locator("td")).toHaveText(["alpha"]);
-    await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Column 1 actions", exact: true })).toBeFocused();
     await proveBrowserArrival(page, { path: "upstream", readTags: () => getMeta(fixture.doc).tags });
     expect(getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text).toBe(source);
