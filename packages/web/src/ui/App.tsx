@@ -108,7 +108,6 @@ import {
   useHubEndpoint,
   useIdentity,
   useLocalSessionMissing,
-  usePresence,
   useTitlePresence,
   useRoom,
   useRoomStatus,
@@ -743,9 +742,8 @@ export function App(): ReactElement {
   );
   /**
    * The title retains departed agents exactly while their named editor
-   * cursors remain visible; present-now reporting uses live awareness.
+   * cursors remain visible.
    */
-  const presence = usePresence(chromeRoom);
   const titlePresence = useTitlePresence(chromeRoom);
   /**
    * Count workspace agent sessions in the directory room, which every session
@@ -1297,17 +1295,15 @@ export function App(): ReactElement {
               onToggleThreads={onToggleThreads}
               syncDetails
             />
-            {/* Connection reporting excludes the title's retained departures. */}
             {(route.kind === "doc" || route.kind === "decision") && (
               <PopoverContent
                 align="start"
                 collisionPadding={8}
-                aria-label="Sync and presence"
+                aria-label="Sync details"
                 className="ub-sync-panel w-[min(22rem,calc(100vw_-_1rem))]! max-h-[min(calc(100dvh_-_1rem),var(--radix-popover-content-available-height))] overflow-y-auto"
               >
                 <SyncPanel
                   connection={chromeRoom}
-                  presence={presence}
                   endpoint={statusEndpoint}
                   hubAcked={serving === null ? undefined : servingStatus?.hubAcked ?? null}
                   notSharedReason={servingStatus?.notSharedReason ?? null}

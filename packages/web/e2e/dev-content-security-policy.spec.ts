@@ -100,7 +100,7 @@ test("Vite syncs, loads Figma and applies Fast Refresh without CSP violations", 
     });
 
     await page.locator(".ub-status-sync").click();
-    await expect(page.getByRole("dialog", { name: "Sync and presence" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Sync details" })).toBeVisible();
     await page.evaluate(() => { (window as unknown as { devCspIdentity: string }).devCspIdentity = "same page"; });
     let navigations = 0;
     page.on("framenavigated", (frame) => { if (frame === page.mainFrame()) navigations += 1; });

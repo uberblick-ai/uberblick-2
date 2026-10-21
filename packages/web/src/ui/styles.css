@@ -2630,6 +2630,15 @@ h6.ub-heading {
 }
 
 .ub-status-sync { cursor: pointer; }
+.ub-status-sync--code {
+  width: 44px;
+  column-gap: 4px;
+}
+.ub-sync-code-mark {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: var(--type-caption-size);
+}
 .ub-status-sync:focus-visible,
 .ub-doc-rev:focus-visible {
   outline: 2px solid var(--ring);

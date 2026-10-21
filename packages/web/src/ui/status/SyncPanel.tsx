@@ -1,5 +1,5 @@
 /**
- * Display client-held sync, code-check and awareness facts plus the shell's
+ * Display client-held sync and code-check facts plus the shell's
  * local /api/status answer. Never query the remote hub or wait on
  * HTTP for local durability. Omit local-update count because this client has
  * no update log.
@@ -13,10 +13,10 @@ import type { NotSharedReason } from "../../shell/document-search.js";
 import { backlogLabel, rawSyncState, useCalmSyncState } from "./calm.js";
 import { statusReading } from "./status-reading.js";
 import { documentSyncFacts } from "./sync-facts.js";
-import type { RemotePresence } from "./doc-chrome.js";
 import { useDocMeta, useDocRev, useRoomStatus } from "../hooks.js";
-import { PeerAvatar } from "./PeerAvatar.js";
 import { formatExactTimestamp, formatTimestamp, useTimestampClock } from "../timestamps.js";
+import { CodeCheckPaths } from "./CodeCheckPaths.js";
+import { staleCodeCheckAgeDays } from "./code-check-age.js";
 
 /** What a fact reads as before this client knows it. */
 const UNKNOWN = "—";
@@ -25,10 +25,12 @@ function Fact({
   label,
   value,
   mono = false,
+  fill = false,
 }: {
   label: string;
   value: string | ReactElement;
   mono?: boolean;
+  fill?: boolean;
 }): ReactElement {
   return (
     <div className="ub-sync-fact flex items-baseline gap-2 py-[0.15rem]">
@@ -36,7 +38,7 @@ function Fact({
         {label}
       </dt>
       {/* Identifiers and exact timestamps wrap inside the panel. */}
-      <dd className={`m-0 min-w-0 ub-type-caption [overflow-wrap:anywhere]${mono ? " font-mono" : ""}`}>
+      <dd className={`m-0 min-w-0 ub-type-caption [overflow-wrap:anywhere]${mono ? " font-mono" : ""}${fill ? " flex-1" : ""}`}>
         {value}
       </dd>
     </div>
@@ -51,15 +53,12 @@ function Fact({
  */
 export function SyncPanel({
   connection,
-  presence,
   endpoint,
   hubAcked,
   notSharedReason = null,
   lastUpdated,
 }: {
   connection: RoomConnection | null;
-  /** Every remote session in that room, read once by the shell. */
-  presence: readonly RemotePresence[];
   /** The endpoint the provider was constructed with, or null until resolved. */
   endpoint: HubEndpoint | null;
   /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
@@ -71,7 +70,8 @@ export function SyncPanel({
   const status = useRoomStatus(connection);
   const meta = useDocMeta(connection);
   const revision = useDocRev(connection);
-  const now = useTimestampClock();
+  const clock = useTimestampClock();
+  const now = Math.max(clock, Date.now());
   const codeChecks = meta?.code_check ?? [];
   const raw = rawSyncState(status);
   const state = useCalmSyncState(raw, connection);
@@ -144,6 +144,7 @@ export function SyncPanel({
                       {check.commit.slice(0, 8)}
                     </a>
                     {checked !== null && <> · <time dateTime={checked.dateTime} title={checked.title}>{checked.label}</time></>}
+                    {staleCodeCheckAgeDays(check.checked_at, now) !== null && " · due for a re-check"}
                   </>
                 } />
                 <Fact label="Result" value={
@@ -151,43 +152,14 @@ export function SyncPanel({
                     {check.result === "matches" ? "Matches the code" : check.result === "ahead" ? "Ahead of the code (intended)" : "Differs from the code"}
                   </span>
                 } />
-                <Fact label="Page text" value={check.rev === undefined ? "Not recorded" : check.rev === revision ? "Unchanged since then" : "Edited since then"} />
+                <Fact label="Page edited since" value={check.rev === undefined ? "Unknown (older check)" : check.rev === revision ? "No" : "Yes"} />
                 {check.paths !== undefined && check.paths.length > 0 && (
-                  <Fact label="Looked at" value={`${check.paths[0]}${check.paths.length > 1 ? ` +${check.paths.length - 1} more` : ""}`} mono />
+                  <Fact label="Looked at" value={<CodeCheckPaths paths={check.paths} />} mono fill />
                 )}
               </dl>
             );
           })}
         </section>
-      )}
-      <h2 className="m-0 mb-[0.4rem] ub-type-caption tracking-[0.06em] uppercase text-muted-foreground">Present now</h2>
-      {presence.length === 0 ? (
-        <p className="ub-muted">Nobody else is in this room.</p>
-      ) : (
-        <ul className="ub-presence m-0 flex list-none flex-col gap-[0.3rem] p-0">
-          {presence.map((session) => (
-            <li
-              key={session.clientId}
-              className="ub-presence-row flex min-w-0 items-baseline gap-[0.4rem]"
-            >
-              {/*
-                  * The row name is accessible text; keep its shared avatar decorative to avoid
-                  * naming the session twice.
-               */}
-              <PeerAvatar session={session} />
-              <span className="ub-presence-name min-w-0 [overflow-wrap:anywhere]">
-                {session.name}
-              </span>
-              {/* Only where the caret resolves to a block a reader can see.
-                  Silence beats a number the document disagrees with. */}
-              {session.block !== null && (
-                <span className="ub-muted shrink-0 whitespace-nowrap">
-                  block {session.block}
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
       )}
     </div>
   );
