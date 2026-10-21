@@ -1,4 +1,4 @@
-import { addComment, createAnnotation, getBlock, setAnnotationResolved } from "@uberblick/schema";
+import { addComment, createAnnotation, getAnnotation, getBlock, moveAnnotation, setAnnotationResolved } from "@uberblick/schema";
 import { z } from "zod";
 import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
@@ -7,14 +7,20 @@ import { uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
 
 /**
- * thread_id selects a reply with optional resolution; its absence requires
- * a block/range and forbids resolution. The two field sets cannot mix.
+ * Existing threads either receive a reply or move to a range with a reply.
+ * Only a reply without a range may change resolution.
  */
 const ANNOTATE_MODES: readonly ToolMode[] = [
   {
     title: "A reply (`thread_id`)",
-    when: { field: "thread_id", present: true },
+    when: { all: [{ field: "thread_id", present: true }, { field: "block_id", present: false }] },
     forbids: ["block_id", "start", "end", "row", "column"],
+  },
+  {
+    title: "Moving a thread's anchor",
+    when: { all: [{ field: "thread_id", present: true }, { field: "block_id", present: true }] },
+    requires: ["start", "end"],
+    forbids: ["resolved"],
   },
   {
     title: "Opening a thread over a range",
@@ -32,16 +38,16 @@ export const inputSchema = strictInput(
       .string()
       .min(1)
       .optional()
-      .describe("Comment on this existing thread instead of opening a new one."),
-    block_id: z.string().min(1).optional().describe("The block to annotate. New thread only."),
-    start: z.number().int().min(0).optional().describe("Range start, in characters. New thread only."),
-    end: z.number().int().min(0).optional().describe("Range end, exclusive. New thread only."),
-    row: z.number().int().min(0).optional().describe("Table cell row in the zero-based GFM projection, header 0. New thread only."),
-    column: z.number().int().min(0).optional().describe("Table cell column in the zero-based GFM projection. New thread only."),
+      .describe("Reply to or move this existing thread."),
+    block_id: z.string().min(1).optional().describe("Target block for opening or moving an anchor."),
+    start: z.number().int().min(0).optional().describe("Anchor range start, in characters."),
+    end: z.number().int().min(0).optional().describe("Anchor range end, exclusive."),
+    row: z.number().int().min(0).optional().describe("Table cell row in the zero-based GFM projection, header 0."),
+    column: z.number().int().min(0).optional().describe("Table cell column in the zero-based GFM projection."),
     resolved: z
       .boolean()
       .optional()
-      .describe("With thread_id, true resolves the thread and false reopens it."),
+      .describe("Reply only: true resolves the thread; false reopens it."),
     author: z.string().min(1).optional(),
   },
   ANNOTATE_MODES,
@@ -52,7 +58,11 @@ export const annotateOperation = documentOperation({ content: false, contentDura
 
   const who = author ?? replicas.name;
 
-  if (thread_id !== undefined) {
+  if (thread_id !== undefined && getAnnotation(replica.doc, thread_id) === null) {
+    throw new ToolError("thread_not_found", `No annotation thread ${thread_id} in document ${uuid}`, { uuid, threadId: thread_id });
+  }
+
+  if (thread_id !== undefined && block_id === undefined) {
     // Combine nested reply/resolution transactions into one durable append.
     const updated = replica.doc.transact(() => {
       const added = addComment(replica.doc, thread_id, who, text);
@@ -75,25 +85,21 @@ export const annotateOperation = documentOperation({ content: false, contentDura
 
   // ANNOTATE_MODES requires these range fields; TypeScript cannot infer the branch.
   if (getBlock(replica.doc, block_id as string)?.type === "card") {
-    throw new ToolError("annotation_card", "Open new card comment threads in the web editor; MCP supports replies to existing card threads.", { blockId: block_id });
+    throw new ToolError("annotation_card", "Open card anchors on selected text in the web editor; MCP can move an existing thread to prose or a table cell.", { blockId: block_id });
   }
   if (getBlock(replica.doc, block_id as string)?.type === "figma") {
-    throw new ToolError("annotation_figma", "MCP cannot open a new Figma caption thread; it supports replies to existing Figma threads.", { blockId: block_id });
+    throw new ToolError("annotation_figma", "Open Figma caption anchors on selected text in the web editor; MCP can move an existing thread to prose or a table cell.", { blockId: block_id });
   }
   if ((row === undefined) !== (column === undefined)) {
     throw new ToolError("annotation_cell", "Table cell coordinates require both row and column", { blockId: block_id, reason: "missing" });
   }
-  const created = createAnnotation(
-    replica.doc,
-    block_id as string,
-    start as number,
-    end as number,
-    who,
-    text,
-    row === undefined || column === undefined ? undefined : { row, column },
-  );
+  const target = row === undefined || column === undefined ? undefined : { row, column };
+  const updated = thread_id === undefined
+    ? createAnnotation(replica.doc, block_id as string, start as number, end as number, who, text, target)
+    : moveAnnotation(replica.doc, thread_id, block_id as string, start as number, end as number, who, text, target);
+  if (updated === null) throw new ToolError("thread_not_found", `No annotation thread ${thread_id} in document ${uuid}`, { uuid, threadId: thread_id });
   return {
     uuid,
-    annotation: annotationJson(replica, created),
+    annotation: annotationJson(replica, updated),
   };
 });

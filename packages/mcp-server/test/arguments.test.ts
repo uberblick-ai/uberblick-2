@@ -12,8 +12,8 @@
  *   required fields are still refused before the handler runs.
  * - **`create_doc` lifecycle shapes select exactly one branch.** An omitted
  *   kind is ordinary; an explicit kind selects only its matching record shape.
- * - **`annotate` is two shapes, never a mixture.** Opening a thread names a
- *   block and a range; a reply names a thread and may resolve or reopen it.
+ * - **`annotate` has three exclusive shapes.** Opening names a block and range;
+ *   a reply names a thread and may resolve it; moving names both and a range.
  * - **`sidebar_group` is three shapes, and each takes only its own field.** A
  *   `rename` carrying an `index` must be refused before writing.
  *
@@ -250,7 +250,7 @@ describe("create_doc lifecycle arguments", () => {
 });
 
 describe("annotate", () => {
-  it("advertises two shapes and resolves threads only through replies", async () => {
+  it("advertises three shapes and resolves threads only through replies", async () => {
     const rig = await localRig();
     const doc = await seeded(rig);
 
@@ -259,6 +259,11 @@ describe("annotate", () => {
         title: "A reply (`thread_id`)",
         required: ["thread_id"],
         properties: { block_id: false, start: false, end: false, row: false, column: false },
+      },
+      {
+        title: "Moving a thread's anchor",
+        required: ["thread_id", "block_id", "start", "end"],
+        properties: { resolved: false },
       },
       {
         title: "Opening a thread over a range",
@@ -296,8 +301,14 @@ describe("annotate", () => {
     expect(reopened.annotation.comments).toHaveLength(3);
     expect(reopened.annotation.resolved).toBe(false);
 
+    const moved = await rig.ok("annotate", {
+      uuid: doc.uuid, thread_id: threadId, block_id: doc.blockId,
+      start: 4, end: 7, text: "Move to the next word",
+    });
+    expect(moved.annotation.range).toEqual({ start: 4, end: 7, collapsed: false });
+
     const refused = [
-      // A reply cannot carry any range field, even one field on its own.
+      // A move needs the complete range; a plain reply takes no range fields.
       { thread_id: threadId, block_id: doc.blockId },
       { thread_id: threadId, start: 0 },
       { thread_id: threadId, end: 3 },
@@ -309,8 +320,9 @@ describe("annotate", () => {
       { start: 4, end: 7 },
       // Resolution belongs only to a reply.
       { block_id: doc.blockId, start: 4, end: 7, resolved: true },
+      { thread_id: threadId, block_id: doc.blockId, start: 0, end: 3, resolved: true },
       { resolved: true },
-      // Neither shape at all.
+      // No valid shape at all.
       {},
     ];
     for (const args of refused) {
@@ -323,12 +335,12 @@ describe("annotate", () => {
       expect(result.payload.error, JSON.stringify(args)).toBe("schema_validation");
     }
 
-    // The document holds what the three valid calls put there, and nothing else.
+    // The document holds only the valid calls.
     const read = await rig.ok("get_doc", { uuid: doc.uuid });
     expect(read.annotations).toHaveLength(1);
-    expect(read.annotations[0].comments).toHaveLength(3);
+    expect(read.annotations[0].comments).toHaveLength(4);
     expect(read.annotations[0].resolved).toBe(false);
-    expect(read.annotations[0].range).toEqual({ start: 0, end: 3, collapsed: false });
+    expect(read.annotations[0].range).toEqual({ start: 4, end: 7, collapsed: false });
   });
 });
 

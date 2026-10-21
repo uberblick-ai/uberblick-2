@@ -66,10 +66,12 @@ export type { RevInput } from "./rev.js";
 export {
   COMMENT_MARK,
   addComment,
+  annotationAnchors,
   createAnnotation,
   getAnnotation,
   listAnnotationRanges,
   listAnnotations,
+  moveAnnotation,
   resolveAnnotationRange,
   setAnnotationResolved,
 } from "./annotations.js";

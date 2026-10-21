@@ -4,6 +4,7 @@ import { z } from "zod";
 import { strictInput } from "../inputs.js";
 import { listIndentArg, listStyleArg, uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
+import { preservingOpenAnchors } from "./anchor-protection.js";
 
 export const inputSchema = strictInput({
   uuid: uuidArg,
@@ -37,12 +38,12 @@ export const editBlockOperation = documentOperation({ content: true, contentDura
       (rev === undefined || current.rev === rev)) validateCardTargets(new_text, old_text);
   if (current?.type === "figma" && current.text === old_text &&
       (rev === undefined || current.rev === rev)) validateFigmaTargets(new_text, old_text);
-  editBlock(replica.doc, block_id, old_text, new_text, {
+  preservingOpenAnchors(replica.doc, block_id, draft => editBlock(draft, block_id, old_text, new_text, {
     ...(rev === undefined ? {} : { rev }),
     ...(list === undefined ? {} : { list }),
     ...(indent === undefined ? {} : { indent: indent as ListIndent }),
     ...(table_mapping === undefined ? {} : { tableMapping: table_mapping }),
-  });
+  }));
   replicas.publishCursor(replica, block_id, new_text.length);
   return {
     uuid,

@@ -5,6 +5,7 @@ import {
   BlockNotFoundError,
   COMMENT_MARK,
   addComment,
+  annotationAnchors,
   appendBlock,
   createAnnotation,
   deleteBlock,
@@ -13,10 +14,16 @@ import {
   getAnnotation,
   getBlock,
   getBlocksFragment,
+  findBlockElement,
+  cardPartTexts,
+  figmaCaptionTexts,
   initDoc,
   listAnnotationRanges,
   listAnnotations,
+  moveAnnotation,
   resolveAnnotationRange,
+  tableCellTexts,
+  tableRows,
   setAnnotationResolved,
 } from "../src/index.js";
 import { replicaPair, syncDocs } from "./helpers.js";
@@ -67,6 +74,87 @@ function deltaOf(doc: Y.Doc, blockId: string): Array<[string, unknown]> {
 }
 
 describe("annotations", () => {
+  it("moves all copies of an anchor with one reply while preserving the thread's metadata", () => {
+    const { doc, blockId, threadId } = annotated();
+    addComment(doc, threadId, "owner", "Earlier reply");
+    setAnnotationResolved(doc, threadId, true);
+    const previous = getAnnotation(doc, threadId)!;
+    const target = appendBlock(doc, { type: "paragraph", text: "New anchor" });
+    const table = appendBlock(doc, { type: "table", text: "| H |\n| --- |\n| Cell |" });
+    const card = appendBlock(doc, { type: "card", text: "title: Card\n\nBody" });
+    const figma = appendBlock(doc, { type: "figma", text: "url: https://www.figma.com/design/Abc123/File\n\nCaption" });
+    const tableElement = findBlockElement(doc, table)!;
+    const cardElement = findBlockElement(doc, card)!;
+    const figmaElement = findBlockElement(doc, figma)!;
+    for (const text of [
+      tableCellTexts(tableRows(tableElement)[1]![0]!)[0]!,
+      ...cardPartTexts(cardElement, "body"),
+      ...figmaCaptionTexts(figmaElement),
+    ]) text.format(0, text.length, { [COMMENT_MARK]: { threadId } });
+    const shadow = findBlockElement(doc, blockId)!.clone();
+    getBlocksFragment(doc).insert(getBlocksFragment(doc).length, [shadow]);
+    const before = annotationAnchors(doc);
+    expect(before.get(threadId)).toBe("brave … Cell … Body … Caption");
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+
+    const moved = moveAnnotation(doc, threadId, target, 0, 3, "agent", "Moved context");
+
+    expect(updates).toBe(1);
+    expect(moved).toMatchObject({ id: threadId, blockId: target, resolved: true });
+    expect(moved?.comments.slice(0, -1)).toEqual(previous.comments);
+    expect(moved?.comments.at(-1)).toMatchObject({ author: "agent", text: "Moved context" });
+    expect(resolveAnnotationRange(doc, threadId)).toEqual({ start: 0, end: 3, collapsed: false });
+    expect(annotationAnchors(doc)).toEqual(new Map([[threadId, "New"]]));
+    expect((shadow.firstChild as Y.XmlText).toDelta()).toEqual([{ insert: SENTENCE }]);
+    for (const id of [blockId, table, card, figma]) expect(listAnnotationRanges(doc, id)).toEqual([]);
+  });
+
+  it("moves onto its own current anchor and restores an orphaned thread", () => {
+    const { doc, blockId, threadId } = annotated();
+    moveAnnotation(doc, threadId, blockId, 4, 13, "agent", "Wider context");
+    expect(resolveAnnotationRange(doc, threadId)).toEqual({ start: 4, end: 13, collapsed: false });
+    deleteBlock(doc, blockId);
+    const target = appendBlock(doc, { type: "paragraph", text: "Restored context" });
+    moveAnnotation(doc, threadId, target, 8, 16, "agent", "Found context");
+    expect(getAnnotation(doc, threadId)?.blockId).toBe(target);
+    expect(annotationAnchors(doc).get(threadId)).toBe(" context");
+  });
+
+  it("validates a move before changing any anchor or reply", () => {
+    const { doc, blockId, threadId } = annotated();
+    createAnnotation(doc, blockId, 12, 17, "other", "Other thread");
+    const empty = appendBlock(doc, { type: "paragraph", text: "" });
+    findBlockElement(doc, empty)!.delete(0, 1);
+    const state = Y.encodeStateAsUpdate(doc);
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    expect(() => moveAnnotation(doc, threadId, blockId, 12, 14, "a", "Overlap")).toThrow(AnnotationRangeError);
+    expect(() => moveAnnotation(doc, threadId, blockId, 2, 2, "a", "Empty")).toThrow(AnnotationRangeError);
+    expect(() => moveAnnotation(doc, threadId, empty, 0, 3, "a", "Missing text")).toThrow(AnnotationRangeError);
+    expect(() => moveAnnotation(doc, threadId, "unknown", 0, 1, "a", "Missing")).toThrow(BlockNotFoundError);
+    expect(moveAnnotation(doc, "unknown", blockId, 0, 1, "a", "Missing thread")).toBeNull();
+    expect(updates).toBe(0);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(state);
+  });
+
+  it("ignores shadowed and unidentified block marks when reading document-wide anchors", () => {
+    const { doc, blockId, threadId } = annotated();
+    const shadow = findBlockElement(doc, blockId)!.clone();
+    const unidentified = shadow.clone();
+    unidentified.removeAttribute("id");
+    getBlocksFragment(doc).insert(getBlocksFragment(doc).length, [shadow, unidentified]);
+    expect(annotationAnchors(doc)).toEqual(new Map([[threadId, "brave"]]));
+    (findBlockElement(doc, blockId)!.firstChild as Y.XmlText).format(6, 5, { [COMMENT_MARK]: null });
+    expect(annotationAnchors(doc).has(threadId)).toBe(false);
+  });
+
+  it("keeps anchor excerpts aligned when foreign embeds precede the marked text", () => {
+    const { doc, blockId, threadId } = annotated();
+    (findBlockElement(doc, blockId)!.firstChild as Y.XmlText).insertEmbed(0, { foreign: true });
+    expect(annotationAnchors(doc).get(threadId)).toBe("brave");
+  });
+
   it("anchors the range as a comment mark on the block's text", () => {
     const { doc, blockId, threadId } = annotated();
 

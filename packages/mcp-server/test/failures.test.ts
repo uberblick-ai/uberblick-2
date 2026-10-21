@@ -127,6 +127,7 @@ const EXPECTED: Record<
     detail: ["blockId", "currentText", "currentRev", "retry"],
   },
   block_not_found: { recoveryClass: "reread", detail: ["blockId"] },
+  open_thread_anchored: { recoveryClass: "manual", detail: ["blockId", "threads"] },
   annotation_range: {
     recoveryClass: "reread",
     detail: ["reason", "blockId", "conflictingThreadId"],
@@ -335,6 +336,9 @@ describe("the failure contract", () => {
       end: 3,
       text: "the first thread",
     });
+    record((await rig.call("delete_block", {
+      uuid: doc.uuid, block_id: doc.blockId,
+    })).payload);
     record(
       (
         await rig.call("annotate", {
