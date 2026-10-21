@@ -509,7 +509,7 @@ test("the open document's last-updated reading follows its stub through status a
     await expect(hubProblem).toBeVisible();
     await expect(page.locator(".ub-directory-status")).toHaveCount(0);
     await page.locator(".ub-sync-toggle").click();
-    const panel = page.getByRole("dialog", { name: "Sync and presence" });
+    const panel = page.getByRole("dialog", { name: "Sync details" });
     const fact = (label: string) =>
       panel.getByText(label, { exact: true }).locator("..").locator("dd");
     await expect(fact("Hub")).toHaveText(harness().hubUrl);
@@ -550,7 +550,7 @@ test("the workspace hub dot clears when the local server can no longer report up
     await expect(page.locator(".ub-directory-status")).toHaveCount(0);
     await expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", "Sync details");
     await page.locator(".ub-sync-toggle").click();
-    const panel = page.getByRole("dialog", { name: "Sync and presence" });
+    const panel = page.getByRole("dialog", { name: "Sync details" });
     await expect(panel.getByText("State", { exact: true }).locator("..").locator("dd")).toHaveText("offline");
     await expect(panel.getByText("Hub state", { exact: true })).toHaveCount(0);
   } finally {

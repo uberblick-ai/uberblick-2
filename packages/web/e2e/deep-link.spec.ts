@@ -382,7 +382,7 @@ test("the served configuration names the workspaces, and the build's define is o
   // route, because that is where the status surfaces are.
   await createDoc(page, docTitle("served"), { pin: true });
   await page.locator(".ub-sync-toggle").click();
-  const source = page.getByRole("dialog", { name: "Sync and presence" })
+  const source = page.getByRole("dialog", { name: "Sync details" })
     .locator('.ub-sync-fact:has(dt:text-is("Source")) dd');
   // "served …", not either of the two "… not used" answers: falling back to
   // the compiled value while still reading *synced* is the failure being guarded.
@@ -390,7 +390,7 @@ test("the served configuration names the workspaces, and the build's define is o
   // `test/sync-panel.test.tsx` — matched loosely here so this test says only
   // what it is for.
   await expect(source).toHaveText(/^served\b/);
-  await expect(page.getByRole("dialog", { name: "Sync and presence" })
+  await expect(page.getByRole("dialog", { name: "Sync details" })
     .locator('.ub-sync-fact:has(dt:text-is("Hub")) dd')).toHaveText(new URL("/ws", appUrl).href.replace("http:", "ws:"));
   await expect(page.locator(".ub-sync-toggle")).toHaveAccessibleName(/^(Sync details|Synced with hub .+)$/);
   await page.keyboard.press("Escape");

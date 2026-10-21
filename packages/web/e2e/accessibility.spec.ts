@@ -87,7 +87,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.getByRole("button", { name: "Cancel", exact: true }).click();
 
       await page.locator(".ub-status .ub-sync-toggle").click();
-      await expect(page.getByRole("dialog", { name: "Sync and presence" })).toBeVisible();
+      await expect(page.getByRole("dialog", { name: "Sync details" })).toBeVisible();
       await scan("Sync details");
       await page.keyboard.press("Escape");
       await page.getByRole("button", { name: "Document actions" }).click();

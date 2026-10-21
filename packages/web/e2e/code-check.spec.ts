@@ -12,7 +12,11 @@ let agent: McpAgent | null = null;
 const repository = "example/product";
 const otherRepository = "example/worker";
 const commitSha = "a".repeat(40);
-const paths = ["packages/web/src/ui/document/EditorPane.tsx", "packages/web/src/ui/status/SyncPanel.tsx", "packages/web/src/ui/hooks.ts"];
+const paths = [
+  "packages/web/src/ui/document/comparison/deeply/nested/EditorPane.tsx",
+  "packages/web/src/ui/status/SyncPanel.tsx",
+  `packages/web/src/ui/${"long-filename-".repeat(7)}component.tsx`,
+];
 
 test.beforeAll(() => {
   agent = new McpAgent({
@@ -33,7 +37,7 @@ async function openDetails(page: Page, touch: boolean): Promise<Locator> {
   const trigger = page.locator(".ub-status-sync");
   if (touch) await trigger.tap();
   else { await trigger.focus(); await trigger.press("Space"); }
-  const panel = page.getByRole("dialog", { name: "Sync and presence", exact: true });
+  const panel = page.getByRole("dialog", { name: "Sync details", exact: true });
   await expect(panel).toBeVisible();
   return panel;
 }
@@ -62,6 +66,42 @@ async function expectNoteContained(page: Page): Promise<void> {
   expect(layout).toEqual([]);
 }
 
+async function expectPathsContained(group: Locator, expected: readonly string[]): Promise<void> {
+  const rows = fact(group, "Looked at").locator(".ub-code-check-path");
+  await expect(rows).toHaveCount(expected.length);
+  for (const [index, fullPath] of expected.entries()) {
+    const row = rows.nth(index);
+    const text = row.locator(".ub-code-check-path-text");
+    await expect(row.locator(".sr-only")).toHaveText(fullPath);
+    const shown = await text.innerText();
+    if (shown !== fullPath) {
+      expect(shown).toMatch(/^…\//);
+      const basename = fullPath.slice(fullPath.lastIndexOf("/") + 1);
+      if (shown.endsWith("…")) {
+        expect(shown).toMatch(/^…\/[^/]+…$/);
+        expect(basename.startsWith(shown.slice(2, -1))).toBe(true);
+      } else {
+        expect(fullPath.endsWith(`/${shown.slice(2)}`)).toBe(true);
+        expect(shown.endsWith(basename)).toBe(true);
+      }
+    }
+    expect(await text.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const row = element.closest(".ub-code-check-path");
+      if (row === null) throw new Error("path text has no row");
+      const box = row.getBoundingClientRect();
+      const panel = element.closest('[role="dialog"]')?.getBoundingClientRect();
+      const lines = [...range.getClientRects()];
+      return {
+        singleLine: lines.every((line) => Math.abs(line.top - (lines[0]?.top ?? line.top)) < 1),
+        fits: row.scrollWidth <= row.clientWidth + 1 && lines.every((line) => line.right <= box.right + 1),
+        contained: panel !== undefined && box.left >= panel.left && box.right <= panel.right,
+      };
+    })).toEqual({ singleLine: true, fits: true, contained: true });
+  }
+}
+
 for (const scheme of ["light", "dark"] as const) {
   test(`code comparisons show checked text, usable details and AA warnings — ${scheme} @webkit`, async ({
     browser, contextOptions, viewport, hasTouch, isMobile, deviceScaleFactor, userAgent,
@@ -86,6 +126,7 @@ for (const scheme of ["light", "dark"] as const) {
         ...(deviceScaleFactor === undefined ? {} : { deviceScaleFactor }),
         ...(userAgent === undefined ? {} : { userAgent }),
       },
+      beforeNavigate: async (loading) => { await loading.clock.install(); },
       readySelector: ".ub-editor",
     });
     const revision = page.locator(".ub-doc-rev");
@@ -108,10 +149,20 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(time).toHaveText(/^(just now|\d+ minutes? ago)$/);
     await expect(fact(product, "Result")).toHaveText("Matches the code");
     await expect(fact(worker, "Result")).toHaveText("Ahead of the code (intended)");
-    await expect(fact(product, "Page text")).toHaveText("Unchanged since then");
-    await expect(fact(product, "Looked at")).toHaveText(`${paths[0]} +2 more`);
+    await expect(fact(product, "Page edited since")).toHaveText("No");
+    await expect(fact(product, "Looked at").locator(".ub-code-check-path")).toHaveCount(1);
+    await expectPathsContained(product, paths.slice(0, 1));
+    const expand = fact(product, "Looked at").getByRole("button", { name: "+2 more", exact: true });
+    await expand.focus();
+    await expand.press("Space");
+    await expect(expand).toHaveCount(0);
+    await expect(panel).toBeVisible();
+    expect(await panel.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+    await expectPathsContained(product, paths);
     await expect(fact(worker, "Looked at")).toHaveCount(0);
     await expect(page.locator(".ub-code-check-note")).toHaveCount(0);
+    await commit.focus();
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
     await page.keyboard.press("Escape");
 
     await placeCaret(page);
@@ -119,9 +170,11 @@ for (const scheme of ["light", "dark"] as const) {
     await page.locator(".ub-title").focus();
     await expect(editor(page)).toContainText("An immediate edit.");
     const note = page.locator(".ub-code-check-note");
-    await expect(note).toHaveText("Edited since code check");
+    await expect(note).toHaveCount(0);
     panel = await openDetails(page, hasTouch);
-    await expect(fact(product, "Page text")).toHaveText("Edited since then");
+    await expect(fact(product, "Page edited since")).toHaveText("Yes");
+    await expect(fact(product, "Looked at").getByRole("button", { name: "+2 more", exact: true })).toBeVisible();
+    await expect(fact(product, "Looked at").locator(".ub-code-check-path")).toHaveCount(1);
     await page.keyboard.press("Escape");
 
     let currentRev = "";
@@ -133,8 +186,8 @@ for (const scheme of ["light", "dark"] as const) {
     await writer.call("set_metadata", { uuid: created.uuid, code_check: { ...primary, rev: currentRev } });
     await writer.call("set_metadata", { uuid: created.uuid, code_check: { ...secondary, rev: currentRev } });
     panel = await openDetails(page, hasTouch);
-    await expect(fact(product, "Page text")).toHaveText("Unchanged since then");
-    await expect(fact(worker, "Page text")).toHaveText("Unchanged since then");
+    await expect(fact(product, "Page edited since")).toHaveText("No");
+    await expect(fact(worker, "Page edited since")).toHaveText("No");
     await expect(note).toHaveCount(0);
     await expect(revision).toHaveAttribute("aria-label", `Copy revision ${currentRev}`);
     await page.keyboard.press("Escape");
@@ -150,6 +203,24 @@ for (const scheme of ["light", "dark"] as const) {
       for (const reading of noteInk) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
       panel = await openDetails(page, hasTouch);
       await expect(fact(product, "Result")).toHaveText("Differs from the code");
+      const more = fact(product, "Looked at").getByRole("button", { name: "+2 more", exact: true });
+      if (hasTouch) await more.tap();
+      else await more.click();
+      await expect(more).toHaveCount(0);
+      await expectPathsContained(product, paths);
+      const shortened = fact(product, "Looked at").locator(".ub-code-check-path").first();
+      await expect(shortened.locator(".ub-code-check-path-text")).toHaveText(/^…\/.*EditorPane\.tsx$/);
+      await shortened.focus();
+      await expect(page.getByRole("tooltip")).toHaveText(paths[0] ?? "missing path");
+      await commit.focus();
+      if (!hasTouch) {
+        await shortened.hover();
+        await expect(page.getByRole("tooltip")).toHaveText(paths[0] ?? "missing path");
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("tooltip")).toHaveCount(0);
+        await page.mouse.move(0, 0);
+      }
+      await expect(fact(product, "Looked at").locator(".ub-code-check-path-text").last()).toHaveText(/^…\/[^/]+…$/);
       const box = await panel.boundingBox();
       expect(box).not.toBeNull();
       expect(box?.x).toBeGreaterThanOrEqual(0);
@@ -160,8 +231,54 @@ for (const scheme of ["light", "dark"] as const) {
       const path = info.outputPath(`code-check-${width}.png`);
       await page.screenshot({ path });
       await info.attach(`code comparisons at ${width}px`, { path, contentType: "image/png" });
+      await commit.focus();
+      await expect(page.getByRole("tooltip")).toHaveCount(0);
       await page.keyboard.press("Escape");
+      await expect(panel).toHaveCount(0);
       await expect(page.locator(".ub-status-sync")).toBeFocused();
     }
+
+    const trigger = page.locator(".ub-status-sync");
+    const mark = trigger.locator(".ub-sync-code-mark");
+    await expect(mark).toHaveCount(0);
+    const recentWidth = await trigger.evaluate((element) => element.getBoundingClientRect().width);
+    const dotState = await trigger.locator(".ub-sync-dot").getAttribute("data-state");
+    const current = await writer.call<{ code_check: { checked_at: string }[] }>("get_doc", { uuid: created.uuid });
+    const oldest = Math.min(...current.code_check.map((check) => Date.parse(check.checked_at)));
+    const day = 24 * 60 * 60 * 1_000;
+    await page.clock.pauseAt(new Date(Date.now() + 1_000));
+    await page.clock.setSystemTime(oldest + 14 * day - 60_000);
+    await page.clock.fastForward(60_000);
+    await expect(mark).toHaveCount(0);
+    expect(await trigger.evaluate((element) => element.getBoundingClientRect().width)).toBe(recentWidth);
+    await page.clock.fastForward(60_000);
+    await expect(mark).toHaveText("</>");
+    await expect(trigger).toHaveAttribute("aria-label", / · code check 14 days old$/);
+    await expect(trigger.locator(".ub-sync-dot")).toHaveAttribute("data-state", dotState ?? "missing state");
+    await page.clock.setSystemTime(oldest + 20.5 * day);
+    await page.clock.fastForward(60_000);
+    await expect(trigger).toHaveAttribute("aria-label", / · code check 20 days old$/);
+    await expect(trigger).toHaveAttribute("title", / · code check 20 days old$/);
+    await trigger.blur();
+    await trigger.focus();
+    await page.clock.runFor(1_000);
+    await expect(page.getByRole("tooltip")).toHaveText(/ · code check 20 days old$/);
+    expect(await mark.evaluate((element) => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--muted-foreground)";
+      element.append(probe);
+      const muted = getComputedStyle(probe).color;
+      probe.remove();
+      return getComputedStyle(element).color === muted;
+    })).toBe(true);
+    if (hasTouch) {
+      const target = await trigger.boundingBox();
+      expect(target?.height).toBeGreaterThanOrEqual(44);
+      expect(target?.width).toBeGreaterThanOrEqual(44);
+    }
+    panel = await openDetails(page, hasTouch);
+    await expect(fact(product, "Compared")).toHaveText(/ · due for a re-check$/);
+    await expect(fact(worker, "Compared")).toHaveText(/ · due for a re-check$/);
+    await page.keyboard.press("Escape");
   });
 }
