@@ -161,8 +161,8 @@ describe("hub status", () => {
   function mount(hubAcked: boolean | null | undefined, patch: Partial<RoomStatus> = {}, reason: NotSharedReason | null = null, endpoint = "wss://hub.example/ws") {
     const current = fixture(patch);
     const tree = (ack: boolean | null | undefined) => <Popover><StatusLine connection={current.connection}
-      presence={[]} endpoint={{ url: endpoint, source: "document" }} hubAcked={ack}
-      notSharedReason={reason} lastUpdated={Date.now()} syncDetails /></Popover>;
+      presence={[]} syncReading={{ endpoint: { url: endpoint, source: "document" }, hubAcked: ack,
+        notSharedReason: reason, syncDetails: true }} lastUpdated={Date.now()} /></Popover>;
     const view = render(tree(hubAcked));
     settle();
     return { ...view, current, ack(value: boolean | null) { view.rerender(tree(value)); } };

@@ -70,7 +70,7 @@ it.each(["regular", "decision", "archived"] as const)("normalizes a %s page afte
   } as unknown as RoomConnection;
   onTestCleanup(() => ydoc.destroy());
   const { container } = render(<EditorPane connection={connection} segment={WORKSPACE} presence={[]}
-    author="Reader" archived={kind === "archived"} docLinks={null} onRestore={null} onSelectThread={() => {}} />);
+    author="Reader" archived={kind === "archived"} docLinks={null} actions={{ onRestore: null }} onSelectThread={() => {}} />);
   expect(getBlocksFragment(ydoc).length).toBe(2);
   act(() => {
     Object.assign(connection.status, LIVE);

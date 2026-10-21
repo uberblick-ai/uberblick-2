@@ -979,7 +979,8 @@ test("document actions stay reachable, close with the route, and archive into Re
   }
   await expect(page.locator(".ub-doc-meta")).not.toContainText(/uuid |rev /);
   await expect(page.locator(".ub-doc-meta")).not.toContainText("Copy link");
-  const layout = await page.evaluate(() => {
+  // Resizing animates the sidebar and document widths before they settle.
+  await expect.poll(() => page.evaluate(() => {
       const body = document.querySelector<HTMLElement>(".ub-body");
       const pane = document.querySelector<HTMLElement>(".ub-pane");
       if (body === null || pane === null) throw new Error("e2e: no document pane");
@@ -988,11 +989,7 @@ test("document actions stay reachable, close with the route, and archive into Re
         body: [body.clientWidth, body.scrollWidth],
         pane: [pane.clientWidth, pane.scrollWidth],
       };
-    });
-  for (const [client, scroll] of [layout.body, layout.pane]) {
-    expect(client).toBe(layout.viewport);
-    expect(scroll).toBeLessThanOrEqual(client ?? 0);
-  }
+    })).toEqual({ viewport: 810, body: [810, 810], pane: [810, 810] });
 
   await copyLink.click();
   await expect(copyNotice(page, "Link copied")).toBeVisible();

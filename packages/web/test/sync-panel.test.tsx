@@ -16,13 +16,12 @@
 import { act, render, type RenderResult } from "./react-render.js";
 import { within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useCallback, useState } from "react";
 import type { ReactElement } from "react";
 import * as Y from "yjs";
 import { Awareness, removeAwarenessStates } from "y-protocols/awareness";
-import { appendBlock, docRev, getBlocksFragment, initDoc, insertBlock, setCodeCheck, setKind } from "@uberblick/schema";
+import { appendBlock, docRev, getBlocksFragment, getMeta, initDoc, insertBlock, resolveDecisionTopics, setCodeCheck, setKind, upsertDirectoryEntry } from "@uberblick/schema";
 import { SyncPanel } from "../src/ui/status/SyncPanel.js";
-import { StatusLine } from "../src/ui/document/EditorPane.js";
+import { documentPaneState, RoutePane } from "../src/ui/App.js";
 import { usePresence } from "../src/ui/hooks.js";
 import type { HubEndpoint } from "../src/config.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
@@ -33,6 +32,7 @@ import { AUTH_REJECTED } from "@uberblick/schema/protocol";
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const DOC_UUID = "9f3c1a2b-0000-4000-8000-0123456789ab";
 const ROOM = `${WORKSPACE}/${DOC_UUID}`;
+const selectThread = (): void => {};
 
 /** The endpoint the shell resolved — never a hardcoded address in the panel. */
 const ENDPOINT: HubEndpoint = { url: "ws://hub.example:1234", source: "document" };
@@ -208,37 +208,43 @@ function presentNow(host: HTMLElement): string[] {
   );
 }
 
-/** The room-paired stamp output the shell connects to the details panel. */
+/** Both surfaces receive the selected document's stamp once its pane is hydrated. */
 function TimestampSurfaces({
   connection,
   stamp,
   open,
+  pane = {},
 }: {
   connection: RoomConnection;
   stamp: number | undefined;
   open: boolean;
+  pane?: Partial<Parameters<typeof documentPaneState>[0]>;
 }): ReactElement {
-  const [shown, setShown] = useState<{
-    room: string;
-    value: number | undefined;
-  } | null>(null);
-  const report = useCallback((room: string, value: number | undefined) => {
-    setShown({ room, value });
-  }, []);
+  const paneProps: Parameters<typeof documentPaneState>[0] = {
+    connection,
+    route: { kind: "doc", workspace: { uuid: WORKSPACE, segment: WORKSPACE }, uuid: DOC_UUID },
+    meta: getMeta(connection.ydoc),
+    ...pane,
+  };
+  const lastUpdated = documentPaneState(paneProps, paneProps.connection?.status.hasAnswered ?? false) === "shown" &&
+    !paneProps.connection?.status.deleted ? stamp : undefined;
   return (
     <>
-      <StatusLine
-        connection={connection}
+      <RoutePane
+        {...paneProps}
         presence={[]}
-        lastUpdated={stamp}
-        onLastUpdatedChange={report}
+        author="Reader"
+        archived={false}
+        updatedAt={stamp}
+        docLinks={null}
+        onSelectThread={selectThread}
       />
       {open && (
         <SyncPanel
-          connection={connection}
+          connection={paneProps.connection}
           presence={[]}
           endpoint={ENDPOINT}
-          lastUpdated={shown?.room === connection.room ? shown.value : undefined}
+          lastUpdated={lastUpdated}
         />
       )}
     </>
@@ -335,7 +341,7 @@ describe("the sync panel renders the state this client holds", () => {
     }
   });
 
-  it("mirrors the shown age immediately on panel open and clears it on room change", () => {
+  it("mirrors the shown stamp immediately on panel open and document change", () => {
     vi.useFakeTimers();
 
     const first = fixture();
@@ -345,6 +351,7 @@ describe("the sync panel renders the state this client holds", () => {
       room: `${WORKSPACE}/another-document`,
     };
     const stamp = Date.now() - 20 * 60_000;
+    const secondStamp = stamp - 60_000;
     const tree = (
       connection: RoomConnection,
       open: boolean,
@@ -373,12 +380,75 @@ describe("the sync panel renders the state this client holds", () => {
     expect(facts(host)["Last updated"]).toBe(
       within(within(host).getByText(/Edited/)).getByRole("time").getAttribute("title"),
     );
-    draw(second.connection, true);
+    // useRoom withholds the previous connection while the new address opens.
+    view.rerender(<TimestampSurfaces connection={second.connection} stamp={secondStamp} open pane={{ connection: null }} />);
+    expect(within(host).queryByText(/Edited/)).toBeNull();
+    expect(facts(host)["Last updated"]).toBeUndefined();
+    draw(second.connection, true, secondStamp);
     expect(within(host).queryByText(/Edited/)).not.toBeNull();
-    expect(facts(host)["Last updated"]).toBeDefined();
+    expect(facts(host)["Last updated"]).toBe(
+      within(within(host).getByText(/Edited/)).getByRole("time").getAttribute("title"),
+    );
+    expect(facts(host)["Last updated"]).not.toBe(new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium", timeStyle: "short",
+    }).format(stamp));
     draw(second.connection, true, Number.NaN);
     expect(within(host).queryByText(/Edited/)).toBeNull();
     expect(facts(host)["Last updated"]).toBeUndefined();
+  });
+
+  it("omits both stamps while waiting and derives them when the document is shown", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    const stamp = Date.now() - 20 * 60_000;
+    const tree = (waiting: boolean, value: number | undefined) => (
+      <TimestampSurfaces connection={fix.connection} stamp={value} open
+        pane={waiting ? { meta: { ...getMeta(fix.ydoc), uuid: "" } } : {}} />
+    );
+    const view = render(tree(true, stamp));
+    const host = view.container;
+    expect(within(host).getByText("Waiting for sync.")).not.toBeNull();
+    expect(within(host).queryByText(/Edited/)).toBeNull();
+    expect(facts(host)["Last updated"]).toBeUndefined();
+    view.rerender(tree(false, stamp));
+    expect(facts(host)["Last updated"]).toBe(
+      within(within(host).getByText(/Edited/)).getByRole("time").getAttribute("title"),
+    );
+    for (const value of [undefined, Number.NaN, Infinity, Number.MAX_VALUE]) {
+      view.rerender(tree(false, value));
+      expect(within(host).queryByText(/Edited/)).toBeNull();
+      expect(facts(host)["Last updated"]).toBeUndefined();
+    }
+  });
+
+  it("withholds both stamps until the requested document and its decision context are shown", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    const meta = getMeta(fix.ydoc);
+    const decisionMeta = { ...meta, kind: "decision" as const };
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, { uuid: DOC_UUID, title: meta.title, kind: "decision" });
+    const topic = resolveDecisionTopics(directory)[0]!;
+    const route = { kind: "decision" as const, workspace: { uuid: WORKSPACE, segment: WORKSPACE }, topic: DOC_UUID, record: DOC_UUID };
+    const absent: Array<Partial<Parameters<typeof documentPaneState>[0]>> = [
+      { connection: null },
+      { meta: null },
+      { meta: { ...meta, uuid: "another-document" } },
+      { meta: decisionMeta, navigate: () => {} },
+      { meta: decisionMeta, navigate: () => {}, topic: { ...topic, first: null } },
+      { route, meta: decisionMeta, topic: null, selectedUuid: DOC_UUID },
+      { route, meta: decisionMeta, topic, selectedUuid: null },
+      { connection: fixture({ deleted: true }).connection },
+    ];
+    const tree = (pane: Partial<Parameters<typeof documentPaneState>[0]>) => (
+      <TimestampSurfaces connection={fix.connection} stamp={Date.now()} open pane={pane} />
+    );
+    const view = render(tree(absent[0]!));
+    for (const pane of absent) {
+      view.rerender(tree(pane));
+      expect(within(view.container).queryByText(/Edited/)).toBeNull();
+      expect(facts(view.container)["Last updated"]).toBeUndefined();
+    }
   });
 
   it("makes no room-status claim while the requested connection is absent", () => {

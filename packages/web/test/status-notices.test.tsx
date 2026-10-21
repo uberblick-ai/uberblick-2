@@ -61,8 +61,8 @@ interface LineProps {
   documentLayout?: boolean;
 }
 
-function line(props: LineProps) {
-  return <StatusLine presence={[]} {...props} />;
+function line({ hubAcked, notSharedReason, ...props }: LineProps) {
+  return <StatusLine presence={[]} syncReading={{ hubAcked, notSharedReason: notSharedReason ?? null }} {...props} />;
 }
 
 function settle(milliseconds = 5_000): void {

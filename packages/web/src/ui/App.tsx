@@ -56,12 +56,13 @@ import { randomIdentity } from "../collab/identity.js";
 import { createDocLinkContext } from "../editor/doc-links.js";
 import type { DocLinkContext } from "../editor/doc-links.js";
 import type { RoomConnection } from "../collab/rooms.js";
-import type { NotSharedReason } from "../shell/document-search.js";
 import type { RemotePresence } from "./status/doc-chrome.js";
 import { CopyLink } from "./document/DocChrome.js";
+import type { DocumentActionProps } from "./document/DocChrome.js";
 import { Sidebar, togglePin } from "./sidebar/Sidebar.js";
 import { SidebarProvider, SIDEBAR_TOGGLE_CLASSES } from "./shadcn/sidebar.js";
 import { EditorPane, PaneNotice, StatusLine } from "./document/EditorPane.js";
+import type { DocumentSyncReading } from "./document/EditorPane.js";
 import { DecisionTopicPane } from "./document/DecisionTopicPane.js";
 import { AlterDecisionDialog } from "./document/AlterDecisionDialog.js";
 import type { AlterDecisionSession, RecordedDecision } from "./document/AlterDecisionDialog.js";
@@ -193,6 +194,20 @@ export function ReboundNotice({
   );
 }
 
+/** Share header eligibility with the separately mounted Sync details panel. */
+export function documentPaneState({
+  route, connection, meta, topic = null, selectedUuid, navigate,
+}: Pick<ComponentProps<typeof RoutePane>, "route" | "connection" | "meta" | "topic" | "selectedUuid" | "navigate">, hasAnswered: boolean):
+  "silent" | "waiting-record" | "waiting-document" | "waiting-topic" | "shown" {
+  if (route.kind !== "doc" && route.kind !== "decision") return "silent";
+  if (route.kind === "decision" && (topic === null || selectedUuid === null)) return "waiting-record";
+  if (connection === null || !replicaHasAnswered(meta, hasAnswered)) return "silent";
+  const uuid = selectedUuid ?? (route.kind === "doc" ? route.uuid : route.record);
+  if (!docIsHydrated(uuid, meta)) return "waiting-document";
+  if (meta?.kind === "decision" && (topic === null || topic.first === null) && navigate !== undefined) return "waiting-topic";
+  return "shown";
+}
+
 /**
  * A well-formed unseen document remains a document route and resolves when
  * its room arrives; non-document routes render their own states.
@@ -202,33 +217,18 @@ export function RoutePane({
   configured = true,
   connection,
   presence,
-  endpoint = null,
-  hubAcked,
-  rawHubAcked,
-  sampledAt,
-  notSharedReason = null,
+  syncReading = {},
   meta,
   author,
   catalogConnection = null,
   archived,
   updatedAt,
-  onLastUpdatedChange,
   docLinks,
-  pinned = false,
-  onTogglePin = null,
-  onArchive = null,
-  onArchiveRecord = null,
-  showArchiveRecord = false,
-  archiveRecordUnavailable = null,
-  onArchiveConfirmationFocusChange,
-  focusRestore = false,
-  onRestoreFocused,
-  onRestore,
+  actions = {},
   onSelectThread,
   threads = [],
   threadsOpen = false,
   onToggleThreads,
-  syncDetails = false,
   topic = null,
   selectedUuid,
   navigate,
@@ -253,13 +253,7 @@ export function RoutePane({
    * surface.
    */
   presence: readonly RemotePresence[];
-  /** The hub the document-local sync reading describes. */
-  endpoint?: HubEndpoint | null;
-  /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
-  hubAcked?: boolean | null | undefined;
-  rawHubAcked?: boolean | null | undefined;
-  sampledAt?: number | null | undefined;
-  notSharedReason?: NotSharedReason | null;
+  syncReading?: DocumentSyncReading;
   /**
    * Null metadata means unread. Empty metadata earns the waiting screen only
    * after replicaHasAnswered confirms a room answer.
@@ -272,36 +266,17 @@ export function RoutePane({
   archived: boolean;
   /** The selected directory stub's edit-freshness hint, when it has one. */
   updatedAt?: number | undefined;
-  onLastUpdatedChange?:
-    | ((room: string, value: number | undefined) => void)
-    | undefined;
   /** What an inline document reference resolves against — see {@link EditorPane}. */
   docLinks: DocLinkContext | null;
-  /** Sidebar curation and lifecycle actions for the live document. */
-  pinned?: boolean;
-  onTogglePin?: (() => void) | null;
-  onArchive?: (() => void) | null;
-  onArchiveRecord?: (() => void) | null;
-  showArchiveRecord?: boolean;
-  archiveRecordUnavailable?: string | null;
-  /** Track focus that should survive a remote archive closing its confirmation. */
-  onArchiveConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
-  /** A local confirmed archive moves focus to the surviving Restore action. */
-  focusRestore?: boolean;
-  /** Consume that one-shot focus request after the Restore control receives it. */
-  onRestoreFocused?: (() => void) | undefined;
-  /** Lift that tombstone. The only action an archived document offers. */
-  onRestore: (() => void) | null;
+  actions?: DocumentActionProps;
   onSelectThread: SelectThread;
   /** The open document's conversations, for the narrow pane-edge trigger. */
   threads?: readonly ThreadView[];
   threadsOpen?: boolean;
   onToggleThreads?: (() => void) | undefined;
-  /** The document-local sync reading opens the existing details panel. */
-  syncDetails?: boolean;
   topic?: DecisionTopicResolution | null;
   selectedUuid?: string | null | undefined;
-  navigate?: Navigate;
+  navigate?: Navigate | undefined;
   directoryConnection?: RoomConnection | null;
   titleConnection?: RoomConnection | null;
   relatedTopics?: readonly DecisionTopicResolution[];
@@ -349,17 +324,18 @@ export function RoutePane({
   }
 
   if (route.kind === "doc" || route.kind === "decision") {
-    if (route.kind === "decision" && (topic === null || selectedUuid === null)) {
+    const paneState = documentPaneState({ route, connection, meta, topic, selectedUuid, navigate }, hasAnswered);
+    if (paneState === "waiting-record") {
       return <PaneNotice documentLayout><p className="ub-notice">Waiting for the selected record in this decision topic to sync.</p></PaneNotice>;
     }
     const uuid = selectedUuid ?? (route.kind === "doc" ? route.uuid : route.record);
     // Unread metadata or a joining empty room keeps the frame silent; neither
     // establishes waiting for sync.
-    if (connection === null || !replicaHasAnswered(meta, hasAnswered)) {
+    if (connection === null || paneState === "silent") {
       return <PaneNotice documentLayout>{null}</PaneNotice>;
     }
 
-    if (!docIsHydrated(uuid, meta)) {
+    if (paneState === "waiting-document") {
       return (
         <PaneNotice documentLayout>
           {/*
@@ -370,13 +346,7 @@ export function RoutePane({
             <StatusLine
               connection={connection}
               presence={presence}
-              endpoint={endpoint}
-              hubAcked={hubAcked}
-              rawHubAcked={rawHubAcked}
-              sampledAt={sampledAt}
-              notSharedReason={notSharedReason}
-              onLastUpdatedChange={onLastUpdatedChange}
-              syncDetails={syncDetails}
+              syncReading={syncReading}
             />
             <CopyLink room={connection.room} segment={route.workspace.segment} />
           </div>
@@ -387,18 +357,17 @@ export function RoutePane({
         </PaneNotice>
       );
     }
-    if (meta?.kind === "decision" && (topic === null || topic.first === null) && navigate !== undefined) {
+    if (paneState === "waiting-topic") {
       return <PaneNotice documentLayout><p className="ub-notice">Waiting for the decision topic to sync.</p></PaneNotice>;
     }
   }
 
+  if (connection === null) return <PaneNotice>{null}</PaneNotice>;
+
   const editorProps: ComponentProps<typeof EditorPane> = {
-    connection, segment: route.workspace.segment, presence, endpoint,
-    hubAcked, rawHubAcked, sampledAt, notSharedReason, author, catalogConnection, archived, updatedAt,
-    onLastUpdatedChange, docLinks, pinned, onTogglePin, onArchive,
-    onArchiveRecord, showArchiveRecord, archiveRecordUnavailable,
-    onArchiveConfirmationFocusChange, focusRestore, onRestoreFocused, onRestore,
-    onSelectThread, threads, threadsOpen, onToggleThreads, syncDetails,
+    connection, segment: route.workspace.segment, presence, syncReading,
+    author, catalogConnection, archived, updatedAt, docLinks, actions,
+    onSelectThread, threads, threadsOpen, onToggleThreads,
   };
   if (navigate !== undefined && topic !== null) {
     const current = decisionCurrentRecord(topic);
@@ -719,23 +688,9 @@ export function App(): ReactElement {
    * have no replacement room.
    */
   const chromeRoom = selected === null ? null : doc;
-  // Read the timestamp segment the status line actually displays, preserving
-  // its existing initial settle window and clearing stale reports by room.
-  const [shownLastUpdated, setShownLastUpdated] = useState<{
-    room: string;
-    value: number;
-  } | null>(null);
-  const onLastUpdatedChange = useCallback(
-    (room: string, value: number | undefined) => {
-      setShownLastUpdated((previous) => {
-        if (value === undefined) return previous?.room === room ? null : previous;
-        return previous?.room === room && previous.value === value
-          ? previous
-          : { room, value };
-      });
-    },
-    [],
-  );
+  const lastUpdated = !docStatus.deleted && documentPaneState({
+    route, connection: doc, meta, topic, selectedUuid: selected, navigate,
+  }, docStatus.hasAnswered) === "shown" ? selectedDirectoryEntry?.updatedAt : undefined;
   const servingStatus = useServingRoomStatus(
     documentSearch,
     chromeRoom?.room ?? directory?.room ?? null,
@@ -1248,54 +1203,54 @@ export function App(): ReactElement {
               configured={hubReady}
               connection={doc}
               presence={titlePresence}
-              endpoint={statusEndpoint}
-              hubAcked={serving === null ? undefined : servingStatus?.hubAcked ?? null}
-              rawHubAcked={serving === null ? undefined : servingStatus?.rawHubAcked ?? null}
-              sampledAt={servingStatus?.sampledAt}
-              notSharedReason={servingStatus?.notSharedReason ?? null}
+              syncReading={{
+                endpoint: statusEndpoint,
+                hubAcked: serving === null ? undefined : servingStatus?.hubAcked ?? null,
+                rawHubAcked: serving === null ? undefined : servingStatus?.rawHubAcked ?? null,
+                sampledAt: servingStatus?.sampledAt,
+                notSharedReason: servingStatus?.notSharedReason ?? null,
+                syncDetails: true,
+              }}
               meta={meta}
               author={identity.name}
               catalogConnection={catalog}
               archived={archived}
               updatedAt={selectedDirectoryEntry?.updatedAt}
-              onLastUpdatedChange={onLastUpdatedChange}
               docLinks={docLinks}
-              pinned={pinned}
-              onTogglePin={
-                sidebarStatus.writable && sidebarStatus.synced && selected !== null
-                  ? onTogglePin
-                  : null
-              }
-              onArchive={
-                selectedDirectoryEntry !== null &&
-                selectedDirectoryEntry !== undefined &&
-                !archived &&
-                directoryStatus.writable &&
-                sidebarStatus.writable &&
-                sidebarStatus.synced
-                  ? onArchive
-                  : null
-              }
-              showArchiveRecord={topic !== null && topic.records.length >= 2}
-              archiveRecordUnavailable={topic?.inForce?.uuid === selected
-                ? "Archive this record unavailable — it is the decision in force"
-                : topic?.conflicts.some((record) => record.uuid === selected)
-                  ? "Archive this record unavailable — it is a conflicting answer" : null}
-              onArchiveRecord={!archived && directoryStatus.writable && sidebarStatus.writable && sidebarStatus.synced
-                ? () => onArchive(true) : null}
-              onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
-              focusRestore={
-                doc !== null &&
-                (restoreFocusRoom.current === doc.room ||
-                  archiveConfirmationFocusRoom.current === doc.room)
-              }
-              onRestoreFocused={onRestoreFocused}
-              onRestore={directoryStatus.writable ? onRestore : null}
+              actions={{
+                pinned,
+                onTogglePin:
+                  sidebarStatus.writable && sidebarStatus.synced && selected !== null
+                    ? onTogglePin
+                    : null,
+                onArchive:
+                  selectedDirectoryEntry !== null &&
+                  selectedDirectoryEntry !== undefined &&
+                  !archived &&
+                  directoryStatus.writable &&
+                  sidebarStatus.writable &&
+                  sidebarStatus.synced
+                    ? onArchive
+                    : null,
+                showArchiveRecord: topic !== null && topic.records.length >= 2,
+                archiveRecordUnavailable: topic?.inForce?.uuid === selected
+                  ? "Archive this record unavailable — it is the decision in force"
+                  : topic?.conflicts.some((record) => record.uuid === selected)
+                    ? "Archive this record unavailable — it is a conflicting answer" : null,
+                onArchiveRecord: !archived && directoryStatus.writable && sidebarStatus.writable && sidebarStatus.synced
+                  ? () => onArchive(true) : null,
+                onArchiveConfirmationFocusChange,
+                focusRestore:
+                  doc !== null &&
+                  (restoreFocusRoom.current === doc.room ||
+                    archiveConfirmationFocusRoom.current === doc.room),
+                onRestoreFocused,
+                onRestore: directoryStatus.writable ? onRestore : null,
+              }}
               onSelectThread={onFocusThread}
               threads={threads}
               threadsOpen={threadsOpen}
               onToggleThreads={onToggleThreads}
-              syncDetails
             />
             {/* Connection reporting excludes the title's retained departures. */}
             {(route.kind === "doc" || route.kind === "decision") && (
@@ -1311,12 +1266,7 @@ export function App(): ReactElement {
                   endpoint={statusEndpoint}
                   hubAcked={serving === null ? undefined : servingStatus?.hubAcked ?? null}
                   notSharedReason={servingStatus?.notSharedReason ?? null}
-                  lastUpdated={
-                    shownLastUpdated !== null &&
-                    shownLastUpdated.room === chromeRoom?.room
-                      ? shownLastUpdated.value
-                      : undefined
-                  }
+                  lastUpdated={lastUpdated}
                 />
               </PopoverContent>
             )}
