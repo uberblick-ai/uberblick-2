@@ -1,7 +1,7 @@
 import { getBlockInline, getBlocks } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
-import { removeTempDirs, startServer } from "./core-helpers.js";
+import { removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
@@ -245,6 +245,45 @@ describe("atomic insert_block batches", () => {
       replica.doc.off("update", replicate);
       cursor.mockRestore();
       peer.destroy();
+    }
+  });
+
+  it("does not claim nothing was written when directory persistence fails after the document batch is logged", async () => {
+    const rig = await startServer(testConfig({ updatedAtCoarsenessMs: 0 }));
+    rigs.push(rig);
+    const page = await create(rig, { blocks: [paragraph] });
+    const replica = rig.instance.replicas.replica(page.uuid);
+    const directory = rig.instance.replicas.directory();
+    const store = rig.instance.store;
+    const log = store.updateCount(replica.room);
+    const append = store.appendUpdate.bind(store);
+    const failure = vi.spyOn(store, "appendUpdate").mockImplementation((...args) => {
+      if (args[0] === directory.room) throw new Error("simulated directory append failure");
+      return append(...args);
+    });
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 1_000);
+    const replay = new Y.Doc();
+    try {
+      const result = await rig.call("insert_block", { uuid: page.uuid, blocks: [
+        { type: "paragraph", text: "Durable first entry" },
+        { type: "paragraph", text: "Durable second entry" },
+      ] });
+      expect(result).toMatchObject({ isError: true, payload: {
+        error: "persistence_failed", room: directory.room,
+      } });
+      expect(JSON.stringify(result.payload)).not.toMatch(/nothing was written/i);
+      expect(result.payload).not.toHaveProperty("entry_index");
+      expect(store.updateCount(replica.room)).toBe(log + 1);
+      expect(getBlocks(replica.doc).map(block => block.text))
+        .toEqual(["Durable first entry", "Durable second entry", paragraph.text]);
+      const persisted = store.readSince(replica.room, 0);
+      if (persisted.snapshot !== null) Y.applyUpdate(replay, persisted.snapshot.state);
+      for (const update of persisted.updates) Y.applyUpdate(replay, update.payload);
+      expect(getBlocks(replay)).toEqual(getBlocks(replica.doc));
+    } finally {
+      clock.mockRestore();
+      failure.mockRestore();
+      replay.destroy();
     }
   });
 });

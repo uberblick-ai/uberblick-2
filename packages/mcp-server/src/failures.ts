@@ -474,7 +474,10 @@ function stamped(
     recoveryClass: recovery.recoveryClass,
     recovery: recovery.guidance,
     ...payload,
-    ...(tool.name === "insert_block" && !/nothing was written/i.test(payload.message)
+    ...(tool.name === "insert_block" && [
+      "block_not_found", "doc_not_found", "doc_not_hydrated", "doc_archived", "doc_deleted",
+      "decision_read_only", "guidance_required", "server_shutting_down",
+    ].includes(payload.error) && !/nothing was written/i.test(payload.message)
       ? { message: `${payload.message} Nothing was written.` }
       : {}),
   });

@@ -44,7 +44,8 @@ export const insertBlockOperation = documentOperation({ content: true, contentDu
       } catch (error) {
         const { error: code, message, ...detail } = toFailure({ name: "insert_block", writes: "document" }, error).payload;
         if (code === "internal_error") throw error;
-        throw new ToolError(String(code), `Entry ${index + 1}: ${message}`, { ...detail, entry_index: index + 1 });
+        const unchanged = /nothing was written/i.test(String(message)) ? "" : " Nothing was written.";
+        throw new ToolError(String(code), `Entry ${index + 1}: ${message}${unchanged}`, { ...detail, entry_index: index + 1 });
       }
     }
 
