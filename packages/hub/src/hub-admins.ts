@@ -85,8 +85,7 @@ export class HubAdminRegistry {
   }
 
   /** Commit before fencing every room. A retry repeats closure after a listener failure. */
-  setWorkspaceStatus(actorPrincipalId: string, workspaceId: string, status: "active" | "suspended"): void {
-    this.requireAdmin(actorPrincipalId);
+  setWorkspaceStatus(workspaceId: string, status: "active" | "suspended"): void {
     if (!this.workspaceIds().includes(workspaceId)) throw new HubAdminRefusal("workspace-not-found");
     const db = this.database.connection;
     if (status === "active") {
@@ -109,7 +108,6 @@ export class HubAdminRegistry {
   }
 
   listAdmins(actorPrincipalId: string): HubAdminRecord[] {
-    this.requireAdmin(actorPrincipalId);
     return this.database.connection.prepare(`SELECT admin.principal_id, principal.github_account_id, principal.github_username,
       (SELECT COUNT(*) FROM hub_memberships WHERE principal_id = admin.principal_id) AS workspaces,
       (SELECT history.issued_at FROM hub_credentials AS history
@@ -146,12 +144,11 @@ export class HubAdminRegistry {
     return { admins, nextCursor: index === rows.length ? null : encodeCursor([index]) };
   }
 
-  /** Current authority, last-admin protection and removal commit without yielding. */
+  /** Protect self-removal and the last admin in the removal transaction. */
   remove(actorPrincipalId: string, principalId: string): void {
     const db = this.database.connection;
     db.exec("BEGIN IMMEDIATE");
     try {
-      this.requireAdmin(actorPrincipalId);
       if (actorPrincipalId === principalId) throw new HubAdminRefusal("self-admin");
       if (!this.isAdmin(principalId)) throw new HubAdminRefusal("admin-not-found");
       if ((db.prepare("SELECT COUNT(*) AS count FROM hub_admins").get()?.count as number) <= 1) {
@@ -165,8 +162,7 @@ export class HubAdminRegistry {
     }
   }
 
-  listWorkspaces(actorPrincipalId: string): HubWorkspaceRecord[] {
-    this.requireAdmin(actorPrincipalId);
+  listWorkspaces(): HubWorkspaceRecord[] {
     const db = this.database.connection;
     return this.workspaceIds().map(workspaceId => {
       let name: string | undefined;
@@ -203,8 +199,8 @@ export class HubAdminRegistry {
     }).sort((left, right) => left.localeCompare(right));
   }
 
-  pageWorkspaces(actorPrincipalId: string, cursor?: string): { workspaces: HubWorkspaceRecord[]; nextCursor: string | null } {
-    const rows = this.listWorkspaces(actorPrincipalId);
+  pageWorkspaces(cursor?: string): { workspaces: HubWorkspaceRecord[]; nextCursor: string | null } {
+    const rows = this.listWorkspaces();
     let [index, offset] = readCursor(cursor, 2);
     if (index > rows.length || offset > (rows[index]?.admins.length ?? 0)) throw new HubAdminRefusal("invalid-request");
     const workspaces: HubWorkspaceRecord[] = [];

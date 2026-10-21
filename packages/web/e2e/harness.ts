@@ -659,7 +659,7 @@ export async function startHarness(options: {
       changeCurrentWorkspaceRole(role) {
         const { principals, memberships } = hub ?? {};
         if (principals === undefined || memberships === undefined) throw new Error("Workspace role fixture is missing");
-        memberships.changeRole({ workspaceId: workspaceUuid, actorPrincipalId: principals.identify("5678", "other-admin").id,
+        memberships.changeRole({ workspaceId: workspaceUuid,
           principalId: principals.identify("1234", "browser-person").id, role });
       },
       ...(secondHubUrl === undefined ? {} : { secondHubUrl }),

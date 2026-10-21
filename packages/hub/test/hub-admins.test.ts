@@ -54,7 +54,7 @@ it("lists every inventory source without exposing document content, and tolerate
       .run(`${unreadable}/_settings`, new Uint8Array([255]));
     database.connection.prepare("INSERT INTO documents (name, data) VALUES (?, ?)")
       .run("not-a-uuid/_settings", new Uint8Array());
-    const inventory = hubAdmins.listWorkspaces(owner.id);
+    const inventory = hubAdmins.listWorkspaces();
     expect(inventory).toHaveLength(7);
     expect(inventory).toEqual(expect.arrayContaining([
       { workspaceId: defaultId, status: "active", name: "Default workspace", members: 0, admins: [] },
@@ -66,7 +66,7 @@ it("lists every inventory source without exposing document content, and tolerate
       { workspaceId: unreadable, status: "active", members: 0, admins: [] },
     ]));
     expect(JSON.stringify(inventory)).not.toContain("document content must stay private");
-    expect(() => hubAdmins.listWorkspaces(workspaceAdmin.id)).toThrow("hub-admin-required");
+    expect(() => hubAdmins.requireAdmin(workspaceAdmin.id)).toThrow("hub-admin-required");
     expect(claims.state(true)).toEqual({ unclaimed: true, canClaim: true });
   } finally { database.close(); }
 });
@@ -99,14 +99,14 @@ it("persists suspension through restart, preserves workspace data and commits be
     throw new Error("closure fixture");
   });
   registry.onSuspend(() => { calls.push("second"); });
-  expect(() => registry.setWorkspaceStatus(owner.id, workspaceId, "suspended")).toThrow(AggregateError);
+  expect(() => registry.setWorkspaceStatus(workspaceId, "suspended")).toThrow(AggregateError);
   expect(calls).toEqual(["first", "second"]);
   expect(registry.availableWorkspaces([workspaceId])).toEqual([]);
   unsubscribe();
-  registry.setWorkspaceStatus(owner.id, workspaceId, "suspended");
+  registry.setWorkspaceStatus(workspaceId, "suspended");
   expect(calls).toEqual(["first", "second", "second"]);
   expect(credentials.get(issued.record.id)).toEqual(issued.record);
-  expect(registry.listWorkspaces(owner.id)).toEqual([{ workspaceId, status: "suspended", members: 1, admins: ["owner"] }]);
+  expect(registry.listWorkspaces()).toEqual([{ workspaceId, status: "suspended", members: 1, admins: ["owner"] }]);
   database.close();
   const reopened = new HubDatabase(path, error => { throw error; });
   reopened.open();
@@ -116,9 +116,9 @@ it("persists suspension through restart, preserves workspace data and commits be
     expect(reopened.connection.prepare("SELECT * FROM documents").all()).toEqual(before.documents);
     expect(reopened.connection.prepare("SELECT * FROM hub_memberships").all()).toEqual(before.members);
     expect(reopened.connection.prepare("SELECT * FROM hub_credentials").all()).toEqual(before.credentials);
-    restored.setWorkspaceStatus(owner.id, workspaceId, "active");
+    restored.setWorkspaceStatus(workspaceId, "active");
     expect(restored.availableWorkspaces([workspaceId])).toEqual([workspaceId]);
-    expect(restored.listWorkspaces(owner.id)).toEqual([{ workspaceId, status: "active", members: 1, admins: ["owner"] }]);
+    expect(restored.listWorkspaces()).toEqual([{ workspaceId, status: "active", members: 1, admins: ["owner"] }]);
   } finally { reopened.close(); }
 });
 
@@ -134,7 +134,7 @@ it("storage failure applies no suspension and notifies no closure listener", () 
     const calls: string[] = [];
     registry.onSuspend(id => { calls.push(id); });
     database.connection.exec("CREATE TRIGGER refuse_suspension BEFORE INSERT ON hub_workspace_suspensions BEGIN SELECT RAISE(ABORT, 'fixture'); END");
-    expect(() => registry.setWorkspaceStatus("owner", workspaceId, "suspended")).toThrow("fixture");
+    expect(() => registry.setWorkspaceStatus(workspaceId, "suspended")).toThrow("fixture");
     expect(registry.isSuspended(workspaceId)).toBe(false);
     expect(calls).toEqual([]);
   } finally { database.close(); }
@@ -161,7 +161,7 @@ it("retains private hub roles through restart and rolls back a failed removal", 
     registry.remove("first", "second");
     expect(registry.isAdmin("second")).toBe(false);
     expect(() => registry.remove("first", "first")).toThrow("self-admin");
-    expect(() => registry.remove("second", "first")).toThrow("hub-admin-required");
+    expect(() => registry.requireAdmin("second")).toThrow("hub-admin-required");
     expect(registry.isAdmin("first")).toBe(true);
   } finally { reopened.close(); }
 });
@@ -197,7 +197,7 @@ it("retrieves inventories larger than the transport bound through bounded pages,
     database.connection.exec("COMMIT");
 
     const expectedAdmins = registry.listAdmins(owner.id);
-    const expectedWorkspaces = registry.listWorkspaces(owner.id);
+    const expectedWorkspaces = registry.listWorkspaces();
     expect(Buffer.byteLength(JSON.stringify(expectedAdmins))).toBeGreaterThan(65_536);
     expect(Buffer.byteLength(JSON.stringify(expectedWorkspaces))).toBeGreaterThan(65_536);
     expect(Buffer.byteLength(JSON.stringify(expectedWorkspaces.find(row => row.workspaceId === giant)))).toBeGreaterThan(65_536);
@@ -219,7 +219,7 @@ it("retrieves inventories larger than the transport bound through bounded pages,
     let workspacePages = 0;
     let giantFragments = 0;
     do {
-      const page = registry.pageWorkspaces(owner.id, cursor);
+      const page = registry.pageWorkspaces(cursor);
       expect(Buffer.byteLength(JSON.stringify({ status: "ok", ...page }))).toBeLessThanOrEqual(49_152);
       expect(JSON.stringify(page)).not.toContain("private document content");
       expect(JSON.stringify(page)).not.toContain(Buffer.from(issued.keyBytes).toString("base64url"));
@@ -240,7 +240,6 @@ it("retrieves inventories larger than the transport bound through bounded pages,
     expect([...workspaces.values()]).toEqual(expectedWorkspaces);
 
     registry.remove(expectedAdmins.find(row => !row.current)!.principalId, owner.id);
-    expect(() => registry.pageAdmins(owner.id, "WzFd")).toThrow("hub-admin-required");
-    expect(() => registry.pageWorkspaces(owner.id, "WzAsMV0")).toThrow("hub-admin-required");
+    expect(() => registry.requireAdmin(owner.id)).toThrow("hub-admin-required");
   } finally { database.close(); }
 });

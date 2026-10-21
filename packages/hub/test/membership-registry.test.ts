@@ -31,27 +31,12 @@ afterEach(() => {
 });
 
 describe("hub-owned workspace memberships", () => {
-  it.each(["member", "foreign-admin"])("refuses management by %s without changing or revealing members", (actorPrincipalId) => {
+  it.each(["member", "foreign-admin", "outsider"])("requires workspace admin authority from %s", (actorPrincipalId) => {
     const store = registry();
     grant(store, "admin", "admin");
     grant(store, "member");
     grant(store, "foreign-admin", "admin", OTHER_WORKSPACE);
-    const before = store.listMembers(WORKSPACE, "admin");
-    const removed: string[] = [];
-    store.onRemove((_, principalId) => { removed.push(principalId); });
-
-    for (const principalId of ["member", "absent"]) {
-      expect(() => store.grantMember({ workspaceId: WORKSPACE, actorPrincipalId, principalId, role: "admin" }))
-        .toThrow("workspace admin required");
-      expect(() => store.changeRole({ workspaceId: WORKSPACE, actorPrincipalId, principalId, role: "admin" }))
-        .toThrow("workspace admin required");
-      expect(() => store.remove({ workspaceId: WORKSPACE, actorPrincipalId, principalId }))
-        .toThrow("workspace admin required");
-    }
     expect(() => store.requireAdmin(WORKSPACE, actorPrincipalId)).toThrow("workspace admin required");
-    expect(() => store.listMembers(WORKSPACE, actorPrincipalId)).toThrow("workspace admin required");
-    expect(store.listMembers(WORKSPACE, "admin")).toEqual(before);
-    expect(removed).toEqual([]);
   });
 
   it("serves only the current member's own role and returns detached management records", () => {
@@ -63,7 +48,7 @@ describe("hub-owned workspace memberships", () => {
     expect(() => store.ownRole(WORKSPACE, "outsider")).toThrow("workspace member required");
     expect(() => store.ownRole(OTHER_WORKSPACE, "admin")).toThrow("workspace member required");
 
-    const members = store.listMembers(WORKSPACE, "admin");
+    const members = store.listMembers(WORKSPACE);
     expect(members).toEqual([
       { workspaceId: WORKSPACE, principalId: "admin", role: "admin" },
       { workspaceId: WORKSPACE, principalId: "member", role: "member" },
@@ -73,27 +58,21 @@ describe("hub-owned workspace memberships", () => {
     member.role = "admin";
     members.length = 0;
     expect(store.roleFor(WORKSPACE, "member")).toBe("member");
-    expect(() => store.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "member", principalId: "member", role: "admin" }))
-      .toThrow("workspace admin required");
   });
 
-  it.each(["demote", "remove"] as const)("lets an admin %s another admin or themselves while another remains", (operation) => {
+  it.each(["demote", "remove"] as const)("can %s either admin while another remains", (operation) => {
     for (const principalId of ["other-admin", "acting-admin"]) {
       const store = registry();
       grant(store, "acting-admin", "admin");
       grant(store, "other-admin", "admin");
       grant(store, "member");
-      const request = { workspaceId: WORKSPACE, actorPrincipalId: "acting-admin", principalId };
+      const request = { workspaceId: WORKSPACE, principalId };
       if (operation === "demote") store.changeRole({ ...request, role: "member" });
       else expect(store.remove(request)).toBe(true);
       expect(store.roleFor(WORKSPACE, principalId)).toBe(operation === "demote" ? "member" : null);
       const remainingAdmin = principalId === "acting-admin" ? "other-admin" : "acting-admin";
       expect(store.roleFor(WORKSPACE, remainingAdmin)).toBe("admin");
       expect(store.roleFor(WORKSPACE, "member")).toBe("member");
-      expect(() => store.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: principalId, principalId: "member", role: "admin" }))
-        .toThrow("workspace admin required");
-      expect(() => store.remove({ workspaceId: WORKSPACE, actorPrincipalId: principalId, principalId: "member" }))
-        .toThrow("workspace admin required");
     }
   });
 
@@ -101,19 +80,19 @@ describe("hub-owned workspace memberships", () => {
     const store = registry();
     grant(store, "admin", "admin");
     grant(store, "member");
-    const before = store.listMembers(WORKSPACE, "admin");
+    const before = store.listMembers(WORKSPACE);
     const removed: string[] = [];
     store.onRemove((_, principalId) => { removed.push(principalId); });
-    const request = { workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "admin" };
+    const request = { workspaceId: WORKSPACE, principalId: "admin" };
     expect(() => {
       if (operation === "demote") store.changeRole({ ...request, role: "member" });
       else store.remove(request);
     }).toThrow("final workspace admin must remain");
-    expect(store.listMembers(WORKSPACE, "admin")).toEqual(before);
+    expect(store.listMembers(WORKSPACE)).toEqual(before);
     expect(removed).toEqual([]);
-    // A later authorized promotion provides a remaining administrator and
+    // A later promotion provides a remaining administrator and
     // permits the same operation.
-    store.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "member", role: "admin" });
+    store.changeRole({ workspaceId: WORKSPACE, principalId: "member", role: "admin" });
     if (operation === "demote") store.changeRole({ ...request, role: "member" });
     else expect(store.remove(request)).toBe(true);
     expect(store.roleFor(WORKSPACE, "member")).toBe("admin");
@@ -125,32 +104,32 @@ describe("hub-owned workspace memberships", () => {
     grant(store, "member");
     expect(store.grant({ workspaceId: WORKSPACE, principalId: "member", role: "admin" }))
       .toEqual({ workspaceId: WORKSPACE, principalId: "member", role: "member" });
-    expect(store.grantMember({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "member", role: "admin" }))
+    expect(store.grantMember({ workspaceId: WORKSPACE, principalId: "member", role: "admin" }))
       .toEqual({ workspaceId: WORKSPACE, principalId: "member", role: "member" });
-    expect(store.grantMember({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "admin", role: "member" }))
+    expect(store.grantMember({ workspaceId: WORKSPACE, principalId: "admin", role: "member" }))
       .toEqual({ workspaceId: WORKSPACE, principalId: "admin", role: "admin" });
     expect(store.roleFor(WORKSPACE, "admin")).toBe("admin");
     expect(store.roleFor(WORKSPACE, "member")).toBe("member");
-    expect(() => store.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "absent", role: "admin" }))
+    expect(() => store.changeRole({ workspaceId: WORKSPACE, principalId: "absent", role: "admin" }))
       .toThrow("member not found");
-    expect(store.remove({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "absent" })).toBe(false);
+    expect(store.remove({ workspaceId: WORKSPACE, principalId: "absent" })).toBe(false);
     expect(store.roleFor(WORKSPACE, "absent")).toBeNull();
-    store.remove({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "member" });
-    expect(() => store.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "member", role: "admin" }))
+    store.remove({ workspaceId: WORKSPACE, principalId: "member" });
+    expect(() => store.changeRole({ workspaceId: WORKSPACE, principalId: "member", role: "admin" }))
       .toThrow("member not found");
     expect(store.roleFor(WORKSPACE, "member")).toBeNull();
     grant(store, "member");
     expect(store.roleFor(WORKSPACE, "member")).toBe("member");
   });
 
-  it("lets a current admin grant a new member or admin and returns detached records", () => {
+  it("grants a new member or admin and returns detached records", () => {
     const store = registry();
     grant(store, "admin", "admin");
     for (const role of ["member", "admin"] as const) {
       const principalId = `new-${role}`;
-      const membership = store.grantMember({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId, role });
+      const membership = store.grantMember({ workspaceId: WORKSPACE, principalId, role });
       expect(membership).toEqual({ workspaceId: WORKSPACE, principalId, role });
-      expect(store.listMembers(WORKSPACE, "admin")).toContainEqual(membership);
+      expect(store.listMembers(WORKSPACE)).toContainEqual(membership);
       expect(store.workspacesFor(principalId)).toEqual([WORKSPACE]);
       membership.role = role === "member" ? "admin" : "member";
       expect(store.roleFor(WORKSPACE, principalId)).toBe(role);
@@ -158,19 +137,13 @@ describe("hub-owned workspace memberships", () => {
     }
   });
 
-  it("checks current admin authority even after a successful earlier check and on duplicate grants", () => {
+  it("checks current admin authority even after a successful earlier check", () => {
     const store = registry();
     grant(store, "admin", "admin");
     grant(store, "acting-admin", "admin");
-    grant(store, "existing-member");
     store.requireAdmin(WORKSPACE, "acting-admin");
-    store.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "acting-admin", role: "member" });
-    for (const principalId of ["new-member", "existing-member"]) {
-      expect(() => store.grantMember({ workspaceId: WORKSPACE, actorPrincipalId: "acting-admin", principalId, role: "admin" }))
-        .toThrow("workspace admin required");
-    }
-    expect(store.roleFor(WORKSPACE, "new-member")).toBeNull();
-    expect(store.roleFor(WORKSPACE, "existing-member")).toBe("member");
+    store.changeRole({ workspaceId: WORKSPACE, principalId: "acting-admin", role: "member" });
+    expect(() => store.requireAdmin(WORKSPACE, "acting-admin")).toThrow("workspace admin required");
   });
 
   it("returns one membership across registry instances while preserving the first grant's role", () => {
@@ -179,9 +152,9 @@ describe("hub-owned workspace memberships", () => {
     const second = registry(path);
     grant(first, "admin", "admin");
     const membership = { workspaceId: WORKSPACE, principalId: "new-member", role: "member" as const };
-    expect(first.grantMember({ ...membership, actorPrincipalId: "admin" })).toEqual(membership);
-    expect(second.grantMember({ ...membership, actorPrincipalId: "admin", role: "admin" })).toEqual(membership);
-    expect(first.listMembers(WORKSPACE, "admin").filter((record) => record.principalId === "new-member"))
+    expect(first.grantMember(membership)).toEqual(membership);
+    expect(second.grantMember({ ...membership, role: "admin" })).toEqual(membership);
+    expect(first.listMembers(WORKSPACE).filter((record) => record.principalId === "new-member"))
       .toEqual([membership]);
     expect(second.roleFor(WORKSPACE, "new-member")).toBe("member");
   });
@@ -195,7 +168,7 @@ describe("hub-owned workspace memberships", () => {
     store.onRemove((_, principalId) => { removed.push(principalId); });
     db.connection.exec(`CREATE TRIGGER refuse_membership_delete BEFORE DELETE ON hub_memberships
       BEGIN SELECT RAISE(ABORT, 'test deletion failure'); END`);
-    const request = { workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "member" };
+    const request = { workspaceId: WORKSPACE, principalId: "member" };
     expect(() => store.remove(request)).toThrow("test deletion failure");
     expect(store.roleFor(WORKSPACE, "member")).toBe("member");
     expect(removed).toEqual([]);
@@ -217,7 +190,7 @@ describe("hub-owned workspace memberships", () => {
       expect(store.roleFor(workspaceId, principalId)).toBeNull();
       events.push(`${workspaceId}/${principalId}`);
     });
-    const request = { workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "person" };
+    const request = { workspaceId: WORKSPACE, principalId: "person" };
     let failure: unknown;
     try { store.remove(request); } catch (error) { failure = error; }
     expect(failure).toBeInstanceOf(AggregateError);
@@ -230,8 +203,6 @@ describe("hub-owned workspace memberships", () => {
     unsubscribeOtherFailing();
     expect(store.remove(request)).toBe(false);
     expect(events).toEqual([`${WORKSPACE}/person`, `${WORKSPACE}/person`]);
-    expect(() => store.remove({ ...request, actorPrincipalId: "person" })).toThrow("workspace admin required");
-    expect(events).toHaveLength(2);
   });
 
   it("does not notify removal for role changes, and unsubscribes removal listeners", () => {
@@ -240,11 +211,11 @@ describe("hub-owned workspace memberships", () => {
     grant(store, "member");
     const removed: string[] = [];
     const unsubscribe = store.onRemove((_, principalId) => { removed.push(principalId); });
-    store.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "member", role: "admin" });
-    store.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "member", role: "member" });
+    store.changeRole({ workspaceId: WORKSPACE, principalId: "member", role: "admin" });
+    store.changeRole({ workspaceId: WORKSPACE, principalId: "member", role: "member" });
     expect(removed).toEqual([]);
     unsubscribe();
-    store.remove({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "member" });
+    store.remove({ workspaceId: WORKSPACE, principalId: "member" });
     expect(removed).toEqual([]);
   });
 
@@ -258,7 +229,7 @@ describe("hub-owned workspace memberships", () => {
       expect(store.roleFor(workspaceId, principalId)).toBe(role);
       changes.push(`${workspaceId}/${principalId}/${role}`);
     });
-    const request = { workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "other-admin", role: "member" as const };
+    const request = { workspaceId: WORKSPACE, principalId: "other-admin", role: "member" as const };
     expect(() => store.changeRole(request)).toThrow("fencing failed");
     expect(store.roleFor(WORKSPACE, "other-admin")).toBe("member");
     expect(changes).toEqual([`${WORKSPACE}/other-admin/member`]);
@@ -288,9 +259,9 @@ describe("hub-owned workspace memberships", () => {
     grant(first, "person");
     grant(first, "other-admin", "admin");
     grant(first, "person", "member", OTHER_WORKSPACE);
-    first.grantMember({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "new-member", role: "member" });
-    first.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "other-admin", role: "member" });
-    first.remove({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "person" });
+    first.grantMember({ workspaceId: WORKSPACE, principalId: "new-member", role: "member" });
+    first.changeRole({ workspaceId: WORKSPACE, principalId: "other-admin", role: "member" });
+    first.remove({ workspaceId: WORKSPACE, principalId: "person" });
     firstDatabase.close();
 
     const restartedDatabase = database(path);
@@ -316,17 +287,14 @@ describe("hub-owned workspace memberships", () => {
       .toThrow("role must be admin or member");
     grant(store, "admin", "admin");
     grant(store, "member");
-    expect(() => store.grantMember({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "", role: "member" }))
+    expect(() => store.grantMember({ workspaceId: WORKSPACE, principalId: "", role: "member" }))
       .toThrow("principalId must not be empty");
-    expect(() => store.grantMember({ workspaceId: WORKSPACE, actorPrincipalId: "", principalId: "new-member", role: "member" }))
-      .toThrow("principalId must not be empty");
-    expect(() => store.grantMember({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "new-member", role: "owner" as MembershipRole }))
+    expect(() => store.grantMember({ workspaceId: WORKSPACE, principalId: "new-member", role: "owner" as MembershipRole }))
       .toThrow("role must be admin or member");
-    expect(() => store.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "member", role: "owner" as MembershipRole }))
+    expect(() => store.changeRole({ workspaceId: WORKSPACE, principalId: "member", role: "owner" as MembershipRole }))
       .toThrow("role must be admin or member");
-    expect(() => store.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "", principalId: "member", role: "admin" }))
-      .toThrow("principalId must not be empty");
-    expect(() => store.remove({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "" }))
+    expect(() => store.requireAdmin(WORKSPACE, "")).toThrow("principalId must not be empty");
+    expect(() => store.remove({ workspaceId: WORKSPACE, principalId: "" }))
       .toThrow("principalId must not be empty");
     expect(store.roleFor(WORKSPACE, "member")).toBe("member");
   });
