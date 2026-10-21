@@ -62,9 +62,9 @@ async function syncDetails(page: Page, touch: boolean): Promise<void> {
   const trigger = page.locator(".ub-status-sync");
   await expectFloor(trigger, touch ? 44 : 24);
   await activate(trigger, touch);
-  await expect(page.getByRole("dialog", { name: "Sync and presence", exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Sync details", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: "Sync and presence", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Sync details", exact: true })).toHaveCount(0);
   await expect(trigger).toBeFocused();
 }
 

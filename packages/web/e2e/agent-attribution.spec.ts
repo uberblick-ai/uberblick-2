@@ -197,9 +197,9 @@ for (const settings of [
           await activate(page.getByRole("button", { name: "Close document list", exact: true }));
         }
         await activate(page.locator(".ub-sync-toggle"));
-        const presence = page.getByRole("dialog", { name: "Sync and presence" });
-        await expect(presence).toContainText("Nobody else is in this room.");
-        await expect(presence.getByText(session.name, { exact: true })).toHaveCount(0);
+        const details = page.getByRole("dialog", { name: "Sync details" });
+        await expect(details.getByRole("heading", { name: "Present now" })).toHaveCount(0);
+        await expect(details.getByText(session.name, { exact: true })).toHaveCount(0);
         await activate(page.locator(".ub-sync-toggle"));
         await expect(label).toBeVisible();
         await expect(avatar).toBeVisible();

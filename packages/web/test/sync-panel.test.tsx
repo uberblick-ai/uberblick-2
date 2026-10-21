@@ -2,27 +2,26 @@
  * The sync detail panel: what a reader is told when they ask about sync.
  *
  * Everything the panel draws is client-held state, so the test supplies exactly
- * that and nothing else — a Y.Doc with blocks, a real Awareness carrying two
- * foreign sessions, a connection that only reports status, and the endpoint the
- * shell resolved. No hub, no provider, no socket: a panel that needed one to
+ * that and nothing else — a Y.Doc with blocks, a connection that only reports
+ * status, and the endpoint the shell resolved. No hub, no provider, no socket:
+ * a panel that needed one to
  * say whether it was connected would have nothing to show in the outage it
  * exists for.
  *
  * What is worth pinning is the truthfulness: the endpoint and the room it
- * actually names, the backlog in the unit the status line uses, and a
- * present-now list that follows awareness in both directions.
+ * actually names, the backlog in the unit the status line uses, and the code
+ * comparison facts as the page and its recorded checks change.
  */
 
 import { act, render, type RenderResult } from "./react-render.js";
-import { within } from "@testing-library/react";
+import { fireEvent, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 import * as Y from "yjs";
-import { Awareness, removeAwarenessStates } from "y-protocols/awareness";
-import { appendBlock, docRev, getBlocksFragment, getMeta, initDoc, insertBlock, resolveDecisionTopics, setCodeCheck, setKind, upsertDirectoryEntry } from "@uberblick/schema";
+import { Awareness } from "y-protocols/awareness";
+import { appendBlock, docRev, getBlocksFragment, getMeta, initDoc, resolveDecisionTopics, setCodeCheck, setKind, upsertDirectoryEntry } from "@uberblick/schema";
 import { SyncPanel } from "../src/ui/status/SyncPanel.js";
 import { documentPaneState, RoutePane } from "../src/ui/App.js";
-import { usePresence } from "../src/ui/hooks.js";
 import type { HubEndpoint } from "../src/config.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { TOKEN_MISSING } from "../src/ui/status/status-reading.js";
@@ -37,17 +36,8 @@ const selectThread = (): void => {};
 /** The endpoint the shell resolved — never a hardcoded address in the panel. */
 const ENDPOINT: HubEndpoint = { url: "ws://hub.example:1234", source: "document" };
 
-/** The foreign client ids standing in for an agent and a second browser tab. */
-const AGENT_CLIENT = 424_242;
-const HUMAN_CLIENT = 515_151;
-
-/** The `client` markers each of them publishes — the wire values. */
-const AGENT_MARKER = "agent";
-const WEB_MARKER = "web";
-
 interface Fixture {
   ydoc: Y.Doc;
-  awareness: Awareness;
   connection: RoomConnection;
 }
 
@@ -80,7 +70,7 @@ function fixture(status: Partial<RoomStatus> = {}): Fixture {
       return () => {};
     },
   } as unknown as RoomConnection;
-  return { ydoc, awareness, connection };
+  return { ydoc, connection };
 }
 
 /** The Y.XmlText of one block — what a caret is anchored in. */
@@ -92,44 +82,6 @@ function blockText(ydoc: Y.Doc, index: number): Y.XmlText {
   return text;
 }
 
-/**
- * Publish a foreign session, in the wire format an MCP session uses:
- * relative-position JSON under `cursor`, `user` beside it, and the session's own
- * `client` marker beside both. `blockIndex` null is a session publishing
- * presence with no caret — a tab that has not been clicked into, which the list
- * still has to name.
- */
-function publish(
-  fix: Fixture,
-  clientId: number,
-  user: { name: string; color: string },
-  blockIndex: number | null,
-  client: string = AGENT_MARKER,
-): void {
-  const cursor =
-    blockIndex === null
-      ? null
-      : (() => {
-          const anchor = Y.relativePositionToJSON(
-            Y.createRelativePositionFromTypeIndex(
-              blockText(fix.ydoc, blockIndex),
-              3,
-            ),
-          );
-          return { anchor, head: anchor };
-        })();
-  fix.awareness.states.set(
-    clientId,
-    JSON.parse(JSON.stringify({ user, client, cursor })) as Record<string, unknown>,
-  );
-}
-
-/**
- * What the app does around the panel, in miniature: read the room's presence
- * once and hand it down. The subscription lives in the shell rather than in the
- * panel, so the pill and this list are two views of one snapshot — the test
- * supplies it the way `App` does, and the list still follows awareness live.
- */
 function Panel({
   fix,
   endpoint = ENDPOINT,
@@ -143,11 +95,9 @@ function Panel({
   notSharedReason?: "no-hub-credentials" | null;
   lastUpdated?: number | undefined;
 }): ReactElement {
-  const presence = usePresence(fix.connection);
   return (
     <SyncPanel
       connection={fix.connection}
-      presence={presence}
       endpoint={endpoint}
       hubAcked={hubAcked}
       notSharedReason={notSharedReason}
@@ -191,23 +141,6 @@ function facts(host: HTMLElement): Record<string, string> {
   return read;
 }
 
-/**
- * The present-now list, one line per session: the name, and where the caret is
- * when the row says. The two spans are read separately because the gap between
- * them is CSS — `textContent` alone would run them together.
- */
-function presentNow(host: HTMLElement): string[] {
-  return within(host).queryAllByRole("listitem").map((row) =>
-    [
-      // The name span excludes the decorative initial; its styling gap is the contract.
-      row.querySelector(".ub-presence-name")?.textContent ?? "",
-      within(row).queryByText(/^block \d+$/)?.textContent ?? "",
-    ]
-      .filter((part) => part !== "")
-      .join(" "),
-  );
-}
-
 /** Both surfaces receive the selected document's stamp once its pane is hydrated. */
 function TimestampSurfaces({
   connection,
@@ -242,7 +175,6 @@ function TimestampSurfaces({
       {open && (
         <SyncPanel
           connection={paneProps.connection}
-          presence={[]}
           endpoint={ENDPOINT}
           lastUpdated={lastUpdated}
         />
@@ -267,12 +199,19 @@ describe("the sync panel renders the state this client holds", () => {
     act(() => void vi.advanceTimersByTime(120_000));
     const { host, view } = mount(fix);
     try {
-      expect(within(host).getAllByRole("heading").map((heading) => heading.textContent)).toEqual(["Sync", "Code", "Present now"]);
+      expect(within(host).getAllByRole("heading").map((heading) => heading.textContent)).toEqual(["Sync", "Code"]);
       const groups = [...host.querySelectorAll<HTMLElement>(".ub-code-check")];
       const byRepo = Object.fromEntries(groups.map((group) => [facts(group).Repository, facts(group)]));
-      expect(byRepo["owner/matches"]).toEqual({ Repository: "owner/matches", Compared: "aaaaaaaa · 2 minutes ago", Result: "Matches the code", "Page text": "Unchanged since then", "Looked at": "src/first.ts +2 more" });
-      expect(byRepo["owner/ahead"]).toMatchObject({ Result: "Ahead of the code (intended)", "Page text": "Edited since then", "Looked at": "src/only.ts" });
-      expect(byRepo["owner/drift"]).toMatchObject({ Result: "Differs from the code", "Page text": "Not recorded" });
+      const matches = groups.find((group) => facts(group).Repository === "owner/matches")!;
+      const ahead = groups.find((group) => facts(group).Repository === "owner/ahead")!;
+      expect(byRepo["owner/matches"]).toMatchObject({ Repository: "owner/matches", Compared: "aaaaaaaa · 2 minutes ago", Result: "Matches the code", "Page edited since": "No" });
+      expect(within(matches).getAllByText("src/first.ts").length).toBeGreaterThan(0);
+      expect(within(matches).getByRole("button", { name: "+2 more" })).toBeDefined();
+      expect(within(matches).queryByText("src/second.ts")).toBeNull();
+      expect(byRepo["owner/ahead"]).toMatchObject({ Result: "Ahead of the code (intended)", "Page edited since": "Yes" });
+      expect(within(ahead).getAllByText("src/only.ts").length).toBeGreaterThan(0);
+      expect(within(ahead).queryByRole("button")).toBeNull();
+      expect(byRepo["owner/drift"]).toMatchObject({ Result: "Differs from the code", "Page edited since": "Unknown (older check)" });
       expect(byRepo["owner/drift"]).not.toHaveProperty("Looked at");
       for (const group of groups) {
         const link = within(group).getByRole("link", { name: "aaaaaaaa" });
@@ -296,14 +235,62 @@ describe("the sync panel renders the state this client holds", () => {
       expect(within(host).queryByRole("heading", { name: "Code" })).toBeNull();
       const input = { repository: "owner/project", commit: "a".repeat(40), result: "matches" as const };
       act(() => { setCodeCheck(fix.ydoc, { ...input, rev: docRev(fix.ydoc) }); });
-      expect(facts(host)["Page text"]).toBe("Unchanged since then");
+      expect(facts(host)["Page edited since"]).toBe("No");
       act(() => { blockText(fix.ydoc, 0).insert(0, "Edited immediately "); });
-      expect(facts(host)["Page text"]).toBe("Edited since then");
+      expect(facts(host)["Page edited since"]).toBe("Yes");
       act(() => { setCodeCheck(fix.ydoc, { ...input, rev: docRev(fix.ydoc) }); });
-      expect(facts(host)["Page text"]).toBe("Unchanged since then");
+      expect(facts(host)["Page edited since"]).toBe("No");
       act(() => { setKind(fix.ydoc, "decision"); });
       expect(within(host).queryByRole("heading", { name: "Code" })).toBeNull();
       expect(host.textContent).not.toMatch(/code changed/i);
+    } finally { view.unmount(); }
+  });
+
+  it("expands every recorded path in place and starts collapsed on reopening", () => {
+    vi.useFakeTimers();
+    const fix = fixture();
+    const paths = ["src/first.ts", "src/second.ts", "README.md"];
+    setCodeCheck(fix.ydoc, { repository: "owner/project", commit: "a".repeat(40), result: "matches", paths });
+    const { host, view } = mount(fix);
+    try {
+      expect(within(host).queryByText(paths[1]!)).toBeNull();
+      fireEvent.click(within(host).getByRole("button", { name: "+2 more" }));
+      for (const path of paths) {
+        expect(within(host).getAllByText(path).length).toBeGreaterThan(0);
+      }
+      expect(within(host).queryByRole("button", { name: "+2 more" })).toBeNull();
+    } finally { view.unmount(); }
+
+    const reopened = mount(fix);
+    try {
+      expect(within(reopened.host).getAllByText(paths[0]!).length).toBeGreaterThan(0);
+      expect(within(reopened.host).queryByText(paths[1]!)).toBeNull();
+      expect(within(reopened.host).getByRole("button", { name: "+2 more" })).toBeDefined();
+    } finally { reopened.view.unmount(); }
+  });
+
+  it("marks each check due only after fourteen days and clears it on a new check", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-01T00:00:00Z"));
+    const fix = fixture();
+    const input = { commit: "a".repeat(40), result: "matches" as const };
+    setCodeCheck(fix.ydoc, { ...input, repository: "owner/oldest" });
+    vi.setSystemTime(new Date("2026-10-02T00:00:00Z"));
+    setCodeCheck(fix.ydoc, { ...input, repository: "owner/recent" });
+    vi.setSystemTime(new Date("2026-10-15T00:00:00Z"));
+    const view = render(<Panel fix={fix} />);
+    const host = view.container;
+    const compared = (): Record<string, string> => Object.fromEntries(
+      [...host.querySelectorAll<HTMLElement>(".ub-code-check")]
+        .map((group) => [facts(group).Repository, facts(group).Compared!]),
+    );
+    try {
+      expect(compared()["owner/oldest"]).not.toContain("due for a re-check");
+      act(() => void vi.advanceTimersByTime(60_000));
+      expect(compared()["owner/oldest"]).toMatch(/· due for a re-check$/);
+      expect(compared()["owner/recent"]).not.toContain("due for a re-check");
+      act(() => { setCodeCheck(fix.ydoc, { ...input, repository: "owner/oldest" }); });
+      expect(compared()["owner/oldest"]).not.toContain("due for a re-check");
     } finally { view.unmount(); }
   });
 
@@ -456,7 +443,6 @@ describe("the sync panel renders the state this client holds", () => {
     const view = render(
       <SyncPanel
         connection={null}
-        presence={[]}
         endpoint={ENDPOINT}
       />,
     );
@@ -632,79 +618,6 @@ describe("the sync panel renders the state this client holds", () => {
         view.unmount();
       }
     }
-  });
-
-  it("lists both sessions, with the caret's block only where there is one", () => {
-    vi.useFakeTimers();
-    const fix = fixture();
-    const agent =
-      "Claude · documentation agent reviewing the complete production corpus";
-    const person =
-      "Alexandria Montgomery · Engineering collaboration session on the production workspace";
-    publish(fix, AGENT_CLIENT, { name: agent, color: "#7b5ec7" }, 1);
-    publish(
-      fix,
-      HUMAN_CLIENT,
-      { name: person, color: "#0c853d" },
-      null,
-      WEB_MARKER,
-    );
-    const { host } = mount(fix);
-    // Sorted by client id, so the list does not reorder itself under a reader.
-    expect(presentNow(host)).toEqual([
-      `${agent} block 2`,
-      // No cursor published: the row is still drawn, and says nothing about
-      // where — a block number nobody could point at would be an invention.
-      person,
-    ]);
-    // Avatar plus name, each in its own presence colour — the one its cursor
-    // carries in the prose.
-    // Avatars are decorative; the colour and glyph are their styling contract.
-    const avatars = [...host.querySelectorAll<HTMLElement>(".ub-avatar")];
-    expect(
-      avatars.map((avatar) => [avatar.textContent, avatar.style.borderColor]),
-    ).toEqual([
-      ["C🤖", "rgb(123, 94, 199)"],
-      ["A", "rgb(12, 133, 61)"],
-    ]);
-    // Announced once: the visible name is the row's accessible name, and the
-    // avatar in front of it is decoration. A labelled avatar here would make
-    // a screen reader read every session twice.
-    for (const avatar of avatars) {
-      expect(avatar.getAttribute("aria-hidden")).toBe("true");
-      expect(avatar.getAttribute("aria-label")).toBeNull();
-      expect(avatar.getAttribute("title")).toBeNull();
-    }
-  });
-
-  it("renumbers an idle caret when blocks move above it", () => {
-    vi.useFakeTimers();
-    const fix = fixture();
-    publish(
-      fix,
-      AGENT_CLIENT,
-      { name: "Claude · demo agent", color: "#7b5ec7" },
-      1,
-    );
-    const { host } = mount(fix);
-    expect(presentNow(host)).toEqual(["Claude · demo agent block 2"]);
-    act(() => {
-      insertBlock(fix.ydoc, null, { type: "paragraph", text: "a new first" });
-    });
-    expect(presentNow(host)).toEqual(["Claude · demo agent block 3"]);
-  });
-
-  it("drops a session when its awareness state goes away", () => {
-    vi.useFakeTimers();
-    const fix = fixture();
-    publish(fix, AGENT_CLIENT, { name: "Claude · demo agent", color: "#7b5ec7" }, 0);
-    const { host } = mount(fix);
-    expect(presentNow(host)).toEqual(["Claude · demo agent block 1"]);
-    act(() => {
-      removeAwarenessStates(fix.awareness, [AGENT_CLIENT], "test");
-    });
-    expect(presentNow(host)).toEqual([]);
-    expect(within(host).queryByRole("list")).toBeNull();
   });
 
   /**

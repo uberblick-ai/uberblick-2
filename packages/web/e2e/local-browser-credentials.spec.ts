@@ -22,7 +22,7 @@ async function expectSavedHere(page: Page): Promise<void> {
   await page.locator(".ub-status-sync").click();
   await expect(page.locator('.ub-sync-fact:has(dt:text-is("State")) dd')).toHaveText("saved here");
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: "Sync and presence", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Sync details", exact: true })).toHaveCount(0);
 }
 
 async function statusGeometry(page: Page) {
@@ -76,7 +76,7 @@ test("local-only edits survive a restart and reach the hub after authentication 
       await expect(page.locator('.ub-sync-fact:has(dt:text-is("Reason")) dd'))
         .toHaveText("this machine has no credentials for its hub");
       await page.keyboard.press("Escape");
-      await expect(page.getByRole("dialog", { name: "Sync and presence", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("dialog", { name: "Sync details", exact: true })).toHaveCount(0);
     }
     await page.setViewportSize({ width: 1280, height: 720 });
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");

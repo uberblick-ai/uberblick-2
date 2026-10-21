@@ -32,7 +32,7 @@ async function expectBacklog(page: Page, pending: boolean): Promise<void> {
   const backlog = page.locator(".ub-sync-fact").filter({ has: page.locator("dt", { hasText: /^Backlog$/ }) }).locator("dd");
   await expect(backlog).toHaveText(pending ? /^[1-9]\d* sync messages? unacked$/ : "0 sync messages unacked");
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: "Sync and presence", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Sync details", exact: true })).toHaveCount(0);
   await expect(trigger).toBeFocused();
 }
 

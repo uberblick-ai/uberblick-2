@@ -337,8 +337,8 @@ export function StatusLine({
   connection: RoomConnection;
   /**
    * Reuse the shell title roster, including agents with retained named
-   * cursors; Sync details uses live presence. A second subscription would
-   * repeat awareness and fragment work on every keystroke.
+   * cursors. A second subscription would repeat awareness and fragment work
+   * on every keystroke.
    */
   presence: readonly RemotePresence[];
   /** The selected directory stub's edit-freshness hint, not a sync state. */
@@ -415,16 +415,15 @@ export function StatusLine({
     );
   const codeNote = codeChecks.some((check) => check.result === "drift")
     ? "Differs from code"
-    : revision !== null && codeChecks.some((check) => check.rev !== undefined && check.rev !== revision)
-      ? "Edited since code check"
-      : null;
+    : null;
 
   // Refusals retain their compact word; recovery stays in notices and details.
   return (
     <div ref={syncAttributes} data-sync-room={connection.room} className="ub-status min-w-0 ub-type-small text-[var(--muted-foreground)] py-[0.35rem] border-b border-[var(--border)] mb-3">
       <div className="ub-status-row">
         {hasHub && <SyncDot key={connection.room} offline={offline} error={refusal !== null || unsaved} confirmed={confirmed}
-          lastConfirmedAt={activity.lastConfirmedAt} pulse={activity.pulse} syncDetails={syncDetails} />}
+          lastConfirmedAt={activity.lastConfirmedAt} pulse={activity.pulse} syncDetails={syncDetails}
+          codeChecks={isDecision(connection) ? [] : codeChecks} />}
         <div className="ub-status-left">
           {updatedReading}
           {codeNote !== null && <>

@@ -1,20 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { createPortal } from "react-dom";
+import type { CodeCheck } from "@uberblick/schema";
 import { PopoverTrigger } from "../shadcn/popover.js";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../shadcn/tooltip.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
+import { staleCodeCheckAgeDays } from "./code-check-age.js";
 
 /** Sync meaning is application state; Radix owns the trigger and focus behavior. */
-export function SyncDot({ offline, error, confirmed, lastConfirmedAt, pulse, syncDetails }: {
+export function SyncDot({ offline, error, confirmed, lastConfirmedAt, pulse, syncDetails, codeChecks = [] }: {
   offline: boolean;
   error: boolean;
   confirmed: boolean;
   lastConfirmedAt: number | null;
   pulse: number;
   syncDetails: boolean;
+  codeChecks?: readonly CodeCheck[];
 }): ReactElement {
-  const now = useTimestampClock();
+  const clock = useTimestampClock();
+  const now = Math.max(clock, Date.now());
   const [offlineSince, setOfflineSince] = useState<number | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [finishedPulse, setFinishedPulse] = useState(0);
@@ -46,11 +50,17 @@ export function SyncDot({ offline, error, confirmed, lastConfirmedAt, pulse, syn
   const since = offlineSince === null ? null : new Date(offlineSince);
   const offlineTime = since === null ? null : `${String(since.getHours()).padStart(2, "0")}:${String(since.getMinutes()).padStart(2, "0")}`;
   const age = lastConfirmedAt === null ? null : formatTimestamp(lastConfirmedAt, now, true)?.label;
-  const label = offline && offlineTime !== null
+  const syncLabel = offline && offlineTime !== null
     ? `Offline since ${offlineTime}`
     : confirmed && age != null
       ? `Synced with hub ${age}`
       : "Sync details";
+  const staleAges = codeChecks.flatMap((check) => {
+    const days = staleCodeCheckAgeDays(check.checked_at, now);
+    return days === null ? [] : [days];
+  });
+  const oldestCheckAge = staleAges.length === 0 ? null : Math.max(...staleAges);
+  const label = oldestCheckAge === null ? syncLabel : `${syncLabel} · code check ${oldestCheckAge} days old`;
   const dot = <span
     key={pulse}
     className={`ub-dot ub-sync-dot${!offline && !error && pulse > finishedPulse ? " ub-sync-dot--pulse" : ""}`}
@@ -62,8 +72,9 @@ export function SyncDot({ offline, error, confirmed, lastConfirmedAt, pulse, syn
   return <>
     {syncDetails ? <TooltipProvider><Tooltip>
       <TooltipTrigger asChild><PopoverTrigger asChild>
-        <button type="button" className="ub-status-sync ub-sync-toggle" aria-label={label} title={label}>
+        <button type="button" className={`ub-status-sync ub-sync-toggle${oldestCheckAge === null ? "" : " ub-status-sync--code"}`} aria-label={label} title={label}>
           {dot}
+          {oldestCheckAge !== null && <span className="ub-sync-code-mark" aria-hidden="true">{"</>"}</span>}
         </button>
       </PopoverTrigger></TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
