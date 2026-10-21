@@ -25,7 +25,7 @@ async function checkSeed(box: Sandbox, name: string): Promise<void> {
   const config = resolveMcpConfig({ ...box.env, WORKSPACE_ID: selected.workspaceId });
   expect(readWorkspaceName(config.databasePath, config.workspaceId)).toBe(name);
   const { entries } = await syncWorkspace({ ...config, authSecret: null });
-  expect(entries.map(doc => doc.title).sort()).toEqual(["How to Use It", "Welcome to Überblick"]);
+  expect(entries.map(doc => doc.title).sort()).toEqual(["How to Use It", "Welcome to Uberblick"]);
 }
 
 it("creates a private secret that the next MCP process resolves, without dialing a hub", async () => {

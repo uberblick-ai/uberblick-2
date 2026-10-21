@@ -110,7 +110,7 @@ describe("workspace creation and promotion", () => {
     try {
       expect(getWorkspaceName(fresh.replicas.settings().doc)).toBe("New project");
       expect(listDirectory(fresh.replicas.directory().doc)).toHaveLength(2);
-      expect(readSidebar(fresh.replicas.sidebar().doc)[0]?.name).toBe("Überblick");
+      expect(readSidebar(fresh.replicas.sidebar().doc)[0]?.name).toBe("Uberblick");
     } finally { await fresh.close(); }
   });
 

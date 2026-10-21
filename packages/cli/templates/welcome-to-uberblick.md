@@ -1,12 +1,12 @@
 ---
 uuid: 2d56b281-5614-43bd-b8d8-edd1c270a85a
-title: Welcome to Überblick
-description: What Überblick is and how a fresh workspace works — local-first documents shared by you and the agents you connect. Read How to Use It next.
+title: Welcome to Uberblick
+description: What Uberblick is and how a fresh workspace works — local-first documents shared by you and the agents you connect. Read How to Use It next.
 links:
   - d7ddd0b1-fee9-4ef0-8f1e-42882f925c31
 ---
 
-This is your Überblick workspace. It is shared by you and the agents you connect,
+This is your Uberblick workspace. It is shared by you and the agents you connect,
 and it works locally first. When a hub is configured, the same documents sync to
 your other clients.
 
