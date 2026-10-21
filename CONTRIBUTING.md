@@ -233,14 +233,15 @@ layout and explicit database overrides.
 
 `UB_TEST_MAX_WAIT_MS` is a test seam, not a configuration layer. It caps the
 hub connect and sync budgets, port-owner probe, hub-clock observation,
-claim-state read, `ub auth status`'s request, sign-in protocol/start/collect
-requests and device-management requests. GitHub poll waits and device-recovery
+claim-state read, `ub auth status`'s request and device-management requests.
+GitHub poll waits and device-recovery
 pacing are capped too; CLI sign-in fixtures separately inject a shorter hub
 poll gate without shortening approval lifetimes. It is a ceiling, never
 a floor: unset or unusable it changes nothing, and it cannot lengthen a
 default. As environment it reaches spawned children, which is why it is a
-variable rather than an option. In-process tests can pass an explicit
-collection timeout to leave margin for healthy requests while keeping polls short.
+variable rather than an option. Sign-in request budgets stay unchanged;
+in-process deadline tests pass an explicit collection timeout while healthy
+requests keep their production margin.
 It does not shorten unrelated deadlines such as GitHub approval or lock waits.
 The header of
 [`packages/cli/src/budget.ts`](packages/cli/src/budget.ts) owns the exact contract

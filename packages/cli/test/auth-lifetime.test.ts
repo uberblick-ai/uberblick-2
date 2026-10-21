@@ -200,8 +200,8 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     remote.controls.onStart = (result) => { announcedLifetime = result.expiresIn as number; };
     const box = sandbox();
     const startedAt = Date.now();
-    // Pending replies retain the shorter request/poll ceiling. A stalled body
-    // needs the uncapped request budget so the approval lifetime expires first.
+    // Pending replies retain the shorter poll ceiling. The stalled-body case
+    // also proves expiry with production pacing and request budgets.
     const run = await runUbAsync(["auth", "login", remote.origin], box,
       kind === "hung-body" ? { UB_TEST_MAX_WAIT_MS: undefined } : {}, 12_000);
     const elapsed = Date.now() - startedAt;

@@ -6,14 +6,14 @@ let running = false;
 
 /**
  * Commands read process configuration; each worker restores it before the next assertion.
- * Healthy sign-in collections retain their production request budget; deadline
- * tests pass a shorter explicit timeout independently of capped polling.
+ * Sign-in deadline tests pass a shorter collection timeout independently of
+ * capped polling; healthy requests retain their production budget.
  */
 export async function runInProcess(
   argv: string[],
   box: Sandbox,
   extraEnv: NodeJS.ProcessEnv = {},
-  options: Parameters<typeof runCli>[2] = { authCollectTimeoutMs: 10_000 },
+  options: Parameters<typeof runCli>[2] = {},
 ): Promise<Run> {
   if (running) throw new Error("Concurrent CLI invocations require the subprocess helper");
   if (extraEnv.NODE_OPTIONS) throw new Error("Node startup options require the subprocess helper");

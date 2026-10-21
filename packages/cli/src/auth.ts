@@ -480,7 +480,7 @@ async function checkSignInProtocol(origin: string, signal: AbortSignal): Promise
   const response = await fetch(`${origin}/auth/credential/renew`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: wrapToken(""), redirect: "error",
-    signal: AbortSignal.any([signal, AbortSignal.timeout(Math.max(1, Math.ceil(budget(REQUEST_MS))))]),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_MS)]),
   });
   // Only a validated mismatch diagnoses skew. Leave unavailable sign-in or
   // an older interface to the existing start request and its diagnostics.
@@ -572,7 +572,7 @@ async function login(selection: Selection, io: Io, nextAction: boolean, collectT
     // with. Finish this bounded read so a late reply can still be abandoned.
     let deviceName: string | undefined;
     try { deviceName = sanitizeDeviceName(hostname()); } catch { /* Hostname metadata must never prevent sign-in. */ }
-    const start = (body: object) => post(selection.origin, "start", body, new AbortController().signal, budget(REQUEST_MS), (result) => {
+    const start = (body: object) => post(selection.origin, "start", body, new AbortController().signal, REQUEST_MS, (result) => {
       // Valid authority permits cleanup even if the envelope or public fields
       // are malformed. Never display any of the private start fields.
       if (typeof result.requestId === "string" && UUID.test(result.requestId) &&
@@ -612,7 +612,7 @@ async function login(selection: Selection, io: Io, nextAction: boolean, collectT
       await delay(Math.min(budget(interval * 1000), remaining), undefined, { signal: interrupted.signal });
       const left = deadline - performance.now();
       if (left <= 0) throw new SignInFailure("GitHub sign-in expired; run login again");
-      const result = await post(selection.origin, "collect", attempt, interrupted.signal, Math.min(collectTimeoutMs ?? budget(REQUEST_MS), left));
+      const result = await post(selection.origin, "collect", attempt, interrupted.signal, Math.min(collectTimeoutMs ?? REQUEST_MS, left));
       if (result.status === "pending" && seconds(result.interval)) { interval = result.interval; continue; }
       if (result.status !== "complete") terminal(result);
       collected = true;
