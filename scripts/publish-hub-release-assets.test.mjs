@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
-import { publishHubReleaseAssets } from "./publish-hub-release-assets.mjs";
+import { downloadAsset, publishHubReleaseAssets } from "./publish-hub-release-assets.mjs";
 
 const SHA = "a".repeat(40);
 const TAG = "hub-v1.2.3";
@@ -41,6 +41,7 @@ function services(overrides = {}) {
     getImage: async (ref) => { calls.push(`image ${ref}`); return image(); },
     getRelease: async () => { calls.push("release"); return null; },
     downloadAsset: async (url) => { calls.push(`download ${url.split("/").at(-1)}`); return ASSETS[url.split("/").at(-1)]; },
+    wait: async (ms) => { calls.push(`wait ${ms}`); },
     createRelease: async () => { calls.push("create"); return release({ assets: [] }); },
     uploadAsset: async (_url, name) => { calls.push(`upload ${name}`); return asset(name); },
     listReleases: async () => { calls.push("list"); return []; },
@@ -140,12 +141,100 @@ test("a moved tag at the write boundary stops all publication", async () => {
 
 test("a failed or incomplete upload is never promoted to latest and is not overwritten", async () => {
   for (const uploadAsset of [async () => { throw new Error("upload interrupted"); },
-    async (_url, name) => asset(name, { state: "starter" })]) {
+    async (_url, name) => asset(name, { state: "starter" }),
+    async (_url, name) => asset(name, { size: 999 }),
+    async (_url, name) => asset(name, { browser_download_url: "https://example.org/compose.yml" })]) {
     const fake = services({ uploadAsset });
-    await assert.rejects(publishHubReleaseAssets(input(), fake), /upload interrupted|incompletely/);
+    await assert.rejects(publishHubReleaseAssets(input(), fake), /upload interrupted|incompletely|disagrees/);
     assert.ok(!fake.calls.includes("latest"));
+    assert.ok(!fake.calls.some((call) => call.startsWith("download ") || call.startsWith("wait ")));
   }
 });
+
+test("all four new assets can recover from anonymous 404s on the final attempt before latest is promoted", async () => {
+  const attempts = new Map();
+  const fake = services({ downloadAsset: async (url) => {
+    const name = url.split("/").at(-1);
+    const attempt = (attempts.get(name) ?? 0) + 1;
+    attempts.set(name, attempt);
+    fake.calls.push(`download ${name}`);
+    return attempt < 4 ? null : ASSETS[name];
+  } });
+  assert.equal((await publishHubReleaseAssets(input(), fake)).outcome, "published");
+  assert.deepEqual([...attempts], Object.keys(ASSETS).map((name) => [name, 4]));
+  assert.deepEqual(mutations(fake), ["create", ...Object.keys(ASSETS).map((name) => `upload ${name}`), "latest"]);
+  for (const name of Object.keys(ASSETS)) {
+    const start = fake.calls.indexOf(`upload ${name}`);
+    assert.deepEqual(fake.calls.slice(start, start + 8), [`upload ${name}`, `download ${name}`,
+      "wait 5000", `download ${name}`, "wait 10000", `download ${name}`, "wait 20000", `download ${name}`]);
+  }
+  assert.ok(fake.calls.indexOf("latest") > fake.calls.lastIndexOf("download remote.tailscale.yml"));
+});
+
+test("a persistent 404 names the asset and stops before latest within the four-asset timeout budget", async () => {
+  const attempts = new Map();
+  let waited = 0;
+  const fake = services({ downloadAsset: async (url) => {
+    const name = url.split("/").at(-1);
+    const attempt = (attempts.get(name) ?? 0) + 1;
+    attempts.set(name, attempt);
+    return name === "remote.tailscale.yml" || attempt < 4 ? null : ASSETS[name];
+  }, wait: async (ms) => { waited += ms; } });
+  await assert.rejects(publishHubReleaseAssets(input(), fake), /remote\.tailscale\.yml.*404/);
+  assert.deepEqual([...attempts], Object.keys(ASSETS).map((name) => [name, 4]));
+  assert.deepEqual(mutations(fake), ["create", ...Object.keys(ASSETS).map((name) => `upload ${name}`)]);
+  assert.ok(!fake.calls.includes("list"));
+  const downloadBudget = [...attempts.values()].reduce((sum, count) => sum + count * 30_000, 0);
+  const uploadBudget = Object.keys(ASSETS).length * 30_000;
+  assert.ok(waited + downloadBudget + uploadBudget < 15 * 60_000);
+});
+
+test("different bytes fail immediately even after a 404 recovers", async () => {
+  for (const initial404 of [false, true]) {
+    let attempts = 0;
+    const fake = services({ downloadAsset: async () => {
+      attempts += 1;
+      return initial404 && attempts === 1 ? null : Buffer.from("different bytes\n");
+    } });
+    await assert.rejects(publishHubReleaseAssets(input(), fake), /compose\.yml differs/);
+    assert.equal(attempts, initial404 ? 2 : 1);
+    assert.deepEqual(fake.calls.filter((call) => call.startsWith("wait ")), initial404 ? ["wait 5000"] : []);
+    assert.deepEqual(mutations(fake), ["create", "upload compose.yml"]);
+  }
+});
+
+test("the anonymous download adapter distinguishes 404 from successfully served bytes", async (t) => {
+  const responses = [new Response(null, { status: 404 }), new Response(ASSETS["compose.yml"])];
+  t.mock.method(globalThis, "fetch", async (_url, options) => {
+    assert.ok(options.signal instanceof AbortSignal);
+    assert.equal(options.headers, undefined);
+    return responses.shift();
+  });
+  assert.equal(await downloadAsset(asset("compose.yml").browser_download_url), null);
+  assert.deepEqual(await downloadAsset(asset("compose.yml").browser_download_url), ASSETS["compose.yml"]);
+});
+
+for (const failure of [403, 429, 500, new TypeError("network unavailable"),
+  new DOMException("download timed out", "TimeoutError")]) {
+  test(`anonymous download failure ${failure} stops without retry or latest`, async (t) => {
+    for (const initial404 of [false, true]) {
+      let attempts = 0;
+      const fetchMock = t.mock.method(globalThis, "fetch", async () => {
+        attempts += 1;
+        if (initial404 && attempts === 1) return new Response(null, { status: 404 });
+        if (typeof failure === "number") return new Response(null, { status: failure });
+        throw failure;
+      });
+      const fake = services({ downloadAsset });
+      await assert.rejects(publishHubReleaseAssets(input(), fake), (error) =>
+        typeof failure === "number" ? error.message.includes(`returned ${failure}`) : error === failure);
+      assert.equal(attempts, initial404 ? 2 : 1);
+      assert.deepEqual(fake.calls.filter((call) => call.startsWith("wait ")), initial404 ? ["wait 5000"] : []);
+      assert.deepEqual(mutations(fake), ["create", "upload compose.yml"]);
+      fetchMock.mock.restore();
+    }
+  });
+}
 
 test("latest follows the greatest stable hub version, never a later lower version", async () => {
   for (const [candidate, promote] of [[release({ tag_name: "hub-v1.2.10" }), false],
