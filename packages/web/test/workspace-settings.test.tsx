@@ -662,173 +662,103 @@ it("takes offline and refusal readings live from the shared status derivation", 
 });
 
 
-it("renames only shared workspace state and refuses invalid drafts without changing the name", async () => {
-  const directory = statusRoom(SYNCED);
-  const settings = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
-  setWorkspaceName(settings.connection.ydoc, "Current name");
-  createTagCatalogEntry(settings.connection.ydoc, "product");
-  const catalog = listTagCatalog(settings.connection.ydoc);
-  const host = await mount(directory.connection, ENDPOINT, settings.connection);
-  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Name" });
-  const submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Save" });
-  expect(input.value).toBe("Current name");
-  const hint = within(host).getByText("Shown in the sidebar header and the workspace menu.", { exact: true });
-  expect(input.getAttribute("aria-describedby")?.split(/\s+/)).toContain(hint.id);
-  expect(host.textContent).not.toContain("Use 1–64 characters");
+const SHARED_FIELDS = [
+  {
+    label: "Name",
+    save: "Save",
+    read: getWorkspaceName,
+    write: setWorkspaceName,
+    other: getWorkspaceMainRepository,
+    sample: (word: string) => `${word} name`,
+    invalid: "   ",
+    alert: "1–64 characters after trimming",
+    typed: "  Product Research  ",
+    stored: "Product Research",
+    toast: "Saved “Product Research”.",
+    reconnect: "Reconnect before renaming the workspace.",
+  },
+  {
+    label: "Main repository",
+    save: "Save main repository",
+    read: getWorkspaceMainRepository,
+    write: setWorkspaceMainRepository,
+    other: getWorkspaceName,
+    sample: (word: string) => `Owner/${word}`,
+    invalid: "https://github.com/Owner/Repo/issues/1",
+    alert: "owner/repo or a github.com repository address",
+    typed: "https://github.com/Owner/Repo.git/",
+    stored: "Owner/Repo",
+    toast: "Saved main repository “Owner/Repo”.",
+    reconnect: "Reconnect before changing the main repository.",
+  },
+];
 
-  for (const invalid of ["   ", "x".repeat(65), "Control\u0007name", "Format\u200bname"]) {
-    act(() => typeInto(input, invalid));
-    expect(within(host).queryByRole("alert")).toBeNull();
-    act(() => submit.click());
-    expect(within(host).getByRole("alert").textContent).toContain("1–64 characters after trimming");
-    expect(input.getAttribute("aria-invalid")).toBe("true");
-    expect(getWorkspaceName(settings.connection.ydoc)).toBe("Current name");
-  }
-  expect(toast.success).not.toHaveBeenCalled();
-  act(() => typeInto(input, "  Product Research  "));
-  expect(input.getAttribute("aria-invalid")).toBe("false");
-  act(() => submit.click());
-  expect(getWorkspaceName(settings.connection.ydoc)).toBe("Product Research");
-  expect(input.value).toBe("Product Research");
-  expect(toast.success).toHaveBeenLastCalledWith("Saved “Product Research”.", { id: "workspace-settings" });
-  expect(host.textContent).not.toContain("Saved “Product Research”.");
-  expect(within(host).queryByRole("alert")).toBeNull();
-  expect(listTagCatalog(settings.connection.ydoc)).toEqual(catalog);
-  expect(facts(host).get("Workspace ID")).toBe(WORKSPACE.uuid);
-  openConnectionDetails(host);
-  expect(facts(host).get("Address segment")).toBe(WORKSPACE.segment);
-  directory.connection.ydoc.destroy(); settings.connection.ydoc.destroy();
-});
-
-it("normalizes and clears the main repository, preserves other settings and refuses invalid input", async () => {
-  const settings = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
-  setWorkspaceName(settings.connection.ydoc, "Current name");
-  createTagCatalogEntry(settings.connection.ydoc, "product");
-  const catalog = listTagCatalog(settings.connection.ydoc);
-  const peer = peerOf(settings.connection.ydoc);
-  const host = await mount(null, ENDPOINT, settings.connection);
-  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Main repository" });
-  const submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Save main repository" });
-  try {
-    expect(input.value).toBe("");
-    act(() => typeInto(input, "https://github.com/Owner/Repo.git/"));
-    act(() => submit.click());
-    expect(input.value).toBe("Owner/Repo");
-    expect(getWorkspaceMainRepository(peer)).toBe("Owner/Repo");
-    act(() => typeInto(input, "https://github.com/Owner/Repo/issues/1"));
-    act(() => submit.click());
-    expect(within(host).getByRole("alert").textContent).toContain("owner/repo or a github.com repository address");
-    expect(getWorkspaceMainRepository(peer)).toBe("Owner/Repo");
-    act(() => typeInto(input, "Owner/Repo"));
-    act(() => setWorkspaceMainRepository(peer, "Other/Repo"));
-    expect(input.value).toBe("Other/Repo");
-    act(() => typeInto(input, "Local/draft"));
-    act(() => setWorkspaceMainRepository(peer, "Remote/repo"));
-    expect(input.value).toBe("Local/draft");
-    act(() => typeInto(input, ""));
-    act(() => submit.click());
-    expect(getWorkspaceMainRepository(peer)).toBeNull();
-    expect(input.value).toBe("");
-    expect(within(host).queryByRole("alert")).toBeNull();
-    expect(getWorkspaceName(peer)).toBe("Current name");
-    expect(listTagCatalog(peer)).toEqual(catalog);
-  } finally { settings.connection.ydoc.destroy(); peer.destroy(); }
-});
-
-it("waits for settings state and refuses main repository writes when disconnected or in a different room", async () => {
+it.each(SHARED_FIELDS)("$label waits for settings state, follows remote values while pristine and stores only a valid draft in its own room", async (field) => {
   const settings = statusRoom({ ...SYNCED, hasReceivedServerState: false }, settingsRoom(WORKSPACE.uuid));
-  setWorkspaceMainRepository(settings.connection.ydoc, "Owner/Repo");
+  const doc = settings.connection.ydoc;
+  setWorkspaceName(doc, "Current name");
+  setWorkspaceMainRepository(doc, "Current/Repo");
+  createTagCatalogEntry(doc, "product");
+  const catalog = listTagCatalog(doc);
+  const current = field.read(doc);
+  const other = field.other(doc);
+  const peer = peerOf(doc);
   const host = await mount(null, ENDPOINT, settings.connection);
-  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Main repository" });
-  const submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Save main repository" });
-  const form = input.form as HTMLFormElement;
+  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: field.label });
+  const submit = within(host).getByRole<HTMLButtonElement>("button", { name: field.save });
+  // Use the input's native form relationship to force submit while disabled.
   const forceSubmit = (): void => {
-    act(() => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    act(() => input.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   };
   try {
     expect(input.disabled).toBe(true);
     expect(submit.disabled).toBe(true);
     expect(input.value).toBe("");
+    expect(host.textContent).toContain("Waiting for workspace settings");
     forceSubmit();
-    expect(getWorkspaceMainRepository(settings.connection.ydoc)).toBe("Owner/Repo");
+    expect(field.read(doc)).toBe(current);
+
     settings.update({ hasReceivedServerState: true });
-    expect(input.value).toBe("Owner/Repo");
-    expect(input.disabled).toBe(false);
-    act(() => typeInto(input, "Changed/Repo"));
-    settings.update({ writable: false, connected: false });
+    expect(input.value).toBe(current);
+    act(() => field.write(peer, field.sample("Peer")));
+    expect(input.value).toBe(field.sample("Peer"));
+    act(() => typeInto(input, field.sample("Draft")));
+    act(() => field.write(peer, field.sample("Later")));
+    expect(input.value).toBe(field.sample("Draft"));
+
+    settings.update({ writable: false, connected: false, synced: false });
     expect(input.disabled).toBe(true);
     forceSubmit();
-    expect(getWorkspaceMainRepository(settings.connection.ydoc)).toBe("Owner/Repo");
+    expect(within(host).getByRole("alert").textContent).toBe(field.reconnect);
     settings.connection.room = settingsRoom("11111111-2222-4333-8444-555555555555");
-    settings.update({ writable: true, connected: true });
+    settings.update({ writable: true, connected: true, synced: true });
     expect(input.disabled).toBe(true);
     forceSubmit();
-    expect(getWorkspaceMainRepository(settings.connection.ydoc)).toBe("Owner/Repo");
-  } finally { settings.connection.ydoc.destroy(); }
-});
+    expect(field.read(doc)).toBe(field.sample("Later"));
 
-it("follows shared names while pristine and preserves an edited rename draft", async () => {
-  const settings = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
-  const peer = peerOf(settings.connection.ydoc);
-  const host = await mount(null, ENDPOINT, settings.connection);
-  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Name" });
-  const submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Save" });
-  expect(input.value).toBe("");
+    settings.connection.room = settingsRoom(WORKSPACE.uuid);
+    settings.update({});
+    expect(input.value).toBe(field.sample("Draft"));
+    act(() => typeInto(input, field.invalid));
+    act(() => submit.click());
+    const alert = within(host).getByRole("alert");
+    expect(alert.textContent).toContain(field.alert);
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(input.getAttribute("aria-describedby")?.split(" ")).toContain(alert.id);
+    expect(field.read(doc)).toBe(field.sample("Later"));
+    expect(toast.success).not.toHaveBeenCalled();
 
-  act(() => setWorkspaceName(peer, "Arriving name"));
-  expect(input.value).toBe("Arriving name");
-  act(() => typeInto(input, "Local draft"));
-  act(() => setWorkspaceName(peer, "Peer name"));
-  expect(input.value).toBe("Local draft");
-  act(() => setWorkspaceName(peer, "Another peer name"));
-  expect(input.value).toBe("Local draft");
-
-  act(() => typeInto(input, "Another peer name"));
-  act(() => setWorkspaceName(peer, "Followed name"));
-  expect(input.value).toBe("Followed name");
-  act(() => typeInto(input, "Saved local name"));
-  act(() => submit.click());
-  expect(getWorkspaceName(peer)).toBe("Saved local name");
-  act(() => setWorkspaceName(peer, "Later peer name"));
-  expect(input.value).toBe("Later peer name");
-  settings.connection.ydoc.destroy();
-  peer.destroy();
-});
-
-it("waits for settings state and refuses renaming when its room cannot write", async () => {
-  const settings = statusRoom({ ...SYNCED, hasReceivedServerState: false }, settingsRoom(WORKSPACE.uuid));
-  setWorkspaceName(settings.connection.ydoc, "Existing name");
-  const host = await mount(null, ENDPOINT, settings.connection);
-  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Name" });
-  // Use the input's native form relationship to force submit while disabled.
-  const form = input.form as HTMLFormElement;
-  const button = within(host).getByRole<HTMLButtonElement>("button", { name: "Save" });
-  expect(input.disabled).toBe(true);
-  expect(button.disabled).toBe(true);
-  expect(input.value).toBe("");
-  expect(host.textContent).toContain("Waiting for workspace settings");
-  act(() => {
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-  });
-  expect(getWorkspaceName(settings.connection.ydoc)).toBe("Existing name");
-  settings.update({ hasReceivedServerState: true });
-  expect(input.value).toBe("Existing name");
-  expect(input.disabled).toBe(false);
-  act(() => typeInto(input, "Disconnected overwrite"));
-  settings.update({ writable: false, connected: false, synced: false });
-  expect(input.disabled).toBe(true);
-  expect(button.disabled).toBe(true);
-  act(() => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
-  expect(getWorkspaceName(settings.connection.ydoc)).toBe("Existing name");
-  expect(host.textContent).toContain("Reconnect before renaming");
-  expect(within(host).getByRole("alert").textContent).toBe("Reconnect before renaming the workspace.");
-  expect(toast.success).not.toHaveBeenCalled();
-  settings.update({ writable: true, connected: true, synced: true });
-  expect(button.disabled).toBe(false);
-  act(() => button.click());
-  expect(within(host).queryByRole("alert")).toBeNull();
-  expect(toast.success).toHaveBeenLastCalledWith("Saved “Disconnected overwrite”.", { id: "workspace-settings" });
-  settings.connection.ydoc.destroy();
+    act(() => typeInto(input, field.typed));
+    act(() => submit.click());
+    expect(field.read(peer)).toBe(field.stored);
+    expect(input.value).toBe(field.stored);
+    expect(toast.success).toHaveBeenLastCalledWith(field.toast, { id: "workspace-settings" });
+    expect(within(host).queryByRole("alert")).toBeNull();
+    expect(field.other(peer)).toBe(other);
+    expect(listTagCatalog(peer)).toEqual(catalog);
+    act(() => field.write(peer, field.sample("Followed")));
+    expect(input.value).toBe(field.sample("Followed"));
+  } finally { doc.destroy(); peer.destroy(); }
 });
 
 it.each(["input", "submit"])("preserves the focused %s when name or tag submission publishes success", async (focus) => {

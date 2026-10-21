@@ -32,6 +32,7 @@
 @source "./settings/HubSettings.tsx";
 @source "./settings/PreferencesSettings.tsx";
 @source "./settings/DevicesSettings.tsx";
+@source "./settings/settings-kit.tsx";
 @source "./sidebar/WorkspaceSwitcher.tsx";
 @source "./sidebar/UserMenu.tsx";
 @source "./document/DocChrome.tsx";
