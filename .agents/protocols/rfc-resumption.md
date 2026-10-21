@@ -46,10 +46,15 @@ rationale, options and debate in the connected RFC without repeating them in
 the record.
 
 Use `set_status` to settle, reject or withdraw under the existing recorded-answer
-rules below and the installed schemas. All decision content and lifecycle
-writes use MCP; the web supports reading and comments. Surface a refused
-connection, including an archived target, rather than restoring a document or
-creating a replacement without the human's instruction.
+rules below and the installed schemas. Starting a topic and approving, rejecting
+or withdrawing an existing proposal remain MCP-only. The web's decision actions
+include **Alter decision**: **Decide** records a successor, while **Open an RFC
+instead** creates a new RFC and connects an open successor to it. Its archive
+actions include **Archive topic**, **Archive this record** and **Restore**.
+For product behavior, read the live Decision records page discovered by purpose
+under [AGENTS.md](../../AGENTS.md#read-for-the-action). Surface a refused connection,
+including an archived target, rather than restoring a document or creating a
+replacement without the human's instruction.
 
 ## Resume an RFC
 
@@ -101,9 +106,9 @@ that disposition:
   churn unchanged outcome block IDs or erase an unresolved choice without its
   disposition. Re-read before inserts or deletes too; preserve concurrent text
   and comments and surface any conflicting change.
-- Change a decided record only through an `open` successor with `supersedes`
+- Change a decided answer only through an `open` successor with `supersedes`
   and an explicitly chosen `discussion` where applicable, using the short
-  answer shape above. Never edit a decided title or answer block.
+  answer shape above. Never edit a decided answer block in place.
 - Reply to an annotation with `annotate`, naming its `thread_id`, the reason
   and `resolved: true`. Reopening uses the same reply shape with
   `resolved: false` and the human's reason. An archived RFC's annotations remain
