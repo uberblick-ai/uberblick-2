@@ -48,6 +48,7 @@ options for install:
 export async function runCli(
   argv: string[],
   io: Io = processIo,
+  options: { authCollectTimeoutMs?: number } = {},
 ): Promise<number> {
   const [command, ...rest] = argv;
 
@@ -78,7 +79,7 @@ export async function runCli(
     return await workspaceCommand(rest, io);
   }
   if (command === "auth") {
-    return await authCommand(rest, io);
+    return await authCommand(rest, io, { collectTimeoutMs: options.authCollectTimeoutMs });
   }
   if (command === "mcp") {
     const [subcommand, ...args] = rest;

@@ -1,8 +1,10 @@
 /**
  * UB_TEST_MAX_WAIT_MS is a ceiling, never a floor; unset or unusable values
  * preserve defaults. See CONTRIBUTING.md's Test deadlines for the test seam.
- * It caps hub connect/sync, port-owner, hub-clock and claim-state probes, plus
- * device-recovery pacing. Port expiry means unidentified holder, never stranger;
+ * It caps hub connect/sync, port-owner, hub-clock and claim-state probes,
+ * auth status's request, sign-in protocol/start/collect requests, device
+ * management requests, GitHub poll waits and device-recovery pacing.
+ * Port expiry means unidentified holder, never stranger;
  * clock expiry means no reading, claim expiry not-unclaimed and hub expiry down.
  * Leave enough margin for healthy replies: a ceiling below normal latency can
  * turn success into failure. Do not cap lock waits or GitHub approval deadlines,

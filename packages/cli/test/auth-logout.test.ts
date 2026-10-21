@@ -6,19 +6,19 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { DEVICE_CREDENTIAL_LIFETIME_MS, importCredentialPublicKey, inspectRequestProof } from "@uberblick/schema/token";
 import { issueCredential } from "@uberblick/hub/test-device-credentials";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { manageRequest } from "../src/access-management.js";
 import { writeHubLogin } from "../src/auth-store.js";
 import {
   OTHER_HUB, SIGNING_SECRET, USERNAME, WORKSPACE, assertPublicOnly, cleanUp,
   configPath, credentialPath, fixture, privateDeviceRows, readStore, rig,
-  savedLogin, seedLogin, serve,
+  savedLogin, seedLogin,
 } from "./auth-fixtures.js";
 import { DEAD_HUB_URL, removeTempDirs, sandbox } from "./helpers.js";
 
 import { runInProcess } from "./in-process.js";
 
-afterEach(cleanUp);
+afterEach(async () => { vi.restoreAllMocks(); await cleanUp(); });
 afterAll(removeTempDirs);
 
 function memberships(databasePath: string) {
@@ -137,16 +137,34 @@ describe("ub auth logout retires devices", () => {
   });
 
   it("bounds a hung response body, removes the login and reports an unconfirmed revocation", async () => {
-    const remote = await serve((_request, response) => {
-      response.writeHead(200, { "Content-Type": "application/json" });
-      response.write('{"status":"ok"');
+    let requestSignal: AbortSignal | undefined;
+    let bodyRead = false;
+    let bodyAborted = false;
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, options) => {
+      const signal = options?.signal;
+      if (signal == null) throw new Error("device management needs an abort signal");
+      requestSignal = signal;
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal.addEventListener("abort", () => {
+            bodyAborted = true;
+            controller.error(signal.reason);
+          }, { once: true });
+          signal.throwIfAborted();
+        },
+        pull() { bodyRead = true; },
+      }, { highWaterMark: 0 }));
     });
-    const box = sandbox({ credentials: { hubLogins: { [remote.origin]: fixture() } } });
-    const run = await runInProcess(["auth", "logout", remote.origin], box);
+    const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: fixture() } } });
+    const run = await runInProcess(["auth", "logout", OTHER_HUB], box);
     expect(run.status).toBe(1);
-    expect(run.stdout).toBe(`removed    login for ${remote.origin} on this computer\n`);
+    expect(run.stdout).toBe(`removed    login for ${OTHER_HUB} on this computer\n`);
     expect(run.stderr).toMatch(/not.*revoked/i);
-    expect(remote.origin in (readStore(box).hubLogins ?? {})).toBe(false);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(bodyRead).toBe(true);
+    expect(bodyAborted).toBe(true);
+    expect(requestSignal?.aborted).toBe(true);
+    expect(OTHER_HUB in (readStore(box).hubLogins ?? {})).toBe(false);
   });
 
   it("counts an applied closure failure as revoked and explains the remaining connection warning", async () => {
@@ -327,7 +345,8 @@ describe("ub auth logout retires devices", () => {
     expect(retry.stdout).toBe("");
     expect(retry.stderr).toMatch(/sign.in.required|sign in again|refus/i);
     expect(readFileSync(credentialPath(box)).equals(before), "the stored login was kept byte-for-byte").toBe(true);
-    expect((await runInProcess(["auth", "login", remote.origin], box)).status).toBe(0);
+    const renewed = await runInProcess(["auth", "login", remote.origin], box);
+    expect(renewed.status, renewed.stderr).toBe(0);
     const recovered = await runInProcess(["auth", "logout", "--all-devices", remote.origin], box);
     expect(recovered.status, recovered.stderr).toBe(0);
     expect(recovered.stdout).toContain(`revoked    1 devices of ${USERNAME}`);

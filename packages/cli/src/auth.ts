@@ -294,7 +294,11 @@ async function deviceRequest(origin: string, action: DeviceAction, login: Stored
   const transport = hubTransportProblem(origin);
   if (transport !== null) throw new DeviceFailure(`${transport.reason}; ${transport.fix}`);
   let reply: Awaited<ReturnType<typeof manageRequest>>;
-  try { reply = await manageRequest(origin, action, login); } catch (error) {
+  try {
+    const timeoutMs = budget(10_000);
+    reply = await manageRequest(origin, action, login, timeoutMs < 10_000
+      ? { signal: AbortSignal.timeout(Math.max(1, Math.ceil(timeoutMs))) } : {});
+  } catch (error) {
     throw new DeviceFailure(error instanceof ManagementResponseError
       ? "the hub returned an invalid device-management response"
       : "the hub is unreachable or the device-management request timed out");
@@ -476,7 +480,7 @@ async function checkSignInProtocol(origin: string, signal: AbortSignal): Promise
   const response = await fetch(`${origin}/auth/credential/renew`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: wrapToken(""), redirect: "error",
-    signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_MS)]),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(Math.max(1, Math.ceil(budget(REQUEST_MS))))]),
   });
   // Only a validated mismatch diagnoses skew. Leave unavailable sign-in or
   // an older interface to the existing start request and its diagnostics.
@@ -543,7 +547,7 @@ function terminal(result: Record<string, unknown>): never {
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
-async function login(selection: Selection, io: Io, nextAction: boolean): Promise<number> {
+async function login(selection: Selection, io: Io, nextAction: boolean, collectTimeoutMs?: number): Promise<number> {
   try { preflightHubLoginStore(); } catch (error) {
     io.err(`ub auth: ${error instanceof Error ? error.message : "credential store is not writable"}\n`);
     return 1;
@@ -568,7 +572,7 @@ async function login(selection: Selection, io: Io, nextAction: boolean): Promise
     // with. Finish this bounded read so a late reply can still be abandoned.
     let deviceName: string | undefined;
     try { deviceName = sanitizeDeviceName(hostname()); } catch { /* Hostname metadata must never prevent sign-in. */ }
-    const start = (body: object) => post(selection.origin, "start", body, new AbortController().signal, REQUEST_MS, (result) => {
+    const start = (body: object) => post(selection.origin, "start", body, new AbortController().signal, budget(REQUEST_MS), (result) => {
       // Valid authority permits cleanup even if the envelope or public fields
       // are malformed. Never display any of the private start fields.
       if (typeof result.requestId === "string" && UUID.test(result.requestId) &&
@@ -605,10 +609,10 @@ async function login(selection: Selection, io: Io, nextAction: boolean): Promise
     for (;;) {
       const remaining = deadline - performance.now();
       if (remaining <= 0) throw new SignInFailure("GitHub sign-in expired; run login again");
-      await delay(Math.min(interval * 1000, remaining), undefined, { signal: interrupted.signal });
+      await delay(Math.min(budget(interval * 1000), remaining), undefined, { signal: interrupted.signal });
       const left = deadline - performance.now();
       if (left <= 0) throw new SignInFailure("GitHub sign-in expired; run login again");
-      const result = await post(selection.origin, "collect", attempt, interrupted.signal, Math.min(REQUEST_MS, left));
+      const result = await post(selection.origin, "collect", attempt, interrupted.signal, Math.min(collectTimeoutMs ?? budget(REQUEST_MS), left));
       if (result.status === "pending" && seconds(result.interval)) { interval = result.interval; continue; }
       if (result.status !== "complete") terminal(result);
       collected = true;
@@ -686,7 +690,7 @@ async function login(selection: Selection, io: Io, nextAction: boolean): Promise
   }
 }
 
-export async function authCommand(argv: string[], io: Io, options: { loginNextAction?: boolean } = {}): Promise<number> {
+export async function authCommand(argv: string[], io: Io, options: { loginNextAction?: boolean; collectTimeoutMs?: number } = {}): Promise<number> {
   const [sub, ...args] = argv;
   if (sub === undefined || sub === "help" || sub === "--help" || sub === "-h") {
     io.out(AUTH_HELP);
@@ -735,7 +739,7 @@ export async function authCommand(argv: string[], io: Io, options: { loginNextAc
   }
   if (sub === "login") {
     authField(io, "hub", selection.origin);
-    return await login(selection, io, options.loginNextAction !== false);
+    return await login(selection, io, options.loginNextAction !== false, options.collectTimeoutMs);
   }
   if (sub === "status") return await status(selection, io, json);
   return await logout(selection, io, allDevices);

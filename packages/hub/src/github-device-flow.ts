@@ -7,6 +7,8 @@ export interface GithubSignInConfig {
   /** Test seams; production always uses the fixed github.com endpoints. */
   fetch?: typeof globalThis.fetch;
   now?: () => number;
+  /** Test-only ceiling for the collect gate; approval lifetimes stay intact. */
+  pollMaxWaitMs?: number;
   /** Host setup's real wait between polls; GitHub's interval when absent. */
   setupPollMs?: number;
 }
@@ -134,7 +136,7 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
         ...(deviceName === undefined ? {} : { deviceName }),
         ...(context === undefined ? {} : { context }),
         ...(client === undefined ? {} : { client }),
-        intervalMs, nextPollAt: this.now() + intervalMs, polling: false, status: "pending",
+        intervalMs, nextPollAt: this.now() + this.pollWait(intervalMs), polling: false, status: "pending",
       });
       return {
         status: "pending", requestId, collectionSecret,
@@ -168,7 +170,7 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
     if (!this.active(request)) return { status: request.status as TerminalStatus };
     if (request.polling || this.now() < request.nextPollAt) return this.pending(request);
     request.polling = true;
-    request.nextPollAt = this.now() + request.intervalMs;
+    request.nextPollAt = this.now() + this.pollWait(request.intervalMs);
     let step = "token";
     try {
       if (request.deviceCode === undefined) throw new Error();
@@ -184,7 +186,7 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
       if (result.error === "slow_down") {
         request.intervalMs = Math.max(request.intervalMs + 5000,
           typeof result.interval === "number" ? seconds(result.interval) * 1000 : 0);
-        request.nextPollAt = this.now() + request.intervalMs;
+        request.nextPollAt = this.now() + this.pollWait(request.intervalMs);
         return this.pending(request);
       }
       if (result.error !== undefined) {
@@ -251,6 +253,10 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
 
   private pending(request: SignInRequest<Context>): DeviceFlowCollection<Result> {
     return { status: "pending", interval: Math.max(1, Math.ceil((request.nextPollAt - this.now()) / 1000)) };
+  }
+
+  private pollWait(intervalMs: number): number {
+    return Math.min(intervalMs, this.config.pollMaxWaitMs ?? intervalMs);
   }
 
   private async github(url: string, init: RequestInit): Promise<Record<string, unknown>> {
