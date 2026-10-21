@@ -3,14 +3,13 @@
  * about whether a string matched: a valid signature is not enough if the room
  * belongs to another workspace, and a read-only scope has to actually stop
  * writes at the server rather than merely being advertised to the client.
- * Every refused token — garbage, the raw secret, a forged lifetime, an expired
- * or foreign-workspace token — is presented in `auth-log.test.ts`, which
- * checks what the client is told and what the hub logs.
+ * Refused tokens and query-string tokens are presented in `auth-log.test.ts`,
+ * which checks what the client is told and what the hub logs; refused room
+ * names are in `room-admission.test.ts`.
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { HocuspocusProvider } from "@hocuspocus/provider";
-import * as Y from "yjs";
+import type * as Y from "yjs";
 import type { Hub } from "../src/server.js";
 import {
   OTHER_WORKSPACE,
@@ -68,39 +67,6 @@ describe("token auth", () => {
     await expect(connected.synced).resolves.toBeUndefined();
   });
 
-  it("rejects a room name that is not <workspace>/<uuid>", async () => {
-    const rejected = client("bare-room-name", await token("read-write"));
-    await expect(rejected.denied).resolves.toBe("room-name-invalid");
-
-    // A slug-decorated spelling names no room either: the identity is the
-    // uuid, and the token claim the hub compares against carries only that.
-    const decorated = client(`uberblick-${testRoom()}`, await token("read-write"));
-    await expect(decorated.denied).resolves.toBe("room-name-invalid");
-  });
-
-  it("rejects a token passed in the URL query string", async () => {
-    // Even though the auth message also carries a valid token: query strings
-    // leak into access logs and proxy traces, so their presence is fatal.
-    const valid = await token("read-write");
-    const provider = new HocuspocusProvider({
-      url: `ws://127.0.0.1:${hub.port}/?token=${valid}`,
-      name: testRoom(),
-      token: valid,
-      document: new Y.Doc(),
-    });
-    const denied = new Promise<string>((resolve) => {
-      provider.on("authenticationFailed", ({ reason }: { reason: string }) => {
-        resolve(reason);
-      });
-    });
-
-    try {
-      await expect(denied).resolves.toBe("token-in-query");
-    } finally {
-      provider.destroy();
-    }
-  });
-
   describe("read-only scope", () => {
     it("syncs down but cannot write", async () => {
       const room = testRoom();
@@ -117,8 +83,8 @@ describe("token auth", () => {
       // Up: nothing. The update is refused at the server, so it neither
       // reaches the writer nor the server's copy of the document. The
       // awareness frame sent behind it on the same socket is the barrier: the
-      // server drains a connection in order, so once that arrives the update
-      // has already been handled (see hocuspocus-seams.test.ts).
+      // library accepts awareness from a read-only connection and drains a
+      // connection in order, so once that arrives the update has been handled.
       reader.text.insert(0, "SMUGGLED ");
       reader.provider.setAwarenessField("name", "the reader");
       const serverDoc = hub.hocuspocus.documents.get(room);

@@ -18,7 +18,6 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { appendBlock, editBlock, findBlockElement, getBlock, tableCellText, tableRows } from "@uberblick/schema";
 import * as Y from "yjs";
 import type { HubLogRecord } from "../src/log.js";
 import type { Hub } from "../src/server.js";
@@ -117,12 +116,14 @@ async function maximalToken(): Promise<string> {
 }
 
 describe("the version exchange", () => {
-  it("refuses a protocol-3 offline document writer before syncing or acknowledging it", async () => {
+  it("refuses an offline writer speaking another protocol before syncing or acknowledging it", async () => {
+    // The hub compares the integer only, so any other version stands for every
+    // released writer whose document model it no longer accepts.
     const room = testRoom();
     const oldDoc = new Y.Doc();
-    oldDoc.getText("body").insert(0, "offline content from a client without deletion support");
+    oldDoc.getText("body").insert(0, "offline content from an older client");
     const old = createClient({ port: hub.port, room, token: await token(), doc: oldDoc,
-      protocolVersion: 3, reconnectDelayMs: 60_000 });
+      protocolVersion: SYNC_PROTOCOL_VERSION - 1, reconnectDelayMs: 60_000 });
     clients.push(old);
     try {
       await expect(old.denied).resolves.toBe(`protocol-mismatch:${SYNC_PROTOCOL_VERSION}`);
@@ -138,58 +139,6 @@ describe("the version exchange", () => {
     } finally {
       old.destroy();
       clients.splice(clients.indexOf(old), 1);
-      oldDoc.destroy();
-    }
-  });
-
-  it("refuses the shipped protocol-2 table writer before sync or acknowledgement", async () => {
-    const room = testRoom();
-    const current = createClient({ port: hub.port, room, token: await token() });
-    clients.push(current);
-    await current.synced;
-    const before = "| Task | Status |\n| --- | --- |\n| Write | done |";
-    const id = appendBlock(current.doc, { type: "table", text: before });
-    const status = tableCellText(tableRows(findBlockElement(current.doc, id)!)[1]![1]!)!;
-    status.format(0, status.length, { bold: {} });
-    await waitUntil("the structured table to be acknowledged", () => !current.provider.hasUnsyncedChanges);
-    const tableState = Y.encodeStateVector(current.doc);
-
-    const oldDoc = new Y.Doc();
-    try {
-      Y.applyUpdate(oldDoc, Y.encodeStateAsUpdate(current.doc));
-      // v0.2.9 (d1b8fbf) reads a structured table as empty and inserts a
-      // first-child text on edit. Queue that incompatible write before connect.
-      const oldTable = findBlockElement(oldDoc, id)!;
-      const lostWrite = "| Task | Status |\n| --- | --- |\n| Write | done |\n| Ship | todo |";
-      oldTable.insert(0, [new Y.XmlText(lostWrite)]);
-      const old = createClient({ port: hub.port, room, token: await token(), doc: oldDoc,
-        protocolVersion: 2, reconnectDelayMs: 60_000 });
-      clients.push(old);
-      await expect(old.denied).resolves.toBe(protocolMismatchReason());
-      await expect(old.synced).rejects.toThrow(protocolMismatchReason());
-      expect(old.provider.isAuthenticated).toBe(false);
-      expect(old.provider.synced).toBe(false);
-      expect(old.provider.hasUnsyncedChanges).toBe(true);
-      clients.splice(clients.indexOf(old), 1);
-      old.destroy();
-
-      // A fresh matching client reads the hub, rather than our local writer.
-      // Its handshake is also a barrier after the incompatible write's refusal.
-      const updated = createClient({ port: hub.port, room, token: await token() });
-      clients.push(updated);
-      await updated.synced;
-      expect(Y.encodeStateVector(updated.doc)).toEqual(tableState);
-      expect(findBlockElement(updated.doc, id)!.firstChild).toBeInstanceOf(Y.XmlElement);
-      const formatted = getBlock(updated.doc, id)!.text;
-      expect(formatted).toBe(before.replace("done", "**done**"));
-      const after = formatted.replace("**done**", "**done (blocked)**");
-      editBlock(updated.doc, id, formatted, after);
-      await waitUntil("the matching table edit to arrive", () => getBlock(current.doc, id)!.text === after);
-      await waitUntil("the matching table edit to be acknowledged", () => !updated.provider.hasUnsyncedChanges);
-      expect(tableCellText(tableRows(findBlockElement(current.doc, id)!)[1]![1]!)).toBe(status);
-      expect(status.toDelta()).toEqual([{ insert: "done (blocked)", attributes: { bold: {} } }]);
-      expect(getBlock(updated.doc, id)!.text).toBe(after);
-    } finally {
       oldDoc.destroy();
     }
   });

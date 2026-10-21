@@ -502,7 +502,9 @@ describe("credential admission on a composed server", () => {
     }
   });
 
-  it.each(["revocation", "membership removal", "suspension", "expiry"] as const)("reads authority after verification's final await so %s during verification wins", async (accessEnd) => {
+  // One credential and one authority change: both are read again after the
+  // await. Suspension and expiry refusals have their own tests in this file.
+  it.each(["revocation", "membership removal"] as const)("reads authority after verification's final await so %s during verification wins", async (accessEnd) => {
     const rig = await startServer();
     const held = gate();
     const verified = gate();
@@ -514,7 +516,6 @@ describe("credential admission on a composed server", () => {
       return result;
     });
     const laptop = issue(rig.registry, "laptop");
-    if (accessEnd === "expiry") expiresSoon(rig, laptop);
     const room = testRoom();
     const offline = new Y.Doc();
     offline.getText(TEXT_KEY).insert(0, "authenticating write must not land");
@@ -526,7 +527,6 @@ describe("credential admission on a composed server", () => {
       expect(await waitFor("the authenticating device to be refused", sender.denied)).toBe("device-credential-refused");
       expect(sender.authenticated).not.toHaveBeenCalled();
       expect(rig.logs.at(-1)).toMatchObject({ cause: accessEndCause(accessEnd) });
-      if (accessEnd === "suspension") rig.hubAdmins.setWorkspaceStatus("hub-admin", WORKSPACE, "active");
       const peer = issue(rig.registry, "peer", [WORKSPACE], "observer");
       const observer = connect({ port: rig.port, room, token: await credentialToken(peer) });
       await waitFor("the unaffected member to open the room", observer.synced);

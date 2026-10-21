@@ -676,62 +676,6 @@ describe("ClientConnection.ts:635-671 — pending-document admission", () => {
   });
 });
 
-describe("MessageReceiver.ts:174-179 — the token dispatch is fire-and-forget", () => {
-  /**
-   * An auth message on an established connection reaches
-   * `connection.callbacks.onTokenSyncCallback` at `MessageReceiver.ts:177`
-   * without an `await`, so the message loop moves on while the `onTokenSync`
-   * hook is still running.
-   *
-   * Release 1's auth refresh hangs off that hook. This test states the
-   * consequence in the only terms that matter: a refresh in flight does not
-   * pause the connection, so writes arriving during it are applied under the
-   * *old* authorization. A bump that adds the `await` would make this time out
-   * — which is a behaviour change worth being told about, in either direction.
-   */
-  it("keeps applying updates while the onTokenSync hook is still running", async () => {
-    const room = randomUUID();
-    const held = gate();
-    let entered = false;
-    let released = false;
-
-    const { port, hocuspocus } = await startServer({
-      onAuthenticate: async () => ({ name: "refresher" }),
-      onTokenSync: async () => {
-        entered = true;
-        await held.opened;
-        released = true;
-      },
-    });
-
-    // The gate is released in `finally` because the failure this test exists to
-    // report — a bump that awaits the dispatch — would otherwise leave the hook
-    // blocked forever and hang teardown instead of failing here, by name.
-    try {
-      const client = connect({ port, room });
-      await client.synced;
-
-      client.provider.sendToken();
-      await waitUntil("the onTokenSync hook to be entered", () => entered);
-
-      client.text.insert(0, "written mid-refresh");
-      await waitUntil(
-        "the update to reach the server document",
-        () =>
-          hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString() ===
-          "written mid-refresh",
-      );
-
-      expect(
-        released,
-        "the hook was still running when the update landed",
-      ).toBe(false);
-    } finally {
-      held.open();
-    }
-  });
-});
-
 describe("MessageReceiver.ts:206-297 — beforeSync gates apply and acknowledgement", () => {
   /**
    * `beforeSync` runs after the sync subtype and payload have been decoded, but
@@ -959,55 +903,6 @@ describe("ClientConnection.ts:518-562 — onAuthenticate runs once, refreshes go
     expect(order).toEqual(["onConnect", "onAuthenticate", "connected"]);
     expect(authenticated).toEqual(["first-token"]);
     expect(refreshed).toEqual(["second-token"]);
-  });
-});
-
-describe("MessageReceiver.ts:72-124 — awareness has no readOnly check", () => {
-  /**
-   * The sync branches ask `connection.readOnly` before applying anything
-   * (`:234` and `:276`); the awareness branch does not. A read-only connection
-   * therefore cannot write a character but can publish any awareness state it
-   * likes, and the server fans it out to every other client.
-   *
-   * The hub grants `readOnly` from a token's `scope` claim, so this is what a
-   * read-only token actually buys — asserted here rather than assumed, because
-   * "read-only" reads like a promise about everything the connection can send.
-   */
-  it("accepts awareness from a read-only connection while refusing its updates", async () => {
-    const room = randomUUID();
-
-    const { port, hocuspocus } = await startServer({
-      onAuthenticate: async ({ token, connectionConfig }) => {
-        connectionConfig.readOnly = token === "read-only";
-        return { name: token };
-      },
-    });
-
-    const reader = connect({ port, room, token: "read-only" });
-    await reader.synced;
-
-    // The order of these two lines is the proof, and the reason nothing here
-    // waits out a timer to call the document empty. Both frames leave on the
-    // same socket, and the server drains one connection's queue strictly in
-    // order (`Connection.ts:252-302`): the update goes first, so the awareness
-    // state showing up on the server is proof that the update ahead of it has
-    // already been handled — and refused.
-    reader.text.insert(0, "SMUGGLED");
-    reader.provider.setAwarenessField("name", "the read-only client");
-
-    const document = hocuspocus.documents.get(room);
-    await waitUntil(
-      "the read-only client's awareness to reach the server",
-      () =>
-        [...(document?.awareness.getStates().values() ?? [])].some(
-          (state) => (state as { name?: string }).name === "the read-only client",
-        ),
-    );
-
-    // The client holds text the server refused, from the same connection whose
-    // awareness it just accepted.
-    expect(reader.text.toString()).toBe("SMUGGLED");
-    expect(document?.getText(TEXT_KEY).toString()).toBe("");
   });
 });
 

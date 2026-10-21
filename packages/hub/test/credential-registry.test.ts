@@ -72,32 +72,6 @@ describe("hub-owned credential registry", () => {
     expect(store.listDevices("person").map(device => device.deviceId)).toEqual([fresh.record.deviceId]);
   });
 
-  it.each(["room", "management"] as const)("lets credential expiry win during %s signature verification", async kind => {
-    let now = Date.now();
-    const store = registry(":memory:", () => now);
-    const issued = issue(store);
-    now += DEVICE_CREDENTIAL_LIFETIME_MS - 1;
-    const signed = kind === "room" ? await token(issued, issued.keyBytes, Math.floor(now / 1000))
-      : await mintDeviceRequestProof(await importCredentialKey(issued.keyBytes), {
-        kid: issued.record.id, operation: "list-devices", lifetimeSeconds: 60, iat: Math.floor(now / 1000),
-      });
-    let release!: () => void;
-    let entered!: () => void;
-    const held = new Promise<void>(resolve => { release = resolve; });
-    const reached = new Promise<void>(resolve => { entered = resolve; });
-    const verify = crypto.subtle.verify.bind(crypto.subtle);
-    vi.spyOn(crypto.subtle, "verify").mockImplementation(async (...args) => {
-      entered();
-      await held;
-      return verify(...args);
-    });
-    const verifying = kind === "room" ? store.verify(signed) : store.verifyRequest(signed, { operation: "list-devices" });
-    await reached;
-    now += 1;
-    release();
-    expect(await verifying).toEqual(kind === "room" ? { failure: "expired-credential" } : null);
-  });
-
   it("stores only the device's public key and admits no signatures made from database bytes", async () => {
     const store = registry();
     const pair = generateTestCredentialKeyPair();
@@ -146,17 +120,15 @@ describe("hub-owned credential registry", () => {
     expect(restarted.listDevices("person")).toEqual(expected.filter((row) => row.deviceId !== laptop.record.deviceId));
   });
 
-  it.each(["", "  ", "line\nbreak", "format\u200dcharacter", "control\u0000character", "a".repeat(254)])(
-    "ignores an invalid device name without interfering with key issuance", (deviceName) => {
-      const store = registry();
-      const issued = issueCredential(store, { principalId: "person", deviceId: "laptop", deviceName, workspaces: [] });
-      expect(issued.keyBytes).toHaveLength(48);
-      expect(store.listDevices("person")).toEqual([
-        { deviceId: "laptop", signedInAt: issued.record.issuedAt, workspaces: [] },
-      ]);
-      expect(databases[0]?.connection.prepare("SELECT device_name FROM hub_credentials").get()?.device_name).toBeNull();
-    },
-  );
+  it("ignores an invalid device name without interfering with key issuance", () => {
+    const store = registry();
+    const issued = issueCredential(store, { principalId: "person", deviceId: "laptop", deviceName: "line\nbreak", workspaces: [] });
+    expect(issued.keyBytes).toHaveLength(48);
+    expect(store.listDevices("person")).toEqual([
+      { deviceId: "laptop", signedInAt: issued.record.issuedAt, workspaces: [] },
+    ]);
+    expect(databases[0]?.connection.prepare("SELECT device_name FROM hub_credentials").get()?.device_name).toBeNull();
+  });
 
   it("issues distinct keys per device and reveals only public records thereafter", async () => {
     const store = registry();

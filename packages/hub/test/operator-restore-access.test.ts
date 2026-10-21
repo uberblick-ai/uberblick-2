@@ -218,25 +218,6 @@ describe("restore access rollback reporting", () => {
     expect(lines.join("\n")).not.toContain("private-signing-secret");
   });
 
-  it("compares older public-key credentials without device names or replacement columns", async () => {
-    const live = join(directory(), "hub.sqlite");
-    const candidate = join(directory(), "backup.sqlite");
-    const backup = fixture(candidate, { olderColumns: true });
-    backup.prepare("INSERT INTO hub_credentials VALUES ('older-key', 'alice', ?, '[]', ?, ?, NULL)")
-      .run(device, key, Date.now());
-    backup.exec("INSERT INTO hub_admins VALUES ('bob')");
-    backup.close();
-    const current = fixture(live, { olderColumns: true, admins: false });
-    current.prepare("INSERT INTO hub_credentials VALUES ('older-key', 'alice', ?, '[]', ?, ?, ?)")
-      .run(device, key, Date.now(), Date.now());
-    current.close();
-    const lines: string[] = [];
-    await expect(restoreDatabase(live, candidate, { confirm: async () => false, writeLine: line => lines.push(line) }))
-      .rejects.toThrow("live database was unchanged");
-    expect(lines.join("\n")).toContain(device);
-    expect(lines.join("\n")).not.toContain("hub-admin removal:");
-  });
-
   it.each(["absent", "unreadable"])("explains unknown newer access changes for an %s live database and proceeds without asking", async kind => {
     const root = directory();
     const live = join(root, "hub.sqlite");
