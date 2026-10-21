@@ -12,6 +12,7 @@ import type { Io } from "./io.js";
 import { PROJECT_CONFIG_FILE, type ProjectBinding, findProjectConfig, resolveProjectBinding, writeProjectBinding } from "@uberblick/mcp-server/project-binding";
 import { seedStarterDocs } from "./starter.js";
 import { fillMainRepositoryFromOrigin } from "./workspace-main-repository.js";
+import { useBindingLines } from "./workspace-use-output.js";
 
 export const WORKSPACE_CREATE_HELP = `usage: ub workspace create <name>
 
@@ -46,6 +47,7 @@ export async function createWorkspaceCommand(argv: string[], io: Io): Promise<nu
   // Always create in this directory, never overwrite an ancestor project's binding.
   const path = join(process.cwd(), PROJECT_CONFIG_FILE);
   let previous: ProjectBinding | null = null;
+  let output = "";
   try {
     const lock = await acquireInitLock(process.env, { command: "ub workspace create" });
     try {
@@ -75,12 +77,9 @@ export async function createWorkspaceCommand(argv: string[], io: Io): Promise<nu
         await fillMainRepositoryFromOrigin(uuid, null, config.databasePath);
       } finally { seedLock.release(); }
       writeProjectBinding(binding, { path });
+      output = `${useBindingLines(binding, previous, path, "created")}open it with: ub open\n`;
     } finally { lock.release(); }
-    io.out(`Created ${name} (${uuid}), local-only.\nSelected in ${path}.\nRun \`ub open\` to open it.\n`);
-    if (previous !== null) {
-      io.out(`Previous workspace ${previous.workspaceId} (${previous.hubUrl ?? "local"}) and its documents remain unchanged.\n` +
-        `Switch back: ub workspace use ${previous.workspaceId}\n`);
-    }
+    io.out(output);
     reportEnvironmentBinding(io);
     return 0;
   } catch (error) {

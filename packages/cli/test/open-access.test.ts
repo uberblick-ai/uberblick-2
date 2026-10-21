@@ -274,6 +274,8 @@ describe("ub open: live Access bridge", () => {
       expect(JSON.parse(binding)).toEqual({ workspaceId: WORKSPACE, hubUrl: null });
       expect(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")).toBe(binding);
       expect(app.stdout()).toContain(`${fallback} (not started: no signing secret`);
+      expect(app.stdout()).toContain("free the local hub port and run `ub open` again, or export HUB_AUTH_TOKEN");
+      expect(app.stdout()).not.toContain("ub workspace create");
       expect(existsSync(credentials)).toBe(false);
       expect(existsSync(env.HUB_DB_PATH!)).toBe(false);
     } finally { expect((await app.interrupt()).status).toBe(0); }

@@ -316,9 +316,9 @@ export async function openFails(
   box: Sandbox,
   args: string[],
   extraEnv: NodeJS.ProcessEnv = {},
-): Promise<{ status: number | null; output: string }> {
+): Promise<{ status: number | null; output: string; stdout: string; stderr: string }> {
   const run = await runUbAsync(["open", ...args], box, extraEnv, WAIT_TIMEOUT_MS);
-  return { status: run.status, output: run.output };
+  return run;
 }
 
 /**

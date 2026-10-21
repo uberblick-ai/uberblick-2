@@ -125,8 +125,13 @@ describe("workspace creation and promotion", () => {
     expect(readWorkspaceHub(previous.workspaceId, box.env)).toBe(previous.hubUrl);
     expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBeNull();
     expect(existsSync(join(box.dataHome, "uberblick", `${previous.workspaceId}.sqlite`))).toBe(false);
-    expect(result.stdout).toContain(`Previous workspace ${previous.workspaceId} (${previous.hubUrl})`);
-    expect(result.stdout).toContain(`Switch back: ub workspace use ${previous.workspaceId}\n`);
+    expect(result.stdout).toBe(
+      `created    Second (${selected(box).workspaceId}, local)\n` +
+      `wrote      ${join(box.cwd, ".uberblick.json")}\n` +
+      `previous   ${previous.workspaceId} (https://old.example.test)\n` +
+      `switch back with: ub workspace use ${previous.workspaceId}\n` +
+      "open it with: ub open\n",
+    );
     const switched = await runInProcess(["workspace", "use", previous.workspaceId], box);
     expect(switched.status, switched.output).toBe(0);
     expect(selected(box)).toEqual(previous);

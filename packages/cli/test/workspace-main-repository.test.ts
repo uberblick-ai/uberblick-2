@@ -45,7 +45,11 @@ it.each([
   const result = await runInProcess(["workspace", "create", "Project notes"], box);
   expect(result.status, result.output).toBe(0);
   expect(await repository(box)).toBe("Acme/notes");
-  expect(result.stdout).toBe(`Created Project notes (${selected(box)}), local-only.\nSelected in ${join(box.cwd, ".uberblick.json")}.\nRun \`ub open\` to open it.\n`);
+  expect(result.stdout).toBe(
+    `created    Project notes (${selected(box)}, local)\n` +
+    `wrote      ${join(box.cwd, ".uberblick.json")}\n` +
+    "open it with: ub open\n",
+  );
   expect(result.stderr).toBe("");
   expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")))
     .toEqual({ workspaceId: selected(box), hubUrl: null });
