@@ -106,6 +106,33 @@ function resolveDrag(editor: Editor, data: TableDragData): boolean {
 }
 
 /** Each eligible table reveals independently, including a hovered second table. */
+type TableMenuIcon = "row-before" | "row-after" | "row-up" | "row-down" | "row-delete"
+  | "column-before" | "column-after" | "column-left" | "column-right" | "column-delete";
+
+// Line glyphs on a 16px grid: lines stand for rows or columns, a plus marks
+// where one is inserted, an arrow the move and a cross the deletion.
+const tableMenuPaths: Record<TableMenuIcon, string> = {
+  "row-before": "M8 2v4M6 4h4M2.5 9.5h11M2.5 12.5h11",
+  "row-after": "M2.5 3.5h11M2.5 6.5h11M8 10v4M6 12h4",
+  "row-up": "M8 13V3M4.5 6.5 8 3l3.5 3.5",
+  "row-down": "M8 3v10M4.5 9.5 8 13l3.5-3.5",
+  "row-delete": "M2.5 3.5h11M2.5 12.5h11M6.5 6.5l3 3M9.5 6.5l-3 3",
+  "column-before": "M4 6v4M2 8h4M9.5 2.5v11M12.5 2.5v11",
+  "column-after": "M3.5 2.5v11M6.5 2.5v11M12 6v4M10 8h4",
+  "column-left": "M13 8H3M6.5 4.5 3 8l3.5 3.5",
+  "column-right": "M3 8h10M9.5 4.5 13 8l-3.5 3.5",
+  "column-delete": "M3.5 2.5v11M12.5 2.5v11M6.5 6.5l3 3M9.5 6.5l-3 3",
+};
+
+function TableMenuGlyph({ icon }: { icon: TableMenuIcon }): ReactElement {
+  return (
+    <svg className="ub-table-menu-icon block size-4 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
+      <path d={tableMenuPaths[icon]} fill="none" stroke="currentColor" strokeWidth="1.3"
+        strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function TableControls({ editor, host }: {
   editor: Editor;
   host: RefObject<HTMLElement | null>;
@@ -524,36 +551,32 @@ function TableControlSurface({ tableId, editor, host }: {
     acted.current = target !== null && moveTableColumn(editor, target, direction);
     finish();
   };
+  // Compact rows on a pointer device; touch keeps 44px targets.
+  const item = (key: TableMenuIcon, label: string, disabled: boolean, onSelect: () => void, destructive = false): ReactElement =>
+    <DropdownMenuItem key={key} className={geometry?.touch === true ? "min-h-11" : "py-1"}
+      variant={destructive ? "destructive" : "default"} disabled={disabled} onSelect={onSelect}>
+      <TableMenuGlyph icon={key} />{label}
+    </DropdownMenuItem>;
   const rowItems = (index: number | null): ReactElement[] => [
-    <DropdownMenuItem key="row-before" className="min-h-11" disabled={index === null || index === 0}
-      onSelect={() => act(menuRef.current, 0, "row-before")}>Insert row above</DropdownMenuItem>,
-    <DropdownMenuItem key="row-after" className="min-h-11" disabled={index === null}
-      onSelect={() => act(menuRef.current, 0, "row-after")}>Insert row below</DropdownMenuItem>,
+    item("row-before", "Insert row above", index === null || index === 0, () => act(menuRef.current, 0, "row-before")),
+    item("row-after", "Insert row below", index === null, () => act(menuRef.current, 0, "row-after")),
   ];
   const rowMoves = (index: number | null): ReactElement[] => [
-    <DropdownMenuItem key="row-up" className="min-h-11" disabled={index === null || index <= 1}
-      onSelect={() => moveRow(-1)}>Move row up</DropdownMenuItem>,
-    <DropdownMenuItem key="row-down" className="min-h-11" disabled={index === null || index === 0 || index === rowCount - 1}
-      onSelect={() => moveRow(1)}>Move row down</DropdownMenuItem>,
+    item("row-up", "Move row up", index === null || index <= 1, () => moveRow(-1)),
+    item("row-down", "Move row down", index === null || index === 0 || index === rowCount - 1, () => moveRow(1)),
   ];
   const rowDelete = (index: number | null): ReactElement =>
-    <DropdownMenuItem key="row-delete" className="min-h-11" variant="destructive" disabled={index === null || index === 0}
-      onSelect={() => act(menuRef.current, 0, "row-delete")}>Delete row</DropdownMenuItem>;
+    item("row-delete", "Delete row", index === null || index === 0, () => act(menuRef.current, 0, "row-delete"), true);
   const columnItems = (index: number | null): ReactElement[] => [
-    <DropdownMenuItem key="column-before" className="min-h-11" disabled={index === null}
-      onSelect={() => insertColumn("column-before")}>Insert column left</DropdownMenuItem>,
-    <DropdownMenuItem key="column-after" className="min-h-11" disabled={index === null}
-      onSelect={() => insertColumn("column-after")}>Insert column right</DropdownMenuItem>,
+    item("column-before", "Insert column left", index === null, () => insertColumn("column-before")),
+    item("column-after", "Insert column right", index === null, () => insertColumn("column-after")),
   ];
   const columnMoves = (index: number | null): ReactElement[] => [
-    <DropdownMenuItem key="column-left" className="min-h-11" disabled={index === null || index === 0}
-      onSelect={() => moveColumn(-1)}>Move column left</DropdownMenuItem>,
-    <DropdownMenuItem key="column-right" className="min-h-11" disabled={index === null || index === columnCount - 1}
-      onSelect={() => moveColumn(1)}>Move column right</DropdownMenuItem>,
+    item("column-left", "Move column left", index === null || index === 0, () => moveColumn(-1)),
+    item("column-right", "Move column right", index === null || index === columnCount - 1, () => moveColumn(1)),
   ];
   const columnDelete = (index: number | null): ReactElement =>
-    <DropdownMenuItem key="column-delete" className="min-h-11" variant="destructive" disabled={index === null || columnCount === 1}
-      onSelect={deleteColumn}>Delete column</DropdownMenuItem>;
+    item("column-delete", "Delete column", index === null || columnCount === 1, deleteColumn, true);
   const closeFocus = (event: Event, keep: boolean): void => {
     closing.current = false;
     queueMicrotask(() => refresh.current());

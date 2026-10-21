@@ -1394,7 +1394,7 @@ h6.ub-heading {
 .ub-table-control.ub-table-handle span {
   width: 20px;
   height: 6px;
-  border: 1px solid var(--muted-foreground);
+  border: 1px solid color-mix(in oklab, var(--muted-foreground) 35%, transparent);
   border-radius: 999px;
   background: var(--background);
 }
@@ -1414,8 +1414,12 @@ h6.ub-heading {
 .ub-table-control.ub-table-handle:hover span,
 .ub-table-control.ub-table-handle:focus-visible span,
 .ub-table-control.ub-table-handle[data-state="open"] span {
-  border-color: var(--foreground);
+  border-color: var(--muted-foreground);
 }
+
+/* Menu glyphs stay muted; a destructive item's glyph takes its colour. */
+.ub-table-menu-icon { color: var(--muted-foreground); }
+[data-variant="destructive"] > .ub-table-menu-icon { color: inherit; }
 
 .ub-table-column-drop {
   position: absolute;
