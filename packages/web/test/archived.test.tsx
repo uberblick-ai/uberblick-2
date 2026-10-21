@@ -330,6 +330,7 @@ describe("an archived document is readable, says so, and offers one way back", (
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     expect(within(host).getByPlaceholderText<HTMLTextAreaElement>("Untitled").value).toBe("Other document");
+    expect(release).not.toHaveBeenCalled();
     act(() => notice.action.onClick({ preventDefault: vi.fn() } as unknown as MouseEvent<HTMLButtonElement>));
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
     expect(getDirectoryEntry(nextDirectory, OTHER)?.deleted).toBeUndefined();
@@ -385,6 +386,29 @@ describe("an archived document is readable, says so, and offers one way back", (
     act(() => {
       notice[callback]?.({ id: "closed" });
       notice[callback]?.({ id: "closed" });
+      notice.action.onClick({} as MouseEvent<HTMLButtonElement>);
+    });
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
+  });
+
+  it("releases an active Undo hold once when the shell unmounts", async () => {
+    const directory = room(directoryRoom(WORKSPACE)).ydoc;
+    initDoc(room(roomForDoc(WORKSPACE, UUID)).ydoc, { uuid: UUID, title: "Original" });
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Original" });
+    window.history.replaceState(null, "", `/${WORKSPACE}/${UUID}`);
+    const { container: host, unmount } = await mount(<App />);
+    openActions(host);
+    act(() => action("Archive document")?.click());
+    act(() => screen.getByRole("button", { name: /^Archive$/ }).click());
+    const notice = archiveNotice();
+    const release = undoRelease();
+    expect(release).not.toHaveBeenCalled();
+
+    unmount();
+    expect(release).toHaveBeenCalledTimes(1);
+    act(() => {
+      notice.onDismiss?.({ id: "closed" });
       notice.action.onClick({} as MouseEvent<HTMLButtonElement>);
     });
     expect(release).toHaveBeenCalledTimes(1);

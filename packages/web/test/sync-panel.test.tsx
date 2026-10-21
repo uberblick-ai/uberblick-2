@@ -21,7 +21,7 @@ import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import { appendBlock, docRev, getBlocksFragment, getMeta, initDoc, resolveDecisionTopics, setCodeCheck, setKind, upsertDirectoryEntry } from "@uberblick/schema";
 import { SyncPanel } from "../src/ui/status/SyncPanel.js";
-import { documentPaneState, RoutePane } from "../src/ui/App.js";
+import { documentPaneState, RoutePane } from "../src/ui/shell/RoutePane.js";
 import type { HubEndpoint } from "../src/config.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { TOKEN_MISSING } from "../src/ui/status/status-reading.js";

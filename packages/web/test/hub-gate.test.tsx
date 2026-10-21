@@ -20,7 +20,8 @@ import { directoryRoom } from "@uberblick/schema";
 const acquireRoom = vi.hoisted(() => vi.fn());
 vi.mock("../src/collab/rooms.js", () => ({ acquireRoom }));
 
-const { App, ReboundNotice } = await import("../src/ui/App.js");
+const { App } = await import("../src/ui/App.js");
+const { ReboundNotice } = await import("../src/ui/shell/ShellNotices.js");
 const { LOCAL_SESSION_KEY } = await import("../src/collab/local-session.js");
 
 /**

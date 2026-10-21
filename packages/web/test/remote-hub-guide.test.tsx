@@ -5,7 +5,7 @@ import {
   CLAIM_STATE_POLL_MS,
   CLAIM_STATE_TIMEOUT_MS,
   RemoteHubGuide,
-} from "../src/ui/document/RemoteHubGuide.js";
+} from "../src/ui/shell/RemoteHubGuide.js";
 
 const fetchMock = vi.fn<typeof fetch>();
 
