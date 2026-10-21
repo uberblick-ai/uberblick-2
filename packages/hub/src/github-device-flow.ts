@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import { type HubLogger, stderrLogger } from "./log.js";
 import { RequestBudget } from "./request-budget.js";
+import { GITHUB_HEADERS, readGithubJson } from "./http.js";
 
 export interface GithubSignInConfig {
   clientId: string;
@@ -36,11 +37,6 @@ export type DeviceFlowCollection<Result extends object> =
   | { status: "pending"; interval: number }
   | { status: TerminalStatus | "unknown-request" }
   | ({ status: "complete" } & Result);
-
-function object(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error();
-  return value as Record<string, unknown>;
-}
 
 function seconds(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) throw new Error();
@@ -266,29 +262,11 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
   }
 
   private async github(url: string, init: RequestInit): Promise<Record<string, unknown>> {
+    const signal = AbortSignal.any([this.closed.signal, AbortSignal.timeout(10_000)]);
     const response = await this.fetch(url, {
-      ...init, redirect: "error",
-      signal: AbortSignal.any([this.closed.signal, AbortSignal.timeout(10_000)]),
-      headers: { Accept: "application/json", "User-Agent": "Uberblick-Hub", "X-GitHub-Api-Version": "2026-03-10", ...init.headers },
+      ...init, redirect: "error", signal, headers: { ...GITHUB_HEADERS, ...init.headers },
     });
     if (!response.ok) throw new GithubFailure("http-error", response.status);
-    // Even a successful provider response is bounded before parsing. Only a
-    // public identity or a small OAuth result is needed, never a large payload.
-    if (response.body === null) throw new Error();
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    try {
-      for (;;) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        size += chunk.value.length;
-        if (size > 65_536) throw new Error();
-        chunks.push(chunk.value);
-      }
-    } finally {
-      await reader.cancel();
-    }
-    return object(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    return readGithubJson(response, signal);
   }
 }

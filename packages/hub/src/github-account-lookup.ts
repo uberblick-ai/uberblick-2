@@ -1,6 +1,7 @@
 /** Unauthenticated public identity lookup, never an authorization source. */
 import { isGithubAccountId, isGithubUsername } from "@uberblick/schema/github-identity";
 import { RequestBudget } from "./request-budget.js";
+import { GITHUB_HEADERS, readGithubJson } from "./http.js";
 
 type AccountTarget = { githubUsername: string } | { githubAccountId: string };
 type AccountLookup =
@@ -26,8 +27,7 @@ export class GithubAccountLookup {
       if (!this.budget.take(`account:${principalId}`, `workspace:${workspaceId}`)) return { status: "lookup-unavailable" };
       const signal = AbortSignal.any([this.closed.signal, AbortSignal.timeout(10_000)]);
       const response = await this.fetch(`https://api.github.com/${byId ? "user" : "users"}/${encodeURIComponent(value)}`, {
-        method: "GET", redirect: "error", signal,
-        headers: { Accept: "application/json", "User-Agent": "Uberblick-Hub", "X-GitHub-Api-Version": "2026-03-10" },
+        method: "GET", redirect: "error", signal, headers: GITHUB_HEADERS,
       });
       signal.throwIfAborted();
       if (response.redirected) {
@@ -42,25 +42,7 @@ export class GithubAccountLookup {
         await response.body?.cancel();
         throw new Error();
       }
-      const reader = response.body.getReader();
-      const chunks: Uint8Array[] = [];
-      let size = 0;
-      try {
-        for (;;) {
-          const chunk = await reader.read();
-          signal.throwIfAborted();
-          if (chunk.done) break;
-          size += chunk.value.length;
-          if (size > 65_536) throw new Error();
-          chunks.push(chunk.value);
-        }
-      } finally {
-        await reader.cancel();
-      }
-      signal.throwIfAborted();
-      const identity: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      if (identity === null || typeof identity !== "object" || Array.isArray(identity)) throw new Error();
-      const { id, login, type } = identity as Record<string, unknown>;
+      const { id, login, type } = await readGithubJson(response, signal);
       if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 1 || !isGithubUsername(login) ||
         (byId ? String(id) !== value : login.toLowerCase() !== value.toLowerCase())) throw new Error();
       if (type === "Organization" || type === "Bot") return { status: "account-not-found" };
