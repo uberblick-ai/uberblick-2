@@ -79,7 +79,8 @@ export async function runCli(
     return await workspaceCommand(rest, io);
   }
   if (command === "auth") {
-    return await authCommand(rest, io, { collectTimeoutMs: options.authCollectTimeoutMs });
+    return await authCommand(rest, io, options.authCollectTimeoutMs === undefined
+      ? {} : { collectTimeoutMs: options.authCollectTimeoutMs });
   }
   if (command === "mcp") {
     const [subcommand, ...args] = rest;
