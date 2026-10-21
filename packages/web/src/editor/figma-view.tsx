@@ -40,7 +40,6 @@ function elements(): {
   const dom = document.createElement("article");
   dom.className = "ub-figma";
   dom.dataset.blockType = "figma";
-  dom.tabIndex = 0;
   const panel = document.createElement("div");
   panel.className = "ub-figma-panel";
   panel.contentEditable = "false";
@@ -77,6 +76,8 @@ function elements(): {
   const viewer = document.createElement("div");
   viewer.className = "ub-figma-viewer";
   viewer.contentEditable = "false";
+  viewer.tabIndex = 0;
+  viewer.setAttribute("role", "region");
   const placeholder = document.createElement("div");
   placeholder.className = "ub-figma-placeholder";
   const placeholderTitle = document.createElement("strong");
@@ -117,6 +118,7 @@ class FigmaView implements NodeView {
   private editing = false;
   private fullscreen = false;
   private openingFullscreen = false;
+  private fullscreenUnavailable = false;
   private viewerHistory: ReturnType<typeof figureHistory> | null = null;
   private editAfterFullscreen = false;
   private iframe: HTMLIFrameElement | null = null;
@@ -153,8 +155,8 @@ class FigmaView implements NodeView {
       if (!this.fullscreen && window.matchMedia("(pointer: coarse)").matches) this.expand(true);
       else this.interact();
     });
-    this.dom.addEventListener("keydown", (event) => {
-      if (event.target === this.dom && event.key === "Enter") {
+    this.ui.viewer.addEventListener("keydown", (event) => {
+      if (event.target === this.ui.viewer && event.key === "Enter") {
         event.preventDefault();
         if (!this.fullscreen && window.matchMedia("(pointer: coarse)").matches) this.expand(true);
         else this.interact();
@@ -163,7 +165,7 @@ class FigmaView implements NodeView {
     this.ui.edit.addEventListener("click", () => this.openFields());
     const done = (): void => {
       if (this.editing) this.ui.fields.querySelector("form")?.requestSubmit();
-      else { this.active = false; this.sync(); this.dom.focus({ preventScroll: true }); }
+      else { this.active = false; this.sync(); this.ui.viewer.focus({ preventScroll: true }); }
     };
     this.ui.done.addEventListener("click", done);
     this.ui.fullscreenDone.addEventListener("click", done);
@@ -218,6 +220,7 @@ class FigmaView implements NodeView {
     this.openingFullscreen = true;
     void this.dom.requestFullscreen().then(() => {
       this.openingFullscreen = false;
+      this.fullscreenUnavailable = false;
       if (this.destroyed || document.fullscreenElement !== this.dom) { this.finishFullscreen(); return; }
       this.viewerHistory = figureHistory(() => {
         this.viewerHistory = null;
@@ -232,6 +235,7 @@ class FigmaView implements NodeView {
     }).catch(() => {
       this.openingFullscreen = false;
       this.fullscreen = false;
+      this.fullscreenUnavailable = true;
       this.sync();
       this.visibility.refresh();
       if (!this.destroyed) toast.error("Couldn't open fullscreen. Use Open in Figma instead.", { id: "figma-fullscreen" });
@@ -245,7 +249,7 @@ class FigmaView implements NodeView {
     if (this.destroyed) return;
     this.sync();
     this.visibility.refresh();
-    this.dom.focus({ preventScroll: true });
+    this.ui.viewer.focus({ preventScroll: true });
     if (this.editAfterFullscreen) {
       this.editAfterFullscreen = false;
       this.openFields();
@@ -331,6 +335,8 @@ class FigmaView implements NodeView {
     this.dom.dataset.figmaActive = String(this.active);
     this.dom.dataset.figmaEditing = String(this.editing);
     this.dom.dataset.figmaLive = String(this.iframe !== null);
+    this.dom.dataset.figmaFullscreenUnavailable = String(this.fullscreenUnavailable);
+    this.ui.viewer.setAttribute("aria-label", title);
     this.ui.title.textContent = title;
     this.ui.placeholderTitle.textContent = title;
     this.ui.open.href = this.current.attrs.url;
