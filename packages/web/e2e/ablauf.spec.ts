@@ -437,6 +437,7 @@ test("the viewer preserves history state, restores focus on every close path, an
   await expect(page.locator(".ub-title")).toHaveValue("Previous Ablauf document");
   await page.goForward();
   await expect(page.locator(".ub-title")).toHaveValue("Ablauf viewer history");
+  await waitForDocumentDraw(page, session, uuid);
   await expand(page).focus();
   await page.keyboard.press("Enter");
   await expect(viewer(page)).toBeVisible();

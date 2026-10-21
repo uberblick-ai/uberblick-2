@@ -62,6 +62,8 @@ function elements(): {
     const link = document.createElement("a");
     link.textContent = "Open in Figma";
     link.target = "_blank"; link.rel = "noopener noreferrer"; link.referrerPolicy = "no-referrer";
+    // The editor's prose-link handler cancels native clicks in editable documents.
+    link.addEventListener("click", (event) => event.stopPropagation());
     return link;
   };
   const open = makeLink();
