@@ -11,7 +11,7 @@ import { INTERNAL_RESOURCE_ERROR_MESSAGE } from "../src/resource-adapter.js";
 import { FailingStore, removeTempDirs, startServer, TEST_SECRET, testConfig } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
-const concepts = ["orientation", "workspaces", "lifecycle", "markdown", "data", "tools", "tool-contracts"];
+const concepts = ["orientation", "workspaces", "lifecycle", "markdown", "ablauf", "data", "tools", "tool-contracts"];
 const rigs: Rig[] = [];
 
 async function local(config = testConfig(), store?: FailingStore): Promise<Rig> {
@@ -61,6 +61,16 @@ it("lists every concept and registered tool once, with the same Markdown through
       { uri, mimeType: "text/markdown", text: help.text },
     ]);
   }
+});
+
+it("points Markdown authors to Ablauf help and requires checking edits in the web editor", () => {
+  const help = new HelpCatalog();
+  const markdown = help.read("markdown").text;
+  expect(markdown).toContain("[Ablauf diagrams](uberblick://help/ablauf)");
+  expect(markdown).not.toContain("github.com/uberblick-ai/ablauf");
+  const ablauf = help.read("ablauf").text.replace(/\s+/g, " ");
+  expect(ablauf).toContain("After every edit, check the drawing in the web editor.");
+  expect(ablauf).toContain("MCP does not return the renderer's diagnostics");
 });
 
 it("refuses unknown topics through the tool failure contract and the resource-not-found protocol error", async () => {
