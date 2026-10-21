@@ -1090,7 +1090,6 @@ h6.ub-heading {
 .ub-quote { --block-bar: var(--block-rose-bar); --block-tint: var(--block-rose-tint); }
 .ub-terminal { --block-bar: var(--block-green-bar); --block-tint: var(--block-green-tint); }
 .ub-chart { --block-bar: var(--block-blue-bar); --block-tint: var(--block-blue-tint); }
-.ub-figma { --block-bar: var(--block-teal-bar); --block-tint: var(--block-teal-tint); }
 
 .ub-block-frame:not([data-view="table"]) {
   position: relative;
@@ -1151,28 +1150,42 @@ h6.ub-heading {
 }
 .ub-code-language-trigger { pointer-events: auto; }
 
-.ub-figma-viewer { position: relative; width: 100%; min-height: 240px; height: var(--figma-height, 480px); }
+.ub-figma { min-width: 0; max-width: 100%; margin: 0.7em 0; white-space: normal; }
+.ub-figma-panel { position: relative; min-width: 0; max-width: 100%; }
+.ub-figma-viewer { position: relative; width: 100%; min-height: 240px; height: var(--figma-height, 480px); overflow: hidden; border-radius: var(--radius); }
 .ub-figma-viewer > iframe { display: block; width: 100%; height: 100%; border: 0; }
-.ub-figma-placeholder { display: grid; place-content: center; gap: 0.5rem; height: 100%; padding: 1rem; color: var(--muted-foreground); font-family: var(--font-sans); }
+.ub-figma-placeholder { display: grid; place-content: center; gap: 0.5rem; height: 100%; padding: 1rem; background: var(--muted); color: var(--muted-foreground); font-family: var(--font-sans); overflow-wrap: anywhere; }
+.ub-figma-placeholder-title { color: var(--foreground); }
 .ub-figma-placeholder > button { justify-self: start; }
 .ub-figma-shield { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; color: var(--foreground); font: inherit; cursor: pointer; }
-.ub-figma-shield > span { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 0.2rem 0.5rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--background); color: var(--foreground); font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans); white-space: nowrap; }
-.ub-figma[data-figma-active="true"] { box-shadow: 0 0 0 2px var(--ring); }
-.ub-figma .ub-block-actions > a { display: inline-flex; align-items: center; padding: 0.05rem 0.3rem; color: var(--muted-foreground); text-decoration: none; font: inherit; }
-.ub-figma .ub-block-actions > :disabled { opacity: 0.5; cursor: default; }
+.ub-figma-shield > span { opacity: 0; position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 0.2rem 0.5rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--background); color: var(--foreground); font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans); white-space: nowrap; }
+.ub-figma-shield:is(:hover, :focus-visible) > span { opacity: 1; }
+.ub-figma:is([data-figma-active="true"], :focus-within, .ProseMirror-selectednode) .ub-figma-viewer { box-shadow: 0 0 0 2px var(--ring); }
+.ub-figma:where(:hover, :focus-within, [data-figma-active="true"], [data-figma-editing="true"]) .ub-figure-toolbar { opacity: 1; pointer-events: auto; }
+.ub-figma:where([data-figma-editing="true"]) .ub-figure-toolbar { position: static; width: fit-content; margin-bottom: 0.5rem; }
 .ub-figma-fields { display: grid; gap: 0.5rem; font-family: var(--font-sans); }
 .ub-figma-fields > label { display: grid; gap: 0.2rem; font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans); }
 .ub-figma-fields [role="alert"] { color: var(--destructive); }
-.ub-figma-resize { display: block; width: 100%; height: 12px; margin-top: 0.3rem; padding: 0; border: 0; background: transparent; color: transparent; cursor: ns-resize; touch-action: none; }
+.ub-figma-resize { position: absolute; bottom: 0; left: 0; display: block; width: 100%; height: 12px; padding: 0; border: 0; background: transparent; color: transparent; cursor: ns-resize; touch-action: none; opacity: 0; }
+.ub-figma:is(:hover, :focus-within) .ub-figma-resize { opacity: 1; }
 .ub-figma-resize::after { content: ""; display: block; width: 3rem; height: 3px; margin: auto; border-radius: 2px; background: var(--muted-foreground); }
-@media (any-pointer: coarse) { .ub-figma-resize { height: 24px; } .ub-figma .ub-block-actions > :is(button, a), .ub-figma-placeholder > button { min-height: 44px; } }
+@media (pointer: coarse) {
+  .ub-figma .ub-figure-toolbar, .ub-figma .ub-figma-resize, .ub-figma-shield > span { display: none; }
+  .ub-figma:not(:fullscreen) .ub-figma-viewer > iframe { pointer-events: none; }
+  .ub-figma:where([data-figma-live="false"], [data-figma-editing="true"]) .ub-figure-toolbar { display: flex; opacity: 1; pointer-events: auto; }
+  .ub-figma[data-figma-live="false"] .ub-figure-toolbar > :disabled { display: none; }
+  .ub-figma .ub-figure-toolbar > :is(button, a), .ub-figma-placeholder > button { min-width: 44px; min-height: 44px; }
+}
 .ub-figma-print { display: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ub-figma > .ub-figure-viewer-bar { display: none; }
 .ub-figma:fullscreen { display: flex; flex-direction: column; width: 100%; height: 100%; margin: 0; background: var(--background); }
+.ub-figma:fullscreen > .ub-figure-viewer-bar { display: flex; }
+.ub-figma:fullscreen .ub-figma-panel { display: flex; flex: 1; min-height: 0; }
 .ub-figma:fullscreen .ub-figma-viewer { flex: 1; min-height: 0; height: auto; }
-.ub-figma:fullscreen .ub-figma-resize { display: none; }
+.ub-figma:fullscreen :is(.ub-figma-resize, .ub-figure-toolbar, .ub-figma-caption) { display: none; }
 .ub-figma [hidden] { display: none; }
 @media print {
-  .ub-figma-viewer, .ub-figma-fields, .ub-figma-resize, .ub-figma .ub-block-caption { display: none; }
+  .ub-figma-panel, .ub-figma-fields, .ub-figma > .ub-figure-viewer-bar { display: none; }
   .ub-figma-print { display: block; }
 }
 @media (any-pointer: coarse) {

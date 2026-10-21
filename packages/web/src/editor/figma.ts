@@ -16,7 +16,7 @@ export const Figma = Node.create({
   },
   parseHTML() { return [{ tag: "article[data-block-type=figma]" }]; },
   renderHTML({ HTMLAttributes }) {
-    return ["article", mergeAttributes({ class: "ub-figma ub-block-frame", "data-block-type": "figma" }, HTMLAttributes), 0];
+    return ["article", mergeAttributes({ class: "ub-figma", "data-block-type": "figma" }, HTMLAttributes), 0];
   },
   addNodeView() { return figmaBlockView; },
 });

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import type { Browser, CDPSession, Locator, Page } from "@playwright/test";
+import type { Browser, Locator, Page } from "@playwright/test";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import { wrapToken } from "@uberblick/schema/protocol";
@@ -41,7 +41,7 @@ async function fixture(browser: Browser, figma = false, touch = false): Promise<
   });
   const page = await openApp(browser, `/${harness().workspace}/${created.uuid}`, {
     upstream: true,
-    contextOptions: { viewport: { width: touch ? 810 : 1440, height: 1400 }, ...(touch ? { hasTouch: true } : {}) },
+    contextOptions: { viewport: { width: touch ? 810 : 1440, height: 1400 }, ...(touch ? { hasTouch: true, isMobile: false } : {}) },
     beforeNavigate: async (target) => {
       await mockFigmaLookup(target);
       await target.route("https://embed.figma.com/**", (route) => route.fulfill({
@@ -163,7 +163,14 @@ test("Edit validates fields and keeps the same hidden viewer through title and h
   await block.locator("iframe").evaluate((frame) => { frame.dataset.identity = "existing-viewer"; });
   const before = (await stored(writer, uuid)).blocks[0];
   if (before === undefined) throw new Error("e2e: stored Figma block missing");
-  await activateControl(block.getByRole("button", { name: "Edit", exact: true }));
+  if (info.project.use.hasTouch === true) {
+    await block.locator(".ub-figma-shield").tap();
+    await expect.poll(() => block.evaluate((element) => document.fullscreenElement === element)).toBe(true);
+    await block.locator(".ub-figure-viewer-bar").getByRole("button", { name: "Edit", exact: true }).tap();
+  } else {
+    await block.getByRole("button", { name: "Edit", exact: true }).focus();
+    await activateControl(block.getByRole("button", { name: "Edit", exact: true }));
+  }
   const link = block.getByRole("textbox", { name: "Figma link", exact: true });
   const title = block.getByRole("textbox", { name: "Title", exact: true });
   const height = block.getByRole("textbox", { name: "Height", exact: true });
@@ -274,33 +281,19 @@ test("mouse height drags keep their preview through peer edits, commit once, cla
   } finally { watch.close(); }
 });
 
-async function touchDrag(session: CDPSession, handle: Locator, delta: number, cancel = false): Promise<void> {
-  const start = await point(handle);
-  await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...start, id: 1 }] });
-  for (let step = 1; step <= 10; step += 1) {
-    await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: start.x, y: start.y + delta * step / 10, id: 1 }] });
-  }
-  await session.send("Input.dispatchTouchEvent", { type: cancel ? "touchCancel" : "touchEnd", touchPoints: [] });
-}
-
-test("iPad touch height drags commit once and browser cancellation restores stored height", async ({ browser, browserName }) => {
-  test.skip(browserName !== "chromium", "Native touch sequences use Chromium's browser protocol");
-  const { page, uuid, block } = await fixture(browser, true, true);
-  const watch = await watchHeight(uuid);
-  const session = await page.context().newCDPSession(page);
-  try {
-    const handle = block.locator(".ub-figma-resize");
-    await touchDrag(session, handle, 100);
-    await expect.poll(() => watch.values).toEqual(["400"]);
-    await touchDrag(session, handle, 80, true);
-    await expect(block.locator(".ub-figma-viewer")).toHaveCSS("height", "400px");
-    await proveBrowserTitleArrival(page, { path: "upstream", readTitle: watch.readTitle });
-    expect(watch.values).toEqual(["400"]);
-    await touchDrag(session, handle, 1100);
-    await expect.poll(() => watch.values).toEqual(["400", "960"]);
-    await touchDrag(session, handle, -1100);
-    await expect.poll(() => watch.values).toEqual(["400", "960", "240"]);
-  } finally {
-    try { await session.detach(); } finally { watch.close(); }
-  }
+test("iPad sets height in fields reached through the viewer and has no inline resize handle", { tag: "@webkit" }, async ({ browser }) => {
+  const { page, writer, uuid, block } = await fixture(browser, true, true);
+  await expect(block.locator(".ub-figma-resize")).toBeHidden();
+  await expect(block.locator(".ub-figure-toolbar")).toBeHidden();
+  await block.locator(".ub-figma-shield").tap();
+  await expect.poll(() => block.evaluate((element) => document.fullscreenElement === element)).toBe(true);
+  await block.locator(".ub-figure-viewer-bar").getByRole("button", { name: "Edit", exact: true }).tap();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+  const height = block.getByLabel("Height", { exact: true });
+  await height.fill("600");
+  await activateControl(block.getByRole("button", { name: "Done", exact: true }));
+  await expect(block.locator(".ub-figma-viewer")).toHaveCSS("height", "600px");
+  await expect(block.locator(".ub-figma-resize")).toBeHidden();
+  await proveMcpArrival(page, writer, uuid, { path: "upstream" });
+  await expectMcp(() => stored(writer, uuid), doc => { expect(doc.blocks[0]?.text).toContain("height: 600"); });
 });

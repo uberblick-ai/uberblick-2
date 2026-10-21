@@ -44,7 +44,7 @@ async function open(browser: Browser, uuid: string, answer: (route: Route, store
   const viewers: string[] = [];
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
     upstream: true,
-    contextOptions: options.touch ? devices["iPad (gen 7)"] : { viewport: { width: 1366, height: 1200 }, hasTouch: false, isMobile: false },
+    contextOptions: options.touch ? { ...devices["iPad (gen 7)"], isMobile: false } : { viewport: { width: 1366, height: 1200 }, hasTouch: false, isMobile: false },
     beforeNavigate: async (target) => {
       await target.context().addCookies([{ name: "figma-session", value: "synthetic-provider-cookie", domain: ".figma.com", path: "/", secure: true, sameSite: "None" }]);
       await target.route(FIGMA_LOOKUP, async (route) => {
@@ -92,16 +92,21 @@ test("a public lookup is credential-free, gates the viewer and changes only the 
   }
   const title = '<img src="https://untrusted.invalid/title" onerror="alert(1)"> & Figma title';
   for (const route of pending) await answerFigmaLookup(route, title);
-  await expect(frames.first().locator(".ub-block-label")).toHaveText(`Figma · ${title}`);
-  await expect(frames.first().locator(".ub-block-label img")).toHaveCount(0);
+  await expect(frames.first().locator(".ub-block-label")).toHaveCount(0);
+  await expect(frames.first().locator(".ub-figma-placeholder-title img")).toHaveCount(0);
   await expect(frames.first().locator("iframe")).toHaveAttribute("title", title);
-  await expect(frames.nth(1).locator(".ub-block-label")).toHaveText("Figma · Stored title");
   await expect(frames.nth(1).locator("iframe")).toHaveAttribute("title", "Stored title");
   await page.emulateMedia({ media: "print" });
   await expect(frames.first().locator(".ub-figma-print")).toHaveText(`${title}\n${LINK}`);
   await expect(frames.nth(1).locator(".ub-figma-print")).toContainText("Stored title");
   await page.emulateMedia({ media: "screen" });
-  await frames.first().getByRole("button", { name: "Edit", exact: true }).click();
+  if (info.project.use.hasTouch === true) {
+    await frames.first().locator(".ub-figma-shield").tap();
+    await frames.first().locator(".ub-figure-viewer-bar").getByRole("button", { name: "Edit", exact: true }).tap();
+  } else {
+    await frames.first().getByRole("button", { name: "Edit", exact: true }).focus();
+    await frames.first().getByRole("button", { name: "Edit", exact: true }).click();
+  }
   await expect(frames.first().getByLabel("Title", { exact: true })).toHaveValue("");
   await frames.first().getByRole("button", { name: "Done", exact: true }).first().click();
   await proveMcpArrival(page, session, created.uuid, { path: "upstream" });
@@ -125,8 +130,9 @@ test("a private placeholder holds no viewer slot; Load shares the limit and rema
   const privateFrame = frames.first();
   await expect(privateFrame.locator(".ub-figma-placeholder")).toContainText(PRIVATE);
   await expect(privateFrame.locator("iframe")).toHaveCount(0);
-  await expect(privateFrame.locator(".ub-block-label")).toHaveText("Figma · Private reference");
-  await expect(privateFrame.getByRole("button", { name: "Expand", exact: true })).toBeDisabled();
+  await expect(privateFrame.locator(".ub-figma-placeholder-title")).toHaveText("Private reference");
+  if (info.project.use.hasTouch === true) await expect(privateFrame.getByRole("button", { name: "Expand", exact: true })).toBeHidden();
+  else await expect(privateFrame.getByRole("button", { name: "Expand", exact: true })).toBeDisabled();
   await expect(frames.locator("iframe")).toHaveCount(3);
   await privateFrame.getByRole("button", { name: "Load", exact: true }).click();
   await expect(privateFrame.locator(".ub-figma-placeholder")).not.toContainText(PRIVATE);
@@ -146,7 +152,7 @@ test("a private placeholder holds no viewer slot; Load shares the limit and rema
   await expect(privateFrame.locator(".ub-figma-placeholder")).toContainText(PRIVATE);
   await expect(privateFrame.locator("iframe")).toHaveCount(0);
   await editLink(session, created, LINK.replace("lookup123", "private-again"));
-  await expect(privateFrame.locator(".ub-block-label")).toContainText("Private reference");
+  await expect(privateFrame.locator(".ub-figma-placeholder-title")).toHaveText("Private reference");
   await expect.poll(() => lookups.some(({ url }) => url.includes("private-again"))).toBe(true);
   await expect(privateFrame.locator(".ub-figma-placeholder")).toContainText(PRIVATE);
   await expect(privateFrame.locator("iframe")).toHaveCount(0);
@@ -158,7 +164,7 @@ test("a failed lookup falls back to the stored link title without a private warn
   const { page } = await open(browser, created.uuid, (route) => route.fulfill({ status: 503, body: "Unavailable", headers: CORS }));
   const frame = page.locator(".ub-figma");
   await expect(frame.locator("iframe")).toHaveAttribute("title", "Stored file name");
-  await expect(frame.locator(".ub-block-label")).toHaveText("Figma · Stored file name");
+  await expect(frame.locator(".ub-block-label")).toHaveCount(0);
   await expect(frame.locator(".ub-figma-placeholder")).not.toContainText(PRIVATE);
   await expect(frame.getByRole("button", { name: "Load", exact: true })).toBeHidden();
 });
@@ -176,7 +182,7 @@ test("offline and distant blocks wait until eligible, and revisiting a block reu
   });
   await expect(frames.first().locator("iframe")).toHaveAttribute("title", "Cached title");
   expect(lookups.map(({ url }) => url)).toEqual([LINK]);
-  await expect(frames.last().locator(".ub-block-label")).toHaveText("Figma · Stored file name");
+  await expect(frames.last().locator(".ub-figma-placeholder-title")).toHaveText("Stored file name");
   await frames.last().scrollIntoViewIfNeeded();
   await expect(frames.last().locator("iframe")).toHaveAttribute("title", "Cached title");
   await expect(frames.first().locator("iframe")).toHaveCount(0);
@@ -195,7 +201,7 @@ test("link changes discard the old title and status and ignore an earlier link's
   const next = LINK.replace("lookup123", "next123").replace("Stored-file-name", "Next-file-name");
   await editLink(session, created, next);
   await expect.poll(() => pending.length).toBe(2);
-  await expect(frame.locator(".ub-block-label")).toHaveText("Figma · Next file name");
+  await expect(frame.locator(".ub-figma-placeholder-title")).toHaveText("Next file name");
   const old = pending[0]; const current = pending[1];
   if (old === undefined || current === undefined) throw new Error("e2e: lookup requests are missing");
   await current.fulfill({ status: 404, body: "Missing", headers: CORS });
@@ -206,13 +212,13 @@ test("link changes discard the old title and status and ignore an earlier link's
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 0)));
   }));
-  await expect(frame.locator(".ub-block-label")).toHaveText("Figma · Next file name");
+  await expect(frame.locator(".ub-figma-placeholder-title")).toHaveText("Next file name");
   await expect(frame.locator("iframe")).toHaveCount(0);
   await expect(frame.getByRole("button", { name: "Load", exact: true })).toBeVisible();
   const third = LINK.replace("lookup123", "third123").replace("Stored-file-name", "Third-file-name");
   await editLink(session, created, third);
   await expect.poll(() => lookups.length).toBe(3);
-  await expect(frame.locator(".ub-block-label")).toHaveText("Figma · Third file name");
+  await expect(frame.locator(".ub-figma-placeholder-title")).toHaveText("Third file name");
   await expect(frame.locator(".ub-figma-placeholder")).not.toContainText(PRIVATE);
   const latest = pending[2];
   if (latest === undefined) throw new Error("e2e: latest lookup request is missing");
@@ -221,11 +227,11 @@ test("link changes discard the old title and status and ignore an earlier link's
   const fourth = LINK.replace("lookup123", "fourth123").replace("Stored-file-name", "Fourth-file-name");
   await editLink(session, created, fourth);
   await expect.poll(() => pending.length).toBe(4);
-  await expect(frame.locator(".ub-block-label")).toHaveText("Figma · Fourth file name");
+  await expect(frame.locator(".ub-figma-placeholder-title")).toHaveText("Fourth file name");
   await expect(frame.locator("iframe")).toHaveCount(0);
   const final = pending[3];
   if (final === undefined) throw new Error("e2e: final lookup request is missing");
   await final.fulfill({ status: 404, body: "Missing", headers: CORS });
   await expect(frame.locator(".ub-figma-placeholder")).toContainText(PRIVATE);
-  await expect(frame.locator(".ub-block-label")).toHaveText("Figma · Fourth file name");
+  await expect(frame.locator(".ub-figma-placeholder-title")).toHaveText("Fourth file name");
 });

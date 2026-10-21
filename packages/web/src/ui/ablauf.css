@@ -9,36 +9,7 @@
 .ub-ablauf-viewport[data-zoomable="true"] { cursor: zoom-in; }
 .ub-ablauf.ProseMirror-selectednode .ub-ablauf-viewport,
 .ub-ablauf:focus-within .ub-ablauf-viewport { box-shadow: 0 0 0 2px var(--ring); }
-.ub-figure-toolbar {
-  position: absolute;
-  top: 0.35rem;
-  right: 0.35rem;
-  display: flex;
-  gap: 0.3rem;
-  padding: 0.15rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--popover);
-  color: var(--popover-foreground);
-  font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
-  opacity: 0;
-  pointer-events: none;
-}
-.ub-figure-toolbar > button {
-  min-height: 1.5rem;
-  padding: 0.05rem 0.3rem;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-.ub-figure-toolbar > button:hover { background: var(--accent); }
-.ub-ablauf:hover .ub-figure-toolbar,
-.ub-ablauf:focus-within .ub-figure-toolbar,
-.ub-ablauf-editing .ub-figure-toolbar,
-.ub-ablauf[data-annotated="true"] .ub-figure-toolbar { opacity: 1; pointer-events: auto; }
+.ub-ablauf:where(:hover, :focus-within, .ub-ablauf-editing, [data-annotated="true"]) .ub-figure-toolbar { opacity: 1; pointer-events: auto; }
 .ub-ablauf-source-frame { display: none; }
 .ub-ablauf-editing > .ub-ablauf-source-frame,
 .ub-ablauf[data-annotated="true"] > .ub-ablauf-source-frame { display: block; }
