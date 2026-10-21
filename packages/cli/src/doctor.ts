@@ -82,7 +82,7 @@ function bindingRefusal(error: unknown, env: NodeJS.ProcessEnv, cwd: string): st
     try { parseWorkspaceId(env.UB_WORKSPACE_ID); }
     catch { return "UB_WORKSPACE_ID is not a valid workspace id"; }
     if (env.UB_HUB_URL !== undefined && !env.UB_HUB_URL.trim()) return "UB_HUB_URL must not be empty";
-    if (reason.startsWith("This machine has no hub record")) return "this computer has no hub record for UB_WORKSPACE_ID and no UB_HUB_URL";
+    if (reason.startsWith("This machine has neither a copy nor a hub record")) return "this computer has neither a copy nor a hub record for UB_WORKSPACE_ID; add UB_HUB_URL or fetch with ub workspace use <link>";
     return /UB_WORKSPACE_ID|UB_HUB_URL/.test(reason) ? reason : `UB_HUB_URL: ${reason}`;
   }
   if (env.WORKSPACE_ID?.trim() || env.HUB_URL?.trim()) return "legacy WORKSPACE_ID / HUB_URL variables are no longer supported";

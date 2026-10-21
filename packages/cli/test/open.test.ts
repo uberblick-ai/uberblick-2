@@ -26,7 +26,8 @@ import { MAX_TOKEN_LIFETIME_SECONDS } from "@uberblick/schema/token";
 import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
-import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
+import { defaultWorkspaceDatabasePath, resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
+import { MirrorStore } from "../../mcp-server/src/store.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { localBrowserKey } from "../src/browser-key.js";
 import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
@@ -88,16 +89,19 @@ describe("ub open", () => {
     { source: "project", hubUrl: FIRST_REMOTE },
     { source: "environment", hubUrl: null },
     { source: "environment", hubUrl: FIRST_REMOTE },
+    { source: "id-only", hubUrl: null },
   ])("remembers a first $source binding with hub $hubUrl after serving", async ({ source, hubUrl }) => {
     const box = source === "project"
       ? sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl } })
       : unboundSandbox();
     const env = {
       UBERBLICK_WEB_DIST: fixtureBundle(box), BROWSER: "none",
-      ...(source === "environment" ? {
-        UB_WORKSPACE_ID: `browser-${WORKSPACE}`, UB_HUB_URL: hubUrl ?? "local",
+      ...(source !== "project" ? {
+        UB_WORKSPACE_ID: `browser-${WORKSPACE}`,
+        ...(source === "environment" ? { UB_HUB_URL: hubUrl ?? "local" } : {}),
       } : {}),
     };
+    if (source === "id-only") new MirrorStore(defaultWorkspaceDatabasePath(WORKSPACE, box.env), WORKSPACE).close();
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
     const app = await open(box, ["--port", String(await freePort())], env);
     try {

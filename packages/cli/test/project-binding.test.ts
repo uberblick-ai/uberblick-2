@@ -2,6 +2,8 @@ import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { resolveConfig } from "@uberblick/mcp-server/project-config";
+import { defaultWorkspaceDatabasePath } from "@uberblick/mcp-server";
+import { MirrorStore } from "../../mcp-server/src/store.js";
 import { resolveProjectBinding, writeProjectBinding } from "@uberblick/mcp-server/project-binding";
 import { ensureWorkspaceBinding, readWorkspaceHub, workspaceRegistryPath } from "@uberblick/mcp-server/workspace-registry";
 import { runUb, sandbox, unboundSandbox, removeTempDirs } from "./helpers.js";
@@ -93,7 +95,10 @@ describe("atomic project bindings", () => {
   it.each([null, "wss://recorded.example.test/ws"])("resolves id-only overrides by machine record (%s) and keeps child environments complete", async (hubUrl) => {
     const box = sandbox({ projectBinding: { workspaceId: second, hubUrl: "https://project.example.test" } });
     await ensureWorkspaceBinding({ workspaceId: first, hubUrl }, box.env);
+    new MirrorStore(defaultWorkspaceDatabasePath(first, box.env), first).close();
     vi.stubEnv("XDG_CONFIG_HOME", box.configHome);
+    vi.stubEnv("XDG_DATA_HOME", box.dataHome);
+    vi.stubEnv("UBERBLICK_DB", undefined);
     for (const id of [first, `notes-${first}`]) {
       const run = await runInProcess(["status"], box, { UB_WORKSPACE_ID: id });
       expect(run.status, run.output).toBe(0);
@@ -104,6 +109,42 @@ describe("atomic project bindings", () => {
       expect([resolved.env.UB_WORKSPACE_ID, resolved.env.UB_HUB_URL])
         .toEqual([id, hubUrl ?? "local"]);
     }
+  });
+
+  it.each([first, `notes-${first}`])("resolves an unrecorded replica as local for an id-only override: %s", async id => {
+    const box = sandbox({ projectBinding: { workspaceId: second, hubUrl: "https://project.example.test" } });
+    new MirrorStore(defaultWorkspaceDatabasePath(first, box.env), first).close();
+    vi.stubEnv("XDG_CONFIG_HOME", box.configHome);
+    vi.stubEnv("XDG_DATA_HOME", box.dataHome);
+    vi.stubEnv("UBERBLICK_DB", undefined);
+    const resolved = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: id }, cwd: box.cwd });
+    expect(resolved.binding).toEqual({ workspaceId: id, hubUrl: null });
+    expect(resolved.origins.workspace).toBe("environment");
+    expect(resolved.env.UB_HUB_URL).toBe("local");
+    expect(readWorkspaceHub(first, box.env)).toBeUndefined();
+    const run = await runInProcess(["status"], box, { UB_WORKSPACE_ID: id });
+    expect(run.status, run.output).toBe(0);
+    expect(run.stdout).toContain(first);
+    expect(run.stdout).toContain("local, this computer only");
+    expect(run.stdout).toMatch(/^chosen by\s+environment$/m);
+    expect(readWorkspaceHub(first, box.env)).toBeNull();
+  });
+
+  it.each([false, true])("takes replica roots from the process for partial MCP environments (custom path: %s)", custom => {
+    const box = sandbox();
+    const wrong = sandbox();
+    const path = custom ? join(box.cwd, "custom.sqlite") : defaultWorkspaceDatabasePath(first, box.env);
+    new MirrorStore(path, first).close();
+    vi.stubEnv("XDG_CONFIG_HOME", box.configHome);
+    vi.stubEnv("XDG_DATA_HOME", box.dataHome);
+    vi.stubEnv("UBERBLICK_DB", custom ? path : undefined);
+    const env = { UB_WORKSPACE_ID: `notes-${first}`, XDG_DATA_HOME: wrong.dataHome, UBERBLICK_DB: join(wrong.cwd, "missing.sqlite") };
+    expect(resolveProjectBinding({ env }).binding).toEqual({ workspaceId: `notes-${first}`, hubUrl: null });
+    expect(readWorkspaceHub(first, box.env)).toBeUndefined();
+    vi.stubEnv("XDG_DATA_HOME", wrong.dataHome);
+    vi.stubEnv("UBERBLICK_DB", undefined);
+    expect(() => resolveProjectBinding({ env: { ...env, XDG_DATA_HOME: box.dataHome, UBERBLICK_DB: path } }))
+      .toThrow("neither a copy nor a hub record");
   });
 
   it("takes registry roots from the process even when checking an MCP entry's partial env", async () => {
@@ -121,6 +162,7 @@ describe("atomic project bindings", () => {
     const box = sandbox({ projectBinding: { workspaceId: first, hubUrl: "https://project.example.test" } });
     const run = runUb(["status"], box, { UB_WORKSPACE_ID: id });
     expect(run.status).toBe(1);
+    expect(run.stderr).toContain("This machine has neither a copy nor a hub record for UB_WORKSPACE_ID.");
     expect(run.stderr).toContain("Add UB_HUB_URL (a hub address, or local)");
     expect(run.stderr).toContain("ub workspace use <link>");
     expect(readWorkspaceHub(first, box.env)).toBeUndefined();
