@@ -609,7 +609,8 @@ describe("the sidebar is the _sidebar document", () => {
       tombstoneDirectoryEntry(directoryPeer, ONE);
     });
     // The title the stub still carries, marked — never an eight-character uuid.
-    expect(rowTitles(host, 0)).toEqual(["Overview \u00b7 archived", "Editing"]);
+    expect(rowTitles(host, 0)).toEqual(["Overviewarchived", "Editing"]);
+    expect(host.querySelector(".ub-pin-label .ub-badge.ub-archived")?.textContent).toBe("archived");
     expect(within(host).getByLabelText("Sidebar").textContent ?? "").not.toContain(
       ONE.slice(0, 8),
     );
@@ -641,12 +642,11 @@ describe("the sidebar is the _sidebar document", () => {
     const host = await openApp(`/${WORKSPACE}`);
     expect(rowTitles(host, 0)).toEqual([
       "Overview",
-      "Editing · archived",
+      "Editingarchived",
       "Untitled",
       unknown.slice(0, 8),
     ]);
-    // The same words, with the suffix — and for the stub the whole uuid, since
-    // the eight characters on the row are what there is to recover from.
+    // The tooltip retains the archived state and recovers the stub's whole UUID.
     expect(rowTooltips(host, 0)).toEqual([
       "Overview",
       "Editing · archived",

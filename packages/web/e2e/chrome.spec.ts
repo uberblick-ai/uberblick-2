@@ -125,6 +125,26 @@ function paintedIn(locator: Locator, property: string): Promise<string> {
   );
 }
 
+/** Save and submit use neutral emphasis, including each consumer's cascade. */
+async function expectNeutralEmphasis(control: Locator): Promise<void> {
+  await expect(control).toBeEnabled();
+  const tokens = await control.evaluate((element) => {
+    const probe = document.createElement("span");
+    probe.style.cssText = "background:var(--card-accent);border:1px solid var(--muted-foreground);color:var(--foreground)";
+    element.append(probe);
+    const style = getComputedStyle(probe);
+    const paint = { fill: style.backgroundColor, edge: style.borderColor, ink: style.color };
+    probe.remove();
+    return paint;
+  });
+  await expect(control).toHaveCSS("background-color", tokens.fill);
+  await expect(control).toHaveCSS("border-color", tokens.edge);
+  await expect(control).toHaveCSS("color", tokens.ink);
+  await expect(control).toHaveCSS("opacity", "1");
+  expect(contrast(await paintedIn(control, "color"), await paintedIn(control, "background-color")))
+    .toBeGreaterThanOrEqual(4.5);
+}
+
 /** A keyboard focus cue must be painted, regardless of its chosen thickness. */
 async function expectFocusIndicator(control: Locator): Promise<void> {
   await expect(control).toBeFocused();
@@ -775,7 +795,9 @@ for (const scheme of ["light", "dark"] as const) {
     });
     const text = "Summary without layout surprises. ".repeat(9).slice(0, 300);
     await input.fill(text);
-    await activate(page.getByRole("button", { name: "Save", exact: true }));
+    const save = page.getByRole("button", { name: "Save", exact: true });
+    await expectNeutralEmphasis(save);
+    await activate(save);
     const hideList = page.getByRole("button", { name: "Hide document list" });
     if (await hideList.isVisible()) await activate(hideList);
 
@@ -2937,7 +2959,7 @@ for (const scheme of ["light"] as const) {
  * Seed both thread states through schema operations for deterministic orphaning
  * without a reload or key deletion.
  */
-for (const scheme of ["dark"] as const) {
+for (const scheme of ["light", "dark"] as const) {
   test(`card highlights share one fill and keep their rendered floors — ${scheme}`, async ({ browser }) => {
     const page = await openAppearanceApp(browser, scheme);
     await page.setViewportSize({ width: 1000, height: 1000 });
@@ -2950,8 +2972,12 @@ for (const scheme of ["dark"] as const) {
         const card = getComputedStyle(probe).backgroundColor;
         probe.style.backgroundColor = "var(--card-accent)";
         const accent = getComputedStyle(probe).backgroundColor;
+        probe.style.borderColor = "var(--brand)";
+        const selectedEdge = getComputedStyle(probe).borderColor;
+        probe.style.backgroundColor = "var(--brand-subtle)";
+        const selectedFill = getComputedStyle(probe).backgroundColor;
         probe.remove();
-        return { card, accent };
+        return { card, accent, selectedEdge, selectedFill };
       });
       const check = async (control: Locator, ground = tokens.card) => {
         await expect(control).toBeVisible();
@@ -3003,6 +3029,16 @@ for (const scheme of ["dark"] as const) {
       await page.keyboard.press("Backspace");
       await page.keyboard.type("highlight range");
       for (let index = 0; index < "highlight range".length; index += 1) await page.keyboard.press("Shift+ArrowLeft");
+      const bold = page.getByRole("button", { name: "Bold", exact: true });
+      await bold.click();
+      await page.mouse.move(999, 999);
+      await expect(bold).toHaveAttribute("data-state", "on");
+      await expect(bold).toHaveCSS("border-color", tokens.selectedEdge);
+      await expect(bold).toHaveCSS("background-color", tokens.selectedFill);
+      await page.getByRole("button", { name: "External link", exact: true }).click();
+      await page.getByRole("textbox", { name: "External link URL", exact: true }).fill("https://example.invalid/contrast");
+      await expectNeutralEmphasis(page.getByRole("button", { name: "Apply", exact: true }));
+      await page.getByRole("button", { name: "Cancel", exact: true }).click();
       await page.getByRole("button", { name: "Comment", exact: true }).click();
       const composer = page.locator('[data-slot="selection-composer"]');
       await expect(composer).toBeVisible();
@@ -3010,8 +3046,8 @@ for (const scheme of ["dark"] as const) {
       expect(composerGround).toBe(tokens.card);
       await check(composer.getByRole("button", { name: "Cancel", exact: true }), composerGround);
       await check(composer.locator(".ub-mention").first(), composerGround);
-      // The submit keeps the separate brand emphasis.
-      expect(await paintedIn(composer.getByRole("button", { name: "Comment", exact: true }), "background-color")).not.toBe(tokens.accent);
+      await composer.getByRole("textbox").fill("A comment with neutral submit emphasis.");
+      await expectNeutralEmphasis(composer.getByRole("button", { name: "Comment", exact: true }));
       await composer.getByRole("button", { name: "Cancel", exact: true }).click();
     }, true);
   });

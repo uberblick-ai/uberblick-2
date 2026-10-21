@@ -1,10 +1,13 @@
 import { join } from "node:path";
+import type { Editor } from "@tiptap/core";
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { appendBlock, createGroup, getDirectoryEntry, getDirectoryMap, getMetaMap, pinDoc, sidebarRoom } from "@uberblick/schema";
 import { activateControl, closeIfOpen, editor, setupHarness } from "./app-helpers.js";
 import { legacyDecisionPeer } from "./legacy-decision-peer.js";
+import { renderedText } from "./contrast-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
+import { setNativeSelection } from "./native-selection.js";
 import { expectMcp, proveMcpArrival } from "./settle.js";
 import type { McpSession } from "./mcp-agent.js";
 
@@ -134,8 +137,7 @@ async function selectedRfc(page: Page, rfc: StoredDoc | null, title = ""): Promi
   }
   await expect(line).toHaveCount(1);
   await expect(line.getByText("RFC", { exact: true })).toBeVisible();
-  // An archived RFC adds its badge pill after the title.
-  await expect(line.getByRole("link")).toHaveText(new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(archived)?$`));
+  await expect(line.getByRole("link")).toHaveText(title);
   await expect(line.getByRole("link")).toHaveAttribute("href", new RegExp(`/${rfc.uuid}$`));
   await expect(page.locator(".ub-decision-answer + .ub-decision-rfc + .ub-decision-history")).toHaveCount(1);
 }
@@ -220,18 +222,62 @@ async function copyPath(page: Page, expected: string, touch: boolean): Promise<s
   return `${new URL(page.url()).origin}${expected}`;
 }
 
-async function archivedLink(link: Locator, timeline = false): Promise<void> {
+async function archivedLink(link: Locator): Promise<void> {
   await expect(link).toHaveAttribute("data-doc-link-state", "archived");
   const style = await link.evaluate((element) => ({
     label: getComputedStyle(element, "::after").content,
+    display: getComputedStyle(element, "::after").display,
+    pillDecoration: getComputedStyle(element, "::after").textDecorationLine,
     decoration: getComputedStyle(element).textDecorationLine,
   }));
-  if (timeline) {
-    await expect(link.locator(".ub-decision-archived")).toHaveCount(1);
-    await expect(link.locator(".ub-decision-archived")).toBeVisible();
-    expect(style.label).not.toContain("archived");
-  } else expect(style.label).toContain("archived");
+  expect(style.label).toBe('"archived"');
+  expect(["inline-block", "block"]).toContain(style.display);
+  expect(style.pillDecoration).toBe("none");
   expect(style.decoration).not.toContain("line-through");
+  const title = link.locator(".ub-decision-rfc-title");
+  if (await title.count() > 0) {
+    expect(style.decoration).toBe("none");
+    await expect(title).toHaveCSS("text-decoration-line", "underline");
+    await expect(title).toHaveCSS("text-decoration-style", "dotted");
+  }
+}
+
+async function bannerAction(action: Locator, touch: boolean): Promise<void> {
+  await expect(action).toBeVisible();
+  const layout = await action.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const text = document.createRange();
+    text.selectNodeContents(element);
+    const label = text.getBoundingClientRect();
+    const banner = element.parentElement;
+    const message = banner?.querySelector(":scope > span");
+    if (banner === null || message === null || message === undefined) throw new Error("e2e: missing banner message");
+    const messageBox = message.getBoundingClientRect();
+    return {
+      coarse: matchMedia("(any-pointer: coarse)").matches,
+      height: box.height,
+      labelCenter: label.top + label.height / 2,
+      center: box.top + box.height / 2,
+      sharesLine: Math.min(box.bottom, messageBox.bottom) > Math.max(box.top, messageBox.top),
+    };
+  });
+  expect(layout.coarse).toBe(touch);
+  expect(Math.abs(layout.labelCenter - layout.center)).toBeLessThanOrEqual(2);
+  if (touch) expect(layout.height).toBeGreaterThanOrEqual(44);
+  else {
+    expect(layout.height).toBeLessThan(44);
+    expect(layout.sharesLine).toBe(true);
+  }
+}
+
+async function pillStyle(pill: Locator, pseudo = ""): Promise<Record<string, string>> {
+  return pill.evaluate((element, pseudo) => {
+    const style = getComputedStyle(element, pseudo || null);
+    return Object.fromEntries([
+      "background-color", "color", "border-top-color", "border-top-style", "border-top-width", "border-radius",
+      "padding-top", "padding-right", "padding-bottom", "padding-left", "font-family", "font-size", "font-weight", "line-height",
+    ].map(property => [property, style.getPropertyValue(property)]));
+  }, pseudo);
 }
 
 async function answerHeader(page: Page, label: string, state: string): Promise<void> {
@@ -490,7 +536,7 @@ async function timelineLayout(page: Page, selectedUuid: string, touch: boolean, 
     await expect(rfc).toHaveCSS("text-overflow", "ellipsis");
     expect(await preview.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
     expect(await rfc.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
-    await archivedLink(entry(page, selectedUuid).locator(".ub-decision-record-rfc .ub-doclink"), true);
+    await archivedLink(entry(page, selectedUuid).locator(".ub-decision-record-rfc .ub-doclink"));
   }
   expect(layout.scroll).toBeLessThanOrEqual(layout.width + 1);
   expect(layout.paneScroll).toBeLessThanOrEqual(layout.paneWidth + 1);
@@ -545,6 +591,117 @@ for (const { touch, appearance } of [
   { touch: false, appearance: "light" }, { touch: false, appearance: "dark" },
   { touch: true, appearance: "light" }, { touch: true, appearance: "dark" },
 ] as const) {
+  test(`archived prose, table and sidebar pills preserve labels on ${touch ? "iPad touch @webkit-touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
+    const writer = session();
+    const target = await create(writer, "Archived title that must truncate before its marker ".repeat(5), "The archived target remains readable.");
+    const source = await create(writer, "Archived reference fixture", "", { blocks: [
+      { type: "paragraph", inline: [{ text: "prose reference", marks: { docLink: target.uuid } }] },
+      { type: "table", text: `| Reference |\n| --- |\n| [table reference](${target.uuid}) |` },
+    ] });
+    await writer.call("archive_doc", { uuid: target.uuid });
+    const pinned = await writer.call<{ groups: Array<{ id: string; name: string }> }>("pin_doc", { uuid: target.uuid, group: "Archived markers" });
+    const group = pinned.groups.find(group => group.name === "Archived markers");
+    if (group === undefined) throw new Error("e2e: missing archived marker group");
+    try {
+      const page = await openApp(browser, `/${harness().workspace}/${source.uuid}`, {
+        upstream: true,
+        contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1440, height: 1000 } }), colorScheme: appearance },
+      });
+      const prose = editor(page).locator(":scope > p .ub-doclink");
+      const cell = editor(page).locator(".ub-table td .ub-doclink");
+      for (const link of [prose, cell]) {
+        await archivedLink(link);
+        await expect(link).toHaveAttribute("title", "This document is archived. The link opens it read-only.");
+        await expect(link).toHaveCSS("text-decoration-style", "dotted");
+      }
+      await expect(prose).toHaveText("prose reference");
+      await expect(cell).toHaveText("table reference");
+      const commonStyle = await pillStyle(prose, "::after");
+      expect(await pillStyle(cell, "::after")).toEqual(commonStyle);
+      const neutral = await prose.evaluate((element) => {
+        const probe = document.createElement("span");
+        probe.style.color = "var(--muted-foreground)";
+        probe.style.backgroundColor = "var(--muted)";
+        element.append(probe);
+        try { return { ink: getComputedStyle(probe).color, fill: getComputedStyle(probe).backgroundColor }; }
+        finally { probe.remove(); }
+      });
+      expect(commonStyle.color).toBe(neutral.ink);
+      expect(commonStyle["background-color"]).toBe(neutral.fill);
+      const proseReadings = (await renderedText(page, ".ub-editor .ProseMirror")).filter(reading => reading.where.endsWith("::after"));
+      expect(proseReadings).toHaveLength(2);
+      for (const reading of proseReadings) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
+      await setNativeSelection(prose, () => prose.evaluate((element) => {
+        const root = element.closest(".ProseMirror") as HTMLElement & { editor: Editor };
+        root.focus();
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const selection = document.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        return {
+          anchor: root.editor.view.posAtDOM(element, 0),
+          head: root.editor.view.posAtDOM(element, element.childNodes.length),
+        };
+      }));
+      expect(await page.evaluate(() => document.getSelection()?.toString())).toBe("prose reference");
+      const copied = await editor(page).evaluate((element) => {
+        const clipboard = new DataTransfer();
+        element.dispatchEvent(new ClipboardEvent("copy", { clipboardData: clipboard, bubbles: true, cancelable: true }));
+        return {
+          text: clipboard.getData("text/plain"),
+          htmlText: new DOMParser().parseFromString(clipboard.getData("text/html"), "text/html").body.textContent,
+        };
+      });
+      expect(copied.text).toBe("prose reference");
+      expect(copied.htmlText).toBe("prose reference");
+      for (const link of [prose, cell]) {
+        await activateControl(link, { touch });
+        await expect(page).toHaveURL(new RegExp(`/${target.uuid}$`));
+        await expect(page.locator(".ub-archived-banner")).toBeVisible();
+        await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+        await expect(editor(page)).toHaveText(answerText(target));
+        await page.goBack();
+        await expect(prose).toBeVisible();
+      }
+      const show = page.getByRole("button", { name: "Show document list", exact: true });
+      if (await show.isVisible()) await activateControl(show, { touch });
+      const pin = page.locator(".ub-pin-row > button").filter({ hasText: target.title });
+      const pill = pin.locator(".ub-archived");
+      await expect(pill).toHaveText("archived");
+      await expect(pill).toBeVisible();
+      expect(await pillStyle(pill)).toEqual(commonStyle);
+      const layout = await pin.evaluate((element) => {
+        const title = element.querySelector(".ub-pin-title");
+        const marker = element.querySelector(".ub-archived");
+        if (title === null || marker === null) throw new Error("e2e: missing archived pin label");
+        const row = element.getBoundingClientRect();
+        const titleBox = title.getBoundingClientRect();
+        const markerBox = marker.getBoundingClientRect();
+        return {
+          truncated: title.scrollWidth > title.clientWidth,
+          ellipsis: getComputedStyle(title).textOverflow,
+          titleRight: titleBox.right, pillLeft: markerBox.left, pillRight: markerBox.right, rowRight: row.right,
+        };
+      });
+      expect(layout.truncated).toBe(true);
+      expect(layout.ellipsis).toBe("ellipsis");
+      expect(layout.pillLeft).toBeGreaterThanOrEqual(layout.titleRight);
+      expect(layout.pillRight).toBeLessThanOrEqual(layout.rowRight);
+      const pinReadings = (await renderedText(page, ".ub-pin-row")).filter(reading => reading.where.includes(".ub-archived"));
+      expect(pinReadings.length).toBeGreaterThan(0);
+      for (const reading of pinReadings) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
+      await pin.screenshot({
+        path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `archived-pin-${test.info().project.name}-${touch ? "ipad" : "desktop"}-${appearance}.png`),
+      });
+      await activateControl(pin, { touch });
+      await expect(page).toHaveURL(new RegExp(`/${target.uuid}$`));
+      await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+    } finally {
+      await writer.call("sidebar_group", { action: "delete", group: group.id });
+    }
+  });
+
   test(`decision record archive and restore preserve the topic on ${touch ? "iPad touch @webkit-touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
     const writer = session();
     const first = await create(writer, "Record archive topic", "Original answer to retain.", { kind: "decision", status: "decided" });
@@ -708,7 +865,7 @@ for (const { touch, appearance } of [
     await writer.call("set_metadata", { uuid: currentRfc.uuid, title: currentRfcTitle });
     await selectedRfc(page, currentRfc, currentRfcTitle);
     await writer.call("archive_doc", { uuid: currentRfc.uuid });
-    await archivedLink(page.locator(".ub-decision-rfc a"), true);
+    await archivedLink(page.locator(".ub-decision-rfc a"));
     await selectedTopicPin(page, touch);
     const topicRecords = [first.uuid, current.uuid, rejected.uuid, withdrawn.uuid, pending.uuid];
     const actions = page.getByRole("button", { name: "Document actions", exact: true });
@@ -741,10 +898,13 @@ for (const { touch, appearance } of [
     await timelineLayout(page, current.uuid, touch);
     await expect(page.locator(`.ub-document-pane a[href$="/${owner.uuid}"], .ub-document-pane a[href$="/${formerOwner.uuid}"]`)).toHaveCount(0);
     await archivedLink(page.locator(".ub-decision-notice a"));
-    await archivedLink(entry(page, pending.uuid).locator(".ub-doclink"), true);
+    await bannerAction(page.locator(".ub-decision-notice a"), touch);
+    await archivedLink(entry(page, pending.uuid).locator(".ub-doclink"));
     const historyRfc = entry(page, current.uuid).locator(".ub-decision-record-rfc a");
     await expect(historyRfc.locator(".ub-decision-rfc-title")).toHaveText(currentRfcTitle);
-    await archivedLink(historyRfc, true);
+    await archivedLink(historyRfc);
+    expect(await pillStyle(historyRfc, "::after")).toEqual(await pillStyle(page.locator(".ub-decision-notice a"), "::after"));
+    expect(await pillStyle(page.locator(".ub-decision-rfc a"), "::after")).toEqual(await pillStyle(historyRfc, "::after"));
     await expect(entry(page, rejected.uuid).locator(".ub-decision-record-rfc a")).toHaveText("Original answer RFC");
     await rfcLayout(page);
     await copyPath(page, topicPath, touch);
@@ -815,6 +975,7 @@ for (const { touch, appearance } of [
     const replacementAge = await entry(page, current.uuid).locator("time").textContent();
     await expect(page.locator(".ub-decision-earlier-answer")).toContainText(`Earlier answer. Replaced ${replacementAge}; it no longer applies.`);
     await expect(page.getByRole("link", { name: "Go to the current answer", exact: true })).toBeVisible();
+    await bannerAction(page.getByRole("link", { name: "Go to the current answer", exact: true }), touch);
     await page.screenshot({
       path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `decision-topic-${test.info().project.name}-${touch ? "ipad" : "desktop"}-${appearance}-earlier.png`), fullPage: true,
     });
@@ -886,7 +1047,7 @@ for (const { touch, appearance } of [
     await expect(page).toHaveURL(new RegExp(`${currentPath}$`));
     await selected(page, current.uuid, answerText(current));
     await selectedRfc(page, currentRfc, currentRfcTitle);
-    await archivedLink(page.locator(".ub-decision-rfc a"), true);
+    await archivedLink(page.locator(".ub-decision-rfc a"));
     await rfcLayout(page);
     const archivedRail = await readThread(page, "Conversation about the current answer.", touch);
     await expect(archivedRail.getByRole("button", { name: /^(Reply|Resolve|Reopen)$/ })).toHaveCount(0);

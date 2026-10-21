@@ -15,6 +15,7 @@ import { activateControl, editor, setupHarness } from "./app-helpers.js";
 import { placeCaretIn } from "./harness.js";
 import { proveBrowserArrival } from "./settle.js";
 import { advancePageTimers, installPageTimers, pausePageTimers, resumePageTimers } from "./page-timers.js";
+import { composite, contrast, pageGrounds } from "../test/colour.js";
 
 const { harness, trackContext, ws } = setupHarness();
 const SOURCE = "| A | B |\n| --- | --- |\n| alpha | one |\n| beta | two |\n| gamma | three |";
@@ -66,6 +67,28 @@ function handle(page: Page, row: number): Locator {
 }
 
 function indicator(page: Page): Locator { return page.locator(".ub-table-row-drop"); }
+
+async function expectNeutralDropLine(line: Locator): Promise<void> {
+  await expect(line).toBeVisible();
+  const paint = await line.evaluate((element) => {
+    const probe = document.createElement("span");
+    probe.style.backgroundColor = "var(--foreground)";
+    element.append(probe);
+    const foreground = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    const style = getComputedStyle(element);
+    const body = getComputedStyle(document.body);
+    return {
+      color: style.backgroundColor, opacity: Number(style.opacity), foreground,
+      pageImage: body.backgroundImage, pageColor: body.backgroundColor,
+    };
+  });
+  expect(paint.color).toBe(paint.foreground);
+  expect(paint.opacity).toBe(1);
+  for (const ground of pageGrounds(paint.pageImage, paint.pageColor)) {
+    expect(contrast(composite(paint.color, ground, paint.opacity), ground)).toBeGreaterThanOrEqual(3);
+  }
+}
 
 function bodyNames(table: Locator): Locator {
   return table.locator("tr:has(td) > td:first-child");
@@ -177,13 +200,7 @@ test("mouse pickup leaves every row readable and drops only at a body gap", { ta
     await expect(indicator(page)).toBeVisible();
     for (const colorScheme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme });
-      const painted = await indicator(page).evaluate((element) => {
-        const style = getComputedStyle(element);
-        return { color: style.backgroundColor, opacity: Number(style.opacity) };
-      });
-      expect(painted.color).not.toBe("transparent");
-      expect(painted.color).not.toBe("rgba(0, 0, 0, 0)");
-      expect(painted.opacity).toBeGreaterThan(0);
+      await expectNeutralDropLine(indicator(page));
     }
     await page.emulateMedia({ colorScheme: "light" });
     await expect(bodyNames(table)).toHaveText(INITIAL);
@@ -315,6 +332,11 @@ test("a column pill drags its column to another gap, keeps the caret there and u
     await expect(page.getByRole("menu")).toHaveCount(0);
     await overColumn(2, 0.75);
     await expect(columnIndicator).toHaveAttribute("data-gap", "3");
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await expectNeutralDropLine(columnIndicator);
+    }
+    await page.emulateMedia({ colorScheme: "light" });
     await expect(table.locator("th")).toHaveText(["A", "B", "C"]);
     await page.mouse.up();
     await expect(columnIndicator).toHaveCount(0);
