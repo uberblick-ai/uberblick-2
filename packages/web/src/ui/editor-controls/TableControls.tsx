@@ -553,7 +553,7 @@ function TableControlSurface({ tableId, editor, host }: {
   };
   // Compact rows on a pointer device; touch keeps 44px targets.
   const item = (key: TableMenuIcon, label: string, disabled: boolean, onSelect: () => void, destructive = false): ReactElement =>
-    <DropdownMenuItem key={key} className={geometry?.touch === true ? "min-h-11" : "py-1"}
+    <DropdownMenuItem key={key} className={geometry?.touch === true ? "min-h-11" : "py-1!"}
       variant={destructive ? "destructive" : "default"} disabled={disabled} onSelect={onSelect}>
       <TableMenuGlyph icon={key} />{label}
     </DropdownMenuItem>;
