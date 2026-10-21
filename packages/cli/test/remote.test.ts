@@ -540,7 +540,7 @@ describe("ub workspace use <link>", () => {
       for (const hub of [first, second]) {
         hub.grant(WORKSPACE);
         await writeHubLogin(hub.origin, hub.issue({ workspaces: [WORKSPACE] }), box.env);
-        const joined = await runInProcess(["workspace", "use", `${hub.url}/ws/${WORKSPACE}`], box);
+        const joined = await runInProcess(["workspace", "use", `${hub.url}/ws/${WORKSPACE}`], box, { UB_TEST_MAX_WAIT_MS: "5000" });
         expect(joined.status, joined.output).toBe(0);
         await removeHubLogin(hub.origin, box.env);
       }
@@ -588,7 +588,7 @@ describe("ub workspace use <link>", () => {
       expect(remote.authentications).toEqual([]);
       expect(remote.renewalCount).toBe(0);
       await writeHubLogin(remote.origin, remote.issue({ workspaces: [WORKSPACE] }), box.env);
-      const joined = await runInProcess(["workspace", "use", target], box);
+      const joined = await runInProcess(["workspace", "use", target], box, { UB_TEST_MAX_WAIT_MS: "5000" });
       expect(joined.status, joined.output).toBe(0);
       expect(joined.stdout.split("\n")).toEqual([
         `fetched    ${WORKSPACE} from ${remote.origin}/custom-proxy-path: 0 documents, 0 archived`,
@@ -647,7 +647,7 @@ describe("ub workspace use <link>", () => {
     execFileSync("git", ["init", "--quiet"], { cwd: box.cwd, env: box.env });
     execFileSync("git", ["remote", "add", "origin", "git@github.com:acme/notes.git"], { cwd: box.cwd, env: box.env });
     const selectedWorkspace = initial === null ? `notes-${WORKSPACE}` : WORKSPACE;
-    const result = await runInProcess(["workspace", "use", joinUrl(hub, selectedWorkspace), "--json"], box);
+    const result = await runInProcess(["workspace", "use", joinUrl(hub, selectedWorkspace), "--json"], box, { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(result.status, result.output).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({
       binding: { workspaceId: selectedWorkspace, hubUrl: url(hub) }, previous: null, documents: [],
@@ -676,7 +676,7 @@ describe("ub workspace use <link>", () => {
     });
     try {
       const target = `${proxy.endpoint}/${WORKSPACE}`;
-      const result = await runInProcess(["workspace", "use", target], box);
+      const result = await runInProcess(["workspace", "use", target], box, { UB_TEST_MAX_WAIT_MS: "5000" });
       await proxy.finish();
       expect(result.status, result.output).toBe(1);
       expect(result.stderr).toContain("does not match this workspace's name, settings or sidebar");
@@ -708,7 +708,7 @@ describe("ub workspace use <link>", () => {
       await room.done();
     });
     try {
-      const result = await runInProcess(["workspace", "use", `${proxy.endpoint}/${WORKSPACE}`, "--verbose"], box);
+      const result = await runInProcess(["workspace", "use", `${proxy.endpoint}/${WORKSPACE}`, "--verbose"], box, { UB_TEST_MAX_WAIT_MS: "5000" });
       await proxy.finish();
       if (changed === "other live") {
         expect(result.status, result.output).toBe(0);
@@ -736,9 +736,12 @@ describe("ub workspace use <link>", () => {
     // The first network call starts the directory fetch. Emit once so later
     // background connections cannot inject noise after the command finishes.
     const preload = "import {Socket} from 'node:net'; const original = Socket.prototype.connect; let injected = false; Socket.prototype.connect = function (...args) { if (!injected) { injected = true; console.log('[yjs] Changed the client-id because another client seems to be using it.'); console.warn('dependency warning'); console.error('dependency error'); } return original.apply(this, args); };";
+    // A full join can spend 45 s in named waits at this ceiling; the child
+    // timeout leaves 10 s more so its generic timeout does not win first.
     const run = await runUbAsync(["workspace", "use", localJoinUrl(hub, box, SECRET)], box, {
       NODE_OPTIONS: `--import=data:text/javascript,${encodeURIComponent(preload)}`,
-    });
+      UB_TEST_MAX_WAIT_MS: "5000",
+    }, 55_000);
     expect(run.status, run.output).toBe(0);
     expect(run.stdout.split("\n")).toEqual([
       `fetched    Shared workspace from http://127.0.0.1:${hub.port}: 1 document, 0 archived`,
@@ -767,7 +770,7 @@ describe("ub workspace use <link>", () => {
     await directory.done();
     const previous = { workspaceId: "ce1f08b6-3462-439c-b23d-6f9bdb8bbf74", hubUrl: null };
     const box = sandbox({ projectBinding: previous, credentials: { signingSecret: SECRET } });
-    const run = await runInProcess(["workspace", "use", localJoinUrl(hub, box, SECRET), "--json"], box);
+    const run = await runInProcess(["workspace", "use", localJoinUrl(hub, box, SECRET), "--json"], box, { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(run.status, run.output).toBe(0);
     const result = JSON.parse(run.stdout);
     expect(Object.keys(result).sort()).toEqual(["binding", "documents", "previous"]);
@@ -788,7 +791,7 @@ describe("ub workspace use <link>", () => {
     const hub = await startHub();
     const uuid = await webDoc(hub, "Verbose note");
     const box = unboundSandbox({ credentials: { signingSecret: SECRET } });
-    const run = await runInProcess(["workspace", "use", localJoinUrl(hub, box, SECRET), "--verbose"], box);
+    const run = await runInProcess(["workspace", "use", localJoinUrl(hub, box, SECRET), "--verbose"], box, { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(run.status, run.output).toBe(0);
     expect(run.stdout).toContain("fetched    ");
     expect(run.stdout).toContain(uuid);
@@ -811,14 +814,14 @@ describe("ub workspace use <link>", () => {
       // An id would select this differing record instead of the old project
       // hub. A verified link fetch is the existing way to restore that pair.
       rememberWorkspaceBindings([{ workspaceId: previousId, hubUrl: url(nextHub) }], box.env);
-      const selected = await runInProcess(["workspace", "use", joinUrl(nextHub)], box);
+      const selected = await runInProcess(["workspace", "use", joinUrl(nextHub)], box, { UB_TEST_MAX_WAIT_MS: "5000" });
       expect(selected.status, selected.output).toBe(0);
       const command = selected.stdout.match(/^switch back with: (.+)$/m)?.[1];
       expect(command).toBeDefined();
       const target = command!.slice("ub workspace use ".length);
       expect(parseJoinTarget(target)).toEqual({ endpoint: url(previousHub), workspace: previousId });
       expect(readWorkspaceHub(previousId, box.env)).toBe(url(nextHub));
-      const restored = await runInProcess(["workspace", "use", target], box);
+      const restored = await runInProcess(["workspace", "use", target], box, { UB_TEST_MAX_WAIT_MS: "5000" });
       expect(restored.status, restored.output).toBe(0);
       expect(readConfigFile(box, "config.json")).toEqual(previous);
       expect(readWorkspaceHub(previousId, box.env)).toBe(url(previousHub));
@@ -831,7 +834,7 @@ describe("ub workspace use <link>", () => {
     const bindingPath = join(box.cwd, ".uberblick.json");
     const nested = join(box.cwd, "nested", "project");
     mkdirSync(nested, { recursive: true });
-    const run = await runInProcess(["workspace", "use", joinUrl(hub)], { ...box, cwd: nested });
+    const run = await runInProcess(["workspace", "use", joinUrl(hub)], { ...box, cwd: nested }, { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(run.status, run.output).toBe(0);
     expect(run.stdout).toContain(`wrote      ${bindingPath}\n`);
     expect(JSON.parse(readFileSync(bindingPath, "utf8"))).toEqual({ workspaceId: WORKSPACE, hubUrl: url(hub) });
@@ -858,7 +861,7 @@ describe("ub workspace use <link>", () => {
     if (prior === "other-remote" || prior === "other-local") {
       rememberWorkspaceBindings([{ workspaceId: previousId, hubUrl: "wss://recorded.invalid/ws" }], box.env);
     }
-    const run = await runInProcess(["workspace", "use", localJoinUrl(hub, box, SECRET)], box);
+    const run = await runInProcess(["workspace", "use", localJoinUrl(hub, box, SECRET)], box, { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(run.status, run.output).toBe(0);
     expect(run.stdout).toContain(`fetched    ${WORKSPACE} from http://127.0.0.1:${hub.port}: 0 documents, 0 archived\n`);
     expect(run.stdout.includes("previous   ")).toBe(changed);
@@ -888,6 +891,7 @@ describe("ub workspace use <link>", () => {
     const run = await runInProcess(["workspace", "use", localJoinUrl(hub, box, SECRET), ...(json ? ["--json"] : [])], box, {
       UB_WORKSPACE_ID: WORKSPACE,
       UB_HUB_URL: previousHub,
+      UB_TEST_MAX_WAIT_MS: "5000",
     });
     expect(run.status, run.output).toBe(0);
     expect(run.stdout).not.toContain("previous   ");
@@ -907,7 +911,7 @@ describe("ub workspace use <link>", () => {
     const hub = await startHub(SECRET);
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     rememberWorkspaceBindings([{ workspaceId: WORKSPACE, hubUrl: null }], box.env);
-    const joined = await runInProcess(["workspace", "use", localJoinUrl(hub, box, SECRET)], box);
+    const joined = await runInProcess(["workspace", "use", localJoinUrl(hub, box, SECRET)], box, { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(joined.status, joined.output).toBe(0);
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(url(hub));
     const status = await runInProcess(["status", "--json"], box);
@@ -925,7 +929,7 @@ describe("ub workspace use <link>", () => {
     const box = sandbox({ credentials: { signingSecret: SECRET } });
     const previous = readConfigFile(box, "config.json").workspaceId as string;
     const target = localJoinUrl(hub, box, SECRET);
-    const joined = await runInProcess(["workspace", "use", target], box);
+    const joined = await runInProcess(["workspace", "use", target], box, { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(joined.status, joined.output).toBe(0);
     const databasePath = resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }).databasePath;
     const config = testConfig({ workspaceId: WORKSPACE, databasePath });
@@ -939,7 +943,7 @@ describe("ub workspace use <link>", () => {
       expect(existsSync(databasePath)).toBe(false);
       expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
 
-      const fetched = await runUbAsync(["workspace", "use", target], box);
+      const fetched = await runUbAsync(["workspace", "use", target], box, { UB_TEST_MAX_WAIT_MS: "5000" }, 55_000);
       expect(fetched.status, fetched.output).toBe(0);
       expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(url(hub));
       const refused = await old.call("create_doc", {
@@ -984,7 +988,7 @@ describe("ub workspace use <link>", () => {
       return created.uuid as string;
     });
     const storeBefore = readFileSync(join(box.configHome, "uberblick", "credentials.json"));
-    const joined = await runInProcess(["workspace", "use", joinUrl(hub)], box);
+    const joined = await runInProcess(["workspace", "use", joinUrl(hub)], box, { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(joined.status, joined.stderr).toBe(0);
     expect(persistedHubUrl(box)).toBe(url(hub));
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(url(hub));
@@ -1012,6 +1016,7 @@ describe("ub workspace use <link>", () => {
         localJoinUrl(remote, box, OTHER_SECRET),
       ],
       box,
+      { UB_TEST_MAX_WAIT_MS: "5000" },
     );
     expect(run.status).toBe(0);
     expect(run.stdout).toContain(": 2 documents, 0 archived");
@@ -1144,6 +1149,7 @@ describe("ub workspace use <link>", () => {
         localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
+      { UB_TEST_MAX_WAIT_MS: "5000" },
     );
     expect(moved.status, moved.output).toBe(0);
     expect(moved.stdout).toContain(": 1 document, 1 archived");
@@ -1156,6 +1162,7 @@ describe("ub workspace use <link>", () => {
         localJoinUrl(remote, fresh, OTHER_SECRET),
       ],
       fresh,
+      { UB_TEST_MAX_WAIT_MS: "5000" },
     );
     expect(joined.status, joined.output).toBe(0);
     const restored = await withMcp(
@@ -1196,6 +1203,7 @@ describe("ub workspace use <link>", () => {
         localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
+      { UB_TEST_MAX_WAIT_MS: "5000" },
     );
     expect(run.status, run.stderr).toBe(0);
     expect(run.stdout).toContain(": 1 document, 0 archived");
@@ -1252,6 +1260,7 @@ describe("ub workspace use <link>", () => {
         localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
+      { UB_TEST_MAX_WAIT_MS: "5000" },
     );
     expect(run.status).toBe(1);
     expect(run.stderr).toContain(uuid);
@@ -1284,6 +1293,7 @@ describe("ub workspace use <link>", () => {
         localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
+      { UB_TEST_MAX_WAIT_MS: "5000" },
     );
     expect(run.status).toBe(1);
     expect(run.stderr).toContain(`ub workspace use ${url(source)}/${WORKSPACE}`);
@@ -1418,6 +1428,7 @@ describe("ub workspace use <link>", () => {
         localJoinUrl(remote, box, OTHER_SECRET),
       ],
       box,
+      { UB_TEST_MAX_WAIT_MS: "5000" },
     );
     expect(run.status).toBe(0);
     expect(run.stdout).toContain(": 1 document, 0 archived");
@@ -1538,7 +1549,7 @@ describe("ub workspace use <link>", () => {
       if (address === null || typeof address === "string") throw new Error("missing proxy port");
       const box = sandbox({ credentials: { signingSecret: SECRET } });
       const target = `ws://127.0.0.1:${address.port}`;
-      const run = await runInProcess(["workspace", "use", `${target}/${WORKSPACE}`], box);
+      const run = await runInProcess(["workspace", "use", `${target}/${WORKSPACE}`], box, recover ? { UB_TEST_MAX_WAIT_MS: "5000" } : {});
       expect(connections).toBeGreaterThan(1);
       expect(run.stderr).not.toContain("retrying once");
       expect(run.output).not.toContain(SECRET);

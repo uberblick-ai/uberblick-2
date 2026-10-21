@@ -44,7 +44,7 @@ describe("remote device commands", () => {
   it("joins and resumes status with a stored login, retaining the loopback secret", async () => {
     const { hub, endpoint, login, box } = await rig(true);
     const before = readFileSync(file(box, "credentials.json"));
-    const joined = await runInProcess(["workspace", "use", `${endpoint}/${WORKSPACE}`], box);
+    const joined = await runInProcess(["workspace", "use", `${endpoint}/${WORKSPACE}`], box, { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(joined.status, joined.stderr).toBe(0);
     expect(readFileSync(file(box, "credentials.json"))).toEqual(before);
     const status = await runInProcess(["status", "--json"], box);
@@ -75,7 +75,7 @@ describe("remote device commands", () => {
   it("initializes a remote binding only under workspace access, without generating or copying a secret", async () => {
     const { endpoint, box, login } = await rig(true);
     const before = readFileSync(file(box, "credentials.json"));
-    const initialized = await runInProcess(["workspace", "use", `${endpoint}/${WORKSPACE}`], box);
+    const initialized = await runInProcess(["workspace", "use", `${endpoint}/${WORKSPACE}`], box, { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(initialized.status, initialized.stderr).toBe(0);
     expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")).hubUrl).toBe(endpoint);
     expect(readFileSync(file(box, "credentials.json"))).toEqual(before);

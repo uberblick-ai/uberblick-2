@@ -632,7 +632,8 @@ describe("ub open: sharing through the upstream hub", () => {
         writeCredentials(box, SECRET);
         expect(await (await get(`${app.url}uberblick-config.json`)).text()).not.toContain(key);
         expect((await app.interrupt()).status).toBe(0);
-        const moved = await runUbAsync(["workspace", "use", `${hubUrl}/${WORKSPACE}`], box, env);
+        const moved = await runUbAsync(["workspace", "use", `${hubUrl}/${WORKSPACE}`], box,
+          { ...env, UB_TEST_MAX_WAIT_MS: "5000" }, 55_000);
         expect(moved.status, moved.output).toBe(0);
         app = await open(box, ["--port", String(webPort)], env);
         expect(localBrowserKey(WORKSPACE, box.env)).toBe(key);

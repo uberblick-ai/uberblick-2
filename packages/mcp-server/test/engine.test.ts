@@ -4,7 +4,7 @@
  * shutdown. No MCP call drives these tests — that absence is the contract.
  */
 
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Hub } from "@uberblick/hub";
@@ -72,6 +72,21 @@ function encodedDoc(uuid: string, text: string, tags: string[] = []): Uint8Array
   const update = Y.encodeStateAsUpdate(doc);
   doc.destroy();
   return update;
+}
+
+async function startRestartableHub(databasePath: string): Promise<Hub> {
+  // Outside ephemeral socket ranges and the CLI rig's 20000–31999 picks, so
+  // parallel tests cannot claim this port while the hub is stopped.
+  const offset = randomInt(4_000);
+  for (let tried = 0; tried < 100; tried += 1) {
+    const port = 16_000 + ((offset + tried) % 4_000);
+    try {
+      return await startHub({ databasePath, port });
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "EADDRINUSE")) throw error;
+    }
+  }
+  throw new Error("no free restartable hub port below the ephemeral range");
 }
 
 function tickAfter(engine: UberblickMcpEngine, action: () => void): Promise<void> {
@@ -220,7 +235,7 @@ describe("transport-free MCP engine", () => {
 
   it("pushes pending state after hub recovery and releases its marker without a tool call", async () => {
     const hubDatabase = tempDatabasePath();
-    const first = await startHub({ databasePath: hubDatabase });
+    const first = await startRestartableHub(hubDatabase);
     const port = first.port;
     await first.stop();
 

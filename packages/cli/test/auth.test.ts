@@ -433,7 +433,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const workspace = savedLogin(box, authenticationOrigin(endpoint)).credential.record.workspaces[0];
     expect(parseJoinTarget(link!)).toEqual({ endpoint, workspace });
     expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
-    const joined = await runInProcess(["workspace", "use", link!], box);
+    const joined = await runInProcess(["workspace", "use", link!], box, { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(joined.status, joined.stderr).toBe(0);
     expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8"))).toEqual({ workspaceId: workspace, hubUrl: endpoint });
   });
