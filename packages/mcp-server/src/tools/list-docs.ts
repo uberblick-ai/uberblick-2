@@ -1,4 +1,4 @@
-import { decisionTopicTitle, listDirectory, readDirectoryTags, resolveDecisionTopics } from "@uberblick/schema";
+import { compareDirectoryEntries, decisionTopicTitle, listDirectory, readDirectoryTags, resolveDecisionTopics } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "../inputs.js";
@@ -51,7 +51,7 @@ export const listDocsOperation = operation("list_docs", inputSchema, (context, {
   return {
     workspace: replicas.config.workspaceId,
     docs: [...documents, ...decisionRows]
-      .sort((a, b) => a.title < b.title ? -1 : a.title > b.title ? 1 : a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0)
+      .sort(compareDirectoryEntries)
       .map((entry) => {
         const { recordArchived: _recordArchived, ...fields } = entry;
         return {

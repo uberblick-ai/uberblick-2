@@ -4,7 +4,7 @@
  */
 
 import { InvalidRoomError, InvalidWorkspaceIdError } from "./errors.js";
-import { parseWorkspaceId } from "./workspace.js";
+import { isUuid, parseWorkspaceId } from "./workspace.js";
 
 export const DIRECTORY_SUFFIX = "_directory";
 
@@ -97,20 +97,13 @@ const CANONICAL_DOCUMENT_IDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Lowercase avoids distinct case-sensitive rooms for one UUID. Version and
- * variant nibbles stay unconstrained, allowing ids from other UUID generators.
- */
-const DOCUMENT_UUID =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-/**
  * Links and decision edges share this UUID parser: lowercase mixed-case input
  * without creating a second identity, and refuse reserved workspace roots.
  */
 export function canonicalDocumentUuid(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const lowered = value.toLowerCase();
-  return DOCUMENT_UUID.test(lowered) ? lowered : null;
+  return isUuid(lowered) ? lowered : null;
 }
 
 /**
@@ -119,7 +112,7 @@ export function canonicalDocumentUuid(value: unknown): string | null {
  */
 export function assertCanonicalRoom(room: string): void {
   const { uuid } = parseRoom(room);
-  if (!DOCUMENT_UUID.test(uuid) && !CANONICAL_DOCUMENT_IDS.has(uuid)) {
+  if (!isUuid(uuid) && !CANONICAL_DOCUMENT_IDS.has(uuid)) {
     throw new InvalidRoomError(
       room,
       `the document segment ${JSON.stringify(uuid)} is neither a lowercase ` +

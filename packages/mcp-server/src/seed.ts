@@ -19,7 +19,7 @@ import {
   setLinks,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
-import type { BlockInput, ImportedBlock, ImportedDoc } from "@uberblick/schema";
+import type { ImportedDoc } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
 import type { Replicas } from "./replica.js";
@@ -96,17 +96,6 @@ export function readSeedDocs(dir: string): SeedDoc[] {
   });
 }
 
-function toBlockInput(block: ImportedBlock): BlockInput {
-  return {
-    type: block.type,
-    text: block.text,
-    ...(block.level === undefined ? {} : { level: block.level }),
-    ...(block.language === undefined ? {} : { language: block.language }),
-    // text is resolved plain text; inline is the only copy of the GFM formatting.
-    ...(block.inline === undefined ? {} : { inline: block.inline }),
-  };
-}
-
 function applySeed(
   replicas: Replicas,
   seed: SeedDoc,
@@ -176,7 +165,7 @@ function applySeed(
     tags: seed.tags,
   });
   for (const block of seed.blocks) {
-    appendBlock(doc, toBlockInput(block));
+    appendBlock(doc, block);
   }
   // Missing links are unspecified, not a request to clear links; initDoc seeds the empty set.
   const links = seed.links ?? [];

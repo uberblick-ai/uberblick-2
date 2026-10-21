@@ -7,7 +7,7 @@ import type { StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { assertHubTransport, authenticationOrigin, normalizeRemoteUrl } from "@uberblick/mcp-server/remote-url";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
 import { defaultWorkspaceDatabasePath, readWorkspaceName, syncWorkspace } from "@uberblick/mcp-server";
-import { parseWorkspaceId } from "@uberblick/schema";
+import { isUuid, parseWorkspaceId } from "@uberblick/schema";
 import { ManagementResponseError, manageRequest } from "@uberblick/mcp-server/management-client";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 import { requireBinding, resolveConfig, writeHubAdmission } from "@uberblick/mcp-server/project-config";
@@ -53,8 +53,7 @@ function promotionAttempt(path: string): string {
   if (existsSync(path)) {
     let value: unknown;
     try { value = JSON.parse(readFileSync(path, "utf8")); } catch { throw new Error("cannot read saved promotion attempt"); }
-    if (value === null || typeof value !== "object" || !("attemptId" in value) ||
-      typeof value.attemptId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.attemptId)) {
+    if (value === null || typeof value !== "object" || !("attemptId" in value) || !isUuid(value.attemptId)) {
       throw new Error("invalid saved promotion attempt; restore its original receipt before retrying");
     }
     return value.attemptId;

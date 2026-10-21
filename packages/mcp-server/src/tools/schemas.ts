@@ -2,6 +2,7 @@ import {
   BLOCK_TYPES,
   DECISION_STATUSES,
   DOCUMENT_KINDS,
+  EXTERNAL_HREF,
   LIST_STYLES,
   MAX_DESCRIPTION_LENGTH,
   MAX_LIST_INDENT,
@@ -90,11 +91,6 @@ const INLINE_RUNS =
   "marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this " +
   "replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes " +
   "nothing; an archived target is fine.";
-
-/**
- * Match the model's isExternalHref at the input boundary, before any writes.
- */
-const EXTERNAL_HREF = /^https?:\/\/\S+$/i;
 
 /**
  * Canonicalize through the model before lookups and writes: case-sensitive

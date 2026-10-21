@@ -321,7 +321,7 @@ export interface AnnotationRange {
 export interface DirectoryEntry {
   uuid: string;
   title: string;
-  /** Stored catalog UUIDs, or provisional strings awaiting the clean cut. */
+  /** Catalog tag UUIDs, or provisional name strings that catalog-aware reads omit. */
   tags: string[];
   deleted?: boolean;
   /** Effective individual record archive, derived independently of replaceable stubs. */

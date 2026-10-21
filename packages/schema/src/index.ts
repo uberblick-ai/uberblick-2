@@ -53,7 +53,7 @@ export {
   setInlineLink,
 } from "./blocks.js";
 
-export { isDocId, isExternalHref, readsAsMark } from "./marks.js";
+export { EXTERNAL_HREF, isDocId, isExternalHref, readsAsMark } from "./marks.js";
 export { readSyncedDocId } from "./synced-doc-id.js";
 export { githubItemUrl, githubReference, githubRepository } from "./github-reference.js";
 export type { GitHubItem } from "./github-reference.js";
@@ -119,7 +119,7 @@ export {
   sidebarRoom,
 } from "./rooms.js";
 
-export { parseWorkspaceId } from "./workspace.js";
+export { isUuid, parseWorkspaceId } from "./workspace.js";
 
 export {
   WORKSPACE_SETTINGS_KEY,
@@ -147,6 +147,7 @@ export {
   DIRECTORY_DOCS_KEY,
   DIRECTORY_DELETED_KEY,
   DIRECTORY_ARCHIVED_RECORDS_KEY,
+  compareDirectoryEntries,
   deleteDirectoryEntry,
   enforceDeletedDirectoryEntries,
   decisionDirectoryFields,

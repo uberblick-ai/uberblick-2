@@ -293,7 +293,7 @@ function tableMapping(oldValues: string[][], newValues: string[][], supplied: Ta
  * Caller mappings preserve row/column identity that equal GFM values cannot convey.
  * Compare parsed cells so unchanged whitespace and marks survive.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Validation must precede the first write because Yjs transactions do not roll back; checks and writes share one row and column mapping.
 export function editTable(element: Y.XmlElement, oldTable: GfmTable, newTable: GfmTable, mapping?: TableMapping): void {
   if (!isSupportedTable(element)) throw new InvalidTableError();
   const oldValues = [oldTable.header, ...oldTable.rows];

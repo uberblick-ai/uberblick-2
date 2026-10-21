@@ -23,9 +23,10 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { getMeta } from "@uberblick/schema";
+import { getBlocks, getMeta } from "@uberblick/schema";
 import { PersistenceError, Replicas } from "../src/replica.js";
 import { importSeedDocs, readSeedDocs } from "../src/seed.js";
+import { MirrorStore } from "../src/store.js";
 import { cleanupTestResources, FailingStore, WORKSPACE, tempDir, testConfig } from "./core-helpers.js";
 
 /**
@@ -92,6 +93,30 @@ describe("seed import", () => {
       `---\nuuid: ${NOTES}\ntags: [reference]\n---\n\nProse.\n`,
     );
     expect(() => readSeedDocs(untitled)).toThrow(/no `title` in frontmatter/);
+  });
+
+  // The shipped starters hold only top-level bullets, so this template's own
+  // ordered and nested items are what prove list style and depth survive.
+  it("keeps an imported list's style and nesting", async () => {
+    const dir = tempDir();
+    writeFileSync(
+      join(dir, "steps.md"),
+      `---\nuuid: ${NOTES}\ntitle: Steps\ndescription: What Steps is for.\n---\n\n` +
+        "1. Install\n   - Check the version\n2. Run\n",
+    );
+    const store = new MirrorStore(":memory:", WORKSPACE);
+    const replicas = new Replicas(testConfig({ databasePath: ":memory:" }), store);
+    try {
+      await importSeedDocs(replicas, readSeedDocs(dir));
+      expect(getBlocks(replicas.replica(NOTES).doc).map(({ text, list, indent }) => ({ text, list, indent }))).toEqual([
+        { text: "Install", list: "ordered", indent: 0 },
+        { text: "Check the version", list: "bullet", indent: 1 },
+        { text: "Run", list: "ordered", indent: 0 },
+      ]);
+    } finally {
+      await replicas.destroy();
+      store.close();
+    }
   });
 
   // Sorting a listing by age is the whole reason the stamps exist, and a
