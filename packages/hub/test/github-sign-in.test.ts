@@ -285,6 +285,44 @@ describe("bounded device requests", () => {
     expect(privateRows(testRig.databasePath).credentials).toHaveLength(0);
   });
 
+  it("caps only the poll gate when injected, including pending and slow_down", async () => {
+    const github = new GithubFake();
+    const flow = new GithubDeviceFlow({ clientId: CLIENT_ID, fetch: github.fetch,
+      now: () => github.time, pollMaxWaitMs: 20 }, () => ({}), () => {});
+    try {
+      const started = await flow.start();
+      if (started.status !== "pending") throw new Error("missing sign-in attempt");
+      expect(started).toMatchObject({ interval: 5, expiresIn: 900 });
+      const collect = () => flow.collect(started.requestId, started.collectionSecret);
+      github.tokenResult = { error: "authorization_pending" };
+      github.time += 19;
+      expect(await collect()).toMatchObject({ status: "pending" });
+      expect(github.calls).toHaveLength(1);
+      github.time++;
+      expect(await collect()).toMatchObject({ status: "pending" });
+      expect(github.calls).toHaveLength(2);
+      github.time += 19;
+      await collect();
+      expect(github.calls).toHaveLength(2);
+      github.time++;
+      github.tokenResult = { error: "slow_down", interval: 12 };
+      await collect();
+      expect(github.calls).toHaveLength(3);
+      github.time += 19;
+      await collect();
+      expect(github.calls).toHaveLength(3);
+      github.time++;
+      github.tokenResult = { error: "authorization_pending" };
+      expect(await collect()).toMatchObject({ status: "pending" });
+      expect(github.calls).toHaveLength(4);
+      github.time = 900_999;
+      expect(await collect()).toMatchObject({ status: "pending" });
+      github.time++;
+      expect(await collect()).toEqual({ status: "expired" });
+      expect(github.calls).toHaveLength(5);
+    } finally { flow.stop(); }
+  });
+
   it.each(["denied", "expired"])("%s ends distinctly and issues nothing", async (status) => {
     const testRig = await rig();
     const request = await start(testRig.hub);

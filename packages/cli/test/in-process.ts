@@ -4,11 +4,16 @@ import type { Run, Sandbox } from "./helpers.js";
 
 let running = false;
 
-/** Commands read process configuration; each worker restores it before the next assertion. */
+/**
+ * Commands read process configuration; each worker restores it before the next assertion.
+ * Sign-in deadline tests pass a shorter collection timeout independently of
+ * capped polling; healthy requests retain their production budget.
+ */
 export async function runInProcess(
   argv: string[],
   box: Sandbox,
   extraEnv: NodeJS.ProcessEnv = {},
+  options: Parameters<typeof runCli>[2] = {},
 ): Promise<Run> {
   if (running) throw new Error("Concurrent CLI invocations require the subprocess helper");
   if (extraEnv.NODE_OPTIONS) throw new Error("Node startup options require the subprocess helper");
@@ -28,7 +33,7 @@ export async function runInProcess(
     process.chdir(box.cwd);
     for (const key of Object.keys(process.env)) delete process.env[key];
     Object.assign(process.env, box.env, extraEnv);
-    const status = await runCli(argv, io);
+    const status = await runCli(argv, io, options);
     return { status, stdout, stderr, output: stdout + stderr };
   } finally {
     process.chdir(previousDirectory);

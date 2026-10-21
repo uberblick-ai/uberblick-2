@@ -1,7 +1,8 @@
 /** The local browser's access authority is bounded to its frozen binding. */
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { generateKeyPairSync } from "node:crypto";
-import { request as httpRequest } from "node:http";
+import { IncomingMessage, request as httpRequest } from "node:http";
+import { Socket } from "node:net";
 import { join } from "node:path";
 import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub, type TeamHub as Hub } from "@uberblick/hub/team";
@@ -10,7 +11,7 @@ import { removeHubLogin, writeHubLogin, type StoredHubLogin } from "@uberblick/m
 import { build } from "esbuild";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localBrowserKey } from "../src/browser-key.js";
-import { requestAccess } from "../src/open-access.js";
+import { readJsonObject, requestAccess } from "../src/open-access.js";
 import { PACKAGE_ROOT, REPO_ROOT, pointAt, waitUntil } from "./helpers.js";
 import { authMessage, bearer, cleanUp, configured, configDir, freePort, get, hubs, open, startHub,
   WORKSPACE, REBOUND_WORKSPACE, SECRET, silentListener, writeBinding } from "./open-fixtures.js";
@@ -318,7 +319,7 @@ describe("ub open: live Access bridge", () => {
     } finally { expect((await app.interrupt()).status).toBe(0); }
   });
 
-  it("distinguishes an explicitly local workspace, a shared-secret hub and an unreachable hub", async () => {
+  it("serves an explicitly local workspace without a signing secret or starting a hub", async () => {
     const { box, env } = configured();
     // A local binding cannot override its fallback endpoint through HUB_URL.
     // Isolate that default in this test build; keep the real binding and startup.
@@ -351,21 +352,17 @@ describe("ub open: live Access bridge", () => {
       expect(existsSync(credentials)).toBe(false);
       expect(existsSync(env.HUB_DB_PATH!)).toBe(false);
     } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
 
-    const remote = configured();
-    const hub = await startHub(remote.box);
+  it("distinguishes a shared-secret hub from an unreachable hub", async () => {
+    const { box } = configured();
+    const hub = await startHub(box);
     const origin = `http://127.0.0.1:${hub.port}`;
-    pointAt(remote.box, `ws://127.0.0.1:${hub.port}`);
-    const shared = await open(remote.box, ["--port", String(await freePort())], remote.env);
-    try {
-      const headers = { ...bearer(await authMessage(localBrowserKey(WORKSPACE, remote.box.env))),
-        origin: new URL(shared.url).origin, "content-type": "application/json" };
-      const read = async () => await (await fetch(`${shared.url}api/access`, { method: "POST", headers,
-        body: JSON.stringify({ operation: "list-devices" }) })).json();
-      expect(await read()).toEqual({ status: "not-configured", hub: origin });
-      await hub.stop();
-      expect(await read()).toEqual({ status: "hub-down", hub: origin });
-    } finally { expect((await shared.interrupt()).status).toBe(0); }
+    const binding = { workspaceId: WORKSPACE, hubUrl: `ws://127.0.0.1:${hub.port}`, env: box.env };
+    const read = () => requestAccess(binding, { operation: "list-devices" }, new AbortController().signal);
+    expect(await read()).toEqual({ status: 503, body: { status: "not-configured", hub: origin } });
+    await hub.stop();
+    expect(await read()).toEqual({ status: 503, body: { status: "hub-down", hub: origin } });
   });
 
   it("refuses unauthorized host, origin, URL tokens, other workspaces and broader operations before contacting the hub", async () => {
@@ -509,23 +506,40 @@ describe("ub open: live Access bridge", () => {
     } finally { expect((await app.interrupt()).status).toBe(0); }
   });
 
-  it("refuses chunked oversized and stalled JSON bodies without upstream authority", async () => {
+  it("ends a stalled JSON body at its input deadline", async () => {
+    vi.useFakeTimers();
+    const request = new IncomingMessage(new Socket());
+    request.headers["content-type"] = "application/json";
+    try {
+      let settled = false;
+      const body = readJsonObject(request).then(result => { settled = true; return result; });
+      request.emit("data", Buffer.from("{"));
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await body).toBeNull();
+      expect(request.readableFlowing).toBe(false);
+      expect(request.listenerCount("data")).toBe(0);
+      expect(request.listenerCount("end")).toBe(0);
+    } finally { request.destroy(); vi.useRealTimers(); }
+  });
+
+  it("refuses a chunked oversized JSON body without upstream authority", async () => {
     const { app, headers, hub } = await rig();
     const verify = vi.spyOn(hub.credentials!, "verifyRequest");
-    const send = (stall: boolean) => new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const send = () => new Promise<{ status: number; body: string }>((resolve, reject) => {
       const request = httpRequest(`${app.url}api/access`, { method: "POST", headers }, response => {
         const chunks: Buffer[] = [];
         response.on("data", (chunk: Buffer) => chunks.push(chunk));
         response.on("end", () => resolve({ status: response.statusCode!, body: Buffer.concat(chunks).toString("utf8") }));
       });
       request.on("error", reject);
-      request.write(stall ? "{" : " ".repeat(4097));
+      request.write(" ".repeat(4097));
       // Send neither an end nor a fixed Content-Length: input must be bounded
       // independently of a browser finishing its request.
     });
     try {
-      expect(await send(false)).toEqual({ status: 400, body: '{"status":"invalid-request"}\n' });
-      expect(await send(true)).toEqual({ status: 400, body: '{"status":"invalid-request"}\n' });
+      expect(await send()).toEqual({ status: 400, body: '{"status":"invalid-request"}\n' });
       expect(verify).not.toHaveBeenCalled();
     } finally { expect((await app.interrupt()).status).toBe(0); }
   });

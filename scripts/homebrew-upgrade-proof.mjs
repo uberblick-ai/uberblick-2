@@ -19,7 +19,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertHomebrewPlatform, treeDigest, withMcpSession } from "./lib/homebrew-proof.mjs";
+import { assertHomebrewPlatform, assertReleaseWebIsolation, treeDigest, withMcpSession } from "./lib/homebrew-proof.mjs";
 import { formulaFor } from "./publish-homebrew-release.mjs";
 
 const [installedVersion, upgradedVersion] = process.argv.slice(2);
@@ -90,12 +90,38 @@ const brewEnv = { ...process.env, XDG_CONFIG_HOME: configHome, XDG_DATA_HOME: da
 const brew = (args) => run("brew", args, { env: brewEnv });
 
 function buildPayload(version) {
+	const environment = {
+		...process.env,
+		UBERBLICK_PAYLOAD_OUTPUT_DIR: dist,
+		UB_WORKSPACE_ID: "builder-89c7e520-1111-4111-8111-123456789abc",
+		UB_HUB_URL: "wss://builder-binding.invalid/ws",
+		HUB_AUTH_TOKEN: "builder-secret-must-never-reach-the-web-bundle",
+	};
+	delete environment.UBERBLICK_PAYLOAD_WEB_DIST;
 	run("node", [join(REPOSITORY_ROOT, "scripts", "build-install-payload.mjs"), version], {
 		cwd: REPOSITORY_ROOT,
-		env: { ...process.env, UBERBLICK_PAYLOAD_OUTPUT_DIR: dist },
+		env: environment,
 		stdio: ["ignore", "inherit", "pipe"],
 	});
-	return join(dist, `uberblick-${version}.tar.gz`);
+	const archive = join(dist, `uberblick-${version}.tar.gz`);
+	const extracted = join(scratch, `web-isolation-${version}`);
+	mkdirSync(extracted);
+	try {
+		run("tar", ["-xzf", archive, "-C", extracted]);
+		const web = join(extracted, `uberblick-${version}`, "packages", "web", "dist");
+		const checkout = JSON.parse(readFileSync(join(REPOSITORY_ROOT, ".uberblick.json"), "utf8"));
+		assertReleaseWebIsolation(web, [
+			environment.UB_WORKSPACE_ID,
+			environment.UB_HUB_URL,
+			environment.HUB_AUTH_TOKEN,
+			checkout.workspaceId,
+			checkout.workspaceId.slice(-36),
+			checkout.hubUrl,
+		]);
+	} finally {
+		rmSync(extracted, { recursive: true, force: true });
+	}
+	return archive;
 }
 
 /** The formula the publisher would generate, pointed at a local payload. */
