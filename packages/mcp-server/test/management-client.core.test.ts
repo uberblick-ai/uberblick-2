@@ -96,6 +96,18 @@ describe("shared management transport", () => {
     await expect(manageRequest("https://hub.example", { operation: "list-devices" }, login, { signal: controller.signal })).rejects.toThrow();
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("ends a request aborted after the response headers arrive", async () => {
+    const controller = new AbortController();
+    const reason = new Error("caller cancelled after headers");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      const response = new Response(new ReadableStream());
+      controller.abort(reason);
+      return response;
+    });
+    await expect(manageRequest("https://hub.example", { operation: "list-devices" }, login,
+      { signal: controller.signal })).rejects.toBe(reason);
+  });
 });
 
 describe("management replies exposed to a browser", () => {

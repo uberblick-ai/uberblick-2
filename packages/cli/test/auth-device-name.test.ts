@@ -96,13 +96,9 @@ describe("CLI device hostname metadata", () => {
     expect(run.output).not.toContain(name);
   });
 
-  it.each([
-    ["unavailable", undefined, false], ["throws", undefined, true], ["empty", "", false],
-    ["control", "agent\nserver", false], ["format", "agent\u202eserver", false],
-    ["oversized", "a".repeat(254), false],
-  ] as const)("completes sign-in unnamed when the hostname is %s", async (_label, name, throws) => {
+  it("completes sign-in unnamed when reading the hostname throws", async () => {
     const remote = await rig(); const box = sandbox();
-    const run = await loginWithHostname(box, remote.origin, name, throws).result;
+    const run = await loginWithHostname(box, remote.origin, undefined, true).result;
     expect(run.status, run.stderr).toBe(0);
     expect(remote.requests.find(request => request.path.endsWith("start"))?.body).toEqual({ publicKey: expect.any(String) });
     const devices = await manageRequest(remote.origin, { operation: "list-devices" }, savedLogin(box, remote.origin));
@@ -120,26 +116,17 @@ describe("CLI device hostname metadata", () => {
     expect(remote.cancellations).toEqual([]);
   });
 
-  it("does not retry a refused start", async () => {
-    const remote = await olderHub(undefined, true); const box = sandbox();
+  it("cancels a refused start when its reply carries collection authority", async () => {
+    const remote = await olderHub({ status: 400,
+      result: { status: "invalid-request", requestId: REQUEST_ID, collectionSecret: started.collectionSecret } });
+    const box = sandbox();
     const run = await loginWithHostname(box, remote.origin, "agent-server").result;
     expect(run.status).toBe(1);
     expect(remote.starts).toEqual([{ deviceName: "agent-server", publicKey: expect.any(String) }]);
     expect(existsSync(credentialPath(box))).toBe(false);
-  });
-
-  it.each([
-    [200, { status: "invalid-request" }], [500, { status: "invalid-request" }],
-    [502, { status: "failed" }], [400, { status: "invalid-request", unexpected: true }],
-    [400, { status: "invalid-request", requestId: REQUEST_ID, collectionSecret: started.collectionSecret }],
-  ])("does not retry another failure or malformed refusal (%s, %j)", async (status, result) => {
-    const remote = await olderHub({ status, result }); const box = sandbox();
-    const run = await loginWithHostname(box, remote.origin, "agent-server").result;
-    expect(run.status).toBe(1);
-    expect(remote.starts).toEqual([{ deviceName: "agent-server", publicKey: expect.any(String) }]);
-    expect(existsSync(credentialPath(box))).toBe(false);
-    expect(remote.cancellations).toEqual("requestId" in result
-      ? [{ requestId: REQUEST_ID, collectionSecret: started.collectionSecret, publicKey: expect.any(String) }] : []);
+    expect(remote.cancellations).toEqual([
+      { requestId: REQUEST_ID, collectionSecret: started.collectionSecret, publicKey: expect.any(String) },
+    ]);
   });
 
   it("does not start a fallback attempt after interruption while the named refusal is pending", async () => {

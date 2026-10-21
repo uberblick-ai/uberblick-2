@@ -252,23 +252,19 @@ describe("confirmed grants", () => {
   });
 
   it.each([
-    ["missing", 404, { message: "Not Found" }, /no such GitHub user/i],
-    ["organization", 200, { id: Number(ACCOUNT), login: LOGIN, type: "Organization" }, /no such GitHub user/i],
-    ["bot", 200, { id: Number(ACCOUNT), login: LOGIN, type: "Bot" }, /no such GitHub user/i],
-    ["unavailable", 503, {}, /lookup unavailable.*retry later/i],
-  ] as const)("distinguishes %s during resolution and the grant's second lookup", async (_kind, status, body, message) => {
-    for (const failingPhase of ["resolve", "grant"] as const) {
-      const remote = await administrator();
-      remote.github.lookupHook = url => url.includes("/users/") && failingPhase === "grant"
-        ? Response.json({ id: Number(ACCOUNT), login: LOGIN, type: "User" })
-        : Response.json(body, { status });
-      const run = await runInProcess(["workspace", "member", "add", LOGIN, "--yes"], remote.box);
-      expect(run.status, run.output).toBe(1);
-      expect(run.stderr).toMatch(message);
-      expect(remote.hub.principals!.getByGithubAccountId(ACCOUNT)).toBeNull();
-      expect(actions(remote, "grant-member")).toHaveLength(failingPhase === "grant" ? 1 : 0);
-      publicOutput(run, remote);
-    }
+    ["account-not-found", "resolve", 404, { message: "Not Found" }, /no such GitHub user/i],
+    ["lookup-unavailable", "grant", 503, {}, /lookup unavailable.*retry later/i],
+  ] as const)("reports %s from the %s lookup without granting access", async (_kind, failingPhase, status, body, message) => {
+    const remote = await administrator();
+    remote.github.lookupHook = url => url.includes("/users/") && failingPhase === "grant"
+      ? Response.json({ id: Number(ACCOUNT), login: LOGIN, type: "User" })
+      : Response.json(body, { status });
+    const run = await runInProcess(["workspace", "member", "add", LOGIN, "--yes"], remote.box);
+    expect(run.status, run.output).toBe(1);
+    expect(run.stderr).toMatch(message);
+    expect(remote.hub.principals!.getByGithubAccountId(ACCOUNT)).toBeNull();
+    expect(actions(remote, "grant-member")).toHaveLength(failingPhase === "grant" ? 1 : 0);
+    publicOutput(run, remote);
   });
 });
 

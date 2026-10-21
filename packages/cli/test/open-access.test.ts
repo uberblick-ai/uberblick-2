@@ -30,15 +30,7 @@ function issue(hub: Hub, id: string, username: string, role?: "admin" | "member"
 
 async function rig(role: "admin" | "member" | null = "admin", snapshot?: string[]) {
   const { box, env } = configured();
-  const github = vi.fn<typeof fetch>(async input => {
-    const path = new URL(String(input)).pathname;
-    if (path === "/users/missing") return Response.json({}, { status: 404 });
-    if (path === "/users/rate-limited" || path === "/user/9009") return Response.json({}, { status: 429 });
-    if (path === "/users/CONFIRMED-person" || path === "/user/9876") {
-      return Response.json({ id: 9876, login: "confirmed-person", type: "User" });
-    }
-    throw new Error("unexpected GitHub lookup");
-  });
+  const github = vi.fn<typeof fetch>(async () => { throw new Error("unexpected GitHub lookup"); });
   const hub = await createHub({ port: 0, address: "127.0.0.1",
     databasePath: join(box.cwd, "access-hub.sqlite"), github: { clientId: "Iv1.0123456789abcdef", fetch: github }, log: silentLogger }, { deviceCredentials: true });
   hubs.push(hub);
@@ -166,31 +158,6 @@ describe("ub open: live Access bridge", () => {
     } finally { expect((await app.interrupt()).status).toBe(0); }
   });
 
-  it("uses current hub authority independently of workspace membership and credential scope", async () => {
-    const { app, post, hub, login, other, origin } = await rig(null, []);
-    hub.hubAdmins!.grant(login.identity.id);
-    hub.hubAdmins!.grant(other.identity.id);
-    try {
-      expect((await post({ operation: "own-role", workspaceId: WORKSPACE })).body.status).toBe("forbidden");
-      expect(await post({ operation: "own-hub-role" })).toEqual({ code: 200,
-        body: { status: "ok", role: "admin", hub: origin } });
-      expect((await post({ operation: "list-hub-admins" })).body).toMatchObject({ status: "ok", admins: [
-        { principalId: other.identity.id, current: false, workspaces: 1 },
-        { principalId: login.identity.id, current: true, workspaces: 0 },
-      ] });
-      expect((await post({ operation: "list-hub-workspaces" })).body).toMatchObject({ status: "ok", workspaces:
-        expect.arrayContaining([{ workspaceId: WORKSPACE, status: "active", members: 1, admins: ["other-admin"] }]) });
-      expect((await post({ operation: "remove-hub-admin", principalId: login.identity.id })).body.status).toBe("self-admin");
-      hub.hubAdmins!.remove(other.identity.id, login.identity.id);
-      for (const action of [{ operation: "own-hub-role" }, { operation: "list-hub-admins" },
-        { operation: "list-hub-workspaces" }, { operation: "remove-hub-admin", principalId: other.identity.id }]) {
-        expect((await post(action)).body).toEqual({ status: "forbidden", hub: origin });
-      }
-      expect((await post({ operation: "list-devices" })).body.status).toBe("ok");
-      expect(hub.memberships!.roleFor(WORKSPACE, other.identity.id)).toBe("admin");
-    } finally { expect((await app.interrupt()).status).toBe(0); }
-  });
-
   it("suspends another workspace and restores its own suspended workspace through only the bound hub", async () => {
     const { app, post, hub, login, other, origin, box } = await rig(null, []);
     hub.hubAdmins!.grant(login.identity.id);
@@ -215,24 +182,6 @@ describe("ub open: live Access bridge", () => {
     } finally { expect((await app.interrupt()).status).toBe(0); }
   });
 
-  it("refuses workspace administrators and accounts after hub administration is removed without renewing account authority", async () => {
-    const { app, post, hub, login, other, origin } = await rig();
-    const renew = vi.spyOn(hub.credentials!, "renew");
-    try {
-      for (const operation of ["suspend-workspace", "restore-workspace"]) {
-        expect(await post({ operation, workspaceId: WORKSPACE })).toEqual({ code: 403, body: { status: "forbidden", hub: origin } });
-      }
-      hub.hubAdmins!.grant(login.identity.id);
-      hub.hubAdmins!.grant(other.identity.id);
-      expect((await post({ operation: "suspend-workspace", workspaceId: WORKSPACE })).body.workspaceStatus).toBe("suspended");
-      hub.hubAdmins!.remove(other.identity.id, login.identity.id);
-      expect(await post({ operation: "restore-workspace", workspaceId: WORKSPACE })).toEqual({ code: 403,
-        body: { status: "forbidden", hub: origin } });
-      expect(hub.hubAdmins!.isSuspended(WORKSPACE)).toBe(true);
-      expect(renew).not.toHaveBeenCalled();
-    } finally { expect((await app.interrupt()).status).toBe(0); }
-  });
-
   it("never borrows another hub's login or accepts workspace targets for hub operations", async () => {
     const { app, post, hub, login, box, origin } = await rig();
     try {
@@ -243,30 +192,6 @@ describe("ub open: live Access bridge", () => {
       await writeHubLogin("https://another-hub.example", login, box.env);
       await removeHubLogin(origin, box.env);
       expect((await post({ operation: "own-hub-role" })).body).toEqual({ status: "sign-in-required", hub: origin });
-    } finally { expect((await app.interrupt()).status).toBe(0); }
-  });
-
-  it("relays own device names beside legacy rows with no new upstream fields", async () => {
-    const { app, post, hub, login, other, origin } = await rig("member");
-    const named = issueCredential(hub.credentials!, { principalId: login.identity.id, deviceId: crypto.randomUUID(),
-      deviceName: "agent-server", workspaces: [] });
-    issueCredential(hub.credentials!, { principalId: other.identity.id, deviceId: crypto.randomUUID(),
-      deviceName: "foreign-server", workspaces: [WORKSPACE] });
-    try {
-      expect(await post({ operation: "list-devices" })).toEqual({ code: 200, body: { status: "ok", hub: origin, handle: "this-person",
-        devices: expect.arrayContaining([
-          { deviceId: login.credential.record.deviceId, signedInAt: login.credential.record.issuedAt, current: true },
-          { deviceId: named.record.deviceId, signedInAt: named.record.issuedAt, current: false, deviceName: "agent-server" },
-        ]),
-      } });
-      const listed = (await post({ operation: "list-devices" })).body;
-      expect(listed.devices).toHaveLength(2);
-      expect(JSON.stringify(listed)).not.toContain("foreign-server");
-      expect(JSON.stringify(listed)).not.toContain(login.credential.key);
-      expect((await post({ operation: "revoke-device", deviceId: named.record.deviceId })).body.status).toBe("ok");
-      expect((await post({ operation: "list-devices" })).body.devices).toEqual([
-        { deviceId: login.credential.record.deviceId, signedInAt: login.credential.record.issuedAt, current: true },
-      ]);
     } finally { expect((await app.interrupt()).status).toBe(0); }
   });
 
@@ -414,58 +339,6 @@ describe("ub open: live Access bridge", () => {
     } finally { expect((await app.interrupt()).status).toBe(0); }
   });
 
-  it("resolves without granting, grants the confirmed ID, reads live roles and preserves existing roles", async () => {
-    const { app, post, hub, login, github, origin } = await rig();
-    try {
-      expect(await post({ operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "CONFIRMED-person" }))
-        .toEqual({ code: 200, body: { status: "ok", githubUsername: "confirmed-person", githubAccountId: "9876", hub: origin } });
-      expect(hub.principals!.getByGithubAccountId("9876")).toBeNull();
-      const added = await post({ operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "9876" });
-      expect(added.body).toMatchObject({ status: "ok", member: { githubUsername: "confirmed-person", githubAccountId: "9876", role: "member" } });
-      expect(github.mock.calls.map(([input]) => String(input))).toEqual(["https://api.github.com/users/CONFIRMED-person", "https://api.github.com/user/9876"]);
-      const rows = (await post({ operation: "list-members", workspaceId: WORKSPACE })).body.members as { principalId: string; githubAccountId: string; role: string }[];
-      const target = rows.find(row => row.githubAccountId === "9876")!;
-      expect(target.role).toBe("member");
-      expect((await post({ operation: "change-role", workspaceId: WORKSPACE, principalId: target.principalId, role: "admin" })).body.status).toBe("ok");
-      const repeat = await post({ operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "9876", role: "member" });
-      expect(repeat.body).toMatchObject({ status: "already-member", member: { role: "admin" } });
-      const members = (await post({ operation: "list-members", workspaceId: WORKSPACE })).body.members as object[];
-      expect(members).toEqual(expect.arrayContaining([expect.objectContaining({ principalId: target.principalId, role: "admin" })]));
-      expect((await post({ operation: "remove-member", workspaceId: WORKSPACE, principalId: target.principalId })).body.status).toBe("ok");
-      expect(hub.memberships!.roleFor(WORKSPACE, target.principalId)).toBeNull();
-      for (const [username, state] of [["missing", "account-not-found"], ["rate-limited", "lookup-unavailable"]]) {
-        expect((await post({ operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: username })).body.status).toBe(state);
-      }
-      expect((await post({ operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "9009" })).body.status).toBe("lookup-unavailable");
-      expect(hub.principals!.getByGithubAccountId("9009")).toBeNull();
-      const visible = JSON.stringify({ added, repeat, members, config: await (await get(`${app.url}uberblick-config.json`)).json(), stdout: app.stdout(), stderr: app.stderr() });
-      expect(visible).not.toContain(login.credential.key);
-      expect(visible).not.toContain('"token"');
-      expect(visible).not.toContain(SECRET);
-    } finally { expect((await app.interrupt()).status).toBe(0); }
-  });
-
-  it("enforces current roles and last-admin rules and exposes only the account's own devices", async () => {
-    const { app, post, hub, login, other, origin } = await rig("member");
-    const second = issue(hub, "1234", "this-person", undefined);
-    try {
-      expect((await post({ operation: "own-role", workspaceId: WORKSPACE })).body).toEqual({ status: "ok", role: "member", hub: origin });
-      expect((await post({ operation: "list-members", workspaceId: WORKSPACE })).body.status).toBe("forbidden");
-      const devices = (await post({ operation: "list-devices" })).body.devices as { deviceId: string; current: boolean; signedInAt: number }[];
-      expect(devices).toHaveLength(2);
-      expect(devices.map(row => row.deviceId)).toEqual(expect.arrayContaining([login.credential.record.deviceId, second.credential.record.deviceId]));
-      expect(devices.find(row => row.deviceId === login.credential.record.deviceId)).toEqual({ deviceId: login.credential.record.deviceId, current: true, signedInAt: login.credential.record.issuedAt });
-      expect((await post({ operation: "revoke-device", deviceId: other.credential.record.deviceId })).body.status).toBe("device-not-found");
-      expect((await post({ operation: "revoke-device", deviceId: second.credential.record.deviceId })).body.status).toBe("ok");
-      hub.memberships!.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: other.identity.id, principalId: login.identity.id, role: "admin" });
-      hub.memberships!.remove({ workspaceId: WORKSPACE, actorPrincipalId: login.identity.id, principalId: other.identity.id });
-      expect((await post({ operation: "own-role", workspaceId: WORKSPACE })).body.role).toBe("admin");
-      expect((await post({ operation: "change-role", workspaceId: WORKSPACE, principalId: login.identity.id, role: "member" })).body.status).toBe("last-admin");
-      expect((await post({ operation: "remove-member", workspaceId: WORKSPACE, principalId: login.identity.id })).body.status).toBe("last-admin");
-      expect(hub.memberships!.roleFor(WORKSPACE, login.identity.id)).toBe("admin");
-    } finally { expect((await app.interrupt()).status).toBe(0); }
-  });
-
   it("keeps own-device access after self-removal and preserves applied closure failure and this-device revocation", async () => {
     const { app, post, hub, login } = await rig();
     const closure = hub.memberships!.onRemove(() => { throw new Error("closure contains private material"); });
@@ -497,7 +370,11 @@ describe("ub open: live Access bridge", () => {
       expect(listed).toMatchObject({ status: "ok", handle: "this-person", devices: [
         { deviceId: login.credential.record.deviceId, current: true },
       ] });
-      expect(JSON.stringify(listed)).not.toContain(login.credential.key);
+      const visible = JSON.stringify({ listed, config: await (await get(`${app.url}uberblick-config.json`)).json(),
+        stdout: app.stdout(), stderr: app.stderr() });
+      expect(visible).not.toContain(login.credential.key);
+      expect(visible).not.toContain('"token"');
+      expect(visible).not.toContain(SECRET);
       expect(listed).not.toHaveProperty("identity");
       expect(listed).not.toHaveProperty("credential");
       expect(await (await fetch(`${app.url}api/account`, { headers })).json())

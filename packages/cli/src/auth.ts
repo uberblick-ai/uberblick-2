@@ -148,6 +148,18 @@ function selectHub(hub: string | undefined): Selection | SelectionFailure {
   return { origin, endpoint, bound, workspace: binding?.workspaceId, bindingOrigin: resolved?.origin ?? null };
 }
 
+export function shouldOpenLoginBrowser(stdoutIsTTY: boolean | undefined, env: NodeJS.ProcessEnv): boolean {
+  return !!stdoutIsTTY && env.SSH_CONNECTION === undefined &&
+    env.SSH_CLIENT === undefined && env.SSH_TTY === undefined;
+}
+
+export function shouldPrintClaimCommand(claimedWorkspaceId: string | undefined,
+  selection: Pick<Selection, "bound" | "workspace">): boolean {
+  return claimedWorkspaceId !== undefined &&
+    (!selection.bound || selection.workspace === undefined ||
+      parseWorkspaceId(selection.workspace).uuid !== claimedWorkspaceId);
+}
+
 export function displayUsername(user: string): string {
   // JSON quoting escapes C0 controls; DEL and C1 also need terminal-safe escapes.
   return isGithubUsername(user) ? user : JSON.stringify(user).replace(/[\u007f-\u009f]/g,
@@ -585,10 +597,7 @@ async function login(selection: Selection, io: Io, collectTimeoutMs?: number): P
     authField(io, "open", started.verificationUri);
     authField(io, "code", started.userCode);
     io.out("waiting for approval…\n");
-    if (process.stdout.isTTY &&
-        process.env.SSH_CONNECTION === undefined &&
-        process.env.SSH_CLIENT === undefined &&
-        process.env.SSH_TTY === undefined) {
+    if (shouldOpenLoginBrowser(process.stdout.isTTY, process.env)) {
       // Browser failures must never enter sign-in's cancellation path.
       try { openBrowser(GITHUB_APPROVAL_URL, process.env, io); } catch {
         io.err("ub auth: warning: could not open a browser; approve using the displayed URL and code.\n");
@@ -648,9 +657,7 @@ async function login(selection: Selection, io: Io, collectTimeoutMs?: number): P
       authField(io, "signed in", `${displayUsername(credential.identity.githubUsername)} on ${selection.origin}`);
       if (claimedWorkspaceId !== undefined) authField(io, "claimed", `default workspace (${claimedWorkspaceId}), you are admin`);
       describeWorkspaces(credential, io);
-      if (claimedWorkspaceId !== undefined &&
-          (!selection.bound || selection.workspace === undefined ||
-            parseWorkspaceId(selection.workspace).uuid !== claimedWorkspaceId)) {
+      if (shouldPrintClaimCommand(claimedWorkspaceId, selection)) {
         io.out(`Use it here: ub workspace use ${shellArgument(`${selection.endpoint}/${claimedWorkspaceId}`)}\n`);
       }
       return 0;

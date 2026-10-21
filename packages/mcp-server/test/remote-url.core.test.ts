@@ -1,5 +1,17 @@
 import { expect, it } from "vitest";
-import { authenticationOrigin, assertHubTransport, hubIdentity, hubTransportProblem, isLoopbackEndpoint, normalizeRemoteUrl } from "../src/remote-url.js";
+import { authenticationOrigin, assertHubTransport, hubIdentity, hubTransportProblem, isLoopbackEndpoint, normalizeRemoteUrl, parseJoinTarget } from "../src/remote-url.js";
+
+const WORKSPACE = "1e9b7a30-52c4-4d6f-8a13-c7b204e5f981";
+
+it.each([
+  ["hub.example.ts.net/proxy", "wss://hub.example.ts.net/proxy"],
+  ["hub.example.ts.net", "wss://hub.example.ts.net/ws"],
+  ["https://hub.example.ts.net/", "wss://hub.example.ts.net/ws"],
+  ["wss://Hub.Example.TS.net:443/ws", "wss://Hub.Example.TS.net:443/ws"],
+  ["wss://hub.example.ts.net/proxy//ws", "wss://hub.example.ts.net/proxy//ws"],
+])("takes the workspace from a join link with endpoint %s", (typed, endpoint) => {
+  expect(parseJoinTarget(`${typed}/${WORKSPACE}`)).toEqual({ endpoint, workspace: WORKSPACE });
+});
 
 it.each([
   ["ws://LOCALHOST:4444/ws", "ws://localhost:4444/ws"],
