@@ -78,7 +78,6 @@ function elements(): {
   const viewer = document.createElement("div");
   viewer.className = "ub-figma-viewer";
   viewer.contentEditable = "false";
-  viewer.tabIndex = 0;
   viewer.setAttribute("role", "region");
   const placeholder = document.createElement("div");
   placeholder.className = "ub-figma-placeholder";
@@ -157,17 +156,14 @@ class FigmaView implements NodeView {
       if (!this.fullscreen && window.matchMedia("(pointer: coarse)").matches) this.expand(true);
       else this.interact();
     });
-    this.ui.viewer.addEventListener("keydown", (event) => {
-      if (event.target === this.ui.viewer && event.key === "Enter") {
-        event.preventDefault();
-        if (!this.fullscreen && window.matchMedia("(pointer: coarse)").matches) this.expand(true);
-        else this.interact();
-      }
+    // WebKit can edit a stale document selection while noneditable controls have focus.
+    this.dom.addEventListener("focusin", (event) => {
+      if (event.target instanceof globalThis.Node && !this.contentDOM.contains(event.target)) this.dom.ownerDocument.getSelection()?.removeAllRanges();
     });
     this.ui.edit.addEventListener("click", () => this.openFields());
     const done = (): void => {
       if (this.editing) this.ui.fields.querySelector("form")?.requestSubmit();
-      else { this.active = false; this.sync(); this.ui.viewer.focus({ preventScroll: true }); }
+      else { this.active = false; this.sync(); this.ui.shield.focus({ preventScroll: true }); }
     };
     this.ui.done.addEventListener("click", done);
     this.ui.fullscreenDone.addEventListener("click", done);
@@ -251,7 +247,7 @@ class FigmaView implements NodeView {
     if (this.destroyed) return;
     this.sync();
     this.visibility.refresh();
-    this.ui.viewer.focus({ preventScroll: true });
+    this.ui.shield.focus({ preventScroll: true });
     if (this.editAfterFullscreen) {
       this.editAfterFullscreen = false;
       this.openFields();

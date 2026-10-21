@@ -139,7 +139,7 @@ for (const appearance of ["light", "dark"] as const) {
     await expect(toolbar).toHaveCSS("opacity", "1");
     await editor(page).locator(":scope > p").first().hover();
     await expect(toolbar).toHaveCSS("opacity", "0");
-    await surface.focus();
+    await shield.focus();
     await expect(toolbar).toHaveCSS("opacity", "1");
     await page.keyboard.press("Enter");
     await expect(frame).toHaveAttribute("data-figma-active", "true");
@@ -188,16 +188,17 @@ test("the shield passes wheel scrolling to the document and requires a click bef
   await expect(shield).toBeVisible();
 });
 
-test("Done, fullscreen Close and Tab leave a safe Figma focus target that cannot edit the document", { tag: "@webkit" }, async ({ browser }) => {
+test("Done, fullscreen Close, toolbar and Tab leave a safe Figma focus target that cannot edit the document", { tag: "@webkit" }, async ({ browser }) => {
   const session = writer();
   const created = await create(session);
   const page = await open(browser, created.uuid, [], { fullscreen: true });
   const frame = page.locator(".ub-figma");
-  const preview = frame.getByRole("region", { name: "Payment, mobile", exact: true });
+  const preview = frame.getByRole("button", { name: "Interact with Figma preview", exact: true });
   await expect(frame.locator("iframe").contentFrame().locator("#canvas")).toBeAttached();
   const documentBefore = await editor(page).evaluate((element) => (element as HTMLElement & { editor: Editor }).editor.state.doc.toJSON());
   const storedBefore = created.blocks.map(({ id, type, text }) => ({ id, type, text }));
-  for (const entry of ["Done", "Close", "Tab"] as const) {
+  for (const entry of ["Done", "Close", "Toolbar", "Tab"] as const) {
+    const focused = entry === "Toolbar" ? frame.getByRole("link", { name: "Open in Figma", exact: true }) : preview;
     await editor(page).locator(":scope > p").first().click();
     await page.keyboard.press("End");
     if (entry === "Done") {
@@ -209,13 +210,14 @@ test("Done, fullscreen Close and Tab leave a safe Figma focus target that cannot
       await expect(frame.locator(".ub-figure-viewer-bar")).toBeVisible();
       await frame.getByRole("button", { name: "Close Figma viewer", exact: true }).click();
       await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
-    } else await page.keyboard.press("Tab");
-    await expect(preview, entry).toBeFocused();
+    } else if (entry === "Toolbar") await focused.focus();
+    else await page.keyboard.press("Tab");
+    await expect(focused, entry).toBeFocused();
     for (const key of ["Backspace", "Delete", "W"]) {
       await page.keyboard.press(key);
       await settle(frame);
       expect(await editor(page).evaluate((element) => (element as HTMLElement & { editor: Editor }).editor.state.doc.toJSON()), `${entry}: ${key}`).toEqual(documentBefore);
-      await expect(preview, `${entry}: ${key}`).toBeFocused();
+      await expect(focused, `${entry}: ${key}`).toBeFocused();
     }
     await expectMcp(() => session.call<StoredDoc>("get_doc", { uuid: created.uuid }), (stored) => {
       expect(stored.blocks.map(({ id, type, text }) => ({ id, type, text })), entry).toEqual(storedBefore);
@@ -329,7 +331,7 @@ test("Expand enters browser fullscreen with the same iframe and browser exit pre
   await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
   await unchanged(frame, identity, visits);
   expect(await articleIdentity?.evaluate((element) => element.isConnected)).toBe(true);
-  await expect(frame.locator(".ub-figma-viewer")).toBeFocused();
+  await expect(frame.locator(".ub-figma-shield")).toBeFocused();
   await frame.getByRole("button", { name: "Expand", exact: true }).focus();
   await frame.getByRole("button", { name: "Expand", exact: true }).click();
   await expect.poll(() => frame.evaluate((element) => document.fullscreenElement === element)).toBe(true);
@@ -406,7 +408,7 @@ test("fullscreen close, browser exit and Back retain history state, focus and th
     else if (close === "button") await bar.getByRole("button", { name: "Close Figma viewer", exact: true }).click();
     else await page.goBack();
     await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
-    await expect(frame.locator(".ub-figma-viewer")).toBeFocused();
+    await expect(frame.locator(".ub-figma-shield")).toBeFocused();
     await expect.poll(() => page.evaluate(() => history.state)).toEqual(before);
     await unchanged(frame, identity, visits, navigations);
   }
@@ -452,7 +454,7 @@ test("iPad taps open a live fullscreen preview, while placeholders retain reacha
   }
   await bar.getByRole("button", { name: "Close Figma viewer", exact: true }).tap();
   await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
-  await expect(frame.locator(".ub-figma-viewer")).toBeFocused();
+  await expect(frame.locator(".ub-figma-shield")).toBeFocused();
   await expect(shield).toBeVisible();
   await unchanged(frame, identity, visits);
   await page.keyboard.press("Enter");
@@ -461,7 +463,7 @@ test("iPad taps open a live fullscreen preview, while placeholders retain reacha
   await expect(shield).toBeHidden();
   await bar.getByRole("button", { name: "Close Figma viewer", exact: true }).tap();
   await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
-  await expect(frame.locator(".ub-figma-viewer")).toBeFocused();
+  await expect(frame.locator(".ub-figma-shield")).toBeFocused();
   await expect(shield).toBeVisible();
   await unchanged(frame, identity, visits);
 
