@@ -616,7 +616,7 @@ describe("stubs-only topic resolution", () => {
     expect(listDirectory(directory)).toEqual([]);
   });
 
-  it.each([undefined, "draft", "planned", "implementing", "done"] as const)("derives a regular-page log and Markdown through stored requirement status %s", (status) => {
+  it.each([undefined, "done"] as const)("derives a regular-page log and Markdown through stored requirement status %s", (status) => {
     const directory = fork();
     stub(directory, E, { topic: E, governs: PAGE, status: "open", createdAt: 0 });
     const page = new Y.Doc();

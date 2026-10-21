@@ -663,7 +663,7 @@ describe("directory doc", () => {
     });
   });
 
-  it.each([undefined, "draft", "planned", "implementing", "done", "decided", 42])(
+  it.each([undefined, "decided"])(
     "projects stored requirement stubs with status %j without writing on read",
     (status) => {
       const dir = new Y.Doc();

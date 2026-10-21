@@ -1,5 +1,5 @@
 import * as Y from "yjs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   AnnotationCellError, InvalidTableError, InvalidTableMappingError, OldTextMismatchError, StaleBlockError, TableMappingRequiredError,
   addComment, appendBlock, createAnnotation, editBlock,
@@ -595,33 +595,57 @@ describe("structured table contract", () => {
     } finally { doc.destroy(); }
   });
 
-  it.each([[500, 6], [200, 12]])("edits a %i-row, %i-column table without blocking for a second", (rows, columns) => {
+  it("bounds table scans and scales cell writes constantly and column writes linearly", () => {
     for (const edit of ["cell", "add", "replace"]) {
-      const doc = seeded();
-      try {
-        const values = [Array.from({ length: columns }, (_, col) => `Column ${col}`),
-          ...Array.from({ length: rows }, (_, row) => Array.from({ length: columns }, (_, col) =>
-            col === 1 ? row % 2 === 0 ? "done" : "todo" : `r${row}c${col}-abcdefghijklmnopqrstuvwxyz`))];
-        const before = writeGfmTable(values);
-        const id = appendBlock(doc, { type: "table", text: before });
-        const next = values.map((row) => row.slice());
-        if (edit === "cell") next[Math.floor(rows / 2)]![3] += " changed";
-        else next.forEach((row, index) => {
-          if (edit === "replace") row.splice(4, 1);
-          row.splice(2, 0, index === 0 ? "Owner" : `owner-${index}`);
-        });
-        const after = writeGfmTable(next);
-        const start = performance.now();
-        const columnMapping: Array<number | null> = Array.from({ length: columns }, (_, column) => column);
-        if (edit !== "cell") {
-          if (edit === "replace") columnMapping.splice(4, 1);
-          columnMapping.splice(2, 0, null);
-        }
-        editBlock(doc, id, before, after, edit === "cell" ? {} : { tableMapping: { rows: values.map((_, row) => row), columns: columnMapping } });
-        const elapsed = performance.now() - start;
-        expect(elapsed).toBeLessThan(1000);
-        expect(getBlock(doc, id)!.text).toBe(after);
-      } finally { doc.destroy(); }
+      const costs = [16, 32].map((rows) => {
+        const doc = seeded();
+        try {
+          // Include the header in the row count and use equal-length content,
+          // so doubling the table exactly doubles a column's Yjs writes.
+          const values = Array.from({ length: rows }, () => ["Name", "done", "value", "notes", "owner", "extra"]);
+          const before = writeGfmTable(values);
+          const id = appendBlock(doc, { type: "table", text: before });
+          const table = element(doc, id);
+          const next = values.map((row) => row.slice());
+          if (edit === "cell") next[Math.floor(rows / 2)]![3] = "changed";
+          else next.forEach((row) => {
+            if (edit === "replace") row.splice(4, 1);
+            row.splice(2, 0, "added");
+          });
+          const after = writeGfmTable(next);
+          const columns: Array<number | null> = [0, 1, 2, 3, 4, 5];
+          if (edit !== "cell") {
+            if (edit === "replace") columns.splice(4, 1);
+            columns.splice(2, 0, null);
+          }
+          const start = Y.decodeStateVector(Y.encodeStateVector(doc)).get(doc.clientID)!;
+          let changed = 0;
+          let deleted = 0;
+          doc.on("afterTransaction", (transaction: Y.Transaction) => {
+            changed += transaction.changed.size;
+            for (const ranges of transaction.deleteSet.clients.values()) {
+              for (const range of ranges) deleted += range.len;
+            }
+          });
+          const scan = vi.spyOn(table, "toArray");
+          editBlock(doc, id, before, after, edit === "cell" ? {} : { tableMapping: { rows: values.map((_, row) => row), columns } });
+          const scans = scan.mock.calls.length;
+          scan.mockRestore();
+          const inserted = Y.decodeStateVector(Y.encodeStateVector(doc)).get(doc.clientID)! - start;
+          expect(getBlock(doc, id)!.text).toBe(after);
+          expect(changed).toBeGreaterThan(0);
+          expect(inserted).toBeGreaterThan(0);
+          expect(scans).toBeGreaterThan(0);
+          return { changed, inserted, deleted, scans };
+        } finally { doc.destroy(); }
+      });
+      const [small, large] = costs;
+      const factor = edit === "cell" ? 1 : 2;
+      expect(large!.changed).toBe(small!.changed * factor);
+      expect(large!.inserted).toBe(small!.inserted * factor);
+      expect(large!.deleted).toBe(small!.deleted * factor);
+      // Re-enumerating all stored rows for each row would make this quadratic.
+      expect(large!.scans).toBeLessThanOrEqual(small!.scans);
     }
   });
 
@@ -815,6 +839,8 @@ describe("structured table contract", () => {
       text.delete(0, text.length);
       text.insert(0, literal);
       const source = getBlock(doc, id)!.text;
+      expect(source).toContain("\\[document\\]");
+      expect(source).toContain("\\! \\[ \\]");
       const copy = seeded();
       const copied = insertBlock(copy, null, { type: "table", text: source });
       expect(tableCellText(tableRows(element(copy, copied))[1]![0]!)!.toDelta()).toEqual(text.toDelta());
@@ -851,6 +877,10 @@ describe("structured table contract", () => {
     const text = tableCellText(tableRows(element(doc, id))[1]![0]!)!;
     text.delete(0, text.length);
     text.insert(0, "  Alpha  ", { bold: {}, comment: { threadId: UUID } });
+    const copy = seeded();
+    const copied = appendBlock(copy, { type: "table", text: getBlock(doc, id)!.text });
+    expect(tableCellText(tableRows(element(copy, copied))[1]![0]!)!.toDelta()).toEqual([{ insert: "Alpha", attributes: { bold: {} } }]);
+    copy.destroy();
     text.format(2, 2, { inlineCode: {} });
     text.format(4, 3, { inlineCode: {}, italic: {} });
     const before = getBlock(doc, id)!.text;

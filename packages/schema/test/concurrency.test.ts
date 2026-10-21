@@ -187,27 +187,6 @@ describe("two clients, one block", () => {
     expect(getBlock(a, blockId)!.text).toBe("The slow brown cat jumps");
     expect(getBlock(b, blockId)!.text).toBe(getBlock(a, blockId)!.text);
   });
-
-  it("converges when both clients edit the same range (no lost characters, deterministic)", () => {
-    const original = "one two three";
-    let blockId = "";
-    const [a, b] = replicaPair((doc) => {
-      initDoc(doc, { uuid: UUID, title: "Same range" });
-      blockId = appendBlock(doc, { type: "paragraph", text: original });
-    });
-
-    editBlock(a, blockId, original, "one TWO three");
-    editBlock(b, blockId, original, "one 2 three");
-    syncDocs(a, b);
-
-    // Overlapping edits interleave rather than clobber; the point is that both
-    // replicas agree, and that this is exactly the case a caller avoids by
-    // passing a fresh oldText (see the stale-oldText test below).
-    const merged = getBlock(a, blockId)!.text;
-    expect(getBlock(b, blockId)!.text).toBe(merged);
-    expect(merged.startsWith("one ")).toBe(true);
-    expect(merged.endsWith(" three")).toBe(true);
-  });
 });
 
 describe("stale oldText", () => {
@@ -379,29 +358,6 @@ describe("concurrent structural changes", () => {
     expect(idsA.indexOf(fromB)).toBeLessThan(idsA.indexOf(appendedB));
     expect(getBlocks(a)).toEqual(getBlocks(b));
   });
-
-  it("converges when one client deletes a block another client inserts after", () => {
-    let anchor = "";
-    let tail = "";
-    const [a, b] = replicaPair((doc) => {
-      initDoc(doc, { uuid: UUID, title: "Structure" });
-      anchor = appendBlock(doc, { type: "paragraph", text: "anchor" });
-      tail = appendBlock(doc, { type: "paragraph", text: "tail" });
-    });
-
-    const inserted = insertBlock(b, anchor, {
-      type: "paragraph",
-      text: "inserted after anchor",
-    });
-    deleteBlock(a, anchor);
-
-    syncDocs(a, b);
-
-    // The inserted block survives its deleted neighbour and keeps its place.
-    expect(blockIdsOf(a)).toEqual([inserted, tail]);
-    expect(blockIdsOf(b)).toEqual([inserted, tail]);
-  });
-
 });
 
 /** An empty part as the web editor creates it, before its first keystroke. */

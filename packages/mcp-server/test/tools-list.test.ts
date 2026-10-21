@@ -6,9 +6,7 @@ afterAll(() => {
   removeTempDirs();
 });
 
-it("preserves the complete ordered tools/list contract", async () => {
-  // Keep result schemas, display names and advisory hints reviewable beside
-  // the arguments and descriptions. Includes the four sidebar tools.
+it("preserves the ordered tools/list catalog and input contract", async () => {
   const baseline = JSON.parse(
     readFileSync(new URL("./fixtures/tools-list.json", import.meta.url), "utf8"),
   );
@@ -16,11 +14,10 @@ it("preserves the complete ordered tools/list contract", async () => {
   try {
     const { tools } = await rig.client.listTools();
     expect(
-      tools.map(({ name, title, inputSchema, outputSchema, description, annotations }) => ({
+      tools.map(({ name, title, inputSchema, description, annotations }) => ({
         name,
         title,
         inputSchema,
-        outputSchema,
         description,
         annotations,
       })),

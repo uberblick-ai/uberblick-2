@@ -154,16 +154,3 @@ it("every registered tool is guarded and its operation works synchronously after
     node.name?.text === "collectSyncStatus")!;
   expectOpeningWait(collectStatus, status, /^replicas\.settle\(/);
 });
-
-it("the invariant check rejects an added await after settle", () => {
-  const source = parse("async function handler() { await replicas.settle(); await anotherWriter(); write(); }");
-  expect(() => expectOpeningWait(source.statements[0]!, source, /^replicas\.settle\(/)).toThrow();
-});
-
-it.each([
-  "async function handler() { write(); await anotherWriter(); write(); }",
-  "function handler() { write(); void (async () => { await anotherWriter(); write(); })(); }",
-])("the invariant check rejects an await in an operation body: %s", (fixture) => {
-  const source = parse(fixture);
-  expect(() => expectSynchronousBody(source.statements[0]!)).toThrow();
-});

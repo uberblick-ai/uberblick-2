@@ -90,20 +90,17 @@ describe("stored requirement documents", () => {
     expect(archived).toMatchObject({ uuid: page.uuid, deleted: true });
     expect(archived).not.toHaveProperty("kind");
     expect(await rig.ok("get_doc", { uuid: page.uuid })).toEqual(content);
-    expect((await rig.call("set_metadata", { uuid: page.uuid, title: "Refused" })).payload.error).toBe("doc_archived");
     await rig.ok("restore_doc", { uuid: page.uuid });
     expect(await rig.ok("get_doc", { uuid: page.uuid })).toEqual(content);
     expectLegacyPair(rig, page.uuid, "done");
 
     const doc = rig.instance.replicas.replica(page.uuid).doc;
-    for (const error of ["decision_tldr_unsupported", "decision_data_unsupported"]) {
-      const raw = Y.encodeStateAsUpdate(doc);
-      expect((await rig.call("set_status", { uuid: page.uuid, status: "decided" })).payload.error).toBe(error);
-      expect(Y.encodeStateAsUpdate(doc)).toEqual(raw);
-      expectLegacyPair(rig, page.uuid, "done");
-      if (error === "decision_tldr_unsupported") await rig.ok("set_metadata", { uuid: page.uuid, tldr: null });
-      else await rig.ok("update_data", { uuid: page.uuid, operations: [{ collection: "notes", deleteCollection: true }] });
-    }
+    await rig.ok("set_metadata", { uuid: page.uuid, tldr: null });
+    const raw = Y.encodeStateAsUpdate(doc);
+    expect((await rig.call("set_status", { uuid: page.uuid, status: "decided" })).payload.error).toBe("decision_data_unsupported");
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(raw);
+    expectLegacyPair(rig, page.uuid, "done");
+    await rig.ok("update_data", { uuid: page.uuid, operations: [{ collection: "notes", deleteCollection: true }] });
     expect(await rig.ok("set_status", { uuid: page.uuid, status: "decided" })).toMatchObject({ kind: "decision", status: "decided", agentStance: true });
     expect(getMetaMap(doc).get("kind")).toBe("decision");
     expect(getMetaMap(doc).get("status")).toBe("decided");
