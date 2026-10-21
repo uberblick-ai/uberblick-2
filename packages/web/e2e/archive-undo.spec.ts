@@ -95,9 +95,7 @@ test("an archive in another tab shows the banner without offering Undo here", as
   await expect(page.getByRole("button", { name: "Undo", exact: true })).toHaveCount(0);
 });
 
-test.fixme("Undo refused by a lost connection auto-closes its notice and keeps banner recovery", {
-  annotation: { type: "issue", description: "https://github.com/uberblick-ai/uberblick-2/issues/2003" },
-}, async ({ browser }) => {
+test("Undo refused by a lost connection auto-closes its notice and keeps banner recovery", async ({ browser }) => {
   const page = await openApp(browser, "/", { upstream: true, readySelector: ".ub-workspace" });
   const title = docTitle("Disconnected Undo");
   await createDoc(page, title);
@@ -114,7 +112,11 @@ test.fixme("Undo refused by a lost connection auto-closes its notice and keeps b
     await expect(failure).toBeVisible();
     await expect(failure).toHaveAttribute("data-type", "error");
     await expect(failure.getByRole("button")).toHaveCount(0);
-    await page.mouse.move(0, 0);
+    // Let the replacement settle before leaving: removing the hovered Undo
+    // button can race an immediate raw mouse move and lose Sonner's leave.
+    await failure.hover();
+    await page.locator(".ub-title").hover();
+    await expect(failure).toHaveAttribute("data-expanded", "false");
     await page.locator(".ub-title").focus();
     await expect(editor(page)).toHaveAttribute("contenteditable", "false");
     await expect(restore).toBeDisabled();

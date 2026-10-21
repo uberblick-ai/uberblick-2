@@ -2215,9 +2215,7 @@ for (const scheme of ["light"] as const) {
   });
 }
 for (const scheme of ["light", "dark"] as const) {
-  test.fixme(`document tags occupy only their control, leaving blank header space inert — ${scheme} @webkit`, {
-    annotation: { type: "issue", description: "https://github.com/uberblick-ai/uberblick-2/issues/2003" },
-  }, async ({ browser }, info) => {
+  test(`document tags occupy only their control, leaving blank header space inert — ${scheme} @webkit`, async ({ browser }, info) => {
     const touch = info.project.name === "webkit-ipad";
     const page = await openApp(browser, `/${harness().workspace}/settings/tags`, {
       upstream: true,
@@ -2250,7 +2248,7 @@ for (const scheme of ["light", "dark"] as const) {
       if (touch) await control.tap();
       else await control.click();
     };
-    const blankSpace = async (): Promise<{ x: number; y: number }> => {
+    const blankSpace = async (): Promise<void> => {
       const geometry = await trigger.evaluate((control) => {
         const row = control.closest(".ub-doc-meta");
         const actions = row?.querySelector(".ub-document-controls");
@@ -2265,7 +2263,7 @@ for (const scheme of ["light", "dark"] as const) {
         const y = box.top + box.height / 2;
         const minimum = matchMedia("(any-pointer: coarse)").matches ? 44 : 24;
         return {
-          x, y, width: box.width, height: box.height, minimum,
+          x, y, rowLeft: rowBox.left, rowTop: rowBox.top, width: box.width, height: box.height, minimum,
           trailing: box.right - visibleBox.right,
           chevronGap: chevron === null ? 0 : visibleBox.left - (control.querySelector(".ub-tag")?.getBoundingClientRect().right ?? 0),
           gap: actionBox.left - box.right,
@@ -2286,12 +2284,14 @@ for (const scheme of ["light", "dark"] as const) {
       expect(geometry.actionInset).toBeCloseTo(0, 1);
       expect(geometry.takesBlank).toBe(false);
       expect(geometry.controlsTakeBlank).toBe(false);
-      if (touch) await page.touchscreen.tap(geometry.x, geometry.y);
-      else await page.mouse.click(geometry.x, geometry.y);
+      // Locator input waits for stable layout before interacting with the
+      // newly mounted popover's deferred outside-pointer listener.
+      const position = { x: geometry.x - geometry.rowLeft, y: geometry.y - geometry.rowTop };
+      if (touch) await page.locator(".ub-doc-meta").tap({ position });
+      else await page.locator(".ub-doc-meta").click({ position });
       await expect(page.locator(".ub-tag-picker-panel")).toHaveCount(0);
       await expect(page.getByRole("menu")).toHaveCount(0);
       await expect(copyNotice(page, "Link copied")).toHaveCount(0);
-      return { x: geometry.x, y: geometry.y };
     };
     await blankSpace();
     // Both native activation keys keep the same focus entry and Escape return.
@@ -2317,13 +2317,11 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(trigger.locator(".ub-tag-chevron")).toHaveAttribute("aria-hidden", "true");
     expect(await page.locator(".ub-title").boundingBox()).toEqual(titleBefore);
     expect((await page.locator(".ub-doc-meta").boundingBox())?.height).toBe(rowBefore?.height);
-    const blank = await blankSpace();
+    await blankSpace();
     await activate(trigger);
     await expect(page.locator(".ub-tag-picker-panel")).toBeVisible();
     await expect(page.getByRole("option").first()).toBeFocused();
-    if (touch) await page.touchscreen.tap(blank.x, blank.y);
-    else await page.mouse.click(blank.x, blank.y);
-    await expect(page.locator(".ub-tag-picker-panel")).toHaveCount(0);
+    await blankSpace();
   });
 }
 
@@ -2634,9 +2632,8 @@ function activeHoverRules(control: Locator): Promise<string[]> {
 }
 
 for (const scheme of ["light", "dark"] as const) {
-  test.fixme(`links, kind badges and reversible document actions use neutral ink — ${scheme}`, {
+  test(`links, kind badges and reversible document actions use neutral ink — ${scheme}`, {
     tag: "@webkit",
-    annotation: { type: "issue", description: "https://github.com/uberblick-ai/uberblick-2/issues/2003" },
   }, async ({ browser }, info) => {
     const touch = info.project.use.hasTouch === true;
     const page = await openApp(browser, "/", {
@@ -2745,6 +2742,7 @@ for (const scheme of ["light", "dark"] as const) {
       await expect(unpin).toBeFocused();
       await checkActions();
       await page.keyboard.press("ArrowDown");
+      await expect(archive).toBeFocused();
       await page.keyboard.press("Enter");
       const confirmation = page.getByRole("alertdialog");
       await expect(confirmation).toContainText("The topic and all its records leave the decision list and search. You can restore it later.");
