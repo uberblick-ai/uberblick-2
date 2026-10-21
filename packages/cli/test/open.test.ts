@@ -495,8 +495,8 @@ describe("ub open", () => {
 
     const refused = await openFails(box, [], { ...env, UBERBLICK_WEB_DIST: empty });
     expect(refused.status).toBe(1);
-    expect(refused.output).toContain(empty);
-    expect(refused.output).toContain("index.html");
+    expect(refused.stderr).toBe(`error: UBERBLICK_WEB_DIST names ${empty}, which holds no index.html\n` +
+      "  → point UBERBLICK_WEB_DIST at a built bundle, or build one from a checkout — CONTRIBUTING.md's Updating section links the build instructions\n");
     // The way out names the variable this user can set, not a checkout's task.
     expect(refused.output).toContain("UBERBLICK_WEB_DIST");
     expect(refused.output).not.toMatch(/mise/);
@@ -513,10 +513,9 @@ describe("ub open", () => {
     expect(refused.status).toBe(1);
     // Both versions, so the reader can see which side is behind, and the way
     // out named rather than implied.
-    expect(refused.output).toContain(bundle);
-    expect(refused.output).toContain(`speaks sync protocol ${SYNC_PROTOCOL_VERSION + 1}`);
-    expect(refused.output).toContain(`this uberblick speaks ${SYNC_PROTOCOL_VERSION}`);
-    expect(refused.output).toContain("mise run build-web");
+    expect(refused.stderr).toBe(`error: the web app at ${bundle} speaks sync protocol ${SYNC_PROTOCOL_VERSION + 1}, ` +
+      `and this uberblick speaks ${SYNC_PROTOCOL_VERSION} — it could not sync, so it is not being served\n` +
+      "  → rebuild it with pnpm --filter @uberblick/web build, or mise run build-web from a checkout\n");
 
     // It served nothing and started nothing: a refusal that had bound a port or
     // opened a hub database would be the unsyncable page, served anyway.
@@ -582,12 +581,7 @@ describe("ub open", () => {
 
     expect(refused.status, refused.stderr).toBe(1);
     expect(refused.stdout).toBe("");
-    expect(refused.stderr).toContain(bundle);
-    expect(refused.stderr).toContain("mise run build-web");
-    if (index && protocol !== null) {
-      expect(refused.stderr).toContain(`speaks sync protocol ${protocol}`);
-      expect(refused.stderr).toContain(`this uberblick speaks ${SYNC_PROTOCOL_VERSION}`);
-    }
+    expect(refused.stderr).toBe(`error: the web app in ${bundle} is missing or out of date\n  → mise run build-web\n`);
     expect(refused.stderr).not.toMatch(BANNER);
     expect(existsSync(buildCalls)).toBe(false);
     expect((await probePort("127.0.0.1", hubPort)).state).toBe("free");
@@ -660,13 +654,26 @@ describe("ub open", () => {
       HUB_DB_PATH: join(box.cwd, "unbound-hub.sqlite"),
     });
 
-    expect(refused.status).not.toBe(0);
-    expect(refused.output).toContain("No workspace selected");
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain("no .uberblick.json here or in any parent directory\n" +
+      "  → ub workspace create <name>, or ub workspace use <link|id>\n");
+    expect(refused.stderr).not.toContain("ub:");
     expect(refused.output).not.toMatch(BANNER);
     expect(refused.output).not.toContain(SECRET);
     expect(existsSync(join(configDir(box), "browser-keys"))).toBe(false);
     expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
     expect(existsSync(join(box.cwd, "unbound-hub.sqlite"))).toBe(false);
+  });
+
+  it("names an unusable project binding and the workspace selection remedy", async () => {
+    const { box, env } = configured();
+    const path = join(box.cwd, ".uberblick.json");
+    writeFileSync(path, "{invalid");
+    const refused = await openFails(box, [], env);
+    expect(refused.status).toBe(1);
+    expect(refused.stdout).toBe("");
+    expect(refused.stderr).toBe(`Cannot read ${path}: expected a regular file containing valid JSON\n` +
+      "  → fix the binding, then run ub open again\n");
   });
 
   it.each(["0.0.0.0", "127.attacker.example"])("serves locally without starting a hub at remote endpoint %s", async host => {

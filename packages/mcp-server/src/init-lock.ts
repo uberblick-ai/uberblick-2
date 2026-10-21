@@ -100,7 +100,7 @@ export interface LockOptions {
   path?: string;
   /** How long to wait for a holder before giving up. Zero tries exactly once. */
   waitMs?: number;
-  /** The command to retry; omitted callers name ub open. */
+  /** The command to retry; omitted callers use a neutral retry hint. */
   command?: string;
   /**
    * Announce contention once before waiting; zero-wait callers never call it.
@@ -205,9 +205,12 @@ export async function acquireInitLock(
     }
 
     if (Date.now() >= deadline) {
+      const retry = options.command === undefined
+        ? "run the same command again"
+        : `run \`${options.command}\` again`;
       throw new LockWaitTimeoutError(
         `another configuration writer is holding ${path} (${describeAge(path)}). Wait ` +
-          `for it to finish and run \`${options.command ?? "ub open"}\` again — or, if nothing is ` +
+          `for it to finish and ${retry} — or, if nothing is ` +
           `running, remove it: rm -- ${shellQuote(path)}`,
       );
     }

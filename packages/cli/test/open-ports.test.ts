@@ -148,13 +148,11 @@ describe("ub open: hub, ports and serving role", () => {
     const webPort = await freePort();
     const refused = await openFails(box, ["--no-browser", "--port", String(webPort)], env);
     expect(refused.status).toBe(1);
-    expect(refused.output).toContain("may have leaked");
-    expect(refused.output).toContain(path);
-    expect(refused.output).toMatch(/delete|rm /);
-    expect(refused.output).toContain("ub open");
-    expect(refused.output).toContain("restart");
-    expect(refused.output).toContain("ub auth login");
-    expect(refused.output).not.toContain("chmod 600");
+    expect(refused.stdout).toBe("");
+    expect(refused.stderr).toBe(
+      `error: ${path} can be read by others (0644), so its secret may have leaked\n` +
+      `  → rm ${path}, then ub open makes a new one\n`,
+    );
     expect(refused.output).not.toContain(SECRET);
     expect(readFileSync(path, "utf8")).toBe(before);
     expect(statSync(path).mode & 0o777).toBe(0o644);
@@ -174,6 +172,8 @@ describe("ub open: hub, ports and serving role", () => {
       expect(readFileSync(path, "utf8")).toBe(before);
       expect(statSync(path).mode & 0o777).toBe(0o644);
       expect(app.stdout()).not.toContain("secret     created");
+      expect(app.stderr().match(/may have leaked/g)).toHaveLength(1);
+      expect(app.stderr()).toContain("ub: warning: refusing");
       expect(await hubAnswers(box, hubUrl)).toBe(true);
     } finally { expect((await app.interrupt()).status).toBe(0); }
   });
@@ -207,7 +207,8 @@ describe("ub open: hub, ports and serving role", () => {
     pointAt(other.box, `ws://127.0.0.1:${await freePort()}`);
     const samePort = await openFails(other.box, args, other.env);
     expect(samePort.status).toBe(1);
-    expect(samePort.output).toContain(`port ${port} is already serving an uberblick web app`);
+    expect(samePort.stderr).toBe(`error: port ${port} is already serving Uberblick, from another ub open\n` +
+      `  → ub open --port ${port + 1}\n`);
     expect(samePort.output).not.toMatch(BANNER);
 
     expect((await app.interrupt()).status).toBe(0);
@@ -234,15 +235,17 @@ describe("ub open: hub, ports and serving role", () => {
     pointAt(other.box, `ws://127.0.0.1:${await freePort()}`);
     const collision = await openFails(other.box, [], other.env);
     expect(collision.status).toBe(1);
-    expect(collision.output).toContain("port 13379 is already serving an uberblick web app");
+    expect(collision.stderr).toBe("error: port 13379 is already serving Uberblick, from another ub open\n" +
+      "  → ub open --port 13380\n");
     expect(collision.output).not.toMatch(BANNER);
     expect((await app.interrupt()).status).toBe(0);
   });
 
-  it("keeps a stopped loopback deployment external after logout", async () => {
+  it.each(["missing", "exposed"])("keeps a stopped loopback deployment external after logout with %s credentials", async state => {
     const { box, env } = configured();
     const credentials = join(configDir(box), "credentials.json");
-    rmSync(credentials);
+    if (state === "missing") rmSync(credentials);
+    else chmodSync(credentials, 0o644);
     const port = await freePort();
     const endpoint = `ws://127.0.0.1:${port}/custom-proxy-path`;
     pointAt(box, endpoint);
@@ -250,11 +253,14 @@ describe("ub open: hub, ports and serving role", () => {
     writeFileSync(join(configDir(box), "config.json"), JSON.stringify({ hubAdmissions: { [endpoint]: "device" } }));
     const app = await open(box, ["--port", String(await freePort())], env);
     try {
-      expect(app.stdout()).toContain(
-        "hub        not signed in, changes stay on this machine\n" +
-        "             → ub auth login\n",
-      );
-      expect(existsSync(credentials)).toBe(false);
+      expect(app.stdout()).toContain(state === "missing"
+        ? "hub        not signed in, changes stay on this machine\n             → ub auth login\n"
+        : "hub        unreachable, changes stay on this machine until it is back\n");
+      expect(existsSync(credentials)).toBe(state === "exposed");
+      if (state === "exposed") {
+        expect(app.stderr().match(/may have leaked/g)).toHaveLength(1);
+        expect(app.stderr()).toContain("ub: warning: refusing");
+      }
       expect(app.stdout()).not.toContain("secret     created");
       expect((await probePort("127.0.0.1", port)).state).toBe("free");
     } finally { expect((await app.interrupt()).status).toBe(0); }
@@ -452,8 +458,8 @@ describe("ub open: hub, ports and serving role", () => {
 
     const foreign = await openFails(box, ["--port", String(foreignPort)], env);
     expect(foreign.status).toBe(1);
-    expect(foreign.output).toContain(`port ${foreignPort}`);
-    expect(foreign.output).toContain("another process");
+    expect(foreign.stderr).toBe(`error: port ${foreignPort} is in use by another process\n` +
+      "  → stop it, or run ub open --port <free-port>\n");
 
     // A holder that never answers is nobody in particular, and the refusal for
     // it must not send the user to stop what may be their own `ub open`.
@@ -461,8 +467,8 @@ describe("ub open: hub, ports and serving role", () => {
     await silentListener(silentPort);
     const silent = await openFails(box, ["--port", String(silentPort)], env);
     expect(silent.status).toBe(1);
-    expect(silent.output).toContain(`port ${silentPort}`);
-    expect(silent.output).toContain("--port");
+    expect(silent.stderr).toBe(`error: port ${silentPort} is in use, and its holder did not answer in time to say what it is\n` +
+      "  → ub open --port <free-port>\n");
     expect(silent.output).not.toContain("another process");
     expect(silent.output).not.toContain("`ub open`");
     expect(silent.output).not.toMatch(/stop/);
@@ -539,6 +545,20 @@ describe("ub open: hub, ports and serving role", () => {
     const ephemeral = await openFails(ephemeralConfig.box, ["--port", String(webPort)], ephemeralConfig.env);
     expect(ephemeral.status).toBe(1);
     expect(ephemeral.output).toContain("names no port to bind");
+  });
+
+  it("names an environment secret when the configured endpoint cannot be started here", async () => {
+    const { box, env } = configured();
+    rmSync(join(configDir(box), "credentials.json"));
+    const hubPort = await freePort();
+    pointAt(box, `wss://127.0.0.1:${hubPort}`);
+    const app = await open(box, ["--port", String(await freePort())], env);
+    try {
+      expect(app.stdout()).toContain("no signing secret, so a hub here would accept anything — export HUB_AUTH_TOKEN)");
+      expect(app.stdout()).not.toContain("free the local hub port");
+      expect(app.stdout()).not.toContain("ub workspace create");
+      expect((await probePort("127.0.0.1", hubPort)).state).toBe("free");
+    } finally { expect((await app.interrupt()).status).toBe(0); }
   });
 
   it("an interrupt while it is still coming up stops the hub it started", async () => {

@@ -74,7 +74,14 @@ describe.skipIf(process.getuid === undefined)("project binding ownership", () =>
     const box = unboundSandbox({ projectBinding: { workspaceId: first, hubUrl: null } });
     const path = join(box.cwd, ".uberblick.json");
     unowned.add(path);
-    await expect(runInProcess(argv, box)).rejects.toThrow(`${path}: another user owns it`);
+    if (argv[0] === "open") {
+      const result = await runInProcess(argv, box);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toBe(`Ignoring ${path}: another user owns it.\n` +
+        "  → ub workspace create <name>, or ub workspace use <link|id>\n");
+    } else {
+      await expect(runInProcess(argv, box)).rejects.toThrow(`${path}: another user owns it`);
+    }
     expect(readFileSync(path, "utf8")).toContain(first);
   });
 

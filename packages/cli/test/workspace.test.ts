@@ -860,6 +860,24 @@ globalThis.fetch = () => { throw new Error("use by id must stay local"); };
     expect(existsSync(lock)).toBe(false);
   });
 
+  it("keeps the workspace use retry hint neutral when the init lock times out", async () => {
+    const box = sandbox();
+    bind(box);
+    record(box, OTHER, null);
+    const holder = await acquireInitLock(box.env);
+    try {
+      const run = await runUbAsync(["workspace", "use", OTHER], box);
+      expect(run.status, run.output).toBe(1);
+      expect(run.stderr).toContain("Wait for it to finish and run the same command again");
+      expect(run.stderr).toContain(`remove it: rm -- '${holder.path}'`);
+      expect(run.stderr).not.toContain("ub open");
+      expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: HUB });
+      expect(existsSync(holder.path)).toBe(true);
+    } finally {
+      holder.release();
+    }
+  });
+
   it.each([undefined, null, HUB])("preserves the hub recorded while use waits for the init lock (previous record: %s)", async (initial) => {
     const box = sandbox({ projectBinding: { workspaceId: OTHER, hubUrl: HUB } });
     withDatabase(box, OTHER);

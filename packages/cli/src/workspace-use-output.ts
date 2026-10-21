@@ -32,8 +32,8 @@ export function useField(label: string, value: string): string {
 }
 
 /** Called under the binding lock, after publication has registered both pairs. */
-export function useBindingLines(binding: ProjectBinding, previous: ProjectBinding | null, path: string): string {
-  let text = useField("using", workspaceLabel(binding)) + useField("wrote", path);
+export function useBindingLines(binding: ProjectBinding, previous: ProjectBinding | null, path: string, label: "using" | "created" = "using"): string {
+  let text = useField(label, workspaceLabel(binding)) + useField("wrote", path);
   if (previous === null || (parseWorkspaceId(previous.workspaceId).uuid === parseWorkspaceId(binding.workspaceId).uuid &&
       previous.hubUrl === binding.hubUrl)) return text;
   text += useField("previous", workspaceLabel(previous));

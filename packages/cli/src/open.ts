@@ -38,12 +38,12 @@ import {
 import { budget, resolveMcpConfig } from "./budget.js";
 import { openBrowser } from "./browser.js";
 import { errorMessage, trimmed } from "./strings.js";
-import { ensureLocalSigningSecret, readCredentials, resolveConfig, requireBinding } from "@uberblick/mcp-server/project-config";
+import { BindingResolutionError, ensureLocalSigningSecret, readCredentials, resolveConfig, requireBinding, SigningSecretExposureError } from "@uberblick/mcp-server/project-config";
 import { takeHelp } from "./help.js";
 import { isInstallPayload } from "./version.js";
 import { acquireInitLock, tryAcquireInitLock } from "@uberblick/mcp-server/init-lock";
 import type { Io } from "./io.js";
-import { processIo } from "./io.js";
+import { processIo, shellArgument } from "./io.js";
 import { readAccessAction, requestAccess, type AccessBinding } from "./open-access.js";
 import { createBrowserAccess, hasSession, serveSessionRequest, type BrowserAccess } from "./open-session.js";
 import { requestAccount, requestDeviceLogin } from "./open-account.js";
@@ -175,20 +175,20 @@ function speaks(stamped: number | null): string {
 }
 
 function staleBundle(dir: string, stamped: number | null, source: BundleSource): string {
+  if (source === "default") {
+    return `error: the web app in ${dir} is missing or out of date\n  → mise run build-web\n`;
+  }
   if (source === "installed") {
     return (
-      `ub open: the installed web app at ${dir} ${speaks(stamped)}, and this uberblick speaks ` +
-      `${SYNC_PROTOCOL_VERSION} — it could not sync, so it is not being served. ` +
-      "Reinstall Uberblick; an installation never rebuilds or changes its packaged web app at run time.\n"
+      `error: the installed web app at ${dir} ${speaks(stamped)}, and this uberblick speaks ` +
+      `${SYNC_PROTOCOL_VERSION} — it could not sync, so it is not being served\n` +
+      "  → reinstall Uberblick\n"
     );
   }
-  const recovery = source === "default"
-    ? "Rebuild it with `mise run build-web` from the checkout.\n"
-    : "Rebuild it with `pnpm --filter @uberblick/web build`, or with " +
-      "`mise run build-web` from a checkout.\n";
   return (
-    `ub open: the web app at ${dir} ${speaks(stamped)}, and this uberblick speaks ` +
-    `${SYNC_PROTOCOL_VERSION} — it could not sync, so it is not being served. ` + recovery
+    `error: the web app at ${dir} ${speaks(stamped)}, and this uberblick speaks ` +
+    `${SYNC_PROTOCOL_VERSION} — it could not sync, so it is not being served\n` +
+    "  → rebuild it with pnpm --filter @uberblick/web build, or mise run build-web from a checkout\n"
   );
 }
 
@@ -199,15 +199,17 @@ function staleBundle(dir: string, stamped: number | null, source: BundleSource):
  */
 export function ensureBundle(plan: BundleAction, io: Io): "servable" | "refused" {
   if (plan.action === "missing" || !isFile(join(plan.dir, "index.html"))) {
+    if (plan.source === "default") {
+      io.err(staleBundle(plan.dir, null, plan.source));
+      return "refused";
+    }
     const reason = plan.action === "missing"
       ? plan.reason
       : `the web app at ${plan.dir} holds no index.html`;
     const recovery = plan.source === "installed"
-      ? "Reinstall Uberblick; an installation never builds or changes its packaged web app at run time."
-      : plan.source === "default"
-        ? "Run `mise run build-web` from the checkout."
-        : "Point UBERBLICK_WEB_DIST at a built bundle, or build one from a checkout — CONTRIBUTING.md's Updating section links the build instructions.";
-    io.err(`ub open: ${reason}. ${recovery}\n`);
+      ? "reinstall Uberblick"
+      : "point UBERBLICK_WEB_DIST at a built bundle, or build one from a checkout — CONTRIBUTING.md's Updating section links the build instructions";
+    io.err(`error: ${reason}\n  → ${recovery}\n`);
     return "refused";
   }
   const stamped = stampedProtocol(plan.dir);
@@ -366,6 +368,20 @@ function servingConfigSource(
   };
 }
 
+function startupRefusal(error: unknown): string {
+  if (error instanceof BindingResolutionError) {
+    const recovery = error.reason === "missing"
+      ? "ub workspace create <name>, or ub workspace use <link|id>"
+      : "fix the binding, then run ub open again";
+    return `${error.message}\n  → ${recovery}\n`;
+  }
+  if (error instanceof SigningSecretExposureError) {
+    return `error: ${error.path} can be read by others (${error.permissions}), so its secret may have leaked\n` +
+      `  → rm ${shellArgument(error.path)}, then ub open makes a new one\n`;
+  }
+  return `ub open: ${errorMessage(error)}\n`;
+}
+
 /** Resolve the startup binding under the writers' init lock. */
 async function initialConfig(env: NodeJS.ProcessEnv, ensureSecret = false): Promise<{
   resolved: ReturnType<typeof resolveConfig>;
@@ -374,6 +390,9 @@ async function initialConfig(env: NodeJS.ProcessEnv, ensureSecret = false): Prom
   const lock = await acquireInitLock(env, { command: "ub open" });
   try {
     let resolved = resolveConfig({ env });
+    if (resolved.binding === null) {
+      throw new BindingResolutionError(resolved.bindingProblem ?? "no .uberblick.json here or in any parent directory", "missing");
+    }
     const binding = requireBinding(resolved);
     assertWorkspaceBinding(binding, resolved.env, resolved.paths.projectConfig ?? "environment");
     let secretCreated: string | null = null;
@@ -764,20 +783,20 @@ export async function whoHoldsPort(port: number): Promise<PortHolder> {
 function portTakenMessage(port: number, holder: PortHolder): string {
   if (holder === "ub-open") {
     return (
-      `ub open: port ${port} is already serving an uberblick web app — ` +
-      "that is another `ub open`; use --port to run a second one\n"
+      `error: port ${port} is already serving Uberblick, from another ub open\n` +
+      `  → ub open --port ${port < 65535 ? port + 1 : DEFAULT_WEB_PORT}\n`
     );
   }
   if (holder === "foreign") {
     return (
-      `ub open: port ${port} is in use by another process — ` +
-      "stop it, or serve the web app elsewhere with --port\n"
+      `error: port ${port} is in use by another process\n` +
+      "  → stop it, or run ub open --port <free-port>\n"
     );
   }
   // An unidentified holder gets advice safe for either kind of process.
   return (
-    `ub open: port ${port} is in use, and its holder did not answer in time to ` +
-    "say what it is — serve the web app elsewhere with --port\n"
+    `error: port ${port} is in use, and its holder did not answer in time to say what it is\n` +
+    "  → ub open --port <free-port>\n"
   );
 }
 
@@ -862,12 +881,15 @@ async function ensureHub(
 
   if (secret === null) {
     // Refuse startup without a signing secret; absence is distinct from downtime.
+    const recovery = whyNotStartable(hubUrl, parsed) === null
+      ? "free the local hub port and run `ub open` again, or export HUB_AUTH_TOKEN"
+      : "export HUB_AUTH_TOKEN";
     return {
       started: null,
       showNote: true,
       note:
         `${hubUrl} (not started: no signing secret, so a hub here would accept ` +
-        "anything — run `ub workspace create <name>` or `ub open` with a free local hub port)",
+        `anything — ${recovery})`,
     };
   }
 
@@ -1129,11 +1151,22 @@ export async function openCommand(
 async function serveOpen(options: Options, io: Io): Promise<number> {
   // Retain the original environment for refreshes; resolved file values are not pins.
   const startupEnv: NodeJS.ProcessEnv = { ...process.env };
-  let initial = await initialConfig(startupEnv);
-  let projectBinding = requireBinding(initial.resolved);
-  for (const warning of initial.resolved.warnings) {
-    io.err(`ub: warning: ${warning}\n`);
+  let initial: Awaited<ReturnType<typeof initialConfig>>;
+  try {
+    initial = await initialConfig(startupEnv);
+  } catch (error) {
+    if (!(error instanceof BindingResolutionError)) throw error;
+    io.err(startupRefusal(error));
+    return 1;
   }
+  let projectBinding = requireBinding(initial.resolved);
+  const warnings = initial.resolved.warnings;
+  const exposureWarning = initial.resolved.credentialExposure?.message;
+  const printWarnings = (excludeExposure = false): void => {
+    for (const warning of warnings) {
+      if (!excludeExposure || warning !== exposureWarning) io.err(`ub: warning: ${warning}\n`);
+    }
+  };
   // Share the MCP client's default endpoint rather than defining another.
   let hubUrl = trimmed(initial.resolved.env.HUB_URL) ?? DEFAULT_HUB_URL;
   let env: NodeJS.ProcessEnv = { ...initial.resolved.env, HUB_URL: hubUrl };
@@ -1155,11 +1188,13 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
   // Before ensureHub: a bundle refusal starts no hub and creates no database.
   const bundle = ensureBundle(plan, io);
   if (bundle === "refused") {
+    printWarnings();
     return await foreground.shutdown(1);
   }
   // Freeze the cwd's default for this run, just as the served binding is frozen.
   const presenceName = await defaultPresenceName(startupEnv);
   if (foreground.interrupted()) {
+    printWarnings();
     return await foreground.shutdown(0);
   }
 
@@ -1174,9 +1209,11 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
     showHubNote = decided.showNote ?? false;
     hubDeviceAuthenticated = decided.deviceHub ?? usesDeviceLogin(hubUrl, env);
   } catch (error) {
-    io.err(`ub open: ${errorMessage(error)}\n`);
+    printWarnings(error instanceof SigningSecretExposureError);
+    io.err(startupRefusal(error));
     return await foreground.shutdown(1);
   }
+  printWarnings();
   if (foreground.interrupted()) {
     return await foreground.shutdown(0);
   }
