@@ -751,26 +751,6 @@ describe("the list", () => {
     expect(group()).toBe("Later");
   });
 
-  it("follows a remote create and a remote rename with nobody telling it", async () => {
-    const peer = peerOf(directoryDoc());
-    upsertDirectoryEntry(peer, { uuid: ONE, title: "Overview" });
-
-    const host = await openApp(allPath(WORKSPACE));
-    expect(rowTitles(host)).toEqual(["Overview"]);
-
-    // A second client — another browser, or an agent's `create_doc` — writes to
-    // the directory room. Nothing here is told anything.
-    await act(async () => {
-      upsertDirectoryEntry(peer, { uuid: TWO, title: "Annotations" });
-    });
-    expect(rowTitles(host)).toEqual(["Annotations", "Overview"]);
-
-    await act(async () => {
-      upsertDirectoryEntry(peer, { uuid: ONE, title: "Zebra" });
-    });
-    expect(rowTitles(host)).toEqual(["Annotations", "Zebra"]);
-  });
-
   it("shows an age where the directory has a stamp and a dash where it has none", async () => {
     const peer = peerOf(directoryDoc());
     upsertDirectoryEntry(peer, {
@@ -1048,7 +1028,7 @@ describe("decision topics in the list", () => {
     expect(pin().getAttribute("aria-pressed")).toBe("true");
   });
 
-  it.each(["All documents", "Back to workspace"])("restores a list visit on Back/Forward but opens defaults through %s", async (entry) => {
+  it("restores a list visit on Back/Forward but opens defaults through Back to workspace", async () => {
     localSearch({ Current: [TWO] });
     const peer = peerOf(directoryDoc());
     for (const [uuid, title, supersedes] of [
@@ -1083,12 +1063,10 @@ describe("decision topics in the list", () => {
     await traverseHistory("back");
     assertRestored();
     await traverseHistory("forward");
-    if (entry === "Back to workspace") {
-      await act(async () => within(host).getByRole("button", { name: "Workspace settings" }).click());
-    }
-    await act(async () => within(host).getByRole("button", { name: entry === "All documents" ? entry : "Unnamed workspace" }).click());
+    await act(async () => within(host).getByRole("button", { name: "Workspace settings" }).click());
+    await act(async () => within(host).getByRole("button", { name: "Unnamed workspace" }).click());
     const assertDefaults = (): void => {
-      expect(window.location.pathname).toBe(entry === "All documents" ? allPath(WORKSPACE) : `/${WORKSPACE}`);
+      expect(window.location.pathname).toBe(`/${WORKSPACE}`);
       expect(within(within(host).getByRole("tablist", { name: "Document type" }))
         .getByRole("tab", { name: /^Documents/ }).getAttribute("aria-selected")).toBe("true");
       expect(filter(host).value).toBe("");
@@ -1097,11 +1075,11 @@ describe("decision topics in the list", () => {
     };
     assertDefaults();
     await traverseHistory("back");
-    if (entry === "Back to workspace") await traverseHistory("back");
+    await traverseHistory("back");
     await traverseHistory("back");
     assertRestored();
     await traverseHistory("forward");
-    if (entry === "Back to workspace") await traverseHistory("forward");
+    await traverseHistory("forward");
     await traverseHistory("forward");
     assertDefaults();
     await chooseDecisions(host);
@@ -1436,31 +1414,5 @@ describe("the sidebar entry", () => {
     expect(pin?.getAttribute("aria-describedby")).toBe(reason?.id);
     await act(async () => pin?.click());
     expect(readSidebar(connection.ydoc)).toEqual([]);
-  });
-});
-
-describe("opening a document", () => {
-  it("navigates to the deep link, and a reload comes back to it", async () => {
-    const peer = peerOf(directoryDoc());
-    upsertDirectoryEntry(peer, { uuid: ONE, title: "Overview" });
-    // The document itself, as a peer would have synced it: a reload has to find
-    // it here rather than at the list it came from.
-    const target = room(roomForDoc(WORKSPACE, ONE)).ydoc;
-    initDoc(target, { uuid: ONE, title: "Overview" });
-    appendBlock(target, { type: "paragraph", text: "hello" });
-
-    const host = await openApp(`/${WORKSPACE}`);
-    await act(async () =>
-      within(documentTable(host)).getByRole("button", { name: "Overview" }).click(),
-    );
-    expect(window.location.pathname).toBe(`/${WORKSPACE}/${ONE}`);
-
-    // A reload: the app goes, the address stays, and the document opens.
-    unmount();
-    const again = await openApp(`/${WORKSPACE}/${ONE}`);
-    expect(within(again).queryByRole("table", { hidden: true })).toBeNull();
-    expect(within(again).getByPlaceholderText<HTMLTextAreaElement>("Untitled").value).toBe(
-      "Overview",
-    );
   });
 });

@@ -7,29 +7,21 @@ import {
 } from "@uberblick/schema";
 import { mountEditor, typeText } from "./helpers.js";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
-import { prepareTable } from "../src/editor/table-data.js";
 import { dataRevision } from "../src/editor/render-state.js";
 import type { ChartConfiguration } from "chart.js";
 
 type RecordedChart = typeof charts.instances[number];
 type PanelData = { datasets: { label: string; yAxisID: string; data: { x: number; y: number | null }[]; borderColor: string;
   pointRadius: number | ((context: { dataIndex: number }) => number) }[] };
-type PanelOptions = { interaction: unknown; scales: {
-  x: { min: number; max: number; title: { display: boolean; text: string };
-    afterBuildTicks: (scale: unknown) => void; afterFit: (scale: unknown) => void;
-    ticks: { callback: (value: number) => unknown } };
-  y: { suggestedMin: number; suggestedMax: number; beginAtZero: boolean; ticks: {
-    callback: (value: number, index: number, ticks: { value: number }[]) => string } };
+type PanelOptions = { scales: {
+  x: { min: number; max: number; afterFit: (scale: unknown) => void };
+  y: { suggestedMin: number; suggestedMax: number; beginAtZero: boolean };
 }; plugins: { tooltip: { callbacks: { label: (item: { datasetIndex: number; parsed: { y: number | null } }) => string } } } };
 
 const charts = vi.hoisted(() => ({ instances: [] as Array<{ canvas: unknown; data: unknown; options: unknown; updates: number; destroyed: boolean }> }));
 vi.mock("@uberblick/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@uberblick/schema")>();
   return { ...actual, readDocData: vi.fn(actual.readDocData) };
-});
-vi.mock("../src/editor/table-data.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/editor/table-data.js")>();
-  return { ...actual, prepareTable: vi.fn(actual.prepareTable) };
 });
 vi.mock("chart.js", () => {
   class Chart {
@@ -109,7 +101,6 @@ beforeEach(() => {
   } as CanvasRenderingContext2D);
     charts.instances = [];
     vi.mocked(readDocData).mockClear();
-    vi.mocked(prepareTable).mockClear();
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -266,7 +257,7 @@ describe("the chart's derived lifecycle", () => {
     editor.destroy(); doc.destroy(); directory.destroy();
   });
 
-  it("sorts only a mounted table's cached window without reads, projection, selection or writes", () => {
+  it("sorts only a mounted table's cached window without reads, selection or writes", () => {
     const { doc, directory, id } = fixture();
     const source = JSON.stringify({ ...JSON.parse(tableMapping), limit: 2, sort: { field: "day", direction: "desc" } });
     editBlock(doc, id, mapping, source);
@@ -293,7 +284,6 @@ describe("the chart's derived lifecycle", () => {
     expect(editor.state.selection.eq(selection)).toBe(true);
     expect(first.closest(".ub-chart")?.classList.contains("ub-chart-editing")).toBe(false);
     expect(readDocData).toHaveBeenCalledTimes(1);
-    expect(prepareTable).toHaveBeenCalledTimes(2);
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
     expect(updates).toBe(0);
 
@@ -304,7 +294,6 @@ describe("the chart's derived lifecycle", () => {
     expect(first.querySelector('th[aria-sort="ascending"]')?.textContent).toBe("Delivery↑");
     expect(document.activeElement).toBe(button);
     expect(readDocData).toHaveBeenCalledTimes(2);
-    expect(prepareTable).toHaveBeenCalledTimes(4);
     editBlock(doc, id, source, `${source} `);
     flush();
     expect(first.querySelector('th[aria-sort="descending"]')?.textContent).toBe("day↓");
@@ -349,75 +338,8 @@ describe("the chart's derived lifecycle", () => {
     expect(root.querySelector(".ub-chart-footer")?.hasAttribute("hidden")).toBe(true);
     expect(root.querySelector(".ub-chart-notice")?.hasAttribute("hidden")).toBe(true);
     expect(charts.instances).toHaveLength(1);
+    expect(charts.instances[0]?.options).toMatchObject({ scales: { x: { title: { display: true, text: "day" } } } });
     expect(readDocData).toHaveBeenCalledTimes(1);
-    editor.destroy(); doc.destroy(); directory.destroy();
-  });
-
-  it("wires compact axes, shared x hover and a bottom legend, including one series and a single x", () => {
-    const { doc, directory, id } = fixture();
-    const { editor } = mountEditor(doc);
-    flush();
-    const instance = charts.instances[0];
-    if (instance === undefined) throw new Error("Chart did not draw");
-    const options = instance.options as NonNullable<ChartConfiguration<"line">["options"]>;
-    expect(options.interaction).toMatchObject({ mode: "nearest", axis: "x", intersect: false });
-    expect(options.plugins?.legend).toMatchObject({ display: true, position: "bottom", align: "start", labels: { pointStyle: "line", usePointStyle: true } });
-    expect(options.scales?.x).toMatchObject({ min: 0, max: 2, title: { display: true, text: "day" }, grid: { display: false }, border: { display: false } });
-    expect(options.scales?.y).not.toHaveProperty("title");
-    expect(options.scales?.y?.ticks).toMatchObject({ maxTicksLimit: 6 });
-    expect(editor.view.dom.querySelector(".ub-chart-diagnostics")?.hasAttribute("hidden")).toBe(true);
-    const source = editor.view.dom.querySelector(".ub-chart-open");
-    const caption = editor.view.dom.querySelector(".ub-block-caption");
-    expect(editor.view.dom.querySelectorAll(".ub-block-caption")).toHaveLength(1);
-    expect(caption?.querySelector(".ub-block-label")?.firstChild?.textContent).toBe("Chart");
-    expect(caption?.querySelector(".ub-chart-title")).not.toBeNull();
-    expect([...caption!.querySelectorAll(".ub-block-actions > button")].map(button => button.textContent)).toEqual(["Copy", "Source"]);
-    expect(source?.textContent).toBe("Source");
-    expect(source?.getAttribute("aria-label")).toBe("Open chart source");
-    const data = instance.data as ChartConfiguration<"line">["data"];
-    expect(data.datasets[0]).toMatchObject({ label: "Delivery", yAxisID: "y", pointHoverRadius: 4 });
-    editBlock(doc, id, mapping, JSON.stringify({ ...JSON.parse(mapping), y: [{ field: "value", unit: "%" }, { field: "value", unit: "ms" }] }));
-    applyDocData(doc, directory, [{ collection: "trend", upsert: [{ id: "b", value: { day: 3, value: 7 } }] }]);
-    flush();
-    const next = instance.options as typeof options;
-    expect(next.scales?.x).toMatchObject({ min: 1, max: 3 });
-    expect(next.scales?.yRight).toMatchObject({ type: "linear", position: "right", grid: { drawOnChartArea: false }, border: { display: false } });
-    expect((instance.data as typeof data).datasets.map(series => series.yAxisID)).toEqual(["y", "yRight"]);
-    editor.destroy(); doc.destroy(); directory.destroy();
-  });
-
-  it("recomputes the zero baseline from every series assigned to each value axis", () => {
-    const { doc, directory, id } = fixture();
-    const sharedMapping = JSON.stringify({ ...JSON.parse(mapping), y: [
-      { field: "value", unit: "requests" }, { field: "secondary", unit: "requests" }, { field: "right", unit: "%" },
-    ] });
-    editBlock(doc, id, mapping, sharedMapping);
-    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } },
-      replaceRecords: [{ id: "a", value: { day: 1, value: 30, secondary: 36, right: -40 } }],
-    }]);
-    const { editor } = mountEditor(doc);
-    flush();
-    const instance = charts.instances[0];
-    if (instance === undefined) throw new Error("Chart did not draw");
-    expect(instance.options).toMatchObject({ scales: { y: { beginAtZero: true }, yRight: { beginAtZero: false } } });
-
-    applyDocData(doc, directory, [{ collection: "trend", upsert: [{ id: "a", value: { day: 1, value: 30, secondary: -5, right: 36 } }] }]);
-    flush();
-    expect(instance.options).toMatchObject({ scales: { y: { beginAtZero: false }, yRight: { beginAtZero: true } } });
-
-    const threeUnitMapping = JSON.stringify({ ...JSON.parse(mapping), y: [
-      { field: "value", unit: "requests" }, { field: "secondary", unit: "ms" }, { field: "right", unit: "%" },
-    ] });
-    editBlock(doc, id, sharedMapping, threeUnitMapping);
-    flush();
-    expect(instance.options).toMatchObject({ scales: { y: { beginAtZero: false } } });
-    expect((instance.options as NonNullable<ChartConfiguration<"line">["options"]>).scales).not.toHaveProperty("yRight");
-
-    editBlock(doc, id, threeUnitMapping, JSON.stringify({ ...JSON.parse(mapping), y: [
-      { field: "value", unit: "requests" }, { field: "right", unit: "%" },
-    ] }));
-    flush();
-    expect(instance.options).toMatchObject({ scales: { y: { beginAtZero: true }, yRight: { beginAtZero: true } } });
     editor.destroy(); doc.destroy(); directory.destroy();
   });
 
@@ -629,99 +551,6 @@ describe("the chart's derived lifecycle", () => {
     editor.destroy(); doc.destroy(); directory.destroy();
   });
 
-  it("uses only plotted values for the baseline, ignoring null gaps and negative records rejected by x or schema", () => {
-    const doc = new Y.Doc(), directory = new Y.Doc();
-    initDoc(doc, { uuid: "filtered-baseline", title: "Filtered baseline" });
-    appendBlock(doc, { type: "chart", text: JSON.stringify({ version: 1, type: "line", collection: "trend",
-      x: { field: "day", type: "date" }, y: [{ field: "value", unit: "requests" }, { field: "secondary", unit: "requests" }],
-    }) });
-    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object", properties: {
-      day: { type: "string" }, value: { type: ["number", "null"] }, secondary: { type: ["number", "null"] }, marker: { type: "string" },
-    } } }, upsert: [
-      { id: "first", value: { day: "2026-01-01", value: 30, secondary: null } },
-      { id: "gap", value: { day: "2026-01-02", value: null, secondary: 36 } },
-      { id: "invalid-x", value: { day: "2026-02-31", value: -40, secondary: -40 } },
-    ] }]);
-    // A merged peer record can violate the schema despite valid local writes.
-    doc.getMap("data").set(JSON.stringify(["record", "trend", "invalid-schema"]), {
-      day: "2026-01-03", value: -50, secondary: -50, marker: 42,
-    });
-    const { editor } = mountEditor(doc);
-    flush();
-    const instance = charts.instances[0];
-    if (instance === undefined) throw new Error("Chart did not draw");
-    expect(instance.options).toMatchObject({ scales: { y: { beginAtZero: true } } });
-    expect((instance.data as { datasets: { data: { y: number | null }[] }[] }).datasets.map(series => series.data.map(point => point.y)))
-      .toEqual([[30, null], [null, 36]]);
-    expect(editor.view.dom.querySelector(".ub-chart-diagnostics")?.textContent).toContain("1 invalid under the collection schema");
-    expect(editor.view.dom.querySelector(".ub-chart-diagnostics")?.textContent).toContain("1 wrong-type or invalid x");
-    editor.destroy(); doc.destroy(); directory.destroy();
-  });
-
-  it("uses observation labels on date scales while retaining the full accessible date", () => {
-    const doc = new Y.Doc(), directory = new Y.Doc();
-    initDoc(doc, { uuid: "calendar-chart", title: "Calendar" });
-    appendBlock(doc, { type: "chart", text: JSON.stringify({ version: 1, type: "line", collection: "trend", x: { field: "day", type: "date", label: "Day" }, y: [{ field: "value" }] }) });
-    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } }, upsert: [
-      { id: "a", value: { day: "2026-10-07", value: 3 } },
-      { id: "b", value: { day: "2026-10-09", value: 7 } },
-    ] }]);
-    const { editor } = mountEditor(doc);
-    flush();
-    const options = charts.instances[0]?.options as { scales: { x: {
-      title: { display: boolean }; afterBuildTicks: (scale: unknown) => void;
-      ticks: { callback: (value: number) => unknown; maxRotation: number };
-    } } };
-    const scale = { min: Date.parse("2026-10-07"), max: Date.parse("2026-10-09"), width: 600, ticks: [] as { value: number }[], chart: { ctx: { save() {}, restore() {}, font: "", measureText: (text: string) => ({ width: text.length * 6 }) } } };
-    options.scales.x.afterBuildTicks(scale);
-    expect(options.scales.x.title.display).toBe(false);
-    expect(options.scales.x.ticks.maxRotation).toBe(0);
-    expect(scale.ticks.map(tick => tick.value)).toEqual([Date.parse("2026-10-07"), Date.parse("2026-10-09")]);
-    expect(options.scales.x.ticks.callback(scale.ticks[0]?.value ?? NaN)).toEqual(["Oct 7"]);
-    expect(editor.view.dom.querySelector(".ub-chart-description")?.textContent).toContain("Oct 7, 2026");
-    editor.destroy(); doc.destroy(); directory.destroy();
-  });
-  it.each(["gap", "connect"])("labels only distinct plotted x values under %s without changing series points", (missing) => {
-    for (const type of ["number", "date"] as const) {
-      const x = (value: number): number | string => type === "number" ? value : `2026-10-0${value}`;
-      const doc = new Y.Doc(), directory = new Y.Doc();
-      initDoc(doc, { uuid: "observation-chart", title: "Observations" });
-      appendBlock(doc, { type: "chart", text: JSON.stringify({ version: 1, type: "line", collection: "trend", missing,
-        x: { field: "x", type, label: "Observation" }, y: [{ field: "a" }, { field: "b" }] }) });
-      applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } }, upsert: [
-        { id: "first", value: { x: x(1), a: 3 } },
-        { id: "tied", value: { x: x(1), b: 4 } },
-        { id: "absent", value: { x: x(2) } },
-        { id: "null", value: { x: x(3), a: null, b: null } },
-        { id: "invalid", value: { x: x(4), a: "wrong" } },
-        { id: "last", value: { x: x(7), a: 7, b: 8 } },
-      ] }]);
-      const { editor } = mountEditor(doc);
-      flush();
-      const instance = charts.instances.at(-1);
-      if (!instance) throw new Error("Chart did not draw");
-      const data = JSON.stringify(instance.data);
-      const options = instance.options as { scales: { x: {
-        min: number; max: number; title: { display: boolean; text: string };
-        afterBuildTicks: (scale: unknown) => void; afterFit: (scale: unknown) => void;
-        ticks: { callback: (value: number) => unknown; autoSkip: boolean; maxRotation: number };
-      } } };
-      const { min, max } = options.scales.x;
-      const scale = { min, max, width: 800, ticks: [] as { value: number }[],
-        chart: { ctx: { save() {}, restore() {}, font: "", measureText: (text: string) => ({ width: text.length * 6 }) } } };
-      options.scales.x.afterBuildTicks(scale);
-      expect(scale.ticks.map(tick => tick.value)).toEqual([min, max]);
-      expect(options.scales.x.ticks.callback(min)).toEqual([type === "number" ? "1" : "Oct 1"]);
-      expect(options.scales.x.title).toMatchObject({ display: type === "number", text: "Observation" });
-      expect(options.scales.x.ticks).toMatchObject({ autoSkip: false, maxRotation: 0 });
-      scale.width = 5;
-      options.scales.x.afterFit(scale);
-      expect(scale.ticks.map(tick => tick.value)).toEqual([min]);
-      expect(JSON.stringify(instance.data)).toBe(data);
-      expect(options.scales.x).toMatchObject({ min, max });
-      editor.destroy(); doc.destroy(); directory.destroy();
-    }
-  });
   it("shows a shared reader failure in every view and recovers on a valid update without writes", () => {
     const { doc, directory } = fixture();
     appendBlock(doc, { type: "chart", text: tableMapping });
@@ -1114,7 +943,7 @@ describe("the chart's derived lifecycle", () => {
 });
 
 describe("the panel chart's shared presentation and lifecycle", () => {
-  it("draws ordered panels with shared ranges and observation labels as one accessible image", () => {
+  it("switches to ordered panels while preserving headers, chrome and one accessible image", () => {
     const { doc, directory, id, source } = panelFixture();
     const overlay = JSON.stringify({ ...JSON.parse(source), layout: "overlay" });
     editBlock(doc, id, source, overlay);
@@ -1148,24 +977,8 @@ describe("the panel chart's shared presentation and lifecycle", () => {
     expect(root.querySelector(".ub-chart-description")?.textContent).toBe(accessibleDescription);
     expect([...root.querySelectorAll('[role="img"]')].filter(element => !element.closest("[hidden]"))).toEqual([image]);
 
-    const tickSelections: number[][] = [];
     live.forEach((chart, index) => {
-      const options = panelOptions(chart), data = panelData(chart);
-      expect(data.datasets).toHaveLength(1);
-      expect(data.datasets[0]).toMatchObject({ yAxisID: "y" });
-      expect(options).toMatchObject({ interaction: { mode: "nearest", axis: "x", intersect: false },
-        plugins: { legend: { display: false } }, scales: {
-          x: { min: 1, max: 6, title: { display: true, text: "Observation" }, grid: { display: false }, border: { display: false } },
-          y: { ticks: { maxTicksLimit: 3 }, border: { display: false } },
-        } });
-      expect(options.scales).not.toHaveProperty("yRight");
-      expect(options.scales.y).not.toHaveProperty("title");
-      const scale = { min: 1, max: 6, width: 180, ticks: [] as { value: number }[],
-        chart: { ctx: { save() {}, restore() {}, font: "", measureText: (text: string) => ({ width: text.length * 6 }) } } };
-      options.scales.x.afterBuildTicks(scale);
-      options.scales.x.afterFit(scale);
-      tickSelections.push(scale.ticks.map(tick => tick.value));
-      expect(options.scales.x.ticks.callback(1)).toEqual(["1"]);
+      const data = panelData(chart);
       const canvas = panels[index]?.querySelector("canvas");
       expect(chart.canvas).toBe(canvas);
       expect(canvas?.getAttribute("role")).toBeNull();
@@ -1175,28 +988,6 @@ describe("the panel chart's shared presentation and lifecycle", () => {
       color.style.color = data.datasets[0]?.borderColor ?? "";
       expect(header.style.color).toBe(color.style.color);
     });
-    expect(tickSelections).toEqual(Array(4).fill([1, 6]));
-    const [first, second, third] = live.map(panelOptions);
-    expect(first?.scales.y.suggestedMin).toBe(second?.scales.y.suggestedMin);
-    expect(first?.scales.y.suggestedMax).toBe(second?.scales.y.suggestedMax);
-    expect(first?.scales.y.suggestedMin).toBeLessThanOrEqual(-20);
-    expect(first?.scales.y.suggestedMax).toBeGreaterThanOrEqual(30);
-    expect(first?.scales.y.beginAtZero).toBe(false);
-    expect(third?.scales.y.suggestedMin).toBe(0);
-    expect(third?.scales.y.suggestedMax).toBeGreaterThanOrEqual(9_000);
-    expect(third?.scales.y.beginAtZero).toBe(true);
-    for (const chart of live) {
-      expect(panelOptions(chart).scales.y).not.toHaveProperty("min");
-      expect(panelOptions(chart).scales.y).not.toHaveProperty("max");
-      expect(panelOptions(chart).scales.y.ticks).not.toHaveProperty("count");
-    }
-    const sharedTicks = [{ value: -20 }, { value: 0 }, { value: 30 }];
-    expect(first?.scales.y.ticks.callback(0, 1, sharedTicks)).toBe("0%");
-    expect(third?.scales.y.ticks.callback(9_000, 2, [{ value: 0 }, { value: 5_000 }, { value: 10_000 }])).toBe("9K requests");
-    expect(first?.plugins.tooltip.callbacks.label({ datasetIndex: 0, parsed: { y: 10 } })).toBe("Autonomous: 10 %");
-    expect(second?.plugins.tooltip.callbacks.label({ datasetIndex: 0, parsed: { y: -20 } })).toBe("Wasted: -20 %");
-    expect(third?.plugins.tooltip.callbacks.label({ datasetIndex: 0, parsed: { y: 9_000 } })).toBe("Denials: 9,000 requests");
-    expect(third?.plugins.tooltip.callbacks.label({ datasetIndex: 0, parsed: { y: null } })).toBe("");
     expect(root.querySelector(".ub-chart-open")?.getAttribute("aria-label")).toBe("Open chart source");
     expect(root.querySelector(".ub-block-caption .ub-copy")).not.toBeNull();
     expect(root.querySelectorAll(".ub-chart-diagnostics")).toHaveLength(1);

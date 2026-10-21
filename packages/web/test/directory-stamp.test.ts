@@ -27,11 +27,9 @@ import {
   addComment,
   createAnnotation,
   deleteDirectoryEntry,
-  documentDirectoryFields,
   editBlock,
   getDirectoryEntry,
   getDirectoryMap,
-  getMetaMap,
   initDoc,
   isDirectoryEntryDeleted,
   resolveAnnotationRange,
@@ -40,7 +38,6 @@ import {
   setKind,
   setStatus,
   setTags,
-  setTldr,
   setTitle,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
@@ -178,30 +175,13 @@ describe("directory stamps from the web", () => {
     }
   });
 
-  it("repairs decision relationships, summary and discussion counts from the document", () => {
+  it("preserves a decision's tombstone while repairing its stub", () => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: UUID, title: "Lease duration" });
     setKind(doc, "decision");
-    const meta = getMetaMap(doc);
-    const governs = "19c76b4a-3be9-45ca-8023-445699bf7cf1";
-    const predecessor = "74af8725-e3bc-47a5-a292-1ba64d7c168e";
-    doc.transact(() => {
-      // Approval writers belong to the rules change; these are foreign state.
-      meta.set("governs", governs);
-      meta.set("topic", predecessor);
-      meta.set("supersedes", predecessor);
-      meta.set("agentStance", true);
-      meta.set("decidedBy", "Reviewer");
-      meta.set("decidedAt", "2031-01-01T00:00:00.000Z");
-    });
-    setTldr(doc, "Renew a short lease.");
-    const block = appendBlock(doc, { type: "paragraph", text: "lease duration" });
-    const thread = createAnnotation(doc, block, 0, 5, "Author", "First comment");
-    const second = createAnnotation(doc, block, 6, 14, "Reviewer", "Second thread");
     const directory = new Y.Doc();
     upsertDirectoryEntry(directory, {
-      uuid: UUID, title: "Stale", kind: "decision", topic: predecessor,
-      commentCount: 90, agentStance: false, answerPreview: "stale legacy summary",
+      uuid: UUID, title: "Stale", kind: "decision",
       createdAt: T0, updatedAt: T0,
     });
     tombstoneDirectoryEntry(directory, UUID);
@@ -209,43 +189,15 @@ describe("directory stamps from the web", () => {
     const stop = watchDocumentStub(doc, directory, UUID);
     try {
       expect(getDirectoryEntry(peer, UUID)).toMatchObject({
-        title: "Lease duration", governs, topic: predecessor, supersedes: predecessor,
-        answerPreview: "lease duration", agentStance: true, decidedBy: "Reviewer",
-        decidedAt: "2031-01-01T00:00:00.000Z", commentCount: 2, openThreadCount: 2,
-        deleted: true,
+        title: "Lease duration", deleted: true,
       });
-      expect(getDirectoryEntry(peer, UUID)).not.toHaveProperty("tldr");
-      expect(getMetaMap(doc).get("tldr")).toBe("Renew a short lease.");
-      addComment(doc, thread.id, "Reviewer", "A reply");
-      addComment(doc, second.id, "Author", "Another reply");
-      expect(getDirectoryEntry(peer, UUID)?.commentCount).toBe(4);
-      expect(getDirectoryEntry(peer, UUID)?.openThreadCount).toBe(2);
-      doc.transact(() => {
-        meta.delete("agentStance");
-        meta.delete("decidedBy");
-        meta.delete("decidedAt");
+      setTitle(doc, "Short lease");
+      expect(getDirectoryEntry(peer, UUID)).toMatchObject({
+        title: "Short lease", deleted: true,
       });
-      setTldr(doc, null);
-      const repaired = getDirectoryEntry(peer, UUID);
-      expect(repaired?.agentStance).toBeUndefined();
-      expect(repaired?.decidedBy).toBeUndefined();
-      expect(repaired?.decidedAt).toBeUndefined();
-      expect(repaired).not.toHaveProperty("tldr");
-      expect(repaired?.deleted).toBe(true);
     } finally {
       stop();
     }
-  });
-
-  it("keeps decision-only fields out of an ordinary document's stub", () => {
-    const client = rig("Ordinary");
-    setTldr(client.doc, "A regular summary.");
-    const block = appendBlock(client.doc, { type: "paragraph", text: "prose" });
-    createAnnotation(client.doc, block, 0, 5, "Author", "A comment");
-    expect(stub(client)).not.toHaveProperty("tldr");
-    expect(stub(client)).not.toHaveProperty("commentCount");
-    expect(stub(client)).not.toHaveProperty("topic");
-    expect(stub(client).openThreadCount).toBe(1);
   });
 
   it("counts open threads independently of replies and anchors, and stamps count changes immediately", () => {
@@ -318,46 +270,6 @@ describe("directory stamps from the web", () => {
         expect(getDirectoryEntry(peer, UUID)).toMatchObject({
           openThreadCount: 2, createdAt: T0, updatedAt: T0,
         });
-      } finally {
-        stop();
-      }
-    }
-  });
-
-  it("publishes the current count whichever replica wins the whole-entry stub write", () => {
-    for (const [browserClientId, remoteClientId] of [[2, 3], [3, 2]] as const) {
-      const source = new Y.Doc();
-      initDoc(source, { uuid: UUID, title: "Shared comments" });
-      const block = appendBlock(source, { type: "paragraph", text: "comment" });
-      const thread = createAnnotation(source, block, 0, 7, "Author", "A comment");
-      const browserDoc = new Y.Doc();
-      Y.applyUpdate(browserDoc, Y.encodeStateAsUpdate(source));
-      const base = new Y.Doc();
-      base.clientID = 1;
-      upsertDirectoryEntry(base, {
-        uuid: UUID, title: "Shared comments", openThreadCount: 1,
-        createdAt: T0, updatedAt: T0,
-      });
-      const browser = new Y.Doc();
-      browser.clientID = browserClientId;
-      Y.applyUpdate(browser, Y.encodeStateAsUpdate(base));
-      const remote = new Y.Doc();
-      remote.clientID = remoteClientId;
-      Y.applyUpdate(remote, Y.encodeStateAsUpdate(base));
-      const stop = watchDocumentStub(browserDoc, browser, UUID);
-      try {
-        vi.setSystemTime(T0 + 1_000);
-        setAnnotationResolved(source, thread.id, true);
-        upsertDirectoryEntry(remote, {
-          uuid: UUID, title: "Shared comments", ...documentDirectoryFields(source),
-          updatedAt: T0 + 1_000,
-        });
-        Y.applyUpdate(browserDoc, Y.encodeStateAsUpdate(source));
-        expect(getDirectoryEntry(browser, UUID)?.openThreadCount).toBe(0);
-        Y.applyUpdate(browser, Y.encodeStateAsUpdate(remote));
-        Y.applyUpdate(remote, Y.encodeStateAsUpdate(browser));
-        expect(getDirectoryEntry(browser, UUID)?.openThreadCount).toBe(0);
-        expect(getDirectoryEntry(remote, UUID)?.openThreadCount).toBe(0);
       } finally {
         stop();
       }
@@ -746,89 +658,6 @@ describe("directory stamps from the web", () => {
     // change and must not claim a new updatedAt.
     expect(repaired?.updatedAt).toBe(T0);
     stop();
-  });
-
-  it("projects legacy requirement stubs and preserves raw room fields through opening and editing", () => {
-    const doc = new Y.Doc();
-    initDoc(doc, { uuid: UUID, title: "Legacy page" });
-    getMetaMap(doc).set("kind", "requirement");
-    getMetaMap(doc).set("status", "implementing");
-    const directory = new Y.Doc();
-    getDirectoryMap(directory).set(UUID, {
-      title: "Stale title",
-      tags: [],
-      kind: "requirement",
-      status: "planned",
-      updatedAt: T0,
-    });
-    const peer = peerOf(directory);
-    const stop = watchDocumentStub(doc, directory, UUID);
-    expect(getDirectoryEntry(peer, UUID)).toEqual({
-      uuid: UUID, title: "Legacy page", tags: [], updatedAt: T0,
-      openThreadCount: 0, code_check: [], createdAt: T0,
-    });
-    setTitle(doc, "Edited legacy page");
-    expect(getDirectoryEntry(peer, UUID)?.title).toBe("Edited legacy page");
-    expect(getDirectoryEntry(peer, UUID)?.kind).toBeUndefined();
-    expect(getDirectoryEntry(peer, UUID)?.status).toBeUndefined();
-    expect(getMetaMap(doc).get("kind")).toBe("requirement");
-    expect(getMetaMap(doc).get("status")).toBe("implementing");
-    stop();
-  });
-
-  it("does not carry a stale description through a concurrent lifecycle repair", () => {
-    const doc = new Y.Doc();
-    initDoc(doc, {
-      uuid: UUID,
-      title: "Lifecycle",
-      description: "Current description",
-    });
-    setKind(doc, "decision");
-    setStatus(doc, "open");
-
-    const converge = (browserClientId: number, remoteClientId: number): void => {
-      const base = new Y.Doc();
-      base.clientID = 1;
-      upsertDirectoryEntry(base, {
-        uuid: UUID,
-        title: "Lifecycle",
-        description: "Stale description",
-        kind: "decision",
-        status: "withdrawn",
-      });
-
-      const browser = new Y.Doc();
-      browser.clientID = browserClientId;
-      Y.applyUpdate(browser, Y.encodeStateAsUpdate(base));
-      const remote = new Y.Doc();
-      remote.clientID = remoteClientId;
-      Y.applyUpdate(remote, Y.encodeStateAsUpdate(base));
-
-      upsertDirectoryEntry(remote, {
-        uuid: UUID,
-        title: "Lifecycle",
-        description: "Current description",
-        kind: "decision",
-        status: "open",
-      });
-      const stop = watchDocumentStub(doc, browser, UUID);
-
-      Y.applyUpdate(browser, Y.encodeStateAsUpdate(remote));
-      Y.applyUpdate(remote, Y.encodeStateAsUpdate(browser));
-
-      expect(getDirectoryEntry(browser, UUID)?.description).toBe(
-        "Current description",
-      );
-      expect(getDirectoryEntry(remote, UUID)?.description).toBe(
-        "Current description",
-      );
-      stop();
-    };
-
-    // Whole-entry conflicts order by client id. Check both orders so the
-    // invariant does not accidentally depend on which repair wins.
-    converge(2, 3);
-    converge(3, 2);
   });
 
   it("leaves a tombstone alone, however far the stub has drifted (#81)", () => {

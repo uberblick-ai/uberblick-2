@@ -21,6 +21,51 @@ function execute(script, overrides = {}, args = [], cwd = root) {
 	});
 }
 
+test("web deployment imports the generated policy for the app and its deep-link fallback", () => {
+	const caddyfile = readFileSync(join(root, "Caddyfile"), "utf8");
+	assert.match(caddyfile, /handle \{\s+import \/etc\/caddy\/uberblick-csp\.caddy\s+root \* \/srv\s+try_files \{path\} \/index\.html\s+file_server\s+\}/);
+	assert.ok(!caddyfile.includes("figma.com"));
+	assert.ok(!caddyfile.includes("Content-Security-Policy-Report-Only"));
+	assert.doesNotMatch(caddyfile, /header\s+Content-Security-Policy\s/);
+	assert.ok(readFileSync(join(root, "Dockerfile.hub-release"), "utf8").includes(
+		"COPY --from=build /out/web/uberblick-csp.caddy /etc/caddy/uberblick-csp.caddy",
+	));
+});
+
+test("web serves public runtime configuration uncached ahead of the SPA fallback", () => {
+	const caddyfile = readFileSync(join(root, "Caddyfile"), "utf8");
+	const configRoute = caddyfile.indexOf("handle /uberblick-config.json");
+	assert.ok(configRoute > -1);
+	assert.ok(caddyfile.indexOf("try_files {path} /index.html") > configRoute);
+	assert.ok(caddyfile.includes('header Cache-Control "no-store"'));
+	assert.ok(caddyfile.includes('respond `{"hubUrl":"{$HUB_URL}","workspaces":"{$WORKSPACES}"}`'));
+	const compose = readFileSync(join(root, "compose.release.yml"), "utf8");
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal Compose expression
+	assert.ok(compose.includes('WEB_HUB_URL: "${WEB_HUB_URL:-}"'));
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal Compose expression
+	assert.ok(compose.includes('WEB_WORKSPACES: "${WEB_WORKSPACES:-}"'));
+	assert.ok(!compose.includes("HUB_AUTH_TOKEN:"));
+	assert.ok(readFileSync(join(root, "remote.env.example"), "utf8").includes("WEB_WORKSPACES="));
+});
+
+test("release wrapper refuses injected document settings before calling Docker", () => {
+	const scratch = mkdtempSync(join(process.env.UB_AGENTS_SCRATCH ?? tmpdir(), `hub-injection-${process.env.UB_AGENTS_RUN ?? "test"}-`));
+	try {
+		writeFileSync(join(scratch, "release.json"), "{}\n");
+		for (const [name, value] of Object.entries({
+			WEB_HUB_URL: 'wss://ok.example.ts.net/ws","hubUrl":"wss://elsewhere',
+			TAILSCALE_HOST: 'ok.example.ts.net","hubUrl":"wss://elsewhere',
+		})) {
+			const result = spawnSync("/bin/sh", [join(root, "bin/remote-compose.sh"), "config"], {
+				cwd: scratch, env: { PATH: scratch, [name]: value }, encoding: "utf8",
+			});
+			assert.equal(result.status, 1, name);
+			assert.ok(result.stderr.includes(`${name} may only contain`), result.stderr);
+			assert.equal(result.stdout, "", name);
+		}
+	} finally { rmSync(scratch, { recursive: true, force: true }); }
+});
+
 test("hub image health probe checks its own listener without proxy or DNS settings", async () => {
 	let status = 200;
 	let requestedPath;

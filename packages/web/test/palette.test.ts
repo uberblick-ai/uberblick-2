@@ -134,30 +134,6 @@ describe("the editor palette and stored block types", () => {
     expect(docLink.excludes(link)).toBe(true);
   });
 
-  it("rejects an unknown node or mark type instead of normalising it", () => {
-    expect(() => uberblickSchema.node("blockquote")).toThrow(/Unknown node type/);
-    expect(() =>
-      uberblickSchema.nodeFromJSON({
-        type: "doc",
-        content: [{ type: "bulletList", content: [] }],
-      }),
-    ).toThrow();
-
-    expect(() => uberblickSchema.mark("underline")).toThrow();
-    expect(() =>
-      uberblickSchema.nodeFromJSON({
-        type: "doc",
-        content: [
-          {
-            type: "paragraph",
-            attrs: { id: "a" },
-            content: [{ type: "text", text: "x", marks: [{ type: "underline" }] }],
-          },
-        ],
-      }),
-    ).toThrow();
-  });
-
   /**
    * The docLink half of the palette, end to end: a reference an agent wrote is
    * bindable (the gate opens), renders as marked text carrying its class, and

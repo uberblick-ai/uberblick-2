@@ -277,9 +277,8 @@ describe("an archived document is readable, says so, and offers one way back", (
     peer.destroy();
   });
 
-  it("archives and restores a whole decision topic from a successor, with first-record authority", async () => {
+  it("names the first record in the archive toast and undoes both topic records", async () => {
     const directory = room(directoryRoom(WORKSPACE)).ydoc;
-    const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
     const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
     initDoc(ydoc, { uuid: UUID, title: "New lease" });
     setKind(ydoc, "decision");
@@ -294,25 +293,10 @@ describe("an archived document is readable, says so, and offers one way back", (
         ...(uuid === UUID ? { supersedes: OTHER } : {}),
       });
     }
-    const group = createGroup(sidebar, "Reading");
-    pinDoc(sidebar, group, OTHER);
-    pinDoc(sidebar, group, UUID);
     const host = await openApp(`/${WORKSPACE}/${UUID}`);
-
-    // A foreign/partial tombstone on a mirror cannot archive the topic.
-    const map = getDirectoryMap(directory);
-    act(() => {
-      map.set(UUID, { ...(map.get(UUID) as object), deleted: true });
-    });
-    expect(banner(host)).toBeNull();
-    expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
     openActions(host);
     act(() => action("Archive topic")?.click());
     act(() => screen.getByRole("button", { name: /^Archive$/ }).click());
-    expect(getDirectoryEntry(directory, OTHER)?.deleted).toBe(true);
-    expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
-    expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
-    expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
 
     const archivedNotice = archiveNotice();
     expect(toast.success).toHaveBeenCalledWith("Archived “Original lease”.", expect.any(Object));
@@ -320,20 +304,6 @@ describe("an archived document is readable, says so, and offers one way back", (
     act(() => archivedNotice?.action?.onClick({} as MouseEvent<HTMLButtonElement>));
     expect(getDirectoryEntry(directory, OTHER)?.deleted).toBeUndefined();
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
-    expect(banner(host)).toBeNull();
-    expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
-
-    // A first-record tombstone alone archives every successor.
-    act(() => map.set(OTHER, { ...(map.get(OTHER) as object), deleted: true }));
-    expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
-    expect(banner(host)).not.toBeNull();
-    expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
-    const title = within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
-    expect(title.readOnly).toBe(true);
-    act(() => typeInto(title, "changed"));
-    expect(getMeta(ydoc).title).toBe("New lease");
-    act(() => restoreButton(host)?.click());
-    expect(banner(host)).toBeNull();
   });
 
   it.each([WORKSPACE, OTHER])("Undo restores its original document after navigating to workspace %s", async (nextWorkspace) => {

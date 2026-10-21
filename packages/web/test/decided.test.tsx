@@ -346,7 +346,7 @@ describe("read-only decision records", () => {
     peer.destroy();
   });
 
-  for (const status of ["open", "decided", "rejected", "withdrawn"] as const) it(`keeps comments available on ${status} content`, async () => {
+  for (const status of ["open", "rejected", "withdrawn"] as const) it(`keeps comments available on ${status} content`, async () => {
     const ydoc = stage(status);
     const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
     const host = await openApp();

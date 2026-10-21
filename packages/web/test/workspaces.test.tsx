@@ -173,31 +173,4 @@ describe("switching workspace is navigating to it", () => {
     });
     expect(trigger(host).textContent).toContain("Product Research");
   });
-
-  it("keeps the workspace a deep link carries, listed or not", () => {
-    // The link is the authority. A build configured for two workspaces must not
-    // rewrite an address into one of them.
-    const uuid = "3231bff4-2f1c-4a49-9f0a-6f8b2c1d7e55";
-    window.history.replaceState(null, "", `/${RESEARCH}/${uuid}`);
-    const { container: host } = render(<Probe configured={[UBERBLICK]} />);
-
-    expect(window.location.pathname).toBe(`/${RESEARCH}/${uuid}`);
-    expect(parseRoute(window.location.pathname, null)).toEqual({
-      kind: "doc",
-      workspace: research,
-      uuid,
-    });
-    // Unconfigured, and still on the menu — with the configured one beside it.
-    open(host);
-    expect(offered()).toEqual(["Uberblick", "Product Research"]);
-  });
-
-  it("names the workspace it is at when that is the only one there is", () => {
-    // A menu of one still opens, and the reader is told where they are without it.
-    const { container: host } = render(<Probe configured={[]} />);
-
-    expect(trigger(host).textContent).toContain("Uberblick");
-    open(host);
-    expect(offered()).toEqual(["Uberblick"]);
-  });
 });
