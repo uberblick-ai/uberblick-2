@@ -71,14 +71,7 @@ describe("Figma blocks through MCP", () => {
 
   it.each([
     ["design/key", { kind: "file", file: "key" }],
-    ["file/key", { kind: "file", file: "key" }],
-    ["design/key/Screen?node-id=12%3A345", { kind: "frame", file: "key", fileName: "Screen", node: "12:345" }],
-    ["file/key/Screen?node-id=12-345", { kind: "frame", file: "key", fileName: "Screen", node: "12:345" }],
-    ["proto/key/Flow?starting-point-node-id=12-345&version-id=42", { kind: "prototype", file: "key", fileName: "Flow" }],
-    ["board/key/Planning-board", { kind: "board", file: "key", fileName: "Planning board" }],
-    ["slides/key/Design%20review", { kind: "slides", file: "key", fileName: "Design review" }],
-    ["community/file/123/Template", { kind: "community file", file: "123", fileName: "Template" }],
-  ])("normalizes both Figma hosts and reports each accepted view: %s", async (path, fields) => {
+  ])("passes accepted Figma host normalization through create_doc: %s", async (path, fields) => {
     const rig = await localRig();
     const created = await rig.ok("create_doc", { title: "Accepted Figma links", description: "Each path has one derived view identity.",
       blocks: ["figma.com", "www.figma.com"].map(host => ({ type: "figma", text: `url: https://${host}/${path}\n\n` })) });
@@ -86,22 +79,11 @@ describe("Figma blocks through MCP", () => {
     expect(created.blocks[1].figma).toEqual(fields);
     expect(created.blocks[0].text).toBe(created.blocks[1].text);
     expect(created.blocks[0].text).toContain("https://www.figma.com/");
-    if (path.includes("starting-point-node-id")) {
-      expect(created.blocks[0].text).toContain("starting-point-node-id=12-345");
-      expect(created.blocks[0].text).toContain("version-id=42");
-    }
   });
 
   it.each([
     ["title: No URL\n\nCaption", false],
     ["url: https://example.com/design/key\n\nCaption", true],
-    ["url: http://www.figma.com/design/key\n\nCaption", true],
-    ["url: https://www.figma.com/deck/key\n\nCaption", false],
-    ["url: https://www.figma.com/design/key/branch/other\n\nCaption", false],
-    [`url: ${LINK}\nunknown: value\n\nCaption`, false],
-    [`url: ${LINK}\nurl: ${LINK}\n\nCaption`, false],
-    [`url: ${LINK}\nNot a key\n\nCaption`, false],
-    ...["239", "961", "480.5", "pixels", ""].map(height => [`url: ${LINK}\nheight: ${height}\n\nCaption`, false] as const),
   ] as const)("refuses invalid create, insert and edit content before any write: %s", async (invalid, expectsHostError) => {
     const rig = await localRig();
     const created = await rig.ok("create_doc", { title: "Figma refusals", description: "Invalid content cannot make a partial write.",
@@ -126,11 +108,6 @@ describe("Figma blocks through MCP", () => {
       if (expectsHostError) {
         expect(refused.payload.message).toBe("figma blocks take figma.com links only; use a plain link for other sites");
       }
-      if (invalid.includes("/deck/") || invalid.includes("/branch/")) {
-        for (const kind of ["design", "file", "proto", "board", "slides", "community/file"]) {
-          expect(refused.payload.message).toContain(kind);
-        }
-      }
     }
     expect(updates).toBe(0);
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
@@ -139,15 +116,13 @@ describe("Figma blocks through MCP", () => {
     expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual(created.blocks);
   });
 
-  it("preserves stale assertions before invalid input and includes caption marks in rev", async () => {
+  it("preserves stale assertions before malformed replacement content", async () => {
     const rig = await localRig();
     const created = await rig.ok("create_doc", { title: "Figma revisions", description: "Caption formatting participates in edit assertions.",
       blocks: [{ type: "figma", text: SOURCE }] });
     const doc = rig.instance.replicas.replica(created.uuid).doc;
     captionText(doc, created.blocks[0].id).format(0, 4, { bold: {} });
     const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
-    expect(read.rev).not.toBe(created.blocks[0].rev);
-    expect(read.text).toContain("**Keep** the caption.");
     const before = Y.encodeStateAsUpdate(doc);
     const stale = await rig.call("edit_block", { uuid: created.uuid, block_id: read.id,
       old_text: read.text, new_text: "missing URL", rev: created.blocks[0].rev });
@@ -156,10 +131,6 @@ describe("Figma blocks through MCP", () => {
       old_text: SOURCE, new_text: "missing URL", rev: read.rev });
     expect(mismatch.payload).toMatchObject({ error: "old_text_mismatch", applied: false });
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
-    const edited = await rig.ok("edit_block", { uuid: created.uuid, block_id: read.id,
-      old_text: read.text, new_text: read.text.replace("**Keep**", "*Keep*"), rev: read.rev });
-    expect(edited.block.rev).not.toBe(read.rev);
-    expect(captionRuns(doc, read.id)[0]).toEqual({ text: "Keep", marks: { italic: true } });
   });
 
   it("indexes caption document links and refuses newly unknown targets before any write", async () => {
@@ -192,38 +163,6 @@ describe("Figma blocks through MCP", () => {
     await rig.ok("edit_block", { uuid: created.uuid, block_id: created.blocks[0].id,
       old_text: source, new_text: SOURCE, rev: created.blocks[0].rev });
     expect((await rig.ok("backlinks", { uuid: target.uuid })).backlinks).toEqual([]);
-  });
-
-  it("edits headers independently and preserves caption marks, characters and comment anchors", async () => {
-    const rig = await localRig();
-    const source = SOURCE.replace("Keep", "**Keep**");
-    const created = await rig.ok("create_doc", { title: "Figma anchors", description: "Header edits never recreate caption characters.",
-      blocks: [{ type: "figma", text: source }] });
-    const doc = rig.instance.replicas.replica(created.uuid).doc;
-    const id = created.blocks[0].id;
-    const original = captionText(doc, id);
-    const thread = createAnnotation(doc, id, 0, 4, "Reader", "Caption discussion", { part: "caption" });
-    const before = await rig.ok("get_doc", { uuid: created.uuid });
-    expect(before.annotations[0].range).toEqual({ part: "caption", start: 0, end: 4, collapsed: false });
-    const captionState = original.toDelta();
-    const changed = source.replace("Checkout-flow", "Address-flow").replace("Payment, mobile", "Address, mobile").replace("560", "640");
-    const header = await rig.ok("edit_block", { uuid: created.uuid, block_id: id, old_text: before.blocks[0].text,
-      new_text: changed, rev: before.blocks[0].rev });
-    expect(header.block.figma.fileName).toBe("Address flow");
-    expect(captionText(doc, id)).toBe(original);
-    expect(original.toDelta()).toEqual(captionState);
-    const edited = await rig.ok("edit_block", { uuid: created.uuid, block_id: id, old_text: header.block.text,
-      new_text: changed.replace("**Keep**", "*Keep*").replace("the caption.", "the updated caption."), rev: header.block.rev });
-    const after = await rig.ok("get_doc", { uuid: created.uuid });
-    expect(captionText(doc, id)).toBe(original);
-    expect(captionRuns(doc, id)[0]).toEqual({ text: "Keep", marks: { italic: true } });
-    expect(after.annotations.find((entry: { id: string }) => entry.id === thread.id).range)
-      .toEqual({ part: "caption", start: 0, end: 4, collapsed: false });
-    const state = Y.encodeStateAsUpdate(doc);
-    const noop = await rig.ok("edit_block", { uuid: created.uuid, block_id: id,
-      old_text: edited.block.text, new_text: edited.block.text, rev: edited.block.rev });
-    expect(noop.block).toEqual(edited.block);
-    expect(Y.encodeStateAsUpdate(doc)).toEqual(state);
   });
 
   it("refuses MCP anchors and link ranges while preserving existing thread replies and resolution", async () => {

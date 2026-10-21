@@ -164,6 +164,9 @@ describe("card block contract", () => {
     expect(parseCardInput(twoNewlines).title).toBe("Hello  there changed");
     editBlock(doc, id, twoNewlines, twoNewlines.replace("there changed", "there changed again"));
     expect(cardInline(card).title).toEqual([{ text: "Hello\n\nthere changed again", marks: {} }]);
+    const footer = partText(card, "footer");
+    footer.delete(0, footer.length);
+    expect(getBlock(doc, id)!.text).not.toContain("footer:");
     title.delete(0, title.length);
     const empty = getBlock(doc, id)!.text;
     expect(empty).not.toContain("title:");

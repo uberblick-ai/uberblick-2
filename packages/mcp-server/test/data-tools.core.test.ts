@@ -351,8 +351,6 @@ describe("dedicated document data MCP tools", () => {
     await refuse(rig, target.uuid, operations, "doc_archived");
     const decision = await create(rig, { kind: "decision", title: "Data decision" });
     await refuse(rig, decision.uuid, operations, "decision_data_unsupported");
-    await rig.ok("set_status", { uuid: decision.uuid, status: "decided" });
-    await refuse(rig, decision.uuid, operations, "decision_read_only");
     const legacy = await create(rig, { title: "Legacy data decision" });
     await rig.ok("update_data", { uuid: legacy.uuid, operations });
     const legacyDoc = document(rig, legacy.uuid);

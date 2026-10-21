@@ -443,6 +443,7 @@ describe("an archived document is read-only", () => {
         { uuid: doc.uuid, block_id: blockId, old_text: BODY, new_text: "No." },
       ],
       ["insert_block", { uuid: doc.uuid, type: "paragraph", text: "No." }],
+      ["delete_block", { uuid: doc.uuid, block_id: blockId }],
       ["set_metadata", { uuid: doc.uuid, tags: ["billing"] }],
       ["set_metadata", { uuid: doc.uuid, title: "Renamed while archived" }],
       ["set_metadata", { uuid: doc.uuid, description: "Should not land." }],

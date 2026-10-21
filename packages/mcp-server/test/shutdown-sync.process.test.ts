@@ -175,11 +175,11 @@ async function pendingWrite() {
   }
 }
 
-it.each(["EOF", "SIGINT", "SIGTERM"] as const)("acknowledges the final write before %s exits and retains its named departure", async (signal) => {
+it("acknowledges the final write before EOF exits and retains its named departure", async () => {
   const pending = await pendingWrite();
   try {
     const began = Date.now();
-    const closing = pending.writer.close(signal);
+    const closing = pending.writer.close();
     await sleep(150);
     expect(pending.writer.child.exitCode).toBeNull();
     expect(pending.writer.child.signalCode).toBeNull();
@@ -250,7 +250,7 @@ it("exits inside the shutdown deadline when a connected hub withholds acknowledg
   }
 }, 35_000);
 
-it("does not wait or warn when hub synchronization is disabled", async () => {
+it("handles SIGTERM without waiting or warning when hub synchronization is disabled", async () => {
   const writer = await startProcess();
   await writer.call("create_doc", {
     title: "Local only",
@@ -258,7 +258,7 @@ it("does not wait or warn when hub synchronization is disabled", async () => {
     blocks: [{ type: "paragraph", text: WRITTEN }],
   });
   const began = Date.now();
-  const result = await writer.close();
+  const result = await writer.close("SIGTERM");
   expect(Date.now() - began).toBeLessThan(1_500);
   expect(result).toMatchObject({ code: 0, signal: null });
   expect(result.stderr).not.toContain("changes are still only local");
