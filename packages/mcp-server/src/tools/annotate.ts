@@ -85,10 +85,10 @@ export const annotateOperation = documentOperation({ content: false, contentDura
 
   // ANNOTATE_MODES requires these range fields; TypeScript cannot infer the branch.
   if (getBlock(replica.doc, block_id as string)?.type === "card") {
-    throw new ToolError("annotation_card", "Open card anchors on selected text in the web editor; MCP can move an existing thread only to prose or a table cell.", { blockId: block_id });
+    throw new ToolError("annotation_card", "Open card anchors on selected text in the web editor; MCP can move an existing thread to prose or a table cell.", { blockId: block_id });
   }
   if (getBlock(replica.doc, block_id as string)?.type === "figma") {
-    throw new ToolError("annotation_figma", "Open Figma caption anchors on selected text in the web editor; MCP can move an existing thread only to prose or a table cell.", { blockId: block_id });
+    throw new ToolError("annotation_figma", "Open Figma caption anchors on selected text in the web editor; MCP can move an existing thread to prose or a table cell.", { blockId: block_id });
   }
   if ((row === undefined) !== (column === undefined)) {
     throw new ToolError("annotation_cell", "Table cell coordinates require both row and column", { blockId: block_id, reason: "missing" });
