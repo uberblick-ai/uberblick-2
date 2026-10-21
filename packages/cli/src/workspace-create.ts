@@ -1,12 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseArgs } from "node:util";
 import { defaultWorkspaceDatabasePath, storeWorkspaceName } from "@uberblick/mcp-server";
 import { validateWorkspaceName } from "@uberblick/schema";
 import { ensureLocalSigningSecret, SigningSecretExposureError } from "@uberblick/mcp-server/project-config";
 import { resolveMcpConfig } from "./budget.js";
-import { takeHelp } from "./help.js";
+import { type CommandArgs, usageError } from "./command.js";
 import { acquireInitLock, seedLockPath } from "@uberblick/mcp-server/init-lock";
 import type { Io } from "./io.js";
 import { PROJECT_CONFIG_FILE, type ProjectBinding, findProjectConfig, resolveProjectBinding, writeProjectBinding } from "@uberblick/mcp-server/project-binding";
@@ -31,16 +30,12 @@ export function reportEnvironmentBinding(io: Io): void {
   }
 }
 
-export async function createWorkspaceCommand(argv: string[], io: Io): Promise<number> {
-  if (takeHelp(argv, io, WORKSPACE_CREATE_HELP)) return 0;
+export async function createWorkspaceCommand({ positionals }: CommandArgs<Record<string, never>>, io: Io): Promise<number> {
   let name: string;
   try {
-    const { positionals } = parseArgs({ args: argv, options: {}, allowPositionals: true });
-    if (positionals.length !== 1) throw new Error("expected exactly one workspace name");
     name = validateWorkspaceName(positionals[0] ?? "");
   } catch (error) {
-    io.err(`ub workspace create: ${error instanceof Error ? error.message : "invalid name"}\n`);
-    return 2;
+    usageError(error instanceof Error ? error.message : "invalid name");
   }
   const uuid = randomUUID();
   const binding: ProjectBinding = { workspaceId: uuid, hubUrl: null };

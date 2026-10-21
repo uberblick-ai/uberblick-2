@@ -1,9 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { parseArgs } from "node:util";
 import { defaultWorkspaceDatabasePath, readWorkspaceFork, writeWorkspaceFork } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
-import { takeHelp } from "./help.js";
 import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
 import { type Io, shellArgument } from "./io.js";
 import { NO_BINDING, resolveProjectBinding, writeProjectBinding } from "@uberblick/mcp-server/project-binding";
@@ -26,14 +24,7 @@ options:
   -h, --help        show this help
 `;
 
-export async function forkWorkspaceCommand(argv: string[], io: Io): Promise<number> {
-  if (takeHelp(argv, io, WORKSPACE_FORK_HELP)) return 0;
-  try {
-    parseArgs({ args: argv, options: {}, allowPositionals: false });
-  } catch (error) {
-    io.err(`ub workspace fork: ${error instanceof Error ? error.message : "unexpected argument"}\n\n${WORKSPACE_FORK_HELP}`);
-    return 2;
-  }
+export async function forkWorkspaceCommand(io: Io): Promise<number> {
   try {
     const lock = await acquireInitLock(process.env, { command: "ub workspace fork" });
     let output: string;

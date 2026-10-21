@@ -1,5 +1,4 @@
 import { dirname, resolve } from "node:path";
-import { parseArgs } from "node:util";
 import { isGithubUsername } from "@uberblick/schema/github-identity";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
@@ -11,7 +10,7 @@ import { displayUsername } from "./auth.js";
 import { resolveMcpConfig } from "./budget.js";
 import type { Origin } from "@uberblick/mcp-server/project-config";
 import { resolveConfig } from "@uberblick/mcp-server/project-config";
-import { takeHelp } from "./help.js";
+import type { CommandArgs } from "./command.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { field, plural, timeAgo } from "./strings.js";
@@ -330,23 +329,10 @@ replica acknowledgement, not durable hub storage. Each problem names its fix;
 `;
 
 export async function statusCommand(
-  argv: string[],
+  { values }: CommandArgs<typeof STATUS_OPTIONS>,
   io: Io = processIo,
 ): Promise<number> {
-  if (takeHelp(argv, io, STATUS_HELP)) return 0;
-
-  let json = false;
-  try {
-    json =
-      parseArgs({
-        args: argv,
-        options: STATUS_OPTIONS,
-        allowPositionals: false,
-      }).values.json === true;
-  } catch (error) {
-    io.err(`ub status: ${error instanceof Error ? error.message : String(error)}\n`);
-    return 2;
-  }
+  const json = values.json === true;
 
   const { report, warnings, accountOrigin, workspaceName, recentDevices } = await statusReport();
   for (const warning of warnings) {

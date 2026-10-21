@@ -4,7 +4,7 @@ import { ensureHub } from "./open-hub.js";
 import { DEFAULT_WEB_PORT, WEB_HOST, portTakenMessage, whoHoldsPort, whyNotStartable } from "./open-ports.js";
 import { execFile } from "node:child_process";
 import { userInfo } from "node:os";
-import { parseArgs, promisify } from "node:util";
+import { promisify } from "node:util";
 import { silentLogger, type Hub } from "@uberblick/hub";
 import { createLocalBrowserServer, type LocalBrowserServer } from "./local-browser-server.js";
 import { hubTransportProblem, isLoopbackHost } from "@uberblick/mcp-server/remote-url";
@@ -30,7 +30,7 @@ import { resolveMcpConfig } from "./budget.js";
 import { openBrowser } from "./browser.js";
 import { errorMessage, trimmed } from "./strings.js";
 import { BindingResolutionError, ensureLocalSigningSecret, readCredentials, resolveConfig, requireBinding, SigningSecretExposureError } from "@uberblick/mcp-server/project-config";
-import { takeHelp } from "./help.js";
+import { type CommandArgs, usageError } from "./command.js";
 import { acquireInitLock, tryAcquireInitLock } from "@uberblick/mcp-server/init-lock";
 import type { Io } from "./io.js";
 import { processIo, shellArgument } from "./io.js";
@@ -257,21 +257,13 @@ export const OPEN_OPTIONS = {
   verbose: { type: "boolean" },
 } as const;
 
-function parseOptions(argv: string[]): Options {
-  const { values, positionals } = parseArgs({
-    args: argv,
-    options: OPEN_OPTIONS,
-    allowPositionals: true,
-  });
-  if (positionals.length > 0) {
-    throw new Error(`unexpected argument ${JSON.stringify(positionals[0])}`);
-  }
+function openOptions({ values }: CommandArgs<typeof OPEN_OPTIONS>): Options {
   const raw = values.port;
   let port = DEFAULT_WEB_PORT;
   if (raw !== undefined) {
     port = Number(raw);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      throw new Error(`--port must be an integer in 1..65535, got ${JSON.stringify(raw)}`);
+      usageError(`--port must be an integer in 1..65535, got ${JSON.stringify(raw)}`);
     }
   }
   return { port, browser: !values["no-browser"], verbose: values.verbose ?? false };
@@ -426,18 +418,10 @@ function takeForeground(owned: Owned, io: Io): Foreground {
 }
 
 export async function openCommand(
-  argv: string[],
+  args: CommandArgs<typeof OPEN_OPTIONS>,
   io: Io = processIo,
 ): Promise<number> {
-  if (takeHelp(argv, io, OPEN_HELP)) return 0;
-
-  let options: Options;
-  try {
-    options = parseOptions(argv);
-  } catch (error) {
-    io.err(`ub open: ${errorMessage(error)}\n\n${OPEN_HELP}`);
-    return 2;
-  }
+  const options = openOptions(args);
 
   const serve = () => serveOpen(options, io);
   return options.verbose ? serve() : withLoggingDisabled(serve);

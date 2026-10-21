@@ -1,5 +1,4 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { parseArgs } from "node:util";
 import { openWorkspaceReplicas, readWorkspaceData, updateWorkspaceData, WorkspaceDataWriteError } from "@uberblick/mcp-server";
 import { canonicalDocumentUuid, parseWorkspaceId } from "@uberblick/schema";
 import type { DataCollectionChange, DocData } from "@uberblick/schema";
@@ -8,6 +7,7 @@ import { requireBinding, resolveConfig } from "@uberblick/mcp-server/project-con
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
+import { type CommandArgs, usageError } from "./command.js";
 
 export const DATA_GET_OPTIONS = { out: { type: "string" } } as const;
 export const DATA_UPDATE_OPTIONS = {
@@ -33,27 +33,19 @@ type DataCommand =
   | { command: "get"; doc: string; collection?: string; out?: string }
   | { command: "update"; doc: string; file: string; dryRun: boolean };
 
-function parseCommand(argv: string[]): DataCommand {
-  const [command, ...args] = argv;
-  if (command === "get") {
-    const { positionals, values } = parseArgs({ args, options: DATA_GET_OPTIONS, allowPositionals: true });
-    const [doc, collection] = positionals;
-    if (doc === undefined || positionals.length > 2) throw new Error("expected a document and an optional collection");
-    if (values.out !== undefined && (values.out === "" || collection === undefined)) {
-      throw new Error("--out needs a file and a collection");
-    }
-    return { command, doc, ...(collection === undefined ? {} : { collection }),
-      ...(values.out === undefined ? {} : { out: values.out }) };
+export async function getDataCommand({ positionals, values }: CommandArgs<typeof DATA_GET_OPTIONS>, io: Io = processIo): Promise<number> {
+  const [doc, collection] = positionals;
+  if (values.out !== undefined && (values.out === "" || collection === undefined)) {
+    usageError("--out needs a file and a collection");
   }
-  if (command === "update") {
-    const { positionals, values } = parseArgs({ args, options: DATA_UPDATE_OPTIONS, allowPositionals: true });
-    const [doc] = positionals;
-    if (doc === undefined || positionals.length !== 1 || values.file === undefined || values.file === "") {
-      throw new Error("expected one document and --file <path|->");
-    }
-    return { command, doc, file: values.file, dryRun: values["dry-run"] === true };
-  }
-  throw new Error(`unknown command ${JSON.stringify(command)}`);
+  return await dataCommand({ command: "get", doc: doc as string,
+    ...(collection === undefined ? {} : { collection }), ...(values.out === undefined ? {} : { out: values.out }) }, io);
+}
+
+export async function updateDataCommand({ positionals, values }: CommandArgs<typeof DATA_UPDATE_OPTIONS>, io: Io = processIo): Promise<number> {
+  if (values.file === undefined || values.file === "") usageError("expected one document and --file <path|->");
+  return await dataCommand({ command: "update", doc: positionals[0] as string, file: values.file,
+    dryRun: values["dry-run"] === true }, io);
 }
 
 /** URL parsing never follows a link; the bound workspace supplies all access. */
@@ -127,17 +119,7 @@ function failureOutcome(error: unknown, saved: "synced" | "local" | "unconfirmed
     ? "write outcome unconfirmed; read the data before retrying\n" : "nothing written\n";
 }
 
-export async function dataCommand(argv: string[], io: Io = processIo): Promise<number> {
-  if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) {
-    io.out(DATA_HELP);
-    return 0;
-  }
-  let command: DataCommand;
-  try { command = parseCommand(argv); }
-  catch (error) {
-    io.err(`ub data: ${reason(error)}\n\n${DATA_HELP}`);
-    return 2;
-  }
+async function dataCommand(command: DataCommand, io: Io): Promise<number> {
   let saved: "synced" | "local" | "unconfirmed" | undefined;
   try {
     const resolved = resolveConfig();

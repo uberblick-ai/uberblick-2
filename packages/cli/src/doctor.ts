@@ -5,7 +5,6 @@ import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, relative, resolve, sep } from "node:path";
-import { parseArgs } from "node:util";
 import {
   CLOCK_SKEW_SECONDS,
   REQUEST_PROOF_LIFETIME_SECONDS,
@@ -18,7 +17,7 @@ import { displayUsername } from "./auth.js";
 import { resolveMcpConfig } from "./budget.js";
 import type { ResolvedConfig } from "@uberblick/mcp-server/project-config";
 import { readCredentials, resolveConfig } from "@uberblick/mcp-server/project-config";
-import { takeHelp } from "./help.js";
+import type { CommandArgs } from "./command.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { errorMessage } from "./strings.js";
@@ -692,23 +691,10 @@ options:
 `;
 
 export async function doctorCommand(
-  argv: string[],
+  { values }: CommandArgs<typeof DOCTOR_OPTIONS>,
   io: Io = processIo,
 ): Promise<number> {
-  if (takeHelp(argv, io, DOCTOR_HELP)) return 0;
-
-  let json = false;
-  try {
-    json =
-      parseArgs({
-        args: argv,
-        options: DOCTOR_OPTIONS,
-        allowPositionals: false,
-      }).values.json === true;
-  } catch (error) {
-    io.err(`ub doctor: ${errorMessage(error)}\n`);
-    return 2;
-  }
+  const json = values.json === true;
 
   const { report, warnings } = await doctorReport();
   for (const warning of warnings) {

@@ -1,5 +1,4 @@
 import { createInterface } from "node:readline/promises";
-import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import { isGithubAccountId, isGithubUsername } from "@uberblick/schema/github-identity";
 import { ensureDeviceLogin, readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
@@ -7,7 +6,7 @@ import { parseWorkspaceId } from "@uberblick/schema";
 import { ManagementResponseError, manageRequest } from "@uberblick/mcp-server/management-client";
 import type { ManagementAction } from "@uberblick/mcp-server/management-client";
 import { requireBinding, resolveConfig } from "@uberblick/mcp-server/project-config";
-import { takeHelp } from "./help.js";
+import { type CommandArgs, usageError } from "./command.js";
 import type { Io } from "./io.js";
 
 export const WORKSPACE_MEMBER_HELP = `usage: ub workspace member <command>
@@ -108,44 +107,21 @@ function already(value: Member, io: Io): void {
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
-export async function workspaceMemberCommand(argv: string[], io: Io): Promise<number> {
-  const [command, ...rest] = argv;
-  if (command === undefined || ["help", "--help", "-h"].includes(command)) {
-    io.out(WORKSPACE_MEMBER_HELP); return 0;
-  }
-  const help = Object.hasOwn(WORKSPACE_MEMBER_SUBCOMMAND_HELP, command) ? WORKSPACE_MEMBER_SUBCOMMAND_HELP[command as keyof typeof WORKSPACE_MEMBER_SUBCOMMAND_HELP] : undefined;
-  if (help === undefined) {
-    io.err(`ub workspace member: unknown command ${JSON.stringify(command)}\n\n${WORKSPACE_MEMBER_HELP}`); return 2;
-  }
-  if (takeHelp(rest, io, help)) return 0;
-  let positionals: string[];
+export async function workspaceMemberCommand(command: "add" | "list" | "role" | "remove",
+  { positionals, values }: CommandArgs<typeof WORKSPACE_MEMBER_ADD_OPTIONS & typeof WORKSPACE_MEMBER_LIST_OPTIONS>, io: Io): Promise<number> {
   let role: Role = "member";
-  let json = false;
-  let yes = false;
-  try {
-    const options: ParseArgsOptionsConfig =
-      command === "add" ? WORKSPACE_MEMBER_ADD_OPTIONS :
-      command === "list" ? WORKSPACE_MEMBER_LIST_OPTIONS : {};
-    const parsed = parseArgs({ args: rest, allowPositionals: true, options });
-    positionals = parsed.positionals;
-    const count = command === "list" ? 0 : command === "role" ? 2 : 1;
-    if (positionals.length !== count) throw new Error(`expected ${count} argument${count === 1 ? "" : "s"}`);
-    if (command === "add") {
-      if (!isGithubUsername(positionals[0])) throw new Error("malformed GitHub handle; use a GitHub user login without @ or path syntax");
-      const requested = parsed.values.role ?? "member";
-      if (!isRole(requested)) throw new Error("role must be admin or member");
-      role = requested;
-    }
-    if (command === "role") {
-      if (!isRole(positionals[1])) throw new Error("role must be admin or member");
-      role = positionals[1];
-    }
-    json = parsed.values.json === true;
-    yes = parsed.values.yes === true;
-  } catch (error) {
-    io.err(`ub workspace member ${command}: ${error instanceof Error ? error.message : "invalid arguments"}\n\n${help}`);
-    return 2;
+  if (command === "add") {
+    if (!isGithubUsername(positionals[0])) usageError("malformed GitHub handle; use a GitHub user login without @ or path syntax");
+    const requested = values.role ?? "member";
+    if (!isRole(requested)) usageError("role must be admin or member");
+    role = requested;
   }
+  if (command === "role") {
+    if (!isRole(positionals[1])) usageError("role must be admin or member");
+    role = positionals[1];
+  }
+  const json = values.json === true;
+  const yes = values.yes === true;
 
   try {
     const { resolved, binding } = (() => {
