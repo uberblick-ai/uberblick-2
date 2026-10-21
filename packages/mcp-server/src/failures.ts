@@ -187,6 +187,11 @@ const RECOVERIES: Record<string, Recovery> = {
       "Call get_doc for the block's current text and its existing threads, then annotate a range that fits it — " +
       "`reason` says which of the two is in the way.",
   },
+  open_thread_anchored: {
+    recoveryClass: "manual",
+    guidance:
+      "Use annotate with each named thread_id and text to resolve it (resolved: true), or move its anchor to a new range in this document (block_id, start, end; row and column for a table cell), then repeat the write. Nothing was written.",
+  },
   thread_not_found: {
     recoveryClass: "reread",
     guidance:

@@ -18,6 +18,7 @@ import {
   initDoc,
   listAnnotationRanges,
   listAnnotations,
+  moveAnnotation,
   setAnnotationResolved,
   setKind,
   setStatus,
@@ -44,6 +45,39 @@ function cellText(table: Y.XmlElement, row: number, column: number): Y.XmlText {
 }
 
 describe("table-cell annotation contract", () => {
+  it("moves a thread between prose and a table cell, then within its own anchor", () => {
+    const { doc, id } = fixture();
+    const prose = appendBlock(doc, { type: "paragraph", text: "Previous context" });
+    const thread = createAnnotation(doc, prose, 0, 8, "reader", "Question");
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    moveAnnotation(doc, thread.id, id, 1, 4, "agent", "Table context", { row: 1, column: 0 });
+    expect(updates).toBe(1);
+    expect(listAnnotationRanges(doc, prose)).toEqual([]);
+    expect(getAnnotation(doc, thread.id)?.blockId).toBe(id);
+    expect(resolveAnnotationRange(doc, thread.id)).toEqual({ row: 1, column: 0, start: 1, end: 4, collapsed: false });
+    moveAnnotation(doc, thread.id, id, 0, 5, "agent", "Whole cell", { row: 1, column: 0 });
+    expect(resolveAnnotationRange(doc, thread.id)).toEqual({ row: 1, column: 0, start: 0, end: 5, collapsed: false });
+    expect(getAnnotation(doc, thread.id)?.comments).toHaveLength(3);
+    doc.destroy();
+  });
+
+  it("refuses invalid move cells, empty ranges and foreign overlaps without changing the thread", () => {
+    const { doc, id } = fixture();
+    const thread = createAnnotation(doc, id, 0, 5, "reader", "Alpha", { row: 1, column: 0 });
+    createAnnotation(doc, id, 0, 4, "reader", "Beta", { row: 2, column: 0 });
+    const before = Y.encodeStateAsUpdate(doc);
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    expect(() => moveAnnotation(doc, thread.id, id, 0, 1, "agent", "Missing cell")).toThrow(AnnotationCellError);
+    expect(() => moveAnnotation(doc, thread.id, id, 0, 1, "agent", "Outside", { row: 99, column: 0 })).toThrow(AnnotationCellError);
+    expect(() => moveAnnotation(doc, thread.id, id, 0, 0, "agent", "Empty", { row: 1, column: 0 })).toThrow(AnnotationRangeError);
+    expect(() => moveAnnotation(doc, thread.id, id, 0, 1, "agent", "Overlap", { row: 2, column: 0 })).toThrow(AnnotationRangeError);
+    expect(updates).toBe(0);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    doc.destroy();
+  });
+
   it("uses displayed cell characters including edge whitespace, excluding inline syntax and escapes", () => {
     const { doc, id, table } = fixture();
     const text = cellText(table, 1, 0);

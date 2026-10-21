@@ -12,7 +12,8 @@ import { z } from "zod";
  */
 export type ModeSelector =
   | { field: string; is: string }
-  | { field: string; present: boolean };
+  | { field: string; present: boolean }
+  | { all: readonly ModeSelector[] };
 
 /** One valid shape of a tool that multiplexes several actions over one name. */
 export interface ToolMode {
@@ -27,6 +28,7 @@ export interface ToolMode {
 }
 
 function selects(when: ModeSelector, args: Record<string, unknown>): boolean {
+  if ("all" in when) return when.all.every((selector) => selects(selector, args));
   const value = args[when.field];
   return "is" in when ? value === when.is : (value !== undefined) === when.present;
 }
@@ -38,14 +40,19 @@ function selects(when: ModeSelector, args: Record<string, unknown>): boolean {
 function branch(mode: ToolMode): Record<string, unknown> {
   const properties: Record<string, unknown> = {};
   const required: string[] = [];
-  if ("is" in mode.when) {
-    properties[mode.when.field] = { const: mode.when.is };
-    required.push(mode.when.field);
-  } else if (mode.when.present) {
-    required.push(mode.when.field);
-  } else {
-    properties[mode.when.field] = false;
-  }
+  const select = (when: ModeSelector): void => {
+    if ("all" in when) {
+      for (const selector of when.all) select(selector);
+    } else if ("is" in when) {
+      properties[when.field] = { const: when.is };
+      required.push(when.field);
+    } else if (when.present) {
+      required.push(when.field);
+    } else {
+      properties[when.field] = false;
+    }
+  };
+  select(mode.when);
   required.push(...(mode.requires ?? []));
   for (const field of mode.forbids ?? []) properties[field] = false;
   return {

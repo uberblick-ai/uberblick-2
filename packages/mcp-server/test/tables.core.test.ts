@@ -115,6 +115,7 @@ describe("structured tables through MCP", () => {
     expect(read.annotations[0]).toMatchObject({ id: opened.annotation.id, range: null });
     const another = await rig.ok("annotate", { uuid: created.uuid, block_id: id, row: 2, column: 0,
       start: 0, end: 5, text: "Alpha" });
+    await rig.ok("annotate", { uuid: created.uuid, thread_id: another.annotation.id, text: "Done", resolved: true });
     const next = "| Name | Extra | Value |\n| --- | --- | --- |\n| New | New | New |";
     await rig.ok("edit_block", { uuid: created.uuid, block_id: id, old_text: read.blocks[0].text, new_text: next,
       table_mapping: { rows: [0, 1], columns: [0, 1, 2] } });

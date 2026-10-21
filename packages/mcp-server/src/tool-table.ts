@@ -327,12 +327,12 @@ export const tools: readonly Tool[] = [
       "Splice block text, preserving edits elsewhere; list-item list/indent can change in place. " +
       "Assert old_text and preferably rev from get_doc; " +
       "stale_block or old_text_mismatch returns currentText/currentRev. Assertions are replica-local. " +
-      "Edit prose strictly inside unmarked text; replace marked spans with delete_block/insert_block " +
-      "and verify export_markdown. Tables require GFM old/new text and table_mapping for " +
+      "Prose marks can shift at splice edges; verify formatting with export_markdown. " +
+      "open_thread_anchored refuses loss of an open thread's last anchor; resolve it or move its anchor " +
+      "with annotate. Tables require GFM old/new text and table_mapping for " +
       "structural/multi-cell edits. Cards take :::card content: inline-Markdown prose, repeated button: " +
-      "[Text](destination) lines after footer in authored order. New buttons need nonempty plain labels " +
-      "linking to https or exact claude://code/new, claude-cli://open, codex://new, optionally with " +
-      "?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; " +
+      "[Text](destination) lines after footer in authored order. Buttons use nonempty plain labels, " +
+      "https or supported app routes, optional style/color; " +
       "invalid_card refuses bad input; unchanged " +
       "parts, buttons and anchors survive. Rev includes each button's text, destination, appearance and " +
       "order. Figma takes :::figma content: url, optional plain title and height 240–960, blank line " +
@@ -391,13 +391,15 @@ export const tools: readonly Tool[] = [
     description:
       "Delete one block. Deleting is never how a block changes type — use insert_block plus edit_block only for " +
       "new content, and never delete-and-reinsert to re-type, which churns the block id and orphans its " +
-      "annotations.",
+      "annotations. Refuses with open_thread_anchored if any open thread would lose its last document anchor. " +
+      "Use annotate to resolve that thread or move its anchor before deleting.",
     input: deleteBlockInput,
     operation: deleteBlockOperation,
     // Removes a block; repeating finds no block to remove.
     hints: { destructive: true, idempotent: true },
     example: { uuid, block_id: "paragraph-1" },
     related: proseContracts,
+    details: toolHelpDetails.delete_block,
   }),
   tool({
     name: "set_metadata",
@@ -508,18 +510,19 @@ export const tools: readonly Tool[] = [
   }),
   tool({
     name: "annotate",
-    title: "Annotate a range, or reply to and resolve a thread",
+    title: "Annotate a range, reply, resolve or move a thread's anchor",
     description:
-      "Open an anchored comment thread on block_id/start/end, or reply with thread_id and no range fields. text " +
-      "and author belong to both modes; only replies accept resolved to resolve or reopen in the same update. " +
-      "Mixing modes or incomplete ranges refuses at the input boundary. For tables, row/column are zero-based " +
-      "GFM projection indices including header row 0. Offsets count displayed cell characters, including stored " +
-      "edge whitespace: remove exactly the GFM padding before decoding inline syntax. Returned coordinates " +
-      "follow moved cells; orphaned ranges are null and orphaned threads still accept replies. Missing, invalid " +
-      "or non-table coordinates refuse with annotation_cell; empty/overlapping ranges refuse with " +
-      "annotation_range. Offsets are clamped to text. Opening a card thread refuses with annotation_card; " +
-      "open it in the web editor. Opening a Figma thread refuses with annotation_figma and no write. " +
-      "Existing card and Figma threads accept replies, resolution and reopening; Figma ranges name caption.",
+      "Open a thread with block_id/start/end; reply with thread_id and no range fields; move an anchor with " +
+      "thread_id plus block_id/start/end. text adds a comment in every mode; author is optional. Only replies " +
+      "accept resolved to resolve or reopen. Moves remove all previous marks in the document and keep the " +
+      "thread's id, earlier replies and resolution, including for orphaned threads. Incomplete ranges refuse. " +
+      "Table targets need zero-based row/column GFM projection indices including header row 0. Offsets count " +
+      "displayed characters, including stored edge whitespace: remove exactly the GFM padding before decoding " +
+      "inline syntax. Coordinates follow moved cells; orphaned ranges are null. Bad or missing cell coordinates " +
+      "refuse with annotation_cell; empty or other-thread overlap ranges with annotation_range. Offsets clamp " +
+      "to text; a move may overlap its own anchor. Opening or moving into cards/Figma refuses with " +
+      "annotation_card/annotation_figma. Existing card/Figma threads accept replies, resolution, reopening " +
+      "or moves to prose/table cells; Figma ranges name caption.",
     input: annotateInput,
     operation: annotateOperation,
     // Replies can overwrite thread resolution; repeating adds another comment.

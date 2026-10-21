@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { getDirectoryMap, upsertDirectoryEntry } from "@uberblick/schema";
+import { deleteBlock, getDirectoryMap, upsertDirectoryEntry } from "@uberblick/schema";
 
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanupTestResources, startServer, testConfig } from "./core-helpers.js";
@@ -58,7 +58,7 @@ describe("open comment threads through directory stubs", () => {
     await rig.ok("annotate", { uuid: doc.uuid, thread_id: second.annotation.id, text: "Done", resolved: true });
     expect(await rows(rig)).toMatchObject([{ openThreadCount: 1 }]);
 
-    await rig.ok("delete_block", { uuid: doc.uuid, block_id: doc.blocks[0].id });
+    deleteBlock(rig.instance.replicas.replica(doc.uuid).doc, doc.blocks[0].id);
     const annotations = (await rig.ok("get_doc", { uuid: doc.uuid })).annotations;
     expect(annotations).toHaveLength(2);
     expect(annotations.find((thread: any) => thread.id === first.annotation.id)).toMatchObject({ range: null });

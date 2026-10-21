@@ -276,9 +276,20 @@ export const toolHelpDetails = {
     "the formatting is now wrong, and nothing here detects that.\n\n" +
     "So edit a block that carries formatting only where the changed range lies strictly inside unmarked text. " +
     "For anything else — a marked span itself, or a range whose edges touch one — delete_block plus " +
-    "insert_block is the repair: it writes plain text, losing the formatting instead of corrupting it. Check " +
+    "insert_block writes plain text, losing the formatting instead of corrupting it. An open comment's last " +
+    "anchor cannot be replaced this way: first resolve the thread or move its anchor with annotate. Check " +
     "the result with export_markdown, where a mark whose edges are whitespace, or that has swallowed a `, ` " +
     "or an ` and `, is the damage showing.\n\n" +
+    "`open_thread_anchored` refuses before any write when the actual splice would remove every remaining " +
+    "anchored character of an open thread. The failure names every affected thread by id and anchored text, " +
+    "with `recoveryClass: \"manual\"`, `applied: false` and `partial: false`. Use annotate to resolve each " +
+    "thread, or to move its anchor to a new range in this document, then retry. A surviving comment mark " +
+    "anywhere in the document is enough, including another block, table cell, card part or Figma caption; " +
+    "the recorded thread blockId does not limit this check. Resolved threads and already orphaned open " +
+    "threads do not block. Survival follows the characters the splice keeps: changing `8s timeout` to " +
+    "`10s timeout` keeps `s timeout` anchored. The check also covers table cells, rows/columns removed by " +
+    "`table_mapping`, card parts and Figma captions. It sees this replica's state, so concurrent peer edits " +
+    "can still remove a remaining anchor.\n\n" +
     "`old_text` and `new_text` are the block text get_doc returns. For a table this is GFM: each must be " +
     "exactly one table, or `invalid_table` refuses the write. Alignment markers are accepted but not stored; " +
     "inline markdown writes cell formatting and escaped punctuation stays literal. Newly added cell document " +
@@ -537,10 +548,22 @@ export const toolHelpDetails = {
     "left in place. SEARCH ON THIS REPLICA will not find a restored but unindexed " +
     "document yet — it catches up when the content arrives or on a later call, whichever was missing. " +
     "Offline, content arriving means the hub coming back.",
+  delete_block:
+    "Remove the block only if no open comment thread would lose its last anchored character anywhere in " +
+    "the document. `open_thread_anchored` refuses without writing and names every affected thread by id and " +
+    "anchored text, with `recoveryClass: \"manual\"`, `applied: false` and `partial: false`. Either resolve " +
+    "each thread with annotate, or move its anchor with annotate to another block, then retry. Threads " +
+    "already orphaned or resolved never block. A surviving comment mark in any block, table cell, card " +
+    "part or Figma caption suffices, even outside the thread's recorded blockId. The check uses this " +
+    "replica's state; a concurrent peer edit can still remove a remaining anchor.",
   annotate:
     "Open an annotation thread over a range of a block's text, or — with `thread_id` — add a comment to an " +
     "existing thread and optionally resolve or reopen it. The range is anchored by a formatting mark on the " +
-    "text itself, so it survives edits, splits and re-types.\n\n" +
+    "text itself, so it follows surviving characters through edits, splits and re-types. To move an existing " +
+    "thread's anchor, supply `thread_id` together with a complete target range. In one document update, " +
+    "the move removes every old comment mark for that thread in every block, marks the new range, changes " +
+    "its recorded blockId and appends `text` as a reply. It preserves the id, earlier replies and resolution, " +
+    "and works on already orphaned threads. The answer and get_doc report the new blockId and range.\n\n" +
     "For a table, supply `row` and `column`: zero-based GFM projection indices with the header as row 0, the " +
     "same indices as `table_mapping`. `start` and `end` count the cell's displayed characters, without inline " +
     "Markdown syntax or escapes, including stored cell-edge whitespace. Canonical GFM `text` preserves that " +
@@ -548,19 +571,19 @@ export const toolHelpDetails = {
     "cell's inline syntax, rather than trimming it. Offsets are clamped to the cell's text. The returned " +
     "range adds `row` and `column`, recomputed as cells move; it is null when orphaned. Coordinates on a " +
     "non-table block, missing coordinates or a cell outside the projection refuse with `annotation_cell` " +
-    "before anything is written. Empty and overlapping ranges refuse with `annotation_range`. Orphaned legacy " +
-    "table threads stay orphaned and accept replies, resolution and reopening. Card comments are opened in " +
-    "the web editor; MCP opening a new card thread refuses with annotation_card before writing. Existing " +
-    "card threads accept replies, resolution and reopening. Their returned ranges name label, title, body " +
-    "or footer in part. Opening a Figma thread refuses with annotation_figma before writing. Existing " +
-    "Figma threads still accept replies, resolution and reopening by thread_id; returned ranges name " +
-    "part caption and measure caption characters.\n\n" +
-    "Two shapes, and a call is exactly one of them: open a thread with `block_id`, `start` and `end` — all " +
-    "three, none of them optional — plus `row` and `column` for a table cell, or reply to one with " +
-    "`thread_id` and no range fields at all. Mixing them, or leaving a range half-stated, is refused at the " +
-    "input boundary before anything is written, rather than resolved by ignoring whichever fields do not fit. " +
-    "`text` and `author` belong to both. A reply may also carry `resolved`: true resolves the thread and " +
-    "false reopens it in the same document update as the reply; a new thread cannot carry that field.",
+    "before anything is written. Empty ranges and ranges overlapping another thread refuse with " +
+    "`annotation_range`; moving onto the thread's own current anchor is allowed. Unknown thread ids refuse " +
+    "with `thread_not_found`. Invalid move targets leave the old anchor, replies and thread unchanged. " +
+    "Card comments are opened in the web editor; opening or moving into a card refuses with annotation_card. " +
+    "Existing card ranges name label, title, body or footer in part. Opening or moving into a Figma caption " +
+    "refuses with annotation_figma. Existing Figma ranges name part caption and measure caption characters. " +
+    "Card and Figma threads can receive replies, resolution and reopening, or move to prose or a table cell.\n\n" +
+    "Three shapes, and a call is exactly one: open with `block_id`, `start` and `end`; reply with `thread_id` " +
+    "and no range fields; or move with `thread_id`, `block_id`, `start` and `end`. Range targets require all " +
+    "three range fields, plus `row` and `column` for a table cell. Incomplete ranges refuse at the input " +
+    "boundary before writing. Every mode requires `text` and accepts optional `author`. Only a reply may " +
+    "carry `resolved`: true resolves and false reopens in the same update as the reply. Opening and moving " +
+    "forbid `resolved`; a move keeps the thread's existing resolution.",
   link_range:
     "Turn a range of a block's text into an inline reference to another document. The range's own characters " +
     "are the label — this tool writes a mark and never a character, so the block's `text` and `rev` come back " +

@@ -5,9 +5,9 @@
  */
 
 import * as Y from "yjs";
-import { getAnnotationsMap } from "./doc.js";
+import { getAnnotationsMap, getBlocksFragment } from "./doc.js";
 import { AnnotationCellError, AnnotationRangeError, BlockNotFoundError, CardAnnotationError, FigmaAnnotationError, InvalidCardError, InvalidFigmaError, InvalidTableError } from "./errors.js";
-import { findBlockElement, requireBlockText } from "./blocks.js";
+import { findBlockElement } from "./blocks.js";
 import { tableCellTexts, tableRows } from "./table.js";
 import { CARD_PARTS, cardPartTexts } from "./card.js";
 import type { CardPart } from "./card.js";
@@ -75,7 +75,7 @@ function formatRange(
   texts: readonly Y.XmlText[],
   start: number,
   end: number,
-  value: CommentMark,
+  value: CommentMark | null,
 ): void {
   let offset = 0;
   for (const text of texts) {
@@ -170,15 +170,14 @@ function threadMap(ydoc: Y.Doc, threadId: string): ThreadMap | null {
  * Empty ranges and overlaps are refused: Yjs and editor marks allow one thread
  * per character, so another thread's anchor would be overwritten.
  */
-export function createAnnotation(
+function annotationRange(
   ydoc: Y.Doc,
   blockId: string,
   startIndex: number,
   endIndex: number,
-  author: string,
-  text: string,
   target?: { row: number; column: number } | { part: CardPart | "caption" },
-): Annotation {
+  ownThreadId?: string,
+): { texts: Y.XmlText[]; lo: number; hi: number } {
   const element = findBlockElement(ydoc, blockId);
   if (element === null) throw new BlockNotFoundError(blockId);
   let texts: Y.XmlText[];
@@ -212,17 +211,30 @@ export function createAnnotation(
     }
   } else {
     if (target !== undefined) throw new AnnotationCellError("not-table", blockId);
-    texts = [requireBlockText(ydoc, element, blockId)];
+    texts = element.firstChild instanceof Y.XmlText ? [element.firstChild] : [];
   }
   const length = texts.reduce((total, value) => total + value.length, 0);
   const lo = Math.max(0, Math.min(length, Math.min(startIndex, endIndex)));
   const hi = Math.max(0, Math.min(length, Math.max(startIndex, endIndex)));
   if (lo === hi) throw new AnnotationRangeError("empty", blockId);
 
-  const clash = commentRuns(texts).find((run) => run.start < hi && lo < run.end);
+  const clash = commentRuns(texts).find((run) => run.threadId !== ownThreadId && run.start < hi && lo < run.end);
   if (clash !== undefined) {
     throw new AnnotationRangeError("overlap", blockId, clash.threadId);
   }
+  return { texts, lo, hi };
+}
+
+export function createAnnotation(
+  ydoc: Y.Doc,
+  blockId: string,
+  startIndex: number,
+  endIndex: number,
+  author: string,
+  text: string,
+  target?: { row: number; column: number } | { part: CardPart | "caption" },
+): Annotation {
+  const { texts, lo, hi } = annotationRange(ydoc, blockId, startIndex, endIndex, target);
 
   const id = crypto.randomUUID();
   const opening: AnnotationComment = {
@@ -243,6 +255,37 @@ export function createAnnotation(
     comments.push([opening]);
   });
   return { id, blockId, comments: [opening] };
+}
+
+/** Move every old anchor to one validated range, keeping the thread and replies. */
+export function moveAnnotation(
+  ydoc: Y.Doc,
+  threadId: string,
+  blockId: string,
+  startIndex: number,
+  endIndex: number,
+  author: string,
+  text: string,
+  target?: { row: number; column: number } | { part: CardPart | "caption" },
+): Annotation | null {
+  const thread = threadMap(ydoc, threadId);
+  if (thread === null) return null;
+  const { texts, lo, hi } = annotationRange(ydoc, blockId, startIndex, endIndex, target, threadId);
+  ydoc.transact(() => {
+    // Clear shadowed copies too so a later repair cannot restore an old anchor.
+    for (const child of getBlocksFragment(ydoc).toArray()) {
+      if (!(child instanceof Y.XmlElement)) continue;
+      for (const { texts: oldTexts } of annotationTexts(child)) {
+        for (const run of commentRuns(oldTexts)) {
+          if (run.threadId === threadId) formatRange(oldTexts, run.start, run.end, null);
+        }
+      }
+    }
+    formatRange(texts, lo, hi, { threadId });
+    thread.set("blockId", blockId);
+    commentRows(thread).push([{ author, text, createdAt: new Date().toISOString() }]);
+  });
+  return readThread(thread);
 }
 
 export function getAnnotation(ydoc: Y.Doc, threadId: string): Annotation | null {
@@ -273,6 +316,29 @@ export function listAnnotationRanges(
   return annotationTexts(element).flatMap(({ texts, ...coordinates }) =>
     commentRuns(texts).map((run) => ({ ...run, ...coordinates })),
   );
+}
+
+/** Anchored text across visible blocks, independent of a thread's recorded block. */
+export function annotationAnchors(ydoc: Y.Doc): Map<string, string> {
+  const anchors = new Map<string, string>();
+  const claimed = new Set<string>();
+  for (const child of getBlocksFragment(ydoc).toArray()) {
+    if (!(child instanceof Y.XmlElement)) continue;
+    const blockId = child.getAttribute("id") ?? "";
+    if (blockId === "" || claimed.has(blockId)) continue;
+    claimed.add(blockId);
+    for (const { texts } of annotationTexts(child)) {
+      // Foreign embeds occupy one Yjs offset even without displayed text.
+      const plain = texts.flatMap(value => value.toDelta() as Array<{ insert?: unknown }>)
+        .map(op => typeof op.insert === "string" ? op.insert : op.insert === undefined ? "" : "\uFFFC").join("");
+      for (const run of commentRuns(texts)) {
+        const prior = anchors.get(run.threadId);
+        const text = plain.slice(run.start, run.end);
+        anchors.set(run.threadId, prior === undefined ? text : `${prior} … ${text}`);
+      }
+    }
+  }
+  return anchors;
 }
 
 /**
