@@ -112,10 +112,9 @@ while you were elsewhere.
 
 ## Immediately before merging
 
-Re-fetch the PR's reviews and comment threads, filtered to trusted authors,
-plus review threads via `gh api graphql` with the same filter on each
-comment's `authorAssociation` (inline review comments don't show in the
-former). Confirm zero unanswered remarks from trusted authors, including any
+Re-read the PR with the launcher's `read` command: its `comments`, `reviews`
+and `review_comments` (the inline review threads) are already filtered to
+trusted authors. Confirm zero unanswered remarks from trusted authors, including any
 that arrived after the earlier gates passed. Confirm the PR's base is `main`
 (`gh pr view <n> --json baseRefName`) — a stacked PR merges into its parent
 feature branch and can orphan the reviewed work; retarget it or merge the

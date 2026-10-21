@@ -53,8 +53,8 @@ a change is never its independent reviewer.
 ## Headless Claude
 
 Commands must match the allowlist literally: no shell expansion or loops, and
-one plain command per call. Files are limited to the worktree and run scratch;
-read corpus documents through MCP. Use the launcher's literal `report_command`
+one plain command per call. Files are limited to the worktree, run scratch and
+the output Claude Code saves for a run; read corpus documents through MCP. Use the launcher's literal `report_command`
 for its `report`, `read` and `retrospective` commands.
 
 ## Read for the action
