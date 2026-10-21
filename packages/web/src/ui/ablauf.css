@@ -58,4 +58,14 @@
 @media (pointer: coarse) {
   .ub-ablauf .ub-figure-toolbar { display: none; }
   .ub-ablauf-viewport { cursor: zoom-in; }
+  /* Without a drawing to tap, authors still need a route to source recovery. */
+  .ub-ablauf-panel:has(> .ub-ablauf-viewport[hidden]) > .ub-figure-toolbar:has(> button:not([hidden], :disabled)) {
+    position: static;
+    display: flex;
+    width: fit-content;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .ub-ablauf-panel:has(> .ub-ablauf-viewport[hidden]) > .ub-figure-toolbar > button { min-width: 44px; min-height: 44px; }
+  .ub-ablauf-panel:has(> .ub-ablauf-viewport[hidden]) > .ub-figure-toolbar > button:disabled { display: none; }
 }

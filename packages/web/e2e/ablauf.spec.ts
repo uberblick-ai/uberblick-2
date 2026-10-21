@@ -183,6 +183,20 @@ test("the renderer loads on first use, hides the pending drawing and retries fai
   const diagnostics = page.locator(".ub-ablauf-diagnostics");
   await expect(diagnostics).toContainText("Preview cannot be loaded:");
   expect(requests).toHaveLength(1);
+  await activateControl(neighbor(page));
+  await expect(source(page)).toBeHidden();
+  if (await page.evaluate(() => matchMedia("(pointer: coarse)").matches)) {
+    const action = openSource(page);
+    await expect(action).toBeVisible();
+    const bounds = await action.boundingBox();
+    if (bounds === null) throw new Error("e2e: source recovery control missing");
+    expect(bounds.width).toBeGreaterThanOrEqual(44);
+    expect(bounds.height).toBeGreaterThanOrEqual(44);
+    await expect(expand(page)).toBeHidden();
+    await activateControl(action);
+    await expect(source(page)).toBeVisible();
+    await sourceIsFramed(page);
+  }
   const failedEdit = FLOW.replace('"Draft"', '"Still unavailable"');
   await editSource(session, uuid, failedEdit);
   await waitForDocumentDraw(page, session, uuid, { source: failedEdit, outcome: "error" });
