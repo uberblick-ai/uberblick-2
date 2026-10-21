@@ -157,6 +157,16 @@ for (const appearance of ["light", "dark"] as const) {
     expect(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(appearance === "light");
     const diagrams = page.locator(".ub-ablauf-drawing svg");
     await expect(diagrams).toHaveCount(4);
+    for (const block of await page.locator(".ub-ablauf").all()) {
+      await expect(block).not.toHaveClass(/ub-block-frame/);
+      const frame = await block.evaluate(element => {
+        const style = getComputedStyle(element);
+        return { border: style.borderLeftWidth, ground: style.backgroundColor };
+      });
+      expect(frame.border).toBe("0px");
+      expect(alphaOf(frame.ground)).toBe(0);
+      await expect(block.locator(":scope > .ub-block-caption, .ub-copy")).toHaveCount(0);
+    }
     const flow = diagrams.nth(0);
     await paintIs(flow, "text:not(.muted, .cap, [class*='t-'])", "fill", "--ab-ink");
     await paintIs(flow, ".muted, .cap", "fill", "--ab-muted");
@@ -205,14 +215,19 @@ for (const appearance of ["light", "dark"] as const) {
     expect(await diagrams.nth(2).locator("text.m").evaluateAll(texts => texts.map(text => getComputedStyle(text).fontFamily))).toEqual(firstFonts);
     await page.addStyleTag({ content: ".ub-ablauf { max-width: 360px !important; }" });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    let scrolling = 0;
     for (const viewport of await page.locator(".ub-ablauf-viewport").all()) {
-      if (!await viewport.evaluate(element => element.scrollWidth > element.clientWidth)) continue;
-      scrolling += 1;
+      const fitted = await viewport.evaluate(element => {
+        const svg = element.querySelector(".ub-ablauf-drawing")?.shadowRoot?.querySelector("svg");
+        if (svg === null || svg === undefined) throw new Error("e2e: fitted Ablauf SVG is missing");
+        return { scroll: element.scrollWidth, width: element.clientWidth,
+          drawn: svg.getBoundingClientRect().width, natural: Number(svg.getAttribute("width")) };
+      });
+      expect(fitted.scroll).toBeLessThanOrEqual(fitted.width + 1);
+      expect(fitted.drawn).toBeLessThanOrEqual(fitted.width + 0.5);
+      expect(fitted.drawn).toBeCloseTo(Math.min(fitted.width, fitted.natural), 0);
       await viewport.evaluate(element => { element.scrollLeft = element.scrollWidth; });
-      expect(await viewport.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+      expect(await viewport.evaluate(element => element.scrollLeft)).toBe(0);
     }
-    expect(scrolling).toBeGreaterThan(0);
     const capture = info.outputPath(`ablauf-palette-${appearance}.png`);
     await page.locator(".ub-ablauf").first().screenshot({ path: capture });
     await info.attach(`ablauf-palette-${appearance}`, { path: capture, contentType: "image/png" });
