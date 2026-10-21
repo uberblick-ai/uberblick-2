@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { normalizeRemoteUrl } from "./remote-url.js";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { publishOwnerOnly } from "./safe-write.js";
-import { readWorkspaceHub, withWorkspaceBindings } from "./workspace-registry.js";
+import { hasWorkspaceReplica, readWorkspaceHub, withWorkspaceBindings } from "./workspace-registry.js";
 
 export const PROJECT_CONFIG_FILE = ".uberblick.json";
 const LOCAL_HUB = "local";
@@ -113,12 +113,12 @@ export function resolveProjectBinding(options: BindingOptions = {}): ResolvedBin
       if (!env.UB_HUB_URL.trim()) throw new Error("UB_HUB_URL must not be empty; use a hub address or local.");
       hubUrl = env.UB_HUB_URL.trim() === LOCAL_HUB ? null : env.UB_HUB_URL;
     } else {
-      // Machine records use this process's roots, even when env is a partial MCP map.
+      // Machine records and replicas use this process's roots, even when env is a partial MCP map.
       const recorded = readWorkspaceHub(workspaceId);
-      if (recorded === undefined) {
-        throw new Error("This machine has no hub record for UB_WORKSPACE_ID. Add UB_HUB_URL (a hub address, or local), or fetch the workspace with `ub workspace use <link>`.");
+      if (recorded === undefined && !hasWorkspaceReplica(workspaceId)) {
+        throw new Error("This machine has neither a copy nor a hub record for UB_WORKSPACE_ID. Add UB_HUB_URL (a hub address, or local), or fetch the workspace with `ub workspace use <link>`.");
       }
-      hubUrl = recorded;
+      hubUrl = recorded ?? null;
     }
     return {
       binding: validateProjectBinding({

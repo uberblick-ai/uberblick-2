@@ -7,9 +7,11 @@ import { DatabaseSync } from "node:sqlite";
 import { defaultWorkspaceDatabasePath } from "@uberblick/mcp-server";
 import { MirrorStore } from "../../mcp-server/src/store.js";
 import { afterAll, describe, expect, it } from "vitest";
-import { readWorkspaceHub, ensureWorkspaceBinding, workspaceRegistryPath } from "@uberblick/mcp-server/workspace-registry";
+import { readWorkspaceHub, ensureWorkspaceBinding, rememberWorkspaceBindings, workspaceRegistryPath } from "@uberblick/mcp-server/workspace-registry";
+import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
 import { DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox } from "./helpers.js";
 import type { Run, Sandbox } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
 import { parseJoinTarget } from "@uberblick/mcp-server/remote-url";
 import * as Y from "yjs";
 
@@ -119,14 +121,15 @@ describe("passive commands preserve this machine's workspace hub", () => {
       expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(registryBefore);
     });
 
-    it(`${command.name} cannot attach an unrecorded replica to a project hub`, async () => {
+    it.each(["project", "environment"])(`${command.name} cannot attach an unrecorded replica to a %s hub`, async source => {
       const trap = await hubTrap();
       try {
         const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: trap.url },
           credentials: { signingSecret: "unrecorded-binding-test-secret" },
         });
         const before = replica(box);
-        const run = await runUbAsync(command.args, box);
+        const extraEnv = source === "environment" ? { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: trap.url } : {};
+        const run = await runUbAsync(command.args, box, extraEnv);
         expect(mismatch(run, command.name)).toMatch(/unrecorded|no.*record/i);
         expect(trap.connections()).toBe(0);
         expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
@@ -296,12 +299,35 @@ describe("first workspace registration", () => {
     } finally { await trap.close(); }
   });
 
-  it.each(["status", "data"])("%s records an existing unrecorded replica as local", async command => {
+  it.each([
+    { command: "status", source: "project" },
+    { command: "status", source: "environment" },
+    { command: "data", source: "project" },
+    { command: "data", source: "environment" },
+  ])("$command records an existing unrecorded replica as local from $source", async ({ command, source }) => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     replica(box);
-    const run = await runUbAsync(command === "status" ? ["status", "--json"] : ["data", "get", DOCUMENT], box);
+    const extraEnv = source === "environment" ? { UB_WORKSPACE_ID: WORKSPACE } : {};
+    const run = await runUbAsync(command === "status" ? ["status", "--json"] : ["data", "get", DOCUMENT], box, extraEnv);
     expect(run.status, run.output).toBe(command === "status" ? 0 : 1);
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBeNull();
+  });
+
+  it("refuses a hub recorded while an id-only local selection waits for the init lock", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    const databaseBefore = replica(box);
+    const lock = await acquireInitLock(box.env);
+    const pending = runInProcess(["status", "--json"], box, { UB_WORKSPACE_ID: WORKSPACE });
+    try {
+      rememberWorkspaceBindings([{ workspaceId: WORKSPACE, hubUrl: RECORDED_HUB }], box.env, WORKSPACE);
+    } finally {
+      lock.release();
+      await pending;
+    }
+    const run = await pending;
+    expect(mismatch(run, "status")).toContain(RECORDED_HUB);
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(RECORDED_HUB);
+    expect(readFileSync(defaultWorkspaceDatabasePath(WORKSPACE, box.env))).toEqual(databaseBefore);
   });
 
   it("lets only one of two concurrent first hubs claim a workspace", async () => {
