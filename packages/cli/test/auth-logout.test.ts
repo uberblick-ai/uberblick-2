@@ -7,8 +7,8 @@ import { DatabaseSync } from "node:sqlite";
 import { DEVICE_CREDENTIAL_LIFETIME_MS, importCredentialPublicKey, inspectRequestProof } from "@uberblick/schema/token";
 import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { manageRequest } from "../src/access-management.js";
-import { writeHubLogin } from "../src/auth-store.js";
+import { manageRequest } from "@uberblick/mcp-server/management-client";
+import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import {
   OTHER_HUB, SIGNING_SECRET, USERNAME, WORKSPACE, assertPublicOnly, cleanUp,
   configPath, credentialPath, fixture, privateDeviceRows, readStore, rig,

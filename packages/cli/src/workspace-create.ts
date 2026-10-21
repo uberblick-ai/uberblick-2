@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { defaultWorkspaceDatabasePath, storeWorkspaceName } from "@uberblick/mcp-server";
 import { validateWorkspaceName } from "@uberblick/schema";
-import { ensureLocalSigningSecret, SigningSecretExposureError } from "./config.js";
+import { ensureLocalSigningSecret, SigningSecretExposureError } from "@uberblick/mcp-server/project-config";
 import { resolveMcpConfig } from "./budget.js";
 import { takeHelp } from "./help.js";
-import { acquireInitLock, seedLockPath } from "./init-lock.js";
+import { acquireInitLock, seedLockPath } from "@uberblick/mcp-server/init-lock";
 import type { Io } from "./io.js";
-import { PROJECT_CONFIG_FILE, type ProjectBinding, findProjectConfig, resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
+import { PROJECT_CONFIG_FILE, type ProjectBinding, findProjectConfig, resolveProjectBinding, writeProjectBinding } from "@uberblick/mcp-server/project-binding";
 import { seedStarterDocs } from "./starter.js";
 import { fillMainRepositoryFromOrigin } from "./workspace-main-repository.js";
 

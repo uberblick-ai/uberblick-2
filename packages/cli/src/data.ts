@@ -4,10 +4,10 @@ import { openWorkspaceReplicas, readWorkspaceData, updateWorkspaceData, Workspac
 import { canonicalDocumentUuid, parseWorkspaceId } from "@uberblick/schema";
 import type { DataCollectionChange, DocData } from "@uberblick/schema";
 import { resolveMcpConfig } from "./budget.js";
-import { requireBinding, resolveConfig } from "./config.js";
+import { requireBinding, resolveConfig } from "@uberblick/mcp-server/project-config";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
-import { ensureWorkspaceBinding } from "./workspace-registry.js";
+import { ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 
 export const DATA_GET_OPTIONS = { out: { type: "string" } } as const;
 export const DATA_UPDATE_OPTIONS = {

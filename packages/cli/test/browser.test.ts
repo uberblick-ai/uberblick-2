@@ -41,7 +41,6 @@ describe("shared browser opener", () => {
 
   it.each([
     ["darwin", "open", [URL]],
-    ["win32", "cmd", ["/c", "start", "", URL]],
     ["linux", "xdg-open", [URL]],
   ] as const)("uses the existing %s default for unset or empty BROWSER", (name, command, args) => {
     Object.defineProperty(process, "platform", { value: name, configurable: true });

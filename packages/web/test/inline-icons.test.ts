@@ -182,7 +182,7 @@ it.each(["external", "document"] as const)("keeps the visible %s link name when 
 });
 
 it("leaves unknown names, inline code and every source-block type literal", () => {
-  const literal = ":rocket: note:this: 10:30:15";
+  const literal = ":rocket: :Claude: :codex-extra: note:this: 10:30:15";
   const { ydoc } = fixture([
     { text: `${literal} :claude: `, marks: {} },
     { text: ":codex:", marks: { inlineCode: true } },

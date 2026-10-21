@@ -20,12 +20,10 @@ import {
   bridgeAwareness,
   createLocalBrowserServer,
   type LocalBrowserServer,
-  STORE_BUSY_REASON,
-  STORE_REFUSED_REASON,
 } from "../src/local-browser-server.js";
 import type { HubLogRecord } from "@uberblick/hub";
 import type { Hub } from "@uberblick/hub";
-import { DOC_DELETED_REASON, SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
+import { DOC_DELETED_REASON, STORE_BUSY_REASON, STORE_REFUSED_REASON, SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 import { generateCredentialKeyPair, importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import {
   OTHER_WORKSPACE,

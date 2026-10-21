@@ -20,7 +20,7 @@ import type { Check, DoctorReport } from "../src/doctor.js";
 import { doctorCommand, doctorReport, renderDoctor } from "../src/doctor.js";
 import * as open from "../src/open.js";
 import * as probes from "../src/probes.js";
-import { ensureWorkspaceBinding } from "../src/workspace-registry.js";
+import { ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 import type { Run, Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 import { DEAD_HUB_URL, freePort, pointAt, removeTempDirs, sandbox, unboundSandbox } from "./helpers.js";

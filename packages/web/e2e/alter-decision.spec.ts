@@ -76,151 +76,154 @@ async function unchanged(writer: McpSession, source: StoredDoc, page: Page): Pro
   });
 }
 
-for (const touch of [false, true]) for (const appearance of ["light", "dark"] as const) {
-  test(`rich answer controls stay inside the modal on ${touch ? "iPad touch" : "desktop keyboard and pointer"} in ${appearance}${touch ? " @webkit-touch" : ""}`, async ({ browser }) => {
-    const writer = session();
-    const title = docTitle("Alter controls");
-    const reference = await writer.call<StoredDoc>("create_doc", {
-      title: `${title.replaceAll(" ", "-")}-reference`, description: "An answer-editor reference target.",
-      blocks: [{ type: "paragraph", text: "A reference target." }],
-    });
-    const source = await create(writer, title, [
-      { type: "paragraph", text: "Select this answer before changing it." },
-      { type: "code", text: "return original;" },
-      { type: "table", text: "| Name | Value |\n| --- | --- |\n| Original | Kept |" },
-    ]);
-    const page = await openApp(browser, `/${harness().workspace}/${source.uuid}`, {
-      contextOptions: { ...(touch ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 1000 } }), colorScheme: appearance },
-    });
-    await expect(editor(page)).toContainText("Select this answer");
-    await openDialog(page, touch);
-    await expect(dialog(page)).toContainText(title);
-    await expect(dialog(page).getByRole("button", { name: "Decide", exact: true })).toBeDisabled();
-    await expect(dialog(page).getByRole("button", { name: "Open an RFC instead", exact: true })).toBeDisabled();
+test("rich answer controls stay inside the modal on desktop keyboard and pointer or iPad touch", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const touch = info.project.use.hasTouch === true;
+  const writer = session();
+  const title = docTitle("Alter controls");
+  const reference = await writer.call<StoredDoc>("create_doc", {
+    title: `${title.replaceAll(" ", "-")}-reference`, description: "An answer-editor reference target.",
+    blocks: [{ type: "paragraph", text: "A reference target." }],
+  });
+  const source = await create(writer, title, [
+    { type: "paragraph", text: "Select this answer before changing it." },
+    { type: "code", text: "return original;" },
+    { type: "table", text: "| Name | Value |\n| --- | --- |\n| Original | Kept |" },
+  ]);
+  const page = await openApp(browser, `/${harness().workspace}/${source.uuid}`, {
+    contextOptions: touch ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 1000 } },
+  });
+  await expect(editor(page)).toContainText("Select this answer");
+  await openDialog(page, touch);
+  await expect(dialog(page)).toContainText(title);
+  await expect(dialog(page).getByRole("button", { name: "Decide", exact: true })).toBeDisabled();
+  await expect(dialog(page).getByRole("button", { name: "Open an RFC instead", exact: true })).toBeDisabled();
 
-    const paragraph = draft(page).locator(":scope > p").first();
+  const paragraph = draft(page).locator(":scope > p").first();
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
     const currentColor = await dialog(page).locator('.ProseMirror[contenteditable="false"] > p').first()
       .evaluate((element) => getComputedStyle(element).color);
     const draftColor = await paragraph.evaluate((element) => getComputedStyle(element).color);
-    expect(currentColor).not.toBe(draftColor);
-    await placeCaretIn(paragraph, { touch });
-    for (let character = 0; character < 15; character += 1) await page.keyboard.press("Shift+ArrowLeft");
-    const selected = await page.evaluate(() => document.getSelection()?.toString() ?? "");
-    expect(selected.length).toBeGreaterThan(0);
-    await expect(page.getByRole("button", { name: "Comment", exact: true })).toHaveCount(0);
-    for (const name of ["Bold", "Italic", "Strikethrough", "Inline code", "External link"]) {
-      await expect(dialog(page).getByRole("button", { name, exact: true })).toBeVisible();
-    }
-    await activateControl(dialog(page).getByRole("button", { name: "Bold", exact: true }), { touch });
-    await expect(paragraph.locator("strong")).toContainText(selected);
-    await activateControl(dialog(page).getByRole("button", { name: "External link", exact: true }), { touch });
-    await dialog(page).getByLabel("External link URL").fill("https://example.org/answer");
-    await page.keyboard.press("Escape");
-    await expect(dialog(page).getByLabel("External link URL")).toHaveCount(0);
-    await expect(dialog(page).getByRole("toolbar", { name: "Text formatting", exact: true })).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(dialog(page).getByRole("toolbar", { name: "Text formatting", exact: true })).toHaveCount(0);
-    await expect(dialog(page)).toBeVisible();
-    await expect(draft(page)).toContainText("Select this answer");
-    await placeCaretIn(paragraph, { touch });
-    for (let character = 0; character < 15; character += 1) await page.keyboard.press("Shift+ArrowLeft");
-    await activateControl(dialog(page).getByRole("button", { name: "External link", exact: true }), { touch });
-    await dialog(page).getByLabel("External link URL").fill("https://example.org/answer");
-    await activateControl(dialog(page).getByRole("button", { name: "Apply", exact: true }), { touch });
-    await expect(paragraph.locator('a[href="https://example.org/answer"]')).toContainText(selected);
+    expect(currentColor, colorScheme).not.toBe(draftColor);
+  }
+  await placeCaretIn(paragraph, { touch });
+  for (let character = 0; character < 15; character += 1) await page.keyboard.press("Shift+ArrowLeft");
+  const selected = await page.evaluate(() => document.getSelection()?.toString() ?? "");
+  expect(selected.length).toBeGreaterThan(0);
+  await expect(page.getByRole("button", { name: "Comment", exact: true })).toHaveCount(0);
+  for (const name of ["Bold", "Italic", "Strikethrough", "Inline code", "External link"]) {
+    await expect(dialog(page).getByRole("button", { name, exact: true })).toBeVisible();
+  }
+  await activateControl(dialog(page).getByRole("button", { name: "Bold", exact: true }), { touch });
+  await expect(paragraph.locator("strong")).toContainText(selected);
+  await activateControl(dialog(page).getByRole("button", { name: "External link", exact: true }), { touch });
+  await dialog(page).getByLabel("External link URL").fill("https://example.org/answer");
+  await page.keyboard.press("Escape");
+  await expect(dialog(page).getByLabel("External link URL")).toHaveCount(0);
+  await expect(dialog(page).getByRole("toolbar", { name: "Text formatting", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog(page).getByRole("toolbar", { name: "Text formatting", exact: true })).toHaveCount(0);
+  await expect(dialog(page)).toBeVisible();
+  await expect(draft(page)).toContainText("Select this answer");
+  await placeCaretIn(paragraph, { touch });
+  for (let character = 0; character < 15; character += 1) await page.keyboard.press("Shift+ArrowLeft");
+  await activateControl(dialog(page).getByRole("button", { name: "External link", exact: true }), { touch });
+  await dialog(page).getByLabel("External link URL").fill("https://example.org/answer");
+  await activateControl(dialog(page).getByRole("button", { name: "Apply", exact: true }), { touch });
+  await expect(paragraph.locator('a[href="https://example.org/answer"]')).toContainText(selected);
 
-    const code = draft(page).locator("pre > code");
-    await placeCaretIn(code, { touch });
-    await activateControl(dialog(page).getByRole("button", { name: "Code language", exact: true }), { touch });
-    await expect(dialog(page).getByRole("combobox", { name: "Search languages", exact: true })).toBeFocused();
-    await dialog(page).getByRole("combobox", { name: "Search languages", exact: true }).fill("typescript");
-    await activateControl(dialog(page).getByRole("option", { name: "typescript", exact: true }), { touch });
-    await expect(dialog(page)).toBeVisible();
-    await expect(dialog(page).getByRole("button", { name: "Code language", exact: true })).toHaveText(/TypeScript/);
-    await activateControl(dialog(page).getByRole("button", { name: "Code language", exact: true }), { touch });
-    await page.keyboard.press("Escape");
-    await expect(dialog(page).getByRole("combobox", { name: "Search languages", exact: true })).toHaveCount(0);
-    await expect(dialog(page)).toBeVisible();
+  const code = draft(page).locator("pre > code");
+  await placeCaretIn(code, { touch });
+  await activateControl(dialog(page).getByRole("button", { name: "Code language", exact: true }), { touch });
+  await expect(dialog(page).getByRole("combobox", { name: "Search languages", exact: true })).toBeFocused();
+  await dialog(page).getByRole("combobox", { name: "Search languages", exact: true }).fill("typescript");
+  await activateControl(dialog(page).getByRole("option", { name: "typescript", exact: true }), { touch });
+  await expect(dialog(page)).toBeVisible();
+  await expect(dialog(page).getByRole("button", { name: "Code language", exact: true })).toHaveText(/TypeScript/);
+  await activateControl(dialog(page).getByRole("button", { name: "Code language", exact: true }), { touch });
+  await page.keyboard.press("Escape");
+  await expect(dialog(page).getByRole("combobox", { name: "Search languages", exact: true })).toHaveCount(0);
+  await expect(dialog(page)).toBeVisible();
 
-    const table = draft(page).locator("table");
-    await placeCaretIn(table.locator("td").first(), { touch });
-    await activateControl(dialog(page).getByRole("button", { name: "Column 1 actions", exact: true }), { touch });
-    await activateControl(dialog(page).getByRole("menuitem", { name: "Move column right", exact: true }), { touch });
-    await expect(table.locator("th")).toHaveText(["Value", "Name"]);
-    await expect(dialog(page)).toBeVisible();
-    if (!touch) await table.locator("th").nth(1).hover();
-    await activateControl(dialog(page).getByRole("button", { name: "Column 2 actions", exact: true }), { touch });
-    await page.keyboard.press("Escape");
-    await expect(dialog(page).getByRole("menu")).toHaveCount(0);
-    await expect(dialog(page)).toBeVisible();
+  const table = draft(page).locator("table");
+  await placeCaretIn(table.locator("td").first(), { touch });
+  await activateControl(dialog(page).getByRole("button", { name: "Column 1 actions", exact: true }), { touch });
+  await activateControl(dialog(page).getByRole("menuitem", { name: "Move column right", exact: true }), { touch });
+  await expect(table.locator("th")).toHaveText(["Value", "Name"]);
+  await expect(dialog(page)).toBeVisible();
+  if (!touch) await table.locator("th").nth(1).hover();
+  await activateControl(dialog(page).getByRole("button", { name: "Column 2 actions", exact: true }), { touch });
+  await page.keyboard.press("Escape");
+  await expect(dialog(page).getByRole("menu")).toHaveCount(0);
+  await expect(dialog(page)).toBeVisible();
 
-    await placeCaretIn(paragraph, { touch });
+  await placeCaretIn(paragraph, { touch });
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("/");
+  const menu = dialog(page).getByRole("listbox", { name: "Block types", exact: true });
+  await expect.poll(() => menu.getByRole("option").evaluateAll((options) => options.map((option) => option.getAttribute("aria-label"))))
+    .toEqual(["Paragraph", "Bullet list", "Numbered list", "Code", "Table"]);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(dialog(page)).toBeVisible();
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type(`@${reference.title}`);
+  const mentions = dialog(page).getByRole("listbox", { name: "Documents", exact: true });
+  await activateControl(mentions.getByRole("option", { name: reference.title, exact: true }), { touch });
+  await expect(draft(page).locator(`a[data-doc-id="${reference.uuid}"]`)).toHaveText(reference.title);
+
+  const screenshot = test.info().outputPath("alter-decision.png");
+  await page.screenshot({ path: screenshot, fullPage: true });
+  await test.info().attach(`alter-decision-${touch ? "ipad" : "desktop"}`, { path: screenshot, contentType: "image/png" });
+  await activateControl(dialog(page).getByRole("button", { name: "Cancel", exact: true }), { touch });
+  await expect(dialog(page)).toHaveCount(0);
+  await unchanged(writer, source, page);
+});
+
+test("answer references preserve the draft on desktop pointer and Enter or iPad touch", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const touch = info.project.use.hasTouch === true;
+  const writer = session();
+  const reference = await writer.call<StoredDoc>("create_doc", {
+    title: docTitle("Reference target"), description: "A reference shown in the current answer.",
+    blocks: [{ type: "paragraph", text: "Read this without losing the answer draft." }],
+  });
+  const source = await create(writer, docTitle("Alter references"), [
+    { type: "paragraph", inline: [
+      { text: "Keep ", marks: {} },
+      { text: "the referenced document", marks: { docLink: reference.uuid } },
+      { text: ".", marks: {} },
+    ] },
+  ]);
+  const page = await openApp(browser, `/${harness().workspace}/${source.uuid}`, {
+    contextOptions: touch ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 1000 } },
+  });
+  await openDialog(page, touch);
+  await placeCaretIn(draft(page).locator(":scope > p"), { touch });
+  await page.keyboard.type(" Typed replacement.");
+  await dialog(page).getByLabel(/Why the change/).fill("Keep this typed reason.");
+  const expectDraft = async (): Promise<void> => {
+    await expect(page).toHaveURL(new RegExp(`/${source.uuid}$`));
+    await expect(dialog(page)).toBeVisible();
+    await expect(draft(page)).toHaveText("Keep the referenced document. Typed replacement.");
+    await expect(dialog(page).getByLabel(/Why the change/)).toHaveValue("Keep this typed reason.");
+  };
+  const currentReference = dialog(page).locator(`[aria-label="Current answer"] a[data-doc-id="${reference.uuid}"]`);
+  await expect(currentReference).toHaveAttribute("href", new RegExp(`/${reference.uuid}$`));
+  await activateControl(currentReference, { touch });
+  await expectDraft();
+  if (!touch) {
+    await currentReference.focus();
+    await expect(currentReference).toBeFocused();
     await page.keyboard.press("Enter");
-    await page.keyboard.type("/");
-    const menu = dialog(page).getByRole("listbox", { name: "Block types", exact: true });
-    await expect.poll(() => menu.getByRole("option").evaluateAll((options) => options.map((option) => option.getAttribute("aria-label"))))
-      .toEqual(["Paragraph", "Bullet list", "Numbered list", "Code", "Table"]);
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("Escape");
-    await expect(menu).toHaveCount(0);
-    await expect(dialog(page)).toBeVisible();
-    await page.keyboard.press("Backspace");
-    await page.keyboard.type(`@${reference.title}`);
-    const mentions = dialog(page).getByRole("listbox", { name: "Documents", exact: true });
-    await activateControl(mentions.getByRole("option", { name: reference.title, exact: true }), { touch });
-    await expect(draft(page).locator(`a[data-doc-id="${reference.uuid}"]`)).toHaveText(reference.title);
-
-    const screenshot = test.info().outputPath("alter-decision.png");
-    await page.screenshot({ path: screenshot, fullPage: true });
-    await test.info().attach(`alter-decision-${touch ? "ipad" : "desktop"}-${appearance}`, { path: screenshot, contentType: "image/png" });
-    await activateControl(dialog(page).getByRole("button", { name: "Cancel", exact: true }), { touch });
-    await expect(dialog(page)).toHaveCount(0);
-    await unchanged(writer, source, page);
-  });
-
-  test(`answer references preserve the draft on ${touch ? "iPad touch" : "desktop pointer and Enter"} in ${appearance}${touch ? " @webkit-touch" : ""}`, async ({ browser }) => {
-    const writer = session();
-    const reference = await writer.call<StoredDoc>("create_doc", {
-      title: docTitle("Reference target"), description: "A reference shown in the current answer.",
-      blocks: [{ type: "paragraph", text: "Read this without losing the answer draft." }],
-    });
-    const source = await create(writer, docTitle("Alter references"), [
-      { type: "paragraph", inline: [
-        { text: "Keep ", marks: {} },
-        { text: "the referenced document", marks: { docLink: reference.uuid } },
-        { text: ".", marks: {} },
-      ] },
-    ]);
-    const page = await openApp(browser, `/${harness().workspace}/${source.uuid}`, {
-      contextOptions: { ...(touch ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 1000 } }), colorScheme: appearance },
-    });
-    await openDialog(page, touch);
-    await placeCaretIn(draft(page).locator(":scope > p"), { touch });
-    await page.keyboard.type(" Typed replacement.");
-    await dialog(page).getByLabel(/Why the change/).fill("Keep this typed reason.");
-    const expectDraft = async (): Promise<void> => {
-      await expect(page).toHaveURL(new RegExp(`/${source.uuid}$`));
-      await expect(dialog(page)).toBeVisible();
-      await expect(draft(page)).toHaveText("Keep the referenced document. Typed replacement.");
-      await expect(dialog(page).getByLabel(/Why the change/)).toHaveValue("Keep this typed reason.");
-    };
-    const currentReference = dialog(page).locator(`[aria-label="Current answer"] a[data-doc-id="${reference.uuid}"]`);
-    await expect(currentReference).toHaveAttribute("href", new RegExp(`/${reference.uuid}$`));
-    await activateControl(currentReference, { touch });
     await expectDraft();
-    if (!touch) {
-      await currentReference.focus();
-      await expect(currentReference).toBeFocused();
-      await page.keyboard.press("Enter");
-      await expectDraft();
-    }
-    await activateControl(draft(page).locator(`a[data-doc-id="${reference.uuid}"]`), { touch });
-    await expectDraft();
-    await activateControl(dialog(page).getByRole("button", { name: "Cancel", exact: true }), { touch });
-    await expect(dialog(page)).toHaveCount(0);
-    await unchanged(writer, source, page);
-  });
-}
+  }
+  await activateControl(draft(page).locator(`a[data-doc-id="${reference.uuid}"]`), { touch });
+  await expectDraft();
+  await activateControl(dialog(page).getByRole("button", { name: "Cancel", exact: true }), { touch });
+  await expect(dialog(page)).toHaveCount(0);
+  await unchanged(writer, source, page);
+});
 
 test("Decide records a successor at the topic address and RFC opens its new page", async ({ browser }) => {
   const writer = session();

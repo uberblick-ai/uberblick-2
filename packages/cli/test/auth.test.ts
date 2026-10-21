@@ -10,9 +10,8 @@ import { hostname } from "node:os";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authenticationOrigin } from "../src/auth.js";
-import { resolveConfig } from "../src/config.js";
-import { parseJoinTarget } from "../src/remote.js";
+import { authenticationOrigin, parseJoinTarget } from "@uberblick/mcp-server/remote-url";
+import { resolveConfig } from "@uberblick/mcp-server/project-config";
 import { DEAD_HUB_URL, removeTempDirs, sandbox, sleep, UB_BIN, unboundSandbox, waitUntil, type Run } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 import {

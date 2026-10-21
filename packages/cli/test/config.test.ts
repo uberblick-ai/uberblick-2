@@ -18,7 +18,7 @@ import {
   resolveConfig,
   writeCredentials,
   writeHubAdmission,
-} from "../src/config.js";
+} from "@uberblick/mcp-server/project-config";
 import {
   REPO_ROOT,
   SECRET_IN_ENV,

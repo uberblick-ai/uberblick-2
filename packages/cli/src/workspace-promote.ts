@@ -8,15 +8,15 @@ import { assertHubTransport, authenticationOrigin, normalizeRemoteUrl } from "@u
 import { resolveStorage } from "@uberblick/mcp-server/storage";
 import { defaultWorkspaceDatabasePath, readWorkspaceName, syncWorkspace } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
-import { ManagementResponseError, manageRequest } from "./access-management.js";
+import { ManagementResponseError, manageRequest } from "@uberblick/mcp-server/management-client";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
-import { requireBinding, resolveConfig, writeHubAdmission } from "./config.js";
+import { requireBinding, resolveConfig, writeHubAdmission } from "@uberblick/mcp-server/project-config";
 import { takeHelp } from "./help.js";
-import { acquireInitLock } from "./init-lock.js";
+import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
 import { type Io, shellArgument } from "./io.js";
-import { resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
+import { resolveProjectBinding, writeProjectBinding } from "@uberblick/mcp-server/project-binding";
 import { corpusProblem, verify } from "./remote.js";
-import { publishOwnerOnly } from "./safe-write.js";
+import { publishOwnerOnly } from "@uberblick/mcp-server/safe-write";
 import { reportEnvironmentBinding } from "./workspace-create.js";
 
 export const WORKSPACE_PROMOTE_HELP = `usage: ub workspace promote <hub>

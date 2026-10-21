@@ -5,8 +5,8 @@ import { createMcpServer, defaultWorkspaceDatabasePath, resolveMcpConfig } from 
 import { getWorkspaceMainRepository, setWorkspaceMainRepository } from "@uberblick/schema";
 import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { afterEach, expect, it } from "vitest";
-import { writeHubAdmission } from "../src/config.js";
-import { rememberWorkspaceBindings } from "../src/workspace-registry.js";
+import { writeHubAdmission } from "@uberblick/mcp-server/project-config";
+import { rememberWorkspaceBindings } from "@uberblick/mcp-server/workspace-registry";
 import { cleanUp, rig, seedLogin } from "./auth-fixtures.js";
 import { removeTempDirs, unboundSandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";

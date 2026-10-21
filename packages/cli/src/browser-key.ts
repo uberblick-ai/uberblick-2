@@ -11,7 +11,7 @@ import {
 import { join } from "node:path";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
 import { parseWorkspaceId } from "@uberblick/schema";
-import { describeFsError, publishStaged, writeTempBeside } from "./safe-write.js";
+import { describeFsError, publishStaged, writeTempBeside } from "@uberblick/mcp-server/safe-write";
 
 function owned(uid: number): boolean {
   return process.getuid === undefined || uid === process.getuid();

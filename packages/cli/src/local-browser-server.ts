@@ -22,10 +22,14 @@ import {
   PEER_ADDRESS_HEADER,
   type HubContext,
 } from "@uberblick/hub";
-import { DOC_DELETED_REASON, SYNC_PROTOCOL_VERSION, isDocDeletedReason, isProtocolVersion } from "@uberblick/schema/protocol";
-
-export const STORE_BUSY_REASON = "uberblick:store-busy";
-export const STORE_REFUSED_REASON = "uberblick:store-refused";
+import {
+  DOC_DELETED_REASON,
+  SETTINGS_RESET_REASON,
+  STORE_BUSY_REASON,
+  STORE_REFUSED_REASON,
+  SYNC_PROTOCOL_VERSION,
+  isDocDeletedReason,
+} from "@uberblick/schema/protocol";
 
 /** The code is server-local; Hocuspocus sends the reason string to the client. */
 const REFUSAL_CODE = 4900;
@@ -119,7 +123,6 @@ export interface LocalBrowserServerConfig {
   expectedOrigin: string;
   /** Each local admission key admits only its workspace, never another store. */
   workspaces: ReadonlyMap<string, string>;
-  protocolVersion?: number;
   log?: HubLogger;
   /** Prepare an authenticated room's replica before reading its store. */
   prepareRoom?(room: string): Promise<void>;
@@ -212,16 +215,13 @@ export async function createLocalBrowserServer(
   if (workspaces.size === 0 || [...workspaces.values()].some((key) => key === "")) {
     throw new Error("createLocalBrowserServer: browserKey must not be empty");
   }
-  const protocolVersion = config.protocolVersion ?? SYNC_PROTOCOL_VERSION;
-  if (!isProtocolVersion(protocolVersion)) {
-    throw new Error(
-      `createLocalBrowserServer: protocolVersion must be an integer between 1 and 999999, got ${protocolVersion}`,
-    );
-  }
   const log = config.log ?? stderrLogger;
+  const logRefusal = (room: string, cause: string, error: unknown): void => {
+    log({ event: "ub-open.store.refused", room, cause, error: String(error) });
+  };
   const authenticate = await createRoomAuthenticator({
     workspaceKeys: workspaces,
-    protocolVersion,
+    protocolVersion: SYNC_PROTOCOL_VERSION,
     log,
   });
   const upgradedSockets = new Set<Duplex>();
@@ -272,12 +272,7 @@ export async function createLocalBrowserServer(
         await config.prepareRoom?.(payload.documentName);
       } catch (error) {
         const reason = refusalReason(error);
-        log({
-          event: "ub-open.store.refused",
-          room: payload.documentName,
-          cause: reason,
-          error: String(error),
-        });
+        logRefusal(payload.documentName, reason, error);
         throw refused(reason, error);
       }
       return context;
@@ -302,12 +297,7 @@ export async function createLocalBrowserServer(
         );
       } catch (error) {
         const reason = refusalReason(error);
-        log({
-          event: "ub-open.store.refused",
-          room: documentName,
-          cause: reason,
-          error: String(error),
-        });
+        logRefusal(documentName, reason, error);
         // There is no room Connection until loading succeeds. Hocuspocus
         // carries this reason in its per-document permission-denied response,
         // leaving other rooms on the same socket intact.
@@ -339,16 +329,16 @@ export async function createLocalBrowserServer(
         config.assertRoomAvailable?.(documentName);
         if (parseRoom(documentName).uuid === SETTINGS_SUFFIX) {
           if (server.hocuspocus.documents.get(documentName) !== document) {
-            throw refused("uberblick:settings-reset", "obsolete settings replica");
+            throw refused(SETTINGS_RESET_REASON, "obsolete settings replica");
           }
           const reset = config.readRoom(documentName, appliedThrough.get(document) ?? 0).reset;
           if (reset !== undefined && reset.seq !== settingsGenerations.get(document)) {
             resetSettings(documentName, document, reset.seq);
-            throw refused("uberblick:settings-reset", "obsolete settings replica");
+            throw refused(SETTINGS_RESET_REASON, "obsolete settings replica");
           }
         }
       } catch (error) {
-        if ((error as { reason?: unknown }).reason === "uberblick:settings-reset") throw error;
+        if ((error as { reason?: unknown }).reason === SETTINGS_RESET_REASON) throw error;
         throw refused(refusalReason(error), error);
       }
       if (type === messageYjsSyncStep1 || connection.readOnly) return;
@@ -358,12 +348,7 @@ export async function createLocalBrowserServer(
       try {
         decoded = Y.decodeUpdate(payload);
       } catch (error) {
-        log({
-          event: "ub-open.store.refused",
-          room: documentName,
-          cause: "malformed-update",
-          error: String(error),
-        });
+        logRefusal(documentName, "malformed-update", error);
         throw refused(STORE_REFUSED_REASON, error);
       }
       // The reconnect handshake produces a real two-byte Yjs update carrying
@@ -380,16 +365,11 @@ export async function createLocalBrowserServer(
           const reset = config.readRoom(documentName, appliedThrough.get(document) ?? 0).reset;
           if (reset !== undefined && reset.seq !== settingsGenerations.get(document)) {
             resetSettings(documentName, document, reset.seq);
-            throw refused("uberblick:settings-reset", error);
+            throw refused(SETTINGS_RESET_REASON, error);
           }
         }
         const reason = refusalReason(error);
-        log({
-          event: "ub-open.store.refused",
-          room: documentName,
-          cause: reason,
-          error: String(error),
-        });
+        logRefusal(documentName, reason, error);
         throw refused(reason, error);
       }
     },
@@ -417,7 +397,7 @@ export async function createLocalBrowserServer(
     retryRooms.delete(room);
     for (const connection of connections) {
       sendSettingsNotice(connection, room, seq);
-      connection.close({ code: 1000, reason: "uberblick:settings-reset" });
+      connection.close({ code: 1000, reason: SETTINGS_RESET_REASON });
     }
     served.destroy();
   };
@@ -448,12 +428,7 @@ export async function createLocalBrowserServer(
         const busy = isBusy(error);
         if (busy) retryRooms.add(room);
         else retryRooms.delete(room);
-        log({
-          event: "ub-open.store.refused",
-          room,
-          cause: refusalReason(error),
-          error: String(error),
-        });
+        logRefusal(room, refusalReason(error), error);
         if (!busy) {
           // A failed replica must no longer serve its stale in-memory rooms.
           // Close document connections, rather than their shared websocket.

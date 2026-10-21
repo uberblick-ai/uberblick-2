@@ -34,7 +34,7 @@ import * as Y from "yjs";
 import { MirrorStore } from "../../mcp-server/src/store.js";
 import type { Check, DoctorReport } from "../src/doctor.js";
 import { statusReport } from "../src/status.js";
-import { ensureWorkspaceBinding } from "../src/workspace-registry.js";
+import { ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 import type { Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 import { DEAD_HUB_URL, pointAt, removeTempDirs, sandbox, unboundSandbox } from "./helpers.js";

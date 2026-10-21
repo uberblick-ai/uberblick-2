@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { defaultWorkspaceDatabasePath } from "@uberblick/mcp-server";
 import { MirrorStore } from "../../mcp-server/src/store.js";
 import { afterAll, describe, expect, it } from "vitest";
-import { readWorkspaceHub, ensureWorkspaceBinding, workspaceRegistryPath } from "../src/workspace-registry.js";
+import { readWorkspaceHub, ensureWorkspaceBinding, workspaceRegistryPath } from "@uberblick/mcp-server/workspace-registry";
 import { DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox } from "./helpers.js";
 import type { Run, Sandbox } from "./helpers.js";
 import { parseJoinTarget } from "@uberblick/mcp-server/remote-url";

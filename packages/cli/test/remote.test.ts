@@ -60,9 +60,10 @@ import * as Y from "yjs";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
-import { normalizeRemoteUrl, parseJoinTarget, setRemote } from "../src/remote.js";
-import { resolveProjectBinding } from "../src/project-binding.js";
-import { readWorkspaceHub, rememberWorkspaceBindings } from "../src/workspace-registry.js";
+import { normalizeRemoteUrl, parseJoinTarget } from "@uberblick/mcp-server/remote-url";
+import { setRemote } from "../src/remote.js";
+import { resolveProjectBinding } from "@uberblick/mcp-server/project-binding";
+import { readWorkspaceHub, rememberWorkspaceBindings } from "@uberblick/mcp-server/workspace-registry";
 import {
   DEAD_HUB_URL,
   removeTempDirs,

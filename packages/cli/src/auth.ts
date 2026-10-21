@@ -12,16 +12,16 @@ import {
   readHubLogins,
   removeHubLogin,
   writeHubLogin,
-} from "./auth-store.js";
+} from "@uberblick/mcp-server/auth-store";
 import { budget } from "./budget.js";
-import { resolveProjectBinding } from "./project-binding.js";
+import { resolveProjectBinding } from "@uberblick/mcp-server/project-binding";
 import { openBrowser } from "./browser.js";
 import { type Io, shellArgument } from "./io.js";
+import { useField } from "./workspace-use-output.js";
 import { assertHubTransport, authenticationOrigin, hubTransportProblem, normalizeRemoteUrl } from "@uberblick/mcp-server/remote-url";
 import { SYNC_PROTOCOL_VERSION, protocolSkew, readProtocolMismatch, wrapToken } from "@uberblick/schema/protocol";
 import { DEVICE_CREDENTIAL_LIFETIME_MS, generateCredentialKeyPair } from "@uberblick/schema/token";
-import { manageRequest, ManagementResponseError, sanitizeManagementReply } from "./access-management.js";
-export { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
+import { manageRequest, ManagementResponseError, sanitizeManagementReply } from "@uberblick/mcp-server/management-client";
 
 export const AUTH_HELP = `usage: ub auth [command]
 
@@ -293,37 +293,37 @@ type DeviceAction = { operation: "list-devices" } | { operation: "revoke-device"
 async function deviceRequest(origin: string, action: DeviceAction, login: StoredHubLogin, io: Io) {
   const transport = hubTransportProblem(origin);
   if (transport !== null) throw new DeviceFailure(`${transport.reason}; ${transport.fix}`);
-  let reply: Awaited<ReturnType<typeof manageRequest>>;
+  let body: Record<string, unknown>;
+  // The sanitizer pairs each status with its HTTP code and validates every device row.
   try {
     const timeoutMs = budget(10_000);
-    reply = await manageRequest(origin, action, login, timeoutMs < 10_000
+    const reply = await manageRequest(origin, action, login, timeoutMs < 10_000
       ? { signal: AbortSignal.timeout(Math.max(1, Math.ceil(timeoutMs))) } : {});
+    ({ body } = sanitizeManagementReply(action, reply, login));
   } catch (error) {
     throw new DeviceFailure(error instanceof ManagementResponseError
       ? "the hub returned an invalid device-management response"
       : "the hub is unreachable or the device-management request timed out");
   }
-  if (reply.status === 200 && reply.body.status === "ok") return reply.body;
-  if (action.operation === "revoke-device" && reply.status === 500 &&
-      reply.body.status === "closure-failed" && reply.body.applied === true) {
+  if (body.status === "ok") return body;
+  if (body.status === "closure-failed") {
     io.err("ub auth: warning: revocation committed, but the hub could not close every active connection; repair the hub before relying on access closure.\n");
-    return reply.body;
+    return body;
   }
-  const refusals: Record<string, [number, string]> = {
-    "sign-in-required": [401, "sign-in-required: the hub refuses this login"],
-    forbidden: [403, "forbidden: the hub refused own-device management"],
-    "device-not-found": [404, "device-not-found: the hub did not revoke this device"],
-    "protocol-mismatch": [409, "protocol-mismatch: update the hub and client together"],
-    "not-configured": [503, "not-configured: the hub does not support authenticated device management"],
-    failed: [500, "the hub could not complete device management"],
+  const refusals: Record<string, string> = {
+    "sign-in-required": "sign-in-required: the hub refuses this login",
+    forbidden: "forbidden: the hub refused own-device management",
+    "device-not-found": "device-not-found: the hub did not revoke this device",
+    "protocol-mismatch": "protocol-mismatch: update the hub and client together",
+    "not-configured": "not-configured: the hub does not support authenticated device management",
+    failed: "the hub could not complete device management",
   };
-  const refusal = refusals[String(reply.body.status)];
-  throw new DeviceFailure(refusal?.[0] === reply.status ? refusal[1] : "the hub returned an invalid device-management response",
-    reply.status === 401 && reply.body.status === "sign-in-required");
+  throw new DeviceFailure(refusals[String(body.status)] ?? "the hub returned an invalid device-management response",
+    body.status === "sign-in-required");
 }
 
 function authField(io: Io, label: string, value: string): void {
-  io.out(`${label.padEnd(11)}${value}\n`);
+  io.out(useField(label, value));
 }
 
 async function retireCurrentDevice(origin: string, login: StoredHubLogin, io: Io): Promise<string | undefined> {
@@ -354,19 +354,9 @@ async function logout(selection: Selection, io: Io, allDevices: boolean): Promis
     }
     let devices: string[];
     try {
+      // Sanitized: unique device ids, and exactly this login's device is current.
       const body = await deviceRequest(origin, { operation: "list-devices" }, login, io);
-      if (!Array.isArray(body.devices)) throw new DeviceFailure("the hub returned an invalid device list");
-      const seen = new Set<string>();
-      devices = body.devices.map(device => {
-        if (!object(device) || typeof device.deviceId !== "string" || device.deviceId.length === 0 ||
-            typeof device.current !== "boolean" || seen.has(device.deviceId) ||
-            device.current !== (device.deviceId === login.credential.record.deviceId)) {
-          throw new DeviceFailure("the hub returned an invalid device list");
-        }
-        seen.add(device.deviceId);
-        return device.deviceId;
-      });
-      if (!seen.has(login.credential.record.deviceId)) throw new DeviceFailure("the hub returned an invalid device list");
+      devices = (body.devices as { deviceId: string }[]).map(device => device.deviceId);
       // The key authorizes every request. Revoking its device first would
       // prevent the remaining requests from authenticating.
       devices = devices.filter(id => id !== login.credential.record.deviceId).concat(login.credential.record.deviceId);
@@ -547,7 +537,7 @@ function terminal(result: Record<string, unknown>): never {
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
-async function login(selection: Selection, io: Io, nextAction: boolean, collectTimeoutMs?: number): Promise<number> {
+async function login(selection: Selection, io: Io, collectTimeoutMs?: number): Promise<number> {
   try { preflightHubLoginStore(); } catch (error) {
     io.err(`ub auth: ${error instanceof Error ? error.message : "credential store is not writable"}\n`);
     return 1;
@@ -659,7 +649,7 @@ async function login(selection: Selection, io: Io, nextAction: boolean, collectT
       authField(io, "signed in", `${displayUsername(credential.identity.githubUsername)} on ${selection.origin}`);
       if (claimedWorkspaceId !== undefined) authField(io, "claimed", `default workspace (${claimedWorkspaceId}), you are admin`);
       describeWorkspaces(credential, io);
-      if (nextAction && claimedWorkspaceId !== undefined &&
+      if (claimedWorkspaceId !== undefined &&
           (!selection.bound || selection.workspace === undefined ||
             parseWorkspaceId(selection.workspace).uuid !== claimedWorkspaceId)) {
         io.out(`Use it here: ub workspace use ${shellArgument(`${selection.endpoint}/${claimedWorkspaceId}`)}\n`);
@@ -690,7 +680,7 @@ async function login(selection: Selection, io: Io, nextAction: boolean, collectT
   }
 }
 
-export async function authCommand(argv: string[], io: Io, options: { loginNextAction?: boolean; collectTimeoutMs?: number } = {}): Promise<number> {
+export async function authCommand(argv: string[], io: Io, options: { collectTimeoutMs?: number } = {}): Promise<number> {
   const [sub, ...args] = argv;
   if (sub === undefined || sub === "help" || sub === "--help" || sub === "-h") {
     io.out(AUTH_HELP);
@@ -739,7 +729,7 @@ export async function authCommand(argv: string[], io: Io, options: { loginNextAc
   }
   if (sub === "login") {
     authField(io, "hub", selection.origin);
-    return await login(selection, io, options.loginNextAction !== false, options.collectTimeoutMs);
+    return await login(selection, io, options.collectTimeoutMs);
   }
   if (sub === "status") return await status(selection, io, json);
   return await logout(selection, io, allDevices);

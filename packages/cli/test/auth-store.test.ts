@@ -21,12 +21,12 @@ import {
   replaceHubLogin,
   removeHubLogin,
   writeHubLogin,
-} from "../src/auth-store.js";
-import { credentialsPath, resolveConfig, userConfigPath } from "../src/config.js";
-import { acquireInitLock, initLockPath, tryAcquireInitLock } from "../src/init-lock.js";
-import { readWorkspaceHub } from "../src/workspace-registry.js";
+} from "@uberblick/mcp-server/auth-store";
+import { credentialsPath, resolveConfig, userConfigPath } from "@uberblick/mcp-server/project-config";
+import { acquireInitLock, initLockPath, tryAcquireInitLock } from "@uberblick/mcp-server/init-lock";
+import { readWorkspaceHub } from "@uberblick/mcp-server/workspace-registry";
 import * as safeWrite from "@uberblick/mcp-server/safe-write";
-import { PACKAGE_ROOT, SECRET_ON_FILE, removeTempDirs, sandbox, waitUntil, type Sandbox } from "./helpers.js";
+import { PACKAGE_ROOT, REPO_ROOT, SECRET_ON_FILE, removeTempDirs, sandbox, waitUntil, type Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 afterEach(() => vi.restoreAllMocks());
@@ -73,9 +73,9 @@ async function interleaveWriters(box: Sandbox, first: Mutation, second: Mutation
   writeFileSync(worker, `
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
-import { writeHubLogin, removeHubLogin } from ${JSON.stringify(pathToFileURL(join(PACKAGE_ROOT, "src/auth-store.ts")).href)};
-import { credentialsPath } from ${JSON.stringify(pathToFileURL(join(PACKAGE_ROOT, "src/config.ts")).href)};
-import { acquireInitLock, initLockPath } from ${JSON.stringify(pathToFileURL(join(PACKAGE_ROOT, "src/init-lock.ts")).href)};
+import { writeHubLogin, removeHubLogin } from ${JSON.stringify(pathToFileURL(join(REPO_ROOT, "packages/mcp-server/src/auth-store.ts")).href)};
+import { credentialsPath } from ${JSON.stringify(pathToFileURL(join(REPO_ROOT, "packages/mcp-server/src/project-config.ts")).href)};
+import { acquireInitLock, initLockPath } from ${JSON.stringify(pathToFileURL(join(REPO_ROOT, "packages/mcp-server/src/init-lock.ts")).href)};
 import { setRemote } from ${JSON.stringify(pathToFileURL(join(PACKAGE_ROOT, "src/remote.ts")).href)};
 
 const job = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
