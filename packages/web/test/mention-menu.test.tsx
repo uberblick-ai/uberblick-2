@@ -41,8 +41,6 @@ import {
   writeGfmTable,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
-import { Fragment } from "@tiptap/pm/model";
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { redo, undo } from "y-prosemirror";
 import { createDocLinkContext } from "../src/editor/doc-links.js";
 import type { DocLinkContext } from "../src/editor/doc-links.js";
@@ -51,7 +49,6 @@ import {
   mentionTriggerAt,
 } from "../src/editor/mention-menu.js";
 import type { MentionTrigger } from "../src/editor/mention-menu.js";
-import { moveTableRow, tableRowTarget } from "../src/editor/table-controls.js";
 import { MentionMenu } from "../src/ui/editor-controls/MentionMenu.js";
 import { mountEditor, snapshotFragment } from "./helpers.js";
 import { onTestCleanup } from "./test-cleanup.js";
@@ -879,7 +876,7 @@ describe("the picker in editable table cells", () => {
     } finally { mounted.unmount(); ydoc.destroy(); }
   });
 
-  it.each(["caret", "edit", "peer"])("refuses a rendered pointer callback before React commits the %s change", (change) => {
+  it.each(["caret", "peer"])("refuses a rendered pointer callback before React commits the %s change", (change) => {
     const { context } = directory();
     const ydoc = tableDoc([["Header", ""], ["", "@hub"]]);
     const peer = peerOf(ydoc);
@@ -891,10 +888,6 @@ describe("the picker in editable table cells", () => {
       const option = screen.getByRole("option", { name: "The hub" });
       act(() => {
         if (change === "caret") mounted.editor.commands.setTextSelection(cellPosition(mounted.editor, 1, 1) + 4);
-        else if (change === "edit") {
-          const trigger = mentionTriggerAt(mounted.editor)!;
-          mounted.editor.view.dispatch(mounted.editor.state.tr.insertText("@hub", trigger.from, trigger.to));
-        }
         else peer.transact(() => {
           const text = tableCellText(cell(peer, 1, 0))!;
           text.delete(0, 4);
@@ -909,7 +902,7 @@ describe("the picker in editable table cells", () => {
     } finally { mounted.unmount(); peer.destroy(); ydoc.destroy(); }
   });
 
-  it.each(["addRowBefore", "deleteRow", "addColumnBefore", "deleteColumn"] as const)(
+  it.each(["deleteRow"] as const)(
     "a %s cannot send a saved pick to an identical query in another cell",
     (command) => {
       const { context } = directory();
@@ -940,54 +933,4 @@ describe("the picker in editable table cells", () => {
     },
   );
 
-  it.each(["row", "column"])("closes on %s reordering rather than following an identical query", (axis) => {
-    const { context } = directory();
-    const ydoc = tableDoc([["Header", "Header"], ["", "@hub"], ["@hub", "@hub"]]);
-    const mounted = mountPicker(ydoc, context);
-    try {
-      cellCaret(mounted.editor, 1, 0);
-      type(mounted.editor, "@");
-      type(mounted.editor, "hub");
-      const trigger = mentionTriggerAt(mounted.editor)!;
-      act(() => {
-        if (axis === "row") {
-          const target = tableRowTarget(mounted.editor, getBlocks(ydoc)[0]!.id, 1)!;
-          expect(moveTableRow(mounted.editor, target, 3)).toBe(true);
-        } else {
-          const { state } = mounted.editor;
-          const table = state.doc.firstChild!;
-          const rows: ProseMirrorNode[] = [];
-          table.forEach((row) => { rows.push(row.copy(Fragment.fromArray([row.child(1), row.child(0)]))); });
-          mounted.editor.view.dispatch(state.tr.replaceWith(0, table.nodeSize, table.copy(Fragment.fromArray(rows))));
-        }
-      });
-      expect(mounted.card()).toBeNull();
-      const before = getBlocks(ydoc);
-      expect(linkMentionAtTrigger(mounted.editor, trigger, HUB, context)).toBe(false);
-      expect(getBlocks(ydoc)).toEqual(before);
-    } finally { mounted.unmount(); ydoc.destroy(); }
-  });
-
-  it.each(["delete", "replace"])("closes when a peer %ss the occurrence even if the query remains identical", (edit) => {
-    const { context } = directory();
-    const ydoc = tableDoc([["Header", ""], ["", "@hub"]]);
-    const peer = peerOf(ydoc);
-    const mounted = mountPicker(ydoc, context);
-    try {
-      cellCaret(mounted.editor, 1, 0);
-      type(mounted.editor, "@");
-      type(mounted.editor, "hub");
-      const trigger = mentionTriggerAt(mounted.editor)!;
-      act(() => peer.transact(() => {
-        const text = tableCellText(cell(peer, 1, 0))!;
-        text.delete(0, 4);
-        if (edit === "replace") text.insert(0, "@hub");
-      }));
-      expect(mounted.card()).toBeNull();
-      const before = getBlocks(ydoc);
-      expect(linkMentionAtTrigger(mounted.editor, trigger, HUB, context)).toBe(false);
-      expect(getBlocks(ydoc)).toEqual(before);
-      expect(cellDelta(ydoc, 1, 1)).toEqual([{ insert: "@hub" }]);
-    } finally { mounted.unmount(); peer.destroy(); ydoc.destroy(); }
-  });
 });

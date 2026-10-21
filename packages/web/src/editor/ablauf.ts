@@ -2,29 +2,17 @@
 import { Extension } from "@tiptap/core";
 import type { NodeViewRenderer, NodeViewRendererProps } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { TextSelection } from "@tiptap/pm/state";
 import type { NodeView } from "@tiptap/pm/view";
 import type { TextStyle } from "@uberblick/ablauf";
-import { COMMENT_MARK } from "@uberblick/schema";
-import { blockCaption, codeBlockChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js";
+import {
+  blockCaption, carriesComment, chromeFilters, codeBlockChrome, copyButton, lazyRenderer, openSource,
+  showDiagnostics, showFailure, sourceButton, sourceEditingPlugin,
+} from "./source-chrome.js";
 import rendererUrl from "./ablauf-renderer-url.js";
-import { dataRevision, recordDraw } from "./render-state.js";
+import { DRAW_ATTRIBUTES, dataRevision, recordDraw } from "./render-state.js";
 
-type AblaufRenderer = typeof import("@uberblick/ablauf");
-let renderer: AblaufRenderer | null = null;
-let loading: Promise<AblaufRenderer> | null = null;
-let failures = 0;
+const renderers = lazyRenderer(() => import("@uberblick/ablauf"), rendererUrl);
 let nextId = 0;
-
-function loadRenderer(): Promise<AblaufRenderer> {
-  // Browsers cache failed imports by URL; a later edit needs a fresh URL.
-  loading ??= (failures === 0 ? import("@uberblick/ablauf") :
-    import(/* @vite-ignore */ `${rendererUrl}?retry=${failures}`) as Promise<AblaufRenderer>).then(
-    module => (renderer = module),
-    (cause: unknown) => { failures += 1; loading = null; throw cause; },
-  );
-  return loading;
-}
 
 export function ablaufBlockView(): NodeViewRenderer {
   return ({ node, editor, getPos }: NodeViewRendererProps): NodeView => {
@@ -43,10 +31,8 @@ export function ablaufBlockView(): NodeViewRenderer {
     label.className = "ub-code-caption-text";
     label.textContent = "Ablauf";
     caption.append(label);
-    const source = document.createElement("button");
-    source.type = "button";
-    source.textContent = "Source";
-    source.setAttribute("aria-label", "Open ablauf source");
+    // Read-only documents show only the drawing: Source is an authoring control.
+    const source = sourceButton("Open ablauf source", openSource(editor, getPos, true));
     const copy = copyButton(() => current.textContent);
     header.actions.append(copy.element, source);
     header.label.append(caption);
@@ -80,12 +66,7 @@ export function ablaufBlockView(): NodeViewRenderer {
       recordDraw(dom, { type: "code", language: "ablauf", text: current.textContent }, dataRevision(null), succeeded);
     };
     const unavailable = (prefix: string, cause: unknown): void => {
-      const item = document.createElement("li");
-      const message = cause !== null && typeof cause === "object" && "message" in cause
-        ? String(cause.message) : String(cause);
-      item.textContent = `${prefix}: ${message}`;
-      diagnostics.replaceChildren(item);
-      diagnostics.hidden = false;
+      showFailure(diagnostics, prefix, cause);
       stale.hidden = !hasDrawing;
       settled(false);
     };
@@ -100,8 +81,9 @@ export function ablaufBlockView(): NodeViewRenderer {
     const draw = (): void => {
       pending = null;
       if (destroyed) return;
+      const renderer = renderers.current();
       if (renderer === null || !fontsReady) {
-        Promise.all([loadRenderer(), document.fonts.load(`13px "${monoFamily()}"`).then(() => document.fonts.ready)]).then(() => {
+        Promise.all([renderers.load(), document.fonts.load(`13px "${monoFamily()}"`).then(() => document.fonts.ready)]).then(() => {
           fontsReady = true;
           if (pending === null) draw();
         }, (cause: unknown) => {
@@ -131,12 +113,7 @@ export function ablaufBlockView(): NodeViewRenderer {
         hasDrawing = true;
         viewport.hidden = false;
         stale.hidden = true;
-        diagnostics.replaceChildren(...result.diagnostics.map(diagnostic => {
-          const item = document.createElement("li");
-          item.textContent = `Line ${diagnostic.line}: ${diagnostic.severity}: ${diagnostic.message}`;
-          return item;
-        }));
-        diagnostics.hidden = result.diagnostics.length === 0;
+        showDiagnostics(diagnostics, result.diagnostics);
         settled(true);
       } catch (cause) {
         unavailable("Preview cannot be drawn", cause);
@@ -148,24 +125,10 @@ export function ablaufBlockView(): NodeViewRenderer {
       pending = setTimeout(draw, 200);
     };
     const fontsLoaded = (): void => { if (hasDrawing) schedule(); };
-    const open = (event: Event): void => {
-      event.preventDefault();
-      if (!editor.isEditable) return;
-      const pos = getPos();
-      if (pos === undefined) return;
-      editor.view.dispatch(editor.state.tr.setSelection(TextSelection.near(editor.state.doc.resolve(pos + 1))));
-      editor.view.focus();
-    };
-    source.addEventListener("mousedown", event => event.preventDefault());
-    source.addEventListener("click", open);
     const sync = (): void => {
       codeBlockChrome.sync(current, dom);
       source.hidden = !editor.isEditable;
-      let annotated = false;
-      current.forEach(child => {
-        if (child.marks.some(mark => mark.type.name === COMMENT_MARK)) annotated = true;
-      });
-      dom.dataset.annotated = String(annotated);
+      dom.dataset.annotated = String(carriesComment(current));
     };
     editor.on("transaction", sync);
     editor.on("update", sync);
@@ -182,18 +145,14 @@ export function ablaufBlockView(): NodeViewRenderer {
         if (changed) schedule();
         return true;
       },
-      stopEvent: event => event.target instanceof Node &&
-        (header.row.contains(event.target) || panel.contains(event.target)),
-      ignoreMutation: mutation => header.row.contains(mutation.target) || panel.contains(mutation.target) ||
-        (mutation.type === "attributes" && mutation.target === dom &&
-          ["id", "data-language", "data-annotated", "data-source-rev", "data-data-rev", "data-draw-state"].includes(mutation.attributeName ?? "")),
+      // sync also runs on editor events, outside an update, so its attributes are chrome too.
+      ...chromeFilters(dom, [header.row, panel], ["id", "data-language", "data-annotated", ...DRAW_ATTRIBUTES]),
       destroy: () => {
         destroyed = true;
         if (pending !== null) clearTimeout(pending);
         document.fonts.removeEventListener("loadingdone", fontsLoaded);
         editor.off("transaction", sync);
         editor.off("update", sync);
-        source.removeEventListener("click", open);
       },
     };
   };

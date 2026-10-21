@@ -9,11 +9,10 @@ import type { Editor } from "@tiptap/core";
 import { NodeSelection } from "@tiptap/pm/state";
 import { BLOCK_MENU_ENTRIES, convertBlockAtTrigger, insertBlockBelow, slashTriggerAt } from "../src/editor/block-menu.js";
 import { findForeignBlocks, findLinkConflicts, LINK_CONFLICT } from "../src/editor/palette.js";
-import { retypeSelectedBlock } from "../src/editor/retype.js";
 import { commentTargetOf } from "../src/editor/selection.js";
 import { bindGuardedEditor } from "../src/editor/guarded-binding.js";
 import { threadsFromDoc } from "../src/ui/comments/threads.js";
-import { mountEditor } from "./helpers.js";
+import { mountEditor, retypeAtCaret } from "./helpers.js";
 import { onTestCleanup } from "./test-cleanup.js";
 
 const SOURCE = "label: Lever\ntitle: A title\nfooter: Metadata\n\nBody words";
@@ -110,7 +109,7 @@ describe("card editor", () => {
       }
     }
     expect(getBlocks(ydoc)).toHaveLength(2);
-    expect(retypeSelectedBlock(editor, "paragraph")).toBe(false);
+    expect(retypeAtCaret(editor, "paragraph")).toBe(false);
   });
 
   it("keeps Enter inside the body paragraph and refuses header splits", () => {

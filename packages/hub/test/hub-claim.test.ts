@@ -16,7 +16,7 @@ import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
 import { PrincipalRegistry } from "../src/principals.js";
 import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
-import { silentLogger, type HubLogRecord } from "../src/log.js";
+import { silentLogger } from "../src/log.js";
 import { OTHER_WORKSPACE, TEST_SECRET, WORKSPACE } from "./helpers.js";
 
 const CLIENT_ID = "Iv1.0123456789abcdef";
@@ -366,86 +366,31 @@ describe("credential-free claim-state report", () => {
 });
 
 describe("deployed hub administrator persistence", () => {
-  async function start(path: string, events: HubLogRecord[]) {
-    const github = new GithubFake();
-    const hub = await createHub({ authSecret: TEST_SECRET, databasePath: path, address: "127.0.0.1", port: 0,
-      log: (record) => { events.push(record); },
-      github: { clientId: CLIENT_ID, fetch: github.fetch, now: () => github.time } }, { initializeDefaultWorkspace: true });
-    hubs.push(hub);
-    return hub;
-  }
-
-  it.each(["member", "admin"] as const)("never appoints an administrator when its oldest member is a workspace %s", async (oldestRole) => {
+  it("appoints nobody when an existing deployment with members starts and restarts without a hub admin", async () => {
     const old = rig(undefined, false);
     old.principals.identify("1001", "signed-in-without-access");
-    const oldest = old.principals.identify("1002", "oldest-member");
-    const newer = old.principals.identify("1003", "newer-member");
-    old.memberships.grant({ workspaceId: WORKSPACE, principalId: newer.id, role: oldestRole === "member" ? "admin" : "member" });
-    old.memberships.grant({ workspaceId: OTHER_WORKSPACE, principalId: oldest.id, role: oldestRole });
+    const admin = old.principals.identify("1002", "workspace-admin");
+    const member = old.principals.identify("1003", "workspace-member");
+    old.memberships.grant({ workspaceId: OTHER_WORKSPACE, principalId: admin.id, role: "admin" });
+    old.memberships.grant({ workspaceId: WORKSPACE, principalId: member.id, role: "member" });
     const memberships = old.database.connection.prepare("SELECT * FROM hub_memberships ORDER BY workspace_id, principal_id").all();
     const path = old.database.databasePath;
     old.database.close();
 
-    const events: HubLogRecord[] = [];
-    const hub = await start(path, events);
-    expect(await (await fetch(`http://127.0.0.1:${hub.port}/auth/claim-state`)).json())
-      .toEqual({ unclaimed: false, canClaim: false });
-    expect(hub.hubAdmins!.isAdmin(oldest.id)).toBe(false);
-    expect(hub.hubAdmins!.isAdmin(newer.id)).toBe(false);
-    expect(events.some((record) => record.event === "hub.admin.adopted")).toBe(false);
-    const inspect = rig(path);
-    expect(inspect.database.connection.prepare("SELECT * FROM hub_admins").all()).toEqual([]);
-    expect(inspect.database.connection.prepare("SELECT * FROM hub_memberships ORDER BY workspace_id, principal_id").all()).toEqual(memberships);
-    inspect.database.close();
-    await hub.stop();
-
-    const again: HubLogRecord[] = [];
-    const restarted = await start(path, again);
-    expect(restarted.hubAdmins!.isAdmin(oldest.id)).toBe(false);
-    expect(restarted.hubAdmins!.isAdmin(newer.id)).toBe(false);
-    expect(again.some((record) => record.event === "hub.admin.adopted")).toBe(false);
-    expect(rig(path).database.connection.prepare("SELECT principal_id FROM hub_admins").all())
-      .toEqual([]);
-  });
-
-  it("preserves every existing administrator unchanged across startup and restart", async () => {
-    const administered = rig(undefined, false);
-    const member = administered.principals.identify("2001", "member");
-    const admin = administered.principals.identify("2002", "hub-admin");
-    const otherAdmin = administered.principals.identify("2003", "other-hub-admin");
-    administered.memberships.grant({ workspaceId: WORKSPACE, principalId: member.id, role: "admin" });
-    administered.hubAdmins.grant(admin.id);
-    administered.hubAdmins.grant(otherAdmin.id);
-    const before = administered.database.connection.prepare("SELECT rowid, * FROM hub_admins ORDER BY rowid").all();
-    const administeredPath = administered.database.databasePath;
-    administered.database.close();
-
-    const events: HubLogRecord[] = [];
-    const first = await start(administeredPath, events);
-    expect(first.hubAdmins!.isAdmin(member.id)).toBe(false);
-    const inspect = rig(administeredPath);
-    expect(inspect.database.connection.prepare("SELECT rowid, * FROM hub_admins ORDER BY rowid").all()).toEqual(before);
-    inspect.database.close();
-    await first.stop();
-    const restarted = await start(administeredPath, events);
-    expect(restarted.hubAdmins!.isAdmin(admin.id)).toBe(true);
-    expect(restarted.hubAdmins!.isAdmin(otherAdmin.id)).toBe(true);
-    expect(rig(administeredPath).database.connection.prepare("SELECT rowid, * FROM hub_admins ORDER BY rowid").all()).toEqual(before);
-    expect(events.some((record) => record.event === "hub.admin.adopted")).toBe(false);
-  });
-
-  it("leaves a hub without members and a fresh claimable hub alone", async () => {
-    const empty = rig(undefined, false);
-    empty.principals.identify("3001", "signed-in-without-access");
-    const emptyPath = empty.database.databasePath;
-    empty.database.close();
-
-    const events: HubLogRecord[] = [];
-    await start(emptyPath, events);
-    const fresh = await start(databasePath(), events);
-    expect(await (await fetch(`http://127.0.0.1:${fresh.port}/auth/claim-state`)).json())
-      .toEqual({ unclaimed: true, canClaim: true });
-    expect(events.some((record) => record.event === "hub.admin.adopted")).toBe(false);
-    expect(rig(emptyPath).database.connection.prepare("SELECT * FROM hub_admins").all()).toEqual([]);
+    for (const run of ["startup", "restart"]) {
+      const github = new GithubFake();
+      const hub = await createHub({ authSecret: TEST_SECRET, databasePath: path, address: "127.0.0.1", port: 0,
+        log: silentLogger, github: { clientId: CLIENT_ID, fetch: github.fetch, now: () => github.time } },
+      { initializeDefaultWorkspace: true });
+      hubs.push(hub);
+      expect(await (await fetch(`http://127.0.0.1:${hub.port}/auth/claim-state`)).json(), run)
+        .toEqual({ unclaimed: false, canClaim: false });
+      const inspect = rig(path);
+      expect(inspect.database.connection.prepare("SELECT * FROM hub_admins").all(), run).toEqual([]);
+      expect(inspect.database.connection.prepare("SELECT * FROM hub_memberships ORDER BY workspace_id, principal_id").all(), run)
+        .toEqual(memberships);
+      inspect.database.close();
+      await hub.stop();
+    }
   });
 });

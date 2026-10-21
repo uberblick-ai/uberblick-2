@@ -8,7 +8,6 @@
  */
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { BLOCK_TYPES } from "@uberblick/schema";
 import {
   removeTempDirs,
   startServer,
@@ -45,49 +44,6 @@ afterAll(() => {
 });
 
 describe("with the hub stopped", () => {
-  it("exposes exactly the v0 tool set", async () => {
-    const rig = await offlineRig();
-    const { tools } = await rig.client.listTools();
-
-    // Pinned deliberately. An extra tool is a contract change, and a
-    // whole-document write must never appear here.
-    expect(tools.map((tool) => tool.name).sort()).toEqual([
-      "annotate",
-      "archive_doc",
-      "backlinks",
-      "create_doc",
-      "delete_block",
-      "delete_doc",
-      "edit_block",
-      "export_markdown",
-      "find_decisions",
-      "get_data",
-      "get_doc",
-      "get_help",
-      "get_sidebar",
-      "insert_block",
-      "link_range",
-      "list_docs",
-      "list_tags",
-      "pin_doc",
-      "restore_doc",
-      "search",
-      "set_metadata",
-      "set_status",
-      "sidebar_group",
-      "sync_status",
-      "unpin_doc",
-      "update_data",
-    ]);
-
-    // The complete insert_block vocabulary remains available on demand;
-    // tool descriptions may summarize it without repeating every detail.
-    const insertHelp = (await rig.ok("get_help", { topic: "insert_block" })).text;
-    for (const type of BLOCK_TYPES) {
-      expect(insertHelp).toContain(type);
-    }
-  });
-
   it("reads a document without writing to the replica log", async () => {
     const rig = await offlineRig();
     const created = await rig.ok("create_doc", {

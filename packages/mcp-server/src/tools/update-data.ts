@@ -27,7 +27,7 @@ export function prepareDataUpdate(context: ToolContext, args: z.infer<typeof inp
   return prepareDocData(replica.doc, context.replicas.directory().doc, args.operations as DataOperation[], replica.id);
 }
 
-export const updateDataOperation = documentOperation("update_data", inputSchema, (context, args, _request, replica) => {
+export const updateDataOperation = documentOperation({ content: true, contentDurability: false }, inputSchema, (context, args, _request, replica) => {
   const update = prepareDataUpdate(context, args, replica);
   update.commit();
   return {

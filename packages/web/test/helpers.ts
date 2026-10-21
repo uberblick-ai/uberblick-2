@@ -5,8 +5,11 @@
 
 import * as Y from "yjs";
 import { getBlocksFragment } from "@uberblick/schema";
+import type { BlockType } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
+import { retypeBlockInTransaction } from "../src/editor/retype.js";
+import type { RetypeAttrs } from "../src/editor/retype.js";
 import type { DocLinkContext } from "../src/editor/doc-links.js";
 import { plainText } from "../src/editor/ytext.js";
 import { onTestCleanup } from "./test-cleanup.js";
@@ -127,6 +130,16 @@ export function pastePlainText(editor: Editor, text: string): void {
       .setMeta("paste", true)
       .setMeta("uiEvent", "paste"),
   );
+}
+
+/** Re-type the top-level block holding the caret in its own transaction; false when refused. */
+export function retypeAtCaret(editor: Editor, type: BlockType, attrs: RetypeAttrs = {}): boolean {
+  const { $head } = editor.state.selection;
+  if ($head.depth < 1) return false;
+  const tr = editor.state.tr;
+  if (!retypeBlockInTransaction(tr, $head.before(1), type, attrs)) return false;
+  editor.view.dispatch(tr);
+  return true;
 }
 
 /**

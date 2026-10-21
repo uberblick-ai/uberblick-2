@@ -5,7 +5,6 @@
  * the replaced text can be lost.
  */
 
-import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import { BLOCK_TYPES } from "@uberblick/schema";
 import type { BlockType, HeadingLevel, ListStyle } from "@uberblick/schema";
@@ -24,20 +23,6 @@ export interface RetypeAttrs {
 
 function attrString(value: unknown): string | null {
   return typeof value === "string" && value !== "" ? value : null;
-}
-
-/** The top-level block containing the selection head, with its position. */
-export function selectedBlock(
-  editor: Editor,
-): { pos: number; type: BlockType; attrs: Record<string, unknown> } | null {
-  const { $head } = editor.state.selection;
-  if ($head.depth < 1) return null;
-  const pos = $head.before(1);
-  const node = editor.state.doc.nodeAt(pos);
-  if (node === null) return null;
-  const name = node.type.name;
-  if (!(BLOCK_TYPES as readonly string[]).includes(name)) return null;
-  return { pos, type: name as BlockType, attrs: node.attrs };
 }
 
 /**
@@ -96,25 +81,5 @@ export function retypeBlockInTransaction(
   if (!nodeType.validContent(node.content)) return false;
 
   tr.setNodeMarkup(pos, nodeType, next);
-  return true;
-}
-
-/**
- * Re-type the block containing the selection, in a transaction of its own.
- * Returns what {@link retypeBlockInTransaction} answered — nothing is dispatched
- * when the re-type is refused or is a no-op.
- */
-export function retypeSelectedBlock(
-  editor: Editor,
-  type: BlockType,
-  attrs: RetypeAttrs = {},
-): boolean {
-  const current = selectedBlock(editor);
-  if (current === null) return false;
-
-  const tr = editor.state.tr;
-  if (!retypeBlockInTransaction(tr, current.pos, type, attrs)) return false;
-
-  editor.view.dispatch(tr);
   return true;
 }

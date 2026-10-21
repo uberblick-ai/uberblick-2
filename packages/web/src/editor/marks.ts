@@ -156,7 +156,7 @@ export const Italic = Mark.create({
   },
 });
 
-export const Strike = Mark.create({
+const Strike = Mark.create({
   name: "strike",
   parseHTML() {
     return [{ tag: "s" }, { tag: "del" }, { tag: "strike" }];
@@ -180,7 +180,7 @@ export const Strike = Mark.create({
 /**
  * code:true suppresses neighboring formatting input rules.
  */
-export const InlineCode = Mark.create({
+const InlineCode = Mark.create({
   name: "inlineCode",
   code: true,
   parseHTML() {
@@ -287,7 +287,7 @@ export const Link = Mark.create({
  * Render data-doc-id without href; addresses are derived by the live mark view.
  * Its HTML rule outranks external links and validates pasted identities.
  */
-export const DocLink = Mark.create({
+const DocLink = Mark.create({
   name: "docLink",
   inclusive: false,
   excludes: "docLink link",

@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import ts from "typescript-api";
 import { expect, it } from "vitest";
-import { MUTATING_TOOLS, READ_ONLY_TOOLS } from "../src/failures.js";
+import { tools } from "../src/tool-table.js";
 import { PACKAGE_ROOT } from "./core-helpers.js";
 
 function parse(source: string, path = "handler.ts"): ts.SourceFile {
@@ -47,9 +47,7 @@ function expectOpeningWait(
   if (skipUnsettledTools) {
     expect(ts.isIfStatement(first)).toBe(true);
     const branch = first as ts.IfStatement;
-    expect(branch.expression.getText(source)).toMatch(
-      /^tool\s*!==\s*["']sync_status["']\s*&&\s*tool\s*!==\s*["']get_help["']$/,
-    );
+    expect(branch.expression.getText(source)).toBe("gates.settle");
     expect(branch.thenStatement).toBe(wait.parent);
     expect(branch.elseStatement).toBeUndefined();
   } else {
@@ -62,13 +60,7 @@ function expectSynchronousBody(handler: ts.Node): void {
   expect(awaits(handler)).toHaveLength(0);
 }
 
-interface OperationBody {
-  tool: string;
-  handler: ts.Node;
-  source: ts.SourceFile;
-}
-
-/** Follow the named import used by a registration to its inspected declaration. */
+/** Follow the named import used by the tool table to its inspected declaration. */
 function importedOperationKey(name: string, source: ts.SourceFile): string {
   for (const statement of source.statements) {
     if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
@@ -82,87 +74,83 @@ function importedOperationKey(name: string, source: ts.SourceFile): string {
   throw new Error(`No operation import for ${name} in ${source.fileName}`);
 }
 
+function property(entry: ts.ObjectLiteralExpression, name: string): ts.Expression {
+  const found = entry.properties.find((candidate): candidate is ts.PropertyAssignment =>
+    ts.isPropertyAssignment(candidate) && ts.isIdentifier(candidate.name) && candidate.name.text === name);
+  if (found === undefined) throw new Error(`Tool entry without ${name}`);
+  return found.initializer;
+}
+
 it("every registered tool is guarded and its operation works synchronously after opening settle", () => {
   const root = join(PACKAGE_ROOT, "src");
   const sources = (readdirSync(root, { recursive: true }) as string[])
     .filter((path) => path.endsWith(".ts"))
     .map((path) => parse(readFileSync(join(root, path), "utf8"), join(root, path)));
-  const operations = new Map<string, OperationBody>();
+  const handlers = new Map<string, { handler: ts.Node; source: ts.SourceFile }>();
+  const registrations: ts.CallExpression[] = [];
   for (const source of sources) {
     function visit(node: ts.Node): void {
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
-          node.initializer !== undefined && ts.isCallExpression(node.initializer)) {
-        const call = node.initializer;
-        if (["operation", "documentOperation", "sidebarOperation"].includes(call.expression.getText(source)) &&
-            call.arguments[0] !== undefined && ts.isStringLiteral(call.arguments[0])) {
-          operations.set(`${source.fileName}:${node.name.text}`, {
-            tool: call.arguments[0].text, handler: call.arguments[2]!, source,
-          });
-        }
+          node.initializer !== undefined && ts.isCallExpression(node.initializer) &&
+          ["operation", "documentOperation", "sidebarOperation"].includes(node.initializer.expression.getText(source))) {
+        handlers.set(`${source.fileName}:${node.name.text}`, { handler: node.initializer.arguments[2]!, source });
+      }
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+          node.expression.name.text === "registerTool") {
+        registrations.push(node);
       }
       ts.forEachChild(node, visit);
     }
     visit(source);
   }
 
-  const registered: string[] = [];
-  for (const source of sources) {
-    function visit(node: ts.Node): void {
-      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
-          node.expression.name.text === "registerTool") {
-        const name = (node.arguments[0] as ts.StringLiteral).text;
-        registered.push(name);
-        const guard = node.arguments[2]!;
-        expect(ts.isCallExpression(guard), name).toBe(true);
-        const call = guard as ts.CallExpression;
-        expect(call.expression.getText(source), name).toBe("guarded");
-        expect(call.arguments[0]?.getText(source), name).toBe(node.arguments[0]!.getText(source));
-        expect(call.arguments[1]?.getText(source), name).toBe("context");
-        const reference = call.arguments[2]!;
-        expect(ts.isIdentifier(reference), name).toBe(true);
-        const operation = operations.get(importedOperationKey((reference as ts.Identifier).text, source));
-        if (operation === undefined) throw new Error(`No inspected operation for ${name}`);
-        expect(operation.tool, name).toBe(name);
-        if (name === "sync_status") {
-          // This read delegates its opening settle to the shared status helper.
-          expectOpeningWait(operation.handler, operation.source, /^collectSyncStatus\(context\.replicas\)$/);
-        } else {
-          expectSynchronousBody(operation.handler);
-        }
-      }
-      ts.forEachChild(node, visit);
+  // One loop registers the table, and its handler is the adapter.
+  expect(registrations).toHaveLength(1);
+  const guard = registrations[0]!.arguments[2]!;
+  expect(ts.isCallExpression(guard) && guard.expression.getText()).toBe("guarded");
+
+  const table = sources.find((source) => source.fileName === join(root, "tool-table.ts"))!;
+  const entries: ts.ObjectLiteralExpression[] = [];
+  function collect(node: ts.Node): void {
+    if (ts.isCallExpression(node) && node.expression.getText(table) === "tool" &&
+        node.arguments[0] !== undefined && ts.isObjectLiteralExpression(node.arguments[0])) {
+      entries.push(node.arguments[0]);
     }
-    visit(source);
+    ts.forEachChild(node, collect);
   }
-  expect(registered.sort()).toEqual([...MUTATING_TOOLS, ...READ_ONLY_TOOLS].sort());
+  collect(table);
+  expect(entries.map((entry) => (property(entry, "name") as ts.StringLiteral).text))
+    .toEqual(tools.map(({ name }) => name));
+  for (const entry of entries) {
+    const name = (property(entry, "name") as ts.StringLiteral).text;
+    const reference = property(entry, "operation");
+    expect(ts.isIdentifier(reference), name).toBe(true);
+    const operation = handlers.get(importedOperationKey((reference as ts.Identifier).text, table));
+    if (operation === undefined) throw new Error(`No inspected operation for ${name}`);
+    if (name === "sync_status") {
+      // This read delegates its opening settle to the shared status helper.
+      expectOpeningWait(operation.handler, operation.source, /^collectSyncStatus\(context\.replicas\)$/);
+    } else {
+      expectSynchronousBody(operation.handler);
+    }
+  }
+
   const wrapper = sources.find((source) => source.fileName === join(root, "tools/operation.ts"))!;
   for (const name of ["operation", "documentOperation", "sidebarOperation"]) {
     const node = wrapper.statements.find((statement): statement is ts.FunctionDeclaration =>
       ts.isFunctionDeclaration(statement) && statement.name?.text === name);
     if (node?.body === undefined) throw new Error(`No inspected ${name} wrapper`);
     if (name === "operation") {
-      const returned = node.body.statements.find(ts.isReturnStatement)!;
-      expectOpeningWait(returned.expression!, wrapper, /^context\.replicas\.settle\(/, true);
+      const run = node.body.statements.find(ts.isVariableStatement)!.declarationList.declarations[0]!;
+      expect(run.name.getText(wrapper)).toBe("run");
+      expectOpeningWait(run.initializer!, wrapper, /^context\.replicas\.settle\(/, true);
     } else {
       // The shared write wrappers must not introduce a new interleaving either.
       expectSynchronousBody(node);
     }
   }
   const status = sources.find((source) => source.fileName === join(root, "status.ts"))!;
-  const collect = status.statements.find((node) => ts.isFunctionDeclaration(node) &&
+  const collectStatus = status.statements.find((node) => ts.isFunctionDeclaration(node) &&
     node.name?.text === "collectSyncStatus")!;
-  expectOpeningWait(collect, status, /^replicas\.settle\(/);
-});
-
-it("the invariant check rejects an added await after settle", () => {
-  const source = parse("async function handler() { await replicas.settle(); await anotherWriter(); write(); }");
-  expect(() => expectOpeningWait(source.statements[0]!, source, /^replicas\.settle\(/)).toThrow();
-});
-
-it.each([
-  "async function handler() { write(); await anotherWriter(); write(); }",
-  "function handler() { write(); void (async () => { await anotherWriter(); write(); })(); }",
-])("the invariant check rejects an await in an operation body: %s", (fixture) => {
-  const source = parse(fixture);
-  expect(() => expectSynchronousBody(source.statements[0]!)).toThrow();
+  expectOpeningWait(collectStatus, status, /^replicas\.settle\(/);
 });

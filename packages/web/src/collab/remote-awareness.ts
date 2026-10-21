@@ -4,7 +4,7 @@ import type { Awareness } from "y-protocols/awareness";
 import { AGENT_CLIENT, AWARENESS_FALLBACK_COLOR } from "./identity.js";
 import type { AwarenessUser } from "./identity.js";
 
-export interface RemoteAwareness extends AwarenessUser {
+interface RemoteAwareness extends AwarenessUser {
   clientId: number;
   hasUser: boolean;
   kind: "agent" | "human";

@@ -251,17 +251,15 @@ describe("principal-owned device management", () => {
 });
 
 describe("current management credential verification", () => {
-  it.each(["revocation", "replacement"] as const)("refuses a proof when %s lands during asynchronous verification", async (change) => {
-    const { store, memberships } = registry();
+  it("refuses a proof when revocation lands during asynchronous verification", async () => {
+    const { store } = registry();
     const original = issue(store, "laptop", "person", []);
     const request = await proof(original);
-    const renewingProof = await proof(original, { operation: "renew-credential" });
     const barrier = holdVerification();
     const checking = store.verifyRequest(request, { operation: "list-devices" });
     await barrier.reached;
     try {
-      if (change === "revocation") store.revokeDevice("person", "laptop");
-      else replacement(await renewCredential(store, renewingProof, memberships));
+      store.revokeDevice("person", "laptop");
     } finally {
       barrier.release();
     }

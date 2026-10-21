@@ -22,7 +22,7 @@ function Probe() {
 function configuration(hubUrl: string): ClientConfig {
   return {
     hubUrl, hubUrlSource: "document", workspaces: [], workspacesSource: "document",
-    hubAuthToken: "synthetic-token", localServing: null,
+    hubAuthToken: "synthetic-token",
   };
 }
 

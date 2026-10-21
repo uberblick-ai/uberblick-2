@@ -55,8 +55,14 @@ agents:
       - "Bash(ub-agents *)"
       - "Bash(mise *)"
       - "mcp__uberblick__*"
-      - "Bash(sh bin/housekeeping.sh *)"
       - "Bash(docker *)"
+      # Claude Code saves oversized command output here and tells the run to read it.
+      - "Read(~/.claude/projects/**/tool-results/**)"
+      # Read-only probes, so preparation can check what a contract assumes about a package or GitHub.
+      - "Bash(npm view *)"
+      - "Bash(pnpm view *)"
+      - "WebFetch(domain:registry.npmjs.org)"
+      - "WebFetch(domain:docs.github.com)"
       # Read-only and scratch helpers, so compound commands such as `cd /tmp/ub-x && mise run review SHA`
       # or `… | tail` are not denied part by part in headless runs.
       - "Bash(cd *)"
@@ -74,11 +80,20 @@ agents:
       - "Bash(sort *)"
       - "Bash(find *)"
       - "Bash(jq *)"
-      # Interpreters and env already run any code, so denying them guards nothing;
-      # env also lets a run clear credentials before tests.
+      - "Bash(awk *)"
+      - "Bash(tar *)"
+      - "Bash(unzip *)"
+      - "Bash(which *)"
+      - "Bash(command -v *)"
+      # Interpreters, env and command runners already run any code, so denying them guards nothing;
+      # env also lets a run clear credentials before tests, and timeout bounds a long gate.
       - "Bash(node *)"
       - "Bash(python3 *)"
+      - "Bash(/usr/bin/python3 *)"
+      - "Bash(sh *)"
       - "Bash(env *)"
+      - "Bash(timeout *)"
+      - "Bash(xargs *)"
 
   issue-reviewer:
     health-check: *corpus-health

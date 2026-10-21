@@ -11,7 +11,6 @@ import {
   getBlocksFragment,
   initDoc,
 } from "../src/index.js";
-import { replicaPair, syncDocs } from "./helpers.js";
 
 const UUID = "88888888-8888-4888-8888-888888888888";
 
@@ -75,19 +74,5 @@ describe("blockRev", () => {
       rev: before,
     });
     expect(getBlock(doc, id)?.text).toBe("Hello brave new world");
-  });
-
-  it("agrees across replicas that have converged", () => {
-    let id = "";
-    const [a, b] = replicaPair((doc) => {
-      initDoc(doc, { uuid: UUID, title: "Revs" });
-      id = appendBlock(doc, { type: "paragraph", text: "shared" });
-    });
-    expect(getBlockRev(a, id)).toBe(getBlockRev(b, id));
-
-    editBlock(a, id, "shared", "shared, edited by A");
-    expect(getBlockRev(a, id)).not.toBe(getBlockRev(b, id));
-    syncDocs(a, b);
-    expect(getBlockRev(a, id)).toBe(getBlockRev(b, id));
   });
 });

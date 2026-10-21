@@ -590,7 +590,7 @@ function renderDecision(reference: DecisionReference): string {
  * Keep adjacent items tight with single newlines; other sections need blank
  * lines. Emit the derived decision log oldest-topic-first only when nonempty.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: One ordered section list decides every separator: adjacent list items stay tight, other sections get a blank line.
 export function exportMarkdown(
   ydoc: Y.Doc,
   options: ExportMarkdownOptions = {},
@@ -1395,7 +1395,7 @@ function advanceColumn(text: string, column: number): number {
  * consecutive quote lines share one block. Unknown block syntax becomes prose,
  * and HTML comments are skipped rather than restoring annotations.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: One line scanner owns the open paragraph, quote and list-column state that every block syntax must flush or extend.
 export function importMarkdown(markdown: string): ImportedDoc {
   const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
   const front = parseFrontmatter(lines);

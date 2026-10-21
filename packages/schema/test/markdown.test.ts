@@ -398,7 +398,7 @@ describe("markdown round-trip", () => {
     expect(ordinaryExport).not.toContain("\nstatus:");
   });
 
-  it.each([undefined, "draft", "planned", "implementing", "done", "decided", 42])(
+  it.each([undefined, "decided"])(
     "exports a stored requirement with status %j as regular without rewriting metadata",
     (status) => {
       const doc = new Y.Doc();

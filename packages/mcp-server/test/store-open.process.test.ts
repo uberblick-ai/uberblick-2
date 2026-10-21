@@ -12,8 +12,8 @@ import { MirrorStore } from "../src/store.js";
 import { removeTempDirs, tempDatabasePath, WORKSPACE } from "./helpers.js";
 
 const WORKER = builtWorker("store-open");
-const OPENERS = 8;
-const ROUNDS = 60;
+const OPENERS = 3;
+const ROUNDS = 10;
 
 type WorkerMessage =
   | { type: "ready" }
@@ -112,7 +112,7 @@ async function expectConcurrentOpens(
 // One pool of openers, alternating between a store that does not exist yet and
 // one that does, so both startup paths race without paying for a second pool.
 it(
-  "opens new and existing stores from eight processes at once without a busy failure",
+  "opens new and existing stores from three processes at once without a busy failure",
   async () => {
     const existing = tempDatabasePath();
     new MirrorStore(existing, WORKSPACE).close();

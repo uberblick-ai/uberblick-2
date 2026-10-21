@@ -13,7 +13,7 @@ export const inputSchema = strictInput({
 });
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
-export const setStatusOperation = documentOperation("set_status", inputSchema, (context, { uuid, status, answer, reason }, _request, replica) => {
+export const setStatusOperation = documentOperation({ content: false, contentDurability: false }, inputSchema, (context, { uuid, status, answer, reason }, _request, replica) => {
   const { replicas, recordAnswer, decisionAuthorityJson } = context;
 
   const stored = getMeta(replica.doc, replica.id);

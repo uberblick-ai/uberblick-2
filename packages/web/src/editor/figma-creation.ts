@@ -5,7 +5,8 @@ import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import type { EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { normalizeFigmaLink } from "@uberblick/schema";
-import { endUndoCapture, findBlockById, slashTriggerAt } from "./block-menu.js";
+import { slashTriggerAt } from "./block-menu.js";
+import { endUndoCapture, findBlockById } from "./blocks.js";
 import type { SlashTrigger } from "./block-menu.js";
 
 export interface FigmaDraft {

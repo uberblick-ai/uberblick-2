@@ -20,6 +20,7 @@ import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
 import { ServerShuttingDownError } from "./server-work.js";
 import { WorkspaceRemovedError } from "./store.js";
+import type { Writes } from "./tools/operation.js";
 
 /** Keep unclassified exception text out of caller-visible failures. */
 export const INTERNAL_ERROR_MESSAGE =
@@ -50,100 +51,13 @@ export class ToolError extends Error {
 export type RecoveryClass = "retry" | "reread" | "manual";
 
 /**
- * Classify caller-requested writes explicitly; do not infer them at runtime.
- * Together with READ_ONLY_TOOLS, these sets must cover every registration.
+ * The failing tool and what it may write. Read failures omit mutation state
+ * because the caller requested no write.
  */
-export const DOCUMENT_MUTATING_TOOLS: ReadonlySet<string> = new Set([
-  "create_doc",
-  "edit_block",
-  "insert_block",
-  "delete_block",
-  "set_metadata",
-  "set_status",
-  "archive_doc",
-  "delete_doc",
-  "restore_doc",
-  "annotate",
-  "link_range",
-  "update_data",
-]);
-
-export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
-  ...DOCUMENT_MUTATING_TOOLS,
-  "pin_doc",
-  "unpin_doc",
-  "sidebar_group",
-]);
-
-/** Read failures omit mutation state because the caller requested no write. */
-export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
-  "get_help",
-  "list_tags",
-  "get_doc",
-  "get_data",
-  "list_docs",
-  "search",
-  "backlinks",
-  "find_decisions",
-  "export_markdown",
-  "sync_status",
-  "get_sidebar",
-]);
-
-/** Keep the shared operation/failure path free of SDK types as well as values. */
-interface ToolHints {
-  readonly readOnlyHint: boolean;
-  readonly destructiveHint: boolean;
-  readonly idempotentHint: boolean;
-  readonly openWorldHint: boolean;
+export interface FailedTool {
+  readonly name: string;
+  readonly writes: Writes;
 }
-
-/**
- * Registration refuses missing rows; contract tests check complete coverage.
- * find_decisions looks up local references, so its openWorldHint also stays false.
- */
-export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolHints>> = {
-  get_help: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  list_tags: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  get_doc: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  get_data: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  list_docs: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  search: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  backlinks: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  find_decisions: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  export_markdown: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  sync_status: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  get_sidebar: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  // Adds a fresh document and optional pin; repeating adds another document.
-  create_doc: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  // Adds a block; repeating adds another block.
-  insert_block: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  // Replies can overwrite thread resolution; repeating adds another comment.
-  annotate: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-  // Retargets a document link; unchanged rev lets repeats write the same mark.
-  link_range: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  // Replaces text; table_mapping can replace rows again under identical text and rev.
-  edit_block: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-  // Removes a block; repeating finds no block to remove.
-  delete_block: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  // Replaces named fields and sets; repeating a code check records a new time.
-  set_metadata: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-  // Overwrites lifecycle and answer; repeating leaves the same state or is refused.
-  set_status: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  // Tombstones and unpins; every repeat raises the unpin counter, suppressing later pins.
-  archive_doc: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-  delete_doc: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  // Removes one archive layer; repeating can restore a previously archived record.
-  restore_doc: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-  // Replaces, upserts and deletes data; an identical repeat reports changed: false.
-  update_data: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  // Moves an existing pin; repeating leaves it in the requested place.
-  pin_doc: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  // Removes a pin; repeating reports unpinned: false.
-  unpin_doc: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  // Renames, moves or deletes groups/pins; repeated rename/delete by name can reach a namesake.
-  sidebar_group: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-};
 
 interface Recovery {
   readonly recoveryClass: RecoveryClass;
@@ -545,7 +459,7 @@ function failure(payload: Record<string, unknown>): ToolFailure {
  * rooms and partial: true.
  */
 function stamped(
-  tool: string,
+  tool: FailedTool,
   payload: Record<string, unknown> & { error: string },
 ): ToolFailure {
   const recovery = RECOVERIES[payload.error];
@@ -554,7 +468,7 @@ function stamped(
     return failure(payload);
   }
   return failure({
-    ...(MUTATING_TOOLS.has(tool)
+    ...(tool.writes !== null
       ? { applied: false, partial: false, synced: false }
       : {}),
     recoveryClass: recovery.recoveryClass,
@@ -563,7 +477,7 @@ function stamped(
   });
 }
 
-export function toFailure(tool: string, error: unknown): ToolFailure {
+export function toFailure(tool: FailedTool, error: unknown): ToolFailure {
   if (error instanceof WorkspaceRemovedError ||
     (error instanceof PersistenceError && error.cause instanceof WorkspaceRemovedError)) {
     return stamped(tool, { error: "workspace_removed", message: new WorkspaceRemovedError().message });
@@ -686,7 +600,7 @@ export function toFailure(tool: string, error: unknown): ToolFailure {
       message: error.message,
       unknown: error.unknown,
       retired: error.retired,
-      ...(tool === "set_metadata" ? { field: "tags" } : {}),
+      ...(tool.name === "set_metadata" ? { field: "tags" } : {}),
     });
   }
   if (error instanceof ToolError) {

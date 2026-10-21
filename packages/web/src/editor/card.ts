@@ -4,14 +4,13 @@ import type { Node as ProseMirrorNode, Schema } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { EditorView } from "@tiptap/pm/view";
-import { ySyncPluginKey } from "y-prosemirror";
-import { CARD_NODE_NAMES, CARD_PARTS, TABLE_CELL_MARKS, parseCardButtons } from "@uberblick/schema";
+import { CARD_NODE_NAMES, CARD_PARTS, parseCardButtons } from "@uberblick/schema";
 import type { CardPart } from "@uberblick/schema";
+import { blockShapeGuard, isPlainPart } from "./blocks.js";
 
 const PLACEHOLDERS: Record<CardPart, string> = {
   label: "Label", title: "Title", body: "Write the body…", footer: "Footer",
 };
-const PART_MARKS = new Set<string>(TABLE_CELL_MARKS);
 
 export const Card = Node.create({
   name: "card",
@@ -101,14 +100,7 @@ function supportedCard(node: ProseMirrorNode): boolean {
   }
   return CARD_PARTS.every((part, index) => {
     const child = node.child(index);
-    const paragraph = child.firstChild;
-    if (child.type.name !== CARD_NODE_NAMES[part] || child.childCount !== 1 ||
-        paragraph?.type.name !== "paragraph" || paragraph.attrs.id !== null) return false;
-    let supported = true;
-    paragraph.forEach((text) => {
-      if (!text.isText || text.marks.some((mark) => !PART_MARKS.has(mark.type.name))) supported = false;
-    });
-    return supported;
+    return child.type.name === CARD_NODE_NAMES[part] && isPlainPart(child);
   });
 }
 
@@ -122,13 +114,7 @@ export const CardBlocks = Extension.create({
   name: "uberblickCardBlocks",
   priority: 1100,
   addProseMirrorPlugins() {
-    return [new Plugin({
-      filterTransaction(tr) {
-        if (!tr.docChanged || tr.getMeta(ySyncPluginKey)?.isChangeOrigin === true) return true;
-        let supported = true;
-        tr.doc.forEach((node) => { if (node.type.name === "card" && !supportedCard(node)) supported = false; });
-        return supported;
-      },
+    return [blockShapeGuard("card", supportedCard), new Plugin({
       props: {
         decorations(state) {
           const decorations: Decoration[] = [];

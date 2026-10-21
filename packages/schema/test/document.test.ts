@@ -449,7 +449,7 @@ describe("document round-trip", () => {
     }
   });
 
-  it.each([undefined, "draft", "planned", "implementing", "done", "decided", 42])(
+  it.each([undefined, "decided"])(
     "reads a stored requirement with status %j as regular without rewriting its room",
     (status) => {
       const doc = seeded();

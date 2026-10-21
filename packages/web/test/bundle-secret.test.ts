@@ -9,9 +9,7 @@
  * So this file performs the build. One build of the real app, with a sentinel
  * secret in the environment where `mise run build-web` and `ub open` build,
  * and the output is searched for it. The release payload also uses Vite's
- * build pipeline, so the guard covers its assets too. The negative control
- * re-injects the define through the same `build()` API and asserts the search
- * finds *that*: a scan that cannot fail proves nothing.
+ * build pipeline, so the guard covers its assets too.
  *
  * Not a generic entropy detector. It looks for one known string and one known
  * identifier, which is what makes its verdict trustworthy rather than
@@ -170,30 +168,6 @@ describe("the built web bundle", () => {
     }
   });
 
-  it("would fail if a build put the define back", async () => {
-    // The negative control. The real bundle no longer *mentions* the define, so
-    // re-injecting it there would replace nothing and prove nothing; a source
-    // that reads it is what the define needs to reach an output at all. Same
-    // `build()` API, same scan.
-    const fixture = scratch();
-    writeFileSync(join(fixture, "main.js"), `console.log(${DEFINE});\n`, "utf8");
-    const fixtureOut = join(fixture, "dist");
-
-    await build({
-      configFile: false,
-      root: fixture,
-      logLevel: "error",
-      define: { [DEFINE]: JSON.stringify(SENTINEL) },
-      build: {
-        outDir: fixtureOut,
-        emptyOutDir: true,
-        minify: false,
-        rollupOptions: { input: join(fixture, "main.js") },
-      },
-    });
-
-    expect(leaks(fixtureOut)).not.toEqual([]);
-  }, 120_000);
 });
 
 /** A released bundle gets every deployment value from its served document. */

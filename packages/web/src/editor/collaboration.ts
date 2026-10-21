@@ -26,7 +26,7 @@ import { AGENT_CLIENT } from "../collab/identity.js";
 export const AGENT_CURSOR_GRACE_MS = 30_000;
 
 /** Local presentation metadata; never an awareness field published on the wire. */
-export type AgentCursorAwareness = Awareness & {
+type AgentCursorAwareness = Awareness & {
   isDeparted(clientId: number): boolean;
 };
 
@@ -246,7 +246,7 @@ export function withDepartedAgentCursors(
   } as unknown as AgentCursorAwareness;
 }
 
-export interface CollaborationOptions {
+interface CollaborationOptions {
   /** The `blocks` fragment of the document's Y.Doc. */
   fragment: Y.XmlFragment | null;
   /** Provider awareness. `null` disables remote cursors (tests, read-only views). */

@@ -1,10 +1,10 @@
 import { strictInput } from "../inputs.js";
 import { activeTagCatalog, tagCatalogComplete } from "../tag-catalog.js";
-import { operation } from "./operation.js";
+import { READ, operation } from "./operation.js";
 
 export const inputSchema = strictInput({});
 
-export const listTagsOperation = operation("list_tags", inputSchema, (context, _args, _request) => {
+export const listTagsOperation = operation(READ, inputSchema, (context, _args, _request) => {
   const { replicas, tagCatalog } = context;
 
   return {

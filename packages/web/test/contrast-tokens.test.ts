@@ -9,9 +9,9 @@
  * grounds remain browser obligations: a good palette does not prove good paint.
  */
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import { composite, contrast, separation, splitCssList } from "./colour.js";
-import { cardHighlightFloor, focusedOrphanedChipFloor } from "./contrast-contract.js";
+import { cardHighlightFloor } from "./contrast-contract.js";
 
 type Appearance = "light" | "dark";
 type Tokens = Map<string, string>;
@@ -37,13 +37,6 @@ function declarations(source: string): Tokens {
     }
   }
   return tokens;
-}
-
-/** Change a real declaration in memory; never edit production appearance. */
-function seedToken(name: string, value: string): Tokens {
-  const declaration = new RegExp(`(${name}\\s*:\\s*)[^;]+;`);
-  if (!declaration.test(stylesheet)) throw new Error(`no declaration to seed: ${name}`);
-  return declarations(stylesheet.replace(declaration, (_match, prefix: string) => `${prefix}${value};`));
 }
 
 function resolve(tokens: Tokens, name: string, scheme: Appearance, path: string[] = []): string {
@@ -123,7 +116,6 @@ const pairs: Pair[] = [
   text("threads/composer/resolved-chip ink", "--secondary-foreground", "--card-accent"),
   text("resting orphaned chip ink", "--foreground", "--status-warning-subtle", "--card"),
   text("focused orphaned chip ink", "--brand-foreground", "--status-warning", "--brand-subtle"),
-  { name: "focused orphaned chip step", ink: "--status-warning", ground: "--brand-subtle", measure: "separation", floor: focusedOrphanedChipFloor },
   // Links retain AA on page, card, annotated-range and inline-code grounds.
   ...["--background", "--card", "--card-accent", "--sidebar", "--sidebar-accent", "--brand-subtle", "--muted", "--page-ground[0]", "--page-ground[1]"]
     .map((ground) => text("neutral link ink", "--foreground", ground)),
@@ -172,35 +164,40 @@ function reading(pair: Pair, source: Tokens, scheme: Appearance): { value: numbe
   return { value, floor };
 }
 
-describe.each(["light", "dark"] as const)("source-token contrast — %s", (scheme) => {
+it.each(["light", "dark"] as const)("source-token contrast — %s", (scheme) => {
+  const failures: string[] = [];
   for (const pair of pairs.filter((pair) => pair.appearance === undefined || pair.appearance === scheme)) {
     const name = `${pair.name}: ${pair.ink} on ${pair.ground}`;
-    it(name, () => {
+    try {
       const { value, floor } = reading(pair, tokens, scheme);
-      expect(value, name).toBeGreaterThanOrEqual(floor);
-    });
+      if (!(value >= floor)) failures.push(`${name}: ${value} < ${floor}`);
+    } catch (error) {
+      failures.push(`${name}: ${String(error)}`);
+    }
   }
 
-  it("table headers are slightly quieter than muted text on every header ground", () => {
+  try {
     const header = resolve(tokens, "--table-header-foreground", scheme);
     const muted = resolve(tokens, "--muted-foreground", scheme);
     const step = separation(header, muted);
-    expect(step).toBeGreaterThan(0);
-    expect(step).toBeLessThanOrEqual(0.02);
+    if (!(step > 0 && step <= 0.02)) failures.push(`table header step: ${step} outside (0, 0.02]`);
     const other = scheme === "light" ? "dark" : "light";
     const otherStep = separation(resolve(tokens, "--table-header-foreground", other), resolve(tokens, "--muted-foreground", other));
-    expect(Math.abs(step - otherStep)).toBeLessThanOrEqual(0.002);
+    if (!(Math.abs(step - otherStep) <= 0.002)) failures.push(`table header appearance steps differ: ${step} vs ${otherStep}`);
     for (const ground of tableHeaderGrounds) {
       const backing = resolve(tokens, ground, scheme);
-      expect(contrast(header, backing), ground).toBeLessThan(contrast(muted, backing));
+      if (!(contrast(header, backing) < contrast(muted, backing))) failures.push(`table header ink is not quieter than muted ink on ${ground}`);
     }
-  });
+  } catch (error) {
+    failures.push(`table header relation: ${String(error)}`);
+  }
 
-  it("focused orphaned chips separate no less than resting chips", () => {
+  try {
     const focused = separation(resolve(tokens, "--status-warning", scheme), resolve(tokens, "--brand-subtle", scheme));
     const resting = separation(resolve(tokens, "--status-warning-subtle", scheme), resolve(tokens, "--card", scheme));
-    expect(focused).toBeGreaterThanOrEqual(resting);
-    const regressed = seedToken("--status-warning", "var(--brand-subtle)");
-    expect(separation(resolve(regressed, "--status-warning", scheme), resolve(regressed, "--brand-subtle", scheme))).toBeLessThan(resting);
-  });
+    if (!(focused >= resting)) failures.push(`focused orphaned chip step: ${focused} < resting ${resting}`);
+  } catch (error) {
+    failures.push(`orphaned chip relation: ${String(error)}`);
+  }
+  expect(failures, failures.join("\n")).toEqual([]);
 });

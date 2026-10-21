@@ -1,13 +1,10 @@
 /** Hub-private administration, with live signed requests. */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import type { ReactElement } from "react";
-import type { AccessAnswer, HubAdmin, HubWorkspace } from "../../shell/workspace-access.js";
+import type { AccessAction, AccessAnswer, HubAdmin, HubWorkspace } from "../../shell/workspace-access.js";
 import type { HubAdministration } from "./hub-administration.js";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle, AlertDialogTrigger } from "../shadcn/alert-dialog.js";
 import { formatExactTimestamp, formatTimestamp, useTimestampClock } from "../timestamps.js";
-
-const CELL = "border-b border-(--border) px-2 py-3 text-left";
-const ROW_ACTION = "min-h-8 [@media(any-pointer:coarse)]:min-h-11 cursor-pointer rounded-(--radius-sm) border-0 bg-transparent px-2 font-[inherit] ub-type-ui text-muted-foreground hover:enabled:bg-accent hover:enabled:text-foreground disabled:opacity-50";
+import { CELL, ConfirmAction, FeedbackLine, ROW_HEADER, SettingsPage, TableHead, hubHost, useHubMutation } from "./settings-kit.js";
 
 function failure(status: string): string {
   switch (status) {
@@ -22,11 +19,6 @@ function failure(status: string): string {
     case "update-required": return "Update ub and the hub, restart ub open, then visit this page again.";
     default: return "The hub cannot be reached. Reconnect, then visit this page again.";
   }
-}
-
-function host(hub: string | null): string {
-  try { return hub === null ? "this hub" : new URL(hub).host; }
-  catch { return "this hub"; }
 }
 
 function SignedIn({ at, now }: { at: number | null; now: number }): ReactElement {
@@ -45,22 +37,14 @@ function AdminRow({ admin, now, disabled, remove }: {
   admin: HubAdmin; now: number; disabled: boolean; remove: (admin: HubAdmin) => void;
 }): ReactElement {
   return <tr>
-    <th className={`${CELL} font-normal [overflow-wrap:anywhere]`} scope="row">@{admin.githubUsername}{admin.current && <span className="ub-muted ml-2">you</span>}
+    <th className={ROW_HEADER} scope="row">@{admin.githubUsername}{admin.current && <span className="ub-muted ml-2">you</span>}
     </th>
     <td className={CELL}>{admin.workspaces}</td>
     <td className={CELL}><SignedIn at={admin.lastSignedInAt} now={now} /></td>
-    <td className={CELL}>{!admin.current && <AlertDialog>
-      <AlertDialogTrigger asChild><button type="button" className={ROW_ACTION} disabled={disabled}
-        aria-label={`Remove ${admin.githubUsername}`}>Remove</button></AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogTitle>Remove @{admin.githubUsername} as a hub administrator?</AlertDialogTitle>
-        <AlertDialogDescription>This account loses hub administration and cannot add workspaces. Its workspace memberships and roles stay.</AlertDialogDescription>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction disabled={disabled} onClick={() => remove(admin)}>Remove</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>}</td>
+    <td className={CELL}>{!admin.current && <ConfirmAction trigger="Remove" label={`Remove ${admin.githubUsername}`}
+      title={`Remove @${admin.githubUsername} as a hub administrator?`}
+      description="This account loses hub administration and cannot add workspaces. Its workspace memberships and roles stay."
+      disabled={disabled} onConfirm={() => remove(admin)} />}</td>
   </tr>;
 }
 
@@ -71,25 +55,16 @@ function WorkspaceRow({ workspace, disabled, changeStatus }: {
   const action = suspended ? "Restore" : "Suspend";
   const name = workspace.name ?? `Unnamed workspace (${workspace.workspaceId.slice(0, 8)})`;
   return <tr>
-    <th className={`${CELL} font-normal [overflow-wrap:anywhere]`} scope="row">{workspace.name ?? <span className="ub-muted">Unnamed workspace</span>}<span className="ub-muted mt-1 block font-(family-name:--font-mono) ub-type-caption" title={workspace.workspaceId}>{workspace.workspaceId.slice(0, 8)}</span>
+    <th className={ROW_HEADER} scope="row">{workspace.name ?? <span className="ub-muted">Unnamed workspace</span>}<span className="ub-muted mt-1 block font-(family-name:--font-mono) ub-type-caption" title={workspace.workspaceId}>{workspace.workspaceId.slice(0, 8)}</span>
     </th>
     <td className={`${CELL} tabular-nums`}>{workspace.members}</td>
     <td className={CELL}>{workspace.admins.length === 0 ? <span className="ub-muted">—</span> : workspace.admins.map((name) => `@${name}`).join(", ")}</td>
     <td className={CELL}>{suspended ? "Suspended" : "Active"}</td>
-    <td className={CELL}><AlertDialog>
-      <AlertDialogTrigger asChild><button type="button" className={ROW_ACTION} disabled={disabled}
-        aria-label={`${action} ${name}`}>{action}</button></AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogTitle>{action} "{name}"?</AlertDialogTitle>
-        <AlertDialogDescription>{suspended
-          ? "Its members can sync with this hub again, without signing in or being added again."
-          : "This stops its sync for everyone. Its documents and members stay, and downloaded copies remain usable. You can restore it later."}</AlertDialogDescription>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction disabled={disabled} onClick={() => changeStatus(workspace)}>{action}</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog></td>
+    <td className={CELL}><ConfirmAction trigger={action} label={`${action} ${name}`} title={`${action} "${name}"?`}
+      description={suspended
+        ? "Its members can sync with this hub again, without signing in or being added again."
+        : "This stops its sync for everyone. Its documents and members stay, and downloaded copies remain usable. You can restore it later."}
+      disabled={disabled} onConfirm={() => changeStatus(workspace)} /></td>
   </tr>;
 }
 
@@ -98,9 +73,6 @@ export function HubSettings({ page, administration }: {
 }): ReactElement {
   const { admin, authority, request } = administration;
   const [list, setList] = useState<AccessAnswer | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
-  const lifetime = useRef<AbortController | null>(null);
   const now = useTimestampClock();
   const refresh = useCallback(async (signal: AbortSignal): Promise<void> => {
     setList(null);
@@ -132,59 +104,45 @@ export function HubSettings({ page, administration }: {
     }
   }, [page, request]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    lifetime.current = controller;
-    setList(null); setFeedback(null); setBusy(false);
-    if (admin) void refresh(controller.signal);
-    return () => { controller.abort(); lifetime.current = null; };
+  const load = useCallback((signal: AbortSignal) => {
+    setList(null);
+    if (admin) void refresh(signal);
   }, [admin, refresh]);
+  const { busy, feedback, setFeedback, run } = useHubMutation(load);
 
-  const remove = async (person: HubAdmin): Promise<void> => {
-    const signal = lifetime.current?.signal;
-    if (!admin || busy || signal === undefined || signal.aborted) return;
-    setBusy(true); setFeedback(null);
-    const result = await request({ operation: "remove-hub-admin", principalId: person.principalId }, signal);
-    if (signal.aborted) return;
-    setFeedback({ ok: result.status === "ok", text: result.status === "ok"
-      ? `@${person.githubUsername} removed as a hub administrator.` : failure(result.status) });
-    if (result.status !== "forbidden" && result.status !== "sign-in-required") await refresh(signal);
-    if (!signal.aborted) setBusy(false);
+  const change = (action: AccessAction, success: string): void => {
+    if (!admin) return;
+    void run(async (signal) => {
+      const result = await request(action, signal);
+      if (signal.aborted) return;
+      setFeedback({ applied: result.status === "ok", text: result.status === "ok" ? success : failure(result.status) });
+      if (result.status !== "forbidden" && result.status !== "sign-in-required") await refresh(signal);
+    });
   };
-  const changeStatus = async (workspace: HubWorkspace): Promise<void> => {
-    const signal = lifetime.current?.signal;
-    if (!admin || busy || signal === undefined || signal.aborted) return;
-    setBusy(true); setFeedback(null);
+  const remove = (person: HubAdmin): void => change({ operation: "remove-hub-admin", principalId: person.principalId },
+    `@${person.githubUsername} removed as a hub administrator.`);
+  const changeStatus = (workspace: HubWorkspace): void => {
     const suspended = workspace.status === "suspended";
-    const result = await request({ operation: suspended ? "restore-workspace" : "suspend-workspace", workspaceId: workspace.workspaceId }, signal);
-    if (signal.aborted) return;
-    setFeedback({ ok: result.status === "ok", text: result.status === "ok"
-      ? `${workspace.name ?? `Workspace ${workspace.workspaceId.slice(0, 8)}`} ${suspended ? "restored" : "suspended"}.` : failure(result.status) });
-    if (result.status !== "forbidden" && result.status !== "sign-in-required") await refresh(signal);
-    if (!signal.aborted) setBusy(false);
+    change({ operation: suspended ? "restore-workspace" : "suspend-workspace", workspaceId: workspace.workspaceId },
+      `${workspace.name ?? `Workspace ${workspace.workspaceId.slice(0, 8)}`} ${suspended ? "restored" : "suspended"}.`);
   };
   const ready = admin && list?.status === "ok";
 
-  return <section className="ub-pane ub-page-pane" data-settings-page aria-labelledby="ub-settings-title">
-    <div className="ub-column gap-4">
-      <div className="ub-page-header">
-        <h1 id="ub-settings-title" className="ub-title">{page === "hub-admins" ? "Admins" : "Workspaces"}</h1>
-        <p className="m-0 ub-type-small">{page === "hub-admins" ? `Hub admins of ${host(authority?.hub ?? null)}.` : "Workspaces this hub serves. Suspending one stops its sync for everyone; its documents and members stay."}</p>
-      </div>
-      {authority === null ? <p className="m-0 ub-type-ui" role="status">Reading hub access…</p> :
-        !admin ? <p className="m-0 ub-type-ui" role="alert">{failure(authority.status)}</p> :
-        list === null ? <p className="m-0 ub-type-ui" role="status">Reading from the hub…</p> :
-        list.status !== "ok" ? <p className="m-0 ub-type-ui" role="alert">{failure(list.status)}</p> : null}
-      {feedback !== null && <p className="m-0 ub-type-ui" role={feedback.ok ? "status" : "alert"}>{feedback.text}</p>}
-      {ready && <table className="w-full table-auto border-collapse" aria-label={page === "hub-admins" ? "Hub admins" : "Hub workspaces"}>
-        {page === "hub-admins" ? <>
-          <thead><tr><th className={`${CELL} ub-type-ui`} scope="col">Account</th><th className={`${CELL} ub-type-ui`} scope="col">Workspaces</th><th className={`${CELL} ub-type-ui`} scope="col">Last signed in</th><th className={`${CELL} ub-type-ui`} scope="col"><span className="ub-sr-only">Actions</span></th></tr></thead>
-          <tbody>{list.admins?.map((person) => <AdminRow key={person.principalId} admin={person} now={now} disabled={busy} remove={(person) => { void remove(person); }} />)}</tbody>
-        </> : <>
-          <thead><tr><th className={`${CELL} ub-type-ui`} scope="col">Workspace</th><th className={`${CELL} ub-type-ui`} scope="col">Members</th><th className={`${CELL} ub-type-ui`} scope="col">Admins</th><th className={`${CELL} ub-type-ui`} scope="col">Status</th><th className={`${CELL} ub-type-ui`} scope="col"><span className="ub-sr-only">Actions</span></th></tr></thead>
-          <tbody>{list.workspaces?.map((workspace) => <WorkspaceRow key={workspace.workspaceId} workspace={workspace} disabled={busy} changeStatus={(workspace) => { void changeStatus(workspace); }} />)}</tbody>
-        </>}
-      </table>}
-    </div>
-  </section>;
+  return <SettingsPage title={page === "hub-admins" ? "Admins" : "Workspaces"} gap="gap-4"
+    note={page === "hub-admins" ? `Hub admins of ${hubHost(authority?.hub ?? null)}.` : "Workspaces this hub serves. Suspending one stops its sync for everyone; its documents and members stay."}>
+    {authority === null ? <p className="m-0 ub-type-ui" role="status">Reading hub access…</p> :
+      !admin ? <p className="m-0 ub-type-ui" role="alert">{failure(authority.status)}</p> :
+      list === null ? <p className="m-0 ub-type-ui" role="status">Reading from the hub…</p> :
+      list.status !== "ok" ? <p className="m-0 ub-type-ui" role="alert">{failure(list.status)}</p> : null}
+    <FeedbackLine feedback={feedback} />
+    {ready && <table className="w-full table-auto border-collapse" aria-label={page === "hub-admins" ? "Hub admins" : "Hub workspaces"}>
+      {page === "hub-admins" ? <>
+        <TableHead columns={["Account", "Workspaces", "Last signed in"]} actions />
+        <tbody>{list.admins?.map((person) => <AdminRow key={person.principalId} admin={person} now={now} disabled={busy} remove={remove} />)}</tbody>
+      </> : <>
+        <TableHead columns={["Workspace", "Members", "Admins", "Status"]} actions />
+        <tbody>{list.workspaces?.map((workspace) => <WorkspaceRow key={workspace.workspaceId} workspace={workspace} disabled={busy} changeStatus={changeStatus} />)}</tbody>
+      </>}
+    </table>}
+  </SettingsPage>;
 }

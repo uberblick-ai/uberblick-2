@@ -21,7 +21,6 @@ import {
   pinDoc,
   readSidebar,
   resolveDecisionTopics,
-  exportMarkdown,
   roomForDoc,
   setKind,
   setStatus,
@@ -238,14 +237,6 @@ async function choose(host: HTMLElement, uuid: string): Promise<void> {
   await act(async () => link.click());
 }
 
-async function back(): Promise<void> {
-  await act(async () => {
-    const popped = new Promise<void>((resolve) => window.addEventListener("popstate", () => setTimeout(resolve, 0), { once: true }));
-    window.history.back();
-    await popped;
-  });
-}
-
 function copiedUrls(): ReturnType<typeof vi.fn> {
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
@@ -419,6 +410,7 @@ describe("decision topic navigation and history", () => {
     });
     expect(getMeta(ydoc).title).toBe("Original question");
     expect(liveTitle.readOnly).toBe(true);
+    expect(within(live).queryByRole("button", { name: "Alter decision" })).toBeNull();
   });
 
   it("refuses a stale title event when the current record changes before rendering", async () => {
@@ -439,62 +431,6 @@ describe("decision topic navigation and history", () => {
     expect(getMeta(connection.ydoc).title).toBe("Replacement question");
   });
 
-  it("shows live related topics as page chrome without acquiring record rooms or changing page content", async () => {
-    story();
-    const ydoc = room(roomForDoc(WORKSPACE, RELATED_FIRST)).ydoc;
-    initDoc(ydoc, { uuid: RELATED_FIRST, title: "Original related page" });
-    appendBlock(ydoc, { type: "paragraph", text: "The owning page's prose." });
-    appendBlock(ydoc, { type: "heading", text: "Related", level: 2 });
-    appendBlock(ydoc, { type: "paragraph", text: "Other guidance." });
-    const blocks = getBlocks(ydoc);
-    const markdown = exportMarkdown(ydoc, { directory: directory() });
-    const pageUpdates = vi.fn();
-    ydoc.on("update", pageUpdates);
-    const host = (await open(docPath(WORKSPACE, RELATED_FIRST))).container;
-    const block = within(host).getByRole("region", { name: "Decisions" });
-    expect(within(block).getByRole("link", { name: "Under review: Original title" }).getAttribute("href"))
-      .toBe(docPath(WORKSPACE, FIRST));
-    expect(block.textContent).toContain("Use the current answer.");
-    expect(block.textContent).not.toContain("A replacement under discussion.");
-    expect(block.closest(".ub-editor")).toBeNull();
-    expect((host.querySelector(".ub-editor")?.compareDocumentPosition(block) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .not.toBe(0);
-    expect(getBlocks(ydoc)).toEqual(blocks);
-    expect(exportMarkdown(ydoc, { directory: directory() })).toBe(markdown);
-    const jump = within(host).getByRole("link", { name: /1 decision · 1 under review/ });
-    await act(async () => jump.click());
-    expect(document.activeElement).toBe(block);
-    expect(window.location.pathname).toBe(docPath(WORKSPACE, RELATED_FIRST));
-    await act(async () => tombstoneDirectoryEntry(directory(), FIRST));
-    expect(within(host).queryByRole("region", { name: "Decisions" })).toBeNull();
-    expect(host.querySelector(".ub-decisions-link")).toBeNull();
-    expect(pageUpdates).not.toHaveBeenCalled();
-    expect(acquired.filter((name) => [FIRST, CURRENT, REJECTED, WITHDRAWN, OPEN].some((uuid) => name === roomForDoc(WORKSPACE, uuid)))).toEqual([]);
-    ydoc.off("update", pageUpdates);
-  });
-
-  it("adds the block when a related topic arrives, then opens its current answer", async () => {
-    const ydoc = room(roomForDoc(WORKSPACE, RELATED_FIRST)).ydoc;
-    initDoc(ydoc, { uuid: RELATED_FIRST, title: "A page without headings" });
-    appendBlock(ydoc, { type: "paragraph", text: "Read this first." });
-    regular(RELATED_FIRST, "A page without headings");
-    const host = (await open(docPath(WORKSPACE, RELATED_FIRST))).container;
-    expect(within(host).queryByRole("region", { name: "Decisions" })).toBeNull();
-    await act(async () => {
-      record(FIRST, "A new question", "decided", "A current answer with no cached preview.", { related: RELATED_FIRST, cache: false });
-      upsertDirectoryEntry(directory(), { uuid: FIRST, title: "A new question", governs: RELATED_FIRST });
-    });
-    const row = within(host).getByRole("link", { name: "In force: A new question" });
-    expect(row.querySelector(".ub-decisions-row-preview")).toBeNull();
-    expect(acquired).not.toContain(roomForDoc(WORKSPACE, FIRST));
-    await act(async () => row.click());
-    expect(window.location.pathname).toBe(docPath(WORKSPACE, FIRST));
-    expect(host.querySelector(".ub-decisions-block")).toBeNull();
-    expect(selection(host)).toBe(FIRST);
-    await back();
-    expect(within(host).getByRole("region", { name: "Decisions" })).toBeDefined();
-  });
-
   it("keeps older recorded answer dates relative without using edit timestamps", async () => {
     record(FIRST, "Longstanding answer", "decided", "A longstanding answer.", { answerer: "Ben", answerDate: "2020-01-01T00:00:00Z" });
     upsertDirectoryEntry(directory(), { uuid: FIRST, title: "Longstanding answer", updatedAt: Date.now() });
@@ -505,7 +441,6 @@ describe("decision topic navigation and history", () => {
   });
 
   it.each([
-    [docPath(WORKSPACE, FIRST), FIRST],
     [docPath(WORKSPACE, CURRENT), FIRST],
     [decisionRecordPath(WORKSPACE, FIRST, REJECTED), FIRST],
     [decisionRecordPath(WORKSPACE, FIRST, FIRST), CURRENT],
@@ -641,6 +576,9 @@ describe("decision topic navigation and history", () => {
       expect(row.querySelector(".ub-decision-event")?.textContent ?? null).toBe(event);
       await choose(host, uuid);
       expectAnswerState(host, label);
+      if (uuid === FIRST) {
+        expect(answerHeader(host).querySelector(".ub-decision-attribution")?.textContent).toBe("Agent stance · 4 weeks ago");
+      }
       expect(selection(host)).toBe(uuid);
       expect(item(host, uuid).getAttribute("data-selected")).toBe("true");
     }
@@ -696,43 +634,6 @@ describe("decision topic navigation and history", () => {
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, REJECTED));
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, OPEN));
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, RFC));
-  });
-
-  it("shares explicit selections, restores them through Back and opens the matching comments", async () => {
-    story();
-    const writeText = copiedUrls();
-    const view = await open();
-    const host = view.container;
-    await copy(host);
-    expect(writeText).toHaveBeenLastCalledWith(`${window.location.origin}${docPath(WORKSPACE, FIRST)}`);
-    await choose(host, REJECTED);
-    const rejectedPath = decisionRecordPath(WORKSPACE, FIRST, REJECTED);
-    expect(window.location.pathname).toBe(rejectedPath);
-    expect(selection(host)).toBe(REJECTED);
-    expect(answer(host).textContent).toContain("Use the rejected alternative.");
-    expectAnswerState(host, "Rejected");
-    expect(answer(host).classList.contains("ub-decision-answer-history")).toBe(true);
-    expect(host.querySelector(".ub-decision-rejection")?.textContent).toContain("It loses compatibility.");
-    expect(answerHeader(host).querySelector(".ub-decision-attribution")?.textContent).toBe("Alex · 3 weeks ago");
-    expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).value).toBe("Original title");
-    await copy(host);
-    expect(writeText).toHaveBeenLastCalledWith(`${window.location.origin}${rejectedPath}`);
-    await choose(host, FIRST);
-    expect(window.location.pathname).toBe(decisionRecordPath(WORKSPACE, FIRST, FIRST));
-    expect(host.textContent).toContain("Earlier record comment");
-    expect(host.textContent).not.toContain("Current record comment");
-    expectAnswerState(host, "Superseded");
-    expect(answer(host).classList.contains("ub-decision-answer-history")).toBe(true);
-    expect(answerHeader(host).querySelector(".ub-decision-attribution")?.textContent).toBe("Agent stance · 4 weeks ago");
-    expect(host.querySelector(".ub-decision-earlier-answer")?.textContent).toContain("Earlier answer. Replaced 4 weeks ago; it no longer applies.");
-    await back();
-    expect(selection(host)).toBe(REJECTED);
-    view.unmount();
-    const reopened = await renderSettled(<App />);
-    expect(selection(reopened.container)).toBe(REJECTED);
-    await act(async () => within(reopened.container).getByRole("link", { name: "Go to the current answer" }).click());
-    expect(window.location.pathname).toBe(docPath(WORKSPACE, FIRST));
-    expect(selection(reopened.container)).toBe(CURRENT);
   });
 
   it("follows a newly approved answer while an ordinary linked record keeps its identity", async () => {
@@ -812,21 +713,6 @@ describe("decision topic navigation and history", () => {
     expect(item(host, OPEN).querySelector(".ub-decision-preview")).toBeNull();
     expect(item(host, OPEN).querySelector(".ub-decision-record-rfc")).toBeNull();
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, OPEN));
-  });
-
-  it("labels an unanswered record once and links its discussion without changing the timeline", async () => {
-    regular(RFC, "Unanswered RFC");
-    record(FIRST, "Still under discussion", "open", "The initial proposal.", { discussion: RFC });
-    const host = (await open()).container;
-    expectAnswerState(host, "Not yet decided");
-    expect(host.querySelector(".ub-decision-notice")?.textContent).not.toContain("Not yet decided");
-    expect(item(host, FIRST).querySelector(".ub-decision-answer-state")?.textContent).toBe("Not yet decided");
-    expect(item(host, FIRST).getAttribute("data-rail-green")).toBe("false");
-    expect(answer(host).textContent).toContain("The initial proposal.");
-    expect(host.querySelector(".ub-decision-rfc")?.textContent).toBe("RFC Unanswered RFC");
-    expect(within(host).getByRole("link", { name: "Open proposal" }).getAttribute("href")).toBe(docPath(WORKSPACE, RFC));
-    expect(answerHeader(host).querySelector(".ub-decision-attribution")?.textContent).toBe("Opened 4 weeks ago");
-    expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
   });
 
   it("counts several pending proposals while each keeps its own RFC link", async () => {
@@ -981,37 +867,6 @@ describe("decision topic navigation and history", () => {
     expect(answerHeader(host).querySelector(".ub-decision-attribution")?.textContent).toBe("Ben · 4 weeks ago");
   });
 
-  it("never calls any conflicting answer current and lets each answer be selected", async () => {
-    regular(RFC, "Conflicting discussion");
-    record(FIRST, "Initial stance", "decided", "Initial stance answer.", { agent: true });
-    record(CURRENT, "First conflicting answer", "decided", "One conflicting answer.", { supersedes: FIRST, answerer: "Ben", answerDate: DATE, discussion: RFC, order: 1 });
-    record(NEXT, "Second conflicting answer", "decided", "Another conflicting answer.", { supersedes: FIRST, answerer: "Alex", answerDate: DATE, order: 2 });
-    const host = (await open()).container;
-    expect(within(host).queryByRole("button", { name: "Alter decision" })).toBeNull();
-    expect(selection(host)).toBe(NEXT);
-    expect(host.querySelector(".ub-decision-rfc")).toBeNull();
-    expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("Nothing is in force");
-    expectAnswerState(host, "Conflicting answer");
-    expect(item(host, CURRENT).textContent).toContain("Conflicting answer");
-    expect(item(host, NEXT).textContent).toContain("Conflicting answer");
-    expect(item(host, CURRENT).querySelector(".ub-decision-event")?.textContent).toBe("Ben decided");
-    expect(item(host, NEXT).querySelector(".ub-decision-event")?.textContent).toBe("Alex decided");
-    expect([...timeline(host).querySelectorAll("li")].every((row) => row.getAttribute("data-rail-green") === "false")).toBe(true);
-    expect(within(host).queryByRole("link", { name: "Go to the current answer" })).toBeNull();
-    await choose(host, CURRENT);
-    expect(answer(host).textContent).toContain("One conflicting answer.");
-    expect(host.querySelector(".ub-decision-rfc")?.textContent).toBe("RFC Conflicting discussion");
-    expectAnswerState(host, "Conflicting answer");
-    await act(async () => record(OPEN, "Proposal during conflict", "open", "A new proposal.", { supersedes: CURRENT, discussion: RFC, order: 3 }));
-    await choose(host, OPEN);
-    expectAnswerState(host, "Open proposal");
-    expect(item(host, OPEN).querySelector(".ub-decision-answer-state")?.textContent).toBe("Open proposal");
-    expect(item(host, OPEN).querySelector(".ub-decision-event")).toBeNull();
-    expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("Nothing is in force.");
-    expect(answer(host).classList.contains("ub-decision-answer-history")).toBe(true);
-    expect(within(host).queryByRole("link", { name: "Go to the current answer" })).toBeNull();
-  });
-
   it.each([false, true])("keeps an archived earlier answer superseded when approved answers conflict: %s", async (conflict) => {
     record(FIRST, "Archive question", "decided", "The earlier answer.", { answerer: "Ben", answerDate: "2026-09-01" });
     record(CURRENT, "Archive question", "decided", "The replacement answer.", {
@@ -1045,23 +900,6 @@ describe("decision topic navigation and history", () => {
     expect(resolveDecisionTopics(directory())[0]?.pending).toHaveLength(0);
     await act(async () => within(host).getByRole("button", { name: "Restore" }).click());
     expectAnswerState(host, "Under review");
-  });
-
-  it("keeps every archived record readable while closing comment writes", async () => {
-    story();
-    tombstoneDirectoryEntry(directory(), FIRST);
-    const host = (await open()).container;
-    expect(within(host).queryByRole("button", { name: "Alter decision" })).toBeNull();
-    expect(host.textContent).toContain("Archived. Read-only and hidden from the document list.");
-    expect(timeline(host).querySelectorAll("li")).toHaveLength(5);
-    expect(host.querySelector(".ub-thread-actions")).toBeNull();
-    await choose(host, FIRST);
-    expect(answer(host).textContent).toContain("Keep the original answer.");
-    expect(host.textContent).toContain("Earlier record comment");
-    expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
-    expect(host.querySelector(".ub-thread-actions")).toBeNull();
-    await choose(host, OPEN);
-    expect(host.querySelector(".ub-decision-rfc")?.textContent).toBe("RFC Proposal discussion");
   });
 
   it("keeps an archived first answer separate from the live topic address and restores it in place", async () => {

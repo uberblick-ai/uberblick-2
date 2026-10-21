@@ -243,7 +243,7 @@ function collectionChanges(
 }
 
 /** Validate and summarize without writing; commit the resulting plan synchronously. */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Every operation validates against one working copy before a plan exists; the aggregate area and operation limits need the whole result.
 export function prepareDocData(doc: Y.Doc, directory: Y.Doc, operations: readonly DataOperation[], authoritativeUuid?: string): DataUpdatePlan {
   const meta = getMeta(doc, authoritativeUuid);
   if (decisionTopicArchived(directory, meta.uuid)) throw new DataError("doc_archived", "Archived documents are read-only", { uuid: meta.uuid, archived: true });

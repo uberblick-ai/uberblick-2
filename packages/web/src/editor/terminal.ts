@@ -18,13 +18,14 @@
 import { Extension } from "@tiptap/core";
 import type { NodeViewRenderer, NodeViewRendererProps } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
-import { TextSelection } from "@tiptap/pm/state";
 import type { Plugin } from "@tiptap/pm/state";
 import type { NodeView } from "@tiptap/pm/view";
-import { COMMENT_MARK } from "@uberblick/schema";
 import {
   blockCaption,
+  carriesComment,
+  chromeFilters,
   copyButton,
+  openSource,
   selectedBlock,
   sourceEditingPlugin,
   terminalChrome,
@@ -58,7 +59,7 @@ interface Step {
  * Generate frames lazily: a long command must not allocate its entire animation.
  * Restart creates a new generator from the beginning.
  */
-export function* transcriptSteps(transcript: string): Generator<Step> {
+function* transcriptSteps(transcript: string): Generator<Step> {
   let committed = "";
   for (const line of transcript.split("\n")) {
     if (line.startsWith(PROMPT)) {
@@ -89,21 +90,11 @@ function playable(transcript: string): boolean {
   return transcript.trim() !== "";
 }
 
-/** Whether any of the block's text carries an annotation's anchor. */
-function carriesComment(node: ProseMirrorNode): boolean {
-  let found = false;
-  node.forEach((child) => {
-    if (child.marks.some((mark) => mark.type.name === COMMENT_MARK)) found = true;
-  });
-  return found;
-}
-
 /* ------------------------------------------------------------------ nodeview */
 
 /**
  * Keep playback, controls and transcript inside the NodeView's owned chrome.
  */
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export const terminalBlockView: NodeViewRenderer = ({
   node,
   editor,
@@ -148,10 +139,7 @@ export const terminalBlockView: NodeViewRenderer = ({
   let paused = false;
   let onScreen = false;
 
-  const motion =
-    typeof window.matchMedia === "function"
-      ? window.matchMedia("(prefers-reduced-motion: reduce)")
-      : null;
+  const motion = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
   const observable = typeof IntersectionObserver === "function";
   /** Whether this panel animates at all, as opposed to standing complete. */
   const animates = (): boolean => observable && motion?.matches !== true;
@@ -161,14 +149,10 @@ export const terminalBlockView: NodeViewRenderer = ({
     if (showCursor) frame.append(cursor);
   };
 
-  /**
-   * Write only on change; even identical setAttribute calls emit root mutations.
-   */
+  /** Write only on change; even identical setAttribute calls emit root mutations. */
   const setRendered = (value: boolean): void => {
     const next = String(value);
-    if (dom.getAttribute("data-rendered") !== next) {
-      dom.setAttribute("data-rendered", next);
-    }
+    if (dom.getAttribute("data-rendered") !== next) dom.setAttribute("data-rendered", next);
   };
 
   const stop = (): void => {
@@ -194,7 +178,7 @@ export const terminalBlockView: NodeViewRenderer = ({
 
   /** Whether the reader's caret is in *this* block — the stylesheet's rule. */
   const beingEdited = (): boolean => {
-    const pos = typeof getPos === "function" ? getPos() : undefined;
+    const pos = getPos();
     if (pos === undefined) return false;
     return selectedBlock(editor.state, "terminal")?.pos === pos;
   };
@@ -288,15 +272,7 @@ export const terminalBlockView: NodeViewRenderer = ({
   toggle.addEventListener("click", onToggle);
 
   // Opening source must explicitly place its caret.
-  const open = (event: Event): void => {
-    event.preventDefault();
-    const pos = typeof getPos === "function" ? getPos() : undefined;
-    if (pos === undefined) return;
-    const { view } = editor;
-    const inside = view.state.doc.resolve(pos + 1);
-    view.dispatch(view.state.tr.setSelection(TextSelection.near(inside)));
-    view.focus();
-  };
+  const open = openSource(editor, getPos);
   const openByKey = (event: KeyboardEvent): void => {
     if (event.key === "Enter" || event.key === " ") open(event);
   };
@@ -350,12 +326,7 @@ export const terminalBlockView: NodeViewRenderer = ({
       }
       return false;
     },
-    // Ignore owned frame/transcript/control mutations only; source mutations
-    // must reach ProseMirror for document updates and DOM repair.
-    ignoreMutation: (mutation: { target: Node }): boolean =>
-      screen.contains(mutation.target) ||
-      spoken.contains(mutation.target) ||
-      header.row.contains(mutation.target),
+    ignoreMutation: chromeFilters(dom, [screen, spoken, header.row]).ignoreMutation,
     destroy: () => {
       stop();
       watcher?.disconnect();

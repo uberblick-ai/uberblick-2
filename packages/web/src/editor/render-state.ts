@@ -17,6 +17,9 @@ export function dataRevision(data: RenderData | null): string {
   return blockRev({ type: "code", language: "json", text: canonicalJson(collections, Infinity) });
 }
 
+/** The root attributes recordDraw writes, which node views ignore as mutations. */
+export const DRAW_ATTRIBUTES = ["data-source-rev", "data-data-rev", "data-draw-state"] as const;
+
 /** Call after the synchronous drawing or error presentation, inside ignored node-view chrome. */
 export function recordDraw(element: HTMLElement, source: RevInput, dataRev: string, succeeded: boolean): void {
   element.dataset.sourceRev = blockRev(source);

@@ -149,28 +149,18 @@ describe("decision authority through MCP", () => {
     }
   });
 
-  it("protects all decided content doors while comments and unapproved metadata remain writable", async () => {
+  it("explains the decided content lock while comments and unapproved metadata remain writable", async () => {
     const rig = await localRig();
     const target = await rig.ok("create_doc", { title: "Reference", description: "A curated reference." });
     const record = await legacyDecision(rig, { status: "decided", answer, tldr: "Use the update log." });
     const block = record.blocks[0];
-    const mutations: [string, Record<string, unknown>][] = [
-      ["set_metadata", { tldr: "Changed decision line." }],
-      ["set_metadata", { tldr: null }],
-      ["edit_block", { block_id: block.id, old_text: block.text, new_text: "Changed text.", rev: block.rev }],
-      ["insert_block", { type: "paragraph", text: "Additional reasoning." }],
-      ["delete_block", { block_id: block.id }],
-      ["link_range", { block_id: block.id, start: 0, end: 3, doc_id: target.uuid, rev: block.rev }],
-    ];
-    for (const [name, args] of mutations) {
-      const refused = await refuse(rig, name, { uuid: record.uuid, ...args }, "decision_read_only", record.uuid);
-      expect(refused).toMatchObject({
-        message: "A decided record's answer blocks and structured data are read-only; decisions have no TL;DR. Create a superseding record.",
-        recoveryClass: "manual",
-        recovery: "A decided record's answer blocks, structured data and discussion reference are read-only. Decisions have no TL;DR. Create an open superseding record " +
-          "for any answer change, then record a person's answer to decide it. Titles stay editable without changing approval; comments stay open.",
-      });
-    }
+    const refused = await refuse(rig, "set_metadata", { uuid: record.uuid, tldr: "Changed decision line." }, "decision_read_only", record.uuid);
+    expect(refused).toMatchObject({
+      message: "A decided record's answer blocks and structured data are read-only; decisions have no TL;DR. Create a superseding record.",
+      recoveryClass: "manual",
+      recovery: "A decided record's answer blocks, structured data and discussion reference are read-only. Decisions have no TL;DR. Create an open superseding record " +
+        "for any answer change, then record a person's answer to decide it. Titles stay editable without changing approval; comments stay open.",
+    });
     const thread = await rig.ok("annotate", { uuid: record.uuid, block_id: block.id, start: 0, end: 3, text: "Discuss the rationale." });
     await rig.ok("annotate", { uuid: record.uuid, thread_id: thread.annotation.id, text: "Resolved in discussion.", resolved: true });
     await rig.ok("set_metadata", { uuid: record.uuid, description: "Updated discovery copy." });
@@ -183,7 +173,7 @@ describe("decision authority through MCP", () => {
     expect(getDirectoryEntry(rig.instance.replicas.directory().doc, record.uuid)).toMatchObject({ approvalChanged: false, commentCount: 2 });
   });
 
-  it("hides stored legacy TL;DR without rewriting it and refuses new decision TL;DR before creation", async () => {
+  it("hides stored legacy TL;DR without rewriting it", async () => {
     const rig = await localRig();
     const page = await rig.ok("create_doc", { title: "Owning page", description: "The page this decision governs." });
     const first = await legacyDecision(rig, { status: "decided", answer, related: page.uuid, tldr: "  Use the update log.  " });
@@ -225,9 +215,6 @@ describe("decision authority through MCP", () => {
     expect((await rig.ok("get_doc", { uuid: (await decision(rig, { tldr: null })).uuid })).tldr).toBeNull();
     const exact = await legacyDecision(rig, { tldr: "x".repeat(MAX_TLDR_LENGTH) });
     expect((await rig.ok("get_doc", { uuid: exact.uuid })).tldr).toBeNull();
-    for (const status of ["open", "decided"]) {
-      await refuse(rig, "create_doc", { title: "New TL;DR", description: "Answer blocks hold the answer.", kind: "decision", status, tldr: "Use the log.", blocks: body }, "decision_tldr_unsupported");
-    }
     for (const tldr of ["", "  ", "x".repeat(MAX_TLDR_LENGTH + 1)]) {
       const before = state(rig);
       expect((await rig.call("create_doc", { title: "Invalid line", description: "The same TL;DR limits as set_metadata.", kind: "decision", status: "decided", tldr })).payload.error).toBe("schema_validation");

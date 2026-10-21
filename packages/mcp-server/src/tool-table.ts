@@ -1,0 +1,691 @@
+/**
+ * Every registered tool, in tools/list order. Registration, MCP annotations,
+ * failure payloads and per-tool help read this table; each operation's wrapper
+ * fixes what it writes. SDK-free, so callers without MCP use the same entries.
+ */
+import type { z } from "zod";
+import { helpPointer } from "./help.js";
+import { toolHelpDetails } from "./help-details.js";
+import { outputSchemas } from "./outputs.js";
+import {
+  getSidebarInput,
+  getSidebarOperation,
+  pinDocInput,
+  pinDocOperation,
+  sidebarGroupInput,
+  sidebarGroupOperation,
+  unpinDocInput,
+  unpinDocOperation,
+} from "./sidebar-tools.js";
+import { inputSchema as annotateInput, annotateOperation } from "./tools/annotate.js";
+import { inputSchema as archiveDocInput, archiveDocOperation } from "./tools/archive-doc.js";
+import { inputSchema as backlinksInput, backlinksOperation } from "./tools/backlinks.js";
+import { inputSchema as createDocInput, createDocOperation } from "./tools/create-doc.js";
+import { inputSchema as deleteBlockInput, deleteBlockOperation } from "./tools/delete-block.js";
+import { inputSchema as deleteDocInput, deleteDocOperation } from "./tools/delete-doc.js";
+import { inputSchema as editBlockInput, editBlockOperation } from "./tools/edit-block.js";
+import { inputSchema as exportMarkdownInput, exportMarkdownOperation } from "./tools/export-markdown.js";
+import { inputSchema as findDecisionsInput, findDecisionsOperation } from "./tools/find-decisions.js";
+import { inputSchema as getDataInput, getDataOperation } from "./tools/get-data.js";
+import { inputSchema as getDocInput, getDocOperation } from "./tools/get-doc.js";
+import { inputSchema as getHelpInput, getHelpOperation } from "./tools/get-help.js";
+import { inputSchema as insertBlockInput, insertBlockOperation } from "./tools/insert-block.js";
+import { inputSchema as linkRangeInput, linkRangeOperation } from "./tools/link-range.js";
+import { inputSchema as listDocsInput, listDocsOperation } from "./tools/list-docs.js";
+import { inputSchema as listTagsInput, listTagsOperation } from "./tools/list-tags.js";
+import type { Operation, ToolOperation, Writes } from "./tools/operation.js";
+import { inputSchema as restoreDocInput, restoreDocOperation } from "./tools/restore-doc.js";
+import { inputSchema as searchInput, searchOperation } from "./tools/search.js";
+import { inputSchema as setMetadataInput, setMetadataOperation } from "./tools/set-metadata.js";
+import { inputSchema as setStatusInput, setStatusOperation } from "./tools/set-status.js";
+import { inputSchema as syncStatusInput, syncStatusOperation } from "./tools/sync-status.js";
+import { inputSchema as updateDataInput, updateDataOperation } from "./tools/update-data.js";
+
+export type ToolName = keyof typeof outputSchemas;
+
+/** MCP advisory annotations, kept free of SDK types like the rest of the operation path. */
+export interface ToolHints {
+  readonly readOnlyHint: boolean;
+  readonly destructiveHint: boolean;
+  readonly idempotentHint: boolean;
+  readonly openWorldHint: boolean;
+}
+
+export interface Tool {
+  readonly name: ToolName;
+  readonly title: string;
+  /** The registered description, ending with its help pointer. */
+  readonly description: string;
+  readonly input: z.ZodObject;
+  readonly output: z.ZodObject;
+  readonly operation: Operation<Record<string, unknown>>;
+  readonly writes: Writes;
+  readonly annotations: ToolHints;
+  readonly example: Record<string, unknown>;
+  readonly related: readonly string[];
+  readonly details?: string;
+}
+
+interface WriteHints {
+  readonly destructive: boolean;
+  readonly idempotent: boolean;
+}
+
+type ToolSpec<Input extends z.ZodObject, W extends Writes> = {
+  readonly name: ToolName;
+  readonly title: string;
+  /** Tool-specific prose; the help pointer is appended. */
+  readonly description: string;
+  readonly input: Input;
+  readonly operation: ToolOperation<z.output<Input>, object, W>;
+  readonly example: Record<string, unknown>;
+  readonly related: readonly string[];
+  readonly details?: string;
+} & (W extends null ? { readonly hints?: never } : { readonly hints: WriteHints });
+
+function tool<Input extends z.ZodObject, W extends Writes>(spec: ToolSpec<Input, W>): Tool {
+  return {
+    name: spec.name,
+    title: spec.title,
+    description: spec.description + helpPointer(spec.name, spec.related),
+    input: spec.input,
+    output: outputSchemas[spec.name],
+    // ToolSpec ties the operation's Args to input; the SDK parses every call
+    // with that input before the operation runs.
+    operation: spec.operation as unknown as Operation<Record<string, unknown>>,
+    writes: spec.operation.writes,
+    // Every tool reads or writes this replica; find_decisions looks up local
+    // references only, so its openWorldHint also stays false.
+    annotations: {
+      readOnlyHint: spec.operation.writes === null,
+      destructiveHint: spec.hints?.destructive ?? false,
+      idempotentHint: spec.hints?.idempotent ?? true,
+      openWorldHint: false,
+    },
+    example: spec.example,
+    related: spec.related,
+    ...(spec.details === undefined ? {} : { details: spec.details }),
+  };
+}
+
+const uuid = "11111111-1111-4111-8111-111111111111";
+const targetUuid = "11111111-1111-4111-8111-111111111112";
+const documentContracts = ["workspaces", "lifecycle", "tool-contracts"];
+const proseContracts = [...documentContracts, "markdown"];
+const dataContracts = [...documentContracts, "data"];
+
+export const tools: readonly Tool[] = [
+  tool({
+    name: "list_tags",
+    title: "List assignable tags",
+    description:
+      "The active workspace tag catalog, in deterministic name order. Each entry carries the stable canonical " +
+      "`id` documents store and its current display `name`. Retired entries are absent here but remain visible, " +
+      "marked retired, on documents that still carry them. MCP cannot curate this catalog.\n\n" +
+      "`complete` says whether this is the whole workspace vocabulary. It is false while a configured hub has " +
+      "not delivered the catalog room to this replica: what is listed is then a local copy that may be missing " +
+      "curated entries, and a tag value this replica has never seen is refused rather than assigned. `hub` says " +
+      "where that connection stands.",
+    input: listTagsInput,
+    operation: listTagsOperation,
+    example: {},
+    related: ["workspaces", "tool-contracts"],
+  }),
+  tool({
+    name: "create_doc",
+    title: "Create a document",
+    description:
+      "Create doc/stub; optional blocks/regular-page TL;DR. Require nonblank description; title is required except for successors. " +
+      "A decision topic has one title stored on its first record. Renaming any record renames the topic. Successors inherit it: omit title or supply the same title; another refuses. " +
+      "List-item seeds: bullet/ordered list, integer indent 0–3 (defaults bullet/0). " +
+      "Active tags by id/name (case ignored); unknown/retired refuse. Kind defaults first status; invalid pairs refuse. " +
+      "Before creating a decision topic, consult get_help({topic: \"lifecycle\"}) for when to create a record. " +
+      "For decision answers, see lifecycle's Decision answers and topics section. " +
+      "Open/decided only; deciding needs supported nonblank answer blocks, no TL;DR/data; decided successors require recorded human answer. " +
+      "related: live readable regular page; inherited unless supplied. supersedes: hydrated decision in live topic. Targets validated pre-write. " +
+      "discussion: live, readable regular RFC UUID; reuse/create first. Never inherited; set_metadata corrects/clears while open, then fixed. RFC/page untouched. Separate from curated links/recorded answer. " +
+      "Sidebar: get_sidebar group id; invalid = group_not_found, no creation; omit = unpinned. Independent rooms: persistence_failed: uuid, completed/failed, rolledBack: false, duplicate-safe recovery. " +
+      "answerPreview: first answer paragraph/list. Page get_doc: related/linked topics.",
+    input: createDocInput,
+    operation: createDocOperation,
+    // Adds a fresh document and optional pin; repeating adds another document.
+    hints: { destructive: false, idempotent: false },
+    example: {
+      title: "Release checklist",
+      description: "The steps and checks used to prepare a product release.",
+      blocks: [{
+        type: "list-item", text: "Review the release notes before publishing.", list: "ordered", indent: 0,
+      }],
+    },
+    related: proseContracts,
+    details: toolHelpDetails.create_doc,
+  }),
+  tool({
+    name: "get_doc",
+    title: "Read a document",
+    description:
+      "Read metadata, blocks/rev and threads; page rev equals the web status row's revision. Regular pages return related then linked decision topics; " +
+      "code_check is [] or latest repository/commit/checked_at/result plus recorded rev/paths when known; paths are hints, not complete dependencies. Results: matches (agrees), ahead " +
+      "(intentionally undelivered), drift (unintended disagreement). Content edits preserve checks; decisions " +
+      "omit them. Decision discussion: RFC UUID/null, apart from curated links and recorded answer. Decisions " +
+      "have no TL;DR (tldr: null); entries cache discussion and answerPreview (first paragraph/list, max 300 " +
+      "chars), absent if unknown. Unset description/TL;DR: null; data lists collections/counts for get_data. " +
+      "Tables: canonical GFM. Cards: canonical content with ordered button lines after footer; see get_help for link/style/color syntax. " +
+      "Figma: :::figma content, no delimiters, normalized url, optional plain title/height, blank line, marked " +
+      "caption; read-only kind (frame/file/prototype/board/slides/community file), file, optional decoded " +
+      "fileName (dashes as spaces), node (12:345). Tables/cards/Figma rev includes formatting and button " +
+      "values/order; other rev ignores marks. Prose doc_links has ranges; containers have none. Card thread " +
+      "ranges name part; Figma uses caption offsets. No Figma request; eligible guidance counts toward this " +
+      "process's briefing.",
+    input: getDocInput,
+    operation: getDocOperation,
+    example: { uuid },
+    related: [...proseContracts, "data"],
+    details: toolHelpDetails.get_doc,
+  }),
+  tool({
+    name: "get_data",
+    title: "Read document data",
+    description:
+      "Read a document's structured data without changing it, including merged invalidity and diagnostics. Omit " +
+      "collection for an area summary with no schemas or values, or data: null when absent. Name a collection " +
+      "for its raw schema and a detached page in Unicode code-point id order; an unknown collection refuses. " +
+      "after is an exclusive cursor; ids optionally filters it and reports missing_ids. limit: 0 reads only the " +
+      "schema. max_bytes bounds canonical JSON of the page's id/value array, excluding schemas, diagnostics and " +
+      "formatting; a positive-limit page includes its first remaining record even over budget. It does not " +
+      "bound the whole response or token count. Follow next_after until complete; schema-only reads do not " +
+      "advance, and pages are not snapshots.",
+    input: getDataInput,
+    operation: getDataOperation,
+    example: { uuid, collection: "tasks", limit: 20 },
+    related: dataContracts,
+    details: toolHelpDetails.get_data,
+  }),
+  tool({
+    name: "update_data",
+    title: "Update document data",
+    description:
+      "Apply one validated batch through applyDocData, naming each touched collection once. " +
+      "Within each collection, set `schema`, optionally `replaceRecords`, then `deleteRecords`, then `upsert` " +
+      "whole `{id, value}` records. `deleteCollection: true` excludes other changes. Schema and value JSON " +
+      "reach validation unaltered; unsupported schemas and invalid retained records refuse before mutation. " +
+      "The batch is one local transaction; identical refreshes return `changed: false` without an update. " +
+      "The result summarizes touched collection names, counts and deletion with durability, without values.\n\n" +
+      "Refresh producer-owned collections by upsert or full-set replacement. Keep human " +
+      "dispositions in a separate collection keyed by producer record ids. Split changes above the 1 MiB " +
+      "schema/value budget across calls; they are not atomic together and supply no CAS or distributed lock. " +
+      "Read with get_data; get_doc summarizes collections. " +
+      "Decisions refuse data with decision_data_unsupported; decided records " +
+      "keep decision_read_only, and legacy data stays readable. Decision answer guidance is in lifecycle's " +
+      "Decision answers and topics section. Their " +
+      "directory answerPreview uses the first answer paragraph/list; decisions have no TL;DR. get_doc page " +
+      "decisions are marked related or linked. Recorded attribution {who, when, where} is separate from " +
+      "the answer's content blocks.",
+    input: updateDataInput,
+    operation: updateDataOperation,
+    // Replaces, upserts and deletes data; an identical repeat reports changed: false.
+    hints: { destructive: true, idempotent: true },
+    example: {
+      uuid,
+      operations: [{
+        collection: "tasks",
+        schema: {
+          version: 1,
+          schema: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              done: { type: "boolean" },
+            },
+            required: ["title", "done"],
+            additionalProperties: false,
+          },
+        },
+        upsert: [{ id: "review-notes", value: { title: "Review release notes", done: false } }],
+      }],
+    },
+    related: dataContracts,
+  }),
+  tool({
+    name: "list_docs",
+    title: "List documents",
+    description:
+      "List synced directory stubs without opening rooms. Unfiltered omits decisions; " +
+      "kind/status/tag/has_open_threads predicates include them. Topics present in-force, else pending, else " +
+      "first record, plus pending/conflicts. Predicates may match different live records; resolution uses " +
+      "the whole graph. include_superseded applies predicates per record. include_deleted admits archived, " +
+      "never permanently deleted UUIDs; it is no predicate. Filters combine; unknown tags refuse. " +
+      "has_open_threads accepts only true (known openThreadCount >= 1); false refuses. Every entry, including " +
+      "inForce/pending/conflicts, caches openThreadCount: threads not resolved, including deleted anchors; " +
+      "absent means unknown. Use get_doc for threads, annotate to reply/resolve. Regular " +
+      "code_check cache: repository/commit/checked_at/result plus recorded rev/paths when known; paths are hints, not complete dependencies. No current page rev is cached. [] if never checked, absent " +
+      "if uncached. Results: matches (agrees), ahead (intentionally undelivered), drift (unintended " +
+      "disagreement); content edits preserve checks. Decisions omit code_check/TL;DR; answerPreview: first " +
+      "answer paragraph/list or null; discussion: RFC UUID/null, apart from curated links/recorded answer; " +
+      "both absent if unknown. Rows cache description/tags/lifecycle/authority metadata, sidebar-derived " +
+      "pinned, approximate timestamps. get_doc marks related/linked topics.",
+    input: listDocsInput,
+    operation: listDocsOperation,
+    example: { kind: "decision", status: "open" },
+    related: documentContracts,
+    details: toolHelpDetails.list_docs,
+  }),
+  tool({
+    name: "search",
+    title: "Search documents",
+    description:
+      "Find live documents containing any query word in titles, descriptions, content or assigned tag names. " +
+      "English word forms match; case and accents fold, underscore groups match adjacent words and a trailing * " +
+      "matches prefixes. Punctuation or emoji alone matches nothing. Results use title-weighted bm25 relevance, " +
+      "without a strict title-first or matched-word-count order. Optional kind narrows to regular documents or " +
+      "decision records. Optional tag accepts one catalog id or current name (case ignored), or a list: any listed tag " +
+      "matches and more listed tags boost relevance; unknown tags refuse. Every hit includes kind and canonical " +
+      "tags; decision hits include current record state, including superseded and conflict. No hits does not " +
+      "prove the index is empty or the replica complete.",
+    input: searchInput,
+    operation: searchOperation,
+    example: { query: "release checklist", kind: "regular", tag: ["mcp", "cli"], limit: 10 },
+    related: documentContracts,
+    details: toolHelpDetails.search,
+  }),
+  tool({
+    name: "backlinks",
+    title: "Documents linking here",
+    description:
+      "Documents that reference this one, by UUID and never by path or title. The answer is the union of two " +
+      "kinds of edge, which it does not distinguish: the curated doc-level `links` set_metadata owns, and every " +
+      "inline reference in a prose block or table cell — written by link_range, an `inline` run, or a table " +
+      "cell's inline markdown. A citation needs no `links` entry to appear here.\n\n" +
+      "Each one carries its `description` — null where it has none — so a citing document can be judged without opening it.",
+    input: backlinksInput,
+    operation: backlinksOperation,
+    example: { uuid },
+    related: documentContracts,
+  }),
+  tool({
+    name: "find_decisions",
+    title: "Find decisions linking a GitHub item",
+    description:
+      "Find live decision records whose prose links one GitHub issue or PR, using this replica's derived index " +
+      "without opening document rooms or calling GitHub. Only external link hrefs in prose count; labels, " +
+      "unlinked text and source blocks do not. Pass github_ref as owner/repo#n or an http(s) github.com " +
+      "/issues/n or /pull/n URL. Equivalent case/path spellings and suffixes normalize to the same identity; " +
+      "bare #n and other hosts refuse with invalid_github_reference. Returns every indexed live matching record " +
+      "once, ordered by title under SQLite binary collation then UUID, without pagination or topic resolution. " +
+      "Archived records are omitted. Results may lag unseen or unindexed content; an empty array does not prove " +
+      "replica completeness.",
+    input: findDecisionsInput,
+    operation: findDecisionsOperation,
+    example: { github_ref: "example/project#42" },
+    related: documentContracts,
+    details: toolHelpDetails.find_decisions,
+  }),
+  tool({
+    name: "edit_block",
+    title: "Edit one block",
+    description:
+      "Splice block text, preserving edits elsewhere; list-item list/indent can change in place. " +
+      "Assert old_text and preferably rev from get_doc; " +
+      "stale_block or old_text_mismatch returns currentText/currentRev. Assertions are replica-local. " +
+      "Edit prose strictly inside unmarked text; replace marked spans with delete_block/insert_block " +
+      "and verify export_markdown. Tables require GFM old/new text and table_mapping for " +
+      "structural/multi-cell edits. Cards take :::card content: inline-Markdown prose, repeated button: " +
+      "[Text](destination) lines after footer in authored order. New buttons need nonempty plain labels " +
+      "linking to https or exact claude://code/new, claude-cli://open, codex://new, optionally with " +
+      "?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; " +
+      "invalid_card refuses bad input; unchanged " +
+      "parts, buttons and anchors survive. Rev includes each button's text, destination, appearance and " +
+      "order. Figma takes :::figma content: url, optional plain title and height 240–960, blank line " +
+      "and marked caption. Accepted Figma view URLs retain only the path and node-id, " +
+      "starting-point-node-id, version-id on www.figma.com. invalid_figma refuses without writing. " +
+      "Changed headers update their fields; unchanged caption marks/anchors survive. Figma rev includes " +
+      "caption formatting. Card/Figma conversions and table_mapping are refused; new document targets " +
+      "must be known locally.",
+    input: editBlockInput,
+    operation: editBlockOperation,
+    // Replaces text; table_mapping can replace rows again under identical text and rev.
+    hints: { destructive: true, idempotent: false },
+    example: {
+      uuid,
+      block_id: "list-item-1",
+      old_text: "Confirm the final checks passed.",
+      new_text: "Confirm the final checks passed.",
+      rev: "revision-from-get_doc",
+      indent: 1,
+    },
+    related: proseContracts,
+    details: toolHelpDetails.edit_block,
+  }),
+  tool({
+    name: "insert_block",
+    title: "Insert a block",
+    description:
+      "Insert one block after after_block_id, or at the top when omitted; lists use adjacent list-item " +
+      "blocks with list/indent (default bullet/0). " +
+      "Tables take one GFM table or invalid_table refuses. Cards take :::card content without " +
+      "delimiters: nonempty title, optional label/footer, repeated button: [Text](destination) lines " +
+      "and inline-Markdown prose. Button labels are plain text; destinations are https or exact " +
+      "claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled " +
+      "and color neutral/blue/green/violet may follow in either order; defaults are outline neutral. " +
+      "Output keeps authored order, writes style before color and omits defaults. Bad cards refuse with " +
+      "invalid_card. Figma takes :::figma content without delimiters: required url, optional plain " +
+      "one-line title and height 240–960, blank line and marked caption. HTTPS figma.com/www.figma.com " +
+      "design/file/proto/board/slides/community/file links retain the key/id, optional name and " +
+      "node-id, starting-point-node-id, version-id on www.figma.com; other query fields and fragments " +
+      "disappear. invalid_figma refuses bad headers, paths or height without writing; other sites " +
+      "require a plain link. Document targets must be known locally or doclink_target_not_known_locally " +
+      "refuses. get_doc derives Figma kind/file/fileName/node; this tool contacts no Figma service. " +
+      "Other text is plain or literal source; chart source maps document data.",
+    input: insertBlockInput,
+    operation: insertBlockOperation,
+    // Adds a block; repeating adds another block.
+    hints: { destructive: false, idempotent: false },
+    example: {
+      uuid,
+      after_block_id: "list-item-1",
+      type: "list-item",
+      text: "Confirm the final checks passed.",
+      list: "ordered",
+      indent: 2,
+    },
+    related: proseContracts,
+    details: toolHelpDetails.insert_block,
+  }),
+  tool({
+    name: "delete_block",
+    title: "Delete a block",
+    description:
+      "Delete one block. Deleting is never how a block changes type — use insert_block plus edit_block only for " +
+      "new content, and never delete-and-reinsert to re-type, which churns the block id and orphans its " +
+      "annotations.",
+    input: deleteBlockInput,
+    operation: deleteBlockOperation,
+    // Removes a block; repeating finds no block to remove.
+    hints: { destructive: true, idempotent: true },
+    example: { uuid, block_id: "paragraph-1" },
+    related: proseContracts,
+  }),
+  tool({
+    name: "set_metadata",
+    title: "Set document metadata together",
+    description:
+      "Set title/description/tldr/tags/links/code_check or decision discussion; require one. Omissions stay; " +
+      "refusals write nothing and field failures name field. " +
+      "Title/description cannot be cleared. tldr: null clears but preserves deliberate absence; replacing a marked TL;DR requires tldr_opt_in: true with non-null tldr. Tags/links " +
+      "replace; [] clears. list_tags active ids/names (case ignored); assigned retired/unresolved ids stay. New " +
+      "links: directory-known; archived/unchanged accepted. Regular-only code_check replaces one repository's entry " +
+      "(case-insensitive); {repository, commit, result, rev, paths?}. rev must match get_doc's page rev; on refusal reread and compare before recording. paths are hints, not complete dependencies. Writer sets UTC checked_at. Content edits preserve checks; " +
+      "decisions refuse. Only open decisions accept discussion: live, readable non-decision RFC UUID/null. " +
+      "Reuse/create RFC first; RFC/page/approval untouched. " +
+      "Separate from curated links/recorded answer; fixed after open. Decisions have no TL;DR; non-null refuses " +
+      "decision_tldr_unsupported, open null accepted. Decided records refuse tldr/discussion. " +
+      "Title on any live record renames its decision topic; successors inherit it. Title renames preserve approval. " +
+      "answerPreview: first answer paragraph/list; get_doc marks related/linked. " +
+      "See lifecycle's Decision answers and topics section. " +
+      "Archived metadata refuses; lifecycle: set_status.",
+    input: setMetadataInput,
+    operation: setMetadataOperation,
+    // Replaces named fields and sets; repeating a code check records a new time.
+    hints: { destructive: true, idempotent: false },
+    example: {
+      uuid,
+      title: "Release preparation checklist",
+      description: "The release preparation steps, checks and responsibilities for the team.",
+      tldr: "Review the release notes and confirm all checks before publishing.",
+      tags: ["Release"],
+      links: [targetUuid],
+    },
+    related: documentContracts,
+    details: toolHelpDetails.set_metadata,
+  }),
+  tool({
+    name: "set_status",
+    title: "Set a document's lifecycle status",
+    description:
+      "Record a document's lifecycle status. On an ordinary document this also adopts the kind that owns the " +
+      "status; the result names both, so adoption is never silent. A document that already has a kind accepts " +
+      "only that kind's statuses. Its kind is fixed through MCP: if it was adopted in error, retrying with the " +
+      "other kind's status cannot change it. An open record can be withdrawn without an answer; decided records " +
+      "cannot reopen or withdraw. Rejected and withdrawn are final. Rejection requires a non-empty `reason` and " +
+      "a recorded person's answer, and applies only to an open proposal, an agent stance or a decided record in " +
+      "a conflict. It stores `rejectionReason`. Validation refusals change nothing.",
+    input: setStatusInput,
+    operation: setStatusOperation,
+    // Overwrites lifecycle and answer; repeating leaves the same state or is refused.
+    hints: { destructive: true, idempotent: true },
+    example: { uuid, status: "open" },
+    related: documentContracts,
+  }),
+  tool({
+    name: "archive_doc",
+    title: "Archive a document",
+    description:
+      "Archive a document or every record in a decision topic: tombstone directory entries, drop local search " +
+      "rows and unconditionally unpin without erasing content. Reads by UUID remain available. unpinned reports " +
+      "the asserted unpin, not whether a pin was found. An unseen concurrent pin can survive with archived " +
+      "status; use get_sidebar then unpin_doc to remove it. This writes directory and sidebar rooms " +
+      "independently, without rollback or remote atomicity. The answer reports rooms; partial " +
+      "persistence_failed carries uuid, completed/failed rooms, rolledBack: false and recovery. Follow recovery " +
+      "to finish. indexed is false only on index-write failure; the archive remains applied and a later call " +
+      "retries indexing. Restoration uses restore_doc; pin_doc deliberately places the restored document back " +
+      "in navigation.",
+    input: archiveDocInput,
+    operation: archiveDocOperation,
+    // Tombstones and unpins; every repeat raises the unpin counter, suppressing later pins.
+    hints: { destructive: true, idempotent: false },
+    example: { uuid },
+    related: documentContracts,
+    details: toolHelpDetails.archive_doc,
+  }),
+  tool({
+    name: "delete_doc",
+    title: "Permanently delete an archived document",
+    description:
+      "Permanently delete an archived regular document, including content, comments, data and history. " +
+      "Only its UUID and permanent deletion mark remain. Replicas remove their copies when they learn the mark; " +
+      "the hub refuses later room updates. This cannot be undone, including by an offline restore. " +
+      "Live documents refuse with doc_not_archived; deleted UUIDs refuse with doc_deleted; decision records refuse. " +
+      "Links stored in other documents stay unchanged. Directory and sidebar writes report independent durability.",
+    input: deleteDocInput,
+    operation: deleteDocOperation,
+    hints: { destructive: true, idempotent: true },
+    example: { uuid },
+    related: documentContracts,
+    details: toolHelpDetails.delete_doc,
+  }),
+  tool({
+    name: "restore_doc",
+    title: "Restore an archived document",
+    description:
+      "Remove one archive layer: restore an archived decision topic first, retaining records archived individually " +
+      "beforehand; in a live topic restore the addressed record. The archived result says whether that answer " +
+      "remains archived. Restore directory visibility and search indexing, using its recorded " +
+      "title and tags. It never restores a sidebar pin; use pin_doc for placement. On an already live regular document " +
+      "it can repair a drifted directory stub. Check indexed: false means this replica lacks the content or its " +
+      "index write failed. The restore still applies and replicates; search catches up when content arrives or " +
+      "a later call retries. Offline content arrival requires hub recovery.",
+    input: restoreDocInput,
+    operation: restoreDocOperation,
+    // Removes one archive layer; repeating can restore a previously archived record.
+    hints: { destructive: true, idempotent: false },
+    example: { uuid },
+    related: documentContracts,
+    details: toolHelpDetails.restore_doc,
+  }),
+  tool({
+    name: "annotate",
+    title: "Annotate a range, or reply to and resolve a thread",
+    description:
+      "Open an anchored comment thread on block_id/start/end, or reply with thread_id and no range fields. text " +
+      "and author belong to both modes; only replies accept resolved to resolve or reopen in the same update. " +
+      "Mixing modes or incomplete ranges refuses at the input boundary. For tables, row/column are zero-based " +
+      "GFM projection indices including header row 0. Offsets count displayed cell characters, including stored " +
+      "edge whitespace: remove exactly the GFM padding before decoding inline syntax. Returned coordinates " +
+      "follow moved cells; orphaned ranges are null and orphaned threads still accept replies. Missing, invalid " +
+      "or non-table coordinates refuse with annotation_cell; empty/overlapping ranges refuse with " +
+      "annotation_range. Offsets are clamped to text. Opening a card thread refuses with annotation_card; " +
+      "open it in the web editor. Opening a Figma thread refuses with annotation_figma and no write. " +
+      "Existing card and Figma threads accept replies, resolution and reopening; Figma ranges name caption.",
+    input: annotateInput,
+    operation: annotateOperation,
+    // Replies can overwrite thread resolution; repeating adds another comment.
+    hints: { destructive: true, idempotent: false },
+    example: {
+      uuid,
+      block_id: "paragraph-1",
+      start: 0,
+      end: 6,
+      text: "Who will review the release notes?",
+    },
+    related: proseContracts,
+    details: toolHelpDetails.annotate,
+  }),
+  tool({
+    name: "link_range",
+    title: "Link a range of a block to another document",
+    description:
+      "Mark selected prose text as a document reference without changing its characters or rev. start/end are " +
+      "character offsets measured against the required rev; stale_block returns currentText/currentRev for " +
+      "remeasurement. Indices clamp to text and swap if reversed; empty ranges refuse. Existing document " +
+      "references are retargeted; external links, source blocks, tables, cards and Figma blocks refuse. Write card and Figma caption links " +
+      "as inline Markdown in their container text. doc_id must be known to this replica's directory or doclink_target_not_known_locally refuses " +
+      "before writing; archived targets are accepted. The answer includes the target title, but the label stays " +
+      "the selected text and does not follow renames. Backlinks update without changing curated meta.links.",
+    input: linkRangeInput,
+    operation: linkRangeOperation,
+    // Retargets a document link; unchanged rev lets repeats write the same mark.
+    hints: { destructive: true, idempotent: true },
+    example: {
+      uuid,
+      block_id: "paragraph-1",
+      start: 11,
+      end: 24,
+      doc_id: targetUuid,
+      rev: "revision-from-get_doc",
+    },
+    related: proseContracts,
+    details: toolHelpDetails.link_range,
+  }),
+  tool({
+    name: "export_markdown",
+    title: "Export a document as markdown",
+    description:
+      "Render a Markdown projection: code, terminal and chart keep source fences; tables write " +
+      "padded GFM with inline cell marks. Cards export separate :::card containers with inline-Markdown " +
+      "prose and button: [Text](destination) lines after footer in authored order. Each exported " +
+      "button's plain label links to https or exact claude://code/new, claude-cli://open, codex://new, " +
+      "optionally with ?query. Style outline/filled and color neutral/blue/green/violet default to " +
+      "outline neutral; export writes style before color and omits defaults. Import restores buttons " +
+      "and appearances. Figma exports separate :::figma containers: url, optional literal title and " +
+      "height, blank line and marked caption. Normalized HTTPS www.figma.com links retain " +
+      "design/file/proto/board/slides/community/file path, key/id, optional name and node-id, " +
+      "starting-point-node-id, version-id; other query values and fragments were dropped at save. " +
+      "Absent keys are omitted; header newlines fold to spaces and prose lines starting ::: are " +
+      "escaped. Import restores caption marks and adjacent containers; invalid/unclosed containers " +
+      "remain literal paragraphs. MCP refuses bad Figma content with invalid_figma; get_doc derives " +
+      "kind/file/fileName/node. Markdown help owns height 240–960 and accepted links. Export contacts " +
+      "no Figma service. Chart/data records are omitted with a notice; Markdown is never storage and " +
+      "MCP has no import tool.",
+    input: exportMarkdownInput,
+    operation: exportMarkdownOperation,
+    example: { uuid, frontmatter: true, annotations: "drop" },
+    related: [...proseContracts, "data"],
+  }),
+  tool({
+    name: "sync_status",
+    title: "Sync status",
+    description:
+      "Inspect local replica state, pending rooms and hub connection/acknowledgements. hub.status distinguishes " +
+      "disabled, retryable hub-down, auth-failed requiring action, and update-required protocol mismatch. " +
+      "hub.recoveryClass, authRecovery and reason explain recovery; protocolVersion and hubProtocolVersion " +
+      "identify the incompatible side. Tools still work locally. unsyncedChanges counts durable pending rooms; " +
+      "inFlightUpdates counts provider sync messages on the current connection, resetting on reconnect. " +
+      "lastSync is this machine's stored UTC time when its full replica caught up, or null; it never moves " +
+      "backwards across processes. persistence diagnoses a failed log append and remains readable when ordinary " +
+      "replica tools are quarantined until restart. See this tool's help for counter units and lastSync " +
+      "conditions.",
+    input: syncStatusInput,
+    operation: syncStatusOperation,
+    example: {},
+    related: ["workspaces", "tool-contracts"],
+    details: toolHelpDetails.sync_status,
+  }),
+  tool({
+    name: "get_sidebar",
+    title: "Read the sidebar",
+    description:
+      "The workspace's curated navigation: named groups of pinned documents, in the order they are stored. This " +
+      "is not the corpus — unpinned documents are fully alive and reachable through list_docs, search, links " +
+      "and backlinks. Unpinned documents are simply not entry points.",
+    input: getSidebarInput,
+    operation: getSidebarOperation,
+    example: {},
+    related: documentContracts,
+  }),
+  tool({
+    name: "pin_doc",
+    title: "Pin a document into a sidebar group",
+    description:
+      "Pin a document into a group, creating the group when no group carries that name. `index` places it; omit " +
+      "it to append.\n\n" +
+      "One pin per document across the whole sidebar, so this is also how a pinned document is moved or " +
+      "reordered: pinning one that is already pinned moves it to `index` in the named group — carrying the pin " +
+      "as it stands rather than re-pinning it, so a concurrent unpin still wins — and `index` then counts " +
+      "positions in the target group after the document has been taken out of it.",
+    input: pinDocInput,
+    operation: pinDocOperation,
+    // Moves an existing pin; repeating leaves it in the requested place.
+    hints: { destructive: true, idempotent: true },
+    example: { uuid, group: "Release", index: 0 },
+    related: documentContracts,
+  }),
+  tool({
+    name: "unpin_doc",
+    title: "Unpin a document",
+    description:
+      "Remove a document from the sidebar, wherever it sits. The document itself is untouched: unpinning is a " +
+      "navigation act. archive_doc hides a document; delete_doc permanently deletes an archived regular document.\n\n" +
+      "An unpin beats a move made concurrently on another replica, so a document does not reappear because " +
+      "somebody was dragging it at the time. It takes no group: one pin per document means there is only ever " +
+      "one place to remove it from. `unpinned` is false when the document was not pinned to begin with.",
+    input: unpinDocInput,
+    operation: unpinDocOperation,
+    // Removes a pin; repeating reports unpinned: false.
+    hints: { destructive: true, idempotent: true },
+    example: { uuid },
+    related: documentContracts,
+  }),
+  tool({
+    name: "sidebar_group",
+    title: "Rename, delete or move a sidebar group",
+    description:
+      "Manage the groups themselves. `delete` removes the group and its pins — the documents are untouched, " +
+      "because the group only ever held their uuids, and they stay reachable through list_docs and search.\n\n" +
+      "`action` picks one of three shapes and each takes only its own field: `rename` needs `name` and refuses " +
+      "`index`, `move` takes `index` (omitted: last) and refuses `name`, `delete` takes neither. A field " +
+      "belonging to another action is refused at the input boundary before the sidebar is touched, rather than " +
+      "ignored — so a call that says two things is a failure you can see, not a silent half-success.\n\n" +
+      "There is no create action: pin_doc creates a group by naming one that does not exist, which is how a " +
+      "group comes into being with something in it rather than empty.",
+    input: sidebarGroupInput,
+    operation: sidebarGroupOperation,
+    // Renames, moves or deletes groups/pins; repeated rename/delete by name can reach a namesake.
+    hints: { destructive: true, idempotent: false },
+    example: { action: "rename", group: "Release", name: "Release preparation" },
+    related: documentContracts,
+  }),
+  tool({
+    name: "get_help",
+    title: "Read product help",
+    description:
+      "Read bundled, version-matched product help by topic or exact registered tool name. Omit topic to list " +
+      "every topic with its id, title, description and URI. The returned text is the same Markdown as " +
+      "uberblick://help/{topic}. Help is workspace-agnostic, needs no guidance briefing and never opens or " +
+      "settles a replica; it remains available offline and while the replica store is quarantined. " +
+      "Unknown topics refuse with unknown_help_topic and list valid topic ids; choose one and retry.",
+    input: getHelpInput,
+    operation: getHelpOperation,
+    example: { topic: "get_doc" },
+    related: ["orientation", "tools", "tool-contracts"],
+  }),
+];

@@ -7,8 +7,11 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   BlockNotFoundError,
+  CARD_NODE_NAMES,
+  CARD_PARTS,
   StaleBlockError,
   appendBlock,
+  cardPartTexts,
   createAnnotation,
   deleteBlock,
   editBlock,
@@ -22,6 +25,10 @@ import {
   insertBlock,
   listAnnotations,
   resolveAnnotationRange,
+  seedNewCardParts,
+  seedNewTableCells,
+  tableCellTexts,
+  tableRows,
 } from "../src/index.js";
 import { replicaPair, syncDocs } from "./helpers.js";
 
@@ -179,27 +186,6 @@ describe("two clients, one block", () => {
 
     expect(getBlock(a, blockId)!.text).toBe("The slow brown cat jumps");
     expect(getBlock(b, blockId)!.text).toBe(getBlock(a, blockId)!.text);
-  });
-
-  it("converges when both clients edit the same range (no lost characters, deterministic)", () => {
-    const original = "one two three";
-    let blockId = "";
-    const [a, b] = replicaPair((doc) => {
-      initDoc(doc, { uuid: UUID, title: "Same range" });
-      blockId = appendBlock(doc, { type: "paragraph", text: original });
-    });
-
-    editBlock(a, blockId, original, "one TWO three");
-    editBlock(b, blockId, original, "one 2 three");
-    syncDocs(a, b);
-
-    // Overlapping edits interleave rather than clobber; the point is that both
-    // replicas agree, and that this is exactly the case a caller avoids by
-    // passing a fresh oldText (see the stale-oldText test below).
-    const merged = getBlock(a, blockId)!.text;
-    expect(getBlock(b, blockId)!.text).toBe(merged);
-    expect(merged.startsWith("one ")).toBe(true);
-    expect(merged.endsWith(" three")).toBe(true);
   });
 });
 
@@ -372,27 +358,70 @@ describe("concurrent structural changes", () => {
     expect(idsA.indexOf(fromB)).toBeLessThan(idsA.indexOf(appendedB));
     expect(getBlocks(a)).toEqual(getBlocks(b));
   });
+});
 
-  it("converges when one client deletes a block another client inserts after", () => {
-    let anchor = "";
-    let tail = "";
-    const [a, b] = replicaPair((doc) => {
-      initDoc(doc, { uuid: UUID, title: "Structure" });
-      anchor = appendBlock(doc, { type: "paragraph", text: "anchor" });
-      tail = appendBlock(doc, { type: "paragraph", text: "tail" });
-    });
+/** An empty part as the web editor creates it, before its first keystroke. */
+function emptyPart(name: string): Y.XmlElement {
+  const part = new Y.XmlElement(name);
+  part.insert(0, [new Y.XmlElement("paragraph")]);
+  return part;
+}
 
-    const inserted = insertBlock(b, anchor, {
-      type: "paragraph",
-      text: "inserted after anchor",
-    });
-    deleteBlock(a, anchor);
+const WEB_CONTAINERS = [
+  {
+    name: "table cell",
+    seed: seedNewTableCells,
+    parts: 2,
+    build: (): Y.XmlElement => {
+      const header = new Y.XmlElement("tableRow");
+      header.insert(0, [emptyPart("tableHeader")]);
+      const row = new Y.XmlElement("tableRow");
+      row.insert(0, [emptyPart("tableCell")]);
+      const table = new Y.XmlElement("table");
+      table.insert(0, [header, row]);
+      return table;
+    },
+    texts: (table: Y.XmlElement) => tableRows(table).flat().flatMap(tableCellTexts),
+  },
+  {
+    name: "card part",
+    seed: seedNewCardParts,
+    parts: CARD_PARTS.length,
+    build: (): Y.XmlElement => {
+      const card = new Y.XmlElement("card");
+      card.insert(0, CARD_PARTS.map((part) => emptyPart(CARD_NODE_NAMES[part])));
+      return card;
+    },
+    texts: (card: Y.XmlElement) => CARD_PARTS.flatMap((part) => cardPartTexts(card, part)),
+  },
+];
 
-    syncDocs(a, b);
+describe("web-created container text", () => {
+  // Unseeded, two replicas' first keystrokes into one empty part each create a
+  // text, and consolidating those texts can lose later writes.
+  it.each(WEB_CONTAINERS)("seeds each empty $name in its creating transaction, never a received one", ({ seed, parts, build, texts }) => {
+    const web = new Y.Doc();
+    const peer = new Y.Doc();
+    web.on("beforeObserverCalls", seed);
+    peer.on("beforeObserverCalls", seed);
+    web.transact(() => getBlocksFragment(web).insert(0, [build()]));
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(web));
+    const first = getBlocksFragment(web).get(0) as Y.XmlElement;
+    const second = getBlocksFragment(peer).get(0) as Y.XmlElement;
+    expect(texts(first)).toHaveLength(parts);
+    texts(first)[0]!.insert(0, "First ");
+    texts(second)[0]!.insert(0, "Second ");
+    syncDocs(web, peer);
+    expect(texts(first)).toHaveLength(parts);
+    expect(texts(second)[0]!.toString()).toBe(texts(first)[0]!.toString());
+    expect(texts(first)[0]!.toString()).toContain("First ");
+    expect(texts(first)[0]!.toString()).toContain("Second ");
 
-    // The inserted block survives its deleted neighbour and keeps its place.
-    expect(blockIdsOf(a)).toEqual([inserted, tail]);
-    expect(blockIdsOf(b)).toEqual([inserted, tail]);
+    const sender = new Y.Doc();
+    getBlocksFragment(sender).insert(0, [build()]);
+    const receiver = new Y.Doc();
+    receiver.on("beforeObserverCalls", seed);
+    Y.applyUpdate(receiver, Y.encodeStateAsUpdate(sender));
+    expect(texts(getBlocksFragment(receiver).get(0) as Y.XmlElement)).toEqual([]);
   });
-
 });

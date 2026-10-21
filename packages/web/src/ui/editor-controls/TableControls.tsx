@@ -5,7 +5,7 @@ import type { Editor } from "@tiptap/core";
 import { DragDropProvider } from "@dnd-kit/react";
 import type { DragDropManager } from "@dnd-kit/react";
 import { Accessibility, Feedback } from "@dnd-kit/dom";
-import { findBlockById } from "../../editor/block-menu.js";
+import { findBlockById } from "../../editor/blocks.js";
 import { isOrdinaryTable } from "../../editor/table.js";
 import { actOnTable, deleteTableColumn, moveTableColumn, moveTableColumnToGap, moveTableRow, resolveTableColumn, resolveTableRow, tableColumnTargets, tableRowTarget, tableRowTargets } from "../../editor/table-controls.js";
 import type { TableAction, TableColumnTarget, TableRowTarget } from "../../editor/table-controls.js";

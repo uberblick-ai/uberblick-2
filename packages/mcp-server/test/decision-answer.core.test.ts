@@ -100,11 +100,10 @@ describe("short decision answers", () => {
     expect(await rig.ok("set_status", { uuid: valid.uuid, status: "decided" })).toMatchObject({ kind: "decision", status: "decided", agentStance: true });
   });
 
-  it("refuses new TL;DR atomically, accepts null on open records and never nudges decision writes", async () => {
+  it("accepts null TL;DR on open records and never nudges decision writes", async () => {
     const rig = await local();
     const record = await create(rig, { blocks: [paragraph] });
     expect(record).not.toHaveProperty("tldrHint");
-    await refuse(rig, "set_metadata", { uuid: record.uuid, title: "Must stay unchanged", description: "Must stay unchanged too.", tldr: "New TL;DR" }, "decision_tldr_unsupported", record.uuid);
     setTldr(rig.instance.replicas.replica(record.uuid).doc, "Legacy answer");
     expect(await rig.ok("get_doc", { uuid: record.uuid })).toMatchObject({ tldr: null });
     expect(await rig.ok("set_metadata", { uuid: record.uuid, description: "Discovery copy." })).toMatchObject({ tldr: null });

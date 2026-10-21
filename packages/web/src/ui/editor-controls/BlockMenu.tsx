@@ -13,13 +13,13 @@ import type { Transaction } from "@tiptap/pm/state";
 import {
   convertBlockAtTrigger,
   filterBlockMenu,
-  findBlockById,
   insertBlockBelow,
   opensSlashSession,
   slashTriggerAt,
   triggerHint,
 } from "../../editor/block-menu.js";
 import type { BlockMenuEntry, SlashTrigger } from "../../editor/block-menu.js";
+import { findBlockById } from "../../editor/blocks.js";
 import { useCaretMenuKeys } from "./caret-menu.js";
 import { CaretMenu, useCaretMenuIds } from "./CaretMenu.js";
 import { FigmaDraft } from "./FigmaDraft.js";

@@ -1,6 +1,8 @@
-import { issueCredential, mintDeviceRequestProof as mintRequestProof, renewCredential, type TestCredential as IssuedCredential } from "./device-credentials.js";
+import { issueCredential, MANAGEMENT_OPERATION_NAMES, managementAction, mintDeviceRequestProof as mintRequestProof, renewCredential,
+  type TestCredential as IssuedCredential } from "./device-credentials.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { importCredentialKey, type RequestAction } from "@uberblick/schema/token";
+import { MANAGEMENT_OPERATIONS } from "../src/access-management.js";
 import { CredentialRegistry } from "../src/credentials.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
@@ -9,16 +11,9 @@ import { WORKSPACE, removeTempDatabases, tempDatabasePath } from "./helpers.js";
 const databases: HubDatabase[] = [];
 const principalId = "00000000-0000-4000-8000-000000000001";
 const deviceId = "00000000-0000-4000-8000-000000000002";
-const mutations: RequestAction[] = [
-  { operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "1234" },
-  { operation: "change-role", workspaceId: WORKSPACE, principalId, role: "admin" },
-  { operation: "remove-member", workspaceId: WORKSPACE, principalId },
-  { operation: "revoke-device", deviceId },
-  { operation: "remove-hub-admin", principalId },
-  { operation: "suspend-workspace", workspaceId: WORKSPACE },
-  { operation: "restore-workspace", workspaceId: WORKSPACE },
-  { operation: "promote-workspace", workspaceId: WORKSPACE, attemptId: deviceId },
-];
+const targets = { workspaceId: WORKSPACE, principalId, deviceId, attemptId: deviceId,
+  githubUsername: "new-account", githubAccountId: "1234" };
+const removal = managementAction("remove-member", targets);
 
 function rig(path = ":memory:", now?: () => number) {
   const db = new HubDatabase(path, error => { throw error; });
@@ -48,7 +43,7 @@ afterEach(() => {
 });
 
 describe("durable request proof consumption", () => {
-  it.each([{ operation: "list-devices" } as const, mutations[2]!])(
+  it.each([managementAction("list-devices", targets), removal])(
     "refuses a fresh $operation proof that expires before consumption without recording it", async action => {
       let now = Date.now();
       let advanceOnRead = false;
@@ -72,16 +67,19 @@ describe("durable request proof consumption", () => {
     },
   );
 
-  it.each(mutations)("accepts concurrent $operation verification once across registries", async action => {
+  // The HTTP suite checks that every changesState: false operation leaves
+  // access state unchanged, so the table cannot mark a mutation reusable.
+  it.each(MANAGEMENT_OPERATION_NAMES)("verifies a concurrent %s proof once across registries if it changes state, else every time", async operation => {
+    const { changesState } = MANAGEMENT_OPERATIONS[operation];
     const { db, store } = rig();
     const other = new CredentialRegistry(db);
     const issued = issue(store);
+    const action = managementAction(operation, targets);
     const token = await proof(issued, action);
     const results = await Promise.all([store.verifyRequest(token, action), other.verifyRequest(token, action)]);
-    expect(results.filter(result => result !== null)).toHaveLength(1);
-    expect(results.filter(result => result === null)).toHaveLength(1);
-    expect(await store.verifyRequest(token, action)).toBeNull();
-    expect(used(db)).toHaveLength(1);
+    expect(results.filter(result => result !== null)).toHaveLength(changesState ? 1 : 2);
+    expect(await store.verifyRequest(token, action) === null).toBe(changesState);
+    expect(used(db)).toHaveLength(changesState ? 1 : 0);
   });
 
   it("retains future-issued proofs through their exact expiry across restart and prunes only afterwards", async () => {
@@ -90,7 +88,7 @@ describe("durable request proof consumption", () => {
     const clock = vi.spyOn(Date, "now").mockReturnValue(now * 1000);
     const first = rig(path);
     const issued = issue(first.store);
-    const action = mutations[2]!;
+    const action = removal;
     const token = await proof(issued, action, now + 60);
     expect(await first.store.verifyRequest(token, action)).not.toBeNull();
     first.db.close();
@@ -118,7 +116,7 @@ describe("durable request proof consumption", () => {
     const { db, store, memberships } = rig();
     const issued = issue(store);
     const wrongKey = await importCredentialKey(issue(store).keyBytes);
-    for (const action of [mutations[2]!, { operation: "renew-credential" } as const]) {
+    for (const action of [removal, { operation: "renew-credential" } as const]) {
       const forged = await mintRequestProof(wrongKey, { kid: issued.record.id, ...action, lifetimeSeconds: 60 });
       const now = Math.floor(Date.now() / 1000);
       const payload = Buffer.from(JSON.stringify({ typ: "request", kid: issued.record.id, ...action,

@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import type { McpConfig } from "../src/config.js";
 import { MirrorStore } from "../src/store.js";
 import type { UpdateOrigin } from "../src/store.js";
+import { tools } from "../src/tool-table.js";
+import type { Tool } from "../src/tool-table.js";
 import { drainWaits } from "./lifecycle.js";
 
 export { drainWaits, waitUntil } from "./lifecycle.js";
@@ -238,3 +240,10 @@ export interface ToolCall {
 
 /** The name used by test tool callers. */
 export const CLIENT_NAME = "uberblick-tests";
+
+/** A registered tool's table entry. */
+export function toolNamed(name: string): Tool {
+  const tool = tools.find((entry) => entry.name === name);
+  if (tool === undefined) throw new Error(`Unknown tool: ${name}`);
+  return tool;
+}

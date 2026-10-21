@@ -66,13 +66,6 @@ export interface AwarenessUser {
   color: string;
 }
 
-/** One swatch on the presence picker: a hue, and what to call it. */
-export interface PresenceColor {
-  name: string;
-  /** 6-digit hex, `#rrggbb`. */
-  hex: string;
-}
-
 function pick<T>(values: readonly T[]): T {
   const index = Math.floor(Math.random() * values.length);
   // noUncheckedIndexedAccess: the index is always in range, but prove it.

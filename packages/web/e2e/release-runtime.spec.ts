@@ -10,7 +10,9 @@ import { createHub, silentLogger } from "@uberblick/hub";
 import type { Hub } from "@uberblick/hub";
 import { createTeamHub } from "@uberblick/hub/team";
 import type { TeamHub } from "@uberblick/hub/team";
+import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
+import { LOCAL_SESSION_KEY } from "../src/collab/local-session.js";
 import { build, preview } from "vite";
 import type { PreviewServer } from "vite";
 
@@ -292,12 +294,24 @@ test("ub open's local page ignores remote claim state and keeps its editor", asy
   });
   await context.route("**/uberblick-config.json", async (route) => {
     await route.fulfill({ json: {
-      hubUrl: `${appUrl.replace("http:", "ws:")}/ws`, workspaces: [WORKSPACE], hubAuthToken: SECRET,
-      remoteHubUrl: "wss://remote.example/ws", rebound: false,
+      hubUrl: `${appUrl.replace("http:", "ws:")}/ws`, workspaces: [WORKSPACE], hubAuthToken: "",
+      remoteHubUrl: "wss://remote.example/ws",
+      servedWorkspaces: { [WORKSPACE]: { remoteHubUrl: "wss://remote.example/ws", name: null } },
     } });
+  });
+  // ub open's page asks it for room tokens with the session it traded its launch secret for.
+  await context.addInitScript((key) => localStorage.setItem(key, "s".repeat(43)), LOCAL_SESSION_KEY);
+  const key = await importRootSecret(SECRET);
+  await context.route("**/api/room-token", async (route) => {
+    const { workspace, subject } = route.request().postDataJSON() as { workspace: string; subject: string };
+    await route.fulfill({ json: { token: await mintToken(key, {
+      typ: "room", sub: subject, workspace, scope: "read-write", kid: null, lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+    }) } });
   });
   await page.goto(`${appUrl}/${WORKSPACE}`);
   await expect(page.getByRole("button", { name: "+ New page" })).toBeVisible();
+  // Enabled only once the directory room connects with ub open's room token.
+  await expect(page.getByRole("button", { name: "+ New page" })).toBeEnabled();
   await expect(page.getByRole("region", { name: "Hub setup guide" })).toHaveCount(0);
   expect(claimReads).toBe(0);
   await expectNoViolations(page);

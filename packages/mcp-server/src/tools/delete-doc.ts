@@ -2,12 +2,12 @@ import { deleteDirectoryEntry, unpinDoc } from "@uberblick/schema";
 import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
 import { roomStages } from "./helpers.js";
-import { operation } from "./operation.js";
+import { DOCUMENT_WRITE, operation } from "./operation.js";
 import { uuidArg } from "./schemas.js";
 
 export const inputSchema = strictInput({ uuid: uuidArg });
 
-export const deleteDocOperation = operation("delete_doc", inputSchema, (context, { uuid }) => {
+export const deleteDocOperation = operation(DOCUMENT_WRITE, inputSchema, (context, { uuid }) => {
   const { replicas, requireStub, titleFor, durabilityAcross } = context;
   const stub = requireStub(uuid);
   if (stub.kind === "decision") {

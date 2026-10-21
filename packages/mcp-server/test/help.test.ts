@@ -2,16 +2,15 @@ import { randomUUID } from "node:crypto";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { createTagCatalogEntry, setTags } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
-import { FAILURE_INSTRUCTIONS, READ_ONLY_TOOLS } from "../src/failures.js";
+import { FAILURE_INSTRUCTIONS } from "../src/failures.js";
 import { GUIDANCE_INSTRUCTIONS } from "../src/briefing.js";
-import { toolHelpEntries } from "../src/help-examples.js";
 import { HelpCatalog } from "../src/help.js";
 import { log } from "../src/log.js";
 import { INTERNAL_RESOURCE_ERROR_MESSAGE } from "../src/resource-adapter.js";
-import { FailingStore, removeTempDirs, startServer, TEST_SECRET, testConfig } from "./helpers.js";
+import { FailingStore, removeTempDirs, startServer, TEST_SECRET, testConfig, toolNamed } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
-const concepts = ["orientation", "workspaces", "lifecycle", "markdown", "data", "tools", "tool-contracts"];
+const concepts = ["orientation", "workspaces", "lifecycle", "markdown", "ablauf", "data", "tools", "tool-contracts"];
 const rigs: Rig[] = [];
 
 async function local(config = testConfig(), store?: FailingStore): Promise<Rig> {
@@ -63,6 +62,16 @@ it("lists every concept and registered tool once, with the same Markdown through
   }
 });
 
+it("points Markdown authors to Ablauf help and requires checking edits in the web editor", () => {
+  const help = new HelpCatalog();
+  const markdown = help.read("markdown").text;
+  expect(markdown).toContain("[Ablauf diagrams](uberblick://help/ablauf)");
+  expect(markdown).not.toContain("github.com/uberblick-ai/ablauf");
+  const ablauf = help.read("ablauf").text.replace(/\s+/g, " ");
+  expect(ablauf).toContain("After every edit, check the drawing in the web editor.");
+  expect(ablauf).toContain("MCP does not return the renderer's diagnostics");
+});
+
 it("refuses unknown topics through the tool failure contract and the resource-not-found protocol error", async () => {
   const rig = await local();
   const { topics } = await rig.ok("get_help");
@@ -73,24 +82,10 @@ it("refuses unknown topics through the tool failure contract and the resource-no
     message: expect.any(String), recoveryClass: "manual", recovery: expect.any(String),
   } });
   for (const key of ["applied", "partial", "synced"]) expect(refused.payload).not.toHaveProperty(key);
-  expect(READ_ONLY_TOOLS.has("get_help")).toBe(true);
   const uri = `uberblick://help/${topic}`;
   await expect(rig.client.readResource({ uri })).rejects.toMatchObject({
     code: -32002, data: { uri }, message: `MCP error -32002: MCP error -32002: Resource not found: ${uri}`,
   });
-});
-
-it("documents only regular pages and decision lifecycle values in product help", async () => {
-  const rig = await local();
-  const { topics } = await rig.ok("get_help");
-  const lifecycle = topics.find((topic: { id: string }) => topic.id === "lifecycle");
-  expect(lifecycle.description).not.toMatch(/requirement/i);
-  for (const topic of ["lifecycle", "create_doc", "get_doc", "list_docs", "set_status", "set_metadata", "markdown", "export_markdown"]) {
-    const { text } = await rig.ok("get_help", { topic });
-    expect(text, topic).not.toMatch(/requirement|\bplanned\b|\bimplementing\b|\bdone\b/i);
-    expect(text, topic).not.toMatch(/`draft`|"draft"/);
-  }
-  expect((await rig.ok("get_help", { topic: "markdown" })).text).toContain("decision log of any regular page");
 });
 
 it.each(["list", "read"] as const)("contains an unexpected help resource %s failure and logs its original cause", async (route) => {
@@ -126,9 +121,7 @@ it("renders each tool's actual full description and schemas, with an accepted ex
     const inputSchema = jsonSection(text, "Arguments");
     expect(inputSchema, tool.name).toEqual(tool.inputSchema);
     expect(jsonSection(text, "Output"), tool.name).toEqual(tool.outputSchema);
-    const entry = toolHelpEntries[tool.name];
-    expect(entry, `${tool.name} has no per-tool help entry`).toBeDefined();
-    const details = entry!.details;
+    const { details } = toolNamed(tool.name);
     if (details !== undefined) {
       const constraints = text.split("## Constraints\n")[1]?.split("\n## ")[0];
       expect(constraints, `${tool.name} loses its expanded tool-specific contract`).toContain(details);
@@ -146,26 +139,6 @@ it("renders each tool's actual full description and schemas, with an accepted ex
   ]) {
     expect((await rig.ok("get_help", { topic: tool })).text.split("## Related\n")[1])
       .toContain(`uberblick://help/${topic}`);
-  }
-});
-
-it("keeps tool-specific modes, refusals and recovery in the tool's own expanded help", async () => {
-  const rig = await local();
-  for (const [tool, guidance] of [
-    ["create_doc", "before a UUID is allocated or a room is written"],
-    ["create_doc", "rooms already `completed`"],
-    ["edit_block", "strictly inside unmarked text"],
-    ["edit_block", "invalid_table_mapping"],
-    ["edit_block", "currentText` and `currentRev"],
-    ["archive_doc", "rolledBack: false"],
-    ["archive_doc", "a later call retries it"],
-    ["get_data", "first remaining record"],
-    ["get_data", "Cursors are not snapshots"],
-    ["link_range", "decision_read_only"],
-  ]) {
-    const { text } = await rig.ok("get_help", { topic: tool });
-    const constraints = text.split("## Constraints\n")[1]?.split("\n## ")[0];
-    expect(constraints, `${tool}: ${guidance}`).toContain(guidance);
   }
 });
 
@@ -192,160 +165,6 @@ it("creates and re-indents list items using the published help examples", async 
   });
   expect(edited.block.rev).not.toBe(inserted.block.rev);
   expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual([seed, edited.block]);
-});
-
-it("routes decision answer guidance to lifecycle while keeping page context and previews", async () => {
-  const rig = await local();
-  const { tools } = await rig.client.listTools();
-  for (const topic of ["lifecycle", "create_doc", "get_doc", "list_docs", "set_metadata", "update_data"]) {
-    const { text } = await rig.ok("get_help", { topic });
-    for (const rule of ["related", "linked", "answerPreview"]) {
-      expect(text, `${topic}: ${rule}`).toContain(rule);
-    }
-    if (topic !== "update_data") expect(text, topic).toContain("RFC");
-    if (topic !== "lifecycle") {
-      expect(text, topic).toContain("Decision answers and topics");
-      expect(text, topic).toContain("uberblick://help/lifecycle");
-      expect(text, topic).not.toMatch(/brief reasons?|short answer blocks|one to three short|60 words|yes\/no flag/);
-    }
-    expect(text, topic).not.toMatch(/decision line|boundary table|owner's recorded GitHub decision|reasons and guidance/);
-    const description = tools.find((tool) => tool.name === topic)?.description;
-    if (description !== undefined) {
-      for (const rule of ["related", "linked", "answerPreview"]) expect(description, topic).toContain(rule);
-      expect(description, topic).not.toMatch(/decision line|boundary table|governs requires/);
-    }
-  }
-  const createDoc = tools.find((tool) => tool.name === "create_doc")!;
-  for (const guidance of [
-    (createDoc.inputSchema.oneOf as { title: string }[])[0]!.title,
-    (createDoc.inputSchema.properties!.title as { description: string }).description,
-    ...tools.filter((tool) => ["create_doc", "set_metadata", "update_data"].includes(tool.name))
-      .map((tool) => tool.description!),
-  ]) {
-    expect(guidance).toContain("lifecycle's Decision answers and topics section");
-    expect(guidance).not.toMatch(/brief reasons?|short answer blocks|one to three short|60 words|yes\/no flag/);
-  }
-  const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;
-  const answers = lifecycle.split("## Decision answers and topics\n")[1]!.split("### Connect RFC discussion")[0]!;
-  for (const rule of [
-    "Lead the answer with the choice in one plain sentence naming the chosen option",
-    'without hedging such as "should consider" or "where possible"',
-    "Give the reason in one clause or sentence",
-    "Keep the whole answer, across all its blocks, to 60 words or fewer",
-    "editorial guidance, not a validated word limit",
-    "enduring question being decided", "only the context needed",
-    "An open record may instead hold a proposal or recommendation",
-    "extended rationale, alternatives and process in a linked RFC",
-    "archived and remain readable as historical context",
-    "one to three answer blocks",
-  ]) expect(answers, rule).toContain(rule);
-  const outsideAnswers = lifecycle.replace(answers, "");
-  expect(outsideAnswers).not.toMatch(/60 words|yes\/no flag|Y.Map whole-value conflict resolution/);
-  expect(answers).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
-  for (const code of [
-    "decision_block_unsupported", "decision_answer_too_long", "decision_answer_empty",
-    "decision_tldr_unsupported", "decision_data_unsupported", "related_not_regular_document",
-  ]) expect(lifecycle, code).toContain(code);
-  expect(lifecycle).toContain("answer: {who, when, where}");
-  expect(lifecycle).toContain("missing preview is unknown");
-});
-
-it("describes decision reads and writes without a legacy TL;DR exception", async () => {
-  const rig = await local();
-  for (const topic of ["workspaces", "lifecycle", "create_doc", "get_doc", "list_docs", "set_metadata", "update_data"]) {
-    const { text } = await rig.ok("get_help", { topic });
-    expect(text, topic).toContain("no TL;DR");
-    expect(text, topic).not.toMatch(/legacy TL;DR|legacy decision summaries remain readable/);
-  }
-  for (const topic of ["get_doc", "set_metadata"]) {
-    expect((await rig.ok("get_help", { topic })).text, topic).toContain("tldr: null");
-  }
-  const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;
-  expect(lifecycle).toContain("first answer paragraph or list");
-  expect(lifecycle).toContain("stored values are ignored without changing them");
-});
-
-it("describes editable decision titles and answer-only approval while retaining answer locks", async () => {
-  const rig = await local();
-  const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;
-  expect(lifecycle).toContain("Approval covers the answer, not the topic title");
-  expect(lifecycle).toContain("a title-only rename preserves approval and any existing changed-after-approval warning");
-  expect(lifecycle).toContain("A decided decision record's answer blocks and structured data are read-only");
-  expect(lifecycle).toContain("naming tldr or discussion");
-  expect(lifecycle).not.toMatch(/approves the current title|record's title, answer blocks|naming title, tldr/);
-  expect(lifecycle).toContain("A topic has one title, stored on its first record");
-  expect(lifecycle).toContain("A rename through any record renames the topic");
-  expect(lifecycle).toContain("Older clients show, and can still write, each record's own title");
-  for (const topic of ["create_doc", "set_metadata"]) {
-    const help = (await rig.ok("get_help", { topic })).text;
-    expect(help).toContain("stored on its first record");
-    expect(help).toContain("rename through any record renames the topic");
-    expect(help).toContain("Successors take the topic's title");
-    expect(help).not.toContain("successors keep it");
-  }
-  const metadata = (await rig.ok("get_help", { topic: "set_metadata" })).text;
-  expect(metadata).toContain("accepts title, description, tags and links");
-  expect(metadata).toContain("refuses tldr or discussion");
-  expect(metadata).toContain("An archived document refuses every metadata field");
-  const { tools } = await rig.client.listTools();
-  expect(tools.find(tool => tool.name === "set_metadata")?.description).toContain("Title renames preserve approval");
-});
-
-it("explains deliberate TL;DR removal and explicit opt-in in help and field contracts", async () => {
-  const rig = await local();
-  const { tools } = await rig.client.listTools();
-  const getDoc = tools.find(tool => tool.name === "get_doc")!;
-  const setMetadata = tools.find(tool => tool.name === "set_metadata")!;
-  const mark = (getDoc.outputSchema as any).properties.tldrOptOut;
-  expect(mark).toMatchObject({ type: "boolean", const: true });
-  expect(mark.description).toContain("on purpose");
-  expect(mark.description).toContain("tldr_opt_in: true");
-  expect((setMetadata.inputSchema as any).properties.tldr_opt_in.description).toContain("non-null tldr");
-  for (const topic of ["workspaces", "get_doc", "set_metadata"]) {
-    const { text } = await rig.ok("get_help", { topic });
-    expect(text, topic).toContain("tldrOptOut");
-    expect(text, topic).toContain("tldr_opt_in: true");
-    expect(text, topic).toContain("non-null");
-  }
-  const { text } = await rig.ok("get_help", { topic: "set_metadata" });
-  expect(text).toContain("tldr_opted_out");
-  expect(text).toContain("field: \"tldr\"");
-  expect(text).toContain("MCP cannot set that mark");
-});
-
-it("explains explicit RFC connections, open-only corrections and cached discussion reads", async () => {
-  const rig = await local();
-  const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;
-  for (const rule of [
-    "Create or reuse the RFC first as an ordinary regular document",
-    "ordinary `rfc` tag that can be applied deliberately", "no tool requires it",
-    "open first record with `related` and `discussion`", "no answer until one is recorded",
-    "open successor with `supersedes` and `discussion`", "current answer stays in force",
-    "A successor never inherits its predecessor's discussion",
-    "`discussion: null`", "fixed once the record leaves `open`",
-    "Settle, reject or withdraw with `set_status`", "recorded-answer contract",
-    "discussion_not_regular_document", "discussion_not_writable",
-    "never creates a document, tags or edits the RFC or related page",
-    "or changes `approvalFingerprint` or `approvalChanged`",
-    "A null discussion means no reference", "missing value means the cache is unknown",
-    "backlinks on an RFC finds its connected records", "unless the RFC is also its related page",
-  ]) expect(lifecycle, rule).toContain(rule);
-
-  const { tools } = await rig.client.listTools();
-  for (const topic of ["create_doc", "set_metadata", "get_doc", "list_docs"]) {
-    const { text } = await rig.ok("get_help", { topic });
-    const constraints = text.split("## Constraints\n")[1]?.split("\n## ")[0];
-    for (const rule of ["discussion", "RFC", "curated links", "recorded answer"]) {
-      expect(constraints, `${topic}: ${rule}`).toContain(rule);
-      expect(tools.find((tool) => tool.name === topic)?.description, `${topic}: ${rule}`).toContain(rule);
-    }
-  }
-  for (const topic of ["create_doc", "set_metadata"]) {
-    const { text } = await rig.ok("get_help", { topic });
-    for (const rule of ["discussion_not_regular_document", "doc_archived", "doc_not_found", "doc_not_hydrated"]) {
-      expect(text, `${topic}: ${rule}`).toContain(rule);
-    }
-  }
 });
 
 it("advertises the server identity and instructions in initialize", async () => {
@@ -490,99 +309,4 @@ it("documents the table mapping through both help routes and accepts its source 
   expect(JSON.parse(insertSource!)).not.toHaveProperty("pageSize");
   expect((await rig.client.readResource({ uri: "uberblick://help/insert_block" })).contents[0])
     .toMatchObject({ text: insertHelp.text });
-});
-
-it("documents optional record limits for both views through data and insert_block help", async () => {
-  const rig = await local();
-  for (const topic of ["data", "insert_block"]) {
-    const { text } = await rig.ok("get_help", { topic });
-    for (const guidance of [
-      "Optional limit is an integer of 1 or more",
-      "selects the latest N records with a valid x in x-then-record-id order, still at most 5,000",
-      "shows only the first N valid rows in sort order (record-id order without sort)",
-      "limit has no upper bound of its own", "Records hidden by the author limit are not omissions",
-      "no pager or page state", "footnote includes shown and total valid-record counts",
-      "when it hides nothing, no count appears", "notice and diagnostics when N exceeds 5,000",
-    ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
-    expect((await rig.client.readResource({ uri: `uberblick://help/${topic}` })).contents[0])
-      .toMatchObject({ text });
-  }
-});
-
-it("documents opt-in chart panels through data and insert_block help", async () => {
-  const rig = await local();
-  for (const topic of ["data", "insert_block"]) {
-    const { text } = await rig.ok("get_help", { topic });
-    for (const guidance of [
-      "Optional layout is overlay or panels, default overlay",
-      "panels draws one compact line or bar chart per y series in mapping order, in a responsive grid",
-      "each panel shows its label and latest plotted value",
-      "Panels share the x range and share y ranges within each unit group",
-      "layout is invalid for table mappings",
-    ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
-    expect((await rig.client.readResource({ uri: `uberblick://help/${topic}` })).contents[0])
-      .toMatchObject({ text });
-  }
-});
-
-it("documents opt-in bar series through data and insert_block help", async () => {
-  const rig = await local();
-  for (const topic of ["data", "insert_block"]) {
-    const { text } = await rig.ok("get_help", { topic });
-    for (const guidance of [
-      "Optional y series type is line or bar, default line",
-      "Bars-only charts keep top-level type line and draw grouped bars from zero",
-      "In overlay, a mixed chart draws its bars behind its lines on a separate right-hand value axis",
-      "Missing, null or wrong-type bar values draw no bar",
-    ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
-    expect((await rig.client.readResource({ uri: `uberblick://help/${topic}` })).contents[0])
-      .toMatchObject({ text });
-  }
-});
-
-it("documents per-series ranges and references through data and insert_block help", async () => {
-  const rig = await local();
-  for (const topic of ["data", "insert_block"]) {
-    const { text } = await rig.ok("get_help", { topic });
-    for (const guidance of [
-      "Each y series optionally accepts range [min, max], exactly two finite numbers with min lower than max",
-      "reference, one finite number",
-      "In overlay, both apply to the series' left or right value axis",
-      "In panels, range applies to the series' unit group and reference draws only on that series' own panel",
-      "A range is a minimum span: the axis covers every declared range, and plotted or reference values outside it widen the axis",
-      "A declared range replaces the zero-baseline rule for line-only axes and panel unit groups",
-      "Axes and panel unit groups containing bars always include zero",
-      "A reference draws a horizontal line across the plot",
-      "each distinct reference value appears once per axis or panel",
-      "A panel's reference value also widens its unit group's shared range",
-      "range and reference are invalid on x and in table mappings",
-    ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
-    expect((await rig.client.readResource({ uri: `uberblick://help/${topic}` })).contents[0])
-      .toMatchObject({ text });
-  }
-});
-
-it("makes the portable creation threshold discoverable through tools and identical help resources", async () => {
-  const rig = await local();
-  const { tools } = await rig.client.listTools();
-  const createDoc = tools.find(tool => tool.name === "create_doc")!;
-  expect(createDoc.description).toContain('get_help({topic: "lifecycle"})');
-  expect(createDoc.description).toContain("when to create");
-
-  const { text } = await rig.ok("get_help", { topic: "lifecycle" });
-  expect((await rig.client.readResource({ uri: "uberblick://help/lifecycle" })).contents[0])
-    .toMatchObject({ text });
-  const guidance = text.split("### When to create a decision record\n")[1]?.split("\n## ")[0];
-  expect(guidance).toContain("**all four**");
-  expect(guidance?.match(/^\d\. \*\*[^*]+\*\*/gm)).toEqual([
-    "1. **Significance:**", "2. **Meaningful alternatives:**",
-    "3. **Lasting consequences:**", "4. **Useful rationale:**",
-  ]);
-  expect(guidance).toContain("When in doubt, do not create a new topic");
-  expect(guidance).toContain("successor in the same topic");
-  expect(guidance).not.toMatch(/\n\|/);
-
-  const creationHelp = (await rig.ok("get_help", { topic: "create_doc" })).text;
-  expect(creationHelp).toContain("When to create a decision record");
-  expect(creationHelp).toContain("uberblick://help/lifecycle");
 });

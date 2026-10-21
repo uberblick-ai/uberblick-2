@@ -1,11 +1,11 @@
-import { decisionTopicTitle, listDirectory, readDirectoryTags, resolveDecisionTopics } from "@uberblick/schema";
+import { compareDirectoryEntries, decisionTopicTitle, listDirectory, readDirectoryTags, resolveDecisionTopics } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "../inputs.js";
 import { pinnedUuids } from "../sidebar.js";
 import { resolveTagFilter } from "../tag-catalog.js";
 import { documentKindArg, documentStatusArg } from "./schemas.js";
-import { operation } from "./operation.js";
+import { READ, operation } from "./operation.js";
 
 export const inputSchema = strictInput({
   tag: z.string().min(1).optional().describe("Only documents carrying this tag."),
@@ -16,7 +16,7 @@ export const inputSchema = strictInput({
   include_superseded: z.boolean().optional().describe("Return every decision record instead of one row per topic."),
 });
 
-export const listDocsOperation = operation("list_docs", inputSchema, (context, { tag, kind, status, has_open_threads, include_deleted, include_superseded }, _request) => {
+export const listDocsOperation = operation(READ, inputSchema, (context, { tag, kind, status, has_open_threads, include_deleted, include_superseded }, _request) => {
   const { replicas, tagCatalog, topicJson } = context;
 
   const hasPredicate = tag !== undefined || kind !== undefined || status !== undefined || has_open_threads === true;
@@ -51,7 +51,7 @@ export const listDocsOperation = operation("list_docs", inputSchema, (context, {
   return {
     workspace: replicas.config.workspaceId,
     docs: [...documents, ...decisionRows]
-      .sort((a, b) => a.title < b.title ? -1 : a.title > b.title ? 1 : a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0)
+      .sort(compareDirectoryEntries)
       .map((entry) => {
         const { recordArchived: _recordArchived, ...fields } = entry;
         return {

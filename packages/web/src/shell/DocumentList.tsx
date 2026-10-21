@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { decisionCurrentRecord, readDirectoryTags, resolveDecisionTopics } from "@uberblick/schema";
+import { compareDirectoryEntries, decisionCurrentRecord, readDirectoryTags, resolveDecisionTopics } from "@uberblick/schema";
 import type { DecisionTopicState, DirectoryEntry, SidebarGroup, TagAssignment, TagCatalogEntry } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useRoomStatus } from "../ui/hooks.js";
@@ -16,12 +16,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/shadcn/tabs.js";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/shadcn/tooltip.js";
 import { documentSearchRows, rankDocumentSearchRows, usableDocumentStamp, useDocumentSearch } from "./document-search-results.js";
 import type { DocumentSearchSource } from "./document-search-results.js";
-
-/** Use code-unit title/UUID order so the list and list_docs agree across replicas. */
-function byTitle(a: DirectoryEntry, b: DirectoryEntry): number {
-  if (a.title !== b.title) return a.title < b.title ? -1 : 1;
-  return a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0;
-}
 
 /** The two sortable columns, in their visual order. */
 const ORDERS = ["title", "changed"] as const;
@@ -110,17 +104,17 @@ export function sortDirectory<T extends DirectoryEntry>(
 ): T[] {
   if (order === "title") {
     return [...entries].sort((a, b) =>
-      direction === "ascending" ? byTitle(a, b) : byTitle(b, a),
+      direction === "ascending" ? compareDirectoryEntries(a, b) : compareDirectoryEntries(b, a),
     );
   }
   return [...entries].sort((a, b) => {
     const left = usableDocumentStamp(a.updatedAt);
     const right = usableDocumentStamp(b.updatedAt);
     if (left === undefined || right === undefined) {
-      if (left === right) return byTitle(a, b);
+      if (left === right) return compareDirectoryEntries(a, b);
       return left === undefined ? 1 : -1;
     }
-    if (left === right) return byTitle(a, b);
+    if (left === right) return compareDirectoryEntries(a, b);
     return direction === "ascending" ? left - right : right - left;
   });
 }

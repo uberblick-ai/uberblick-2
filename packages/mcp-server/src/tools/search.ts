@@ -2,7 +2,7 @@ import { decisionTopicTitle, isDirectoryEntryArchived, isDirectoryEntryDeleted, 
 import { z } from "zod";
 import { strictInput } from "../inputs.js";
 import { resolveTagFilter } from "../tag-catalog.js";
-import { operation } from "./operation.js";
+import { READ, operation } from "./operation.js";
 
 export const inputSchema = strictInput({
   query: z
@@ -20,7 +20,7 @@ export const inputSchema = strictInput({
 
 type RecordState = "in-force" | "superseded" | "open" | "rejected" | "withdrawn" | "conflict";
 
-export const searchOperation = operation("search", inputSchema, (context, { query, limit, tag, kind }, _request) => {
+export const searchOperation = operation(READ, inputSchema, (context, { query, limit, tag, kind }, _request) => {
   const { replicas, tagCatalog } = context;
 
   const catalog = tagCatalog();

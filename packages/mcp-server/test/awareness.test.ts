@@ -1,11 +1,9 @@
 /**
  * The awareness payload an agent puts on the wire.
  *
- * The format is pinned by `packages/web/test/agent-cursor-format.test.ts`,
- * which verifies it against the code that renders it (y-prosemirror's
- * `createDecorations`). This suite pins the same contract from the writing end,
- * so a change here fails next to the code that made it rather than in another
- * package: `user` is `{name, color}`, and `cursor` is `{anchor, head}` of
+ * Browser journeys in `packages/web/e2e/agent-attribution.spec.ts` verify the
+ * rendered cursor. This suite checks the writing end: `user` is `{name, color}`,
+ * and `cursor` is `{anchor, head}` of
  * `Y.relativePositionToJSON` output anchored to the block's Y.XmlText.
  */
 

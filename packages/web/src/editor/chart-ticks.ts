@@ -1,4 +1,4 @@
-export interface ObservationTick {
+interface ObservationTick {
   value: number;
   label: string[];
 }

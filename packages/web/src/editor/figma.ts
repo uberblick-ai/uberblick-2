@@ -1,8 +1,8 @@
 import { Extension, Node, mergeAttributes } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
-import { ySyncPluginKey } from "y-prosemirror";
-import { TABLE_CELL_MARKS, normalizeFigmaLink, parseFigmaHeight } from "@uberblick/schema";
+import { normalizeFigmaLink, parseFigmaHeight } from "@uberblick/schema";
+import { blockShapeGuard, isPlainPart } from "./blocks.js";
 import { figmaBlockView } from "./figma-view.js";
 
 export const Figma = Node.create({
@@ -36,27 +36,14 @@ function supportedFigma(node: PMNode): boolean {
     }
     if (node.attrs.title !== null && (typeof node.attrs.title !== "string" || /[\r\n]/.test(node.attrs.title))) return false;
   } catch { return false; }
-  const part = node.firstChild;
-  const paragraph = part?.firstChild;
-  if (node.childCount !== 1 || part?.type.name !== "figmaCaption" || part.childCount !== 1 ||
-    paragraph?.type.name !== "paragraph" || paragraph.attrs.id !== null) return false;
-  let valid = true;
-  paragraph.forEach((child) => {
-    if (!child.isText || child.marks.some((mark) => !(TABLE_CELL_MARKS as readonly string[]).includes(mark.type.name))) valid = false;
-  });
-  return valid;
+  const caption = node.firstChild;
+  return node.childCount === 1 && caption?.type.name === "figmaCaption" && isPlainPart(caption);
 }
 
 export const FigmaBlocks = Extension.create({
   name: "uberblickFigmaBlocks", priority: 1100,
   addProseMirrorPlugins() {
-    return [new Plugin({
-      filterTransaction(tr) {
-        if (!tr.docChanged || tr.getMeta(ySyncPluginKey)?.isChangeOrigin === true) return true;
-        let valid = true;
-        tr.doc.forEach((node) => { if (node.type.name === "figma" && !supportedFigma(node)) valid = false; });
-        return valid;
-      },
+    return [blockShapeGuard("figma", supportedFigma), new Plugin({
       props: {
         handleKeyDown(view, event) {
           const { $from } = view.state.selection;

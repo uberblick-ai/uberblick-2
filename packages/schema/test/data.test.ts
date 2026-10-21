@@ -135,7 +135,7 @@ describe("document-owned data", () => {
     expect(prepareDocData(doc, directory, []).collections).toEqual([]);
   });
 
-  it("preview refuses invalid batches and readonly documents without updating either root", () => {
+  it("preview refuses invalid batches without updating either root", () => {
     const { doc, directory, apply } = rig();
     apply([{ collection: "c", schema: { version: 1, schema: { type: "object", properties: { hours: { type: "number" } } } } }]);
     const directoryBefore = Y.encodeStateAsUpdate(directory);
@@ -150,13 +150,6 @@ describe("document-owned data", () => {
     expect(Buffer.from(Y.encodeStateAsUpdate(directory)).equals(Buffer.from(directoryBefore))).toBe(true);
     expect(updates).toBe(0);
     expect(directoryUpdates).toBe(0);
-    tombstoneDirectoryEntry(directory, UUID);
-    expect(failUnchanged(doc, () => prepareDocData(doc, directory, [])).code).toBe("doc_archived");
-    const decision = rig();
-    setKind(decision.doc, "decision");
-    expect(failUnchanged(decision.doc, () => prepareDocData(decision.doc, decision.directory, [])).code).toBe("decision_data_unsupported");
-    setStatus(decision.doc, "decided");
-    expect(failUnchanged(decision.doc, () => prepareDocData(decision.doc, decision.directory, [])).code).toBe("decision_read_only");
   });
 
   it.each([

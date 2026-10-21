@@ -26,14 +26,11 @@
  * retain their loopback path.
  *
  * The fetch itself is a stub: what is defended is the decision, not whether
- * `fetch` works. The Caddy half of the no-store contract is checked against the
- * configuration, because this suite runs in jsdom and serves nothing.
+ * `fetch` works. Repository script tests check the deployment configuration.
  */
 
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { devConfigDocument } from "../dev-config-document.js";
@@ -48,7 +45,6 @@ import {
 } from "../src/config.js";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const repoRoot = resolve(webRoot, "../..");
 declare const __HUB_URL__: string;
 
 /**
@@ -61,6 +57,10 @@ const INJECTED = __HUB_URL__;
 /** Two workspaces a served document could name — one decorated, one bare. */
 const FIRST = "uberblick-6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const SECOND = "b2d9e4c7-5a13-4f80-8e6b-71c0a9d35f2e";
+
+/** How ub open names FIRST in its served-workspace map: by bare UUID. */
+const FIRST_UUID = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
+const FIRST_SERVED = { [FIRST_UUID]: { remoteHubUrl: "wss://remote.example/ws", name: null } };
 
 /** A secret arriving on a *second* read, after the first document missed. */
 const LATE_SECRET = "late-arriving-signing-secret";
@@ -352,8 +352,7 @@ describe("the local-serving diagnostic", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     for (const document of [
       { hubUrl: "ws://localhost:1234", workspaces: [FIRST] },
-      { hubUrl: "ws://127.0.0.1:4321", workspaces: [FIRST], remoteHubUrl: "wss://remote.example/ws" },
-      { hubUrl: "ws://127.0.0.1:4321", workspaces: [], remoteHubUrl: "wss://remote.example/ws" },
+      { hubUrl: "ws://127.0.0.1:4321", workspaces: [FIRST], servedWorkspaces: FIRST_SERVED },
     ]) {
       // Each case represents a new page, with its own resolved configuration.
       vi.resetModules();
@@ -365,34 +364,30 @@ describe("the local-serving diagnostic", () => {
   });
 
   it("keeps the frozen workspace/upstream pair and accepts only a literal rebound", async () => {
-    const servingDocument = (rebound: unknown, remote = true): string =>
+    const servingDocument = (rebound: unknown): string =>
       JSON.stringify({
         hubUrl: "ws://127.0.0.1:4321",
         workspaces: [FIRST],
-        ...(remote ? { remoteHubUrl: "wss://remote.example/ws" } : {}),
+        servedWorkspaces: FIRST_SERVED,
         ...(rebound === undefined ? {} : { rebound }),
       });
 
     const rebound = await readClientConfig(
       serving({ body: servingDocument(true) }).fetch,
     );
-    expect(rebound.localServing).toEqual({
+    expect(rebound.servedWorkspaces?.[FIRST_UUID]).toEqual({
       workspace: FIRST,
       remoteHubUrl: "wss://remote.example/ws",
       rebound: true,
+      name: null,
     });
 
     for (const value of [undefined, false, "true", 1]) {
       const config = await readClientConfig(
         serving({ body: servingDocument(value) }).fetch,
       );
-      expect(config.localServing?.rebound, String(value)).toBe(false);
+      expect(config.servedWorkspaces?.[FIRST_UUID]?.rebound, String(value)).toBe(false);
     }
-
-    const direct = await readClientConfig(
-      serving({ body: servingDocument(true, false) }).fetch,
-    );
-    expect(direct.localServing).toBeNull();
   });
 });
 
@@ -580,50 +575,8 @@ describe("the endpoint as it is shown", () => {
   });
 });
 
-describe("the deployments that serve it", () => {
-  it("imports the generated web policy for the app and its deep-link fallback", () => {
-    const caddyfile = readFileSync(resolve(repoRoot, "Caddyfile"), "utf8");
-    expect(caddyfile).toMatch(/handle \{\s+import \/etc\/caddy\/uberblick-csp\.caddy\s+root \* \/srv\s+try_files \{path\} \/index\.html\s+file_server\s+\}/);
-    expect(caddyfile).not.toContain("figma.com");
-    expect(caddyfile).not.toContain("Content-Security-Policy-Report-Only");
-    expect(caddyfile).not.toMatch(/header\s+Content-Security-Policy\s/);
-    expect(readFileSync(resolve(repoRoot, "Dockerfile.hub-release"), "utf8")).toContain(
-      "COPY --from=build /out/web/uberblick-csp.caddy /etc/caddy/uberblick-csp.caddy",
-    );
-  });
-
-  it("serves the document uncached, ahead of the SPA fallback, from run-time config", () => {
-    const caddyfile = readFileSync(resolve(repoRoot, "Caddyfile"), "utf8");
-    const configRoute = caddyfile.indexOf(`handle ${HUB_CONFIG_PATH}`);
-    const spaFallback = caddyfile.indexOf("try_files {path} /index.html");
-
-    expect(configRoute).toBeGreaterThan(-1);
-    expect(spaFallback).toBeGreaterThan(configRoute);
-    expect(caddyfile).toContain('header Cache-Control "no-store"');
-    // The served body: the agreed shape, with all three values substituted at
-    // run time — so retargeting the client, giving it its workspaces or
-    // rotating the secret is not a bundle rebuild.
-    expect(caddyfile).toContain(
-      'respond `{"hubUrl":"{$HUB_URL}","workspaces":"{$WORKSPACES}"}`',
-    );
-
-    // Both the wrapper and the image use the same guard. Plain Compose passes
-    // native operator names; the container validates before aliasing them into
-    // the Caddyfile, so it cannot bypass the wrapper's alphabets.
-    const compose = readFileSync(resolve(repoRoot, "compose.release.yml"), "utf8");
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal Compose expression
-    expect(compose).toContain('WEB_HUB_URL: "${WEB_HUB_URL:-}"');
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal Compose expression
-    expect(compose).toContain('WEB_WORKSPACES: "${WEB_WORKSPACES:-}"');
-    expect(compose).not.toContain("HUB_AUTH_TOKEN:");
-    expect(readFileSync(resolve(repoRoot, "remote.env.example"), "utf8")).toContain(
-      "WEB_WORKSPACES=",
-    );
-    const guard = readFileSync(resolve(repoRoot, "remote-settings.sh"), "utf8");
-    expect(guard).toContain("WEB_WORKSPACES");
-    expect(guard).toContain("*[!A-Za-z0-9,-]*)");
-    expect(guard).not.toContain("HUB_AUTH_TOKEN");
-
+describe("the development configuration document", () => {
+  it("uses the shared binding resolver and has no static public override", () => {
     // The dev server answers the same path from one middleware, through the
     // shared binding resolver — `mise run web`, `mise run dev`, the e2e
     // harness and the first-user proof all read this. Repeating the default
@@ -650,42 +603,4 @@ describe("the deployments that serve it", () => {
     ).toThrow();
   });
 
-  it("refuses an endpoint that could inject into the document, before it calls Docker", () => {
-    // The endpoint reaches the same JSON string the workspaces and the secret
-    // do — by `WEB_HUB_URL`, or through the `wss://<host>/ws` default built
-    // from `TAILSCALE_HOST` — so it needs the same guarantee. Run rather than
-    // read: the *order* is the second half of the contract, and a file cannot
-    // show it. A host without Docker must be told about its `.env`, not about
-    // the daemon.
-    //
-    // PATH is an empty directory, which is the proof of that order: nothing
-    // external is reachable, `docker` included, and the refusal still arrives.
-    // The cwd has only release metadata, so no developer's own `.env` is
-    // sourced over these, and the wrapper accepts it as a release directory.
-    const injecting = {
-      WEB_HUB_URL: 'wss://ok.example.ts.net/ws","hubUrl":"wss://elsewhere',
-      TAILSCALE_HOST: 'ok.example.ts.net","hubUrl":"wss://elsewhere',
-    };
-    const empty = mkdtempSync(join(tmpdir(), `uberblick-${process.env.UB_AGENTS_RUN ?? "test"}-wrapper-`));
-    try {
-      writeFileSync(join(empty, "release.json"), "{}\n");
-      for (const [name, value] of Object.entries(injecting)) {
-        const run = spawnSync(
-          "/bin/sh",
-          [resolve(repoRoot, "bin/remote-compose.sh"), "config"],
-          {
-            cwd: empty,
-            env: { PATH: empty, [name]: value },
-            encoding: "utf8",
-          },
-        );
-
-        expect(run.status, name).toBe(1);
-        expect(run.stderr, name).toContain(`${name} may only contain`);
-        expect(run.stdout, name).toBe("");
-      }
-    } finally {
-      rmSync(empty, { recursive: true, force: true });
-    }
-  });
 });

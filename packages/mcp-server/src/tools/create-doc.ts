@@ -10,7 +10,7 @@ import type { SidebarPlacement } from "../sidebar.js";
 import { resolveTagSelectors } from "../tag-catalog.js";
 import { roomStages, stoppedPartWay } from "./helpers.js";
 import { blockInputSchema, decisionAnswerArg, descriptionArg, documentKindArg, documentStatusArg, titleArg, tldrArg, uuidArg } from "./schemas.js";
-import { operation } from "./operation.js";
+import { DOCUMENT_WRITE, operation } from "./operation.js";
 import type { ToolContext } from "./context.js";
 import { discussionTarget } from "./discussion.js";
 
@@ -150,7 +150,7 @@ function initialBlocks(
   return inputs;
 }
 
-export const createDocOperation = operation("create_doc", inputSchema, (context, {
+export const createDocOperation = operation(DOCUMENT_WRITE, inputSchema, (context, {
       title,
       description,
       tldr,

@@ -1,5 +1,6 @@
 /** Signed access requests share transport, never command-specific authority. */
 import type { StoredHubLogin } from "./auth-store.js";
+import { isUuid } from "@uberblick/schema";
 import { isGithubAccountId, isGithubUsername } from "@uberblick/schema/github-identity";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
@@ -61,15 +62,12 @@ export async function manageRequest(
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
-function uuid(value: unknown): value is string {
-  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
-}
 export function sanitizeHubVersion(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length > 64) return undefined;
   return /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(value)?.[0] === value ? value : undefined;
 }
 function member(value: unknown): Record<string, unknown> {
-  if (!object(value) || !uuid(value.principalId) || !isGithubAccountId(value.githubAccountId) ||
+  if (!object(value) || !isUuid(value.principalId) || !isGithubAccountId(value.githubAccountId) ||
       !isGithubUsername(value.githubUsername) || (value.role !== "member" && value.role !== "admin")) {
     throw new ManagementResponseError();
   }
@@ -88,7 +86,7 @@ function nextCursor(value: unknown, login?: StoredHubLogin): string | null {
 }
 
 function hubAdmin(value: unknown, login?: StoredHubLogin): Record<string, unknown> {
-  if (!object(value) || !uuid(value.principalId) || !isGithubAccountId(value.githubAccountId) ||
+  if (!object(value) || !isUuid(value.principalId) || !isGithubAccountId(value.githubAccountId) ||
       !isGithubUsername(value.githubUsername) || !count(value.workspaces) ||
       (value.lastSignedInAt !== null && !count(value.lastSignedInAt)) || typeof value.current !== "boolean" ||
       (login !== undefined && value.current !== (value.principalId === login.identity.id))) {
@@ -100,7 +98,7 @@ function hubAdmin(value: unknown, login?: StoredHubLogin): Record<string, unknow
 }
 
 function hubWorkspace(value: unknown, login?: StoredHubLogin): Record<string, unknown> {
-  if (!object(value) || !uuid(value.workspaceId) || !count(value.members) ||
+  if (!object(value) || !isUuid(value.workspaceId) || !count(value.members) ||
       (value.status !== "active" && value.status !== "suspended") ||
       !Array.isArray(value.admins) || !value.admins.every(isGithubUsername)) {
     throw new ManagementResponseError();
@@ -190,7 +188,7 @@ export function sanitizeManagementReply(
     case "list-devices":
       if (status === 200 && state === "ok" && Array.isArray(body.devices)) {
         const devices = body.devices.map(value => {
-          if (!object(value) || !uuid(value.deviceId) || !Number.isSafeInteger(value.signedInAt) ||
+          if (!object(value) || !isUuid(value.deviceId) || !Number.isSafeInteger(value.signedInAt) ||
               (value.signedInAt as number) < 0 || typeof value.current !== "boolean" ||
               (login !== undefined && value.current !== (value.deviceId === login.credential.record.deviceId))) {
             throw new ManagementResponseError();

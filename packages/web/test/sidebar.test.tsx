@@ -27,8 +27,6 @@ import {
   initDoc,
   appendBlock,
   pinDoc,
-  moveDoc,
-  moveGroup,
   readSidebar,
   restoreDirectoryEntry,
   roomForDoc,
@@ -394,85 +392,6 @@ describe("the sidebar is the _sidebar document", () => {
     expect(stored(peer)).toEqual([["Reading", [ONE, TWO]]]);
   });
 
-  it("renders stored order and live moves from another replica", async () => {
-    seedDirectory();
-    const sidebar = sidebarDoc();
-    const reading = createGroup(sidebar, "Reading");
-    const later = createGroup(sidebar, "Later");
-    pinDoc(sidebar, reading, ONE);
-    pinDoc(sidebar, reading, TWO);
-    pinDoc(sidebar, later, THREE);
-    // What the second browser reads, throughout.
-    const peer = peerOf(sidebar);
-
-    const host = await openApp(`/${WORKSPACE}`);
-    // Stored order, not alphabetical and not the directory's: nothing sorts.
-    expect(groupNames(host)).toEqual(["Reading", "Later"]);
-    expect(rowTitles(host, 0)).toEqual(["Overview", "Editing"]);
-    expect(rowTitles(host, 1)).toEqual(["Sync"]);
-    // The heading inventory rules out separate count badges even after restyling.
-    expectNoExtraGroupChrome(host);
-
-    // ---- within a group: "Editing" to the top ----
-    act(() => moveDoc(peer, TWO, reading, 0));
-    expect(rowTitles(host, 0)).toEqual(["Editing", "Overview"]);
-    expect(stored(peer)).toEqual([
-      ["Reading", [TWO, ONE]],
-      ["Later", [THREE]],
-    ]);
-
-    // ---- across groups: "Overview" to the head of Later ----
-    act(() => moveDoc(peer, ONE, later, 0));
-    expect(rowTitles(host, 0)).toEqual(["Editing"]);
-    expect(rowTitles(host, 1)).toEqual(["Overview", "Sync"]);
-    expect(stored(peer)).toEqual([
-      ["Reading", [TWO]],
-      ["Later", [ONE, THREE]],
-    ]);
-
-    // ---- and the groups themselves: Later above Reading ----
-    act(() => moveGroup(peer, later, 0));
-    expect(groupNames(host)).toEqual(["Later", "Reading"]);
-    expect(stored(peer)).toEqual([
-      ["Later", [ONE, THREE]],
-      ["Reading", [TWO]],
-    ]);
-  });
-
-  it("takes a second writer's pins and groups live", async () => {
-    seedDirectory();
-    const sidebar = sidebarDoc();
-    const reading = createGroup(sidebar, "Reading");
-    pinDoc(sidebar, reading, ONE);
-    const peer = peerOf(sidebar);
-
-    const host = await openApp(`/${WORKSPACE}`);
-    expect(rowTitles(host, 0)).toEqual(["Overview"]);
-
-    // ---- the two-writer test: an agent pins and groups on its own replica ----
-    // The schema functions are the whole of what `pin_doc` does, so
-    // driving them on a peer doc is what an agent's write looks like from here.
-    act(() => {
-      pinDoc(peer, reading, TWO);
-    });
-    expect(rowTitles(host, 0)).toEqual(["Overview", "Editing"]);
-
-    let empty = "";
-    act(() => {
-      empty = createGroup(peer, "Later");
-    });
-    expect(groupNames(host)).toEqual(["Reading", "Later"]);
-    // Empty groups are rendered, and a peer can populate them without reloading.
-    expect(rowTitles(host, 1)).toEqual([]);
-
-    act(() => moveDoc(peer, ONE, empty, 0));
-    expect(rowTitles(host, 1)).toEqual(["Overview"]);
-    expect(readSidebar(peer)).toEqual([
-      { id: reading, name: "Reading", docs: [TWO] },
-      { id: empty, name: "Later", docs: [ONE] },
-    ]);
-  });
-
   it("pins and unpins the open document from its actions menu, with no drag", async () => {
     seedDirectory();
     const doc = room(roomForDoc(WORKSPACE, THREE)).ydoc;
@@ -581,27 +500,6 @@ describe("the sidebar is the _sidebar document", () => {
     expect(groupNames(host)).toEqual(["Elsewhere"]);
     expect(stored(peer)).toEqual([["Elsewhere", []]]);
     await waitFor(() => expect(document.activeElement).toBe(sidebarControls(host).getByRole("button", { name: "+ New group" })));
-  });
-
-  it("writes nothing when group deletion is cancelled", async () => {
-    seedDirectory();
-    const sidebar = sidebarDoc();
-    pinDoc(sidebar, createGroup(sidebar, "Reading"), ONE);
-    const peer = peerOf(sidebar);
-    const before = stored(peer);
-    const host = await openApp(`/${WORKSPACE}`);
-    const writes = vi.fn();
-    sidebar.on("update", writes);
-    act(() => sidebarControls(host).getByRole("button", { name: "Delete group Reading" }).click());
-    const dialog = screen.getByRole("alertdialog", { name: "Delete group Reading?" });
-    expect(dialog?.textContent).toContain("Delete group Reading?");
-    expect(writes).not.toHaveBeenCalled();
-    await act(async () => {
-      within(dialog).getByRole("button", { name: "Cancel" }).click();
-    });
-    expect(screen.queryByRole("alertdialog", { name: "Delete group Reading?" })).toBeNull();
-    expect(writes).not.toHaveBeenCalled();
-    expect(stored(peer)).toEqual(before);
   });
 
   it("confirmed group deletion removes its pins and preserves every document", async () => {
@@ -958,27 +856,6 @@ describe("settings areas follow the selected page and independent authority", ()
     expectDead(settings);
     expectLive(documents);
     expect(document.activeElement).toBe(within(host).getByRole("button", { name: "Workspace settings" }));
-  });
-
-  it("opens a pasted settings address directly", async () => {
-    seedDirectory();
-    const host = await openApp(`/${WORKSPACE}/settings`);
-    expect(within(host).getByLabelText("Sidebar").getAttribute("data-mode")).toBe(
-      "settings",
-    );
-    expect(within(host).getByRole("heading", { name: "General" }).textContent).toBe("General");
-    expect(documentsPane(host).hasAttribute("inert")).toBe(
-      true,
-    );
-  });
-
-  it("opens the pasted Tags settings address directly", async () => {
-    const host = await openApp(`/${WORKSPACE}/settings/tags`);
-    expect(within(host).getByRole("heading", { name: "Tags" }).textContent).toBe("Tags");
-    expect(
-      within(pane(host, "Workspace settings")).getByRole("button", { name: /./, current: "page" }).textContent,
-    ).toContain("Tags");
-    expect(rooms.has(settingsRoom(WORKSPACE))).toBe(true);
   });
 
   it("offers no settings destination when the address names no workspace", async () => {

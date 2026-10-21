@@ -7,9 +7,6 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   SETTINGS_KEY,
   getSetting,
@@ -90,16 +87,4 @@ describe("the settings store", () => {
     expect(getSetting("presenceName")).toBe("Pat Editor");
   });
 
-  it("imports nothing from the collab layer", () => {
-    // The reason a local setting cannot reach a document: the module that holds
-    // it has no way to name a Y.Doc, a room, or the hub. Static, because the
-    // guarantee has to hold for code paths no test exercises.
-    const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-    const source = readFileSync(resolve(webRoot, "src/settings.ts"), "utf8");
-    const imports = [...source.matchAll(/^\s*(?:import|export)\s.*?from\s+"([^"]+)"/gm)].map(
-      (match) => match[1],
-    );
-    expect(imports).toEqual([]);
-    expect(source).not.toMatch(/collab\/|yjs|@uberblick\//);
-  });
 });

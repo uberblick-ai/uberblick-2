@@ -2,7 +2,7 @@
 
 import { afterEach, expect, it, vi } from "vitest";
 import { createTagCatalogEntry, setTags } from "@uberblick/schema";
-import { DOCUMENT_MUTATING_TOOLS } from "../src/failures.js";
+import { tools } from "../src/tool-table.js";
 import { removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
@@ -54,7 +54,7 @@ it("refuses every document mutation before logging, teaches recovery, and leaves
     annotate: { uuid, block_id: block.id, start: 0, end: 4, text: "Comment" },
     link_range: { uuid, block_id: block.id, start: 0, end: 4, doc_id: first.uuid, rev: block.rev },
   };
-  expect(Object.keys(calls).sort()).toEqual([...DOCUMENT_MUTATING_TOOLS].sort());
+  expect(Object.keys(calls).sort()).toEqual(tools.filter(({ writes }) => writes === "document").map(({ name }) => name).sort());
   const size = rig.instance.store.logSize();
   for (const [name, args] of Object.entries(calls)) {
     const result = await rig.call(name, args);

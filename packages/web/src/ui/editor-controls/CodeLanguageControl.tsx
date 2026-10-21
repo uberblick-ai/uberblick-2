@@ -6,7 +6,7 @@ import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import { yUndoPluginKey } from "y-prosemirror";
-import { findBlockById } from "../../editor/block-menu.js";
+import { findBlockById } from "../../editor/blocks.js";
 import { retypeBlockInTransaction } from "../../editor/retype.js";
 import { selectedBlock } from "../../editor/source-chrome.js";
 import { codeLanguageLabel, codeLanguages } from "../../editor/syntax-highlighting.js";
