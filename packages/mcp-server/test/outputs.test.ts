@@ -104,8 +104,8 @@ describe("successful MCP output contracts", () => {
       uuid, block_id: created.blocks[0].id, start: 0, end: 6, doc_id: target.uuid, rev: edited.block.rev,
     });
     await success("annotate", { uuid, block_id: created.blocks[0].id, start: 7, end: 16, text: "A comment." });
-    const inserted = await success("insert_block", { uuid, type: "paragraph", text: "temporary block" });
-    await success("delete_block", { uuid, block_id: inserted.block.id });
+    const inserted = await success("insert_block", { uuid, blocks: [{ type: "paragraph", text: "temporary block" }] });
+    await success("delete_block", { uuid, block_id: inserted.blocks[0].id });
     await success("get_data", { uuid });
     const storedValue = { arbitrary: { nested: [null, 4, { undeclared: true }] } };
     const storedSchema = { version: 1, schema: { type: "object" } };

@@ -185,15 +185,15 @@ describe("the TL;DR review reminder", () => {
     const edited = await rig.ok("edit_block", {
       uuid: doc.uuid, block_id: first.id, old_text: first.text, new_text: "After", rev: first.rev,
     });
-    const inserted = await rig.ok("insert_block", { uuid: doc.uuid, after_block_id: first.id, type: "paragraph", text: "Temporary" });
-    const deleted = await rig.ok("delete_block", { uuid: doc.uuid, block_id: inserted.block.id });
+    const inserted = await rig.ok("insert_block", { uuid: doc.uuid, after_block_id: first.id, blocks: [{ type: "paragraph", text: "Temporary" }] });
+    const deleted = await rig.ok("delete_block", { uuid: doc.uuid, block_id: inserted.blocks[0].id });
     for (const result of [edited, inserted, deleted]) {
       expect(result).not.toHaveProperty("tldrHint");
       expect(result).not.toHaveProperty("tldr");
       expect(result).not.toHaveProperty("tldrOptOut");
     }
     setTldrOptOut(rig.instance.replicas.replica(doc.uuid).doc, false);
-    const unmarked = await rig.ok("insert_block", { uuid: doc.uuid, type: "paragraph", text: "Now unmarked" });
+    const unmarked = await rig.ok("insert_block", { uuid: doc.uuid, blocks: [{ type: "paragraph", text: "Now unmarked" }] });
     expect(unmarked).toMatchObject({ tldr: null, tldrHint: expect.any(String) });
   });
 
@@ -227,14 +227,12 @@ describe("the TL;DR review reminder", () => {
       rev: first.rev,
     });
     const inserted = await rig.ok("insert_block", {
-      uuid: source.uuid,
-      after_block_id: first.id,
-      type: "paragraph",
-      text: "Temporary",
+      uuid: source.uuid, after_block_id: first.id,
+      blocks: [{ type: "paragraph", text: "Temporary" }],
     });
     const deleted = await rig.ok("delete_block", {
       uuid: source.uuid,
-      block_id: inserted.block.id,
+      block_id: inserted.blocks[0].id,
     });
     for (const result of [edited, inserted, deleted]) {
       expect(result).toMatchObject({ tldr: null });

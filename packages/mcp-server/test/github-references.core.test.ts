@@ -57,9 +57,7 @@ describe("decision records linking GitHub work", () => {
     const last = await decision(rig, "Zebra");
     await rig.ok("insert_block", {
       uuid: first.uuid,
-      type: "list-item",
-      text: "",
-      inline: [{ text: "Same item again", marks: { link: "https://github.com/owner/repo/pull/42#issuecomment-123" } }],
+      blocks: [{ type: "list-item", text: "", inline: [{ text: "Same item again", marks: { link: "https://github.com/owner/repo/pull/42#issuecomment-123" } }] }],
     });
     const elsewhere = await decision(rig, "Other repository", "https://github.com/owner/other/issues/42");
 

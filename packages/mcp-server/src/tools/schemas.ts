@@ -160,5 +160,5 @@ export const blockShape = {
   inline: inlineArg,
 };
 
-// create_doc's nested seeds must refuse unknown keys as insert_block's root does.
+// Document seeds and inserted entries share the same strict shape.
 export const blockInputSchema = z.object(blockShape).strict();

@@ -28,12 +28,12 @@ it("accepts and preserves known and unknown icon source through content writes, 
   });
   for (const [index, seed] of SEEDS.entries()) {
     expect(created.blocks[index]).toMatchObject(seed);
-    const inserted = await rig.ok("insert_block", { uuid: created.uuid, ...seed });
-    expect(inserted.block).toMatchObject(seed);
+    const inserted = await rig.ok("insert_block", { uuid: created.uuid, blocks: [{ ...seed }] });
+    expect(inserted.blocks[0]).toMatchObject(seed);
     const newText = seed.text.replaceAll(":claude:", ":unknown-name:");
     const edited = await rig.ok("edit_block", {
-      uuid: created.uuid, block_id: inserted.block.id, old_text: seed.text,
-      new_text: newText, rev: inserted.block.rev,
+      uuid: created.uuid, block_id: inserted.blocks[0].id, old_text: seed.text,
+      new_text: newText, rev: inserted.blocks[0].rev,
       ...(seed.type === "table" ? { table_mapping: { rows: [0, 1], columns: [0] } } : {}),
     });
     expect(edited.block).toMatchObject({ type: seed.type, text: newText });

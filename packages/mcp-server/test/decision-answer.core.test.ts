@@ -44,7 +44,7 @@ describe("short decision answers", () => {
     const open = await create(rig);
     for (const type of ["heading", "quote", "terminal", "chart", "card"]) {
       await refuse(rig, "create_doc", { title: "Unsupported", description: "Use supported answer blocks.", kind: "decision", blocks: [{ type, text: "answer" }] }, "decision_block_unsupported");
-      await refuse(rig, "insert_block", { uuid: open.uuid, type, text: "answer" }, "decision_block_unsupported", open.uuid);
+      await refuse(rig, "insert_block", { uuid: open.uuid, blocks: [{ type, text: "answer" }] }, "decision_block_unsupported", open.uuid);
     }
     await refuse(rig, "create_doc", { title: "Too long", description: "Three blocks at most.", kind: "decision", blocks: Array.from({ length: 4 }, () => paragraph) }, "decision_answer_too_long");
   });
@@ -52,9 +52,9 @@ describe("short decision answers", () => {
   it("counts adjacent list items as one and checks the insertion position when a list is split", async () => {
     const rig = await local();
     const record = await create(rig, { blocks: [paragraph, { type: "list-item", text: "First" }, { type: "list-item", text: "Second" }, { type: "code", text: "replay()" }] });
-    await rig.ok("insert_block", { uuid: record.uuid, after_block_id: record.blocks[1].id, type: "list-item", text: "Third" });
-    await refuse(rig, "insert_block", { uuid: record.uuid, after_block_id: record.blocks[1].id, type: "paragraph", text: "Splits the list." }, "decision_answer_too_long", record.uuid);
-    await refuse(rig, "insert_block", { uuid: record.uuid, type: "paragraph", text: "Fourth block." }, "decision_answer_too_long", record.uuid);
+    await rig.ok("insert_block", { uuid: record.uuid, after_block_id: record.blocks[1].id, blocks: [{ type: "list-item", text: "Third" }] });
+    await refuse(rig, "insert_block", { uuid: record.uuid, after_block_id: record.blocks[1].id, blocks: [{ type: "paragraph", text: "Splits the list." }] }, "decision_answer_too_long", record.uuid);
+    await refuse(rig, "insert_block", { uuid: record.uuid, blocks: [{ type: "paragraph", text: "Fourth block." }] }, "decision_answer_too_long", record.uuid);
     await rig.ok("set_status", { uuid: record.uuid, status: "decided" });
     for (const blocks of [
       [{ type: "code", text: "replay()" }],
@@ -109,8 +109,8 @@ describe("short decision answers", () => {
     expect(await rig.ok("set_metadata", { uuid: record.uuid, description: "Discovery copy." })).toMatchObject({ tldr: null });
     expect(await rig.ok("set_metadata", { uuid: record.uuid, tldr: null })).toMatchObject({ tldr: null });
     const edit = await rig.ok("edit_block", { uuid: record.uuid, block_id: record.blocks[0].id, old_text: paragraph.text, new_text: "Use the log." });
-    const insert = await rig.ok("insert_block", { uuid: record.uuid, type: "paragraph", text: "Replay preserves history." });
-    const deleted = await rig.ok("delete_block", { uuid: record.uuid, block_id: insert.block.id });
+    const insert = await rig.ok("insert_block", { uuid: record.uuid, blocks: [{ type: "paragraph", text: "Replay preserves history." }] });
+    const deleted = await rig.ok("delete_block", { uuid: record.uuid, block_id: insert.blocks[0].id });
     for (const write of [edit, insert, deleted]) expect(write).not.toHaveProperty("tldrHint");
     await rig.ok("set_status", { uuid: record.uuid, status: "decided" });
   });

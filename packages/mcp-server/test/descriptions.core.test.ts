@@ -242,8 +242,7 @@ describe("a document nobody described", () => {
     // A write succeeds, and carries the nudge rather than a refusal.
     const inserted = await rig.ok("insert_block", {
       uuid,
-      type: "paragraph",
-      text: "written by an agent",
+      blocks: [{ type: "paragraph", text: "written by an agent" }],
     });
     expect(inserted.applied).toBe(true);
     expect(inserted.description).toBeNull();
@@ -306,8 +305,7 @@ describe("directory churn", () => {
     for (let index = 0; index < 10; index += 1) {
       await rig.ok("insert_block", {
         uuid: doc.uuid,
-        type: "paragraph",
-        text: `line ${index}`,
+        blocks: [{ type: "paragraph", text: `line ${index}` }],
       });
     }
     expect(directoryUpdates()).toBe(1);

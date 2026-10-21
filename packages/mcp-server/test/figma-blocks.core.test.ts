@@ -59,11 +59,11 @@ describe("Figma blocks through MCP", () => {
       { text: "external", marks: { link: "https://example.com/page" } }, { text: " ", marks: {} },
       { text: "document", marks: { docLink: target.uuid } },
     ]);
-    const inserted = await rig.ok("insert_block", { uuid: created.uuid, type: "figma", text: source, after_block_id: original.id });
-    expect(inserted.block.text).toBe(canonical);
-    expect(inserted.block.figma).toEqual(original.figma);
-    expect(captionRuns(doc, inserted.block.id)).toEqual(captionRuns(doc, original.id));
-    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual([original, inserted.block]);
+    const inserted = await rig.ok("insert_block", { uuid: created.uuid, after_block_id: original.id, blocks: [{ type: "figma", text: source }] });
+    expect(inserted.blocks[0].text).toBe(canonical);
+    expect(inserted.blocks[0].figma).toEqual(original.figma);
+    expect(captionRuns(doc, inserted.blocks[0].id)).toEqual(captionRuns(doc, original.id));
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual([original, inserted.blocks[0]]);
     expect((await rig.ok("export_markdown", { uuid: created.uuid, frontmatter: false })).markdown)
       .toBe(`:::figma\n${canonical}\n:::\n\n:::figma\n${canonical}\n:::\n`);
     expect(fetch).not.toHaveBeenCalled();
@@ -97,7 +97,7 @@ describe("Figma blocks through MCP", () => {
     for (const [name, args] of [
       ["create_doc", { title: "No partial Figma", description: "All seeds validate before creation.",
         blocks: [{ type: "paragraph", text: "Earlier seed" }, { type: "figma", text: invalid }] }],
-      ["insert_block", { uuid: created.uuid, type: "figma", text: invalid }],
+      ["insert_block", { uuid: created.uuid, blocks: [{ type: "figma", text: invalid }] }],
       ["edit_block", { uuid: created.uuid, block_id: created.blocks[0].id, old_text: SOURCE,
         new_text: invalid, rev: created.blocks[0].rev }],
     ] as const) {
@@ -106,7 +106,8 @@ describe("Figma blocks through MCP", () => {
         applied: false, partial: false, synced: false } });
       expect(refused.payload.recovery).toContain("url");
       if (expectsHostError) {
-        expect(refused.payload.message).toBe("figma blocks take figma.com links only; use a plain link for other sites");
+        const message = "figma blocks take figma.com links only; use a plain link for other sites";
+        expect(refused.payload.message).toBe(name === "insert_block" ? `Entry 1: ${message} Nothing was written.` : message);
       }
     }
     expect(updates).toBe(0);
@@ -149,7 +150,7 @@ describe("Figma blocks through MCP", () => {
     for (const [name, args] of [
       ["create_doc", { title: "No partial caption link", description: "All seed caption links validate first.",
         blocks: [{ type: "paragraph", text: "Earlier seed" }, { type: "figma", text: invalid }] }],
-      ["insert_block", { uuid: created.uuid, type: "figma", text: invalid }],
+      ["insert_block", { uuid: created.uuid, blocks: [{ type: "figma", text: invalid }] }],
       ["edit_block", { uuid: created.uuid, block_id: created.blocks[0].id,
         old_text: source, new_text: invalid, rev: created.blocks[0].rev }],
     ] as const) {
@@ -198,12 +199,12 @@ describe("Figma blocks through MCP", () => {
   it.each(["Caption", ""])("anchors the agent caret in the caption, including an empty one: %s", async (caption) => {
     const rig = await localRig();
     const created = await rig.ok("create_doc", { title: "Figma cursor", description: "Cursor publication addresses the stored caption." });
-    const inserted = await rig.ok("insert_block", { uuid: created.uuid, type: "figma", text: `url: ${LINK}\n\n${caption}` });
+    const inserted = await rig.ok("insert_block", { uuid: created.uuid, blocks: [{ type: "figma", text: `url: ${LINK}\n\n${caption}` }] });
     const replica = rig.instance.replicas.replica(created.uuid);
     const cursor = replica.awareness.getLocalState()!.cursor;
     const position = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(cursor.head), replica.doc);
-    const element = findBlockElement(replica.doc, inserted.block.id);
-    const expected = blockText(replica.doc, inserted.block.id) ??
+    const element = findBlockElement(replica.doc, inserted.blocks[0].id);
+    const expected = blockText(replica.doc, inserted.blocks[0].id) ??
       (element === null ? undefined : figmaCaptionElement(element)?.firstChild);
     expect(position?.type).toBe(expected);
   });

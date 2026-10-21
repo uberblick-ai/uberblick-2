@@ -52,7 +52,7 @@ describe.each([
     expect(read.blocks[0]).toMatchObject({ type: "chart", text: mapping });
     expect(JSON.stringify(read)).not.toContain("DATA_SENTINEL");
     expect((await rig.ok("search", { query: "quartzchartmapping" })).hits).toMatchObject([{ uuid }]);
-    const inserted = await rig.ok("insert_block", { uuid, type: "chart", text: "{ incomplete" });
+    const inserted = await rig.ok("insert_block", { uuid, blocks: [{ type: "chart", text: "{ incomplete" }] });
     const next = mapping.replace("quartzchartmapping", "amethystchartmapping");
     const edited = await rig.ok("edit_block", {
       uuid, block_id: read.blocks[0].id, old_text: mapping, new_text: next, rev: read.blocks[0].rev,
@@ -60,7 +60,7 @@ describe.each([
     expect(edited.block).toMatchObject({ type: "chart", text: next });
     const current = await rig.ok("get_doc", { uuid });
     expect(current.blocks).toMatchObject([
-      { id: inserted.block.id, type: "chart", text: "{ incomplete" },
+      { id: inserted.blocks[0].id, type: "chart", text: "{ incomplete" },
       { id: edited.block.id, type: "chart", text: next },
     ]);
     expect((await rig.ok("search", { query: "amethystchartmapping" })).hits).toMatchObject([{ uuid }]);

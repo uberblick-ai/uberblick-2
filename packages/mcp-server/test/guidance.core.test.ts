@@ -45,7 +45,7 @@ it("refuses every document mutation before logging, teaches recovery, and leaves
   const calls: Record<string, Record<string, unknown>> = {
     create_doc: { title: "Must not exist", description: "Refused creation." },
     edit_block: { uuid, block_id: block.id, old_text: block.text, new_text: "Changed", rev: block.rev },
-    insert_block: { uuid, type: "paragraph", text: "Changed" },
+    insert_block: { uuid, blocks: [{ type: "paragraph", text: "Changed" }] },
     delete_block: { uuid, block_id: block.id },
     set_metadata: { uuid, title: "Changed" }, set_status: { uuid, status: "open" },
     update_data: { uuid, operations: [] },

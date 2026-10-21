@@ -107,16 +107,14 @@ describe("with the hub stopped", () => {
     );
 
     const inserted = await rig.ok("insert_block", {
-      uuid: created.uuid,
-      after_block_id: paragraph.id,
-      type: "paragraph",
-      text: "appended offline",
+      uuid: created.uuid, after_block_id: paragraph.id,
+      blocks: [{ type: "paragraph", text: "appended offline" }],
     });
-    expect(inserted.block.text).toBe("appended offline");
+    expect(inserted.blocks[0].text).toBe("appended offline");
 
     await rig.ok("delete_block", {
       uuid: created.uuid,
-      block_id: inserted.block.id,
+      block_id: inserted.blocks[0].id,
     });
 
     await rig.ok("set_metadata", { uuid: created.uuid, tags: ["mcp", "sync"] });
@@ -178,8 +176,7 @@ describe("with the hub stopped", () => {
 
     const block = await rig.ok("insert_block", {
       uuid: created.uuid,
-      type: "paragraph",
-      text: "one",
+      blocks: [{ type: "paragraph", text: "one" }],
     });
     expect(block.applied).toBe(true);
     expect(block.synced).toBe(false);

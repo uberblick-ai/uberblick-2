@@ -40,11 +40,11 @@ describe("cards through MCP", () => {
   ] as const)("places the agent caret in $part when later optional parts are empty", async ({ source, part }) => {
     const rig = await localRig();
     const created = await rig.ok("create_doc", { title: "Card caret", description: "The agent caret stays in a visible part." });
-    const inserted = await rig.ok("insert_block", { uuid: created.uuid, type: "card", text: source });
+    const inserted = await rig.ok("insert_block", { uuid: created.uuid, blocks: [{ type: "card", text: source }] });
     const replica = rig.instance.replicas.replica(created.uuid);
     const cursor = replica.awareness.getLocalState()!.cursor;
     const position = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(cursor.head), replica.doc);
-    const text = partText(replica.doc, inserted.block.id, part);
+    const text = partText(replica.doc, inserted.blocks[0].id, part);
     expect(position?.type).toBe(text);
     expect(position?.index).toBe(text.length);
   });
@@ -63,7 +63,7 @@ describe("cards through MCP", () => {
     for (const [name, args] of [
       ["create_doc", { title: "No partial card", description: "All seeds validate before creation.",
         blocks: [{ type: "paragraph", text: "Earlier seed" }, { type: "card", text: invalid }] }],
-      ["insert_block", { uuid: created.uuid, type: "card", text: invalid }],
+      ["insert_block", { uuid: created.uuid, blocks: [{ type: "card", text: invalid }] }],
       ["edit_block", { uuid: created.uuid, block_id: created.blocks[0].id, old_text: SOURCE,
         new_text: invalid, rev: created.blocks[0].rev }],
     ] as const) {
@@ -130,7 +130,7 @@ describe("cards through MCP", () => {
     for (const [name, args] of [
       ["create_doc", { title: "No partial link", description: "Validate all seed card parts first.",
         blocks: [{ type: "paragraph", text: "Earlier seed" }, { type: "card", text: invalid }] }],
-      ["insert_block", { uuid: created.uuid, type: "card", text: invalid }],
+      ["insert_block", { uuid: created.uuid, blocks: [{ type: "card", text: invalid }] }],
       ["edit_block", { uuid: created.uuid, block_id: created.blocks[0].id,
         old_text: SOURCE, new_text: invalid, rev: created.blocks[0].rev }],
     ] as const) {

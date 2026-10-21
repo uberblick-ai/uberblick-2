@@ -153,17 +153,17 @@ it("creates and re-indents list items using the published help examples", async 
   const inserted = await rig.ok("insert_block", {
     ...jsonSection(insertHelp.text, "Example"), uuid: created.uuid, after_block_id: seed.id,
   });
-  expect(inserted.block).toMatchObject({ type: "list-item", list: "ordered", indent: 2 });
+  expect(inserted.blocks[0]).toMatchObject({ type: "list-item", list: "ordered", indent: 2 });
 
   const editHelp = await rig.ok("get_help", { topic: "edit_block" });
   const edited = await rig.ok("edit_block", {
     ...jsonSection(editHelp.text, "Example"), uuid: created.uuid,
-    block_id: inserted.block.id, rev: inserted.block.rev,
+    block_id: inserted.blocks[0].id, rev: inserted.blocks[0].rev,
   });
   expect(edited.block).toMatchObject({
-    id: inserted.block.id, text: inserted.block.text, list: "ordered", indent: 1,
+    id: inserted.blocks[0].id, text: inserted.blocks[0].text, list: "ordered", indent: 1,
   });
-  expect(edited.block.rev).not.toBe(inserted.block.rev);
+  expect(edited.block.rev).not.toBe(inserted.blocks[0].rev);
   expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual([seed, edited.block]);
 });
 

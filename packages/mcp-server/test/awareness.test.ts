@@ -157,8 +157,7 @@ describe("agent awareness", () => {
     // that did not exist when the previous cursor was published.
     const inserted = await rig.ok("insert_block", {
       uuid: doc.uuid,
-      type: "paragraph",
-      text: "brand new",
+      blocks: [{ type: "paragraph", text: "brand new" }],
     });
     const afterInsert = awarenessOf(rig, doc.uuid);
     const head = Y.createAbsolutePositionFromRelativePosition(
@@ -166,7 +165,7 @@ describe("agent awareness", () => {
       afterInsert.replica.doc,
     );
     expect(head?.type).toBe(
-      blockText(afterInsert.replica.doc, inserted.block.id),
+      blockText(afterInsert.replica.doc, inserted.blocks[0].id),
     );
     expect(head?.index).toBe("brand new".length);
 
@@ -175,11 +174,10 @@ describe("agent awareness", () => {
     // block an agent inserts.
     const formatted = await rig.ok("insert_block", {
       uuid: doc.uuid,
-      type: "paragraph",
-      inline: [
+      blocks: [{ type: "paragraph", inline: [
         { text: "a formatted ", marks: {} },
         { text: "insert", marks: { bold: true } },
-      ],
+      ] }],
     });
     const afterFormatted = awarenessOf(rig, doc.uuid);
     expect(
@@ -188,7 +186,7 @@ describe("agent awareness", () => {
         afterFormatted.replica.doc,
       )?.index,
     ).toBe("a formatted insert".length);
-    expect(formatted.block.text).toBe("a formatted insert");
+    expect(formatted.blocks[0].text).toBe("a formatted insert");
   });
 
   // Who wrote is half of what a caret says, and the web editor renders whatever

@@ -460,7 +460,7 @@ function failure(payload: Record<string, unknown>): ToolFailure {
  */
 function stamped(
   tool: FailedTool,
-  payload: Record<string, unknown> & { error: string },
+  payload: Record<string, unknown> & { error: string; message: string },
 ): ToolFailure {
   const recovery = RECOVERIES[payload.error];
   if (recovery === undefined) {
@@ -474,6 +474,12 @@ function stamped(
     recoveryClass: recovery.recoveryClass,
     recovery: recovery.guidance,
     ...payload,
+    ...(tool.name === "insert_block" && [
+      "block_not_found", "doc_not_found", "doc_not_hydrated", "doc_archived", "doc_deleted",
+      "decision_read_only", "guidance_required", "server_shutting_down",
+    ].includes(payload.error) && !/nothing was written/i.test(payload.message)
+      ? { message: `${payload.message} Nothing was written.` }
+      : {}),
   });
 }
 

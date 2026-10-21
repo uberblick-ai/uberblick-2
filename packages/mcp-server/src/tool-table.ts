@@ -358,35 +358,29 @@ export const tools: readonly Tool[] = [
   }),
   tool({
     name: "insert_block",
-    title: "Insert a block",
+    title: "Insert blocks",
     description:
-      "Insert one block after after_block_id, or at the top when omitted; lists use adjacent list-item " +
-      "blocks with list/indent (default bullet/0). " +
-      "Tables take one GFM table or invalid_table refuses. Cards take :::card content without " +
-      "delimiters: nonempty title, optional label/footer, repeated button: [Text](destination) lines " +
-      "and inline-Markdown prose. Button labels are plain text; destinations are https or exact " +
-      "claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled " +
-      "and color neutral/blue/green/violet may follow in either order; defaults are outline neutral. " +
-      "Output keeps authored order, writes style before color and omits defaults. Bad cards refuse with " +
-      "invalid_card. Figma takes :::figma content without delimiters: required url, optional plain " +
-      "one-line title and height 240–960, blank line and marked caption. HTTPS figma.com/www.figma.com " +
-      "design/file/proto/board/slides/community/file links retain the key/id, optional name and " +
-      "node-id, starting-point-node-id, version-id on www.figma.com; other query fields and fragments " +
-      "disappear. invalid_figma refuses bad headers, paths or height without writing; other sites " +
-      "require a plain link. Document targets must be known locally or doclink_target_not_known_locally " +
-      "refuses. get_doc derives Figma kind/file/fileName/node; this tool contacts no Figma service. " +
-      "Other text is plain or literal source; chart source maps document data.",
+      "Insert a nonempty blocks array consecutively after after_block_id, or at the top when omitted. " +
+      "Use the same entries as create_doc; one block is a one-entry array. Returns the new blocks in " +
+      "order, each with id and rev. Every entry is checked before anything is written: a refusal keeps " +
+      "its error code, names the 1-based entry_index and says nothing was written. Decision answers " +
+      "must keep their supported shape across the whole batch. Success sends one document update " +
+      "and moves the cursor once, to the end of the last inserted block's stored text. Lists use " +
+      "adjacent list-item entries with list/indent (default bullet/0). Container syntax lives in " +
+      "each entry's text field. Document-link targets must be known locally; chart source stays literal.",
     input: insertBlockInput,
     operation: insertBlockOperation,
-    // Adds a block; repeating adds another block.
+    // Adds blocks; repeating adds another batch.
     hints: { destructive: false, idempotent: false },
     example: {
       uuid,
       after_block_id: "list-item-1",
-      type: "list-item",
-      text: "Confirm the final checks passed.",
-      list: "ordered",
-      indent: 2,
+      blocks: [{
+        type: "list-item",
+        text: "Confirm the final checks passed.",
+        list: "ordered",
+        indent: 2,
+      }],
     },
     related: proseContracts,
     details: toolHelpDetails.insert_block,

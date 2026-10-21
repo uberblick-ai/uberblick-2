@@ -65,7 +65,7 @@ function countDirectoryUpdates(rig: Rig): () => number {
 }
 
 async function typeInto(rig: Rig, uuid: string, text: string): Promise<void> {
-  await rig.ok("insert_block", { uuid, type: "paragraph", text });
+  await rig.ok("insert_block", { uuid, blocks: [{ type: "paragraph", text }] });
 }
 
 beforeEach(() => {

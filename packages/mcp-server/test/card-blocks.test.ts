@@ -57,10 +57,10 @@ describe("cards through MCP", () => {
       { text: "external", marks: { link: "https://example.com/page" } }, { text: " ", marks: {} },
       { text: "document", marks: { docLink: target.uuid } },
     ]);
-    const inserted = await rig.ok("insert_block", { uuid: created.uuid, type: "card", text: canonical });
-    expect(inserted.block.text).toBe(canonical);
-    for (const part of PARTS) expect(partRuns(doc, inserted.block.id, part)).toEqual(partRuns(doc, original.id, part));
-    const text = blockText(doc, inserted.block.id);
+    const inserted = await rig.ok("insert_block", { uuid: created.uuid, blocks: [{ type: "card", text: canonical }] });
+    expect(inserted.blocks[0].text).toBe(canonical);
+    for (const part of PARTS) expect(partRuns(doc, inserted.blocks[0].id, part)).toEqual(partRuns(doc, original.id, part));
+    const text = blockText(doc, inserted.blocks[0].id);
     expect(text).toBeInstanceOf(Y.XmlText);
     const cursor = rig.instance.replicas.replica(created.uuid).awareness.getLocalState()!.cursor;
     const position = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(cursor.head), doc);
@@ -71,7 +71,7 @@ describe("cards through MCP", () => {
     const help = await rig.ok("get_help", { topic: "markdown" });
     expect(help.text).toContain(":::card");
     const tool = (await rig.client.listTools()).tools.find(tool => tool.name === "insert_block")!;
-    expect((tool.inputSchema.properties as Record<string, any>).text.description).toContain(":::card");
+    expect((tool.inputSchema.properties as Record<string, any>).blocks.items.properties.text.description).toContain(":::card");
   });
 
 });

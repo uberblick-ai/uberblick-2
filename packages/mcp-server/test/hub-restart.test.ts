@@ -145,8 +145,7 @@ describe("a hub that restarts under connected servers", () => {
     // never took it back would be visible from either side.
     const inserted = await there.ok("insert_block", {
       uuid: doc.uuid,
-      type: "paragraph",
-      text: "written after the restart",
+      blocks: [{ type: "paragraph", text: "written after the restart" }],
     });
     expect(inserted.applied).toBe(true);
 

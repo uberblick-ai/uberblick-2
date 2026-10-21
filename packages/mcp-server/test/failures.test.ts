@@ -254,39 +254,45 @@ describe("the failure contract", () => {
     record((await rig.call("find_decisions", { github_ref: "#1" })).payload);
     record((await rig.call("get_help", { topic: "no-such-help-topic" })).payload);
     record((await rig.call("insert_block", {
-      uuid: doc.uuid, type: "table", text: "not a GFM table",
+      uuid: doc.uuid,
+      blocks: [{ type: "table", text: "not a GFM table" }],
     })).payload);
     record((await rig.call("insert_block", {
-      uuid: doc.uuid, type: "card", text: "label: Missing title",
+      uuid: doc.uuid,
+      blocks: [{ type: "card", text: "label: Missing title" }],
     })).payload);
     const card = await rig.ok("insert_block", {
-      uuid: doc.uuid, after_block_id: doc.blockId, type: "card", text: "title: Card\n\nBody",
+      uuid: doc.uuid, after_block_id: doc.blockId,
+      blocks: [{ type: "card", text: "title: Card\n\nBody" }],
     });
     record((await rig.call("annotate", {
-      uuid: doc.uuid, block_id: card.block.id, start: 0, end: 3, text: "Open this in the web editor",
+      uuid: doc.uuid, block_id: card.blocks[0].id, start: 0, end: 3, text: "Open this in the web editor",
     })).payload);
     record((await rig.call("insert_block", {
-      uuid: doc.uuid, type: "figma", text: "url: https://example.com/design/key\n\nCaption",
+      uuid: doc.uuid,
+      blocks: [{ type: "figma", text: "url: https://example.com/design/key\n\nCaption" }],
     })).payload);
     const figma = await rig.ok("insert_block", {
-      uuid: doc.uuid, after_block_id: doc.blockId, type: "figma", text: "url: https://www.figma.com/design/key\n\nCaption",
+      uuid: doc.uuid, after_block_id: doc.blockId,
+      blocks: [{ type: "figma", text: "url: https://www.figma.com/design/key\n\nCaption" }],
     });
     record((await rig.call("annotate", {
-      uuid: doc.uuid, block_id: figma.block.id, start: 0, end: 3, text: "New Figma caption thread",
+      uuid: doc.uuid, block_id: figma.blocks[0].id, start: 0, end: 3, text: "New Figma caption thread",
     })).payload);
     const table = await rig.ok("insert_block", {
-      uuid: doc.uuid, after_block_id: doc.blockId, type: "table", text: "| Header |\n| --- |\n| Cell |",
+      uuid: doc.uuid, after_block_id: doc.blockId,
+      blocks: [{ type: "table", text: "| Header |\n| --- |\n| Cell |" }],
     });
     record((await rig.call("edit_block", {
-      uuid: doc.uuid, block_id: table.block.id, old_text: table.block.text,
+      uuid: doc.uuid, block_id: table.blocks[0].id, old_text: table.blocks[0].text,
       new_text: "| Header | Added |\n| --- | --- |\n| Cell | New |",
     })).payload);
     record((await rig.call("edit_block", {
-      uuid: doc.uuid, block_id: table.block.id, old_text: table.block.text, new_text: table.block.text,
+      uuid: doc.uuid, block_id: table.blocks[0].id, old_text: table.blocks[0].text, new_text: table.blocks[0].text,
       table_mapping: { rows: [0, 2], columns: [0] },
     })).payload);
     record((await rig.call("annotate", {
-      uuid: doc.uuid, block_id: table.block.id, start: 0, end: 3, text: "Missing cell coordinates",
+      uuid: doc.uuid, block_id: table.blocks[0].id, start: 0, end: 3, text: "Missing cell coordinates",
     })).payload);
     record(
       (await rig.call("get_doc", { uuid: stubOnly(rig) })).payload,

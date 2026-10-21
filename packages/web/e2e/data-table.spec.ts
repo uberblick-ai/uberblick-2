@@ -358,10 +358,10 @@ test("all rows read like an ordinary table with secondary source and isolated li
     const paragraph = doc.blocks.find((block) => block.type === "paragraph");
     const chart = doc.blocks.find((block) => block.type === "chart");
     if (paragraph === undefined || chart === undefined) throw new Error("e2e: table comparison blocks are missing");
-    await session.call("insert_block", { uuid, after_block_id: paragraph.id, type: "heading", level: 2, text: "Changelog" });
+    await session.call("insert_block", { uuid, after_block_id: paragraph.id, blocks: [{ type: "heading", level: 2, text: "Changelog" }] });
     await session.call("insert_block", {
-      uuid, after_block_id: chart.id, type: "table",
-      text: "| Name | Autonomous | Day | Evidence |\n| --- | --- | --- | --- |\n| Ordinary table | 12.50 % | Jan 1, 2026 | Evidence |",
+      uuid, after_block_id: chart.id,
+      blocks: [{ type: "table", text: "| Name | Autonomous | Day | Evidence |\n| --- | --- | --- | --- |\n| Ordinary table | 12.50 % | Jan 1, 2026 | Evidence |" }],
     });
     await measurements(session, uuid);
     await waitForDocumentDraw(page, session, uuid);

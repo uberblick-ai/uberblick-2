@@ -144,7 +144,7 @@ describe("stored Mermaid removal through MCP", () => {
     expect(getBlocks(replica.doc)).toEqual(created.blocks);
     Y.applyUpdate(older, Y.encodeStateAsUpdate(replica.doc));
     expect(getBlocksFragment(older).toArray()).toHaveLength(1);
-    await rig.ok("insert_block", { uuid: created.uuid, type: "paragraph", text: "Still editable." });
+    await rig.ok("insert_block", { uuid: created.uuid, blocks: [{ type: "paragraph", text: "Still editable." }] });
   });
 
   it("preserves approval and writes nothing when an approved record has no Mermaid block", async () => {
@@ -172,7 +172,7 @@ describe("stored Mermaid removal through MCP", () => {
     expect((await rig.call("create_doc", {
       title: "Refused", description: "No old block type.", blocks: [{ type: "mermaid", text: "flowchart LR; A --> B" }],
     })).payload.error).toBe("schema_validation");
-    expect((await rig.call("insert_block", { uuid: created.uuid, type: "mermaid", text: "flowchart LR; A --> B" })).payload.error).toBe("schema_validation");
+    expect((await rig.call("insert_block", { uuid: created.uuid, blocks: [{ type: "mermaid", text: "flowchart LR; A --> B" }] })).payload.error).toBe("schema_validation");
     expect(rig.instance.store.logSize()).toBe(count);
   });
 });
