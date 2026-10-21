@@ -144,7 +144,7 @@ async function readRenewalReply(response: Response): Promise<Record<string, unkn
 }
 
 /** Bound both headers and body; proof goes only to the stored authentication origin. */
-async function renew(origin: string, login: StoredHubLogin, ifWorkspacesChanged: boolean, signal?: AbortSignal): Promise<StoredHubLogin | DeviceLoginFailure | "already-replaced" | "unchanged"> {
+export async function renewDeviceCredential(origin: string, login: StoredHubLogin, ifWorkspacesChanged: boolean, signal?: AbortSignal): Promise<StoredHubLogin | DeviceLoginFailure | "already-replaced" | "unchanged"> {
   const requestSignal = AbortSignal.any([...(signal === undefined ? [] : [signal]), AbortSignal.timeout(REQUEST_MS)]);
   try {
     signal?.throwIfAborted();
@@ -248,7 +248,7 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
       return cachedResult(cached, origin, workspace, current.login);
     }
     const expected = current.login;
-    const result = await renew(origin, expected,
+    const result = await renewDeviceCredential(origin, expected,
       !oldEnough(expected) && !expected.credential.record.workspaces.includes(workspace) &&
       (options.rejected === undefined || !sameCredential(expected, options.rejected)), options.signal);
     if (typeof result === "object" && "identity" in result) {

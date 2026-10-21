@@ -96,9 +96,73 @@ describe("ub auth logout retires devices", () => {
     expect(run.stderr).toBe("");
     expect(readStore(box).hubLogins?.[remote.origin]).toBeUndefined();
     expect(readStore(box).hubLogins?.[OTHER_HUB]).toBeDefined();
-    expect(remote.requests.map(request => request.body.operation)).toEqual(["revoke-device"]);
+    expect(remote.requests.map(request => request.path)).toEqual(["/auth/manage", "/auth/credential/renew"]);
     expect(privateDeviceRows(remote.databasePath).every(row => row.revoked_at === null)).toBe(true);
     expect((await manageRequest(remote.origin, { operation: "list-devices" }, other.login)).status).toBe(200);
+    assertPublicOnly(run, remote, login.credential.key);
+  });
+
+  it("revokes a replaced device after 30 days, including the copy using its replacement credential", async () => {
+    const remote = await rig([WORKSPACE]);
+    const { box, login } = await signedIn(remote);
+    const other = await signedIn(remote);
+    const replacement = issueCredential(remote.hub.credentials!, {
+      principalId: login.identity.id, deviceId: login.credential.record.deviceId, workspaces: [WORKSPACE],
+    });
+    const copy = { identity: login.identity, credential: {
+      record: replacement.record, key: Buffer.from(replacement.keyBytes).toString("base64url"),
+    } };
+    login.credential.record.issuedAt = Date.now() - DEVICE_CREDENTIAL_LIFETIME_MS;
+    const database = new DatabaseSync(remote.databasePath);
+    try {
+      database.prepare("UPDATE hub_credentials SET issued_at = ?, replaced_at = ? WHERE id = ?")
+        .run(login.credential.record.issuedAt, Date.now(), login.credential.record.id);
+    } finally { database.close(); }
+    await writeHubLogin(remote.origin, login, box.env);
+    expect((await manageRequest(remote.origin, { operation: "list-devices" }, copy)).status).toBe(200);
+    remote.requests.length = 0;
+
+    const run = await runInProcess(["auth", "logout"], box);
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toBe(`revoked    this computer on ${remote.origin}\nremoved    login for ${remote.origin} on this computer\n`);
+    expect(run.stderr).toBe("");
+    expect(readStore(box).hubLogins?.[remote.origin]).toBeUndefined();
+    expect(readStore(box).hubLogins?.[OTHER_HUB]).toBeDefined();
+    expect(remote.requests.map(request => request.path)).toEqual(["/auth/manage", "/auth/credential/renew"]);
+    const rows = privateDeviceRows(remote.databasePath);
+    expect(rows.find(row => row.id === login.credential.record.id)?.revoked_at).not.toBeNull();
+    expect(rows.find(row => row.id === replacement.record.id)?.revoked_at).not.toBeNull();
+    expect((await manageRequest(remote.origin, { operation: "list-devices" }, copy)).status).toBe(401);
+    expect((await manageRequest(remote.origin, { operation: "list-devices" }, other.login)).status).toBe(200);
+    assertPublicOnly(run, remote, login.credential.key);
+    assertPublicOnly(run, remote, copy.credential.key);
+  });
+
+  it.each(["network failure", "unexpected renewal"])("never reports expiry after a renewal %s", async outcome => {
+    const remote = await rig();
+    const { box, login } = await signedIn(remote);
+    login.credential.record.issuedAt = Date.now() - DEVICE_CREDENTIAL_LIFETIME_MS;
+    await writeHubLogin(remote.origin, login, box.env);
+    remote.controls.onManagement = () => ({ status: 401, result: { status: "sign-in-required" } });
+    const fetch = globalThis.fetch;
+    let renewals = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
+      if (String(input) === `${remote.origin}/auth/credential/renew`) {
+        renewals++;
+        if (outcome === "network failure") throw new TypeError("network unavailable");
+      }
+      return fetch(input, options);
+    });
+
+    const run = await runInProcess(["auth", "logout"], box);
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe(`removed    login for ${remote.origin} on this computer\n`);
+    expect(run.stderr).toContain(`ub auth logout --all-devices ${remote.origin}`);
+    expect(run.stderr).toMatch(/this computer.*not.*revoked/i);
+    expect(renewals).toBe(1);
+    expect(readStore(box).hubLogins?.[remote.origin]).toBeUndefined();
+    expect(readStore(box).hubLogins?.[OTHER_HUB]).toBeDefined();
+    expect(privateDeviceRows(remote.databasePath).every(row => row.revoked_at === null)).toBe(true);
     assertPublicOnly(run, remote, login.credential.key);
   });
 
@@ -121,6 +185,7 @@ describe("ub auth logout retires devices", () => {
     expect(run.stderr).toMatch(/computer.*still signed in/i);
     expect(remote.origin in (readStore(box).hubLogins ?? {})).toBe(false);
     expect(privateDeviceRows(remote.databasePath)[0]?.revoked_at).toBeNull();
+    expect(remote.requests.map(request => request.path)).toEqual(["/auth/manage"]);
     assertPublicOnly(run, remote, login.credential.key);
   });
 

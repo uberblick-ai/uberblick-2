@@ -69,14 +69,14 @@ async function hub(start: unknown = started, unclaimed = true, pending = false, 
 function guidance(origin: string, unclaimed = true): string {
   return `hub        ${origin}\n` +
     "approve only a code you just started yourself\n" +
-    (unclaimed ? "this hub is unclaimed: the first account to approve becomes its admin\n" : "") +
+    (unclaimed ? "this hub is unclaimed: the first account to approve becomes hub admin and admin of its default workspace\n" : "") +
     `open       ${URL}\ncode       ABCD-EFGH\nwaiting for approval…\n`;
 }
 
 function stdout(origin: string, unclaimed = true): string {
   return guidance(origin, unclaimed) +
     `signed in  browser-test-user on ${origin}\n` +
-    `claimed    default workspace (${WORKSPACE}), you are admin\n` +
+    `claimed    default workspace (${WORKSPACE}), you are hub admin and admin of this workspace\n` +
     `available workspaces:\n  ${WORKSPACE}\n` +
     `Use it here: ub workspace use ${origin.replace("http:", "ws:")}/ws/${WORKSPACE}\n`;
 }

@@ -22,6 +22,7 @@ import { assertHubTransport, authenticationOrigin, hubTransportProblem, normaliz
 import { SYNC_PROTOCOL_VERSION, protocolSkew, readProtocolMismatch, wrapToken } from "@uberblick/schema/protocol";
 import { DEVICE_CREDENTIAL_LIFETIME_MS, generateCredentialKeyPair } from "@uberblick/schema/token";
 import { manageRequest, ManagementResponseError, sanitizeManagementReply } from "@uberblick/mcp-server/management-client";
+import { renewDeviceCredential } from "@uberblick/mcp-server/device-login";
 
 export const AUTH_HELP = `usage: ub auth [command]
 
@@ -49,7 +50,7 @@ previous device is not revoked.
 Local-only work needs no login. Login never changes the project binding.
 Signing in grants no workspace membership, except for the first claim below.
 On a fresh, unclaimed hub, the first GitHub account to complete approval
-claims its default workspace as administrator. Claiming is one-time; this
+becomes hub admin and admin of its default workspace. Claiming is one-time; this
 command reports the claim after storing the login, then lists the available
 workspace UUIDs and any supplied names along with who signed in and the hub.
 
@@ -83,7 +84,8 @@ export const AUTH_LOGOUT_HELP = `usage: ub auth logout [--all-devices] [hub]
 Revoke this computer at the given hub, then remove its login here.
 Without a hub, use the hub selected by this project's binding.
 The hub can be a bare host, an http(s) address or a ws(s) endpoint.
-Without --all-devices, a credential the hub refuses after 30 days is removed; exit 0.
+Without --all-devices, a credential the hub refuses after 30 days gets one
+renewal attempt: expiry or a confirmed device revocation removes it; exit 0.
 If revocation is not confirmed, the local login is still removed; exit 1.
 Finish with \`ub auth logout --all-devices <hub>\` from a computer still signed in.
 With --all-devices, revoke every device of your signed-in GitHub account on
@@ -343,12 +345,25 @@ async function retireCurrentDevice(origin: string, login: StoredHubLogin, io: Io
     await deviceRequest(origin, { operation: "revoke-device", deviceId: login.credential.record.deviceId }, login, io);
     authField(io, "revoked", `this computer on ${origin}`);
   } catch (error) {
-    if (error instanceof DeviceFailure && error.signInRequired &&
-        Date.now() - login.credential.record.issuedAt >= DEVICE_CREDENTIAL_LIFETIME_MS) {
-      authField(io, "expired", `this computer's credential on ${origin}`);
-    } else {
+    if (!(error instanceof DeviceFailure && error.signInRequired &&
+        Date.now() - login.credential.record.issuedAt >= DEVICE_CREDENTIAL_LIFETIME_MS)) {
       return error instanceof DeviceFailure ? error.message : "revocation not confirmed";
     }
+    try {
+      const renewal = await renewDeviceCredential(origin, login, false,
+        AbortSignal.timeout(Math.max(1, Math.ceil(budget(10_000)))));
+      if (renewal === "already-replaced") {
+        authField(io, "revoked", `this computer on ${origin}`);
+        return;
+      }
+      if (typeof renewal === "object" && "status" in renewal && renewal.status === "sign-in-required") {
+        authField(io, "expired", `this computer's credential on ${origin}`);
+        return;
+      }
+    } catch {
+      return "credential renewal failed; revocation not confirmed";
+    }
+    return "credential renewal did not confirm revocation";
   }
 }
 
@@ -593,7 +608,7 @@ async function login(selection: Selection, io: Io, collectTimeoutMs?: number): P
     deadline = performance.now() + started.expiresIn * 1000;
     if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
     io.out("approve only a code you just started yourself\n");
-    if (unclaimed) io.out("this hub is unclaimed: the first account to approve becomes its admin\n");
+    if (unclaimed) io.out("this hub is unclaimed: the first account to approve becomes hub admin and admin of its default workspace\n");
     authField(io, "open", started.verificationUri);
     authField(io, "code", started.userCode);
     io.out("waiting for approval…\n");
@@ -635,7 +650,7 @@ async function login(selection: Selection, io: Io, collectTimeoutMs?: number): P
       let replaced: StoredHubLogin | null;
       try { replaced = await writeHubLogin(selection.origin, credential, process.env, interrupted.signal); } catch (error) {
         if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
-        const claim = claimedWorkspaceId === undefined ? "" : ` The hub claimed default workspace (${claimedWorkspaceId}) for this account.`;
+        const claim = claimedWorkspaceId === undefined ? "" : ` The hub made this account hub admin and admin of its default workspace (${claimedWorkspaceId}).`;
         io.err(`ub auth: could not store login for ${selection.origin}: ${error instanceof Error ? error.message : "credential store write failed"}.${claim} The issued device remains on the hub; revoke it through device management if needed.\n`);
         return 1;
       }
@@ -655,7 +670,7 @@ async function login(selection: Selection, io: Io, collectTimeoutMs?: number): P
         }
       }
       authField(io, "signed in", `${displayUsername(credential.identity.githubUsername)} on ${selection.origin}`);
-      if (claimedWorkspaceId !== undefined) authField(io, "claimed", `default workspace (${claimedWorkspaceId}), you are admin`);
+      if (claimedWorkspaceId !== undefined) authField(io, "claimed", `default workspace (${claimedWorkspaceId}), you are hub admin and admin of this workspace`);
       describeWorkspaces(credential, io);
       if (shouldPrintClaimCommand(claimedWorkspaceId, selection)) {
         io.out(`Use it here: ub workspace use ${shellArgument(`${selection.endpoint}/${claimedWorkspaceId}`)}\n`);
@@ -667,7 +682,7 @@ async function login(selection: Selection, io: Io, collectTimeoutMs?: number): P
       : deadline !== undefined && performance.now() >= deadline ? "GitHub sign-in expired; run login again"
       : error instanceof SignInFailure ? error.message : "the hub is unreachable or the sign-in request timed out";
     io.err(`ub auth: ${selection.origin}: ${message}.\n`);
-    if (claimedWorkspaceId !== undefined && !stored) io.err(`ub auth: the hub claimed default workspace (${claimedWorkspaceId}) for this account.\n`);
+    if (claimedWorkspaceId !== undefined && !stored) io.err(`ub auth: the hub made this account hub admin and admin of its default workspace (${claimedWorkspaceId}).\n`);
     if (collected) io.err("ub auth: the issued device remains on the hub; revoke it through device management if needed.\n");
     return 1;
   } finally {

@@ -57,7 +57,7 @@ describe("ub auth local selection and command surface", () => {
         expect(help.stdout).toContain("Signing in grants no workspace membership");
         expect(help.stdout).toMatch(/revok.*replac|replac.*revok/i);
         expect(help.stdout.replace(/\s+/g, " ")).toMatch(/approve only a code you just started/i);
-        expect(help.stdout.replace(/\s+/g, " ")).toMatch(/first.*account.*approv.*claim.*default workspace.*admin/i);
+        expect(help.stdout.replace(/\s+/g, " ")).toMatch(/first.*account.*approv.*becomes hub admin and admin of its default workspace/i);
       }
       if (args[1] === "logout") expect(help.stdout).toContain("--all-devices");
     }
@@ -382,7 +382,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(stored.credential.record.workspaces).toHaveLength(1);
     expect(workspace).toMatch(/^[0-9a-f-]{36}$/);
     expect(workspace).not.toBe(WORKSPACE);
-    expect(login.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis hub is unclaimed: the first account to approve becomes its admin\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\nsigned in  ${USERNAME} on ${remote.origin}\nclaimed    default workspace (${workspace}), you are admin\navailable workspaces:\n  ${workspace} | Default workspace\nUse it here: ub workspace use ${remote.origin.replace("http:", "ws:")}/ws/${workspace}\n`);
+    expect(login.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis hub is unclaimed: the first account to approve becomes hub admin and admin of its default workspace\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\nsigned in  ${USERNAME} on ${remote.origin}\nclaimed    default workspace (${workspace}), you are hub admin and admin of this workspace\navailable workspaces:\n  ${workspace} | Default workspace\nUse it here: ub workspace use ${remote.origin.replace("http:", "ws:")}/ws/${workspace}\n`);
     expect(login.stderr).toBe("");
     expect(readFileSync(configPath(box))).toEqual(binding);
     expect(remote.requests[0]).toMatchObject({ path: "/auth/credential/renew", method: "POST", body: {
@@ -416,7 +416,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const login = await runInProcess(["auth", "login", endpoint], box, source === "environment"
       ? { UB_WORKSPACE_ID: workspace, UB_HUB_URL: binding.hubUrl } : {});
     expect(login.status, login.stderr).toBe(0);
-    expect(login.stdout).toContain(`claimed    default workspace (${WORKSPACE}), you are admin\n`);
+    expect(login.stdout).toContain(`claimed    default workspace (${WORKSPACE}), you are hub admin and admin of this workspace\n`);
     expect(login.stdout).not.toContain("Use it here:");
     expect(login.stdout).not.toContain("ub open");
     expect(existsSync(path) ? readFileSync(path) : null).toEqual(before);
@@ -489,7 +489,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const login = await runInProcess(["auth", "login", remote.origin], sandbox());
     expect(login.status, login.stderr).toBe(0);
     expect(login.stdout).not.toContain("this hub is unclaimed");
-    expect(login.stdout).toContain(`signed in  ${USERNAME} on ${remote.origin}\nclaimed    default workspace (${WORKSPACE}), you are admin\n`);
+    expect(login.stdout).toContain(`signed in  ${USERNAME} on ${remote.origin}\nclaimed    default workspace (${WORKSPACE}), you are hub admin and admin of this workspace\n`);
   });
 
   it.each(["hung-body", "unexpected-field"])("continues ordinary login after a %s claim-state read without an unclaimed notice", async (kind) => {
@@ -761,8 +761,9 @@ describe("hub-driven CLI GitHub sign-in", () => {
       const run = await runInProcess(["auth", "login", remote.origin], box);
       expect(run.status).toBe(1);
       expect(claimedWorkspace).toMatch(/^[0-9a-f-]{36}$/);
-      expect(run.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis hub is unclaimed: the first account to approve becomes its admin\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\n`);
+      expect(run.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis hub is unclaimed: the first account to approve becomes hub admin and admin of its default workspace\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\n`);
       expect(run.stderr).toContain(`default workspace (${claimedWorkspace})`);
+      expect(run.stderr).toContain("hub admin and admin of its default workspace");
       expect(run.stderr).toContain("could not store login");
       expect(run.stderr).toMatch(/issued.*device.*remain|issued.*device.*hub|device.*remain.*hub/i);
       expect(privateDeviceRows(remote.databasePath)).toHaveLength(1);

@@ -442,8 +442,10 @@ candidate_ub auth status ws://candidate-hub:1234
 candidate_ub status --json
 ```
 
-`auth status` is an offline record check. Require the live `status --json` reading
-to report `hub: "http://candidate-hub:1234"`, the login's UUID in `workspace.id`,
+`auth status` makes one read-only request to the selected hub and reports whether
+the hub currently accepts the login and whether the account is a hub admin.
+Require the live `status --json` reading to report
+`hub: "http://candidate-hub:1234"`, the login's UUID in `workspace.id`,
 `connection.state: "connected"` and `pending.count: 0`. In a disposable MCP
 configuration, set the command to the absolute path of `$candidate_root/writer-mcp`,
 with no arguments. This
@@ -717,9 +719,11 @@ approval guidance. Over SSH or with non-terminal stdout it only displays them.
 failure does not interrupt login, and login exits without waiting for the browser.
 `ub auth login` and `ub auth status [hub]` list the credential's workspaces as
 `<uuid> | <name>` when a valid stored name is available, or `<uuid>` alone.
-Status reads only the locally recorded identity, workspace limits and names,
-without checking hub acceptance. `ub auth logout [hub]` revokes this computer's
-device at the hub before removing its local login. If the hub does not confirm
+Status makes one read-only request to the selected hub and reports whether the
+hub currently accepts the login and whether the account is a hub admin. It labels
+the locally recorded identity, workspace limits and names as stored.
+`ub auth logout [hub]` revokes this computer's device at the hub before removing
+its local login. If the hub does not confirm
 revocation, logout still removes the login, exits 1 and names the recovery:
 run `ub auth logout --all-devices <hub>` from another computer that is still
 signed in. With no stored login, plain logout contacts nothing.
