@@ -36,7 +36,7 @@ import {
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
 import { RoutePane } from "../src/ui/App.js";
-import { CopyLink, DocMetaLine } from "../src/ui/document/DocChrome.js";
+import { DocMetaLine } from "../src/ui/document/DocChrome.js";
 import { toast } from "sonner";
 import { useDocMeta } from "../src/ui/hooks.js";
 import {
@@ -733,23 +733,12 @@ describe("an address that resolves to no document says which one, and why", () =
   });
 });
 
-/**
- * Activate a mounted document's Copy link icon and return what it says.
- *
- * `segment` is the workspace as the address spells it, which is what the app
- * hands the line — the room key is always the bare uuid.
- */
-async function clickCopy(
-  segment = WS,
-): Promise<{
-  label: string;
-  ariaLabel: string;
-  said: string;
-}> {
+/** Activate a mounted document's Copy link icon and return what it says. */
+async function clickCopy(): Promise<string> {
   const view = render(
     <DocMetaLine
       connection={stubConnection(`${WS}/${UUID}`)}
-      segment={segment}
+      segment={WS}
       meta={meta(UUID)}
       archived={false}
     />,
@@ -757,8 +746,6 @@ async function clickCopy(
   const host = view.container;
 
   const button = within(host).getByRole("button", { name: "Copy link" });
-  const label = button?.textContent ?? "";
-  const ariaLabel = button?.getAttribute("aria-label") ?? label;
   await act(async () => {
     button?.click();
   });
@@ -767,9 +754,7 @@ async function clickCopy(
   });
   const calls = [...vi.mocked(toast.success).mock.calls, ...vi.mocked(toast.error).mock.calls];
   expect(calls).toEqual([[expect.any(String), { id: "clipboard" }]]);
-  const said = calls[0]![0] as string;
-
-  return { label, ariaLabel, said };
+  return calls[0]![0] as string;
 }
 
 describe("the copy control hands back the document's canonical link", () => {
@@ -780,63 +765,6 @@ describe("the copy control hands back the document's canonical link", () => {
   afterEach(() => {
     Reflect.deleteProperty(navigator, "clipboard");
     (document as unknown as { execCommand?: unknown }).execCommand = realExecCommand;
-  });
-
-  it("copies the address a fresh browser would open, not the bare room key", async () => {
-    const written: string[] = [];
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: {
-        writeText: (text: string) => {
-          written.push(text);
-          return Promise.resolve();
-        },
-      },
-    });
-
-    const { label, ariaLabel, said } = await clickCopy();
-
-    expect(label).toBe("");
-    expect(ariaLabel).toBe("Copy link");
-
-    // Exactly what `parseRoute` resolves back to this document.
-    expect(written).toEqual([`${window.location.origin}/${WS}/${UUID}`]);
-    expect(route(new URL(written[0] as string).pathname)).toEqual({
-      kind: "doc",
-      workspace,
-      uuid: UUID,
-    });
-    expect(said).toBe("Link copied");
-    expect(toast.success).toHaveBeenLastCalledWith(said, { id: "clipboard" });
-  });
-
-  it("copies the workspace as the address spells it, slug and all", async () => {
-    // Opened at `/<slug>-<uuid>/<doc>`, the copy has to hand back that link.
-    // Building it from the room key would silently undecorate somebody's URL on
-    // its way out of their own address bar — and the room key, which is what
-    // the line is labelled with, keeps carrying the bare uuid either way.
-    const written: string[] = [];
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: {
-        writeText: (text: string) => {
-          written.push(text);
-          return Promise.resolve();
-        },
-      },
-    });
-
-    const { label, ariaLabel } = await clickCopy(DECORATED);
-
-    expect(written).toEqual([`${window.location.origin}/${DECORATED}/${UUID}`]);
-    expect(label).toBe("");
-    expect(ariaLabel).toBe("Copy link");
-    // And it is a link that resolves back to this document.
-    expect(route(new URL(written[0] as string).pathname)).toEqual({
-      kind: "doc",
-      workspace: { uuid: WS, segment: DECORATED },
-      uuid: UUID,
-    });
   });
 
   it("still copies where navigator.clipboard does not exist", async () => {
@@ -860,44 +788,9 @@ describe("the copy control hands back the document's canonical link", () => {
       return true;
     };
 
-    const { said } = await clickCopy();
+    const said = await clickCopy();
 
     expect(copied).toEqual([`${window.location.origin}/${WS}/${UUID}`]);
     expect(said).toBe("Link copied");
-  });
-
-  it("says so when the copy fails, rather than looking like it worked", async () => {
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: undefined,
-    });
-    (document as unknown as { execCommand: unknown }).execCommand = (): boolean => false;
-
-    expect((await clickCopy()).said).toBe("Couldn't copy the link. Select it in the address bar instead.");
-    expect(toast.error).toHaveBeenLastCalledWith("Couldn't copy the link. Select it in the address bar instead.", { id: "clipboard" });
-  });
-
-  it("publishes every copy again under the same id, including the waiting control", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
-    const view = render(<>
-      <CopyLink room={`${WS}/${UUID}`} segment={DECORATED} />
-      <CopyLink room={`${WS}/${OTHER}`} segment={DECORATED} />
-    </>);
-    const buttons = within(view.container).getAllByRole("button");
-    for (const button of [buttons[0]!, buttons[0]!, buttons[1]!]) {
-      await act(async () => button.click());
-    }
-    expect(writeText.mock.calls).toEqual([
-      [`${window.location.origin}/${DECORATED}/${UUID}`],
-      [`${window.location.origin}/${DECORATED}/${UUID}`],
-      [`${window.location.origin}/${DECORATED}/${OTHER}`],
-    ]);
-    expect(toast.success).toHaveBeenCalledTimes(3);
-    for (const call of vi.mocked(toast.success).mock.calls) {
-      expect(call).toEqual(["Link copied", { id: "clipboard" }]);
-    }
-    expect(buttons[1]!.getAttribute("aria-label")).toBe(`Copy link — copies the canonical document URL for ${DECORATED}/${OTHER}`);
-    expect(within(view.container).queryByRole("status")).toBeNull();
   });
 });

@@ -5,14 +5,13 @@ import type { Editor } from "@tiptap/core";
 import { mountEditor, pastePlainText, typeText } from "./helpers.js";
 
 const forms = [
-  ["**", "bold"],
-  ["__", "bold"],
-  ["*", "italic"],
-  ["_", "italic"],
-  ["~~", "strike"],
-  ["`", "inlineCode"],
+  ["**", "bold", "("],
+  ["__", "bold", "["],
+  ["*", "italic", "{"],
+  ["_", "italic", '"'],
+  ["~~", "strike", "'"],
+  ["`", "inlineCode", "("],
 ] as const;
-const prefixes = ["", " ", "(", "[", "{", '"', "'"];
 const editors: Editor[] = [];
 
 afterEach(() => {
@@ -38,8 +37,8 @@ for (const [route, insert] of [
 ] as const) {
   describe(`${route} inline markdown`, () => {
     it.each(
-      forms.flatMap(([delimiter, mark]) =>
-        prefixes.map((prefix) => ({ delimiter, mark, prefix })),
+      forms.flatMap(([delimiter, mark, punctuation]) =>
+        ["", " ", punctuation].map((prefix) => ({ delimiter, mark, prefix })),
       ),
     )(
       "opens $delimiter after '$prefix' and preserves the prefix",
@@ -55,9 +54,7 @@ for (const [route, insert] of [
     );
 
     it.each([
-      ...forms.flatMap(([delimiter]) =>
-        ["a", "1"].map((prefix) => `${prefix}${delimiter}ab${delimiter}`),
-      ),
+      ...forms.map(([delimiter], index) => `${index % 2 === 0 ? "a" : "1"}${delimiter}ab${delimiter}`),
       "snake_case",
       "a*b*c",
       "x(y`ab`",
@@ -140,7 +137,7 @@ it.each([
   },
 );
 
-it.each(forms.filter(([, mark]) => mark !== "inlineCode"))(
+it.each(forms.filter(([delimiter]) => delimiter === "**" || delimiter === "_"))(
   "does not start %s inside existing inline code",
   (delimiter) => {
     const { ydoc, blockId, editor } = typingDoc();

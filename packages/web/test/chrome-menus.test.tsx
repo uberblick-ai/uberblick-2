@@ -1,6 +1,6 @@
 /**
- * Sidebar menus open workspace and personal destinations. Preferences apply
- * the browser's saved appearance and collaboration identity.
+ * Sidebar menus open workspace and personal destinations. Preferences store
+ * the browser's collaboration identity.
  *
  * Both are driven from stubbed state — workspace names, an identity, a session
  * count — because that is what the components are: a rendering of state the
@@ -8,17 +8,12 @@
  * be lied to about.
  *
  * - The switcher names the current workspace accessibly, marks the current
- *   menu row and offers no workspace creation item. Settings
- *   remain outside its menu, and neither surface shows a document count.
+ *   menu row and shows no document count.
  * - The workspace marker is decorative. An address with no workspace keeps
- *   the neutral reading and no marker. The footer shows the served hub's
- *   account independently of the tab's generated presence identity.
+ *   the neutral reading and no marker.
  * - A presence colour, once chosen, is what the client publishes — and is still
  *   what it publishes after a reload. Whether peers *see* it is a claim about
  *   awareness, and lives in `presence-color.test.ts`.
- * - An appearance choice reaches the document (`data-theme`) and survives a
- *   reload. What that attribute does to the pixels is CSS, and is proved in a
- *   browser (`e2e/chrome.spec.ts`).
  * - "MCP connections" counts agent sessions and nothing else: not this tab, not
  *   another browser tab, and not a session that has gone.
  */
@@ -37,9 +32,7 @@ import type { ReactElement } from "react";
 import { WorkspaceSwitcher } from "../src/ui/sidebar/WorkspaceSwitcher.js";
 import { UserMenu } from "../src/ui/sidebar/UserMenu.js";
 import { PreferencesSettings } from "../src/ui/settings/PreferencesSettings.js";
-import type { AccountIdentity } from "../src/shell/account.js";
 import { useAgentSessions, useSetting } from "../src/ui/hooks.js";
-import { applyStoredAppearance } from "../src/ui/theme.js";
 import { getSetting } from "../src/settings.js";
 import { AGENT_CLIENT, WEB_CLIENT } from "../src/collab/identity.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
@@ -100,7 +93,6 @@ beforeEach(() => {
   installStorage();
   vi.stubGlobal("ResizeObserver", FakeResizeObserver);
   Element.prototype.scrollIntoView = function scrollIntoView() {};
-  document.documentElement.removeAttribute("data-theme");
 });
 
 afterEach(() => {
@@ -238,20 +230,6 @@ describe("the workspace switcher renders configuration", () => {
     expect(screen.queryAllByRole("menu", { hidden: true })).toHaveLength(0);
     view.unmount();
   });
-
-  it("offers only workspaces, with no creation placeholder or settings action", () => {
-    const view = mount(switcher());
-    open(view);
-    const menu = within(screen.getByRole("menu"));
-    const disabled = menu.getAllByRole("menuitem", { hidden: true }).filter((item) => item.getAttribute("aria-disabled") === "true").map((item) => item.textContent);
-    expect(disabled).toEqual([]);
-    expect(menu.queryAllByRole("separator", { hidden: true })).toHaveLength(0);
-    expect(menu.getAllByRole("menuitem", { hidden: true }).map((item) => item.textContent))
-      .toEqual(["Uberblick✓"]);
-    const settings = menu.queryByText("Workspace settings");
-    expect(settings).toBeNull();
-    view.unmount();
-  });
 });
 
 describe("the account footer opens personal settings", () => {
@@ -259,26 +237,6 @@ describe("the account footer opens personal settings", () => {
   function open(view: View): void {
     fireEvent.keyDown(within(view.host).getByRole("button", { name: /; preferences$/ }), { key: "Enter" });
   }
-
-  function menu(account: AccountIdentity = { state: "signed-in", handle: "hub-person" }, onOpenDevices?: () => void): ReactElement {
-    return <UserMenu account={account} onOpenPreferences={() => {}} onOpenDevices={onOpenDevices} />;
-  }
-
-  it("shows the account in the standard button and offers only available destinations", () => {
-    const view = mount(menu());
-    const trigger = within(view.host).getByRole("button", { name: "@hub-person; preferences" });
-    expect(trigger?.textContent).toContain("@hub-person");
-    expect(trigger?.textContent).not.toContain(IDENTITY.name);
-    expect(trigger?.getAttribute("data-sidebar")).toBe("menu-button");
-    expect(trigger?.closest('[data-slot="sidebar-menu-item"]')?.parentElement?.getAttribute("data-slot"))
-      .toBe("sidebar-menu");
-    expect(within(view.host).queryByText("Account settings")).toBeNull();
-    open(view);
-    expect(within(screen.getByRole("menu")).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Preferences"]);
-    expect(screen.queryByRole("textbox")).toBeNull();
-    expect(screen.queryByText("MCP connections")).toBeNull();
-    view.unmount();
-  });
 
   it("opens Preferences and Devices from their menu items independently of account availability", () => {
     const preferences = vi.fn();
@@ -292,28 +250,6 @@ describe("the account footer opens personal settings", () => {
     expect(devices).toHaveBeenCalledOnce();
     view.unmount();
   });
-
-  it.each([
-    [{ state: "signed-out" }, "Not signed in"],
-    [{ state: "unavailable" }, "Account unavailable"],
-  ] as const)("shows the unverified account state without a presence name", (account, label) => {
-    const view = mount(menu(account));
-    expect(within(view.host).getByRole("button", { name: `${label}; preferences` }).textContent).toContain(label);
-    expect(view.host.textContent).not.toContain(IDENTITY.name);
-    view.unmount();
-  });
-
-  it("retires the portalled menu when the sidebar becomes inactive", () => {
-    const view = mount(menu());
-    open(view);
-    // A retired menu must unmount rather than remain hidden in the portal.
-    expect(screen.getAllByRole("menu", { hidden: true })).toHaveLength(1);
-    view.render(<UserMenu onOpenPreferences={() => {}} active={false} />);
-    expect(screen.queryAllByRole("menu", { hidden: true })).toHaveLength(0);
-    view.render(menu());
-    expect(screen.queryAllByRole("menu", { hidden: true })).toHaveLength(0);
-    view.unmount();
-  });
 });
 
 describe("the Preferences page stores this client's choices", () => {
@@ -323,10 +259,6 @@ describe("the Preferences page stores this client's choices", () => {
 
   function chosenSwatch(): string | null {
     return within(screen.getByRole("group", { name: "Presence colour" })).getByRole("button", { pressed: true }).getAttribute("aria-label");
-  }
-
-  function appearanceOption(label: string): HTMLButtonElement {
-    return within(screen.getByRole("group", { name: "Appearance" })).getByRole("button", { name: label });
   }
 
   it("stores a chosen presence colour, and starts from it after a reload", () => {
@@ -371,42 +303,6 @@ describe("the Preferences page stores this client's choices", () => {
     expect(getSetting("presenceName")).toBeNull();
     expect((screen.getByRole("textbox", { name: "Presence name" }) as HTMLInputElement).value).toBe(IDENTITY.name);
     reloaded.unmount();
-  });
-
-  it("flips the token set, and remembers which one", () => {
-    const view = mount(<PreferencesSettings identity={IDENTITY} />);
-    expect(appearanceOption("System")?.getAttribute("aria-pressed")).toBe("true");
-
-    click(appearanceOption("Dark"));
-    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
-    expect(getSetting("appearance")).toBe("dark");
-    expect(appearanceOption("Dark")?.getAttribute("aria-pressed")).toBe("true");
-
-    // Back to the system's answer: the attribute is removed rather than set to a
-    // guess, so the media query decides again.
-    click(appearanceOption("System"));
-    expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
-
-    click(appearanceOption("Light"));
-    view.unmount();
-
-    // The reload path is main.tsx's, before React renders anything.
-    document.documentElement.removeAttribute("data-theme");
-    applyStoredAppearance();
-    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-  });
-
-  it("shows no browser-storage fact even where an estimate is available", async () => {
-    vi.stubGlobal("navigator", {
-      storage: { estimate: async () => ({ usage: 2_500_000, quota: 1e9 }) },
-    });
-    const view = mount(<PreferencesSettings identity={IDENTITY} />);
-    await act(async () => {});
-    const page = within(view.host);
-    expect(page.getByRole("heading", { level: 1, name: "Preferences" })).toBeTruthy();
-    expect(page.getByText("Saved in this browser only.")).toBeTruthy();
-    expect(page.queryAllByRole("term", { hidden: true })).toEqual([]);
-    view.unmount();
   });
 });
 

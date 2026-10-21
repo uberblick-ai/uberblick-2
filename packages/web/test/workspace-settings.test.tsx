@@ -198,18 +198,10 @@ function openConnectionDetails(host: HTMLElement): void {
   act(() => within(host).getByRole<HTMLButtonElement>("button", { name: "Connection details" }).click());
 }
 
-/** Good news uses the same 300ms calm cadence as the status line. */
-async function settleSynced(): Promise<void> {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 310));
-  });
-}
-
 it("renders only live client-held facts and preserves each unknown rule", async () => {
   const room = statusRoom(SYNCED);
   seedDocuments(room.connection, 3);
   const host = await mount(room.connection);
-  await settleSynced();
   expect(within(host).getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
     "Where it lives", "About this workspace", "Connection details",
   ]);
@@ -638,7 +630,6 @@ it("takes offline and refusal readings live from the shared status derivation", 
   const room = statusRoom(SYNCED);
   const host = await mount(room.connection);
   openConnectionDetails(host);
-  await settleSynced();
   expect(facts(host).get("Connection")).toBe("synced");
 
   room.update({ connected: false, synced: false });

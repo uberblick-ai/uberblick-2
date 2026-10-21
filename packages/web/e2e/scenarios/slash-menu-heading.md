@@ -3,11 +3,8 @@
 Scenario: slash-menu-heading
 Test: e2e/block-menu.spec.ts › typing / on an empty block filters, and Enter converts it
 
-A repository scenario retained by #668. This file is the human half of one behavior;
-the `Test:` line above is its only link to the machine half, and
-`packages/web/test/scenario-link.test.ts` is the only thing that checks the link
-still resolves. Nothing here is executed: the Playwright test is the assertion,
-this page is the claim a person makes about the product.
+The `Test:` line names the browser test for this scenario, whose annotation
+names it back. The Playwright assertions check the behavior described here.
 
 ## What a writer should be able to do
 

@@ -234,9 +234,7 @@ test("the pointer can walk from the prose onto the gutter + and press it", async
 });
 
 /**
- * The annotation is the machine end of the link to the human-readable scenario.
- * The assertions were already the behavior proof; the unit-suite link check
- * asks Playwright whether this test is still registered and still names it.
+ * The annotation names the human-readable scenario for these browser assertions.
  */
 test(
   "typing / on an empty block filters, and Enter converts it",

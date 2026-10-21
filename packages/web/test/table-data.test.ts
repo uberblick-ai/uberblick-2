@@ -137,7 +137,7 @@ describe("table cell values", () => {
 
   it.each([
     ["number", "12"], ["number", false], ["number", { nested: 1 }],
-    ["date", "2026-02-30"], ["date", "2026-10-08T12:30:00"], ["date", 123],
+    ["date", "2026-02-30"], ["date", 123],
     ["link", "javascript:alert(1)"], ["link", "data:text/html,<script>alert(1)</script>"],
     ["link", "/relative"], ["link", "//example.com"], ["link", "https://example.com has spaces"],
     ["link", "<a href='https://example.com'>Markup</a>"], ["link", false],

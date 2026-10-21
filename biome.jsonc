@@ -52,6 +52,25 @@
       "linter": { "rules": { "suspicious": { "noConsole": "error" } } }
     },
     {
+      "includes": ["packages/web/src/settings.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [{
+                  "group": ["yjs", "yjs/**", "y-*", "y-*/**", "@uberblick/*", "@uberblick/**", "**/collab/**"],
+                  "message": "Local settings must remain independent of collaboration modules."
+                }]
+              }
+            },
+            "noCommonJs": "error"
+          }
+        }
+      }
+    },
+    {
       "includes": ["packages/*/test/**"],
       "linter": {
         "rules": {
