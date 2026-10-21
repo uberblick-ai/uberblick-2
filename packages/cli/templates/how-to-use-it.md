@@ -8,7 +8,7 @@ links:
 
 ## Open the workspace
 
-Run `ub open` to start Überblick and open the editor. Write directly in any
+Run `ub open` to start Uberblick and open the editor. Write directly in any
 document; changes are saved locally first.
 
 ## Connect an agent

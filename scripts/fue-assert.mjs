@@ -452,7 +452,7 @@ async function main() {
       );
     }
     const titles = new Set(listed.docs.map(doc => doc.title));
-    if (!titles.has("Welcome to Überblick") || !titles.has("How to Use It") || listed.docs.length !== 2) {
+    if (!titles.has("Welcome to Uberblick") || !titles.has("How to Use It") || listed.docs.length !== 2) {
       throw new Error("`list_docs` did not return the two starter documents");
     }
     process.stdout.write(
