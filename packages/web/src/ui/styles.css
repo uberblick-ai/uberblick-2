@@ -114,8 +114,6 @@
   --block-green-tint: light-dark(oklch(0.97 0.006 145), oklch(0.22 0.012 145));
   --block-blue-bar: light-dark(oklch(0.55 0.07 240), oklch(0.7 0.07 240));
   --block-blue-tint: light-dark(oklch(0.97 0.006 240), oklch(0.22 0.012 240));
-  --block-violet-bar: light-dark(oklch(0.55 0.07 305), oklch(0.7 0.07 305));
-  --block-violet-tint: light-dark(oklch(0.97 0.006 305), oklch(0.22 0.012 305));
   --block-teal-bar: light-dark(oklch(0.55 0.07 185), oklch(0.7 0.07 185));
   --block-teal-tint: light-dark(oklch(0.97 0.006 185), oklch(0.22 0.012 185));
 
@@ -350,8 +348,7 @@ body {
 }
 
 .ub-avatar,
-.ub-avatar-agent-badge,
-.ub-status-mark {
+.ub-avatar-agent-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -711,14 +708,6 @@ textarea.ub-title {
   min-width: 0;
 }
 
-.ub-page-subtitle {
-  min-height: var(--type-small-leading);
-  margin: 0;
-  font-size: var(--type-small-size);
-  line-height: var(--type-small-leading);
-  color: var(--muted-foreground);
-}
-
 .ub-title:focus {
   outline: none;
   border-bottom-color: var(--ring);
@@ -733,14 +722,6 @@ textarea.ub-title {
   height: 0.55rem;
   border-radius: 50%;
   display: inline-block;
-}
-
-.ub-dot-live {
-  background: var(--status-success);
-}
-
-.ub-dot-off {
-  background: var(--destructive);
 }
 
 .ub-copy-wrap {
@@ -834,12 +815,6 @@ textarea.ub-title {
 
 .ub-tags-readonly {
   min-height: 2rem;
-}
-
-.ub-doc-ids {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
 }
 
 /* Short ids and the revision placeholder share a stable character width. */
@@ -2640,52 +2615,12 @@ h6.ub-heading {
   .ub-sync-dot--pulse[data-state="resting"]::after { animation: none; }
 }
 
-/* Fixed mark slots remain shared with sync surfaces outside the header. */
-.ub-status-mark {
-  width: 0.7rem;
-  height: 0.7rem;
-  flex: none;
-}
-
-/* Reserve the longest reading, including "update required", and one line
-   even while blank. Face-independent widths keep the slots and their adjacent
-   content still; ch would change with the selected face's zero advance. */
+/* The refusal word keeps its natural width and at least one line of height. */
 .ub-status-word {
   min-height: 1lh;
   flex: none;
   line-height: inherit;
   text-align: left;
-}
-
-/* Saved and hub readings each reserve their longest label width while blank. */
-.ub-status-word--saved {
-  width: 7.2em;
-}
-
-.ub-status-word--hub {
-  width: 11.4em;
-}
-
-/* Inline not-saved only accompanies ordinary sync words. Reserve their
-   longest reading, rather than refusal words, to keep presence in the pane. */
-.ub-status-word--unsaved {
-  width: 5.4em;
-}
-
-/* A lit quarter of the warning ring rotates in the fixed status-mark slot. */
-.ub-spinner {
-  width: 0.7rem;
-  height: 0.7rem;
-  border-radius: 50%;
-  border: 2px solid var(--status-warning-subtle);
-  border-top-color: var(--status-warning);
-  animation: ub-spin 900ms linear infinite;
-}
-
-@keyframes ub-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* Animate disclosure from 0fr to 1fr without measuring content. The child
@@ -2720,10 +2655,6 @@ h6.ub-heading {
   .ub-group-body,
   .ub-copy {
     transition: none;
-  }
-
-  .ub-spinner {
-    animation: none;
   }
 }
 
