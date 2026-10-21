@@ -34,7 +34,7 @@ export function startFigmaDraft(editor: Editor, blockId: string, trigger?: Slash
     return true;
   }
   const slot = editor.view.dom.ownerDocument.createElement("div");
-  slot.className = "ub-figma ub-block-frame";
+  slot.className = "ub-figma";
   slot.dataset.figmaDraft = "true";
   slot.contentEditable = "false";
   const draft: FigmaDraft = { blockId, mode: trigger === undefined ? "below" : "replace", slot };

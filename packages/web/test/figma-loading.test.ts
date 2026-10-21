@@ -15,12 +15,14 @@ function near(dom: HTMLElement, visible: boolean): void {
 function viewer(initialReady: boolean) {
   const dom = document.createElement("div");
   let isReady = initialReady;
+  let isPinned = false;
   const ready = vi.fn(() => isReady);
   const load = vi.fn();
   const unload = vi.fn();
-  const observation = observeFigma({ dom, scroller: null, ready, load, unload, pinned: () => false });
+  const observation = observeFigma({ dom, scroller: null, ready, load, unload, pinned: () => isPinned });
   viewers.push(observation);
-  return { dom, ready, load, unload, observation, setReady(value: boolean) { isReady = value; } };
+  return { dom, ready, load, unload, observation,
+    setReady(value: boolean) { isReady = value; }, setPinned(value: boolean) { isPinned = value; } };
 }
 
 beforeEach(() => {
@@ -92,5 +94,29 @@ describe("Figma lookup eligibility and viewer budget", () => {
     expect(block.load).not.toHaveBeenCalled();
     near(block.dom, true);
     expect(block.load).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a fullscreen viewer and its document intersection while counting its live slot", () => {
+    const fullscreen = viewer(true);
+    near(fullscreen.dom, true);
+    fullscreen.setPinned(true);
+    near(fullscreen.dom, false);
+    const second = viewer(true);
+    const third = viewer(true);
+    const fourth = viewer(true);
+    near(second.dom, true);
+    near(third.dom, true);
+    near(fourth.dom, true);
+    expect(fullscreen.load).toHaveBeenCalledOnce();
+    expect(fullscreen.unload).not.toHaveBeenCalled();
+    expect(second.load).toHaveBeenCalledOnce();
+    expect(third.load).toHaveBeenCalledOnce();
+    expect(fourth.load).not.toHaveBeenCalled();
+    fullscreen.setPinned(false);
+    fullscreen.observation.refresh();
+    expect(fullscreen.unload).not.toHaveBeenCalled();
+    near(fullscreen.dom, false);
+    expect(fullscreen.unload).toHaveBeenCalledOnce();
+    expect(fourth.load).toHaveBeenCalledOnce();
   });
 });

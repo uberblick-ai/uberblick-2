@@ -91,7 +91,7 @@ test("Vite syncs, loads Figma and applies Fast Refresh without CSP violations", 
     expect(sockets.every((url) => new URL(url).origin === appUrl.replace("http:", "ws:"))).toBe(true);
     await page.locator(".ub-figma").scrollIntoViewIfNeeded();
     expect((await lookupResponse).status()).toBe(200);
-    await expect(page.locator(".ub-figma .ub-block-label")).toHaveText("Figma · Figma fixture title");
+    await expect(page.locator(".ub-figma iframe")).toHaveAttribute("title", "Figma fixture title");
     await expect(page.frameLocator(".ub-figma iframe").locator("#viewer")).toHaveText("Live Figma fixture");
     await placeCaret(page);
     await page.keyboard.insertText(" Browser edit reached the dev hub.");

@@ -4,7 +4,7 @@ import type { Browser, Locator, Page } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
 import { randomUUID } from "node:crypto";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { FIGMA_PROVIDER, createAnnotation, roomForDoc } from "@uberblick/schema";
+import { FIGMA_PROVIDER, createAnnotation, findBlockElement, roomForDoc } from "@uberblick/schema";
 import { wrapToken } from "@uberblick/schema/protocol";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import * as Y from "yjs";
@@ -14,6 +14,7 @@ import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
 import { setNativeSelection } from "./native-selection.js";
 import { mockFigmaLookup } from "./figma-fixtures.js";
+import { expectMcp } from "./settle.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
@@ -54,7 +55,7 @@ async function create(session: McpSession, blocks = [
 }
 
 async function open(browser: Browser, uuid: string, navigations: string[], options: { touch?: boolean; appearance?: "light" | "dark"; offline?: boolean; fullscreen?: boolean } = {}): Promise<Page> {
-  const touch = options.touch ?? browser.browserType().name() === "webkit";
+  const touch = options.touch ?? false;
   return openApp(browser, `/${harness().workspace}/${uuid}`, {
     upstream: true,
     contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1366, height: 1000 }, hasTouch: false, isMobile: false }),
@@ -107,29 +108,42 @@ async function token(target: Locator, name: string): Promise<string> {
 }
 
 for (const appearance of ["light", "dark"] as const) {
-  test(`Figma uses the shared teal frame, AA caption and neutral active ring — ${appearance}`, { tag: "@webkit" }, async ({ browser }, info) => {
+  test(`Figma is one rounded surface with prose caption and neutral active ring — ${appearance}`, { tag: "@webkit" }, async ({ browser }, info) => {
     const created = await create(writer());
     const navigations: string[] = [];
-    const page = await open(browser, created.uuid, navigations, { appearance, touch: info.project.use.hasTouch === true });
+    const page = await open(browser, created.uuid, navigations, { appearance });
     const frame = page.locator(".ub-figma");
     const iframe = frame.locator("iframe");
     await expect(iframe).toHaveAttribute("src", FIGMA_PROVIDER.embedAddress(LINK, appearance));
     await expect(iframe).toHaveAttribute("title", "Payment, mobile");
     for (const [name, value] of Object.entries(FIGMA_PROVIDER.frameAttributes)) await expect(iframe).toHaveAttribute(name, value);
     const attributes = await iframe.evaluate((element) => element.getAttributeNames().sort());
-    expect(attributes).toEqual(["allow", "allowfullscreen", "referrerpolicy", "sandbox", "src", "title"]);
-    await expect(frame).toHaveClass(/ub-block-frame/);
-    const painted = await frame.evaluate((element) => ({ bar: getComputedStyle(element).borderLeftColor, tint: getComputedStyle(element).backgroundColor }));
-    expect(painted.bar).toBe(await token(frame, "--block-teal-bar"));
-    expect(painted.tint).toBe(await token(frame, "--block-teal-tint"));
-    const readings = await renderedText(page, ".ub-figma > .ub-block-caption");
+    expect(attributes).toEqual(["allow", "allowfullscreen", "referrerpolicy", "sandbox", "src", "tabindex", "title"]);
+    await expect(frame).not.toHaveClass(/ub-block-frame/);
+    await expect(frame.locator(".ub-block-caption, .ub-block-label")).toHaveCount(0);
+    await expect(frame).toHaveCSS("border-left-width", "0px");
+    await expect(frame).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    const surface = frame.locator(".ub-figma-viewer");
+    await expect(surface).toHaveCSS("overflow", "hidden");
+    expect(await surface.evaluate((element) => getComputedStyle(element).borderRadius)).not.toBe("0px");
+    const geometry = await surface.evaluate((element) => ({ width: element.getBoundingClientRect().width, column: element.closest(".ProseMirror")?.getBoundingClientRect().width }));
+    expect(geometry.width).toBeCloseTo(geometry.column ?? 0, 0);
+    const readings = await renderedText(page, ".ub-figma-caption");
     expect(readings.length).toBeGreaterThan(0);
     for (const reading of readings) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
     const shield = frame.locator(".ub-figma-shield");
+    const toolbar = frame.locator(".ub-figure-toolbar");
+    await editor(page).locator(":scope > p").first().click();
+    await expect(toolbar).toHaveCSS("opacity", "0");
+    await shield.hover();
+    await expect(toolbar).toHaveCSS("opacity", "1");
+    await editor(page).locator(":scope > p").first().hover();
+    await expect(toolbar).toHaveCSS("opacity", "0");
     await shield.focus();
+    await expect(toolbar).toHaveCSS("opacity", "1");
     await page.keyboard.press("Enter");
     await expect(frame).toHaveAttribute("data-figma-active", "true");
-    const ring = await frame.evaluate((element) => getComputedStyle(element).boxShadow);
+    const ring = await surface.evaluate((element) => getComputedStyle(element).boxShadow);
     expect(ring).toContain(await token(frame, "--ring"));
     expect(ring).toContain("0px 0px 0px 2px");
     expect(ring).not.toContain(await token(frame, "--brand"));
@@ -174,6 +188,57 @@ test("the shield passes wheel scrolling to the document and requires a click bef
   await expect(shield).toBeVisible();
 });
 
+test("Done, fullscreen Close, toolbar and Tab leave a safe Figma focus target that cannot edit the document", { tag: "@webkit" }, async ({ browser }) => {
+  const session = writer();
+  const created = await create(session);
+  const page = await open(browser, created.uuid, [], { fullscreen: true });
+  const frame = page.locator(".ub-figma");
+  const preview = frame.getByRole("button", { name: "Interact with Figma preview", exact: true });
+  await expect(frame.locator("iframe").contentFrame().locator("#canvas")).toBeAttached();
+  const documentBefore = await editor(page).evaluate((element) => (element as HTMLElement & { editor: Editor }).editor.state.doc.toJSON());
+  const storedBefore = created.blocks.map(({ id, type, text }) => ({ id, type, text }));
+  for (const entry of ["Done", "Close", "Toolbar", "Tab"] as const) {
+    const focused = entry === "Toolbar" ? frame.getByRole("link", { name: "Open in Figma", exact: true }) : preview;
+    await editor(page).locator(":scope > p").first().click();
+    await page.keyboard.press("End");
+    if (entry === "Done") {
+      await frame.locator(".ub-figma-shield").click();
+      await frame.getByRole("button", { name: "Done", exact: true }).click();
+    } else if (entry === "Close") {
+      await frame.getByRole("button", { name: "Expand", exact: true }).focus();
+      await page.keyboard.press("Enter");
+      await expect(frame.locator(".ub-figure-viewer-bar")).toBeVisible();
+      await frame.getByRole("button", { name: "Close Figma viewer", exact: true }).click();
+      await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+    } else if (entry === "Toolbar") await focused.focus();
+    else await page.keyboard.press("Tab");
+    await expect(focused, entry).toBeFocused();
+    for (const key of ["Backspace", "Delete", "W"]) {
+      await page.keyboard.press(key);
+      await settle(frame);
+      expect(await editor(page).evaluate((element) => (element as HTMLElement & { editor: Editor }).editor.state.doc.toJSON()), `${entry}: ${key}`).toEqual(documentBefore);
+      await expect(focused, `${entry}: ${key}`).toBeFocused();
+    }
+    await expectMcp(() => session.call<StoredDoc>("get_doc", { uuid: created.uuid }), (stored) => {
+      expect(stored.blocks.map(({ id, type, text }) => ({ id, type, text })), entry).toEqual(storedBefore);
+    });
+  }
+});
+
+test("a stored multiline caption renders its line break below the preview", { tag: "@webkit" }, async ({ browser }) => {
+  const created = await create(writer(), [{ type: "figma", text: source().replace(CAPTION, "Line one\nLine two") }]);
+  const page = await open(browser, created.uuid, []);
+  const caption = page.locator(".ub-figma-caption p");
+  await expect(caption).toBeVisible();
+  expect(await caption.innerText()).toBe("Line one\nLine two");
+  const lines = await caption.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+  });
+  expect(lines).toBe(2);
+});
+
 test("caption, local and remote text, undo, fields and theme preserve both clients' viewers; a changed link reloads once", { tag: "@webkit" }, async ({ browser }) => {
   const session = writer();
   const created = await create(session);
@@ -212,9 +277,10 @@ test("caption, local and remote text, undo, fields and theme preserve both clien
   await expect(editor(remote).locator(":scope > p").first()).toContainText("Ordinary edit.");
   await stable();
   await editBlock(session, created.uuid, id, (text) => text.replace("Payment, mobile", "MCP title").replace("height: 240", "height: 300").replace(CAPTION, "MCP caption."));
-  await expect(frames[0].locator(".ub-block-label")).toContainText("MCP title");
+  await expect(frames[0].locator("iframe")).toHaveAttribute("title", "MCP title");
   await expect(frames[1].locator(".ub-figma-caption")).toContainText("MCP caption.");
   await stable();
+  await frames[0].getByRole("button", { name: "Edit", exact: true }).focus();
   await frames[0].getByRole("button", { name: "Edit", exact: true }).click();
   await expect(frames[0].getByLabel("Figma link", { exact: true })).toBeFocused();
   await expect(frames[0].getByRole("button", { name: "Expand", exact: true })).toBeDisabled();
@@ -222,14 +288,15 @@ test("caption, local and remote text, undo, fields and theme preserve both clien
   await frames[0].getByLabel("Title", { exact: true }).fill("Edited title");
   await frames[0].getByLabel("Height", { exact: true }).fill("360");
   await frames[0].getByRole("button", { name: "Done", exact: true }).first().click();
-  await expect(frames[0].locator(".ub-block-label")).toContainText("Edited title");
+  await expect(frames[0].locator("iframe")).toHaveAttribute("title", "Edited title");
   await expect(frames[0].locator(".ub-figma-viewer")).toHaveCSS("height", "360px");
-  await expect(frames[1].locator(".ub-block-label")).toContainText("Edited title");
+  await expect(frames[1].locator("iframe")).toHaveAttribute("title", "Edited title");
   await stable();
   await page.emulateMedia({ colorScheme: "dark" });
   await remote.emulateMedia({ colorScheme: "dark" });
   await stable();
   await expect(frames[0].locator("iframe")).toHaveAttribute("src", /theme=light/);
+  await frames[0].getByRole("button", { name: "Edit", exact: true }).focus();
   await frames[0].getByRole("button", { name: "Edit", exact: true }).click();
   await frames[0].getByLabel("Figma link", { exact: true }).fill(LINK.replace("12-345", "12-401"));
   await frames[0].getByRole("button", { name: "Done", exact: true }).first().click();
@@ -250,14 +317,22 @@ test("Expand enters browser fullscreen with the same iframe and browser exit pre
   await expect(iframe).toHaveCount(1);
   const identity = await iframe.elementHandle();
   const articleIdentity = await frame.elementHandle();
+  await frame.getByRole("button", { name: "Expand", exact: true }).focus();
   await frame.getByRole("button", { name: "Expand", exact: true }).click();
   await expect.poll(() => frame.evaluate((element) => document.fullscreenElement === element)).toBe(true);
   await unchanged(frame, identity, visits);
   expect(await articleIdentity?.evaluate((element) => element.isConnected)).toBe(true);
+  const bar = frame.locator(".ub-figure-viewer-bar");
+  await expect(bar).toBeVisible();
+  await expect(bar).toContainText("Payment, mobile");
+  await expect(bar.getByRole("link", { name: "Open in Figma", exact: true })).toHaveAttribute("href", LINK);
+  await expect(bar.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
   await page.evaluate(() => document.exitFullscreen());
   await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
   await unchanged(frame, identity, visits);
   expect(await articleIdentity?.evaluate((element) => element.isConnected)).toBe(true);
+  await expect(frame.locator(".ub-figma-shield")).toBeFocused();
+  await frame.getByRole("button", { name: "Expand", exact: true }).focus();
   await frame.getByRole("button", { name: "Expand", exact: true }).click();
   await expect.poll(() => frame.evaluate((element) => document.fullscreenElement === element)).toBe(true);
   // Headless Chromium delivers trusted Escape to a bare fullscreen article
@@ -268,21 +343,171 @@ test("Expand enters browser fullscreen with the same iframe and browser exit pre
   await unchanged(frame, identity, visits);
 });
 
-test("a refused fullscreen request keeps the preview and names Open in Figma as the next step", { tag: "@webkit" }, async ({ browser }) => {
-  const created = await create(writer());
-  const visits: string[] = [];
-  const page = await open(browser, created.uuid, visits, { fullscreen: true });
-  const frame = page.locator(".ub-figma");
-  const identity = await frame.locator("iframe").elementHandle();
-  await frame.evaluate((element) => {
-    element.requestFullscreen = () => Promise.reject(new Error("Fullscreen refused"));
+for (const touch of [false, true]) {
+  test(`a refused fullscreen request keeps the preview and exposes working fallback actions — ${touch ? "touch" : "pointer"}`, { tag: "@webkit" }, async ({ browser }) => {
+    const created = await create(writer());
+    const visits: string[] = [];
+    const page = await open(browser, created.uuid, visits, { touch, fullscreen: true });
+    const frame = page.locator(".ub-figma");
+    const identity = await frame.locator("iframe").elementHandle();
+    const before = await page.evaluate(() => ({ state: history.state, length: history.length }));
+    await frame.evaluate((element) => {
+      element.requestFullscreen = () => Promise.reject(new Error("Fullscreen refused"));
+    });
+    if (touch) {
+      await expect(frame.locator(".ub-figure-toolbar")).toBeHidden();
+      await frame.locator(".ub-figma-shield").tap();
+    } else {
+      await frame.getByRole("button", { name: "Expand", exact: true }).focus();
+      await frame.getByRole("button", { name: "Expand", exact: true }).click();
+    }
+    const notice = page.locator("[data-sonner-toast]:not([data-removed=true])");
+    await expect(notice).toContainText("Couldn't open fullscreen. Use Open in Figma instead.");
+    await expect(notice).toHaveAttribute("data-type", "error");
+    const fallback = frame.getByRole("link", { name: "Open in Figma", exact: true });
+    await expect(fallback).toBeVisible();
+    await page.context().route(LINK, (route) => route.fulfill({ contentType: "text/html", body: "Figma external link." }));
+    const opened = page.context().waitForEvent("page");
+    if (touch) await fallback.tap();
+    else await fallback.click();
+    const popup = await opened;
+    try { await expect(popup).toHaveURL(LINK); }
+    finally { await popup.close(); }
+    await page.bringToFront();
+    expect(await page.evaluate(() => ({ state: history.state, length: history.length }))).toEqual(before);
+    await unchanged(frame, identity, visits);
+    const edit = frame.getByRole("button", { name: "Edit", exact: true });
+    await expect(edit).toBeVisible();
+    if (touch) await edit.tap();
+    else await edit.click();
+    await expect(frame.getByLabel("Figma link", { exact: true })).toBeFocused();
   });
-  await frame.getByRole("button", { name: "Expand", exact: true }).click();
-  const notice = page.locator("[data-sonner-toast]:not([data-removed=true])");
-  await expect(notice).toContainText("Couldn't open fullscreen. Use Open in Figma instead.");
-  await expect(notice).toHaveAttribute("data-type", "error");
-  await expect(frame.getByRole("link", { name: "Open in Figma", exact: true })).toBeVisible();
+}
+
+test("fullscreen close, browser exit and Back retain history state, focus and the loaded preview", { tag: "@webkit" }, async ({ browser }) => {
+  const session = writer();
+  const previous = await create(session);
+  const created = await create(session);
+  const visits: string[] = [];
+  const page = await open(browser, previous.uuid, visits, { fullscreen: true });
+  await expect(page.frameLocator(".ub-figma iframe").locator("#canvas")).toBeAttached();
+  await page.goto(new URL(`/${harness().workspace}/${created.uuid}`, page.url()).href);
+  const frame = page.locator(".ub-figma");
+  await expect(frame.locator("iframe").contentFrame().locator("#canvas")).toBeAttached();
+  const identity = await frame.locator("iframe").elementHandle();
+  await page.evaluate(() => history.replaceState({ ...history.state, figmaTest: "retain document state" }, ""));
+  const before = await page.evaluate(() => history.state);
+  const navigations = visits.length;
+  for (const close of ["browser", "button", "back"] as const) {
+    await frame.getByRole("button", { name: "Expand", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => frame.evaluate((element) => document.fullscreenElement === element)).toBe(true);
+    const bar = frame.locator(".ub-figure-viewer-bar");
+    await expect(bar).toBeVisible();
+    if (close === "browser") await page.evaluate(() => document.exitFullscreen());
+    else if (close === "button") await bar.getByRole("button", { name: "Close Figma viewer", exact: true }).click();
+    else await page.goBack();
+    await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+    await expect(frame.locator(".ub-figma-shield")).toBeFocused();
+    await expect.poll(() => page.evaluate(() => history.state)).toEqual(before);
+    await unchanged(frame, identity, visits, navigations);
+  }
+  await frame.getByRole("button", { name: "Expand", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(frame.locator(".ub-figure-viewer-bar")).toBeVisible();
+  await frame.locator(".ub-figure-viewer-bar").getByRole("button", { name: "Edit", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+  await expect(frame.getByLabel("Figma link", { exact: true })).toBeFocused();
+  await expect.poll(() => page.evaluate(() => history.state)).toEqual(before);
+  await frame.getByRole("button", { name: "Done", exact: true }).first().click();
+  await unchanged(frame, identity, visits, navigations);
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/${previous.uuid}$`));
+  await page.goForward();
+  await expect(page).toHaveURL(new RegExp(`/${created.uuid}$`));
+  await expect(page.locator(".ub-figma iframe")).toHaveCount(1);
+});
+
+test("iPad taps open a live fullscreen preview, while placeholders retain reachable actions", { tag: "@webkit" }, async ({ browser }) => {
+  const session = writer();
+  const created = await create(session);
+  const visits: string[] = [];
+  const page = await open(browser, created.uuid, visits, { touch: true, fullscreen: true });
+  const frame = page.locator(".ub-figma");
+  const shield = frame.locator(".ub-figma-shield");
+  await expect(shield).toBeVisible();
+  await expect(frame.locator(".ub-figure-toolbar")).toBeHidden();
+  await expect(frame.locator(".ub-figma-resize")).toBeHidden();
+  const widths = await frame.evaluate((element) => ({ block: element.getBoundingClientRect().width, column: element.closest(".ProseMirror")?.getBoundingClientRect().width }));
+  expect(widths.block).toBeCloseTo(widths.column ?? 0, 0);
+  const identity = await frame.locator("iframe").elementHandle();
+  await shield.tap();
+  await expect.poll(() => frame.evaluate((element) => document.fullscreenElement === element)).toBe(true);
+  await expect(shield).toBeHidden();
+  await expect(frame).toHaveAttribute("data-figma-active", "true");
+  const bar = frame.locator(".ub-figure-viewer-bar");
+  await expect(bar).toContainText("Payment, mobile");
+  for (const button of await bar.getByRole("button").all()) {
+    const bounds = await button.boundingBox();
+    expect(bounds?.width).toBeGreaterThanOrEqual(44);
+    expect(bounds?.height).toBeGreaterThanOrEqual(44);
+  }
+  await bar.getByRole("button", { name: "Close Figma viewer", exact: true }).tap();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+  await expect(frame.locator(".ub-figma-shield")).toBeFocused();
+  await expect(shield).toBeVisible();
   await unchanged(frame, identity, visits);
+  await page.keyboard.press("Enter");
+  await expect.poll(() => frame.evaluate((element) => document.fullscreenElement === element)).toBe(true);
+  await expect(frame).toHaveAttribute("data-figma-active", "true");
+  await expect(shield).toBeHidden();
+  await bar.getByRole("button", { name: "Close Figma viewer", exact: true }).tap();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+  await expect(frame.locator(".ub-figma-shield")).toBeFocused();
+  await expect(shield).toBeVisible();
+  await unchanged(frame, identity, visits);
+
+  const offline = await open(browser, created.uuid, [], { touch: true, offline: true });
+  const placeholder = offline.locator(".ub-figma");
+  await expect(placeholder.locator(".ub-figma-placeholder-title")).toHaveText("Payment, mobile");
+  await expect(placeholder.getByRole("button", { name: "Expand", exact: true })).toBeHidden();
+  await expect(placeholder.getByRole("link", { name: "Open in Figma", exact: true })).toBeVisible();
+  await placeholder.getByRole("button", { name: "Edit", exact: true }).tap();
+  await expect(placeholder.getByLabel("Figma link", { exact: true })).toBeFocused();
+  await placeholder.getByRole("button", { name: "Done", exact: true }).first().tap();
+  await session.call("archive_doc", { uuid: created.uuid });
+  await expect(editor(offline)).toHaveAttribute("contenteditable", "false");
+  await expect(placeholder.getByRole("button", { name: "Edit", exact: true })).toBeHidden();
+  await expect(placeholder.getByRole("link", { name: "Open in Figma", exact: true })).toBeVisible();
+});
+
+test("a touch swipe across the inline preview scrolls the document without entering Figma", async ({ browser, browserName }) => {
+  test.skip(browserName !== "chromium", "Native swipe sequences use Chromium's browser protocol");
+  const created = await create(writer(), [
+    { type: "figma", text: source("swipe", 480) },
+    ...Array.from({ length: 30 }, (_, index) => ({ type: "paragraph", text: `Page scrolling context ${index}.` })),
+  ]);
+  const page = await open(browser, created.uuid, [], { touch: true, fullscreen: true });
+  const frame = page.locator(".ub-figma");
+  const shield = frame.locator(".ub-figma-shield");
+  await expect(shield).toBeVisible();
+  const bounds = await shield.boundingBox();
+  if (bounds === null) throw new Error("e2e: touch preview geometry is missing");
+  const pane = page.locator("section.ub-document-pane");
+  const before = await pane.evaluate((element) => element.scrollTop);
+  const session = await page.context().newCDPSession(page);
+  try {
+    const point = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height * 0.8, id: 1 };
+    await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+    for (let step = 1; step <= 10; step += 1) {
+      await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ ...point, y: point.y - step * 20 }] });
+    }
+    await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeGreaterThan(before);
+    expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
+    await expect(frame).toHaveAttribute("data-figma-active", "false");
+    await expect(shield).toBeVisible();
+  } finally { await session.detach(); }
 });
 
 test("the nested document scroller loads at most three nearby viewers and releases distant ones", async ({ browser }) => {
@@ -322,7 +547,7 @@ test("offline placeholders and print output keep the title, caption and link wit
   const page = await open(browser, created.uuid, visits, { offline: true });
   const frame = page.locator(".ub-figma");
   await expect(frame.locator(".ub-figma-placeholder > span")).toHaveText("The Figma preview needs a connection.");
-  await expect(frame.locator(".ub-block-label")).toContainText("Payment, mobile");
+  await expect(frame.locator(".ub-figma-placeholder-title")).toHaveText("Payment, mobile");
   await expect(frame.locator(".ub-figma-caption")).toHaveText(CAPTION);
   await expect(frame.locator("iframe")).toHaveCount(0);
   expect(visits).toEqual([]);
@@ -343,8 +568,18 @@ test("offline placeholders and print output keep the title, caption and link wit
   await expect(frame.getByRole("button", { name: "Resize Figma preview", exact: true })).toBeHidden();
   await expect(frame.locator("iframe")).toHaveCount(1);
   const expand = frame.getByRole("button", { name: "Expand", exact: true });
-  if (await frame.evaluate((element) => typeof element.requestFullscreen === "function")) await expect(expand).toBeEnabled();
-  else await expect(expand).toBeDisabled();
+  if (await frame.evaluate((element) => typeof element.requestFullscreen === "function")) {
+    await expect(expand).toBeEnabled();
+    await expand.focus();
+    await expect(frame.locator(".ub-figure-toolbar")).toHaveCSS("opacity", "1");
+    await expand.click();
+    const bar = frame.locator(".ub-figure-viewer-bar");
+    await expect(bar).toBeVisible();
+    await expect(bar.getByRole("button", { name: "Edit", exact: true })).toBeHidden();
+    await expect(bar.getByRole("link", { name: "Open in Figma", exact: true })).toBeVisible();
+    await bar.getByRole("button", { name: "Close Figma viewer", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+  } else await expect(expand).toBeDisabled();
 });
 
 test("moving adjacent live viewers and undo or redo reloads each affected viewer at most once on either client", { tag: "@webkit" }, async ({ browser }) => {
@@ -392,10 +627,7 @@ test("moving adjacent live viewers and undo or redo reloads each affected viewer
   await bounded([...initial].reverse());
 });
 
-test.fixme("new and existing caption comments stay at their Figma block and MCP reads their caption ranges", {
-  tag: "@webkit",
-  annotation: { type: "issue", description: "https://github.com/uberblick-ai/uberblick-2/issues/1835" },
-}, async ({ browser }) => {
+test("new and existing caption comments stay at their Figma block and MCP reads their caption ranges", { tag: "@webkit" }, async ({ browser }) => {
   const session = writer();
   const created = await create(session);
   const block = created.blocks.find((candidate) => candidate.type === "figma");
@@ -410,7 +642,7 @@ test.fixme("new and existing caption comments stay at their Figma block and MCP 
     })),
   });
   try {
-    await new Promise<void>((resolve) => provider.on("synced", resolve));
+    await expect.poll(() => findBlockElement(doc, block.id), { timeout: 20_000 }).not.toBeNull();
     createAnnotation(doc, block.id, 2, 8, "Earlier reader", "Existing caption discussion.", { part: "caption" });
     await expect.poll(async () => (await session.call<StoredDoc>("get_doc", { uuid: created.uuid })).annotations.length).toBe(1);
     const visits: string[] = [];
@@ -423,6 +655,14 @@ test.fixme("new and existing caption comments stay at their Figma block and MCP 
     const oldCard = page.locator(".ub-thread-card").filter({ hasText: "Existing caption discussion." });
     await expect(oldCard.locator(".ub-thread-ref")).toHaveText("Figma 2");
     await expect(oldCard.locator(".ub-thread-excerpt")).toHaveText("marked");
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    const geometry = await frame.evaluate((element) => {
+      const block = element.getBoundingClientRect();
+      const column = element.closest(".ProseMirror")?.getBoundingClientRect();
+      return { left: block.left, right: block.right, columnLeft: column?.left, columnRight: column?.right };
+    });
+    expect(geometry.left).toBeGreaterThanOrEqual(geometry.columnLeft ?? 0);
+    expect(geometry.right).toBeLessThanOrEqual(geometry.columnRight ?? 0);
     await closeIfOpen(page.getByRole("button", { name: "Close threads", exact: true }), page.locator(".ub-threads-toggle"));
     await caption.locator("p").click();
     await setNativeSelection(caption, () => caption.evaluate((element) => {

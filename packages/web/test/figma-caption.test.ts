@@ -41,7 +41,7 @@ describe("Figma caption integration", () => {
     expect(editor.state.doc.firstChild?.attrs).toMatchObject({
       url: figma.getAttribute("url"), title: "Payment", height: "560",
     });
-    expect(editor.view.dom.querySelector(".ub-figma strong")?.textContent).toBe("marked");
+    expect(editor.view.dom.querySelector(".ub-figma-caption strong")?.textContent).toBe("marked");
     expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
     expect(findForeignBlocks(getBlocksFragment(ydoc))).toEqual([]);
   });

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "../ui/shadcn/button.js";
 import { Dialog, DialogContent, DialogTitle } from "../ui/shadcn/dialog.js";
 import { writeToClipboard } from "./source-chrome.js";
+import { figureHistory } from "./figure-history.js";
 import "../ui/figure-viewer.css";
 
 interface AblaufViewerOptions {
@@ -24,43 +25,31 @@ export interface AblaufViewerHandle {
   setEditable: (editable: boolean) => void;
 }
 
-const HISTORY_KEY = "ubDiagramViewer";
-let nextViewer = 0;
-
 /** Mount derived drawing chrome without making it part of ProseMirror's tree. */
 export function openAblaufViewer(options: AblaufViewerOptions): AblaufViewerHandle {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
-  const entry = ++nextViewer;
-  const state: unknown = window.history.state;
-  window.history.pushState({ ...(state !== null && typeof state === "object" ? state : {}), [HISTORY_KEY]: entry }, "");
   let disposed = false;
   let closing = false;
   let showSource = false;
-  const dispose = (): void => {
+  const history = figureHistory(() => {
     if (disposed) return;
     disposed = true;
-    window.removeEventListener("popstate", popped);
     root.unmount();
     container.remove();
-  };
-  const popped = (): void => { dispose(); };
+  });
   const close = (source = false): void => {
     if (disposed || closing) return;
     closing = true;
     showSource = source;
-    // Consume our same-address entry, preserving the document's route state.
-    // As with any pushState, opening has already discarded forward entries.
-    if (window.history.state?.[HISTORY_KEY] === entry) window.history.back();
-    else dispose();
+    history.close();
   };
   const render = (): void => { root.render(<AblaufViewer options={options} close={close} restoreFocus={() => {
     if (!options.returnFocus.isConnected) return;
     options.returnFocus.focus({ preventScroll: true });
     if (showSource) options.openSource();
   }} />); };
-  window.addEventListener("popstate", popped);
   render();
   return {
     close: () => { close(); },
