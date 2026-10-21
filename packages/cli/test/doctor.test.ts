@@ -18,7 +18,7 @@ import * as budget from "../src/budget.js";
 import type { Check, DoctorReport } from "../src/doctor.js";
 import { doctorReport, renderDoctor } from "../src/doctor.js";
 import { runCli } from "../src/cli.js";
-import * as open from "../src/open.js";
+import * as open from "../src/open-ports.js";
 import * as probes from "../src/probes.js";
 import { ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 import type { Run, Sandbox } from "./helpers.js";
