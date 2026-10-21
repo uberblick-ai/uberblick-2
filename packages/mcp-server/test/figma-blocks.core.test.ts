@@ -69,6 +69,29 @@ describe("Figma blocks through MCP", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it.each([undefined, "https://example.com/x", "https://www.figma.com/deck/future-key"])(
+    "reads canonical content without derived fields for a stored link this version cannot normalize: %s",
+    async (url) => {
+      const rig = await localRig();
+      const created = await rig.ok("create_doc", { title: "Stored Figma links", description: "Version-skewed links remain readable.",
+        blocks: [{ type: "paragraph", text: "Before" }, { type: "figma", text: SOURCE },
+          { type: "figma", text: SOURCE }, { type: "paragraph", text: "After" }] });
+      const doc = rig.instance.replicas.replica(created.uuid).doc;
+      const original = created.blocks[1];
+      const element = findBlockElement(doc, original.id)!;
+      if (url === undefined) element.removeAttribute("url");
+      else element.setAttribute("url", url);
+      const stored = Y.encodeStateAsUpdate(doc);
+
+      const read = await rig.ok("get_doc", { uuid: created.uuid });
+      expect(read.blocks[1]).toEqual({ id: original.id, type: "figma",
+        text: SOURCE.replace(LINK, url ?? ""), rev: expect.any(String) });
+      expect(read.blocks[1].rev).not.toBe(original.rev);
+      expect([read.blocks[0], ...read.blocks.slice(2)]).toEqual([created.blocks[0], ...created.blocks.slice(2)]);
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(stored);
+    },
+  );
+
   it.each([
     ["design/key", { kind: "file", file: "key" }],
   ])("passes accepted Figma host normalization through create_doc: %s", async (path, fields) => {

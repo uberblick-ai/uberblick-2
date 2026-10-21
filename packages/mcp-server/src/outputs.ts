@@ -141,7 +141,7 @@ function blockSchema(withLinks: boolean) {
       file: z.string(),
       fileName: z.string().optional(),
       node: z.string().optional(),
-    }).strict().describe("Read-only view identity derived from the normalized Figma link.") }).strict(),
+    }).strict().optional().describe("Read-only view identity derived from the normalized Figma link; absent when the stored link cannot be normalized.") }).strict(),
   ]);
 }
 const block = blockSchema(false);

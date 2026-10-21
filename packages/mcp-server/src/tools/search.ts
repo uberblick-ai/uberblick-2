@@ -9,7 +9,7 @@ export const inputSchema = strictInput({
     .string()
     .min(1)
     .describe(
-      "Match any word in title, description, content or assigned tag names, including English word forms. Case and accents fold; `list_docs` matches adjacent `list docs`, and a trailing * matches prefixes. Results use title-weighted bm25 relevance.",
+      "Match any word in title, description, content or assigned tag names, including English word forms. Case and accents fold; `list_docs` matches adjacent `list docs`, and a trailing * matches stem prefixes. A prefix past the stem can miss: `decisi*` can miss `decision`; search the whole word or a shorter prefix, `decis*`. Results use title-weighted bm25 relevance.",
     ),
   limit: z.number().int().min(1).max(100).optional().describe("Maximum hits, from 1 to 100; defaults to 20 after filters."),
   tag: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]).optional()
