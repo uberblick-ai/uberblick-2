@@ -8,6 +8,8 @@ Read `.agents/roles/README.md` first and follow its conditional references.
 ## Given
 
 A pull request a reviewer approved or an implementer sent to integration.
+A Dependabot pull request arrives directly, labelled `dependencies`; apply
+[delivery-policy.md's Dependabot pull requests](../protocols/delivery-policy.md#dependabot-pull-requests).
 
 ## Task
 

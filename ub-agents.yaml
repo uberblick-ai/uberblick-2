@@ -11,6 +11,11 @@ queue:
 
 stop-labels: [needs-human]
 
+# Dependabot PRs need no maintainer start or head approval, and their bodies
+# (upstream release notes) never reach agents. Needs the ub-agents release that
+# adds trusted-pr-authors (ub-agents#624).
+trusted-pr-authors: [dependabot]
+
 cleanup:
   command: [python3, scripts/cleanup-agent-worktree.py]
   timeout-seconds: 60
@@ -154,7 +159,9 @@ agents:
     retrospectives: 1017
     runtime: "claude:claude-opus-5-5:xhigh"
     kind: pr
-    trigger: ready-to-merge
+    # Dependabot labels its PRs `dependencies`, which sends them straight here;
+    # see "Dependabot pull requests" in .agents/protocols/delivery-policy.md.
+    trigger: [ready-to-merge, dependencies]
     on-conflict: changes
     instructions: .agents/roles/integrator.md
     outcomes:

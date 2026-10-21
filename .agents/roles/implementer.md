@@ -173,6 +173,12 @@ Continue the pull request's remote head; never rebase or force-push it.
   carries risk of its own; otherwise finish `integrate`.
 - **An integrator's `changes`,** or ub-agents' `changes` for a PR GitHub reports
   as conflicting: fix what it names and finish `integrate`.
+- **A Dependabot pull request's `changes`:** make the bump work with the
+  smallest adaptation, regenerate `pnpm-lock.yaml` with `pnpm install` rather
+  than editing it, and finish `review` when the fix changes code outside
+  manifests and the lockfile, otherwise `integrate`. A fix that needs a product,
+  architecture or API-migration decision finishes `needs-human` (one fix round,
+  [delivery-policy.md](../protocols/delivery-policy.md#dependabot-pull-requests)).
 - **A person's answer:** act on it, and finish `review` when the answer asks
   for verification or the Rounds rule still requires a second round, otherwise
   `integrate`. When it leaves nothing to change, finish without a commit.
