@@ -1057,6 +1057,20 @@ describe("hub administration", () => {
       .toEqual({ code: 404, result: { status: "workspace-not-found" } });
   });
 
+  it("refuses a spent restore proof after a later suspension", async () => {
+    const { hub } = await rig();
+    const owner = person(hub, "1234", "hub-admin", [[WORKSPACE, "admin"]]);
+    hub.hubAdmins!.grant(owner.principal.id);
+    hub.hubAdmins!.setWorkspaceStatus(owner.principal.id, WORKSPACE, "suspended");
+    const action = { operation: "restore-workspace", workspaceId: WORKSPACE } as const;
+    const request = envelope(await proof(owner.issued, action), action);
+    expect(await post(hub, request)).toEqual({ code: 200,
+      result: { status: "ok", workspaceId: WORKSPACE, workspaceStatus: "active" } });
+    hub.hubAdmins!.setWorkspaceStatus(owner.principal.id, WORKSPACE, "suspended");
+    expect(await post(hub, request)).toEqual({ code: 401, result: { status: "sign-in-required" } });
+    expect(hub.hubAdmins!.isSuspended(WORKSPACE)).toBe(true);
+  });
+
   it.each(["suspend-workspace", "restore-workspace"] as const)("binds %s to its target and rechecks hub authority after verification", async operation => {
     const { hub } = await rig();
     const owner = person(hub, "1234", "owner", [[WORKSPACE, "member"]]);
