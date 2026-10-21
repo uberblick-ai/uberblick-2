@@ -531,7 +531,7 @@ test("iPad taps open the viewer without an inline toolbar and read-only Copy ret
   });
   const copy = viewer(page).getByRole("button", { name: "Copy ablauf source", exact: true });
   await copy.focus();
-  await copy.tap();
+  await page.keyboard.press("Enter");
   await expect(page.locator("html")).toHaveAttribute("data-fallback-source", TALL);
   await expect(page.locator("html")).toHaveAttribute("data-fallback-in-dialog", "true");
   await expect(copy).toBeFocused();

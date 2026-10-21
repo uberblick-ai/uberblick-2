@@ -118,8 +118,8 @@ function AblaufViewer({ options, close, restoreFocus }: {
     fit.current = () => {
       fitted = true;
       center();
-      const fittedScale = Math.min(1, Math.max(1, canvas.clientWidth - 32) / options.width,
-        Math.max(1, canvas.clientHeight - 32) / options.height);
+      const fittedScale = Math.min(1, Math.max(1, canvas.clientWidth) / options.width,
+        Math.max(1, canvas.clientHeight) / options.height);
       fitFloor = Math.min(0.25, fittedScale);
       instance.setOptions({ minScale: fitFloor });
       instance.reset({ startScale: fittedScale, startX: 0, startY: 0, animate: false });
