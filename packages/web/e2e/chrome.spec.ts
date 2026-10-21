@@ -979,7 +979,7 @@ test("document actions stay reachable, close with the route, and archive into Re
   }
   await expect(page.locator(".ub-doc-meta")).not.toContainText(/uuid |rev /);
   await expect(page.locator(".ub-doc-meta")).not.toContainText("Copy link");
-  // Resizing animates the sidebar and document widths before they settle.
+  // The shell fills the viewport; the document pane may cap at its reading measure.
   await expect.poll(() => page.evaluate(() => {
       const body = document.querySelector<HTMLElement>(".ub-body");
       const pane = document.querySelector<HTMLElement>(".ub-pane");
@@ -987,9 +987,10 @@ test("document actions stay reachable, close with the route, and archive into Re
       return {
         viewport: innerWidth,
         body: [body.clientWidth, body.scrollWidth],
-        pane: [pane.clientWidth, pane.scrollWidth],
+        paneFits: pane.clientWidth > 0 && pane.clientWidth <= innerWidth,
+        paneOverflow: pane.scrollWidth - pane.clientWidth,
       };
-    })).toEqual({ viewport: 810, body: [810, 810], pane: [810, 810] });
+    })).toEqual({ viewport: 810, body: [810, 810], paneFits: true, paneOverflow: 0 });
 
   await copyLink.click();
   await expect(copyNotice(page, "Link copied")).toBeVisible();
