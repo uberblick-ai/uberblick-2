@@ -11,6 +11,7 @@ import {
   readFileSync,
   readdirSync,
   readlinkSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -513,7 +514,7 @@ exit 0
     expect(opened.status).toBe(1);
     const reason = _case === "missing" ? "holds no index.html"
       : `speaks sync protocol ${SYNC_PROTOCOL_VERSION + 1}, and this uberblick speaks ${SYNC_PROTOCOL_VERSION} — it could not sync, so it is not being served`;
-    expect(opened.stderr).toBe(`error: the installed web app at ${join(broken, "packages", "web", "dist")} ${reason}\n` +
+    expect(opened.stderr).toBe(`error: the installed web app at ${join(realpathSync(broken), "packages", "web", "dist")} ${reason}\n` +
       "  → reinstall Uberblick\n");
     expect(opened.stderr).not.toMatch(/mise run|pnpm/);
     expect(treeDigest(broken)).toBe(before);
