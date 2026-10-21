@@ -178,6 +178,7 @@ for (const { coarse, width } of [
       await showSidebar(page);
       await expect(allDocs).toHaveAttribute("aria-current", "page");
       await expect(page.locator(".ub-directory-status")).toHaveCount(0);
+      await expect(page.locator(".ub-hub-problem")).toHaveCount(0);
       await expect(page.locator("[data-dnd-dragging], [data-dnd-dropping]")).toHaveCount(0);
 
       await activate(settings);
@@ -197,22 +198,44 @@ for (const { coarse, width } of [
 
       // The unavailable create row shares the same floor without losing its
       // native disabled state or explanation when the direct hub disconnects.
+      const selector = page.locator(".ub-workspace");
+      const workspaceName = (await selector.innerText()).replace(/\s+/g, " ").trim();
       await harness().stopHub();
       const unavailable = page.getByRole("button", { name: "+ New page", exact: true });
       await expect(unavailable).toBeDisabled();
       await expect(unavailable).toHaveAttribute("title", "New document unavailable while the directory is read-only");
       await expect(add).toBeDisabled();
       await expectNavigationGeometry(page, [unavailable, add], coarse);
-      const offline = page.locator(".ub-directory-status");
-      await expect(offline).toHaveText("Offline");
-      await expect(offline).toHaveAttribute("title", "Changes are saved on this device and sync when the hub is back.");
-      const dot = offline.locator(".ub-sync-dot");
-      await expect(dot).toHaveAttribute("data-state", "offline");
-      const dotBox = await dot.boundingBox();
-      expect(dotBox?.width).toBeGreaterThan(0);
-      expect(dotBox?.height).toBeGreaterThan(0);
+      await expect(page.locator(".ub-directory-status")).toHaveCount(0);
+      const location = page.locator(".ub-workspace-location");
+      await expect(location).toHaveText(new URL(page.url()).host);
+      const dot = location.locator(".ub-hub-problem");
+      await expect(dot).toBeVisible();
+      await expect(dot).toHaveAttribute("aria-hidden", "true");
+      await expect(dot).not.toHaveAttribute("title");
+      await expect(dot).not.toHaveAttribute("tabindex");
+      await expect(dot).not.toHaveAttribute("role");
+      await expect(dot).not.toHaveAttribute("aria-label");
+      await expect(dot).toHaveCSS("pointer-events", "none");
+      const geometry = await location.evaluate((element) => {
+        const dot = element.querySelector(".ub-hub-problem");
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        const host = walker.nextNode();
+        if (dot === null || host === null) throw new Error("e2e: hub host and problem dot are missing");
+        const range = document.createRange();
+        range.selectNodeContents(host);
+        const hostBox = range.getBoundingClientRect();
+        const dotBox = dot.getBoundingClientRect();
+        return { width: dotBox.width, height: dotBox.height, gap: dotBox.left - hostBox.right,
+          centre: Math.abs(dotBox.top + dotBox.height / 2 - hostBox.top - hostBox.height / 2) };
+      });
+      expect(geometry.width).toBeGreaterThan(0);
+      expect(geometry.height).toBeGreaterThan(0);
+      expect(geometry.gap).toBeGreaterThanOrEqual(0);
+      expect(geometry.gap).toBeLessThanOrEqual(8);
+      expect(geometry.centre).toBeLessThanOrEqual(2);
       expect(await dot.evaluate((element) => getComputedStyle(element).backgroundColor))
-        .toBe(await offline.evaluate((element) => {
+        .toBe(await location.evaluate((element) => {
           const probe = document.createElement("span");
           probe.style.backgroundColor = "var(--destructive)";
           element.append(probe);
@@ -220,9 +243,15 @@ for (const { coarse, width } of [
           probe.remove();
           return colour;
         }));
-      const footerOrder = await offline.evaluate((row) => {
-        const settings = row.parentElement?.querySelector(".ub-settings-entry");
-        return settings !== null && settings !== undefined && row.nextElementSibling === settings;
+      await expect(selector).toHaveAccessibleName(workspaceName);
+      await selector.press("Enter");
+      await expect(page.locator(".ub-workspace-menu")).toBeVisible();
+      await page.keyboard.press("Escape");
+      const footerOrder = await settings.evaluate((entry) => {
+        const footer = entry.parentElement;
+        const account = footer?.querySelector('[data-testid="account-menu"]');
+        return footer?.firstElementChild === entry && account !== null && account !== undefined
+          && entry.nextElementSibling?.contains(account);
       });
       expect(footerOrder).toBe(true);
     });

@@ -25,6 +25,7 @@ export function WorkspaceSwitcher({
   current,
   names = NO_NAMES,
   workspaceLocation = null,
+  hubProblem = false,
   onSwitch,
   active = true,
   onOpenChange,
@@ -37,6 +38,8 @@ export function WorkspaceSwitcher({
   names?: ReadonlyMap<string, string | null> | undefined;
   /** The route's reported upstream address, or `local` for this device. */
   workspaceLocation?: string | null | undefined;
+  /** A problem with this workspace's hub, without a separate interaction. */
+  hubProblem?: boolean;
   /** Go there. The value is a segment, spelled as the list spells it. */
   onSwitch: (segment: string) => void;
   /** Whether the document-sidebar pane that owns this portalled menu is live. */
@@ -72,8 +75,11 @@ export function WorkspaceSwitcher({
                   {currentLabel}
                 </span>{" "}
                 {location !== null && (
-                  <span className="ub-workspace-location block truncate ub-type-small font-normal text-(--sidebar-muted-foreground)" title={location}>
-                    {location}
+                  <span className="ub-workspace-location flex items-center gap-1 ub-type-small font-normal text-(--sidebar-muted-foreground)">
+                    <span className="min-w-0 truncate" title={location}>{location}</span>
+                    {workspaceLocation !== "local" && hubProblem && (
+                      <span className="ub-hub-problem ub-dot ub-sync-dot shrink-0 pointer-events-none" data-state="offline" aria-hidden="true" />
+                    )}
                   </span>
                 )}
               </span>

@@ -20,6 +20,7 @@ import {
 } from "@uberblick/schema";
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import type { AccountIdentity } from "../../shell/account.js";
+import type { NotSharedReason } from "../../shell/document-search.js";
 import type { RoomConnection } from "../../collab/rooms.js";
 import { useDirectory, useRoomStatus, useStoredFlag } from "../hooks.js";
 import { rawSyncState } from "../status/calm.js";
@@ -91,6 +92,9 @@ type SidebarProps = {
   workspace: Workspace | null;
   workspaceNames?: ReadonlyMap<string, string | null>;
   workspaceLocation?: string | null;
+  /** Undefined on direct pages; null while the local upstream is unknown. */
+  hubAcked?: boolean | null | undefined;
+  notSharedReason?: NotSharedReason | null;
   onWorkspaceMenuOpenChange?: (open: boolean) => void;
   /** Go to a workspace. Switching is navigating; see `WorkspaceSwitcher`. */
   onSwitchWorkspace: (segment: string) => void;
@@ -163,6 +167,8 @@ function SidebarContent({
   workspace,
   workspaceNames,
   workspaceLocation,
+  hubAcked,
+  notSharedReason = null,
   onWorkspaceMenuOpenChange,
   onSwitchWorkspace,
   account,
@@ -186,9 +192,9 @@ function SidebarContent({
   const status = useRoomStatus(connection);
   const sidebarStatus = useRoomStatus(sidebar);
   const reading = statusReading(status, rawSyncState(status));
-  const showDirectoryProblem = workspace !== null && connection !== null && (
-    reading.detail !== null || (status.hasAnswered && reading.tone === "offline")
-  );
+  const hubProblem = hubAcked === undefined
+    ? connection !== null && (reading.detail !== null || (status.hasAnswered && reading.tone === "offline"))
+    : hubAcked !== null && (notSharedReason !== null || !hubAcked);
   const sidebarWritable = sidebar !== null && sidebarStatus.writable;
   const ydoc = sidebarWritable ? sidebar.ydoc : null;
   const canWriteSidebar = (): boolean => sidebar?.status.writable === true;
@@ -287,6 +293,7 @@ function SidebarContent({
               current={workspace}
               names={workspaceNames}
               workspaceLocation={workspaceLocation}
+              hubProblem={hubProblem}
               onOpenChange={onWorkspaceMenuOpenChange}
               onSwitch={onSwitchWorkspace}
               active={!settingsOpen && !collapsed}
@@ -365,15 +372,6 @@ function SidebarContent({
         />
       </div>
       <SidebarFooter className="border-t border-sidebar-border" aria-hidden={collapsed} inert={collapsed}>
-        {showDirectoryProblem && (
-          <div
-            className="ub-directory-status flex min-w-0 items-center gap-2 px-2 py-1.5 ub-type-ui text-(--sidebar-muted-foreground)"
-            title={reading.detail ?? "Changes are saved on this device and sync when the hub is back."}
-          >
-            <span className="ub-dot ub-sync-dot shrink-0" data-state={reading.tone} aria-hidden="true" />
-            <span>{reading.detail === null ? "Offline" : reading.word.charAt(0).toUpperCase() + reading.word.slice(1)}</span>
-          </div>
-        )}
         {workspace !== null && (workspaceAdmin || hubAdmin) && settingsArea !== "workspace" && (
           <button
             type="button"

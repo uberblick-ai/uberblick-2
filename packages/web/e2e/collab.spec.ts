@@ -499,6 +499,8 @@ test("the open document's last-updated reading follows its stub through status a
   await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).not.toBeVisible();
   await withPageTimers(page, () => expect(upstream).toHaveAttribute("aria-label", /^Synced with hub /));
+  const hubProblem = page.locator(".ub-workspace-location .ub-hub-problem");
+  await expect(hubProblem).toHaveCount(0);
 
   await harness().stopHub();
   try {
@@ -508,6 +510,8 @@ test("the open document's last-updated reading follows its stub through status a
     await waitForAcknowledged(page, { path: "relay" });
     await expect(saved).not.toBeVisible();
     await withPageTimers(page, () => expect(upstream).toHaveAttribute("aria-label", /^Offline since /));
+    await expect(hubProblem).toBeVisible();
+    await expect(page.locator(".ub-directory-status")).toHaveCount(0);
     await page.locator(".ub-sync-toggle").click();
     const panel = page.getByRole("dialog", { name: "Sync and presence" });
     const fact = (label: string) =>
@@ -525,9 +529,38 @@ test("the open document's last-updated reading follows its stub through status a
   await withPageTimers(page, () => expect(upstream).toHaveAttribute("aria-label", /^Synced with hub /, {
     timeout: 40_000,
   }));
+  await expect(hubProblem).toHaveCount(0);
   await expect(reading).toContainText("Edited just now");
   await expect(time).toHaveAttribute("dateTime", currentDateTime ?? "");
   expect(await reading.boundingBox()).toEqual(stablePosition);
+});
+
+test("the workspace hub dot clears when the local server can no longer report upstream status", async ({ browser }) => {
+  const page = await openApp(browser);
+  await createDoc(page, docTitle("hub-unknown"));
+  await waitForAcknowledged(page, { path: "upstream" });
+  const hubProblem = page.locator(".ub-workspace-location .ub-hub-problem");
+  await expect(hubProblem).toHaveCount(0);
+
+  await harness().stopHub();
+  try {
+    await withPageTimers(page, () => expect(hubProblem).toBeVisible());
+    await expect(page.locator(".ub-status-offline")).toHaveText("Offline. Changes are saved on this device.");
+    await harness().stopOpen();
+    await withPageTimers(page, () => expect(page.locator(".ub-not-saved")).toHaveText("not saved"));
+    await withPageTimers(page, () => expect(hubProblem).toHaveCount(0));
+    await expect(page.getByText("Changes are not saved.", { exact: true })).toBeVisible();
+    await expect(page.getByText("Offline. Changes are saved on this device.", { exact: true })).toHaveCount(0);
+    await expect(page.locator(".ub-directory-status")).toHaveCount(0);
+    await expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", "Sync details");
+    await page.locator(".ub-sync-toggle").click();
+    const panel = page.getByRole("dialog", { name: "Sync and presence" });
+    await expect(panel.getByText("State", { exact: true }).locator("..").locator("dd")).toHaveText("offline");
+    await expect(panel.getByText("Hub state", { exact: true })).toHaveCount(0);
+  } finally {
+    await harness().startHub();
+    await harness().restartOpen({ authenticated: true });
+  }
 });
 
 test("a fresh browser hydrates from the ub open store while the upstream is offline", async ({

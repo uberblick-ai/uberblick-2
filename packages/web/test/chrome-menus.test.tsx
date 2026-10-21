@@ -122,6 +122,7 @@ describe("the workspace switcher renders configuration", () => {
     active = true,
     onOpenChange?: (open: boolean) => void,
     workspaceLocation?: string | null,
+    hubProblem = false,
   ): ReactElement {
     return (
       <WorkspaceSwitcher
@@ -132,6 +133,7 @@ describe("the workspace switcher renders configuration", () => {
         active={active}
         onOpenChange={onOpenChange}
         workspaceLocation={workspaceLocation}
+        hubProblem={hubProblem}
       />
     );
   }
@@ -179,11 +181,12 @@ describe("the workspace switcher renders configuration", () => {
       view.unmount();
     }
 
-    const none = mount(switcher(null, true, undefined, "local"));
+    const none = mount(switcher(null, true, undefined, "wss://hub.example.test/ws", true));
     const trigger = within(none.host).getByRole("button", { name: "no workspace" });
     // The same marker selector was proved present for both routed spellings.
     expect(trigger.querySelector(".ub-workspace-marker")).toBe(null);
     expect(trigger.querySelector(".ub-workspace-location")).toBe(null);
+    expect(trigger.querySelector(".ub-hub-problem")).toBeNull();
     expect(within(trigger).queryByText(/\d+ docs?/)).toBe(null);
     expect(within(trigger).getByText("no workspace").textContent).toBe("no workspace");
     expect(within(trigger).getByText("no workspace").hasAttribute("title")).toBe(false);
@@ -203,13 +206,14 @@ describe("the workspace switcher renders configuration", () => {
     ["not an address", null],
     ["javascript:secret", null],
   ])("names the workspace's location from %s without exposing address details", (address, location) => {
-    const view = mount(switcher(WORKSPACE, true, undefined, address));
+    const view = mount(switcher(WORKSPACE, true, undefined, address, true));
     const trigger = within(view.host).getByRole("button", {
       name: location === null ? "Uberblick" : `Uberblick ${location}`,
     });
     expect(trigger.hasAttribute("aria-label")).toBe(false);
     expect(trigger.hasAttribute("aria-labelledby")).toBe(false);
     expect(trigger.querySelector(".ub-workspace-location")?.textContent ?? null).toBe(location);
+    expect(trigger.querySelector(".ub-hub-problem") !== null).toBe(location !== null && address !== "local");
     expect(trigger.textContent).not.toMatch(/secret|private|token|fragment/);
     fireEvent.keyDown(trigger, { key: "Enter" });
     expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Uberblick", current: true })).toBeTruthy();
