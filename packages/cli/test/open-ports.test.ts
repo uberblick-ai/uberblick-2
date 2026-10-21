@@ -14,7 +14,7 @@ import { directoryRoom, roomForDoc } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { localBrowserKey } from "../src/browser-key.js";
-import { whoHoldsPort } from "../src/open.js";
+import { whoHoldsPort } from "../src/open-ports.js";
 import { probeHubState, probePort } from "../src/probes.js";
 import { pointAt, waitUntil } from "./helpers.js";
 import {

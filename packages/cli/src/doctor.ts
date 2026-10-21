@@ -24,7 +24,7 @@ import { processIo } from "./io.js";
 import { errorMessage } from "./strings.js";
 import type { DoctorEntry, TargetFile, TargetName } from "./mcp-config.js";
 import { TARGETS, claudeDoctorEntries, doctorEntry, targetFile } from "./mcp-config.js";
-import { DEFAULT_WEB_PORT, WEB_HOST, whoHoldsPort, whyNotStartable } from "./open.js";
+import { DEFAULT_WEB_PORT, WEB_HOST, whoHoldsPort, whyNotStartable } from "./open-ports.js";
 import { findProjectConfig, resolveProjectBinding } from "@uberblick/mcp-server/project-binding";
 import type { Endpoint, HubProbe } from "./probes.js";
 import {
