@@ -21,7 +21,7 @@ export interface RemoveMembershipRequest {
   principalId: string;
 }
 
-/** Stable actor refusals; messages remain compatible with internal callers. */
+/** Stable actor refusals: callers branch on the code, never on the message. */
 export class MembershipRefusal extends Error {
   constructor(readonly code: "admin-required" | "member-required" | "member-not-found" | "last-admin") {
     const messages = {

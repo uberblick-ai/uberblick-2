@@ -7,7 +7,6 @@ import type {
 } from "@hocuspocus/server";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Server } from "@hocuspocus/server";
-import { parseRoom } from "@uberblick/schema";
 import type { HubConfig } from "./config.js";
 import {
   DEFAULT_HOST,
@@ -19,8 +18,9 @@ import type { HubLogger } from "./log.js";
 import type { CredentialContext } from "./credential-admission.js";
 import { hocuspocusLogger, stderrLogger } from "./log.js";
 import { HubDatabase, isEphemeralDatabase } from "./persistence.js";
-import { isAdmissibleRoom } from "./admissible-room.js";
+import { isAdmissibleRoom, readAdmission, roomWorkspace } from "./admissible-room.js";
 import { DeletedRooms } from "./deleted-rooms.js";
+import { replyJson, SIGN_IN_ROUTES } from "./http.js";
 import {
   isProtocolVersion,
   protocolMismatchReason,
@@ -93,21 +93,13 @@ function handleUnconfiguredAuthRequest(request: IncomingMessage, response: Serve
     const valid = request.method === "GET";
     status = valid ? 200 : 405;
     body = valid ? { unclaimed: false, canClaim: false } : { status: "invalid-request" };
-  } else if (["/auth/credential/renew", "/auth/manage", "/auth/github/start", "/auth/github/collect", "/auth/github/cancel",
-    "/auth/browser/start", "/auth/browser/collect", "/auth/browser/cancel", "/auth/browser/session", "/auth/browser/sign-out"].includes(path)) {
+  } else if (SIGN_IN_ROUTES.includes(path)) {
     status = 503;
     body = { status: "not-configured" };
   }
-  response.writeHead(status, {
-    "Content-Type": "application/json", "Cache-Control": "no-store",
-    ...(claimState && status === 405 ? { Allow: "GET" } : {}),
-  });
-  response.end(JSON.stringify(body));
+  replyJson(response, status, body, claimState && status === 405 ? { Allow: "GET" } : {});
   return true;
 }
-
-/** Reject even empty token query parameters: URLs reach access logs and proxy traces. */
-export const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
 
 /**
  * onAuthenticate receives headers without the TCP socket. Stamp the address
@@ -227,14 +219,9 @@ export async function createRoomAuthenticator(options: {
       )));
 
   return async (payload) => {
-    const { documentName, requestHeaders, requestParameters, connectionConfig } = payload;
+    const { documentName, requestHeaders, connectionConfig } = payload;
     // Attribute each rejection to its peer without exposing token contents.
     const peer = resolvePeer(requestHeaders);
-    if (!isAdmissibleRoom(documentName)) {
-      options.log({ event: "hub.auth.rejected", peer: peer.address,
-        proxied: peer.proxied, cause: "room-name-invalid" });
-      throw new AuthError("room-name-invalid", "room name exceeds admission bounds");
-    }
     const rejected = (
       cause: RejectionCause,
       fields: Record<string, unknown> = {},
@@ -247,32 +234,28 @@ export async function createRoomAuthenticator(options: {
       cause,
     });
 
-    const queried = TOKEN_QUERY_PARAMS.find((name) =>
-      requestParameters.has(name),
-    );
-    if (queried !== undefined) {
-      // No token identity here: the connection is refused on the URL, before
-      // any token has been read, and the parameter is the whole finding.
-      options.log(rejected("token-in-query", { parameter: queried }));
-      throw new AuthError(
-        "token-in-query",
-        `token must be sent in the auth message, not the "${queried}" query parameter`,
-      );
-    }
-
-    // Bound the envelope before parsing; reject skew/bare tokens before trusting claims.
-    const envelope = readAuthEnvelope(payload.token);
-    if (
-      envelope === null ||
-      envelope.protocolVersion !== options.protocolVersion
-    ) {
-      options.log(
-        rejected("protocol-mismatch", {
-          // Integers or absence only: never log the token or its envelope.
-          clientProtocol: envelope?.protocolVersion ?? null,
-          hubProtocol: options.protocolVersion,
-        }),
-      );
+    const admission = readAdmission(payload, options.protocolVersion);
+    if ("cause" in admission) {
+      if (admission.cause === "room-name-invalid") {
+        // The out-of-bounds name itself stays out of the log.
+        options.log({ event: "hub.auth.rejected", peer: peer.address,
+          proxied: peer.proxied, cause: "room-name-invalid" });
+        throw new AuthError("room-name-invalid", "room name exceeds admission bounds");
+      }
+      if (admission.cause === "token-in-query") {
+        // No token identity here: the connection is refused on the URL, before
+        // any token has been read, and the parameter is the whole finding.
+        options.log(rejected("token-in-query", { parameter: admission.parameter }));
+        throw new AuthError(
+          "token-in-query",
+          `token must be sent in the auth message, not the "${admission.parameter}" query parameter`,
+        );
+      }
+      // Integers or absence only: never log the token or its envelope.
+      options.log(rejected("protocol-mismatch", {
+        clientProtocol: admission.clientProtocol,
+        hubProtocol: options.protocolVersion,
+      }));
       throw new AuthError(
         protocolMismatchReason(options.protocolVersion),
         `this hub speaks sync protocol ${options.protocolVersion}`,
@@ -289,7 +272,7 @@ export async function createRoomAuthenticator(options: {
       options.log(rejected("workspace-mismatch"));
       throw new AuthError("workspace-mismatch", "room is outside the served workspaces");
     }
-    const inspected = await inspectToken(verificationKey, envelope.token);
+    const inspected = await inspectToken(verificationKey, admission.token);
     if ("failure" in inspected) {
       options.log(rejected(inspected.failure, tokenFields(inspected.identity)));
       throw new AuthError(
@@ -341,18 +324,7 @@ export async function createRoomAuthenticator(options: {
   };
 }
 
-/**
- * Schema owns two-segment room names with a bare workspace UUID.
- * Reject malformed names before they can become authenticated rooms or SQLite keys.
- */
-function roomWorkspace(room: string): string | null {
-  try {
-    return parseRoom(room).workspaceId;
-  } catch {
-    return null;
-  }
-}
-
+/** Admits nobody. It does not refuse query tokens, so it checks room and protocol without the shared prelude. */
 function unconfiguredRoomAuthenticator(protocolVersion: number, log: HubLogger): RoomAuthenticator {
   return async payload => {
     if (!isAdmissibleRoom(payload.documentName)) {

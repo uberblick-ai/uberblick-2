@@ -541,8 +541,9 @@ describe("device credential renewal", () => {
   });
 
   it("revokes legacy credentials and erases shared keys while preserving credential history", async () => {
-    const db = database();
-    db.connection.exec(`CREATE TABLE hub_credentials (
+    const path = tempDatabasePath();
+    const legacy = new DatabaseSync(path);
+    legacy.exec(`CREATE TABLE hub_credentials (
       id TEXT PRIMARY KEY NOT NULL, principal_id TEXT NOT NULL, device_id TEXT NOT NULL,
       workspaces TEXT NOT NULL, signing_key BLOB NOT NULL CHECK(length(signing_key) = 32),
       issued_at INTEGER NOT NULL, revoked_at INTEGER
@@ -553,7 +554,7 @@ describe("device credential renewal", () => {
       keyBytes: crypto.getRandomValues(new Uint8Array(32)),
     };
     const revoked = { ...original, record: { ...original.record, id: crypto.randomUUID(), revokedAt: Date.now() } };
-    const insert = db.connection.prepare(`INSERT INTO hub_credentials
+    const insert = legacy.prepare(`INSERT INTO hub_credentials
       (id, principal_id, device_id, workspaces, signing_key, issued_at, revoked_at)
       VALUES ($id, $principalId, $deviceId, $workspaces, $key, $issuedAt, $revokedAt)`);
     for (const issued of [original, revoked]) {
@@ -561,6 +562,8 @@ describe("device credential renewal", () => {
         deviceId: issued.record.deviceId, workspaces: JSON.stringify(issued.record.workspaces),
         key: issued.keyBytes, issuedAt: issued.record.issuedAt, revokedAt: issued.record.revokedAt });
     }
+    legacy.close();
+    const db = database(path);
     const store = new CredentialRegistry(db);
     const memberships = new MembershipRegistry(db);
 

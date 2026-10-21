@@ -12,6 +12,7 @@ import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import { BrowserSessions, type BrowserSession } from "./browser-sessions.js";
 import { requestClient } from "./client-address.js";
 import { isCredentialPublicKey } from "@uberblick/schema/token";
+import { GITHUB_SIGN_IN_ROUTES, isJsonPost, readJsonRequest, replyJson } from "./http.js";
 
 export type { GithubSignInConfig } from "./github-device-flow.js";
 interface SignInResult {
@@ -100,11 +101,6 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult | BrowserSignInR
   }
 }
 
-function object(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error();
-  return value as Record<string, unknown>;
-}
-
 /** HTTP bodies carry secrets; URLs, logs and browser configuration never do. */
 export async function handleGithubSignIn(
   signIn: GithubSignIn | undefined,
@@ -114,11 +110,8 @@ export async function handleGithubSignIn(
 ): Promise<boolean> {
   const path = request.url ?? "";
   if (!path.startsWith("/auth/")) return false;
-  const reply = (status: number, body: unknown) => {
-    response.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    response.end(JSON.stringify(body));
-  };
-  if (!["/auth/github/start", "/auth/github/collect", "/auth/github/cancel"].includes(path)) {
+  const reply = (status: number, body: unknown) => replyJson(response, status, body);
+  if (!GITHUB_SIGN_IN_ROUTES.includes(path)) {
     reply(404, { status: "unknown-request" });
     return true;
   }
@@ -126,21 +119,12 @@ export async function handleGithubSignIn(
     reply(503, { status: "not-configured" });
     return true;
   }
-  if (request.method !== "POST" || request.headers.authorization !== undefined ||
-      request.headers["content-type"]?.split(";")[0] !== "application/json") {
+  if (!isJsonPost(request)) {
     reply(400, { status: "invalid-request" });
     return true;
   }
   try {
-    let size = 0;
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) {
-      const bytes = Buffer.from(chunk as Uint8Array);
-      size += bytes.length;
-      if (size > 4096) throw new Error();
-      chunks.push(bytes);
-    }
-    const body = object(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    const { body } = await readJsonRequest(request);
     if (path === "/auth/github/start") {
       if (Object.keys(body).some((key) => !["deviceName", "publicKey"].includes(key)) ||
         !isCredentialPublicKey(body.publicKey)) throw new Error();

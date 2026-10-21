@@ -5,6 +5,7 @@ import * as Y from "yjs";
 import type { MembershipRegistry } from "./memberships.js";
 import type { HubDatabase } from "./persistence.js";
 import { HubAdminRegistry } from "./hub-admins.js";
+import { replyJson } from "./http.js";
 
 const HUB_DATA_TABLES = [
   "documents", "hub_principals", "hub_credentials", "hub_memberships", "hub_admin_setup_grants", "hub_admins", "hub_workspace_promotions",
@@ -80,12 +81,8 @@ export function handleHubClaimState(
 ): boolean {
   if (request.url !== "/auth/claim-state") return false;
   const valid = request.method === "GET";
-  response.writeHead(valid ? 200 : 405, {
-    "Content-Type": "application/json", "Cache-Control": "no-store",
-    ...(valid ? {} : { Allow: "GET" }),
-  });
-  response.end(JSON.stringify(valid
+  replyJson(response, valid ? 200 : 405, valid
     ? claims?.state(githubConfigured) ?? { unclaimed: false, canClaim: false }
-    : { status: "invalid-request" }));
+    : { status: "invalid-request" }, valid ? {} : { Allow: "GET" });
   return true;
 }
