@@ -1,8 +1,8 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { Operation, OperationRequest } from "./tools/operation.js";
+import type { Tool } from "./tool-table.js";
+import type { OperationRequest } from "./tools/operation.js";
 import type { ToolContext } from "./tools/context.js";
 import { toFailure } from "./failures.js";
-import { outputSchemas } from "./outputs.js";
 
 /** Both wire answers use the same JSON serialization; failures stay text-only. */
 export function toolResult(payload: object, isError = false): CallToolResult {
@@ -30,21 +30,20 @@ function mcpPayload(payload: object): object {
  * handler-invariants checks registered operations and collectSyncStatus's
  * delegated settle; static get_help never settles.
  */
-export function guarded<Args>(
-  tool: keyof typeof outputSchemas,
+export function guarded(
+  tool: Pick<Tool, "name" | "output" | "operation" | "writes">,
   context: ToolContext,
-  call: Operation<Args>,
-): (args: Args, extra: Pick<OperationRequest, "signal" | "_meta">) => Promise<CallToolResult> {
+): (args: Record<string, unknown>, extra: Pick<OperationRequest, "signal" | "_meta">) => Promise<CallToolResult> {
   return async (args, extra) => {
     try {
-      const payload = mcpPayload(await context.work.run(() => call(context, args, {
+      const payload = mcpPayload(await context.work.run(() => tool.operation(context, args, {
         signal: extra.signal,
         ...(extra._meta === undefined ? {} : { _meta: extra._meta }),
         ...(extra._meta?.progressToken === undefined ? {} : { progressToken: extra._meta.progressToken }),
       })));
-      const parsed = outputSchemas[tool].safeParse(payload);
+      const parsed = tool.output.safeParse(payload);
       if (!parsed.success) {
-        throw new Error(`Output validation failed for ${tool}: ${parsed.error.message}`);
+        throw new Error(`Output validation failed for ${tool.name}: ${parsed.error.message}`);
       }
       return toolResult(payload);
     } catch (error) {

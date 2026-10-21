@@ -17,7 +17,7 @@ import { z } from "zod";
 import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
 import { resolveTagSelectors } from "../tag-catalog.js";
-import { operation } from "./operation.js";
+import { DOCUMENT_WRITE, operation } from "./operation.js";
 import { roomStages } from "./helpers.js";
 import { descriptionArg, docLinkTargetArg, titleArg, tldrArg, uuidArg } from "./schemas.js";
 import { discussionTarget } from "./discussion.js";
@@ -93,7 +93,7 @@ function forField<T>(field: typeof fields[number], validate: () => T): T {
   }
 }
 
-export const setMetadataOperation = operation("set_metadata", inputSchema, (context, args, _request) => {
+export const setMetadataOperation = operation(DOCUMENT_WRITE, inputSchema, (context, args, _request) => {
   const { uuid, title, description, tldr, tldr_opt_in, tags, links, discussion, code_check } = args;
   const replica = context.requireWritableDoc(uuid);
   const current = getMeta(replica.doc, replica.id);

@@ -1,18 +1,15 @@
 /** Tool operations over a private in-memory store, with no MCP client or transport. */
 import { GuidanceBriefing } from "../src/briefing.js";
 import type { McpConfig } from "../src/config.js";
-import { operations } from "../src/operations.js";
 import { ServerWork } from "../src/server-work.js";
 import type { MirrorStore } from "../src/store.js";
 import { seedTagCatalogOnce } from "../src/tag-catalog.js";
 import { guarded } from "../src/tool-adapter.js";
 import { createToolContext } from "../src/tools/context.js";
-import type { Operation } from "../src/tools/operation.js";
 import { openWorkspaceReplicas } from "../src/workspace-replicas.js";
 import type { WorkspaceReplicaSet } from "../src/workspace-replicas.js";
-import { testConfig as integrationConfig, CLIENT_NAME } from "./shared.js";
+import { testConfig as integrationConfig, CLIENT_NAME, toolNamed } from "./shared.js";
 import type { TestConfigOptions, ToolCall } from "./shared.js";
-import { toolInputs } from "./tool-inputs.js";
 
 export * from "./shared.js";
 
@@ -43,18 +40,16 @@ export async function startServer(config = testConfig(), store?: MirrorStore): P
   await seedTagCatalogOnce(instance.replicas);
 
   const call = async (name: string, args: Record<string, unknown> = {}): Promise<ToolCall> => {
-    if (!Object.hasOwn(operations, name)) throw new Error(`Unknown tool: ${name}`);
-    const tool = name as keyof typeof operations;
+    const tool = toolNamed(name);
     // Like MCP registration, refuse before admitting the operation or any write.
-    const parsed = toolInputs[tool].safeParse(args);
+    const parsed = tool.input.safeParse(args);
     if (!parsed.success) return {
       isError: true,
       payload: { error: "schema_validation", message: parsed.error.message },
     };
-    const operation = operations[tool] as Operation<Record<string, unknown>>;
-    const result = await guarded(tool, context, operation)(parsed.data, { signal: new AbortController().signal });
+    const result = await guarded(tool, context)(parsed.data, { signal: new AbortController().signal });
     const content = result.content[0];
-    if (content?.type !== "text") throw new Error(`Tool ${tool} returned no JSON text`);
+    if (content?.type !== "text") throw new Error(`Tool ${name} returned no JSON text`);
     return { isError: result.isError === true, payload: JSON.parse(content.text) };
   };
 

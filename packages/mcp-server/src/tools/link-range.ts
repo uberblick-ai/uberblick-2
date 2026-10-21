@@ -16,7 +16,7 @@ export const inputSchema = strictInput({
     .describe("The block's `rev` from get_doc. Required, and asserted."),
 });
 
-export const linkRangeOperation = documentOperation("link_range", inputSchema, (context, { uuid, block_id, start, end, doc_id, rev }, _request, replica) => {
+export const linkRangeOperation = documentOperation({ content: true, contentDurability: false }, inputSchema, (context, { uuid, block_id, start, end, doc_id, rev }, _request, replica) => {
   const { linkTitle } = context;
 
   // Before the mark: an unknown target refuses with nothing written.

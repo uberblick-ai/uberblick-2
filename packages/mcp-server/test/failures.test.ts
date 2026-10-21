@@ -20,9 +20,6 @@ import {
   FAILURE_CODES,
   INTERNAL_ERROR_MESSAGE,
   PERSISTENCE_ERROR_MESSAGE,
-  MUTATING_TOOLS,
-  READ_ONLY_TOOLS,
-  TOOL_ANNOTATIONS,
   hydrationRecovery,
   toFailure,
 } from "../src/failures.js";
@@ -36,6 +33,7 @@ import {
   startServer,
   tempDatabasePath,
   testConfig,
+  toolNamed,
 } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
@@ -225,41 +223,6 @@ afterAll(() => {
 });
 
 describe("the failure contract", () => {
-  it("classifies and annotates every registered tool as writing or read-only", async () => {
-    // The one fact a failure payload cannot work out for itself: the same
-    // `doc_not_found` is a read's dead end and a write that never happened. A
-    // tool added later is classified here or this fails.
-    const rig = await localRig();
-    const registered = (await rig.client.listTools()).tools;
-
-    expect(registered.length).toBeGreaterThan(0);
-    for (const { name, description, annotations } of registered) {
-      expect(
-        MUTATING_TOOLS.has(name) || READ_ONLY_TOOLS.has(name),
-        `${name} is neither in MUTATING_TOOLS nor READ_ONLY_TOOLS`,
-      ).toBe(true);
-      expect(MUTATING_TOOLS.has(name) && READ_ONLY_TOOLS.has(name)).toBe(false);
-      expect(annotations, name).toEqual(TOOL_ANNOTATIONS[name]);
-      expect(annotations, name).toEqual({
-        readOnlyHint: READ_ONLY_TOOLS.has(name),
-        destructiveHint: READ_ONLY_TOOLS.has(name) ? false : expect.any(Boolean),
-        idempotentHint: READ_ONLY_TOOLS.has(name) ? true : expect.any(Boolean),
-        openWorldHint: false,
-      });
-      // Every tool points to the shared owner of the failure shape rather
-      // than repeating its prose in the model-facing catalog.
-      expect(description, `${name} has no description`).toBeDefined();
-      expect(description?.split("\n").at(-1), name).toContain("tool-contracts");
-    }
-    expect([...MUTATING_TOOLS, ...READ_ONLY_TOOLS].sort()).toEqual(
-      registered.map((tool) => tool.name).sort(),
-    );
-    expect(Object.keys(TOOL_ANNOTATIONS).sort()).toEqual(
-      registered.map((tool) => tool.name).sort(),
-    );
-    expect(READ_ONLY_TOOLS.has("get_help")).toBe(true);
-  });
-
   it("documents the complete failure shape and recovery classes in shared help", async () => {
     const rig = await localRig();
     const { text } = await rig.ok("get_help", { topic: "tool-contracts" });
@@ -570,7 +533,7 @@ describe("the failure contract", () => {
       } catch (error) {
         if (!(error instanceof DataError)) throw error;
         rejected = true;
-        const failure = toFailure("edit_block", error);
+        const failure = toFailure(toolNamed("edit_block"), error);
         const payload = failure.payload;
         expect(failure.isError).toBe(true);
         expect(payload).toMatchObject({
@@ -606,12 +569,12 @@ describe("the failure contract", () => {
     );
 
     // Admission refusals use the same failure floor as every other tool error.
-    record(toFailure("set_metadata", new ServerShuttingDownError()).payload);
-    record(toFailure("create_doc", new WorkspaceRemovedError()).payload);
+    record(toFailure(toolNamed("set_metadata"), new ServerShuttingDownError()).payload);
+    record(toFailure(toolNamed("create_doc"), new WorkspaceRemovedError()).payload);
 
     // Valid MCP inputs cannot cross decision kinds; retain the defensive
     // mapper for shared-model lifecycle errors from an internal caller.
-    record(toFailure("set_status", new InvalidDocumentLifecycleError("decision", "planned")).payload);
+    record(toFailure(toolNamed("set_status"), new InvalidDocumentLifecycleError("decision", "planned")).payload);
 
     // Every code the code itself knows about was triggered above.
     expect([...failures.keys()].sort()).toEqual([...FAILURE_CODES].sort());

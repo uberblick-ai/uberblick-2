@@ -1,11 +1,11 @@
 import { strictInput } from "../inputs.js";
 import { getDirectoryEntry, isDirectoryEntryArchived, isDirectoryEntryDeleted, resolveDecisionTopics } from "@uberblick/schema";
 import { uuidArg } from "./schemas.js";
-import { operation } from "./operation.js";
+import { READ, operation } from "./operation.js";
 
 export const inputSchema = strictInput({ uuid: uuidArg });
 
-export const backlinksOperation = operation("backlinks", inputSchema, (context, { uuid }, _request) => {
+export const backlinksOperation = operation(READ, inputSchema, (context, { uuid }, _request) => {
   const { replicas, titleFor } = context;
   context.requireNotDeleted(uuid);
 

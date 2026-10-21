@@ -37,11 +37,11 @@ const SIDEBAR_GROUP_MODES: readonly ToolMode[] = [
   },
 ];
 
-import { operation, sidebarOperation } from "./tools/operation.js";
+import { READ, operation, sidebarOperation } from "./tools/operation.js";
 
 export const getSidebarInput = strictInput({});
 
-export const getSidebarOperation = operation("get_sidebar", getSidebarInput, (context, _args, _request) => {
+export const getSidebarOperation = operation(READ, getSidebarInput, (context, _args, _request) => {
   const { replicas } = context;
 
   const sidebar = replicas.sidebar();
@@ -57,7 +57,7 @@ export const pinDocInput = strictInput({
   index: indexArg,
 });
 
-export const pinDocOperation = sidebarOperation("pin_doc", pinDocInput, (context, { uuid, group, index }, _request, sidebar) => {
+export const pinDocOperation = sidebarOperation({ requireStub: true }, pinDocInput, (context, { uuid, group, index }, _request, sidebar) => {
   const { replicas } = context;
 
   const groups = readSidebar(sidebar.doc);
@@ -78,7 +78,7 @@ export const unpinDocInput = strictInput({
   uuid: uuidArg,
 });
 
-export const unpinDocOperation = sidebarOperation("unpin_doc", unpinDocInput, (context, { uuid }, _request, sidebar) => {
+export const unpinDocOperation = sidebarOperation({ requireStub: false }, unpinDocInput, (context, { uuid }, _request, sidebar) => {
   const { replicas } = context;
 
   const wasPinned = readSidebar(sidebar.doc).some((group) =>
@@ -108,7 +108,7 @@ export const sidebarGroupInput = strictInput(
   SIDEBAR_GROUP_MODES,
 );
 
-export const sidebarGroupOperation = sidebarOperation("sidebar_group", sidebarGroupInput, (context, { action, group, name, index }, _request, sidebar) => {
+export const sidebarGroupOperation = sidebarOperation({ requireStub: false }, sidebarGroupInput, (context, { action, group, name, index }, _request, sidebar) => {
   const { replicas } = context;
 
   const target = findGroup(readSidebar(sidebar.doc), group);

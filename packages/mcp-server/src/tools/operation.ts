@@ -1,5 +1,4 @@
 import type { z } from "zod";
-import { DOCUMENT_MUTATING_TOOLS } from "../failures.js";
 import type { Replica } from "../replica.js";
 import type { ToolContext } from "./context.js";
 
@@ -21,43 +20,66 @@ export type Operation<Args, Payload extends object = object> = (
 ) => Promise<Payload>;
 
 /**
+ * What a call may write. A writing tool's failure says what became of the
+ * write, and only document writes require the guidance briefing.
+ */
+export type Writes = "document" | "sidebar" | null;
+
+/** An operation together with the write class its wrapper enforces. */
+export type ToolOperation<Args, Payload extends object = object, W extends Writes = Writes> =
+  Operation<Args, Payload> & { readonly writes: W };
+
+interface Gates<W extends Writes> {
+  readonly writes: W;
+  readonly settle: boolean;
+}
+
+/** Workspace reads settle first. */
+export const READ: Gates<null> = { writes: null, settle: true };
+
+/** Writes that manage their own rooms settle, then require the guidance briefing. */
+export const DOCUMENT_WRITE: Gates<"document"> = { writes: "document", settle: true };
+
+/**
+ * Diagnostics settle with requireHealthy:false; bundled help never reads
+ * replicas. Neither takes the normal healthy settle.
+ */
+export const UNSETTLED_READ: Gates<null> = { writes: null, settle: false };
+
+const SIDEBAR_WRITE: Gates<"sidebar"> = { writes: "sidebar", settle: true };
+
+/**
  * Callers must parse input; _input only infers Args. Keep settling and briefing
  * here so callers without MCP use the same gates.
  */
-export function operation<Args, Payload extends object>(
-  tool: string,
+export function operation<Args, Payload extends object, W extends Writes>(
+  gates: Gates<W>,
   _input: z.ZodType<Args>,
   body: (context: ToolContext, args: Args, request: OperationRequest) => Payload | Promise<Payload>,
-): Operation<Args, Payload> {
-  return async (context, args, request) => {
-    // Diagnostics settle with requireHealthy:false; bundled help never reads
-    // replicas. Every workspace operation uses the normal healthy settle.
-    if (tool !== "sync_status" && tool !== "get_help") await context.replicas.settle();
-    if (DOCUMENT_MUTATING_TOOLS.has(tool)) context.briefing.require();
+): ToolOperation<Args, Payload, W> {
+  const run = async (context: ToolContext, args: Args, request: OperationRequest): Promise<Payload> => {
+    if (gates.settle) await context.replicas.settle();
+    if (gates.writes === "document") context.briefing.require();
     return body(context, args, request);
   };
+  return Object.assign(run, { writes: gates.writes });
 }
 
 /** Content locks and content-change nudges have separate scopes. */
-const DOCUMENT_WRITES = {
-  edit_block: { content: true, contentDurability: true },
-  insert_block: { content: true, contentDurability: true },
-  delete_block: { content: true, contentDurability: true },
-  link_range: { content: true, contentDurability: false },
-  update_data: { content: true, contentDurability: false },
-  set_metadata: { content: false, contentDurability: false },
-  set_status: { content: false, contentDurability: false },
-  annotate: { content: false, contentDurability: false },
-} as const;
+export interface DocumentWrite {
+  /** Refuse a decided record's answer blocks and data. */
+  readonly content: boolean;
+  /** Report the TL;DR review nudge with durability. */
+  readonly contentDurability: boolean;
+}
 
 /** Keep refusal, synchronous write and durability checking in this order. */
 export function documentOperation<Args extends { uuid: string }, Payload extends object>(
-  tool: keyof typeof DOCUMENT_WRITES,
+  policy: DocumentWrite,
   input: z.ZodType<Args>,
   body: (context: ToolContext, args: Args, request: OperationRequest, replica: Replica) => Payload,
 ) {
-  return operation(tool, input, (context, args, request) => {
-    const policy = DOCUMENT_WRITES[tool];
+  return operation(DOCUMENT_WRITE, input, (context, args, request) => {
     const replica = context.requireWritableDoc(args.uuid, policy.content);
     const payload = body(context, args, request, replica);
     return {
@@ -69,14 +91,14 @@ export function documentOperation<Args extends { uuid: string }, Payload extends
 
 /** Sidebar writes share durability without acquiring document-write gates. */
 export function sidebarOperation<Args extends object, Payload extends object>(
-  tool: "pin_doc" | "unpin_doc" | "sidebar_group",
+  policy: { readonly requireStub: boolean },
   input: z.ZodType<Args>,
   body: (context: ToolContext, args: Args, request: OperationRequest, sidebar: Replica) => Payload,
 ) {
-  return operation(tool, input, (context, args, request) => {
+  return operation(SIDEBAR_WRITE, input, (context, args, request) => {
     // New pins need a known stub, including archived stubs surfaced by get_sidebar.
     // Do not gate other operations: unknown pins must remain removable.
-    if (tool === "pin_doc") context.requireStub((args as Args & { uuid: string }).uuid);
+    if (policy.requireStub) context.requireStub((args as Args & { uuid: string }).uuid);
     const sidebar = context.replicas.sidebar();
     return { ...body(context, args, request, sidebar), ...context.durability(sidebar) };
   });

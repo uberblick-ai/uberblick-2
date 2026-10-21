@@ -1,8 +1,15 @@
 /** Bundled help has no replica or SDK dependency; both MCP routes read this catalog. */
 import { ToolError } from "./failures.js";
-import { toolHelpEntries } from "./help-examples.js";
 import { conceptTopics } from "./help-topics.js";
 import type { HelpTopic } from "./help-topics.js";
+
+/** A tool's example call and the concept topics that own its shared rules. */
+export interface ToolHelp {
+  readonly name: string;
+  readonly example: Record<string, unknown>;
+  readonly related: readonly string[];
+  readonly details?: string;
+}
 
 /** Public tool metadata with schemas already rendered at the MCP boundary. */
 export interface ToolHelpContract {
@@ -16,11 +23,9 @@ export function helpUri(topic: string): string {
   return `uberblick://help/${topic}`;
 }
 
-/** Short final pointer; the same ownership table supplies per-tool Related links. */
-export function helpPointer(tool: string): string {
-  const entry = toolHelpEntries[tool];
-  if (entry === undefined) throw new Error(`No help topics for registered tool: ${tool}`);
-  return `\n\nHelp: ${[tool, ...entry.related].join(", ")}.`;
+/** Short final pointer; the same related topics supply per-tool Related links. */
+export function helpPointer(tool: string, related: readonly string[]): string {
+  return `\n\nHelp: ${[tool, ...related].join(", ")}.`;
 }
 
 function jsonBlock(value: unknown): string {
@@ -31,10 +36,9 @@ export class HelpCatalog {
   private readonly topics = new Map<string, HelpTopic>(conceptTopics.map((topic) => [topic.id, topic]));
 
   /** Capture the registered schemas and prose rather than maintaining another tool definition. */
-  addTool(name: string, tool: ToolHelpContract): void {
+  addTool(entry: ToolHelp, tool: ToolHelpContract): void {
+    const { name } = entry;
     if (this.topics.has(name)) throw new Error(`Help topic collides with registered tool: ${name}`);
-    const entry = toolHelpEntries[name as keyof typeof toolHelpEntries];
-    if (entry === undefined) throw new Error(`No help example and related topics for registered tool: ${name}`);
     const related = entry.related.map((id) => {
       const topic = this.topics.get(id);
       if (topic === undefined) throw new Error(`No owning help topic ${id} for ${name}`);

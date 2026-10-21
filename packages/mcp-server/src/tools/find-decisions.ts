@@ -2,13 +2,13 @@ import { getDirectoryEntry, githubReference, isDirectoryEntryArchived, isDirecto
 import { z } from "zod";
 import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
-import { operation } from "./operation.js";
+import { READ, operation } from "./operation.js";
 
 export const inputSchema = strictInput({
   github_ref: z.string().describe("One GitHub issue or pull request, as owner/repo#n or its github.com URL."),
 });
 
-export const findDecisionsOperation = operation("find_decisions", inputSchema, (context, { github_ref }, _request) => {
+export const findDecisionsOperation = operation(READ, inputSchema, (context, { github_ref }, _request) => {
   const { replicas, titleFor } = context;
 
   const reference = githubReference(github_ref);

@@ -2,7 +2,7 @@ import { archiveDocument } from "@uberblick/schema";
 import { strictInput } from "../inputs.js";
 import { roomStages } from "./helpers.js";
 import { uuidArg } from "./schemas.js";
-import { operation } from "./operation.js";
+import { DOCUMENT_WRITE, operation } from "./operation.js";
 
 const ARCHIVE_RECOVERY: Record<string, string> & { other: string } = {
   directory:
@@ -25,7 +25,7 @@ export const inputSchema = strictInput({ uuid: uuidArg });
  * Write only directory and sidebar rooms. Replicas reconciles the index from
  * directory updates on every observing replica; do not mutate the index here.
  */
-export const archiveDocOperation = operation("archive_doc", inputSchema, (context, { uuid }, _request) => {
+export const archiveDocOperation = operation(DOCUMENT_WRITE, inputSchema, (context, { uuid }, _request) => {
   const { replicas, requireStub, titleFor, durabilityAcross } = context;
 
   const stub = requireStub(uuid);

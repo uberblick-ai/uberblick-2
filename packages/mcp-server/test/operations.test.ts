@@ -6,8 +6,6 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { GuidanceBriefing } from "../src/briefing.js";
 import type { McpConfig } from "../src/config.js";
-import { operations } from "../src/operations.js";
-import { outputSchemas } from "../src/outputs.js";
 import { Replicas } from "../src/replica.js";
 import { MirrorStore } from "../src/store.js";
 import { ServerWork } from "../src/server-work.js";
@@ -79,8 +77,7 @@ afterEach(async () => {
   for (const cleanup of close.splice(0).reverse()) await cleanup();
 });
 
-it("exposes every tool operation and settles foreign durable updates before direct reads", async () => {
-  expect(Object.keys(operations).sort()).toEqual(Object.keys(outputSchemas).sort());
+it("settles foreign durable updates before direct reads", async () => {
   const writer = local();
   const reader = local(writer.config.databasePath);
   const created = await document(writer.context);
