@@ -102,7 +102,7 @@ export function parseCardInput(source: string, requireTitle = true): CardText {
       bodyStart = index + 1;
       break;
     }
-    const match = /^(label|title|footer|button): ?(.*)$/.exec(line);
+    const match = /^(label|title|footer|button): ?(.*)$/s.exec(line);
     if (match === null) throw new InvalidCardError("Header lines must use label:, title:, footer: or button:");
     const key = match[1] as "label" | "title" | "footer" | "button";
     if (key !== "button" && seen.has(key)) throw new InvalidCardError(`Duplicate header key: ${key}`);
