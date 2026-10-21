@@ -24,7 +24,7 @@ function execute(script, overrides = {}, args = [], cwd = root) {
 test("web deployment imports the generated policy for the app and its deep-link fallback", () => {
 	const caddyfile = readFileSync(join(root, "Caddyfile"), "utf8");
 	assert.match(caddyfile, /handle \{\s+import \/etc\/caddy\/uberblick-csp\.caddy\s+root \* \/srv\s+try_files \{path\} \/index\.html\s+file_server\s+\}/);
-	assert.ok(!caddyfile.includes("figma.com"));
+	assert.doesNotMatch(caddyfile, /figma\.com/);
 	assert.ok(!caddyfile.includes("Content-Security-Policy-Report-Only"));
 	assert.doesNotMatch(caddyfile, /header\s+Content-Security-Policy\s/);
 	assert.ok(readFileSync(join(root, "Dockerfile.hub-release"), "utf8").includes(
