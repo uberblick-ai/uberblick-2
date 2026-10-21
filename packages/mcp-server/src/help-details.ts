@@ -226,7 +226,8 @@ export const toolHelpDetails = {
     "`list_docs` and `list docs`, but not `a list of docs`. English word forms use FTS5's Porter stemmer: " +
     "`launch` finds `launching` and `launched`. Other languages match exact words or prefixes. Case and accents " +
     "fold, so `ecole` finds `École`. A trailing `*` makes a prefix match: `work*` finds `worktree` and `workspace`; " +
-    "prefixes match stems, so `withdraw*` also finds `withdrawal` and `withdrawing`. No hits means no indexed " +
+    "prefixes match stems, so `withdraw*` also finds `withdrawal` and `withdrawing`. A prefix past the stem can miss: " +
+    "`decisi*` can miss `decision`; search the whole word or a shorter prefix, `decis*`. No hits means no indexed " +
     "document matched any query word under those rules; it does not " +
     "by itself mean the index is empty.\n\n" +
     "Results use title-weighted bm25 relevance: a title word weighs more than the same word elsewhere, " +

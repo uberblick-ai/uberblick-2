@@ -276,7 +276,8 @@ export const tools: readonly Tool[] = [
     description:
       "Find live documents containing any query word in titles, descriptions, content or assigned tag names. " +
       "English word forms match; case and accents fold, underscore groups match adjacent words and a trailing * " +
-      "matches prefixes. Punctuation or emoji alone matches nothing. Results use title-weighted bm25 relevance, " +
+      "matches stem prefixes. A prefix past the stem can miss: `decisi*` can miss `decision`; search the whole word or a shorter prefix, `decis*`. " +
+      "Punctuation or emoji alone matches nothing. Results use title-weighted bm25 relevance, " +
       "without a strict title-first or matched-word-count order. Optional kind narrows to regular documents or " +
       "decision records. Optional tag accepts one catalog id or current name (case ignored), or a list: any listed tag " +
       "matches and more listed tags boost relevance; unknown tags refuse. Every hit includes kind and canonical " +
