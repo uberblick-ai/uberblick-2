@@ -60,7 +60,7 @@
               "level": "error",
               "options": {
                 "patterns": [{
-                  "group": ["yjs", "yjs/**", "y-*", "y-*/**", "@uberblick/*", "@uberblick/**", ":PATH:"],
+                  "group": ["yjs", "yjs/**", "y-*", "y-*/**", "@uberblick/*", "@uberblick/**", "**/collab/**"],
                   "message": "Local settings must remain independent of collaboration modules."
                 }]
               }
