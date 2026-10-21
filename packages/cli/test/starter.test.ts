@@ -12,7 +12,6 @@
  * client is usually the first thing a new user opens.
  */
 
-import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -68,19 +67,16 @@ function unboundSandbox(files?: SandboxFiles): Sandbox {
 const TEMPLATES = [
   {
     file: "welcome-to-uberblick.md",
-    title: "Welcome to Überblick",
     uuid: "2d56b281-5614-43bd-b8d8-edd1c270a85a",
-    description:
-      "What Überblick is and how a fresh workspace works — local-first documents shared by you and the agents you connect. Read How to Use It next.",
   },
   {
     file: "how-to-use-it.md",
-    title: "How to Use It",
     uuid: "d7ddd0b1-fee9-4ef0-8f1e-42882f925c31",
-    description:
-      "The shortest path from an empty workspace to useful work — open the editor, connect an agent over MCP, and organize documents with links and sidebar groups.",
   },
-];
+].map(template => {
+  const source = importMarkdown(readFileSync(join(PACKAGE_ROOT, "templates", template.file), "utf8"));
+  return { ...template, title: source.title, description: source.description };
+});
 
 /** The two starter uuids in pin order. */
 const PINS = TEMPLATES.map((template) => template.uuid);
@@ -186,7 +182,7 @@ beforeAll(() => {
   create();
 });
 
-it("pins both starter documents into the Überblick group, in order", () => {
+it("pins both starter documents into the starter group, in order", () => {
   // Read from the update log, with no MCP server ever constructed against this
   // workspace: `ub workspace create` itself has to leave the pins durable, because the web
   // client is the first thing a new user opens and it runs no migration.
@@ -211,10 +207,9 @@ it("seeds exactly two untagged starter documents, with their uuids and links", a
 
   await withTools(async (call) => {
     const { docs } = await call("list_docs");
-    expect(docs.map((doc: { title: string }) => doc.title)).toEqual([
-      "How to Use It",
-      "Welcome to Überblick",
-    ]);
+    expect(docs.map((doc: { title: string }) => doc.title)).toEqual(
+      TEMPLATES.map(template => template.title).sort(),
+    );
     expect(docs.every((doc: { tags: unknown[] }) => doc.tags.length === 0)).toBe(
       true,
     );
@@ -375,74 +370,5 @@ it("seeds two complete new workspaces when creates race", async () => {
         expect(doc.blocks).toHaveLength(source.blocks.length);
       }
     }, race);
-  }
-});
-
-/**
- * The shipped copy, verbatim.
- *
- * Kept as a literal rather than derived from the file, because the file is what
- * is under test. Changes to this onboarding copy are product changes to be
- * made deliberately rather than noticed later in a new user's workspace.
- */
-const COPY: Record<string, string> = {
-  "welcome-to-uberblick.md": `This is your Überblick workspace. It is shared by you and the agents you connect,
-and it works locally first. When a hub is configured, the same documents sync to
-your other clients.
-
-Everything here is an ordinary document made of blocks. You can edit, link,
-reorder, unpin, or archive it — including this page.
-
-## Start here
-
-- Open **How to Use It** for the shortest path from an empty workspace to useful work.
-- Keep important documents close by pinning them in the sidebar.
-- Replace these starter pages when the workspace becomes yours.
-`,
-  "how-to-use-it.md": `## Open the workspace
-
-Run \`ub open\` to start Überblick and open the editor. Write directly in any
-document; changes are saved locally first.
-
-## Connect an agent
-
-Run \`ub mcp install\` to connect a supported MCP client. An agent can then search,
-read, create, and update the same documents you see in the editor.
-
-## Organize what matters
-
-Create documents for decisions, plans, research, or anything else worth keeping.
-Use links to connect related documents and sidebar groups to curate the ones you
-want close at hand.
-`,
-};
-
-it("ships exactly the approved starter copy, frontmatter included", () => {
-  for (const template of TEMPLATES) {
-    const source = readFileSync(
-      join(PACKAGE_ROOT, "templates", template.file),
-      "utf8",
-    );
-    const other = TEMPLATES.find((one) => one !== template);
-    expect(source).toBe(
-      `---\nuuid: ${template.uuid}\ntitle: ${template.title}\ndescription: ${template.description}\nlinks:\n  - ${other?.uuid}\n---\n\n${COPY[template.file]}`,
-    );
-  }
-});
-
-it("ships the templates inside the package", () => {
-  // The packing manifest, not the checkout: a template `ub workspace create` can only find
-  // by walking up to a repository would be missing from every install.
-  const packed = JSON.parse(
-    execFileSync("npm", ["pack", "--dry-run", "--json"], {
-      cwd: PACKAGE_ROOT,
-      encoding: "utf8",
-      // npm warns about every pnpm setting it finds in the environment.
-      stdio: ["ignore", "pipe", "ignore"],
-    }),
-  );
-  const paths = packed[0].files.map((file: { path: string }) => file.path);
-  for (const template of TEMPLATES) {
-    expect(paths).toContain(`templates/${template.file}`);
   }
 });

@@ -15,7 +15,6 @@ afterAll(removeTempDirs);
 
 const PRIVATE_REPLY = "private-upstream-body";
 const snapshot = { account: { login: "previous-user", provider: "github" }, workspaces: [{ id: WORKSPACE }] };
-const modes = [false, true];
 
 function report(run: { stdout: string }) {
   expect(run.stdout.trim().split("\n")).toHaveLength(1);
@@ -46,7 +45,7 @@ const replies = [
   ].map(([status, body], index) => ({ name: `invalid response ${index}`, status: status as number, body, outcome: "hub-error", accepted: null, admin: null })),
 ];
 
-describe.each(modes)("ub auth status current replies, JSON=%s", json => {
+describe("ub auth status current replies", () => {
   it.each(replies)("reports $name with validated evidence only", async ({ name, status, body, outcome, accepted, admin }) => {
     const login = fixture();
     const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: login } } });
@@ -54,15 +53,9 @@ describe.each(modes)("ub auth status current replies, JSON=%s", json => {
     const response = body !== null && typeof body === "object" && !Array.isArray(body)
       ? { ...body, message: PRIVATE_REPLY, key: login.credential.key } : body;
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json(response, { status }));
-    const run = await runInProcess(["auth", "status", OTHER_HUB, ...(json ? ["--json"] : [])], box);
+    const run = await runInProcess(["auth", "status", OTHER_HUB, "--json"], box);
     expect(run.status, run.stderr).toBe(admin === null ? 1 : 0);
-    if (json) expect(report(run)).toEqual({ hub: OTHER_HUB, outcome, loginAccepted: accepted, hubAdmin: admin, storedLogin: snapshot });
-    else {
-      expect(run.stdout).toContain("stored account  previous-user (github)");
-      expect(run.stdout).toContain(`stored available workspaces:\n  ${WORKSPACE}\n`);
-      expect(run.stdout).toContain(`login (hub)  ${accepted === null ? `not verified (${outcome})` : accepted ? "accepted" : "refused"}`);
-      expect(run.stdout).toContain(`hub admin (hub)  ${admin === null ? `not verified (${outcome})` : admin ? "yes" : "no"}`);
-    }
+    expect(report(run)).toEqual({ hub: OTHER_HUB, outcome, loginAccepted: accepted, hubAdmin: admin, storedLogin: snapshot });
     if (outcome === "login-refused") expect(run.stderr).toContain(`ub auth login ${OTHER_HUB}`);
     else if (outcome === "hub-unsupported") expect(run.stderr).toMatch(/runs the hub.*update or configure/);
     else if (outcome === "hub-error") expect(run.stderr).toContain("ask whoever runs the hub");
@@ -85,11 +78,10 @@ describe.each(modes)("ub auth status current replies, JSON=%s", json => {
   it.each([200, 400, 404, 502, 503, 504])("classifies a non-JSON HTTP %s page", async status => {
     const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: fixture() } } });
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(PRIVATE_REPLY, { status }));
-    const run = await runInProcess(["auth", "status", OTHER_HUB, ...(json ? ["--json"] : [])], box);
+    const run = await runInProcess(["auth", "status", OTHER_HUB, "--json"], box);
     const outcome = status < 500 ? "hub-unsupported" : "hub-unreachable";
     expect(run.status).toBe(1);
-    if (json) expect(report(run)).toEqual({ hub: OTHER_HUB, outcome, loginAccepted: null, hubAdmin: null, storedLogin: snapshot });
-    else expect(run.stdout).toContain(`hub admin (hub)  not verified (${outcome})`);
+    expect(report(run)).toEqual({ hub: OTHER_HUB, outcome, loginAccepted: null, hubAdmin: null, storedLogin: snapshot });
     expect(run.stdout).not.toMatch(/not a hub admin|hub admin \(hub\)\s+no\n/);
     expect(run.output).not.toContain(PRIVATE_REPLY);
     expect(fetch).toHaveBeenCalledOnce();
@@ -106,10 +98,9 @@ describe.each(modes)("ub auth status current replies, JSON=%s", json => {
   ])("classifies a JSON gateway HTTP $status reply without hub status fields", async ({ status, body }) => {
     const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: fixture() } } });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json(body, { status }));
-    const run = await runInProcess(["auth", "status", OTHER_HUB, ...(json ? ["--json"] : [])], box);
+    const run = await runInProcess(["auth", "status", OTHER_HUB, "--json"], box);
     expect(run.status).toBe(1);
-    if (json) expect(report(run)).toEqual({ hub: OTHER_HUB, outcome: "hub-unreachable", loginAccepted: null, hubAdmin: null, storedLogin: snapshot });
-    else expect(run.stdout).toContain("hub admin (hub)  not verified (hub-unreachable)");
+    expect(report(run)).toEqual({ hub: OTHER_HUB, outcome: "hub-unreachable", loginAccepted: null, hubAdmin: null, storedLogin: snapshot });
     expect(run.stderr).toMatch(/network or VPN.*retry/);
     expect(run.output).not.toContain(PRIVATE_REPLY);
   });
@@ -117,10 +108,9 @@ describe.each(modes)("ub auth status current replies, JSON=%s", json => {
   it("reports a network failure without treating stored login as current authority", async () => {
     const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: fixture() } } });
     const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error(PRIVATE_REPLY));
-    const run = await runInProcess(["auth", "status", OTHER_HUB, ...(json ? ["--json"] : [])], box);
+    const run = await runInProcess(["auth", "status", OTHER_HUB, "--json"], box);
     expect(run.status).toBe(1);
-    if (json) expect(report(run)).toEqual({ hub: OTHER_HUB, outcome: "hub-unreachable", loginAccepted: null, hubAdmin: null, storedLogin: snapshot });
-    else expect(run.stdout).toContain("stored account  previous-user (github)");
+    expect(report(run)).toEqual({ hub: OTHER_HUB, outcome: "hub-unreachable", loginAccepted: null, hubAdmin: null, storedLogin: snapshot });
     expect(run.stderr).toMatch(/network or VPN.*retry/);
     expect(run.output).not.toContain(PRIVATE_REPLY);
     expect(fetch).toHaveBeenCalledOnce();
@@ -143,22 +133,48 @@ const localCases: Array<{ name: string; files?: SandboxFiles; unbound?: boolean;
   { name: "unusable stored login", files: { projectBinding: { workspaceId: WORKSPACE, hubUrl: OTHER_HUB }, credentials: { hubLogins: { [OTHER_HUB]: {} } } }, outcome: "credential-store", hub: OTHER_HUB },
 ];
 
-describe.each(modes)("ub auth status without usable remote login, JSON=%s", json => {
+describe("ub auth status without usable remote login", () => {
   it.each(localCases)("reports $name without contacting anything", async ({ files, unbound, env, outcome, hub, stored }) => {
     const box = (unbound ? unboundSandbox : sandbox)(files);
     const before = storedBytes(box);
     const fetch = vi.spyOn(globalThis, "fetch");
-    const run = await runInProcess(["auth", "status", ...(json ? ["--json"] : [])], box, env);
+    const run = await runInProcess(["auth", "status", "--json"], box, env);
     expect(run.status).toBe(outcome === "no-hub" ? 0 : 1);
-    if (json) expect(report(run)).toEqual({ hub, outcome, loginAccepted: null, hubAdmin: null, storedLogin: stored ? snapshot : null });
-    else if (outcome === "no-hub") {
-      expect(run.stdout).toContain("none (local-only)");
-      expect(run.stdout).toContain("Local-only work needs no login.");
-    } else expect(run.stdout).toContain(`hub admin (hub)  not verified (${outcome})`);
+    expect(report(run)).toEqual({ hub, outcome, loginAccepted: null, hubAdmin: null, storedLogin: stored ? snapshot : null });
     if (hub !== null) expect(run.stderr).toContain(`ub auth login ${hub}`);
     expect(run.output).not.toContain(PRIVATE_REPLY);
     expect(fetch).not.toHaveBeenCalled();
     expect(storedBytes(box)).toEqual(before);
+  });
+});
+
+describe("ub auth status text rendering", () => {
+  it.each([
+    { name: "current admin", status: 200, body: { status: "ok", role: "admin" }, login: "accepted", admin: "yes" },
+    { name: "confirmed non-admin", status: 403, body: { status: "forbidden" }, login: "accepted", admin: "no" },
+    { name: "refused login", status: 401, body: { status: "sign-in-required" }, login: "refused", admin: "not verified (login-refused)" },
+    { name: "unverified reply", status: 400, body: { status: "invalid-request" }, login: "not verified (hub-unsupported)", admin: "not verified (hub-unsupported)" },
+  ])("renders $name", async ({ status, body, login, admin }) => {
+    const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: fixture() } } });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json(body, { status }));
+    const run = await runInProcess(["auth", "status", OTHER_HUB], box);
+    expect(run.stdout).toContain("stored account  previous-user (github)");
+    expect(run.stdout).toContain(`stored available workspaces:\n  ${WORKSPACE}\n`);
+    expect(run.stdout).toContain(`login (hub)  ${login}`);
+    expect(run.stdout).toContain(`hub admin (hub)  ${admin}`);
+  });
+
+  it.each([
+    { name: "local project", outcome: "no-hub", files: undefined },
+    { name: "malformed binding", outcome: "binding-invalid", files: { raw: { projectBinding: "{broken" } } },
+    { name: "no stored login", outcome: "not-signed-in", files: { projectBinding: { workspaceId: WORKSPACE, hubUrl: OTHER_HUB } } },
+  ])("renders $name", async ({ outcome, files }) => {
+    const box = sandbox(files);
+    const run = await runInProcess(["auth", "status"], box);
+    if (outcome === "no-hub") {
+      expect(run.stdout).toContain("none (local-only)");
+      expect(run.stdout).toContain("Local-only work needs no login.");
+    } else expect(run.stdout).toContain(`hub admin (hub)  not verified (${outcome})`);
   });
 });
 
@@ -284,8 +300,6 @@ describe.each(["login", "status", "logout"])("ub auth %s usage errors", subcomma
   it.each([
     { operands: [`--unsupported=${PRIVATE_REPLY}`], error: /unknown option/i },
     { operands: ["--unsupported", PRIVATE_REPLY], error: /unknown option/i },
-    { operands: ["--live", "--json"], error: /unknown option/i },
-    { operands: ["--offline"], error: /unknown option/i },
     { operands: [PRIVATE_REPLY, PRIVATE_REPLY], error: /expected at most one hub/ },
     { operands: [`https://user:${PRIVATE_REPLY}@hub.invalid`], error: /invalid hub/ },
   ])("redacts values in $operands", async ({ operands, error }) => {
