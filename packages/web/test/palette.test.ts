@@ -15,6 +15,7 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
+  BLOCK_TYPES,
   COMMENT_MARK,
   INLINE_MARKS,
   PROSE_BLOCK_TYPES,
@@ -30,7 +31,6 @@ import { uberblickSchema } from "../src/editor/create-editor.js";
 import { bindGuardedEditor } from "../src/editor/guarded-binding.js";
 import type { GuardedBinding } from "../src/editor/guarded-binding.js";
 import {
-  BLOCK_NODE_NAMES,
   LINK_CONFLICT,
   describeForeignBlocks,
   findForeignBlocks,
@@ -63,18 +63,6 @@ describe("the editor palette and stored block types", () => {
       "terminal",
       "text",
     ]);
-    expect(BLOCK_NODE_NAMES).toEqual([
-      "paragraph",
-      "heading",
-      "code",
-      "list-item",
-      "quote",
-      "table",
-      "terminal",
-      "chart",
-      "card",
-      "figma",
-    ]);
     // The closed mark set: the schema package's six inline marks, plus the
     // annotation anchor.
     expect(Object.keys(uberblickSchema.marks).sort()).toEqual(
@@ -106,7 +94,7 @@ describe("the editor palette and stored block types", () => {
   it("allows the comment mark inside source blocks, and nothing else there", () => {
     // A `marks: ""` node spec would make y-prosemirror throw while building the
     // node — and its catch block deletes the Y.XmlText from the document.
-    for (const name of BLOCK_NODE_NAMES.filter((name) => name !== "table" && name !== "card" && name !== "figma")) {
+    for (const name of BLOCK_TYPES.filter((name) => name !== "table" && name !== "card" && name !== "figma")) {
       const type = uberblickSchema.nodes[name];
       expect(type).toBeDefined();
       expect(type?.allowsMarkType(uberblickSchema.marks[COMMENT_MARK]!)).toBe(true);

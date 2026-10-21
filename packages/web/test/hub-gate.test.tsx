@@ -21,6 +21,7 @@ const acquireRoom = vi.hoisted(() => vi.fn());
 vi.mock("../src/collab/rooms.js", () => ({ acquireRoom }));
 
 const { App, ReboundNotice } = await import("../src/ui/App.js");
+const { LOCAL_SESSION_KEY } = await import("../src/collab/local-session.js");
 
 /**
  * The address names the workspace, so the test opens one. `/` would render the
@@ -60,6 +61,7 @@ function fakeHandle(room: string): unknown {
 afterEach(() => {
   vi.restoreAllMocks();
   acquireRoom.mockReset();
+  localStorage.removeItem(LOCAL_SESSION_KEY);
 });
 
 it("shows the restart state only for a rebound local-serving document", async () => {
@@ -126,6 +128,8 @@ it("keeps the rebound notice visible across routes without replacing the page", 
   );
   acquireRoom.mockImplementation((room: string) => fakeHandle(room));
 
+  // A ub open page without a session shows the connect notice instead.
+  localStorage.setItem(LOCAL_SESSION_KEY, "s".repeat(43));
   window.history.replaceState(null, "", `/${WORKSPACE}`);
   const { container } = await renderSettled(<App />);
 
@@ -137,6 +141,7 @@ it("keeps the rebound notice visible across routes without replacing the page", 
           workspaces: [WORKSPACE],
           remoteHubUrl: "wss://remote.example/ws",
           rebound: true,
+          servedWorkspaces: { [WORKSPACE]: { remoteHubUrl: "wss://remote.example/ws", name: null } },
         }),
         { status: 200 },
       ),

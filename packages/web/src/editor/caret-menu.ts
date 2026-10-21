@@ -2,7 +2,7 @@
 import { Extension } from "@tiptap/core";
 import { Plugin } from "@tiptap/pm/state";
 
-export interface CaretMenuController {
+interface CaretMenuController {
   handleKey: ((key: string) => boolean) | null;
   listId: string;
   activeId: string | undefined;

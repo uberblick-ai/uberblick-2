@@ -24,7 +24,7 @@ export interface GuardedBinding {
   destroy(): void;
 }
 
-export interface GuardedBindingOptions extends CreateEditorOptions {
+interface GuardedBindingOptions extends CreateEditorOptions {
   /** Called when the guard tears the editor down mid-session. */
   onUnbind?: (fragment: Y.XmlFragment) => void;
   /** Only admitted and synchronized replicas may normalize stored blocks. */

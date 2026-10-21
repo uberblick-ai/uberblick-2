@@ -13,12 +13,9 @@
  */
 
 import * as Y from "yjs";
-import { BLOCK_TYPES, CARD_PARTS, cardPartTexts, figmaCaptionTexts, isBlockType, readsAsMark, isSupportedCard, isSupportedFigma, isSupportedTable, tableRows, tableCellTexts } from "@uberblick/schema";
+import { CARD_PARTS, cardPartTexts, figmaCaptionTexts, isBlockType, readsAsMark, isSupportedCard, isSupportedFigma, isSupportedTable, tableRows, tableCellTexts } from "@uberblick/schema";
 import type { CardPart } from "@uberblick/schema";
 import { uberblickSchema } from "./create-editor.js";
-
-/** Stored block names, including types the editor cannot bind yet. */
-export const BLOCK_NODE_NAMES: readonly string[] = BLOCK_TYPES;
 
 /**
  * Distinguish an overlap of supported link marks from an unsupported mark so
@@ -145,7 +142,7 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
  * block ids and blocks can contain multiple text children. Ids and indices are
  * display keys, not write targets.
  */
-export interface LinkConflictRange {
+interface LinkConflictRange {
   /** Start of the range, in Yjs format indices — an embed counts as one. */
   start: number;
   /** End of the range, exclusive. */

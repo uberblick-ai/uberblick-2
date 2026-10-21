@@ -46,7 +46,7 @@ const HEADING_LEVELS: readonly HeadingLevel[] = [1, 2, 3, 4, 5, 6];
  * Clamp a stored `level` to a renderable heading level. Render-time only: the
  * attribute itself keeps whatever the document holds.
  */
-export function renderableHeadingLevel(raw: unknown): HeadingLevel {
+function renderableHeadingLevel(raw: unknown): HeadingLevel {
   const parsed = Number.parseInt(String(raw ?? ""), 10);
   if (Number.isNaN(parsed)) return 1;
   if (parsed < 1) return 1;
@@ -133,7 +133,7 @@ export const Heading = Node.create({
  * listStructurePlugin supplies schema-aligned numbering and accessible list
  * containers; CSS renders data-list/data-indent/data-number markers.
  */
-export const ListItem = Node.create({
+const ListItem = Node.create({
   name: "list-item",
   group: "block",
   content: "inline*",
@@ -195,7 +195,7 @@ export const Quote = Node.create({
  * A source-text block. `code: true` + `whitespace: "pre"` keep newlines and
  * runs of spaces intact, and make `newlineInCode` the right Enter behaviour.
  */
-export const CodeBlock = Node.create({
+const CodeBlock = Node.create({
   name: "code",
   group: "block",
   content: "text*",

@@ -12,13 +12,10 @@ import { Plugin, TextSelection } from "@tiptap/pm/state";
 import type { EditorState } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import { columnResizing, columnResizingPluginKey, ResizeState, updateColumnsOnResize } from "@tiptap/pm/tables";
-import { ySyncPluginKey } from "y-prosemirror";
-import { InvalidTableError, isSupportedColumnWidth, parseTableInput, TABLE_CELL_MARKS } from "@uberblick/schema";
+import { InvalidTableError, isSupportedColumnWidth, parseTableInput } from "@uberblick/schema";
 import type { GfmTable } from "@uberblick/schema";
-import { endUndoCapture, findBlockById } from "./block-menu.js";
+import { blockShapeGuard, endUndoCapture, findBlockById, isPlainPart } from "./blocks.js";
 import { singleLine } from "./table-text.js";
-
-const CELL_MARKS = new Set<string>(TABLE_CELL_MARKS);
 
 function inTable(state: EditorState): boolean {
   return state.selection.$from.depth > 1 && state.selection.$from.node(1).type.name === "table";
@@ -162,14 +159,8 @@ function validTable(node: ProseMirrorNode, allowRagged: boolean): boolean {
     if (cells.type.name !== "tableRow" || cells.childCount === 0 || (!allowRagged && cells.childCount !== width)) return false;
     for (let col = 0; col < cells.childCount; col += 1) {
       const cell = cells.child(col);
-      if (cell.type.name !== (row === 0 ? "tableHeader" : "tableCell") || cell.attrs.colspan !== 1 || cell.attrs.rowspan !== 1 || !isSupportedColumnWidth(cell.attrs.colwidth) || cell.childCount !== 1) return false;
-      const paragraph = cell.child(0);
-      if (paragraph.type.name !== "paragraph" || paragraph.attrs.id !== null) return false;
-      let valid = true;
-      paragraph.forEach((text) => {
-        if (!text.isText || /[\r\n]/.test(text.text ?? "") || text.marks.some((mark) => !CELL_MARKS.has(mark.type.name))) valid = false;
-      });
-      if (!valid) return false;
+      if (cell.type.name !== (row === 0 ? "tableHeader" : "tableCell") || cell.attrs.colspan !== 1 || cell.attrs.rowspan !== 1 ||
+        !isSupportedColumnWidth(cell.attrs.colwidth) || !isPlainPart(cell) || /[\r\n]/.test(cell.textContent)) return false;
     }
   }
   return true;
@@ -180,19 +171,16 @@ export function isOrdinaryTable(node: ProseMirrorNode): boolean {
   return node.type.name === "table" && validTable(node, false);
 }
 
-function tableLimitsPlugin(): Plugin {
+/** A table that was already ragged may stay ragged; every other shape stays ordinary. */
+function tableShapeGuard(): Plugin {
+  return blockShapeGuard("table", (node, state) => {
+    const before = typeof node.attrs.id === "string" ? findBlockById(state.doc, node.attrs.id)?.node : undefined;
+    return validTable(node, before?.type.name === "table" && !validTable(before, false));
+  });
+}
+
+function tableEnterPlugin(): Plugin {
   return new Plugin({
-    filterTransaction(tr, state) {
-      if (!tr.docChanged || tr.getMeta(ySyncPluginKey)?.isChangeOrigin === true) return true;
-      let valid = true;
-      tr.doc.forEach((node) => {
-        if (node.type.name !== "table") return;
-        const before = typeof node.attrs.id === "string" ? findBlockById(state.doc, node.attrs.id)?.node : undefined;
-        const ragged = before?.type.name === "table" && !validTable(before, false);
-        if (!validTable(node, ragged)) valid = false;
-      });
-      return valid;
-    },
     props: {
       handleKeyDown(view, event) {
         if (event.key !== "Enter" || event.isComposing || !inTable(view.state)) return false;
@@ -266,7 +254,7 @@ function convertToTable(
  * table: PM's default parser collapses its lines, while mixed documents must
  * retain ordinary paste behavior.
  */
-export function tableFromTextPlugin(): Plugin {
+function tableFromTextPlugin(): Plugin {
   return new Plugin({
     props: {
       transformPastedHTML(html, view) {
@@ -391,6 +379,6 @@ export const TableBlocks = Extension.create({
   name: "uberblickTableBlocks",
   priority: 1100,
   addProseMirrorPlugins() {
-    return [tableLimitsPlugin(), tableFromTextPlugin()];
+    return [tableShapeGuard(), tableEnterPlugin(), tableFromTextPlugin()];
   },
 });

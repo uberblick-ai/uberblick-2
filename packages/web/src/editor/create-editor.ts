@@ -31,13 +31,10 @@ import { CardBlocks } from "./card.js";
 import { FigmaBlocks } from "./figma.js";
 import { FigmaCreation } from "./figma-creation.js";
 
-/** The palette without collaboration — the schema, and nothing that needs a Y.Doc. */
-export const paletteOnlyExtensions: Extensions = [...paletteExtensions];
-
 /**
  * Share one schema; context-dependent behavior belongs to each editor.
  */
-export const uberblickSchema: Schema = getSchema(paletteOnlyExtensions);
+export const uberblickSchema: Schema = getSchema(paletteExtensions);
 
 export interface CreateEditorOptions {
   /** Mount point, or `null` for an unmounted editor. */

@@ -4,7 +4,7 @@ import type { DataRecord, DocData } from "@uberblick/schema";
 import { chartDate, chartDateFormatter, chartNumberFormatter } from "./chart-data.js";
 import { bindCollection, incompatible, keys, name, numeric, object, optionalText, own } from "./view-data.js";
 
-export type TableFormat = "text" | "number" | "date" | "link";
+type TableFormat = "text" | "number" | "date" | "link";
 export interface TableColumnMapping {
   field: string;
   label?: string;
@@ -30,7 +30,7 @@ export interface TableReady {
   invalidSchema: number;
   notice?: string;
 }
-export interface TableProblem {
+interface TableProblem {
   status: "invalid-configuration" | "collection-absent" | "collection-unusable" | "mapping-incompatible" | "no-records";
   message: string;
   invalidSchema?: number;
@@ -106,7 +106,7 @@ export function sortTableRows(rows: readonly DataRecord[], column: TableColumnMa
   });
 }
 
-export function projectTable(config: TableConfig, data: DocData | null): TableProjection {
+function projectTable(config: TableConfig, data: DocData | null): TableProjection {
   const binding = bindCollection(data, config.collection, "Table");
   if (binding.status !== "ready") return binding;
   const { collection, schema } = binding;
@@ -137,7 +137,10 @@ export function prepareTable(source: string, data: DocData | null): TableProject
   return parsed.ok ? projectTable(parsed.config, data) : { status: "invalid-configuration", message: parsed.message };
 }
 
-/** Reuse Intl formatters within a column, keeping the chart's locale semantics. */
+/**
+ * Reuse Intl formatters within a column, keeping the chart's locale semantics.
+ * The renderer assigns cell text as text; only href activates a link.
+ */
 export function tableCellFormatter(column: TableColumnMapping, locale?: string): (record: DataRecord) => TableCell {
   let number: ((value: number) => string) | undefined;
   let date: ((value: number) => string) | undefined;
@@ -165,11 +168,6 @@ export function tableCellFormatter(column: TableColumnMapping, locale?: string):
     }
     return { state: "invalid", text: `Invalid: ${storedText(value)}` };
   };
-}
-
-/** Text is always assigned as text by the renderer; only href activates a link. */
-export function formatTableCell(column: TableColumnMapping, record: DataRecord, locale?: string): TableCell {
-  return tableCellFormatter(column, locale)(record);
 }
 
 export function tableAccessibleName(config: TableConfig): string { return config.title || `Data table of ${config.collection}`; }

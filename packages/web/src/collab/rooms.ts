@@ -34,7 +34,7 @@ import { HUB_CONFIG_PATH, hubAuthToken, hubUrl, resolveClientConfig, servedLocal
 import { localRoomToken } from "./local-session.js";
 import { getSetting, subscribeSettings } from "../settings.js";
 import { toast } from "sonner";
-import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "./token.js";
+import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "@uberblick/schema/token";
 import { WEB_CLIENT } from "./identity.js";
 import type { AwarenessUser } from "./identity.js";
 import { PacedRoomProvider, RoomAdmission } from "./room-admission.js";

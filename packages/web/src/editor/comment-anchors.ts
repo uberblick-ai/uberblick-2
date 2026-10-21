@@ -72,7 +72,7 @@ function commentMarkViews(ydoc: Y.Doc): Plugin {
   });
 }
 
-export interface CommentAnchorOptions {
+interface CommentAnchorOptions {
   ydoc: Y.Doc | null;
 }
 

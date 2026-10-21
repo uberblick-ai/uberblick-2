@@ -3,16 +3,16 @@
  * Keep its path and keys aligned with Caddy, dev-config-document.ts and ub open:
  *
  *     {"hubUrl": "wss://host/ws", "workspaces": ["uberblick-<uuid>", "<uuid>"],
- *      "hubAuthToken": "<token-signing key>",
- *      "remoteHubUrl": "wss://team-host/ws", "rebound": true,
+ *      "hubAuthToken": "<token-signing key>", "rebound": true,
  *      "defaultPresenceName": "Ana Lopez",
  *      "servedWorkspaces": {"<uuid>": {"remoteHubUrl": "wss://team-host/ws"}}}
  *
- * ub open supplies its loopback hubUrl, upstream remoteHubUrl and rebound flag;
- * rebound means the startup binding changed and the serving process needs a
- * restart. servedWorkspaces uses bare UUIDs and carries no key: its pages ask
- * ub open for room tokens with their session (collab/local-session.ts).
- * A null upstream means local-only; the top-level fields describe startup.
+ * ub open supplies its loopback hubUrl, servedWorkspaces and the rebound flag;
+ * rebound means the startup binding (the first workspace) changed and the
+ * serving process needs a restart. servedWorkspaces uses bare UUIDs and carries
+ * no key: its pages ask ub open for room tokens with their session
+ * (collab/local-session.ts). A null upstream means local-only. Other keys,
+ * such as ub open's top-level remoteHubUrl, are ignored.
  * Unbound serving supplies no workspace or key. Only ub open supplies the
  * default presence name, from git user.name or the OS username; other routes
  * retain random tab names.
@@ -49,7 +49,7 @@ const FALLBACK_HUB_URL = "ws://localhost:1234";
 export const HUB_CONFIG_PATH = "/uberblick-config.json";
 
 /** Which of the three sources supplied a value actually in use. */
-export type ConfigSource = "document" | "define" | "fallback";
+type ConfigSource = "document" | "define" | "fallback";
 
 export interface ClientConfig {
   /** Optional ub open default; other serving routes leave names random. */
@@ -67,9 +67,7 @@ export interface ClientConfig {
   workspacesSource: "document" | "define";
   /** Document-only loopback development signing secret; empty exposes tokenMissing. */
   hubAuthToken: string;
-  /** Same-document workspace/upstream pair; never attribute a fallback workspace to ub open. */
-  localServing: LocalServing | null;
-  /** Exact local-serving admission map; absent for legacy/dev documents. */
+  /** Exact local-serving admission map; only ub open sends one. */
   servedWorkspaces?: Readonly<Record<string, ServedWorkspace>>;
 }
 
@@ -152,7 +150,6 @@ const BUILT_IN: ClientConfig = {
   workspacesSource: "define",
   // Signing keys come only from the runtime document.
   hubAuthToken: "",
-  localServing: null,
 };
 
 /** Refuse malformed/non-ws endpoints and credential-bearing URLs before dialing or logging. */
@@ -224,12 +221,11 @@ interface DocumentConfig {
   workspaces: { list: string[]; dropped: number } | { rejected: string };
   /** Empty when the document named no usable token-signing key. */
   hubAuthToken: string;
-  localServing: LocalServing | { rejected: string } | null;
   servedWorkspaces?: Readonly<Record<string, ServedWorkspace>>;
   servedWorkspacesRejected?: string;
 }
 
-/** Invalid local maps deny admission rather than falling back to the legacy key. */
+/** Drop unusable entries rather than admit them another way; even an empty map marks a ub open page, so no key applies. */
 function usableServedWorkspaces(
   value: unknown,
   workspaces: DocumentConfig["workspaces"],
@@ -302,21 +298,15 @@ function readDocument(
   // with quotes or backslashes. Attacker-controlled documents are outside it.
   // Match a key's unescaped opening quote and colon, never opaque string values.
   const document = parsed as Record<string, unknown>;
-  // Nested workspace upstreams are expected occurrences, not duplicate keys.
-  const nestedUpstreams = document.servedWorkspaces !== null && typeof document.servedWorkspaces === "object"
-    ? Object.values(document.servedWorkspaces).filter((entry) => entry !== null && typeof entry === "object" && Object.hasOwn(entry, "remoteHubUrl")).length
-    : 0;
   const twice = [
     "hubUrl",
     "workspaces",
     "hubAuthToken",
-    "remoteHubUrl",
     "rebound",
     "servedWorkspaces",
     "defaultPresenceName",
   ].find(
-    (key) => (body.match(new RegExp(`(^|[^\\\\])"${key}"\\s*:`, "g")) ?? []).length >
-      (key === "remoteHubUrl" ? nestedUpstreams + (Object.hasOwn(document, key) ? 1 : 0) : 1),
+    (key) => (body.match(new RegExp(`(^|[^\\\\])"${key}"\\s*:`, "g")) ?? []).length > 1,
   );
   if (twice !== undefined) {
     return { rejected: `it names ${twice} more than once` };
@@ -324,13 +314,6 @@ function readDocument(
   const url = document.hubUrl;
   const secret = document.hubAuthToken;
   const workspaces = usableWorkspaces(document.workspaces);
-  const remote = document.remoteHubUrl;
-  const remoteHubUrl =
-    remote === undefined
-      ? null
-      : typeof remote === "string" && remote !== ""
-        ? usableEndpoint(remote, "remoteHubUrl")
-        : { rejected: "remoteHubUrl is not a non-empty string" };
   const served = Object.hasOwn(document, "servedWorkspaces")
     ? usableServedWorkspaces(document.servedWorkspaces, workspaces, document.rebound === true)
     : null;
@@ -344,20 +327,12 @@ function readDocument(
     workspaces,
     // Refuse non-string keys without coercion or diagnostics; expose tokenMissing only.
     hubAuthToken: typeof secret === "string" ? secret.trim() : "",
-    localServing:
-      remoteHubUrl === null || "rejected" in remoteHubUrl
-        ? remoteHubUrl
-        : {
-            remoteHubUrl: remoteHubUrl.url,
-            workspace: "rejected" in workspaces ? null : (workspaces.list[0] ?? null),
-            rebound: document.rebound === true,
-          },
     ...(served === null ? {} : { servedWorkspaces: served.map, servedWorkspacesRejected: served.rejected }),
   };
 }
 
 /** Room acquisition waits on this read; bound hangs in both headers and body. */
-export const HUB_CONFIG_TIMEOUT_MS = 3_000;
+const HUB_CONFIG_TIMEOUT_MS = 3_000;
 
 /**
  * Always settle: document, then defines, then in-code fallback. Release bundles
@@ -403,9 +378,6 @@ export async function readClientConfig(
       `${dropped} of its workspaces ${dropped === 1 ? "is not a workspace id" : "are not workspace ids"}`,
     );
   }
-  if (outcome.localServing !== null && "rejected" in outcome.localServing) {
-    notes.push(outcome.localServing.rejected);
-  }
   if (outcome.servedWorkspacesRejected !== undefined) notes.push(outcome.servedWorkspacesRejected);
 
   const endpoint = "rejected" in outcome.hubUrl
@@ -422,10 +394,6 @@ export async function readClientConfig(
     hubAuthToken: isLoopbackEndpoint(endpoint.hubUrl)
       ? outcome.hubAuthToken
       : "",
-    localServing:
-      outcome.localServing === null || "rejected" in outcome.localServing
-        ? null
-        : outcome.localServing,
     ...(outcome.servedWorkspaces === undefined ? {} : {
       servedWorkspaces: isLoopbackEndpoint(endpoint.hubUrl) ? outcome.servedWorkspaces : {},
     }),
@@ -518,7 +486,7 @@ export function hubEndpoint(): HubEndpoint {
 /** The `ub open` startup binding this page was served with, when there is one. */
 export function localServing(workspace?: string): LocalServing | null {
   const config = settled();
-  if (config.servedWorkspaces === undefined) return config.localServing;
+  if (config.servedWorkspaces === undefined) return null;
   const selected = workspace ?? config.workspaces[0];
   if (selected === undefined) return null;
   try {
@@ -544,9 +512,9 @@ export function browserSignInRequired(): boolean {
   const config = settled();
   // A released Docker proxy can be published on host loopback while its hub
   // still requires a device login. Unlike development or ub open, its public
-  // runtime document supplies no signing key or local-serving diagnostic.
+  // runtime document supplies no signing key or served-workspace map.
   return config.hubUrl !== "" && (
     !isLoopbackEndpoint(config.hubUrl) ||
-    (RUNTIME_CONFIG_ONLY && config.hubAuthToken === "" && config.localServing === null && config.servedWorkspaces === undefined)
+    (RUNTIME_CONFIG_ONLY && config.hubAuthToken === "" && config.servedWorkspaces === undefined)
   );
 }

@@ -62,6 +62,10 @@ const INJECTED = __HUB_URL__;
 const FIRST = "uberblick-6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const SECOND = "b2d9e4c7-5a13-4f80-8e6b-71c0a9d35f2e";
 
+/** How ub open names FIRST in its served-workspace map: by bare UUID. */
+const FIRST_UUID = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
+const FIRST_SERVED = { [FIRST_UUID]: { remoteHubUrl: "wss://remote.example/ws", name: null } };
+
 /** A secret arriving on a *second* read, after the first document missed. */
 const LATE_SECRET = "late-arriving-signing-secret";
 
@@ -352,8 +356,7 @@ describe("the local-serving diagnostic", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     for (const document of [
       { hubUrl: "ws://localhost:1234", workspaces: [FIRST] },
-      { hubUrl: "ws://127.0.0.1:4321", workspaces: [FIRST], remoteHubUrl: "wss://remote.example/ws" },
-      { hubUrl: "ws://127.0.0.1:4321", workspaces: [], remoteHubUrl: "wss://remote.example/ws" },
+      { hubUrl: "ws://127.0.0.1:4321", workspaces: [FIRST], servedWorkspaces: FIRST_SERVED },
     ]) {
       // Each case represents a new page, with its own resolved configuration.
       vi.resetModules();
@@ -365,34 +368,30 @@ describe("the local-serving diagnostic", () => {
   });
 
   it("keeps the frozen workspace/upstream pair and accepts only a literal rebound", async () => {
-    const servingDocument = (rebound: unknown, remote = true): string =>
+    const servingDocument = (rebound: unknown): string =>
       JSON.stringify({
         hubUrl: "ws://127.0.0.1:4321",
         workspaces: [FIRST],
-        ...(remote ? { remoteHubUrl: "wss://remote.example/ws" } : {}),
+        servedWorkspaces: FIRST_SERVED,
         ...(rebound === undefined ? {} : { rebound }),
       });
 
     const rebound = await readClientConfig(
       serving({ body: servingDocument(true) }).fetch,
     );
-    expect(rebound.localServing).toEqual({
+    expect(rebound.servedWorkspaces?.[FIRST_UUID]).toEqual({
       workspace: FIRST,
       remoteHubUrl: "wss://remote.example/ws",
       rebound: true,
+      name: null,
     });
 
     for (const value of [undefined, false, "true", 1]) {
       const config = await readClientConfig(
         serving({ body: servingDocument(value) }).fetch,
       );
-      expect(config.localServing?.rebound, String(value)).toBe(false);
+      expect(config.servedWorkspaces?.[FIRST_UUID]?.rebound, String(value)).toBe(false);
     }
-
-    const direct = await readClientConfig(
-      serving({ body: servingDocument(true, false) }).fetch,
-    );
-    expect(direct.localServing).toBeNull();
   });
 });
 

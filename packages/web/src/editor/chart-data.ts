@@ -24,9 +24,9 @@ export interface ChartConfig {
   layout?: "overlay" | "panels";
   missing: "gap" | "connect";
 }
-export interface ChartPoint { x: number; y: number | null; id: string }
+interface ChartPoint { x: number; y: number | null; id: string }
 export interface ChartSeries { field: string; label: string; unit?: string; type: "line" | "bar"; points: ChartPoint[] }
-export interface ChartDiagnostics {
+interface ChartDiagnostics {
   invalidSchema: number;
   missingX: number;
   invalidX: number;
@@ -48,14 +48,14 @@ export interface ChartReady {
   diagnostics: ChartDiagnostics;
   notice?: string;
 }
-export interface ChartProblem {
+interface ChartProblem {
   status: "invalid-configuration" | "collection-absent" | "collection-unusable" | "mapping-incompatible" | "no-records";
   message: string;
   diagnostics?: ChartDiagnostics;
   notPlotted?: number;
   notice?: string;
 }
-export type ChartProjection = ChartReady | ChartProblem;
+type ChartProjection = ChartReady | ChartProblem;
 
 export function parseChartConfig(source: string):
   { ok: true; config: ChartConfig } | { ok: false; message: string } {
@@ -134,7 +134,7 @@ export function chartDate(value: unknown): number | null {
   return result;
 }
 
-export function projectChart(config: ChartConfig, data: DocData | null): ChartProjection {
+function projectChart(config: ChartConfig, data: DocData | null): ChartProjection {
   const binding = bindCollection(data, config.collection, "Chart");
   if (binding.status !== "ready") return binding;
   const { collection, schema } = binding;

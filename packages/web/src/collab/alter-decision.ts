@@ -47,7 +47,7 @@ export function createDecisionDraft(source: Y.Doc): Y.Doc {
   return draft;
 }
 
-export interface AlterDecisionInput {
+interface AlterDecisionInput {
   source: RoomConnection;
   directory: RoomConnection;
   draft: Y.Doc;
