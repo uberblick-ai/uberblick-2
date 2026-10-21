@@ -61,7 +61,7 @@ function formatDetail(detail: unknown): string {
  * Use console.error so Vitest attributes stderr to its test and hides passing
  * tests' logs; raw stderr writes bypass that attribution.
  */
-export function logAt(level: LogLevel, message: string, detail?: unknown): void {
+function logAt(level: LogLevel, message: string, detail?: unknown): void {
   if (disabledLogging.getStore()) return;
   const head = `${new Date().toISOString()} ${level.toUpperCase()} uberblick/mcp-server ${message}`;
   const line = detail === undefined ? head : `${head} ${formatDetail(detail)}`;

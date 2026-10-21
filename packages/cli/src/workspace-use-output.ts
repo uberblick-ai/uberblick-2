@@ -1,7 +1,8 @@
 import { defaultWorkspaceDatabasePath, readWorkspaceName } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
-import type { ProjectBinding } from "./project-binding.js";
-import { readWorkspaceHub } from "./workspace-registry.js";
+import type { ProjectBinding } from "@uberblick/mcp-server/project-binding";
+import type { Origin } from "@uberblick/mcp-server/project-config";
+import { readWorkspaceHub } from "@uberblick/mcp-server/workspace-registry";
 import { shellArgument } from "./io.js";
 
 export function displayWorkspaceHub(hub: string | null): string {
@@ -17,6 +18,14 @@ export function workspaceLabel(binding: ProjectBinding, databasePath = defaultWo
   const hub = displayWorkspaceHub(binding.hubUrl);
   return name === null ? `${binding.workspaceId} (${hub})` : `${name} (${binding.workspaceId}, ${hub})`;
 }
+
+/** How a binding origin reads in `ub workspace` output. */
+export const ORIGIN_LABELS: Record<Origin, string> = {
+  environment: "environment",
+  "user config": "user config",
+  "project config": "project config",
+  default: "built-in default",
+};
 
 export function useField(label: string, value: string): string {
   return `${label.padEnd(11)}${value}\n`;

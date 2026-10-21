@@ -16,6 +16,13 @@ export const SYNC_PROTOCOL_VERSION = 6;
 /** Terminal, room-local refusal; the client must discard its copy and stop publishing. */
 export const DOC_DELETED_REASON = "uberblick:doc-deleted";
 
+/** Room-local `ub open` store refusals: busy is retryable, refused stops the room. */
+export const STORE_BUSY_REASON = "uberblick:store-busy";
+export const STORE_REFUSED_REASON = "uberblick:store-refused";
+
+/** The settings room has a new generation; the client replaces its copy. */
+export const SETTINGS_RESET_REASON = "uberblick:settings-reset";
+
 /** Match only our bounded sentinel, never arbitrary server-chosen text. */
 export function isDocDeletedReason(reason: string): boolean {
   return reason === DOC_DELETED_REASON;

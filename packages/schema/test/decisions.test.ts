@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
-  InvalidSupersedesReferenceError,
   DIRECTORY_ARCHIVED_RECORDS_KEY,
   addComment,
   appendBlock,
@@ -37,7 +36,8 @@ import {
   tombstoneDecisionRecord,
   upsertDirectoryEntry,
 } from "../src/index.js";
-import type { DirectoryUpsert } from "../src/index.js";
+import type { DirectoryUpsert } from "../src/directory.js";
+import { InvalidSupersedesReferenceError } from "../src/errors.js";
 import { syncDocs } from "./helpers.js";
 
 const PAGE = "11111111-1111-4111-8111-111111111111";

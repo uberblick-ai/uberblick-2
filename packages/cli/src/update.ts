@@ -4,8 +4,10 @@ import { dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findCheckoutRoot } from "./checkout.js";
 import { takeHelp } from "./help.js";
-import { isInstallPayload } from "./installation.js";
+import { isInstallPayload } from "./version.js";
 import type { Io } from "./io.js";
+import { errorMessage } from "./strings.js";
+import { useField } from "./workspace-use-output.js";
 
 const FORMULA = "uberblick-ai/tap/uberblick";
 
@@ -55,10 +57,6 @@ function named(command: string, args: readonly string[]): string {
   return `\`${[command, ...args].join(" ")}\``;
 }
 
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 export function processHost(): UpdateHost {
   return {
     cliDir: dirname(fileURLToPath(import.meta.url)),
@@ -68,7 +66,7 @@ export function processHost(): UpdateHost {
       return {
         status: result.error === undefined ? result.status : null,
         stdout: result.stdout ?? "",
-        stderr: result.error === undefined ? (result.stderr ?? "") : message(result.error),
+        stderr: result.error === undefined ? (result.stderr ?? "") : errorMessage(result.error),
       };
     },
     run(command, args, cwd) {
@@ -89,7 +87,7 @@ export function processHost(): UpdateHost {
           done(result);
         };
 
-        child.on("error", (error) => finish(`${label} could not be run (${message(error)})`));
+        child.on("error", (error) => finish(`${label} could not be run (${errorMessage(error)})`));
         child.on("close", (status, signal) =>
           finish(
             status === 0
@@ -205,8 +203,8 @@ async function updateHomebrew(io: Io, host: UpdateHost, prefix: string): Promise
   const after = homebrewVersion(io, host);
   if (after === null) return 1;
   const result = before === after
-    ? `${"current".padEnd(11)}${after}, nothing to update\n`
-    : `${"updated".padEnd(11)}${before} → ${after}\nrestart ub open and running agents to use it\n`;
-  io.out(`${"copy".padEnd(11)}Homebrew (${prefix})\n${result}`);
+    ? useField("current", `${after}, nothing to update`)
+    : `${useField("updated", `${before} → ${after}`)}restart ub open and running agents to use it\n`;
+  io.out(useField("copy", `Homebrew (${prefix})`) + result);
   return 0;
 }

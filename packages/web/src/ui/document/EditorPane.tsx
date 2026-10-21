@@ -37,6 +37,7 @@ import { statusReading } from "../status/status-reading.js";
 import { documentSyncFacts } from "../status/sync-facts.js";
 import { bindSyncAttributes } from "../status/sync-state.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
+import { isPlainClick } from "../route.js";
 import { BlockMenu } from "../editor-controls/BlockMenu.js";
 import { CodeLanguageControl } from "../editor-controls/CodeLanguageControl.js";
 import { CardButtonControls } from "../editor-controls/CardButtonControls.js";
@@ -64,6 +65,14 @@ import type { SelectThread, ThreadView } from "../comments/threads.js";
 /** Read the document itself, including before its React subscription answers. */
 function isDecision(connection: RoomConnection): boolean {
   return getMeta(connection.ydoc).kind === "decision";
+}
+
+/**
+ * Read live room state, never a render snapshot: the room can become a
+ * decision or lose writability before React renders the change.
+ */
+function canWriteContent(connection: RoomConnection, contentReadOnly: boolean): boolean {
+  return !contentReadOnly && !isDecision(connection) && connection.status.writable;
 }
 
 /**
@@ -174,7 +183,7 @@ function TldrCallout({
   const write = (next: string | null): void => {
     // `readOnly` describes the committed render; the live connection and the
     // tombstone guard the write itself, as the title field does below.
-    if (archived || getMeta(connection.ydoc).kind === "decision" || !connection.status.writable) return;
+    if (!canWriteContent(connection, archived)) return;
     setTldr(connection.ydoc, next);
     onEditingChange(false);
   };
@@ -282,7 +291,7 @@ function TldrCallout({
                 className="block w-full border-0 p-0 bg-transparent text-left [font:inherit] [color:inherit] cursor-text"
                 aria-label="Edit TL;DR"
                 onClick={() => {
-                  if (archived || getMeta(connection.ydoc).kind === "decision" || !connection.status.writable) return;
+                  if (!canWriteContent(connection, archived)) return;
                   onEditingChange(true);
                 }}
               >
@@ -472,7 +481,7 @@ function LinkConflictRepair({
   const { conflicts, refresh } = useLinkConflicts(connection);
   const repair = (conflict: LinkConflict, keep: LinkSurvivor): void => {
     // Guard the write too: the room can become a decision before React observes it.
-    if (contentReadOnly || isDecision(connection) || !connection.status.writable) return;
+    if (!canWriteContent(connection, contentReadOnly)) return;
     repairLinkConflict(conflict, keep);
     // Unconditional: a repair changes the list, and a refusal means live state
     // has already moved on without this render hearing about it yet.
@@ -606,7 +615,7 @@ const BoundEditor = memo(function BoundEditor({
       element,
       fragment: getBlocksFragment(connection.ydoc),
       awareness: connection.provider.awareness,
-      editable: !readContentReadOnly() && !isDecision(connection) && connection.status.writable,
+      editable: canWriteContent(connection, readContentReadOnly()),
       canWrite: () => connection.status.writable,
       canNormalize: () => connection.status.writable && connection.status.synced,
       onUnbind: () => {
@@ -636,13 +645,7 @@ const BoundEditor = memo(function BoundEditor({
         // A modifier or a middle button is the browser's business — the anchor
         // carries a real address, so cmd-click still opens a tab. Everything
         // else navigates in-app, which is what keeps Back working.
-        const modified =
-          event.button !== 0 ||
-          event.metaKey ||
-          event.ctrlKey ||
-          event.shiftKey ||
-          event.altKey;
-        if (!modified && docLinks !== null) {
+        if (isPlainClick(event) && docLinks !== null) {
           event.preventDefault();
           docLinks.open(docId);
         }
@@ -737,13 +740,13 @@ const BoundEditor = memo(function BoundEditor({
         {editor !== null && (
           <CardButtonControls
             editor={editor}
-            canWrite={() => !contentReadOnly && !isDecision(connection) && connection.status.writable}
+            canWrite={() => canWriteContent(connection, contentReadOnly)}
           />
         )}
         {editor !== null && !contentReadOnly && writable && (
           <CodeLanguageControl
             editor={editor}
-            canWrite={() => !contentReadOnly && !isDecision(connection) && connection.status.writable}
+            canWrite={() => canWriteContent(connection, contentReadOnly)}
           />
         )}
         {/* Decision content offers no editing controls, but discussion stays
@@ -970,12 +973,12 @@ export function EditorPane({
           onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
           hasTldr={meta?.tldr != null}
           onEditTldr={() => {
-            if (contentReadOnly || isDecision(connection) || !connection.status.writable) return;
+            if (!canWriteContent(connection, contentReadOnly)) return;
             if (getMeta(connection.ydoc).tldrOptOut === true) setTldrOptOut(connection.ydoc, false);
             setTldrEditorRoom(connection.room);
           }}
           onRemoveTldr={() => {
-            if (contentReadOnly || isDecision(connection) || !connection.status.writable) return;
+            if (!canWriteContent(connection, contentReadOnly)) return;
             setTldrOptOut(connection.ydoc, true);
             setTldrEditorRoom(null);
           }}
@@ -986,7 +989,7 @@ export function EditorPane({
           // Guard the live write too: a document may become a decision before
           // this readOnly render updates.
           onChange={(value) => {
-            if (contentReadOnly || isDecision(connection) || !connection.status.writable) return;
+            if (!canWriteContent(connection, contentReadOnly)) return;
             setTitle(connection.ydoc, value);
           }}
         />}

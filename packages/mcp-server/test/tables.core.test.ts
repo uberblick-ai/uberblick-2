@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { COMMENT_MARK, appendBlock, createAnnotation, deleteAnnotation, decisionApprovalFingerprint, editBlock, findBlockElement, getBlocksFragment, getBlocksWithInline, getMetaMap, initDoc, parseGfmTable, parseTableCell, roomForDoc, setKind, setStatus, tableCellText, tableCellTexts, tableRows, writeGfmTable } from "@uberblick/schema";
+import { COMMENT_MARK, appendBlock, createAnnotation, decisionApprovalFingerprint, editBlock, findBlockElement, getBlocksFragment, getBlocksWithInline, getMetaMap, initDoc, parseGfmTable, parseTableCell, roomForDoc, setKind, setStatus, tableCellText, tableCellTexts, tableRows, writeGfmTable } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import type { TableMapping } from "@uberblick/schema";
@@ -95,11 +95,6 @@ describe("structured tables through MCP", () => {
     expect(getMetaMap(doc).get("approvalFingerprint")).toBe(approved);
     const exported = await rig.ok("export_markdown", { uuid: created.uuid, annotations: "html-comments", frontmatter: false });
     expect(exported.markdown).toContain("row=1 column=0 range=2-7");
-    deleteAnnotation(doc, threadId);
-    const deleted = await rig.ok("get_doc", { uuid: created.uuid });
-    expect(deleted.blocks[0]).toEqual(before);
-    expect(deleted.approvalChanged).toBe(false);
-    expect(alpha.toDelta().every((op: { attributes?: Record<string, unknown> }) => op.attributes?.comment === undefined)).toBe(true);
   });
 
   it("recomputes cell coordinates after structural edits and returns null after deletion", async () => {

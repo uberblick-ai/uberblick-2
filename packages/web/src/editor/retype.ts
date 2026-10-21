@@ -2,7 +2,7 @@
  * Retype with setNodeMarkup, preserving the block id and marked text rather
  * than deleting/reinserting its logical identity. y-prosemirror still replaces
  * the underlying element/text because node names differ: concurrent edits to
- * the replaced text can be lost, as with schema setBlockType.
+ * the replaced text can be lost.
  */
 
 import type { Transaction } from "@tiptap/pm/state";

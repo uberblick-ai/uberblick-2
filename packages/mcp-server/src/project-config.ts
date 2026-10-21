@@ -138,8 +138,6 @@ export interface UserConfig {
   // Explicit undefined permits parsed missing fields under exactOptionalPropertyTypes.
   workspace?: string | undefined;
   hubUrl?: string | undefined;
-  /** Legacy admission marker, valid only for its associated hubUrl. */
-  hubAdmission?: string | undefined;
   /** Awareness display name. */
   displayName?: string | undefined;
   /** Awareness colour, 6-digit hex — the only form y-prosemirror accepts. */
@@ -168,34 +166,15 @@ function hubAdmissions(
     if (admission !== "device") warnings.push(`unsupported hub admission in ${path}; using device credentials`);
     result[normalized] = "device";
   }
-  // The legacy mode belongs only to its validated endpoint, never to the current selection.
-  if (source?.hubAdmission !== undefined && typeof source.hubUrl === "string") {
-    try {
-      const normalized = hubIdentity(source.hubUrl);
-      if (source.hubAdmission !== "device") warnings.push(`unsupported hubAdmission in ${path}; using device credentials`);
-      result[normalized] = "device";
-    } catch {
-      warnings.push(`ignoring legacy admission for an invalid hub URL in ${path}`);
-    }
-  }
   return result;
 }
 
-/** Preserve the old endpoint's mode before its obsolete selector keys are removed. */
-export function migrateHubAdmissions(
-  env: NodeJS.ProcessEnv = process.env,
-): { written: string[]; warnings: string[] } {
+/** The machine settings' problems, read without writing. */
+export function userConfigWarnings(env: NodeJS.ProcessEnv = process.env): string[] {
   const current = readUserConfig(env);
-  const path = userConfigPath(env);
   const warnings = [...current.warnings];
-  const admissions = hubAdmissions(current.raw, path, warnings);
-  if (current.raw?.hubAdmission === undefined || current.config.hubUrl === undefined) return { written: [], warnings };
-  try { hubIdentity(current.config.hubUrl); }
-  catch { return { written: [], warnings }; }
-  const updated: Record<string, unknown> = { ...current.raw, hubAdmissions: admissions };
-  delete updated.hubAdmission;
-  writeUserConfig(updated, env);
-  return { written: [path], warnings };
+  hubAdmissions(current.raw, userConfigPath(env), warnings);
+  return warnings;
 }
 
 /** Save the verified endpoint's mode before publishing its project binding. */
@@ -209,15 +188,10 @@ export function writeHubAdmission(
   const path = userConfigPath(env);
   const warnings = [...current.warnings];
   const admissions = hubAdmissions(current.raw, path, warnings);
-  if ((admissions[normalized] === "device") === device) {
-    // Materialize legacy admission in the map before removing its selector keys.
-    return migrateHubAdmissions(env);
-  }
+  if ((admissions[normalized] === "device") === device) return { written: [], warnings };
   if (device) admissions[normalized] = "device";
   else delete admissions[normalized];
   const updated: Record<string, unknown> = { ...current.raw, hubAdmissions: admissions };
-  // A retained legacy field would resurrect the mode explicitly cleared above.
-  delete updated.hubAdmission;
   writeUserConfig(updated, env);
   return { written: [path], warnings };
 }
@@ -240,7 +214,6 @@ export function readUserConfig(env: NodeJS.ProcessEnv = process.env): {
     config: {
       workspace: stringField(raw, "workspace", path, warnings) ?? undefined,
       hubUrl: stringField(raw, "hubUrl", path, warnings) ?? undefined,
-      hubAdmission: stringField(raw, "hubAdmission", path, warnings) ?? undefined,
       displayName: stringField(raw, "displayName", path, warnings) ?? undefined,
       color: stringField(raw, "color", path, warnings) ?? undefined,
     },
@@ -270,15 +243,6 @@ function warnAboutMisplacedSecret(
       `ignoring "${SIGNING_SECRET_KEY}" in ${path}: the hub signing secret ` +
         `belongs in ${CREDENTIALS_FILE} (mode 0600), never here`,
     );
-  }
-}
-
-/** True when the file exists and no other user can read it. */
-export function isOwnerOnly(path: string): boolean {
-  try {
-    return (statSync(path).mode & 0o077) === 0;
-  } catch {
-    return false;
   }
 }
 

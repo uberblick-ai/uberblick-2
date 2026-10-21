@@ -393,5 +393,3 @@ export const outputSchemas = {
   unpin_doc: z.object({ uuid, unpinned: z.boolean(), ...sidebar, ...durability }).strict(),
   sidebar_group: z.object({ action: z.enum(["rename", "delete", "move"]), group: groupIdentity, ...sidebar, ...durability }).strict(),
 } satisfies Record<string, z.ZodObject>;
-
-export type OutputToolName = keyof typeof outputSchemas;

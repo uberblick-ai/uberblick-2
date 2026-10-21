@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --froze
 COPY packages packages
 COPY scripts/build-hub-release-payload.mjs scripts/build-hub-release-payload.mjs
 COPY compose.release.yml remote.https.yml remote.tailscale.yml remote.env.example remote-settings.sh REMOTE.md RELEASING.md ./
-COPY bin/remote-compose.sh bin/hub-backup.sh bin/hub-restore.sh bin/
+COPY bin/remote-compose.sh bin/
 ARG HUB_RELEASE_VERSION
 ARG HUB_RELEASE_COMMIT
 ARG HUB_SYNC_PROTOCOL_VERSION

@@ -2,10 +2,9 @@
  * Three properties of the store that are about the SQLite binding rather than
  * the data model, and that nothing else in the suite would notice losing.
  *
- * 1. **The file format is the format.** The better-sqlite3 fixture (see
- *    `fixtures/make-legacy.ts`) must stay independently generated; `node:sqlite`
- *    opens it and finds the same log, the same snapshot and the same FTS index.
- *    Compatibility migrations leave the authoritative log intact.
+ * 1. **Released files open in place.** A database written by v0.1.0, the
+ *    oldest release, opens with its log, snapshot, pending watermark and index
+ *    readable. Migrations leave the authoritative log intact.
  * 2. **BLOBs are the bytes handed in**, including when those bytes are a view
  *    into a longer buffer.
  * 3. **All-or-nothing writes.** `node:sqlite` has no `.transaction()` wrapper,
@@ -24,17 +23,26 @@ import * as Y from "yjs";
 import { MirrorStore } from "../src/store.js";
 import { WORKSPACE, removeTempDirs, tempDatabasePath } from "./helpers.js";
 
-/** Expected content of the independently generated better-sqlite3 fixture. */
+/**
+ * Content of fixtures/v0.1.0.sqlite, written by v0.1.0's own MirrorStore so
+ * opening it runs every released migration. To rebuild: `git archive v0.1.0`
+ * into an empty directory outside the repository, `mise trust && mise run
+ * install` there, then run a tsx script in its packages/mcp-server that opens
+ * `new MirrorStore(path, WORKSPACE)` and writes this document with v0.1.0's
+ * schema helpers: a remote snapshot compacted through seq 1, a local tail at
+ * seq 2, and `indexDoc` at cuts (2, 7) with tag `legacy` and a link to `linked`.
+ */
 const LEGACY = {
   uuid: "3f2b0a6c-8b1e-4a55-9c47-0d5d1e6b7a90",
   linked: "9a1c7d2e-4f60-4b18-8f3a-2c5e9b0d6c11",
-  title: "Written by better-sqlite3",
-  blocks: ["seeded by the old binding", "appended after the snapshot"],
+  title: "Written by v0.1.0",
+  description: "Seeded through the first release's store",
+  blocks: ["seeded by the first release", "appended after the snapshot"],
 } as const;
 
 const FIXTURE = join(
   fileURLToPath(new URL("./fixtures/", import.meta.url)),
-  "better-sqlite3.sqlite",
+  "v0.1.0.sqlite",
 );
 
 const GITHUB_ITEM = "uberblick-ai/uberblick-2#1125";
@@ -53,6 +61,17 @@ function legacyDatabase(): string {
   const path = tempDatabasePath();
   copyFileSync(FIXTURE, path);
   return path;
+}
+
+/** The authoritative rows, which no migration may rewrite. */
+function logRows(databasePath: string): unknown[] {
+  const db = new DatabaseSync(databasePath);
+  try {
+    return ["updates", "snapshots", "pending_rooms"].map((table) =>
+      db.prepare(`SELECT * FROM ${table} ORDER BY 1`).all());
+  } finally {
+    db.close();
+  }
 }
 
 afterEach(() => {
@@ -152,11 +171,13 @@ it("removes fragment text left by an older peer's purge without repeatedly scann
   }
 });
 
-describe("a database written by the better-sqlite3 build", () => {
-  it("opens under node:sqlite with its log, snapshot and index intact", () => {
-    const opened = store(legacyDatabase());
-    // Preserve the fixture's opaque room key; re-keying would invalidate compatibility.
-    const room = `main/${LEGACY.uuid}`;
+describe("a database written by v0.1.0", () => {
+  it("opens with its log, snapshot, pending watermark and index intact", () => {
+    const databasePath = legacyDatabase();
+    const before = logRows(databasePath);
+    const opened = store(databasePath);
+    expect(logRows(databasePath)).toEqual(before);
+    const room = `${WORKSPACE}/${LEGACY.uuid}`;
 
     // Replay both fixture BLOB columns as Yjs v1: snapshot, then live tail.
     const slice = opened.readSince(room, 0);
@@ -171,21 +192,21 @@ describe("a database written by the better-sqlite3 build", () => {
     expect(getBlocks(doc).map((block) => block.text)).toEqual(LEGACY.blocks);
     expect(getMeta(doc).title).toBe(LEGACY.title);
 
-    // Pending watermarks and FTS5 rows written by better-sqlite3 remain readable.
+    // Rows written before the search and fragment index migrations stay searchable.
     expect(opened.pendingRooms()).toEqual([{ room, seq: 2 }]);
-    expect(opened.search("binding", 10)).toEqual([
+    expect(opened.search("release", 10)).toEqual([
       {
         uuid: LEGACY.uuid,
         title: LEGACY.title,
         kind: "regular",
         tags: ["legacy"],
-        // Migrating a fixture without the description column leaves its rows empty.
-        description: null,
-        snippet: expect.stringContaining("old binding"),
+        description: LEGACY.description,
+        snippet: expect.stringContaining("first release"),
       },
     ]);
+    expect(opened.searchUuids("snapsho")).toEqual([LEGACY.uuid]);
     expect(opened.backlinks(LEGACY.linked)).toEqual([
-      { uuid: LEGACY.uuid, title: LEGACY.title, description: null },
+      { uuid: LEGACY.uuid, title: LEGACY.title, description: LEGACY.description },
     ]);
   });
 });
@@ -368,22 +389,12 @@ describe("derived GitHub references", () => {
 
   it("re-derives pre-change rows once at their existing cuts without admitting older cuts", () => {
     const databasePath = legacyDatabase();
-    const legacy = new DatabaseSync(databasePath);
-    // Add sequence metadata to the unsequenced fixture so migration exercises
-    // already-indexed rows with unchanged log cuts.
-    legacy.exec(
-      "CREATE TABLE doc_index_seq (uuid TEXT PRIMARY KEY, " +
-        "indexed_through_seq INTEGER NOT NULL, catalog_through_seq INTEGER NOT NULL DEFAULT 0)",
-    );
-    legacy.prepare("INSERT INTO doc_index_seq VALUES (?, 2, 7)").run(LEGACY.uuid);
-    legacy.close();
-
     const opened = store(databasePath);
     const record = {
       uuid: LEGACY.uuid,
       title: LEGACY.title,
       tags: ["legacy"],
-      description: "",
+      description: LEGACY.description,
       links: [LEGACY.linked],
       githubRefs: [GITHUB_ITEM],
       body: LEGACY.blocks.join("\n"),
@@ -392,7 +403,7 @@ describe("derived GitHub references", () => {
     opened.indexDoc({ ...record, title: "Older document" }, 1, 7);
     opened.indexDoc({ ...record, title: "Older catalog" }, 2, 6);
     expect(opened.decisionsForGithub(GITHUB_ITEM)).toEqual([]);
-    expect(opened.search("binding", 10)[0]?.title).toBe(LEGACY.title);
+    expect(opened.search("release", 10)[0]?.title).toBe(LEGACY.title);
 
     // No document or catalog edit is needed: the migration permits one equal
     // cut and marks the derivation complete only with the new rows committed.

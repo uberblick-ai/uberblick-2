@@ -7,14 +7,14 @@ import type {
   connectedPayload,
   onAuthenticatePayload,
 } from "@hocuspocus/server";
-import { parseRoom, settingsRoom } from "@uberblick/schema";
-import { isAdmissibleRoom } from "./admissible-room.js";
+import { settingsRoom } from "@uberblick/schema";
+import { readAdmission, roomWorkspace } from "./admissible-room.js";
 import type { CredentialRecord, CredentialRegistry } from "./credentials.js";
 import type { HubLogger } from "./log.js";
 import type { MembershipRegistry } from "./memberships.js";
 import type { HubAdminRegistry } from "./hub-admins.js";
-import { protocolMismatchReason, readAuthEnvelope } from "@uberblick/schema/protocol";
-import { resolvePeer, TOKEN_QUERY_PARAMS } from "./server.js";
+import { protocolMismatchReason } from "@uberblick/schema/protocol";
+import { resolvePeer } from "./server.js";
 
 export interface CredentialContext {
   credentialId: string;
@@ -76,41 +76,29 @@ export class CredentialAdmission implements Extension<CredentialContext> {
   }
 
   onAuthenticate = async (payload: onAuthenticatePayload<CredentialContext>): Promise<CredentialContext> => {
-    const { documentName, requestHeaders, requestParameters, connectionConfig, instance } = payload;
+    const { documentName, requestHeaders, connectionConfig, instance } = payload;
     const peer = resolvePeer(requestHeaders);
     const refuse = (cause: string, reason?: string): never => {
       // No client claims, token, signature or key material in diagnostic output.
       this.options.log({ event: "hub.auth.rejected", peer: peer.address, cause });
       throw new CredentialRefusal(reason);
     };
-    if (!isAdmissibleRoom(documentName)) {
-      return refuse("room-name-invalid", "room-name-invalid");
+    const admission = readAdmission(payload, this.options.protocolVersion);
+    if ("cause" in admission) {
+      // A token in the URL gets the generic refusal; the others name their cause.
+      return refuse(admission.cause, admission.cause === "room-name-invalid" ? "room-name-invalid"
+        : admission.cause === "protocol-mismatch" ? protocolMismatchReason(this.options.protocolVersion) : undefined);
     }
-    if (TOKEN_QUERY_PARAMS.some((key) => requestParameters.has(key))) {
-      return refuse("token-in-query");
-    }
-    const envelope = readAuthEnvelope(payload.token);
-    if (
-      envelope === null ||
-      envelope.protocolVersion !== this.options.protocolVersion
-    ) {
-      return refuse(
-        "protocol-mismatch",
-        protocolMismatchReason(this.options.protocolVersion),
-      );
-    }
-    const verified = await this.registry.verify(envelope.token);
+    const verified = await this.registry.verify(admission.token);
     if ("failure" in verified) {
       return refuse(verified.failure);
     }
     // verify includes WebCrypto awaits. Revocation can also land between its
     // resolution and this continuation, so admission reads authority again.
-    const record = this.registry.get(verified.record.id);
-    if (record === null || record.revokedAt !== null || record.replacedAt !== null) {
-      return refuse(record !== null && record.replacedAt !== null ? "replaced-credential" : "revoked-credential");
-    }
-    if (this.registry.isExpired(record)) return refuse("expired-credential");
-    const workspace = workspaceOf(documentName);
+    const current = this.registry.usable(this.registry.get(verified.record.id));
+    if ("failure" in current) return refuse(current.failure);
+    const record = current.record;
+    const workspace = roomWorkspace(documentName);
     if (workspace === null || workspace !== verified.claims.workspace) {
       return refuse("workspace-mismatch");
     }
@@ -203,19 +191,19 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     this.track(connection);
     const context = connection.context;
     const record = this.registry.get(context.credentialId);
-    const workspace = workspaceOf(room);
-    const cause = this.credentialFailure(record) ??
-      (record === null || workspace === null ||
-              workspace !== context.workspace ||
-              !record.workspaces.includes(workspace)
-          ? "workspace-mismatch"
-          : this.memberships.roleFor(workspace, record.principalId) === null
-            ? "missing-membership"
-            : this.hubAdmins?.isSuspended(workspace)
-              ? "workspace-suspended"
+    const current = this.registry.usable(record);
+    const workspace = roomWorkspace(room);
+    const cause = "failure" in current
+      ? current.failure
+      : workspace === null || workspace !== context.workspace || !current.record.workspaces.includes(workspace)
+        ? "workspace-mismatch"
+        : this.memberships.roleFor(workspace, current.record.principalId) === null
+          ? "missing-membership"
+          : this.hubAdmins?.isSuspended(workspace)
+            ? "workspace-suspended"
             : !context.authorization.active
               ? "access-ended"
-              : null);
+              : null;
     if (cause !== null) {
       context.authorization.active = false;
       connection.readOnly = true;
@@ -230,13 +218,6 @@ export class CredentialAdmission implements Extension<CredentialContext> {
       connection.readOnly = context.authorization.readOnly ||
         this.memberships.roleFor(context.workspace, context.principalId) !== "admin";
     }
-  }
-
-  private credentialFailure(record: CredentialRecord | null): string | null {
-    if (record === null) return "unknown-credential";
-    if (record.revokedAt !== null) return "revoked-credential";
-    if (record.replacedAt !== null) return "replaced-credential";
-    return this.registry.isExpired(record) ? "expired-credential" : null;
   }
 
   private scheduleExpiry(connection: Connection<CredentialContext>, record: CredentialRecord): void {
@@ -273,13 +254,5 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     } else {
       release();
     }
-  }
-}
-
-function workspaceOf(room: string): string | null {
-  try {
-    return parseRoom(room).workspaceId;
-  } catch {
-    return null;
   }
 }

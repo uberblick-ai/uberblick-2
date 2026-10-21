@@ -15,7 +15,7 @@ import { DatabaseSync } from "node:sqlite";
 import { pipeline } from "node:stream/promises";
 import { adminSocketPath } from "./admin-setup.js";
 import { restoreAccessChanges, writeAccessRecovery } from "./operator-restore-access.js";
-import { checkDatabaseIntegrity, syncDatabaseFile } from "./database-backup.js";
+import { checkDatabaseIntegrity, syncDatabaseFile, tableHasRows } from "./database-backup.js";
 
 export { backupDatabase, checkDatabaseIntegrity } from "./database-backup.js";
 
@@ -33,10 +33,7 @@ function verifyCandidate(path: string): void {
   try {
     checkDatabaseIntegrity(database);
     const hasDocuments = database.prepare("SELECT 1 FROM documents LIMIT 1").get() !== undefined;
-    const hasAccessState = PRIVATE_ACCESS_TABLES.some((table) =>
-      database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== undefined &&
-      database.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get() !== undefined,
-    );
+    const hasAccessState = PRIVATE_ACCESS_TABLES.some((table) => tableHasRows(database, table));
     if (!hasDocuments && !hasAccessState) {
       throw new Error("the hub has no documents or private access state, so this empty backup would restore nothing");
     }

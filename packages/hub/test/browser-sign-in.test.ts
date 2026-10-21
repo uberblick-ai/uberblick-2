@@ -24,7 +24,7 @@ afterEach(async () => {
 
 class GithubFake {
   time = 1000;
-  account = { id: 1234, login: "browser-person" };
+  account: { id: number; login: string; name?: string } = { id: 1234, login: "browser-person" };
   starts = 0;
   pauseIdentity: ((accountId: number) => Promise<void>) | undefined;
   private readonly accounts = new Map<string, { id: number; login: string }>();
@@ -98,6 +98,7 @@ function sessionHeaders(token: string) { return { "X-Uberblick-Session": token }
 describe("browser-only hub identity", () => {
   it("claims on loopback with one bounded session, no device key and no secret disclosure", async () => {
     const r = await rig();
+    r.github.account.name = "Browser Profile Name";
     expect(await post(r.hub, "browser/session")).toEqual({ code: 401, result: { status: "signed-out" } });
     expect(r.github.starts).toBe(0);
     const result = await complete(r);
@@ -105,6 +106,7 @@ describe("browser-only hub identity", () => {
     expect(result.claimedWorkspaceId).toMatch(/^[0-9a-f-]{36}$/);
     expect(Object.keys(result).sort()).toEqual(["claimedWorkspaceId", "session", "status"]);
     const snapshot = rows(r.path);
+    expect(JSON.stringify({ result, snapshot, logs: r.logs })).not.toContain("Browser Profile Name");
     const principal = r.hub.principals!.getByGithubAccountId("1234")!;
     expect(r.hub.principals!.hasSignedIn(principal.id)).toBe(true);
     expect(snapshot.hub_credentials).toEqual([]);

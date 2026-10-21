@@ -12,17 +12,16 @@ import {
   createAnnotation,
   deleteBlock,
   editBlock,
+  findBlockElement,
   getBlock,
   getBlockInline,
   getBlockRev,
-  getBlockText,
   getBlocks,
   getBlocksFragment,
   initDoc,
   insertBlock,
   listAnnotations,
   resolveAnnotationRange,
-  setBlockLevel,
 } from "../src/index.js";
 import { replicaPair, syncDocs } from "./helpers.js";
 
@@ -45,8 +44,8 @@ describe("editBlock: minimal splices", () => {
     editBlock(b, blockId, "abc", "abcd");
     syncDocs(a, b);
 
-    expect(getBlockText(a, blockId)).toBe("abXcd");
-    expect(getBlockText(b, blockId)).toBe("abXcd");
+    expect(getBlock(a, blockId)!.text).toBe("abXcd");
+    expect(getBlock(b, blockId)!.text).toBe("abXcd");
   });
 
   it("does not rewrite untouched characters", () => {
@@ -81,11 +80,11 @@ describe("editBlock: minimal splices", () => {
     editBlock(spliced, blockId, original, changed);
     const spliceUpdate = Y.encodeStateAsUpdate(spliced, beforeSplice);
 
-    expect(getBlockText(spliced, blockId)).toBe(changed);
+    expect(getBlock(spliced, blockId)!.text).toBe(changed);
     const range = resolveAnnotationRange(spliced, thread.id);
     expect(range?.collapsed).toBe(false);
     expect(
-      getBlockText(spliced, blockId).slice(range?.start, range?.end),
+      getBlock(spliced, blockId)!.text.slice(range?.start, range?.end),
     ).toBe("keystrokes");
 
     // …and the update stays far smaller than the delete-all/reinsert an
@@ -102,7 +101,7 @@ describe("editBlock: minimal splices", () => {
     });
     const naiveUpdate = Y.encodeStateAsUpdate(naiveDoc, beforeNaive);
 
-    expect(getBlockText(naiveDoc, naiveId)).toBe(changed);
+    expect(getBlock(naiveDoc, naiveId)!.text).toBe(changed);
     expect(spliceUpdate.byteLength).toBeLessThan(naiveUpdate.byteLength / 3);
   });
 
@@ -113,7 +112,7 @@ describe("editBlock: minimal splices", () => {
     const before = Y.encodeStateVector(doc);
     editBlock(doc, blockId, "steady", "steady");
     expect(Y.encodeStateAsUpdate(doc, before).byteLength).toBeLessThanOrEqual(3);
-    expect(getBlockText(doc, blockId)).toBe("steady");
+    expect(getBlock(doc, blockId)!.text).toBe("steady");
   });
 
   it("handles editing from and to the empty string", () => {
@@ -121,9 +120,9 @@ describe("editBlock: minimal splices", () => {
     initDoc(doc, { uuid: UUID, title: "Splices" });
     const blockId = appendBlock(doc, { type: "paragraph" });
     editBlock(doc, blockId, "", "now with content");
-    expect(getBlockText(doc, blockId)).toBe("now with content");
+    expect(getBlock(doc, blockId)!.text).toBe("now with content");
     editBlock(doc, blockId, "now with content", "");
-    expect(getBlockText(doc, blockId)).toBe("");
+    expect(getBlock(doc, blockId)!.text).toBe("");
   });
 });
 
@@ -178,8 +177,8 @@ describe("two clients, one block", () => {
     editBlock(b, blockId, original, "The quick brown cat jumps");
     syncDocs(a, b);
 
-    expect(getBlockText(a, blockId)).toBe("The slow brown cat jumps");
-    expect(getBlockText(b, blockId)).toBe(getBlockText(a, blockId));
+    expect(getBlock(a, blockId)!.text).toBe("The slow brown cat jumps");
+    expect(getBlock(b, blockId)!.text).toBe(getBlock(a, blockId)!.text);
   });
 
   it("converges when both clients edit the same range (no lost characters, deterministic)", () => {
@@ -197,8 +196,8 @@ describe("two clients, one block", () => {
     // Overlapping edits interleave rather than clobber; the point is that both
     // replicas agree, and that this is exactly the case a caller avoids by
     // passing a fresh oldText (see the stale-oldText test below).
-    const merged = getBlockText(a, blockId);
-    expect(getBlockText(b, blockId)).toBe(merged);
+    const merged = getBlock(a, blockId)!.text;
+    expect(getBlock(b, blockId)!.text).toBe(merged);
     expect(merged.startsWith("one ")).toBe(true);
     expect(merged.endsWith(" three")).toBe(true);
   });
@@ -232,7 +231,7 @@ describe("stale oldText", () => {
     expect(staleError.currentText).toBe("rewritten text");
     expect(staleError.currentRev).toBe(getBlockRev(b, blockId));
     // Nothing was written: the failed edit left the block untouched.
-    expect(getBlockText(b, blockId)).toBe("rewritten text");
+    expect(getBlock(b, blockId)!.text).toBe("rewritten text");
 
     // The documented recovery: re-read, re-diff, retry — and the rev the error
     // handed back is accepted on the retry.
@@ -241,7 +240,7 @@ describe("stale oldText", () => {
       rev: staleError.currentRev,
     });
     syncDocs(a, b);
-    expect(getBlockText(a, blockId)).toBe("rewritten text plus B's addition");
+    expect(getBlock(a, blockId)!.text).toBe("rewritten text plus B's addition");
   });
 
   it("refuses an edit whose rev is stale even when the text still matches", () => {
@@ -254,9 +253,9 @@ describe("stale oldText", () => {
     const staleRev = getBlockRev(b, blockId);
     // A changes only an attribute — the text is untouched, so `oldText` alone
     // cannot detect it.
-    setBlockLevel(a, blockId, 4);
+    findBlockElement(a, blockId)!.setAttribute("level", "4");
     syncDocs(a, b);
-    expect(getBlockText(b, blockId)).toBe("Section");
+    expect(getBlock(b, blockId)!.text).toBe("Section");
 
     let caught: unknown;
     try {
@@ -270,11 +269,11 @@ describe("stale oldText", () => {
     expect(error.expectedRev).toBe(staleRev);
     expect(error.currentRev).toBe(getBlockRev(b, blockId));
     expect(error.currentText).toBe("Section");
-    expect(getBlockText(b, blockId)).toBe("Section");
+    expect(getBlock(b, blockId)!.text).toBe("Section");
 
     // Without the rev assertion the same edit is accepted: rev is opt-in.
     editBlock(b, blockId, "Section", "Section, edited");
-    expect(getBlockText(b, blockId)).toBe("Section, edited");
+    expect(getBlock(b, blockId)!.text).toBe("Section, edited");
 
     // The other half of the contract: a MATCHING rev is accepted, the write
     // moves the rev on, and replaying the now-stale one is refused.
@@ -282,7 +281,7 @@ describe("stale oldText", () => {
     editBlock(b, blockId, "Section, edited", "Section, edited twice", {
       rev: fresh,
     });
-    expect(getBlockText(b, blockId)).toBe("Section, edited twice");
+    expect(getBlock(b, blockId)!.text).toBe("Section, edited twice");
     expect(getBlockRev(b, blockId)).not.toBe(fresh);
     expect(() =>
       editBlock(b, blockId, "Section, edited twice", "again", { rev: fresh }),
@@ -303,7 +302,7 @@ describe("edit versus deletion", () => {
     // A removes the block; B, unaware, edits it.
     deleteBlock(a, doomed);
     editBlock(b, doomed, "delete me", "delete me, edited");
-    expect(getBlockText(b, doomed)).toBe("delete me, edited");
+    expect(getBlock(b, doomed)!.text).toBe("delete me, edited");
 
     syncDocs(a, b);
 

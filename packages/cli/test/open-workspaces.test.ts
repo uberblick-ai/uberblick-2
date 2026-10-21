@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { localBrowserKey } from "../src/browser-key.js";
 import { probePort } from "../src/probes.js";
-import { readWorkspaceHub, ensureWorkspaceBinding } from "../src/workspace-registry.js";
+import { readWorkspaceHub, ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 import { pointAt, runUbAsync, waitUntil, type Sandbox } from "./helpers.js";
 import { authMessage, bearer, cleanUp, configured, FIRST_REMOTE, freePort, get, hubs, open, openFails,
   openStore, SECRET, WORKSPACE, type Running } from "./open-fixtures.js";
@@ -208,7 +208,8 @@ describe("ub open: this machine's workspaces", () => {
         await waitUntil(`${workspace} replica search index`, async () => (await search(index === 0 ? "Primary" : "Secondary")).hits.length === 1);
         expect((await search(index === 0 ? "Secondary" : "Primary")).hits).toEqual([]);
         expect(await (await fetch(`${app.url}api/account`, { headers: auth[index]! })).json())
-          .toEqual({ state: "signed-in", handle: `${index === 0 ? "primary" : "secondary"}-person` });
+          .toEqual({ state: "signed-in", handle: `${index === 0 ? "primary" : "secondary"}-person`,
+            githubAccountId: target.login.identity.githubAccountId });
         const access = await fetch(`${app.url}api/access`, { method: "POST",
           headers: { ...auth[index], "content-type": "application/json", origin: new URL(app.url).origin },
           body: JSON.stringify({ operation: "own-role", workspaceId: workspace }) });

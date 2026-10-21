@@ -1,9 +1,9 @@
 import { defaultWorkspaceDatabasePath, readWorkspaceName } from "@uberblick/mcp-server";
 import type { HubState } from "@uberblick/mcp-server";
-import type { ProjectBinding } from "./project-binding.js";
-import { endpointOf, isLocalHost } from "./probes.js";
+import type { ProjectBinding } from "@uberblick/mcp-server/project-binding";
+import { endpointOf } from "./probes.js";
 import { displayWorkspaceHub, useField, workspaceLabel } from "./workspace-use-output.js";
-import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
+import { authenticationOrigin, isLoopbackHost } from "@uberblick/mcp-server/remote-url";
 import { recentDevicesNotice, type RecentDevice } from "./recent-devices.js";
 
 interface OpenBanner {
@@ -28,7 +28,7 @@ export function openBanner(input: OpenBanner): string {
   const unreachable = !input.signInRequired && input.hubState?.status === "hub-down";
   let note = input.hubNote;
   let showNote = input.showHubNote;
-  const localDeviceHub = input.deviceHub && isLocalHost(endpointOf(input.hubUrl)?.host ?? "");
+  const localDeviceHub = input.deviceHub && isLoopbackHost(endpointOf(input.hubUrl)?.host ?? "");
   if (input.signInRequired) {
     const display = localDeviceHub ? input.hubUrl : displayWorkspaceHub(input.hubUrl);
     note = `${display} (not signed in, changes stay here)`;

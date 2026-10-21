@@ -75,7 +75,7 @@ function formatRange(
   texts: readonly Y.XmlText[],
   start: number,
   end: number,
-  value: CommentMark | null,
+  value: CommentMark,
 ): void {
   let offset = 0;
   for (const text of texts) {
@@ -260,16 +260,6 @@ export function listAnnotations(ydoc: Y.Doc): Annotation[] {
   return out;
 }
 
-/** Threads anchored to one block. */
-export function listAnnotationsForBlock(
-  ydoc: Y.Doc,
-  blockId: string,
-): Annotation[] {
-  return listAnnotations(ydoc).filter(
-    (annotation) => annotation.blockId === blockId,
-  );
-}
-
 /**
  * One scan returns document-order marks, including marks whose thread is gone.
  * Resolve all ranges together to avoid rescanning once per thread.
@@ -355,35 +345,4 @@ export function setAnnotationResolved(
     thread.set("resolved", resolved);
   });
   return readThread(thread);
-}
-
-/**
- * Delete the thread and nested conversation together, so a concurrent reply or
- * resolve cannot retain a thread with a destroyed conversation. Clear only its
- * mark runs, preserving foreign interleaved anchors. Returns whether it existed.
- */
-export function deleteAnnotation(ydoc: Y.Doc, threadId: string): boolean {
-  const annotations = getAnnotationsMap(ydoc);
-  const thread = threadMap(ydoc, threadId);
-  if (thread === null) {
-    if (!annotations.has(threadId)) return false;
-    ydoc.transact(() => {
-      annotations.delete(threadId);
-    });
-    return true;
-  }
-
-  const element = findBlockElement(ydoc, thread.get("blockId") as string);
-  const targets = element === null ? [] : annotationTexts(element);
-  ydoc.transact(() => {
-    for (const { texts } of targets) {
-      for (const run of commentRuns(texts).filter(
-        (candidate) => candidate.threadId === threadId,
-      )) {
-        formatRange(texts, run.start, run.end, null);
-      }
-    }
-    annotations.delete(threadId);
-  });
-  return true;
 }

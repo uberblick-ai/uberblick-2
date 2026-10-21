@@ -19,7 +19,7 @@ import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
 import { SESSION_HEADER } from "../src/open-session.js";
-import { probeHub } from "../src/probes.js";
+import { probeHubState } from "../src/probes.js";
 import type { Sandbox } from "./helpers.js";
 import {
   UB_BIN,
@@ -163,7 +163,7 @@ export async function hubAnswers(box: Sandbox, hubUrl: string): Promise<boolean>
     HUB_AUTH_TOKEN: SECRET,
     UBERBLICK_DB: join(box.cwd, `probe-${Math.random().toString(36).slice(2)}.sqlite`),
   });
-  return (await probeHub(config, hubUrl)) === "connected";
+  return (await probeHubState(config, hubUrl)).status === "connected";
 }
 
 // --- the running command -----------------------------------------------------

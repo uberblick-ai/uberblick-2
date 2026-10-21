@@ -8,7 +8,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { createHub, silentLogger, type Hub } from "@uberblick/hub";
 import { afterEach, describe, expect, it } from "vitest";
 import { DEAD_HUB_URL, pointAt, removeTempDirs, runUbAsync, sandbox, type Sandbox } from "./helpers.js";
-import { ensureWorkspaceBinding } from "../src/workspace-registry.js";
+import { ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 
 const WORKSPACE = "c4ee1905-90e4-42df-8a4c-ed6ce9cbe531";
 const SECRET = "data-sync-test-secret";

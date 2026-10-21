@@ -3,12 +3,10 @@ import * as Y from "yjs";
 import {
   EXAMPLE_TAGS,
   InvalidTagAssignmentError,
-  InvalidTagNameError,
   assignDocumentTags,
   createTagCatalogEntry,
   getMeta,
   getMetaMap,
-  getTagCatalogFlags,
   getTagCatalogIdentities,
   initDoc,
   isTagCatalogSeeded,
@@ -22,6 +20,8 @@ import {
   upsertDirectoryEntry,
   getDirectoryEntry,
 } from "../src/index.js";
+import { InvalidTagNameError } from "../src/errors.js";
+import { getTagCatalogFlags } from "../src/tags.js";
 import { replicaPair, syncDocs } from "./helpers.js";
 
 const DOCUMENT = "11111111-1111-4111-8111-111111111111";

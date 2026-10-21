@@ -10,7 +10,12 @@ on:
       - .github/workflows/homebrew-formula.yml
       - package.json
       - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - mise.toml
+      - tsconfig.base.json
       - packages/cli/bin/**
+      - packages/schema/**
+      - packages/web/**
       - scripts/build-install-payload.mjs
       - scripts/homebrew-*.mjs
       - scripts/lib/homebrew-proof.mjs
@@ -52,7 +57,7 @@ jobs:
 
       # Two versions built here stand in for two published releases; the public
       # transcript belongs to the tap's second publication (#842).
-      - name: Upgrade an installed release through Homebrew
+      - name: Check release web isolation and upgrade through Homebrew
         run: |
           set -euo pipefail
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"

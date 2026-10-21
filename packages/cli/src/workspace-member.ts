@@ -4,9 +4,9 @@ import { isGithubAccountId, isGithubUsername } from "@uberblick/schema/github-id
 import { ensureDeviceLogin, readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 import { parseWorkspaceId } from "@uberblick/schema";
-import { ManagementResponseError, manageRequest } from "./access-management.js";
-import type { ManagementAction } from "./access-management.js";
-import { requireBinding, resolveConfig } from "./config.js";
+import { ManagementResponseError, manageRequest } from "@uberblick/mcp-server/management-client";
+import type { ManagementAction } from "@uberblick/mcp-server/management-client";
+import { requireBinding, resolveConfig } from "@uberblick/mcp-server/project-config";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 

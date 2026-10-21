@@ -6,6 +6,7 @@ import type { MembershipRegistry } from "./memberships.js";
 import { type AuthEnvelope, protocolMismatchReason, readAuthEnvelope } from "@uberblick/schema/protocol";
 import { addWorkspaceNames, type WorkspaceNameReader } from "./workspace-names.js";
 import { isCredentialPublicKey } from "@uberblick/schema/token";
+import { isJsonPost, readJsonRequest, replyJson } from "./http.js";
 
 export async function handleCredentialRenewal(
   credentials: CredentialRegistry | undefined,
@@ -17,16 +18,12 @@ export async function handleCredentialRenewal(
   workspaceNames?: WorkspaceNameReader,
 ): Promise<boolean> {
   if (request.url !== "/auth/credential/renew") return false;
-  const reply = (status: number, body: unknown): void => {
-    response.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    response.end(JSON.stringify(body));
-  };
+  const reply = (status: number, body: unknown): void => replyJson(response, status, body);
   if (credentials === undefined || memberships === undefined) {
     reply(503, { status: "not-configured" });
     return true;
   }
-  if (request.method !== "POST" || request.headers.authorization !== undefined ||
-    request.headers["content-type"]?.split(";")[0] !== "application/json") {
+  if (!isJsonPost(request)) {
     reply(400, { status: "invalid-request" });
     return true;
   }
@@ -35,19 +32,9 @@ export async function handleCredentialRenewal(
   let publicKey = "";
   let rawPublicKey: unknown;
   try {
-    let size = 0;
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) {
-      const bytes = Buffer.from(chunk as Uint8Array);
-      size += bytes.length;
-      if (size > 4096) throw new Error();
-      chunks.push(bytes);
-    }
-    const raw = Buffer.concat(chunks).toString("utf8");
-    const body: unknown = JSON.parse(raw);
-    const parsed = readAuthEnvelope(raw);
-    if (body === null || typeof body !== "object" || Array.isArray(body) || parsed === null) throw new Error();
-    const fields = body as Record<string, unknown>;
+    const { text, body: fields } = await readJsonRequest(request);
+    const parsed = readAuthEnvelope(text);
+    if (parsed === null) throw new Error();
     if (Object.keys(fields).some(key => !["protocolVersion", "token", "publicKey", "ifWorkspacesChanged"].includes(key)) ||
       (fields.ifWorkspacesChanged !== undefined && fields.ifWorkspacesChanged !== true)) throw new Error();
     rawPublicKey = fields.publicKey;

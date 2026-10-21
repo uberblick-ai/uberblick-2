@@ -18,14 +18,15 @@ import {
   isHubLogin,
   preflightHubLoginStore,
   readHubLogins,
+  replaceHubLogin,
   removeHubLogin,
   writeHubLogin,
-} from "../src/auth-store.js";
-import { credentialsPath, resolveConfig, userConfigPath } from "../src/config.js";
-import { acquireInitLock, initLockPath, tryAcquireInitLock } from "../src/init-lock.js";
-import { readWorkspaceHub } from "../src/workspace-registry.js";
+} from "@uberblick/mcp-server/auth-store";
+import { credentialsPath, resolveConfig, userConfigPath } from "@uberblick/mcp-server/project-config";
+import { acquireInitLock, initLockPath, tryAcquireInitLock } from "@uberblick/mcp-server/init-lock";
+import { readWorkspaceHub } from "@uberblick/mcp-server/workspace-registry";
 import * as safeWrite from "@uberblick/mcp-server/safe-write";
-import { PACKAGE_ROOT, SECRET_ON_FILE, removeTempDirs, sandbox, waitUntil, type Sandbox } from "./helpers.js";
+import { PACKAGE_ROOT, REPO_ROOT, SECRET_ON_FILE, removeTempDirs, sandbox, waitUntil, type Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 afterEach(() => vi.restoreAllMocks());
@@ -72,9 +73,9 @@ async function interleaveWriters(box: Sandbox, first: Mutation, second: Mutation
   writeFileSync(worker, `
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
-import { writeHubLogin, removeHubLogin } from ${JSON.stringify(pathToFileURL(join(PACKAGE_ROOT, "src/auth-store.ts")).href)};
-import { credentialsPath } from ${JSON.stringify(pathToFileURL(join(PACKAGE_ROOT, "src/config.ts")).href)};
-import { acquireInitLock, initLockPath } from ${JSON.stringify(pathToFileURL(join(PACKAGE_ROOT, "src/init-lock.ts")).href)};
+import { writeHubLogin, removeHubLogin } from ${JSON.stringify(pathToFileURL(join(REPO_ROOT, "packages/mcp-server/src/auth-store.ts")).href)};
+import { credentialsPath } from ${JSON.stringify(pathToFileURL(join(REPO_ROOT, "packages/mcp-server/src/project-config.ts")).href)};
+import { acquireInitLock, initLockPath } from ${JSON.stringify(pathToFileURL(join(REPO_ROOT, "packages/mcp-server/src/init-lock.ts")).href)};
 import { setRemote } from ${JSON.stringify(pathToFileURL(join(PACKAGE_ROOT, "src/remote.ts")).href)};
 
 const job = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
@@ -372,6 +373,63 @@ describe("hub login store", () => {
     expect(stored.credential.record.workspaces).toEqual([WORKSPACE]);
     expect(JSON.parse(before).hubLogins[HUB]).toEqual(stored);
     expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  it("keeps optional GitHub display data through storage and renewal without refreshing it", async () => {
+    const box = sandbox();
+    const value = login();
+    value.identity.name = " Synthetic 🧭 Person ";
+    await writeHubLogin(HUB, value, box.env);
+    const path = credentialsPath(box.env);
+    const before = readFileSync(path, "utf8");
+    expect(readHubLogins(box.env).logins[HUB]).toEqual(value);
+    expect(readFileSync(path, "utf8")).toBe(before);
+    const replacement = login();
+    replacement.identity.name = "A different upstream name";
+    replacement.credential.record.id = crypto.randomUUID();
+    expect(await replaceHubLogin(HUB, value, replacement, box.env)).toBe(true);
+    expect(readHubLogins(box.env).logins[HUB]).toEqual({ ...value, credential: replacement.credential });
+  });
+
+  it.each([
+    undefined, null, 42, {}, [], "", " \t ", "one\ntwo", "one\rtwo", "control\u009b",
+    "format\u200b", "bidi\u202e", "line\u2028separator", "paragraph\u2029separator", "surrogate\ud800",
+    "🧭".repeat(254), `secret ${login().credential.key}`,
+  ])("drops unsafe GitHub display metadata on reads and writes without losing the login (%j)", async (name) => {
+    const original = login();
+    const supplied = { ...original, identity: { ...original.identity, name } };
+    expect(isHubLogin(supplied)).toBe(true);
+    const box = sandbox({ credentials: { hubLogins: { [HUB]: supplied } } });
+    const path = credentialsPath(box.env);
+    const before = readFileSync(path, "utf8");
+    expect(readHubLogins(box.env).logins[HUB]).toEqual(original);
+    expect(readFileSync(path, "utf8")).toBe(before);
+    if (!isHubLogin(supplied)) throw new Error("display metadata must not invalidate a login");
+    await writeHubLogin(HUB, supplied, box.env);
+    expect(JSON.parse(readFileSync(path, "utf8")).hubLogins[HUB]).toEqual(original);
+  });
+
+  it("accepts a profile name at the Unicode character bound", async () => {
+    const box = sandbox();
+    const value = login();
+    value.identity.name = "🧭".repeat(253);
+    await writeHubLogin(HUB, value, box.env);
+    expect(readHubLogins(box.env).logins[HUB]).toEqual(value);
+  });
+
+  it.each(["invalid stored name", "replacement key"])("omits unsafe cached profile data on renewal (%s)", async (kind) => {
+    const original = login();
+    const replacement = login();
+    replacement.credential.key = Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), Buffer.alloc(32, 18)]).toString("base64url");
+    replacement.credential.record.id = crypto.randomUUID();
+    const name = kind === "replacement key" ? `Synthetic ${replacement.credential.key}` : "Unsafe\nProfile";
+    const named = { ...original, futureLogin: "opaque", identity: { ...original.identity, name, futureIdentity: "opaque" } };
+    const box = sandbox({ credentials: { hubLogins: { [HUB]: named } } });
+    expect(await replaceHubLogin(HUB, named, replacement, box.env)).toBe(true);
+    const stored = JSON.parse(readFileSync(credentialsPath(box.env), "utf8")).hubLogins[HUB];
+    expect(stored.identity).toEqual({ ...original.identity, futureIdentity: "opaque" });
+    expect(stored.futureLogin).toBe("opaque");
+    expect(stored.credential.key).toBe(replacement.credential.key);
   });
 
   it.each([

@@ -1,8 +1,8 @@
 import { lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { findProjectConfig, resolveProjectBinding, writeProjectBinding } from "../src/project-binding.js";
-import { ensureWorkspaceBinding } from "../src/workspace-registry.js";
+import { findProjectConfig, resolveProjectBinding, writeProjectBinding } from "@uberblick/mcp-server/project-binding";
+import { ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 import { removeTempDirs, sandbox, unboundSandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 

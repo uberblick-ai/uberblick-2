@@ -39,7 +39,8 @@ function expectLegacyPair(rig: Rig, uuid: string, status: string | undefined) {
 }
 
 describe("stored requirement documents", () => {
-  it.each([undefined, "draft", "planned", "implementing", "done"])("projects a stored %s lifecycle through reads and offline restart without changing its room", async status => {
+  // No reader branches on a requirement's status value, only on its presence.
+  it.each([undefined, "draft"])("projects a stored %s lifecycle through reads and offline restart without changing its room", async status => {
     const databasePath = tempDatabasePath();
     const rig = await local(databasePath);
     const target = await rig.ok("create_doc", { title: "Link target", description: "A regular link target." });

@@ -5,9 +5,9 @@ import { pathToFileURL } from "node:url";
 import { createMcpServer, defaultWorkspaceDatabasePath, resolveMcpConfig } from "@uberblick/mcp-server";
 import { appendBlock, listDirectory, tombstoneDirectoryEntry } from "@uberblick/schema";
 import { afterAll, expect, it } from "vitest";
-import { initLockPath } from "../src/init-lock.js";
-import { parseJoinTarget } from "../src/remote.js";
-import { readWorkspaceHub, workspaceRegistryPath } from "../src/workspace-registry.js";
+import { initLockPath } from "@uberblick/mcp-server/init-lock";
+import { parseJoinTarget } from "@uberblick/mcp-server/remote-url";
+import { readWorkspaceHub, workspaceRegistryPath } from "@uberblick/mcp-server/workspace-registry";
 import { removeTempDirs, runUb, unboundSandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 

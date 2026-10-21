@@ -3,6 +3,7 @@ import { createPrivateKey } from "node:crypto";
 import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
+import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 export { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
 import { credentialsPath } from "./storage.js";
 export { CREDENTIALS_FILE, credentialsPath } from "./storage.js";
@@ -15,6 +16,7 @@ export interface StoredHubLogin {
     id: string;
     githubAccountId: string;
     githubUsername: string;
+    name?: string;
   };
   credential: {
     record: {
@@ -48,6 +50,13 @@ export interface HubLogins {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Optional public display data must never carry a credential or flow secret. */
+function sanitizeGithubName(value: unknown, ...secrets: (string | undefined)[]): string | undefined {
+  const name = sanitizeDeviceName(value);
+  return name !== undefined && !secrets.some((secret) => secret !== undefined && secret !== "" && name.includes(secret))
+    ? name : undefined;
+}
 
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -169,7 +178,11 @@ function readStore(env: NodeJS.ProcessEnv): Store {
       const names = sanitizeWorkspaceNames(login.credential.workspaceNames,
         login.credential.record.workspaces, login.credential.key);
       const { workspaceNames: _workspaceNames, ...credential } = login.credential;
-      logins[origin] = { ...login, credential: {
+      const name = sanitizeGithubName(login.identity.name, login.credential.key);
+      const { name: _name, ...identity } = login.identity;
+      logins[origin] = { ...login, identity: {
+        ...identity, ...(name === undefined ? {} : { name }),
+      }, credential: {
         ...credential, ...(names === undefined ? {} : { workspaceNames: names }),
       } };
     }
@@ -232,11 +245,13 @@ export function projectLoginFields(login: StoredHubLogin, collectionSecret?: str
   const { record } = credential;
   const workspaceNames = sanitizeWorkspaceNames(credential.workspaceNames, record.workspaces,
     credential.key, collectionSecret);
+  const name = sanitizeGithubName(identity.name, credential.key, collectionSecret);
   return {
     identity: {
       id: identity.id,
       githubAccountId: identity.githubAccountId,
       githubUsername: identity.githubUsername,
+      ...(name === undefined ? {} : { name }),
     },
     credential: {
       record: {
@@ -310,9 +325,13 @@ export async function replaceHubLogin(
     if (current?.credential.record.id !== expected.credential.record.id ||
       current.credential.key !== expected.credential.key) return false;
     const entries = (store.raw?.hubLogins ?? {}) as Record<string, unknown>;
-    // Replace only the credential; preserve identity and unknown sibling fields.
+    const raw = entries[origin] as Record<string, unknown>;
+    const { name: _name, ...identity } = raw.identity as StoredHubLogin["identity"];
+    const name = sanitizeGithubName(current.identity.name, replacement.credential.key);
+    // Preserve the stored identity and unknown siblings without retaining unsafe display data.
     publish(store, { ...entries, [origin]: {
-      ...(entries[origin] as Record<string, unknown>),
+      ...raw,
+      identity: { ...identity, ...(name === undefined ? {} : { name }) },
       credential: projectLoginFields(replacement).credential,
     } }, "ub auth login");
     return true;

@@ -17,18 +17,17 @@ import type {
   McpConfig,
 } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
-export { normalizeRemoteUrl, parseJoinTarget } from "@uberblick/mcp-server/remote-url";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 import {
   resolveConfig,
   writeHubAdmission,
-} from "./config.js";
-import { resolveProjectBinding, validateProjectBinding, writeProjectBinding } from "./project-binding.js";
-import { acquireInitLock } from "./init-lock.js";
-import { type Io, shellArgument } from "./io.js";
-import { displayWorkspaceHub, useBindingLines, useField } from "./workspace-use-output.js";
-import { ORIGIN_LABELS } from "./status.js";
-import { readWorkspaceHub, workspaceRegistryPath } from "./workspace-registry.js";
+} from "@uberblick/mcp-server/project-config";
+import { resolveProjectBinding, validateProjectBinding, writeProjectBinding } from "@uberblick/mcp-server/project-binding";
+import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
+import { type Io, shellArgument, warn } from "./io.js";
+import { plural } from "./strings.js";
+import { ORIGIN_LABELS, displayWorkspaceHub, useBindingLines, useField } from "./workspace-use-output.js";
+import { readWorkspaceHub, workspaceRegistryPath } from "@uberblick/mcp-server/workspace-registry";
 import { fillMainRepositoryFromOrigin } from "./workspace-main-repository.js";
 
 export interface RemotePersistence {
@@ -59,10 +58,6 @@ export function setRemote(
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
   });
   return { written: [...admission.written, ...(previousHub === binding.hubUrl && !registersPrevious ? [] : [workspaceRegistryPath(env)]), path], warnings: admission.warnings };
-}
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 /** Why a hub could not be read, in one line. Never the hub's own words. */
@@ -114,12 +109,6 @@ function listDocs(docs: readonly { uuid: string; title: string }[], limit = 10):
     text += `  … and ${docs.length - limit} more\n`;
   }
   return text;
-}
-
-function warn(io: Io, warnings: readonly string[]): void {
-  for (const warning of warnings) {
-    io.err(`ub: warning: ${warning}\n`);
-  }
 }
 
 /**

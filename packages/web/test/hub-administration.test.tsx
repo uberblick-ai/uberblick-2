@@ -37,7 +37,7 @@ describe("bound hub authority", () => {
   });
 
   it.each([null, { ...SERVING, remoteHubUrl: null }, { ...SERVING, rebound: true },
-    { ...SERVING, workspace: "872b46d9-5b18-4fb1-84d5-de245c337e86" }])("never picks another login for an unavailable binding %j", async (serving) => {
+    { ...SERVING, workspace: "872b46d9-5b18-4fb1-84d5-de245c337e86" }, { ...SERVING, workspace: "not-a-workspace" }])("never picks another login for an unavailable binding %j", async (serving) => {
     const view = render(<Reading serving={serving} />);
     await flush();
     expect(view.container.querySelector("output")?.textContent).toBe("local-only");

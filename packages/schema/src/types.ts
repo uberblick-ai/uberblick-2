@@ -69,12 +69,6 @@ export const INLINE_MARKS = [
   "docLink",
 ] as const;
 
-export type InlineMarkName = (typeof INLINE_MARKS)[number];
-
-export function isInlineMark(value: string): value is InlineMarkName {
-  return (INLINE_MARKS as readonly string[]).includes(value);
-}
-
 /**
  * Flags and disjoint link targets for one run. Writers refuse link/docLink
  * pairs; merged pairs read as docLink (see marks.ts).

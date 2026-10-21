@@ -1,11 +1,11 @@
 import { isGithubUsername } from "@uberblick/schema/github-identity";
-import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
+import { readDeviceLogin, sameCredential } from "@uberblick/mcp-server/device-login";
 import { manageRequest, sanitizeManagementReply } from "@uberblick/mcp-server/management-client";
 import { hubTransportProblem } from "@uberblick/mcp-server/remote-url";
 import type { ServingSyncStatus } from "@uberblick/mcp-server";
 import type { AccessBinding } from "./open-access.js";
 
-export type ServingAccount = { state: "signed-in"; handle: string; accountId?: string }
+export type ServingAccount = { state: "signed-in"; handle: string; accountId?: string; name?: string; githubAccountId?: string }
   | { state: "signed-out" | "unavailable" };
 
 type NotSharedReason = ServingSyncStatus["notSharedReason"];
@@ -63,10 +63,13 @@ export async function requestAccount(
     if (latest.status !== "ready") {
       return { state: latest.status === "sign-in-required" ? "signed-out" : "unavailable" };
     }
-    if (latest.login.credential.record.id !== login.credential.record.id ||
-        latest.login.credential.key !== login.credential.key ||
+    if (!sameCredential(latest.login, login) ||
         latest.login.identity.githubUsername !== login.identity.githubUsername) return { state: "unavailable" };
-    return refused(notSharedReason()) ?? { state: "signed-in", handle: login.identity.githubUsername };
+    return refused(notSharedReason()) ?? {
+      state: "signed-in", handle: login.identity.githubUsername,
+      githubAccountId: login.identity.githubAccountId,
+      ...(login.identity.name === undefined ? {} : { name: login.identity.name }),
+    };
   } catch {
     // Credential-store and transport errors may contain private data.
     return { state: "unavailable" };

@@ -69,7 +69,7 @@ export function readDeviceLogin(endpoint: string, _workspace: string, env: NodeJ
     ? signIn(origin) : { status: "ready", origin, login };
 }
 
-function sameCredential(a: StoredHubLogin, b: StoredHubLogin): boolean {
+export function sameCredential(a: StoredHubLogin, b: StoredHubLogin): boolean {
   return a.credential.record.id === b.credential.record.id && a.credential.key === b.credential.key;
 }
 function fingerprint(login: StoredHubLogin): string {

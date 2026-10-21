@@ -8,7 +8,7 @@
 
 import { createServer } from "node:net";
 import { DEFAULT_HOST, DEFAULT_PORT } from "@uberblick/hub/config";
-import { hubTransportProblem, isLoopbackHost } from "@uberblick/mcp-server/remote-url";
+import { hubTransportProblem } from "@uberblick/mcp-server/remote-url";
 import type { HubState, McpConfig } from "@uberblick/mcp-server";
 import { inspectRemote } from "@uberblick/mcp-server";
 import { budget } from "./budget.js";
@@ -21,13 +21,6 @@ export type HubReach = HubState["status"] | "unsettled";
 
 /** Keep the protocol versions and locally composed reason for diagnostics. */
 export type HubProbe = Omit<HubState, "status"> & { status: HubReach };
-
-export async function probeHub(
-  config: McpConfig,
-  hubUrl: string = config.hubUrl,
-): Promise<HubReach> {
-  return (await probeHubState(config, hubUrl)).status;
-}
 
 export async function probeHubState(
   config: McpConfig,
@@ -190,16 +183,4 @@ export function endpointOf(hubUrl: string): Endpoint | null {
   // `URL` keeps an IPv6 host in brackets; every consumer here wants the address.
   const host = parsed.hostname.replace(/^\[|\]$/g, "");
   return { host, port };
-}
-
-export const isLocalHost = isLoopbackHost;
-
-/**
- * Wildcard bind addresses must be dialed through loopback.
- */
-export function dialHost(host: string): string {
-  if (host === "0.0.0.0" || host === "::" || host === "[::]") {
-    return "127.0.0.1";
-  }
-  return host.includes(":") ? `[${host}]` : host;
 }

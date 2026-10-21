@@ -6,11 +6,11 @@ import {
   type McpConfig,
   type UberblickMcpEngine,
 } from "@uberblick/mcp-server";
-import { resolveConfig } from "./config.js";
+import { resolveConfig } from "@uberblick/mcp-server/project-config";
 import { resolveMcpConfig } from "./budget.js";
 import { localBrowserKey } from "./browser-key.js";
-import type { ProjectBinding } from "./project-binding.js";
-import { readWorkspaceHub } from "./workspace-registry.js";
+import type { ProjectBinding } from "@uberblick/mcp-server/project-binding";
+import { readWorkspaceHub } from "@uberblick/mcp-server/workspace-registry";
 import { listWorkspaces } from "./workspace.js";
 
 export interface ServedWorkspace {

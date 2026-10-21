@@ -12,7 +12,7 @@ import {
 import type { CollectionSchema } from "@uberblick/schema";
 import { afterAll, expect, it, vi } from "vitest";
 import { DATA_HELP } from "../src/data.js";
-import { resolveConfig } from "../src/config.js";
+import { resolveConfig } from "@uberblick/mcp-server/project-config";
 import { removeTempDirs, runUb, sandbox, unboundSandbox } from "./helpers.js";
 import type { Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";

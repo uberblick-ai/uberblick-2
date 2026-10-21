@@ -14,24 +14,17 @@ import type { FigmaInline } from "./figma.js";
 import { parseInline } from "./markdown.js";
 import {
   BlockNotFoundError,
-  CardAnnotationError,
-  CardConversionError,
-  FigmaAnnotationError,
-  FigmaConversionError,
   ConflictingLinkMarksError,
   InlineLinkRangeError,
   InvalidDocLinkTargetError,
   InvalidListAttributesError,
   InvalidTableMappingError,
-  MarksNotAllowedError,
   OldTextMismatchError,
   StaleBlockError,
-  TableAnnotationError,
 } from "./errors.js";
 import {
   applyInlineRuns,
   assertInlineWritable,
-  marksOtherThanComment,
   readInlineRuns,
 } from "./marks.js";
 import { blockRev } from "./rev.js";
@@ -163,15 +156,15 @@ export function findBlockElement(
   return index === -1 ? null : (fragment.get(index) as Y.XmlElement);
 }
 
-/** @internal — shared with the annotations module. */
+/**
+ * @internal — shared with the annotations module. Flat blocks only: callers
+ * branch on table, card and Figma first, or this would insert a text child.
+ */
 export function requireBlockText(
   ydoc: Y.Doc,
   element: Y.XmlElement,
   blockId: string,
 ): Y.XmlText {
-  if (element.nodeName === "table") throw new TableAnnotationError(blockId);
-  if (element.nodeName === "card") throw new CardAnnotationError(blockId);
-  if (element.nodeName === "figma") throw new FigmaAnnotationError(blockId);
   const existing = textOf(element);
   if (existing !== null) return existing;
   ydoc.transact(() => {
@@ -286,13 +279,6 @@ export function getBlock(ydoc: Y.Doc, blockId: string): Block | null {
   return element === null ? null : toBlock(element);
 }
 
-/** One block's plain-text source. Throws {@link BlockNotFoundError} if absent. */
-export function getBlockText(ydoc: Y.Doc, blockId: string): string {
-  const element = findBlockElement(ydoc, blockId);
-  if (element === null) throw new BlockNotFoundError(blockId);
-  return toBlock(element).text;
-}
-
 /** One block's content hash. Throws {@link BlockNotFoundError} if absent. */
 export function getBlockRev(ydoc: Y.Doc, blockId: string): string {
   const element = findBlockElement(ydoc, blockId);
@@ -334,7 +320,7 @@ function inlineOf(input: BlockInput): readonly InlineRun[] | null {
   return isProseBlockType(input.type) ? input.inline : null;
 }
 
-function buildElement(id: string, input: BlockInput, inlineTables = true): Y.XmlElement {
+function buildElement(id: string, input: BlockInput): Y.XmlElement {
   // Validate before insertion: Yjs transactions cannot roll back stray blocks.
   const runs = inlineOf(input);
   if (runs !== null) assertInlineWritable(runs);
@@ -353,8 +339,6 @@ function buildElement(id: string, input: BlockInput, inlineTables = true): Y.Xml
 
   if (input.type === "table") {
     const table = parseTableInput(input.text ?? "");
-    // Retyping and legacy normalization build literal cells; agent GFM has marks.
-    if (!inlineTables) return buildTableElement(id, table);
     for (const cell of [table.header, ...table.rows].flat()) assertInlineWritable(parseTableCell(cell));
     return buildTableElement(id, {
       ...table, header: table.header.map(() => ""), rows: table.rows.map((row) => row.map(() => "")),
@@ -497,7 +481,7 @@ export function repairDuplicateBlocks(ydoc: Y.Doc): number {
 }
 
 /**
- * Normalize only legacy table content. Replacement uses the re-type primitive
+ * Normalize only legacy table content. Each replacement is a same-id element,
  * so simultaneous converters shadow one another instead of duplicating rows.
  * Invalid GFM becomes same-id code with its complete source delta and anchors.
  * Ordinary structured tables cause no update, even when merged rows are uneven.
@@ -537,138 +521,6 @@ export function normalizeLegacyTables(ydoc: Y.Doc): number {
     changed += 1;
   }
   return changed;
-}
-
-/** Set a heading's level. */
-export function setBlockLevel(
-  ydoc: Y.Doc,
-  blockId: string,
-  level: HeadingLevel,
-): void {
-  const element = findBlockElement(ydoc, blockId);
-  if (element === null) throw new BlockNotFoundError(blockId);
-  ydoc.transact(() => {
-    element.setAttribute("level", String(normalizeLevel(level)));
-  });
-}
-
-/** Set a code block's language. */
-export function setBlockLanguage(
-  ydoc: Y.Doc,
-  blockId: string,
-  language: string,
-): void {
-  const element = findBlockElement(ydoc, blockId);
-  if (element === null) throw new BlockNotFoundError(blockId);
-  ydoc.transact(() => {
-    element.setAttribute("language", language);
-  });
-}
-
-export interface BlockTypeAttrs {
-  /** Heading level for the new type. Carried over when the old block was a heading. */
-  level?: HeadingLevel;
-  /** Code language for the new type. Carried over when the old block was code. */
-  language?: string;
-  /** List marker for the new type. Carried over when the old block was a list item. */
-  list?: ListStyle;
-  /** List indent for the new type. Carried over when the old block was a list item. */
-  indent?: number;
-}
-
-/**
- * Only sanctioned retype: retain id, position and full text delta, including thread marks.
- * Applicable attributes carry over unless overridden. Yjs node names are
- * immutable, so insert the replacement beside the old element before deleting it.
- * Concurrent replacements use partitionById's winner; losing text is discarded.
- * Unseen concurrent edits to the replaced element can also be lost.
- * editBlock's rev/oldText guards cannot detect unseen remote changes.
- */
-export function setBlockType(
-  ydoc: Y.Doc,
-  blockId: string,
-  newType: BlockType,
-  attrs: BlockTypeAttrs = {},
-): void {
-  const fragment = getBlocksFragment(ydoc);
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
-  ydoc.transact(() => {
-    const index = indexOfBlock(fragment, blockId);
-    if (index === -1) throw new BlockNotFoundError(blockId);
-    const old = fragment.get(index) as Y.XmlElement;
-    const oldType = elementType(old);
-
-    if (oldType === "figma" || newType === "figma") {
-      if (oldType === newType) return;
-      throw new FigmaConversionError();
-    }
-
-    if (oldType === "card" || newType === "card") {
-      if (oldType === newType) return;
-      throw new CardConversionError();
-    }
-
-    if (oldType === "table" || newType === "table") {
-      // Same-type tables are inert. Table/flat offsets cannot preserve marks;
-      // refuse every mark before mutation. Only legacy normalization may drop anchors.
-      if (oldType === "table" && newType === "table") return;
-      const marked = oldType === "table"
-        ? tableRows(old).flat().flatMap((cell) => tableCellTexts(cell).flatMap((text) => text.toDelta() as Array<{ attributes?: Record<string, unknown> }>))
-        : (textOf(old)?.toDelta() as Array<{ attributes?: Record<string, unknown> }> | undefined) ?? [];
-      const marks = [...new Set(marked.flatMap((op) => Object.keys(op.attributes ?? {})))];
-      if (marks.length > 0) throw new MarksNotAllowedError(blockId, newType, marks);
-      const replacement = buildElement(blockId, {
-        type: newType, text: toBlock(old).text,
-        ...(attrs.level === undefined ? {} : { level: attrs.level }),
-        ...(attrs.language === undefined ? {} : { language: attrs.language }),
-        ...(attrs.list === undefined ? {} : { list: attrs.list }),
-        ...(attrs.indent === undefined ? {} : { indent: attrs.indent }),
-      }, false);
-      fragment.insert(index + 1, [replacement]);
-      fragment.delete(index, 1);
-      return;
-    }
-
-    // Source blocks allow only thread marks. Refuse known and foreign formatting
-    // before mutation: dropping it loses content, keeping it breaks editor binding.
-    if (!isProseBlockType(newType)) {
-      const marks = marksOtherThanComment(textOf(old));
-      if (marks.length > 0) {
-        throw new MarksNotAllowedError(blockId, newType, marks);
-      }
-    }
-
-    const level =
-      attrs.level ?? (oldType === "heading" ? levelOf(old) : undefined);
-    const language =
-      attrs.language ?? (oldType === "code" ? old.getAttribute("language") : undefined);
-    const list = attrs.list ?? (oldType === "list-item" ? listOf(old) : undefined);
-    const indent =
-      attrs.indent ?? (oldType === "list-item" ? indentOf(old) : undefined);
-
-    const replacement = new Y.XmlElement(newType);
-    replacement.setAttribute("id", blockId);
-    if (newType === "heading") {
-      replacement.setAttribute("level", String(normalizeLevel(level)));
-    }
-    if (newType === "code" && language !== undefined) {
-      replacement.setAttribute("language", language);
-    }
-    if (newType === "list-item") {
-      replacement.setAttribute("list", list ?? "bullet");
-      replacement.setAttribute("indent", String(normalizeIndent(indent)));
-    }
-    replacement.insert(0, [new Y.XmlText()]);
-    fragment.insert(index + 1, [replacement]);
-
-    const oldText = textOf(old);
-    const newText = textOf(replacement);
-    if (oldText !== null && newText !== null) {
-      const delta = oldText.toDelta() as Array<Record<string, unknown>>;
-      if (delta.length > 0) newText.applyDelta(delta);
-    }
-    fragment.delete(index, 1);
-  });
 }
 
 export interface EditBlockOptions {

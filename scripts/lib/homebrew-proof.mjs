@@ -1,11 +1,21 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
+import { globSync, lstatSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
 import { join, relative } from "node:path";
 
 export function assertHomebrewPlatform(platform = process.platform, arch = process.arch) {
 	if (!(platform === "darwin" && arch === "arm64") && !(platform === "linux" && arch === "x64")) {
 		throw new Error(`Homebrew proof needs Apple Silicon macOS or Linux x86_64, got ${platform}/${arch}`);
+	}
+}
+
+/** Release JavaScript must not carry the builder's configuration or checkout binding. */
+export function assertReleaseWebIsolation(web, forbiddenValues) {
+	const files = globSync("**/*.js", { cwd: web });
+	if (files.length === 0) throw new Error("the payload has no built web JavaScript");
+	const bundle = files.map((file) => readFileSync(join(web, file), "utf8")).join("\n");
+	for (const value of forbiddenValues) {
+		if (bundle.includes(value)) throw new Error("builder configuration reached packaged web assets");
 	}
 }
 
