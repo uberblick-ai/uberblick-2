@@ -11,7 +11,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { Io } from "../src/io.js";
-import { type CaptureResult, type UpdateHost, processHost, updateCommand } from "../src/update.js";
+import { type CaptureResult, type UpdateHost, processHost } from "../src/update.js";
+import { runCli } from "../src/cli.js";
+
+function updateCommand(argv: string[], io: Io, host: UpdateHost): Promise<number> {
+  return runCli(["update", ...argv], io, { updateHost: host });
+}
 
 const HELP = `usage: ub update
 

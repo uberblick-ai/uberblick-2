@@ -1,9 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { parseArgs } from "node:util";
 import { findProjectConfig, PROJECT_CONFIG_FILE, resolveProjectBinding } from "@uberblick/mcp-server/project-binding";
-import { takeHelp } from "./help.js";
+import { type CommandArgs, usageError } from "./command.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { field } from "./strings.js";
@@ -57,24 +56,11 @@ name \`uberblick\` is never replaced: it is reported, the snippet is printed, an
 the file is left exactly as it was.
 `;
 
-function parseFlags(argv: string[]): Flags | null {
-  if (argv.includes("--")) {
-    throw new Error("unexpected argument \"--\"");
-  }
-  const { values, positionals } = parseArgs({
-    args: argv,
-    options: INSTALL_OPTIONS,
-    allowPositionals: true,
-  });
-
-  if (positionals.length > 1) {
-    throw new Error(`unexpected argument ${JSON.stringify(positionals[1])}`);
-  }
-  const named = positionals[0];
-  if (named === undefined) return null;
+function installFlags({ values, positionals }: CommandArgs<typeof INSTALL_OPTIONS>): Flags {
+  const named = positionals[0] ?? "";
   const known = TARGETS.includes(named as TargetName);
   if (!known && values.print !== true) {
-    throw new Error(
+    usageError(
       `unknown client ${JSON.stringify(named)} — expected one of ${TARGETS.join(", ")}. ` +
         "Add --print for the snippet to paste into any other client",
     );
@@ -239,24 +225,10 @@ function printSnippet(
 }
 
 export async function installCommand(
-  argv: string[],
+  args: CommandArgs<typeof INSTALL_OPTIONS>,
   io: Io = processIo,
 ): Promise<number> {
-  if (takeHelp(argv, io, INSTALL_HELP)) return 0;
-
-  let flags: Flags | null;
-  try {
-    flags = parseFlags(argv);
-  } catch (error) {
-    io.err(
-      `ub mcp install: ${error instanceof Error ? error.message : String(error)}\n`,
-    );
-    return 2;
-  }
-  if (flags === null) {
-    io.err(`ub mcp install: missing client\n\n${INSTALL_HELP}`);
-    return 2;
-  }
+  const flags = installFlags(args);
 
   const entry = DEFAULT_ENTRY;
 

@@ -54,11 +54,11 @@ function state(box: Sandbox) {
 
 it("prints inert help everywhere, and reports usage on stderr without binding or file access", async () => {
   const box = unboundSandbox({ raw: { projectBinding: "{" } });
-  for (const args of [[], ["get", "--out", "absent", "--help"], ["update", "-h"], ["bogus", "--", "--help"]]) {
+  for (const args of [[], ["help"], ["get", "--out", "absent", "--help"], ["update", "-h"]]) {
     const run = await runInProcess(["data", ...args], box);
     expect(run).toMatchObject({ status: 0, stdout: DATA_HELP, stderr: "" });
   }
-  for (const args of [["get"], ["bogus"], ["get", UUID, "--out", "x"], ["update", UUID],
+  for (const args of [["get"], ["bogus"], ["bogus", "--", "--help"], ["get", UUID, "--out", "x"], ["update", UUID],
     ["get", UUID, "c", "--ids", "a"], ["update", UUID, "--file", "x", "--out", "y"]]) {
     const run = await runInProcess(["data", ...args], box);
     expect(run.status, run.output).toBe(2);

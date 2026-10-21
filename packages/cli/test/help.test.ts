@@ -1,12 +1,9 @@
 /**
  * Contextual help as a contract of the whole `ub` surface.
  *
- * The manifest below is the point of this suite: every human-facing command
- * path is listed once, and a new path that ships without help fails here rather
- * than being discovered by somebody who typed `--help` and got exit 2. What is
- * asserted about each is the same three things — both spellings exit 0, the
- * help lands on stdout, and the option names come from the parser the command
- * actually uses rather than from a copy that can go stale.
+ * The declared command tree supplies every human-facing path, its help and
+ * parser options. Both help spellings exit 0 on stdout, and the option names
+ * are checked against the parser surface rather than a copy that can go stale.
  *
  * The other half is what help must *not* do: it is answered before validation,
  * before a missing operand is noticed, and before anything is written,
@@ -20,41 +17,12 @@ import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { HELP, MCP_HELP, runCli } from "../src/cli.js";
-import {
-  AUTH_HELP,
-  AUTH_LOGIN_HELP,
-  AUTH_LOGOUT_HELP,
-  AUTH_LOGOUT_OPTIONS,
-  AUTH_STATUS_HELP,
-  AUTH_STATUS_OPTIONS,
-} from "../src/auth.js";
-import { DOCTOR_HELP, DOCTOR_OPTIONS } from "../src/doctor.js";
-import { DATA_HELP, DATA_GET_OPTIONS, DATA_UPDATE_OPTIONS } from "../src/data.js";
-import { INSTALL_HELP, INSTALL_OPTIONS } from "../src/install.js";
-import { OPEN_HELP, OPEN_OPTIONS } from "../src/open.js";
-import { WORKSPACE_CREATE_HELP } from "../src/workspace-create.js";
-import { WORKSPACE_FORK_HELP } from "../src/workspace-fork.js";
-import {
-  WORKSPACE_MEMBER_HELP,
-  WORKSPACE_MEMBER_SUBCOMMAND_HELP,
-  WORKSPACE_MEMBER_ADD_OPTIONS,
-  WORKSPACE_MEMBER_LIST_OPTIONS,
-} from "../src/workspace-member.js";
-import { WORKSPACE_PROMOTE_HELP } from "../src/workspace-promote.js";
-import { STATUS_HELP, STATUS_OPTIONS } from "../src/status.js";
-import { UPDATE_HELP } from "../src/update.js";
-import {
-  WORKSPACE_HELP,
-  WORKSPACE_LIST_HELP,
-  WORKSPACE_LIST_OPTIONS,
-  WORKSPACE_REMOVE_HELP,
-  WORKSPACE_REMOVE_OPTIONS,
-  WORKSPACE_USE_HELP,
-  WORKSPACE_USE_OPTIONS,
-} from "../src/workspace.js";
+import { COMMAND_TREE, MCP_HELP, runCli } from "../src/cli.js";
+import type { Command } from "../src/command.js";
+import { OPEN_HELP } from "../src/open.js";
+import { WORKSPACE_HELP } from "../src/workspace.js";
 import type { Run, Sandbox } from "./helpers.js";
-import { DEAD_HUB_URL, PACKAGE_ROOT, removeTempDirs, runUb, sandbox } from "./helpers.js";
+import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
@@ -100,7 +68,7 @@ it("refuses an invalid explicit web port", async () => {
 
 /** As much of a `parseArgs` option map as this suite reads. */
 type Options = Readonly<
-  Record<string, { readonly type: string; readonly short?: string }>
+  Record<string, { readonly type: string; readonly short?: string | undefined }>
 >;
 
 interface Path {
@@ -118,63 +86,23 @@ interface Path {
  * deliberately absent: they are not part of this contract, and the test below
  * proves `ub mcp --help` does not advertise them either.
  */
-const ROOT_PATH: Path = { argv: [], help: HELP, options: {} };
+function humanPaths(entry: Command): Path[] {
+  if ("hidden" in entry && entry.hidden) return [];
+  const path = { argv: [...entry.path], help: entry.help };
+  if (!("children" in entry)) return [{ ...path, options: entry.options }];
+  return [
+    {
+      ...path,
+      options: {},
+      children: entry.children
+        .filter(child => !("hidden" in child && child.hidden))
+        .map(child => child.path.at(-1) as string),
+    },
+    ...entry.children.flatMap(humanPaths),
+  ];
+}
 
-const PATHS: Path[] = [
-  ROOT_PATH,
-  { argv: ["update"], help: UPDATE_HELP, options: {} },
-  { argv: ["open"], help: OPEN_HELP, options: OPEN_OPTIONS },
-  { argv: ["status"], help: STATUS_HELP, options: STATUS_OPTIONS },
-  { argv: ["doctor"], help: DOCTOR_HELP, options: DOCTOR_OPTIONS },
-  { argv: ["data"], help: DATA_HELP, options: {}, children: ["get", "update"] },
-  { argv: ["data", "get"], help: DATA_HELP, options: DATA_GET_OPTIONS },
-  { argv: ["data", "update"], help: DATA_HELP, options: DATA_UPDATE_OPTIONS },
-  {
-    argv: ["workspace"],
-    help: WORKSPACE_HELP,
-    options: {},
-    children: ["create", "fork", "promote", "member", "list", "use", "remove"],
-  },
-  { argv: ["workspace", "fork"], help: WORKSPACE_FORK_HELP, options: {} },
-  { argv: ["workspace", "list"], help: WORKSPACE_LIST_HELP, options: WORKSPACE_LIST_OPTIONS },
-  { argv: ["workspace", "use"], help: WORKSPACE_USE_HELP, options: WORKSPACE_USE_OPTIONS },
-  { argv: ["workspace", "remove"], help: WORKSPACE_REMOVE_HELP, options: WORKSPACE_REMOVE_OPTIONS },
-  { argv: ["workspace", "create"], help: WORKSPACE_CREATE_HELP, options: {} },
-  { argv: ["workspace", "promote"], help: WORKSPACE_PROMOTE_HELP, options: {} },
-  {
-    argv: ["workspace", "member"],
-    help: WORKSPACE_MEMBER_HELP,
-    options: {},
-    children: ["add", "list", "role", "remove"],
-  },
-  { argv: ["workspace", "member", "add"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.add, options: WORKSPACE_MEMBER_ADD_OPTIONS },
-  { argv: ["workspace", "member", "list"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.list, options: WORKSPACE_MEMBER_LIST_OPTIONS },
-  { argv: ["workspace", "member", "role"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.role, options: {} },
-  { argv: ["workspace", "member", "remove"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.remove, options: {} },
-  { argv: ["auth"], help: AUTH_HELP, options: {}, children: ["login", "status", "logout"] },
-  { argv: ["auth", "login"], help: AUTH_LOGIN_HELP, options: {} },
-  { argv: ["auth", "status"], help: AUTH_STATUS_HELP, options: AUTH_STATUS_OPTIONS },
-  { argv: ["auth", "logout"], help: AUTH_LOGOUT_HELP, options: AUTH_LOGOUT_OPTIONS },
-  { argv: ["mcp"], help: MCP_HELP, options: {}, children: ["install"] },
-  { argv: ["mcp", "install"], help: INSTALL_HELP, options: INSTALL_OPTIONS },
-];
-
-ROOT_PATH.children = PATHS.flatMap(({ argv }) => (argv.length === 1 ? argv : []));
-
-/**
- * Where the dispatch actually happens, so the manifest can be checked against
- * it: the variable each dispatcher switches on, and the path its cases hang off.
- */
-const DISPATCHERS = [
-  { file: "cli.ts", group: [], variable: "command" },
-  { file: "cli.ts", group: ["mcp"], variable: "subcommand" },
-  { file: "workspace.ts", group: ["workspace"], variable: "sub" },
-  { file: "workspace-member.ts", group: ["workspace", "member"], variable: "command" },
-  { file: "auth.ts", group: ["auth"], variable: "sub" },
-];
-
-/** Not commands: the hidden machine entry, the help words, the version flags. */
-const HIDDEN = ["serve", "help", "--help", "-h", "--version", "-v"];
+const PATHS = humanPaths(COMMAND_TREE);
 
 /** Command names and description columns from one contextual catalog. */
 function commandRows(help: string, catalogOnly = false): Array<{ command: string; descriptionColumn: number }> {
@@ -267,26 +195,6 @@ describe("every human-facing command path", () => {
     });
   }
 
-  it("lists every command the dispatchers actually accept", () => {
-    // The manifest above is written by hand, so this reads the dispatchers
-    // themselves — the same trick the option maps play. A command wired into
-    // `runCli` or into a group and given no help fails here rather than
-    // shipping.
-    const listed = new Set(PATHS.map((path) => path.argv.join(" ")));
-    for (const { file, group, variable } of DISPATCHERS) {
-      const source = readFileSync(join(PACKAGE_ROOT, "src", file), "utf8");
-      for (const [, command] of source.matchAll(
-        // \b, or `command` would match inside `subcommand`.
-        new RegExp(`\\b${variable} === "([^"]+)"`, "g"),
-      )) {
-        // `serve` is hidden by design; the help words are not commands.
-        if (command === undefined || HIDDEN.includes(command)) continue;
-        const path = [...group, command].join(" ");
-        expect(listed, `the manifest lists \`ub ${path}\``).toContain(path);
-      }
-    }
-  });
-
   it("refuses unknown mcp commands with the same help and no hidden command", async () => {
     for (const args of [[], ["--help"]]) {
       const run = await dispatch(["mcp", "bogus", ...args]);
@@ -303,16 +211,27 @@ describe("every human-facing command path", () => {
     expect(run.stdout).not.toMatch(/serve/);
 
     // And it keeps its own rules: no help on stdout, which is the transport.
-    // `serveCommand` refuses the argument before it resolves anything, so this
+    // The dispatcher refuses the argument before resolving anything, so this
     // starts no server here either.
     const serve = await dispatch(["mcp", "serve", "--help"]);
     expect(serve.status).toBe(2);
     expect(serve.stdout).toBe("");
-    expect(serve.stderr).toMatch(/unexpected argument/);
+    expect(serve.stderr).toBe('ub mcp serve: unexpected argument "--help"\n');
   });
 });
 
 describe("help before the work", () => {
+  for (const path of PATHS.filter(path => path.children === undefined)) {
+    it(`answers help before parsing on \`ub ${path.argv.join(" ")}\``, async () => {
+      for (const flag of ["--help", "-h"]) {
+        const run = await dispatch([...path.argv, "--bogus", flag, "extra"]);
+        expect(run.status).toBe(0);
+        expect(run.stdout).toBe(path.help);
+        expect(run.stderr).toBe("");
+      }
+    });
+  }
+
   it.each([
     ["workspace", "use", "-h", "ws://example.invalid:1234"],
     ["mcp", "install", "claude", "--help"],
@@ -331,12 +250,14 @@ describe("help before the work", () => {
 });
 
 describe("bare command groups", () => {
-  it("prints every group's own help", async () => {
+  it("prints every group's own help for a bare group and each help command slot", async () => {
     for (const group of PATHS.filter(path => path.children !== undefined)) {
-      const run = await dispatch(group.argv);
-      expect(run.status, group.argv.join(" ")).toBe(0);
-      expect(run.stdout).toBe(group.help);
-      expect(run.stderr).toBe("");
+      for (const command of [[], ["help"], ["--help"], ["-h"]]) {
+        const run = await dispatch([...group.argv, ...command]);
+        expect(run.status, [...group.argv, ...command].join(" ")).toBe(0);
+        expect(run.stdout).toBe(group.help);
+        expect(run.stderr).toBe("");
+      }
     }
   });
 
@@ -386,7 +307,16 @@ describe("what is not a request for help", () => {
     expect(missingTarget.stderr).toMatch(/^usage: ub workspace use /m);
   });
 
-  it("stops searching for help at --", () => {
+  it("stops searching for help at --", async () => {
+    for (const path of PATHS.filter(path => path.argv[0] === "auth" || path.argv[0] === "data")
+      .filter(path => path.children === undefined)) {
+      for (const flag of ["--help", "-h"]) {
+        const run = await dispatch([...path.argv, "--", flag, "extra", "third"]);
+        expect(run.status, path.argv.join(" ")).toBe(2);
+        expect(run.stdout).toBe("");
+        expect(run.stderr).toContain(`\n\n${path.help}`);
+      }
+    }
     const box = sandbox();
     const before = tree(box);
     const run = runUb(["mcp", "install", "claude", "--print", "--", "--help"], box);
@@ -397,15 +327,15 @@ describe("what is not a request for help", () => {
   });
 
   it("refuses unknown subcommands with an error and the group's usage", async () => {
-    for (const group of [
-      { argv: [], help: HELP, error: 'ub: unknown command "bogus"' },
-      { argv: ["workspace"], help: WORKSPACE_HELP, error: 'ub workspace: unknown command "bogus"' },
-      { argv: ["auth"], help: AUTH_HELP, error: "ub auth: unknown command" },
-    ]) {
-      const run = await dispatch([...group.argv, "bogus", "--help"]);
-      expect(run.status).toBe(2);
-      expect(run.stdout).toBe("");
-      expect(run.stderr).toBe(`${group.error}\n\n${group.help}`);
+    for (const group of PATHS.filter(path => path.children !== undefined)) {
+      const prefix = ["ub", ...group.argv].join(" ");
+      const error = `${prefix}: unknown command${group.argv[0] === "auth" ? "" : ' "bogus"'}`;
+      for (const args of [[], ["--help"], ["-h"]]) {
+        const run = await dispatch([...group.argv, "bogus", ...args]);
+        expect(run.status).toBe(2);
+        expect(run.stdout).toBe("");
+        expect(run.stderr).toBe(`${error}\n\n${group.help}`);
+      }
     }
     const box = sandbox();
     const before = tree(box);
@@ -417,11 +347,18 @@ describe("what is not a request for help", () => {
   });
 
   it("refuses unknown options with an error and usage, without writing", async () => {
-    for (const argv of [["status", "--bogus"], ["mcp", "install", "--bogus"]]) {
-      const run = await dispatch(argv);
+    for (const path of PATHS.filter(path => path.children === undefined)) {
+      const prefix = ["ub", ...(path.argv[0] === "data" ? ["data"] : path.argv)].join(" ");
+      const run = await dispatch([...path.argv, "--bogus"]);
       expect(run.status).toBe(2);
       expect(run.stdout).toBe("");
-      expect(run.stderr).toContain("Unknown option '--bogus'");
+      expect(run.stderr).toMatch(new RegExp(`^${prefix}: `));
+      expect(run.stderr.endsWith(`\n\n${path.help}`)).toBe(true);
+      if (path.argv[0] === "auth") {
+        expect(run.stderr).toBe(`${prefix}: unknown option\n\n${path.help}`);
+      } else if (path.argv[0] !== "update") {
+        expect(run.stderr).toContain("Unknown option '--bogus'");
+      }
     }
     const box = sandbox();
     const before = tree(box);

@@ -3,7 +3,6 @@ import { realpathSync } from "node:fs";
 import { dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findCheckoutRoot } from "./checkout.js";
-import { takeHelp } from "./help.js";
 import { isInstallPayload } from "./version.js";
 import type { Io } from "./io.js";
 import { errorMessage } from "./strings.js";
@@ -145,16 +144,9 @@ const UNSUPPORTED =
 
 /** Report expected installation and Homebrew failures without throwing. */
 export async function updateCommand(
-  argv: string[],
   io: Io,
   host: UpdateHost = processHost(),
 ): Promise<number> {
-  if (takeHelp(argv, io, UPDATE_HELP)) return 0;
-  if (argv.length > 0) {
-    io.err(`ub update: expected no arguments, got ${JSON.stringify(argv[0])}\n\n${UPDATE_HELP}`);
-    return 2;
-  }
-
   const installation = classify(host);
   if (installation.kind === "homebrew") return await updateHomebrew(io, host, installation.prefix);
   if (installation.kind === "checkout") {

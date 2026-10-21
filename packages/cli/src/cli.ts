@@ -1,15 +1,27 @@
-import { authCommand } from "./auth.js";
-import { doctorCommand } from "./doctor.js";
-import { dataCommand } from "./data.js";
-import { installCommand } from "./install.js";
+import { authCommand, AUTH_HELP, AUTH_LOGIN_HELP, AUTH_LOGOUT_HELP, AUTH_LOGOUT_OPTIONS, AUTH_STATUS_HELP, AUTH_STATUS_OPTIONS } from "./auth.js";
+import { command, type CommandGroup, dispatchCommand, type RunOptions } from "./command.js";
+import { doctorCommand, DOCTOR_HELP, DOCTOR_OPTIONS } from "./doctor.js";
+import { getDataCommand, updateDataCommand, DATA_HELP, DATA_GET_OPTIONS, DATA_UPDATE_OPTIONS } from "./data.js";
+import { installCommand, INSTALL_HELP, INSTALL_OPTIONS } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
-import { openCommand } from "./open.js";
+import { openCommand, OPEN_HELP, OPEN_OPTIONS } from "./open.js";
 import { serveCommand } from "./serve.js";
-import { statusCommand } from "./status.js";
-import { updateCommand } from "./update.js";
+import { statusCommand, STATUS_HELP, STATUS_OPTIONS } from "./status.js";
+import { updateCommand, UPDATE_HELP } from "./update.js";
 import { cliVersion } from "./version.js";
-import { workspaceCommand } from "./workspace.js";
+import {
+  listWorkspacesCommand, removeWorkspaceCommand, useWorkspaceCommand,
+  WORKSPACE_HELP, WORKSPACE_LIST_HELP, WORKSPACE_LIST_OPTIONS,
+  WORKSPACE_REMOVE_HELP, WORKSPACE_REMOVE_OPTIONS, WORKSPACE_USE_HELP, WORKSPACE_USE_OPTIONS,
+} from "./workspace.js";
+import { createWorkspaceCommand, WORKSPACE_CREATE_HELP } from "./workspace-create.js";
+import { forkWorkspaceCommand, WORKSPACE_FORK_HELP } from "./workspace-fork.js";
+import { promoteWorkspaceCommand, WORKSPACE_PROMOTE_HELP } from "./workspace-promote.js";
+import {
+  workspaceMemberCommand, WORKSPACE_MEMBER_HELP, WORKSPACE_MEMBER_SUBCOMMAND_HELP,
+  WORKSPACE_MEMBER_ADD_OPTIONS, WORKSPACE_MEMBER_LIST_OPTIONS,
+} from "./workspace-member.js";
 
 export const HELP = `uberblick — local-first, CRDT-backed collaborative documents
 
@@ -44,61 +56,71 @@ options for install:
   --print            # Print the entry to paste, and run nothing
 `;
 
+const authParseError = (error: unknown): string =>
+  error instanceof Error && "code" in error && error.code === "ERR_PARSE_ARGS_UNKNOWN_OPTION"
+    ? "unknown option" : "invalid option usage";
+
+export const COMMAND_TREE: CommandGroup = {
+  path: [], help: HELP, version: cliVersion,
+  children: [
+    command({ path: ["update"], help: UPDATE_HELP, options: {}, positionals: false,
+      argumentError: args => args.length === 0 ? undefined : `expected no arguments, got ${JSON.stringify(args[0])}`,
+      run: (_args, io, options) => updateCommand(io, options.updateHost) }),
+    command({ path: ["open"], help: OPEN_HELP, options: OPEN_OPTIONS,
+      positionals: { min: 0, max: 0, error: args => `unexpected argument ${JSON.stringify(args[0])}` }, run: openCommand }),
+    command({ path: ["status"], help: STATUS_HELP, options: STATUS_OPTIONS, positionals: false, run: statusCommand }),
+    command({ path: ["doctor"], help: DOCTOR_HELP, options: DOCTOR_OPTIONS, positionals: false, run: doctorCommand }),
+    { path: ["data"], help: DATA_HELP, children: [
+      command({ path: ["data", "get"], help: DATA_HELP, options: DATA_GET_OPTIONS, errorPath: "data",
+        positionals: { min: 1, max: 2, error: "expected a document and an optional collection" }, run: getDataCommand }),
+      command({ path: ["data", "update"], help: DATA_HELP, options: DATA_UPDATE_OPTIONS, errorPath: "data",
+        positionals: { min: 1, max: 1, error: "expected one document and --file <path|->" }, run: updateDataCommand }),
+    ] },
+    { path: ["workspace"], help: WORKSPACE_HELP, children: [
+      command({ path: ["workspace", "create"], help: WORKSPACE_CREATE_HELP, options: {},
+        positionals: { min: 1, max: 1, error: "expected exactly one workspace name" }, run: createWorkspaceCommand }),
+      command({ path: ["workspace", "fork"], help: WORKSPACE_FORK_HELP, options: {}, positionals: false,
+        run: (_args, io) => forkWorkspaceCommand(io) }),
+      command({ path: ["workspace", "promote"], help: WORKSPACE_PROMOTE_HELP, options: {},
+        positionals: { min: 1, max: 1, error: "expected exactly one hub" }, run: promoteWorkspaceCommand }),
+      { path: ["workspace", "member"], help: WORKSPACE_MEMBER_HELP, children: [
+        command({ path: ["workspace", "member", "add"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.add, options: WORKSPACE_MEMBER_ADD_OPTIONS,
+          positionals: { min: 1, max: 1, error: "expected 1 argument" }, run: (args, io) => workspaceMemberCommand("add", args, io) }),
+        command({ path: ["workspace", "member", "list"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.list, options: WORKSPACE_MEMBER_LIST_OPTIONS,
+          positionals: { min: 0, max: 0, error: "expected 0 arguments" }, run: (args, io) => workspaceMemberCommand("list", args, io) }),
+        command({ path: ["workspace", "member", "role"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.role, options: {},
+          positionals: { min: 2, max: 2, error: "expected 2 arguments" }, run: (args, io) => workspaceMemberCommand("role", args, io) }),
+        command({ path: ["workspace", "member", "remove"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.remove, options: {},
+          positionals: { min: 1, max: 1, error: "expected 1 argument" }, run: (args, io) => workspaceMemberCommand("remove", args, io) }),
+      ] },
+      command({ path: ["workspace", "list"], help: WORKSPACE_LIST_HELP, options: WORKSPACE_LIST_OPTIONS, positionals: false, run: listWorkspacesCommand }),
+      command({ path: ["workspace", "use"], help: WORKSPACE_USE_HELP, options: WORKSPACE_USE_OPTIONS,
+        positionals: { min: 1, max: 1, error: "expected exactly one workspace link or id" }, run: useWorkspaceCommand }),
+      command({ path: ["workspace", "remove"], help: WORKSPACE_REMOVE_HELP, options: WORKSPACE_REMOVE_OPTIONS,
+        positionals: { min: 1, max: 1, error: "expected exactly one workspace id or prefix" }, run: removeWorkspaceCommand }),
+    ] },
+    { path: ["auth"], help: AUTH_HELP, unknownCommand: () => "unknown command", children: [
+      command({ path: ["auth", "login"], help: AUTH_LOGIN_HELP, options: {}, parseError: authParseError,
+        positionals: { min: 0, max: 1, error: "expected at most one hub" },
+        run: (args, io, options) => authCommand("login", args, io, options.authCollectTimeoutMs === undefined
+          ? {} : { collectTimeoutMs: options.authCollectTimeoutMs }) }),
+      command({ path: ["auth", "status"], help: AUTH_STATUS_HELP, options: AUTH_STATUS_OPTIONS, parseError: authParseError,
+        positionals: { min: 0, max: 1, error: "expected at most one hub" }, run: (args, io) => authCommand("status", args, io) }),
+      command({ path: ["auth", "logout"], help: AUTH_LOGOUT_HELP, options: AUTH_LOGOUT_OPTIONS, parseError: authParseError,
+        positionals: { min: 0, max: 1, error: "expected at most one hub" }, run: (args, io) => authCommand("logout", args, io) }),
+    ] },
+    { path: ["mcp"], help: MCP_HELP, children: [
+      command({ path: ["mcp", "install"], help: INSTALL_HELP, options: INSTALL_OPTIONS,
+        argumentError: args => args.includes("--") ? 'unexpected argument "--"' : undefined,
+        positionals: { min: 1, max: 1, error: args => args.length === 0 ? "missing client" : `unexpected argument ${JSON.stringify(args[1])}` },
+        run: installCommand }),
+      { path: ["mcp", "serve"], hidden: true, options: {}, positionals: false,
+        argumentError: args => args.length === 0 ? undefined : `unexpected argument ${JSON.stringify(args[0])}`, run: serveCommand },
+    ] },
+  ],
+};
+
 /** Contributor commands stay mise tasks; usage failures return an exit code. */
-export async function runCli(
-  argv: string[],
-  io: Io = processIo,
-  options: { authCollectTimeoutMs?: number } = {},
-): Promise<number> {
-  const [command, ...rest] = argv;
-
-  if (command === undefined || command === "help" || command === "--help" || command === "-h") {
-    io.out(HELP);
-    return 0;
-  }
-  if (command === "--version" || command === "-v") {
-    io.out(`${cliVersion()}\n`);
-    return 0;
-  }
-  if (command === "update") {
-    return await updateCommand(rest, io);
-  }
-  if (command === "open") {
-    return await openCommand(rest, io);
-  }
-  if (command === "status") {
-    return await statusCommand(rest, io);
-  }
-  if (command === "doctor") {
-    return await doctorCommand(rest, io);
-  }
-  if (command === "data") {
-    return await dataCommand(rest, io);
-  }
-  if (command === "workspace") {
-    return await workspaceCommand(rest, io);
-  }
-  if (command === "auth") {
-    return await authCommand(rest, io, options.authCollectTimeoutMs === undefined
-      ? {} : { collectTimeoutMs: options.authCollectTimeoutMs });
-  }
-  if (command === "mcp") {
-    const [subcommand, ...args] = rest;
-    if (subcommand === "serve") {
-      return await serveCommand(args, io.err);
-    }
-    if (subcommand === "install") {
-      return await installCommand(args, io);
-    }
-    // Only the subcommand slot asks for group help; unknown children stay errors.
-    if (subcommand === undefined || subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
-      io.out(MCP_HELP);
-      return 0;
-    }
-    io.err(`ub mcp: unknown command ${JSON.stringify(subcommand)}\n\n${MCP_HELP}`);
-    return 2;
-  }
-
-  io.err(`ub: unknown command ${JSON.stringify(command)}\n\n${HELP}`);
-  return 2;
+export async function runCli(argv: string[], io: Io = processIo, options: RunOptions = {}): Promise<number> {
+  return dispatchCommand(COMMAND_TREE, argv, io, options);
 }

@@ -16,7 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startDeviceSyncHub } from "../../hub/test/device-sync-hub.js";
 import * as budget from "../src/budget.js";
 import type { Check, DoctorReport } from "../src/doctor.js";
-import { doctorCommand, doctorReport, renderDoctor } from "../src/doctor.js";
+import { doctorReport, renderDoctor } from "../src/doctor.js";
+import { runCli } from "../src/cli.js";
 import * as open from "../src/open.js";
 import * as probes from "../src/probes.js";
 import { ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
@@ -761,7 +762,7 @@ describe("ub doctor", () => {
     vi.stubEnv("CODEX_HOME", join(homeOf(box), ".codex"));
     vi.spyOn(process, "cwd").mockReturnValue(box.cwd);
     let output = "";
-    expect(await doctorCommand(["--json"], { out: text => { output += text; }, err: () => {} })).toBe(1);
+    expect(await runCli(["doctor", "--json"], { out: text => { output += text; }, err: () => {} })).toBe(1);
     expect(JSON.parse(output)).toEqual(report);
   });
 

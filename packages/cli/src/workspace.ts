@@ -1,13 +1,9 @@
-import { createWorkspaceCommand } from "./workspace-create.js";
-import { forkWorkspaceCommand } from "./workspace-fork.js";
-import { promoteWorkspaceCommand } from "./workspace-promote.js";
 import { useRemoteWorkspace } from "./remote.js";
 import { assertHubTransport, parseJoinTarget } from "@uberblick/mcp-server/remote-url";
 import { ORIGIN_LABELS, displayWorkspaceHub, useBindingLines } from "./workspace-use-output.js";
 
 import { readdirSync, rmSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
-import { parseArgs } from "node:util";
 import { WORKSPACE_DATABASE_FILE, resolveStorage } from "@uberblick/mcp-server/storage";
 import { acquireWorkspaceRemovalRole, defaultWorkspaceDatabasePath, readWorkspaceName, usesDeviceLogin } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
@@ -15,12 +11,11 @@ import type { Origin } from "@uberblick/mcp-server/project-config";
 import { resolveConfig, userConfigWarnings, writeHubAdmission } from "@uberblick/mcp-server/project-config";
 import { type ProjectBinding, resolveProjectBinding, writeProjectBinding } from "@uberblick/mcp-server/project-binding";
 import { forgetWorkspace, hasWorkspaceReplica, readWorkspaceHub, recordedWorkspaceIds, workspaceRegistryPath } from "@uberblick/mcp-server/workspace-registry";
-import { takeHelp } from "./help.js";
-import { workspaceMemberCommand } from "./workspace-member.js";
+import { type CommandArgs, UsageError, usageError } from "./command.js";
 import type { InitLock } from "@uberblick/mcp-server/init-lock";
 import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
 import type { Io } from "./io.js";
-import { processIo, shellArgument, warn } from "./io.js";
+import { shellArgument, warn } from "./io.js";
 import { describeFsError } from "@uberblick/mcp-server/safe-write";
 import { fillMainRepositoryFromOrigin } from "./workspace-main-repository.js";
 
@@ -146,32 +141,15 @@ options:
   -h, --help        show this help
 `;
 
-async function removeCommand(argv: string[], io: Io): Promise<number> {
-  if (takeHelp(argv, io, WORKSPACE_REMOVE_HELP)) return 0;
-  let raw: string;
-  let yes: boolean;
-  try {
-    const { positionals, values } = parseArgs({
-      args: argv,
-      options: WORKSPACE_REMOVE_OPTIONS,
-      allowPositionals: true,
-    });
-    if (positionals.length !== 1 || positionals[0] === undefined) {
-      throw new Error("expected exactly one workspace id or prefix");
-    }
-    raw = positionals[0];
-    yes = values.yes;
-  } catch (error) {
-    io.err(`ub workspace remove: ${error instanceof Error ? error.message : String(error)}\n\n${WORKSPACE_REMOVE_HELP}`);
-    return 2;
-  }
+export async function removeWorkspaceCommand({ positionals, values }: CommandArgs<typeof WORKSPACE_REMOVE_OPTIONS>, io: Io): Promise<number> {
+  const raw = positionals[0] ?? "";
+  const yes = values.yes;
 
   try {
     const ids = new Set([...listWorkspaces().entries.map(entry => entry.uuid), ...recordedWorkspaceIds()]);
     const resolved = resolveWorkspaceId(raw, [...ids].map(uuid => ({ uuid })));
     if ("error" in resolved) {
-      io.err(`ub workspace remove: ${resolved.error}\n${WORKSPACE_REMOVE_HELP}`);
-      return 2;
+      usageError(resolved.error);
     }
     const id = parseWorkspaceId(resolved.id).uuid;
     if (!ids.has(id)) {
@@ -232,6 +210,7 @@ async function removeCommand(argv: string[], io: Io): Promise<number> {
     io.out(`removed ${id} from this computer\n`);
     return 0;
   } catch (error) {
+    if (error instanceof UsageError) throw error;
     io.err(`ub workspace remove: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
@@ -259,21 +238,8 @@ options:
   -h, --help        show this help
 `;
 
-function listCommand(argv: string[], io: Io): number {
-  if (takeHelp(argv, io, WORKSPACE_LIST_HELP)) return 0;
-
-  let json = false;
-  try {
-    json =
-      parseArgs({
-        args: argv,
-        options: WORKSPACE_LIST_OPTIONS,
-        allowPositionals: false,
-      }).values.json === true;
-  } catch (error) {
-    io.err(`ub workspace list: ${error instanceof Error ? error.message : String(error)}\n`);
-    return 2;
-  }
+export function listWorkspacesCommand({ values }: CommandArgs<typeof WORKSPACE_LIST_OPTIONS>, io: Io): number {
+  const json = values.json;
 
   let listed: { entries: (WorkspaceEntry & { hub: string })[]; warnings: string[]; selectionNote: string | null };
   try {
@@ -406,33 +372,9 @@ UB_WORKSPACE_ID selects the workspace for this shell; a differing UB_HUB_URL
 is refused. Clear both variables to follow the project binding again.
 `;
 
-async function useCommand(argv: string[], io: Io): Promise<number> {
-  if (takeHelp(argv, io, WORKSPACE_USE_HELP)) return 0;
-
-  let raw: string | undefined;
-  let json = false;
-  let verbose = false;
-  try {
-    const { positionals, values } = parseArgs({
-      args: argv,
-      options: WORKSPACE_USE_OPTIONS,
-      allowPositionals: true,
-    });
-    if (positionals.length !== 1) {
-      throw new Error("expected exactly one workspace link or id");
-    }
-    raw = positionals[0];
-    json = values.json;
-    verbose = values.verbose;
-  } catch (error) {
-    io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
-    io.err("usage: ub workspace use <link|id> [--verbose] [--json]\n");
-    return 2;
-  }
-  if (raw === undefined) {
-    io.err("usage: ub workspace use <link|id> [--verbose] [--json]\n");
-    return 2;
-  }
+export async function useWorkspaceCommand({ positionals, values }: CommandArgs<typeof WORKSPACE_USE_OPTIONS>, io: Io): Promise<number> {
+  const raw = positionals[0] ?? "";
+  const { json, verbose } = values;
 
   if (raw.includes("/")) {
     let target: ReturnType<typeof parseJoinTarget>;
@@ -442,8 +384,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
     }
     catch (error) {
       // The URL parser deliberately does not echo potentially secret operands.
-      io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\nusage: ub workspace use <link|id> [--verbose] [--json]\nRun again: ub workspace use <link>\n`);
-      return 2;
+      usageError(error instanceof Error ? error.message : String(error), "Run again: ub workspace use <link>");
     }
     return useRemoteWorkspace(target, `ub workspace use ${shellArgument(raw)}`, io, { json, verbose });
   }
@@ -459,9 +400,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   }
   const resolved = resolveWorkspaceId(raw, entries);
   if ("error" in resolved) {
-    io.err(`ub workspace use: ${resolved.error}\n`);
-    io.err("usage: ub workspace use <link|id> [--verbose] [--json]\n");
-    return 2;
+    usageError(resolved.error);
   }
   const id = resolved.id;
 
@@ -529,29 +468,4 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
   }
 
   return 0;
-}
-
-export async function workspaceCommand(
-  argv: string[],
-  io: Io = processIo,
-): Promise<number> {
-  // Dispatch first so help reaches the leaf; an unknown leaf remains an error.
-  const [sub, ...rest] = argv;
-  if (sub === "create") return createWorkspaceCommand(rest, io);
-  if (sub === "fork") return forkWorkspaceCommand(rest, io);
-  if (sub === "promote") return promoteWorkspaceCommand(rest, io);
-  if (sub === "member") return workspaceMemberCommand(rest, io);
-  if (sub === "list") {
-    return listCommand(rest, io);
-  }
-  if (sub === "use") {
-    return await useCommand(rest, io);
-  }
-  if (sub === "remove") return await removeCommand(rest, io);
-  if (sub === undefined || sub === "help" || sub === "--help" || sub === "-h") {
-    io.out(WORKSPACE_HELP);
-    return 0;
-  }
-  io.err(`ub workspace: unknown command ${JSON.stringify(sub)}\n\n${WORKSPACE_HELP}`);
-  return 2;
 }

@@ -25,6 +25,7 @@ import {
 import { resolveProjectBinding, validateProjectBinding, writeProjectBinding } from "@uberblick/mcp-server/project-binding";
 import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
 import { type Io, shellArgument, warn } from "./io.js";
+import { usageError } from "./command.js";
 import { plural } from "./strings.js";
 import { ORIGIN_LABELS, displayWorkspaceHub, useBindingLines, useField } from "./workspace-use-output.js";
 import { readWorkspaceHub, workspaceRegistryPath } from "@uberblick/mcp-server/workspace-registry";
@@ -243,8 +244,7 @@ export async function useRemoteWorkspace(
   let base: McpConfig;
   try { base = resolveMcpConfig(bridgeEnv); }
   catch (error) {
-    io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\nRun again: ${command}\n`);
-    return 2;
+    usageError(error instanceof Error ? error.message : String(error), `Run again: ${command}`);
   }
   const bridge: Bridge = { base, env: bridgeEnv, target: flags.endpoint, io: { out() {}, err() {} } };
   let progress = false;

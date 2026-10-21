@@ -1,5 +1,4 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { parseArgs } from "node:util";
 import { hostname } from "node:os";
 import { isGithubUsername } from "@uberblick/schema/github-identity";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
@@ -23,6 +22,7 @@ import { SYNC_PROTOCOL_VERSION, protocolSkew, readProtocolMismatch, wrapToken } 
 import { DEVICE_CREDENTIAL_LIFETIME_MS, generateCredentialKeyPair } from "@uberblick/schema/token";
 import { manageRequest, ManagementResponseError, sanitizeManagementReply } from "@uberblick/mcp-server/management-client";
 import { renewDeviceCredential } from "@uberblick/mcp-server/device-login";
+import { type CommandArgs, usageError } from "./command.js";
 
 export const AUTH_HELP = `usage: ub auth [command]
 
@@ -701,38 +701,16 @@ async function login(selection: Selection, io: Io, collectTimeoutMs?: number): P
   }
 }
 
-export async function authCommand(argv: string[], io: Io, options: { collectTimeoutMs?: number } = {}): Promise<number> {
-  const [sub, ...args] = argv;
-  if (sub === undefined || sub === "help" || sub === "--help" || sub === "-h") {
-    io.out(AUTH_HELP);
-    return 0;
-  }
-  let help: string;
-  if (sub === "login") help = AUTH_LOGIN_HELP;
-  else if (sub === "status") help = AUTH_STATUS_HELP;
-  else if (sub === "logout") help = AUTH_LOGOUT_HELP;
-  else { io.err(`ub auth: unknown command\n\n${AUTH_HELP}`); return 2; }
-  if (args.includes("--help") || args.includes("-h")) { io.out(help); return 0; }
-  let hub: string | undefined;
-  let allDevices = false;
-  let json = false;
-  try {
-    const parsed = parseArgs({ args, options: sub === "logout" ? AUTH_LOGOUT_OPTIONS : sub === "status" ? AUTH_STATUS_OPTIONS : {}, allowPositionals: true });
-    if (parsed.positionals.length > 1) {
-      io.err(`ub auth ${sub}: expected at most one hub\n\n${help}`);
-      return 2;
-    }
-    hub = parsed.positionals[0];
-    allDevices = "all-devices" in parsed.values && parsed.values["all-devices"] === true;
-    json = "json" in parsed.values && parsed.values.json === true;
-  } catch (error) {
-    const unknown = error instanceof Error && "code" in error && error.code === "ERR_PARSE_ARGS_UNKNOWN_OPTION";
-    io.err(`ub auth ${sub}: ${unknown ? "unknown option" : "invalid option usage"}\n\n${help}`);
-    return 2;
-  }
+export async function authCommand(sub: "login" | "status" | "logout",
+  { positionals, values }: CommandArgs<typeof AUTH_LOGOUT_OPTIONS & typeof AUTH_STATUS_OPTIONS>,
+  io: Io, options: { collectTimeoutMs?: number } = {}): Promise<number> {
+  const hub = positionals[0];
+  const allDevices = values["all-devices"] === true;
+  const json = values.json === true;
   const selection = selectHub(hub);
   if ("outcome" in selection) {
-    if (sub === "status" && selection.outcome !== "usage-error") {
+    if (selection.outcome === "usage-error") usageError(selection.guidance, undefined, "auth");
+    if (sub === "status") {
       return printAuthStatus(null, selection.outcome, null, io, json, selection.outcome === "no-hub"
         ? "name a hub to check it with `ub auth status <hub>`." : selection.guidance);
     }
@@ -745,8 +723,9 @@ export async function authCommand(argv: string[], io: Io, options: { collectTime
     if (sub === "status" && hub === undefined) {
       return printAuthStatus(selection.origin, "binding-invalid", null, io, json, guidance);
     }
+    if (hub !== undefined) usageError(guidance, undefined, "auth");
     io.err(`ub auth: ${guidance}\n`);
-    return hub === undefined ? 1 : 2;
+    return 1;
   }
   if (sub === "login") {
     authField(io, "hub", selection.origin);

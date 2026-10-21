@@ -23,14 +23,8 @@ function installedMcpServerMain(): string {
 }
 
 export async function serveCommand(
-  argv: string[],
   err: (text: string) => void = (text) => process.stderr.write(text),
 ): Promise<number> {
-  if (argv.length > 0) {
-    err(`ub mcp serve: unexpected argument ${JSON.stringify(argv[0])}\n`);
-    return 2;
-  }
-
   const resolved = resolveConfig();
   const binding = requireBinding(resolved);
   for (const warning of resolved.warnings) {
