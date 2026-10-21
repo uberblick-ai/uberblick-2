@@ -47,7 +47,8 @@ function copyViaSelection(text: string, container: HTMLElement = document.body):
   scratch.style.position = "fixed";
   scratch.style.top = "-9999px";
   scratch.style.opacity = "0";
-  container.appendChild(scratch);
+  // A clipboard permission request can outlive the dialog that requested it.
+  (container.isConnected ? container : document.body).appendChild(scratch);
   let copied = false;
   try {
     // Focus explicitly: `select()` alone leaves the selection on an unfocused

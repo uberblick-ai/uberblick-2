@@ -51,6 +51,35 @@ afterEach(() => {
 });
 
 describe("copying from a modal surface", () => {
+  it("copies the exact source when the modal closes before native clipboard refusal", async () => {
+    let refuse: (reason: Error) => void = () => {};
+    Object.defineProperty(navigator, "clipboard", { configurable: true,
+      value: { writeText: () => new Promise<void>((_resolve, reject) => { refuse = reject; }) },
+    });
+    const modal = document.createElement("div");
+    const origin = document.createElement("button");
+    document.body.append(modal, origin);
+    const execCommand = vi.fn(() => {
+      const focused = document.activeElement;
+      return focused instanceof HTMLTextAreaElement && focused.parentElement === document.body && focused.value === SHELL;
+    });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: execCommand });
+    try {
+      const result = writeToClipboard(SHELL, undefined, modal);
+      modal.remove();
+      origin.focus();
+      refuse(new Error("Permission denied"));
+      expect(await result).toBe(true);
+      expect(execCommand).toHaveBeenCalledWith("copy");
+      expect(document.activeElement).toBe(origin);
+      expect(document.querySelector("textarea")).toBeNull();
+    } finally {
+      modal.remove();
+      origin.remove();
+      Reflect.deleteProperty(document, "execCommand");
+    }
+  });
+
   it("starts the native clipboard write synchronously before waiting for focus release", async () => {
     const written = stubClipboard();
     let release = (): void => {};
