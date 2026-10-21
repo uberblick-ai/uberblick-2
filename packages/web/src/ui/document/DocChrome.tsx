@@ -48,6 +48,21 @@ import {
 /** What an untitled document is called wherever its name is shown. */
 const UNTITLED = "Untitled";
 
+export type DocumentActionProps = {
+  pinned?: boolean;
+  onTogglePin?: (() => void) | null;
+  /** Null means this replica cannot establish a current live directory stub. */
+  onArchive?: (() => void) | null;
+  onArchiveRecord?: (() => void) | null;
+  showArchiveRecord?: boolean;
+  archiveRecordUnavailable?: string | null;
+  /** Whether focus is inside the confirmation a remote archive may remove. */
+  onArchiveConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
+  focusRestore?: boolean;
+  onRestoreFocused?: (() => void) | undefined;
+  onRestore?: (() => void) | null;
+};
+
 function titleOf(meta: DocMeta): string {
   return meta.title === "" ? UNTITLED : meta.title;
 }
@@ -353,14 +368,8 @@ export function DocMetaLine({
   archived,
   readOnly = false,
   contentReadOnly = false,
-  pinned = false,
-  onTogglePin = null,
-  onArchive = null,
+  actions = {},
   isDecisionTopic = false,
-  showArchiveRecord = false,
-  onArchiveRecord = null,
-  archiveRecordUnavailable = null,
-  onArchiveConfirmationFocusChange,
   hasTldr = false,
   onEditTldr,
   onRemoveTldr,
@@ -379,16 +388,8 @@ export function DocMetaLine({
   readOnly?: boolean;
   /** Decided content stays immutable without withholding tags or placement. */
   contentReadOnly?: boolean;
-  pinned?: boolean;
-  onTogglePin?: (() => void) | null;
-  /** Null means this replica cannot establish a current live directory stub. */
-  onArchive?: (() => void) | null;
+  actions?: DocumentActionProps;
   isDecisionTopic?: boolean;
-  showArchiveRecord?: boolean;
-  onArchiveRecord?: (() => void) | null;
-  archiveRecordUnavailable?: string | null;
-  /** Whether focus is inside the confirmation a remote archive may remove. */
-  onArchiveConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
   /** Whether the document-actions entry adds or edits the person-facing summary. */
   hasTldr?: boolean;
   onEditTldr?: (() => void) | undefined;
@@ -434,14 +435,8 @@ export function DocMetaLine({
               title={actionTitle || titleOf(meta)}
               uuid={meta.uuid}
               archived={archived}
-              pinned={pinned}
-              onTogglePin={onTogglePin}
-              onArchive={onArchive}
+              actions={actions}
               isDecisionTopic={isDecisionTopic}
-              showArchiveRecord={showArchiveRecord}
-              onArchiveRecord={onArchiveRecord}
-              archiveRecordUnavailable={archiveRecordUnavailable}
-              onConfirmationFocusChange={onArchiveConfirmationFocusChange}
               hasTldr={hasTldr}
               tldrOptOut={meta.tldrOptOut === true}
               contentReadOnly={contentReadOnly || meta.kind === "decision"}
@@ -469,14 +464,8 @@ function DocumentActions({
   title,
   uuid,
   archived,
-  pinned,
-  onTogglePin,
-  onArchive,
+  actions = {},
   isDecisionTopic,
-  showArchiveRecord,
-  onArchiveRecord,
-  archiveRecordUnavailable,
-  onConfirmationFocusChange,
   hasTldr,
   tldrOptOut,
   contentReadOnly,
@@ -486,20 +475,23 @@ function DocumentActions({
   title: string;
   uuid: string;
   archived: boolean;
-  pinned: boolean;
-  onTogglePin: (() => void) | null;
-  onArchive: (() => void) | null;
+  actions?: DocumentActionProps;
   isDecisionTopic: boolean;
-  showArchiveRecord: boolean;
-  onArchiveRecord: (() => void) | null;
-  archiveRecordUnavailable: string | null;
-  onConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
   hasTldr: boolean;
   tldrOptOut: boolean;
   contentReadOnly: boolean;
   onEditTldr: (() => void) | null;
   onRemoveTldr: (() => void) | null;
 }): ReactElement {
+  const {
+    pinned = false,
+    onTogglePin = null,
+    onArchive = null,
+    showArchiveRecord = false,
+    onArchiveRecord = null,
+    archiveRecordUnavailable = null,
+    onArchiveConfirmationFocusChange: onConfirmationFocusChange,
+  } = actions;
   const [confirming, setConfirming] = useState<"document" | "record" | null>(null);
   const openingTldrEditor = useRef(false);
   const pendingCopy = useRef<(() => void) | null>(null);

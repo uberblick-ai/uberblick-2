@@ -1,6 +1,6 @@
 import { Popover, PopoverContent } from "../shadcn/popover.js";
 import { SyncPanel } from "../status/SyncPanel.js";
-import { RoutePane } from "./RoutePane.js";
+import { documentPaneState, RoutePane } from "./RoutePane.js";
 import type { AppShell } from "./use-app-shell.js";
 
 function documentActions(shell: AppShell) {
@@ -27,13 +27,16 @@ function documentActions(shell: AppShell) {
 
 export function ShellDocument({ shell }: { shell: AppShell }) {
   const { route, hubReady, statusEndpoint, serving, identity } = shell.environment;
-  const { topic, selected, directory, doc, topicTitleRoom, catalog } = shell.rooms;
+  const { topic, selected, directory, doc, docStatus, topicTitleRoom, catalog } = shell.rooms;
   const { openAlterDecision } = shell.alter;
-  const { relatedTopics, titlePresence, servingStatus, meta, archived, selectedDirectoryEntry, onLastUpdatedChange, chromeRoom, shownLastUpdated } = shell.readings;
+  const { relatedTopics, titlePresence, servingStatus, meta, archived, selectedDirectoryEntry, chromeRoom } = shell.readings;
   const { navigate } = shell;
   const { docLinks } = shell.navigation;
   const { onFocusThread, threads, threadsOpen, onToggleThreads } = shell.threads;
   const { syncOpen, setSyncOpen } = shell.sync;
+  const lastUpdated = !docStatus.deleted && documentPaneState({
+    route, connection: doc, meta, topic, selectedUuid: selected, navigate,
+  }, docStatus.hasAnswered) === "shown" ? selectedDirectoryEntry?.updatedAt : undefined;
   return (
     <Popover open={syncOpen} onOpenChange={setSyncOpen}>
       <RoutePane
@@ -48,24 +51,25 @@ export function ShellDocument({ shell }: { shell: AppShell }) {
         configured={hubReady}
         connection={doc}
         presence={titlePresence}
-        endpoint={statusEndpoint}
-        hubAcked={serving === null ? undefined : servingStatus?.hubAcked ?? null}
-        rawHubAcked={serving === null ? undefined : servingStatus?.rawHubAcked ?? null}
-        sampledAt={servingStatus?.sampledAt}
-        notSharedReason={servingStatus?.notSharedReason ?? null}
+        syncReading={{
+          endpoint: statusEndpoint,
+          hubAcked: serving === null ? undefined : servingStatus?.hubAcked ?? null,
+          rawHubAcked: serving === null ? undefined : servingStatus?.rawHubAcked ?? null,
+          sampledAt: servingStatus?.sampledAt,
+          notSharedReason: servingStatus?.notSharedReason ?? null,
+          syncDetails: true,
+        }}
         meta={meta}
         author={identity.name}
         catalogConnection={catalog}
         archived={archived}
         updatedAt={selectedDirectoryEntry?.updatedAt}
-        onLastUpdatedChange={onLastUpdatedChange}
         docLinks={docLinks}
-        {...documentActions(shell)}
+        actions={documentActions(shell)}
         onSelectThread={onFocusThread}
         threads={threads}
         threadsOpen={threadsOpen}
         onToggleThreads={onToggleThreads}
-        syncDetails
       />
       {(route.kind === "doc" || route.kind === "decision") && (
         <PopoverContent
@@ -79,12 +83,7 @@ export function ShellDocument({ shell }: { shell: AppShell }) {
             endpoint={statusEndpoint}
             hubAcked={serving === null ? undefined : servingStatus?.hubAcked ?? null}
             notSharedReason={servingStatus?.notSharedReason ?? null}
-            lastUpdated={
-              shownLastUpdated !== null &&
-              shownLastUpdated.room === chromeRoom?.room
-                ? shownLastUpdated.value
-                : undefined
-            }
+            lastUpdated={lastUpdated}
           />
         </PopoverContent>
       )}

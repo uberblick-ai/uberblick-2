@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { getDirectoryEntry, relatedDecisionTopics, parseRoom } from "@uberblick/schema";
 import { watchDocumentStub } from "../../collab/directory-stub.js";
 import { useAgentSessions, useArchived, useDocMeta, useTitlePresence } from "../hooks.js";
@@ -23,23 +23,6 @@ export function useShellReadings({ route, documentSearch }: ShellEnvironment, { 
    * have no replacement room.
    */
   const chromeRoom = selected === null ? null : doc;
-  // Read the timestamp segment the status line actually displays, preserving
-  // its existing initial settle window and clearing stale reports by room.
-  const [shownLastUpdated, setShownLastUpdated] = useState<{
-    room: string;
-    value: number;
-  } | null>(null);
-  const onLastUpdatedChange = useCallback(
-    (room: string, value: number | undefined) => {
-      setShownLastUpdated((previous) => {
-        if (value === undefined) return previous?.room === room ? null : previous;
-        return previous?.room === room && previous.value === value
-          ? previous
-          : { room, value };
-      });
-    },
-    [],
-  );
   const servingStatus = useServingRoomStatus(
     documentSearch,
     chromeRoom?.room ?? directory?.room ?? null,
@@ -56,7 +39,7 @@ export function useShellReadings({ route, documentSearch }: ShellEnvironment, { 
    */
   const agentSessions = useAgentSessions(directory);
 
-  return { meta, relatedTopics, archived, selectedDirectoryEntry, chromeRoom, shownLastUpdated, onLastUpdatedChange, servingStatus, titlePresence, agentSessions };
+  return { meta, relatedTopics, archived, selectedDirectoryEntry, chromeRoom, servingStatus, titlePresence, agentSessions };
 }
 
 export function useDocumentStubRepair({ doc, topicTitleRoom, directory }: ShellRooms) {

@@ -473,7 +473,7 @@ function LinkedPane({
       author="tester"
       archived={false}
       docLinks={null}
-      onRestore={() => {}}
+      actions={{ onRestore: () => {} }}
       onSelectThread={() => {}}
     />
   );
@@ -673,7 +673,7 @@ function paneText(target: Route, docMeta: DocMeta | null): string {
       author="tester"
       archived={false}
       docLinks={null}
-      onRestore={() => {}}
+      actions={{ onRestore: () => {} }}
       onSelectThread={() => {}}
     />,
   );

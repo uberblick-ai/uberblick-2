@@ -1,15 +1,15 @@
 import type { ComponentProps, ReactElement } from "react";
 import { decisionCurrentRecord } from "@uberblick/schema";
 import type { DecisionTopicResolution, DocMeta } from "@uberblick/schema";
-import type { HubEndpoint } from "../../config.js";
 import type { RoomConnection } from "../../collab/rooms.js";
 import type { DocLinkContext } from "../../editor/doc-links.js";
-import type { NotSharedReason } from "../../shell/document-search.js";
 import type { SelectThread, ThreadView } from "../comments/threads.js";
 import { CopyLink } from "../document/DocChrome.js";
+import type { DocumentActionProps } from "../document/DocChrome.js";
 import { DecisionTopicPane } from "../document/DecisionTopicPane.js";
 import { DecisionsBlock, DecisionsLink } from "../document/DecisionsBlock.js";
 import { EditorPane, PaneNotice, StatusLine } from "../document/EditorPane.js";
+import type { DocumentSyncReading } from "../document/EditorPane.js";
 import { useRoomStatus } from "../hooks.js";
 import { docIsHydrated, replicaHasAnswered } from "../route.js";
 import type { Navigate, Route } from "../route.js";
@@ -23,13 +23,7 @@ export interface RoutePaneProps {
   connection: RoomConnection | null;
   /** Read presence once in the shell and share it with every room-status surface. */
   presence: readonly RemotePresence[];
-  /** The hub the document-local sync reading describes. */
-  endpoint?: HubEndpoint | null;
-  /** ub open's upstream reading; undefined when this page talks to a hub. */
-  hubAcked?: boolean | null | undefined;
-  rawHubAcked?: boolean | null | undefined;
-  sampledAt?: number | null | undefined;
-  notSharedReason?: NotSharedReason | null;
+  syncReading?: DocumentSyncReading;
   /** Empty metadata earns the waiting screen only after a confirmed room answer. */
   meta: DocMeta | null;
   author: string;
@@ -39,38 +33,35 @@ export interface RoutePaneProps {
   archived: boolean;
   /** The selected directory stub's edit-freshness hint, when it has one. */
   updatedAt?: number | undefined;
-  onLastUpdatedChange?: ((room: string, value: number | undefined) => void) | undefined;
   /** What an inline document reference resolves against — see EditorPane. */
   docLinks: DocLinkContext | null;
-  /** Sidebar curation and lifecycle actions for the live document. */
-  pinned?: boolean;
-  onTogglePin?: (() => void) | null;
-  onArchive?: (() => void) | null;
-  onArchiveRecord?: (() => void) | null;
-  showArchiveRecord?: boolean;
-  archiveRecordUnavailable?: string | null;
-  /** Track focus that should survive a remote archive closing its confirmation. */
-  onArchiveConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
-  /** A local confirmed archive moves focus to the surviving Restore action. */
-  focusRestore?: boolean;
-  /** Consume the one-shot focus request after the Restore control receives it. */
-  onRestoreFocused?: (() => void) | undefined;
-  /** Lift that tombstone. The only action an archived document offers. */
-  onRestore: (() => void) | null;
+  actions?: DocumentActionProps;
   onSelectThread: SelectThread;
   /** The open document's conversations, for the narrow pane-edge trigger. */
   threads?: readonly ThreadView[];
   threadsOpen?: boolean;
   onToggleThreads?: (() => void) | undefined;
-  /** The document-local sync reading opens the existing details panel. */
-  syncDetails?: boolean;
   topic?: DecisionTopicResolution | null;
   selectedUuid?: string | null | undefined;
-  navigate?: Navigate;
+  navigate?: Navigate | undefined;
   directoryConnection?: RoomConnection | null;
   titleConnection?: RoomConnection | null;
   relatedTopics?: readonly DecisionTopicResolution[];
   onAlterDecision?: (() => void) | null;
+}
+
+/** Share header eligibility with the separately mounted Sync details panel. */
+export function documentPaneState({
+  route, connection, meta, topic = null, selectedUuid, navigate,
+}: Pick<RoutePaneProps, "route" | "connection" | "meta" | "topic" | "selectedUuid" | "navigate">, hasAnswered: boolean):
+  "silent" | "waiting-record" | "waiting-document" | "waiting-topic" | "shown" {
+  if (route.kind !== "doc" && route.kind !== "decision") return "silent";
+  if (route.kind === "decision" && (topic === null || selectedUuid === null)) return "waiting-record";
+  if (connection === null || !replicaHasAnswered(meta, hasAnswered)) return "silent";
+  const uuid = selectedUuid ?? (route.kind === "doc" ? route.uuid : route.record);
+  if (!docIsHydrated(uuid, meta)) return "waiting-document";
+  if (meta?.kind === "decision" && (topic === null || topic.first === null) && navigate !== undefined) return "waiting-topic";
+  return "shown";
 }
 
 function NoWorkspaceNotice({ route, configured }: {
@@ -112,13 +103,7 @@ function WaitingForDocument({ route, uuid, props, connection }: {
         <StatusLine
           connection={connection}
           presence={props.presence}
-          endpoint={props.endpoint ?? null}
-          hubAcked={props.hubAcked}
-          rawHubAcked={props.rawHubAcked}
-          sampledAt={props.sampledAt}
-          notSharedReason={props.notSharedReason ?? null}
-          onLastUpdatedChange={props.onLastUpdatedChange}
-          syncDetails={props.syncDetails ?? false}
+          syncReading={props.syncReading ?? {}}
         />
         <CopyLink room={connection.room} segment={route.workspace.segment} />
       </div>
@@ -131,39 +116,33 @@ function WaitingForDocument({ route, uuid, props, connection }: {
 }
 
 function documentNotice(props: RoutePaneProps, hasAnswered: boolean): ReactElement | null {
-  const { route, connection, meta, selectedUuid, topic = null, navigate } = props;
+  const { route, connection, selectedUuid } = props;
   if (route.kind !== "doc" && route.kind !== "decision") return null;
-  if (route.kind === "decision" && (topic === null || selectedUuid === null)) {
+  const paneState = documentPaneState(props, hasAnswered);
+  if (paneState === "waiting-record") {
     return <PaneNotice documentLayout><p className="ub-notice">Waiting for the selected record in this decision topic to sync.</p></PaneNotice>;
   }
   const uuid = selectedUuid ?? (route.kind === "doc" ? route.uuid : route.record);
   // Unread metadata or a joining empty room keeps the frame silent; neither
   // establishes waiting for sync.
-  if (connection === null || !replicaHasAnswered(meta, hasAnswered)) {
+  if (connection === null || paneState === "silent") {
     return <PaneNotice documentLayout>{null}</PaneNotice>;
   }
-  if (!docIsHydrated(uuid, meta)) return <WaitingForDocument route={route} uuid={uuid} props={props} connection={connection} />;
-  if (meta?.kind === "decision" && (topic === null || topic.first === null) && navigate !== undefined) {
+  if (paneState === "waiting-document") return <WaitingForDocument route={route} uuid={uuid} props={props} connection={connection} />;
+  if (paneState === "waiting-topic") {
     return <PaneNotice documentLayout><p className="ub-notice">Waiting for the decision topic to sync.</p></PaneNotice>;
   }
   return null;
 }
 
-function editorProperties(props: RoutePaneProps, segment: string): ComponentProps<typeof EditorPane> {
+function editorProperties(props: RoutePaneProps, segment: string, connection: RoomConnection): ComponentProps<typeof EditorPane> {
   return {
-    connection: props.connection, segment, presence: props.presence,
-    endpoint: props.endpoint ?? null,
-    hubAcked: props.hubAcked, rawHubAcked: props.rawHubAcked, sampledAt: props.sampledAt,
-    notSharedReason: props.notSharedReason ?? null, author: props.author,
+    connection, segment, presence: props.presence, syncReading: props.syncReading ?? {},
+    author: props.author,
     catalogConnection: props.catalogConnection ?? null, archived: props.archived, updatedAt: props.updatedAt,
-    onLastUpdatedChange: props.onLastUpdatedChange, docLinks: props.docLinks,
-    pinned: props.pinned ?? false, onTogglePin: props.onTogglePin ?? null, onArchive: props.onArchive ?? null,
-    onArchiveRecord: props.onArchiveRecord ?? null, showArchiveRecord: props.showArchiveRecord ?? false,
-    archiveRecordUnavailable: props.archiveRecordUnavailable ?? null,
-    onArchiveConfirmationFocusChange: props.onArchiveConfirmationFocusChange,
-    focusRestore: props.focusRestore ?? false, onRestoreFocused: props.onRestoreFocused, onRestore: props.onRestore,
+    docLinks: props.docLinks, actions: props.actions ?? {},
     onSelectThread: props.onSelectThread, threads: props.threads ?? [], threadsOpen: props.threadsOpen ?? false,
-    onToggleThreads: props.onToggleThreads, syncDetails: props.syncDetails ?? false,
+    onToggleThreads: props.onToggleThreads,
   };
 }
 
@@ -171,8 +150,9 @@ function RouteEditor({ route, props }: {
   route: Exclude<Route, { kind: "no-workspace" | "invalid" }>;
   props: RoutePaneProps;
 }): ReactElement {
-  const { meta, topic = null, navigate, relatedTopics = [] } = props;
-  const editorProps = editorProperties(props, route.workspace.segment);
+  const { meta, topic = null, navigate, relatedTopics = [], connection } = props;
+  if (connection === null) return <PaneNotice>{null}</PaneNotice>;
+  const editorProps = editorProperties(props, route.workspace.segment, connection);
   if (navigate !== undefined && topic !== null) {
     const current = decisionCurrentRecord(topic);
     return <DecisionTopicPane {...editorProps}
