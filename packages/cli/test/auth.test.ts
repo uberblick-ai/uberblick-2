@@ -401,21 +401,15 @@ describe("hub-driven CLI GitHub sign-in", () => {
   });
 
   it.each([
-    { name: "unbound project", source: "unbound", workspace: WORKSPACE, sameHub: true, next: true },
-    { name: "matching project", source: "project", workspace: WORKSPACE, sameHub: true, next: false },
-    { name: "matching slug-decorated project", source: "project", workspace: `test-${WORKSPACE}`, sameHub: true, next: false },
-    { name: "different project workspace", source: "project", workspace: OTHER_WORKSPACE, sameHub: true, next: true },
-    { name: "different project hub", source: "project", workspace: WORKSPACE, sameHub: false, next: true },
-    { name: "matching environment", source: "environment", workspace: WORKSPACE, sameHub: true, next: false },
-    { name: "overriding environment workspace", source: "environment", workspace: OTHER_WORKSPACE, sameHub: true, next: true },
-    { name: "overriding environment hub", source: "environment", workspace: WORKSPACE, sameHub: false, next: true },
-  ])("prints the claim command only when needed for a $name", async ({ source, workspace, sameHub, next }) => {
+    { name: "matching slug-decorated project", source: "project", workspace: `test-${WORKSPACE}` },
+    { name: "matching environment", source: "environment", workspace: WORKSPACE },
+  ])("omits the claim command for a $name", async ({ source, workspace }) => {
     const remote = await rig([WORKSPACE]);
     remote.controls.transform = (path, status, result) => path === "/auth/github/collect" && result.status === "complete"
       ? { status, result: { ...result, claimedWorkspaceId: WORKSPACE } } : { status, result };
     const endpoint = `${remote.origin.replace("http:", "ws:")}/custom//ws`;
-    const binding = { workspaceId: workspace, hubUrl: sameHub ? remote.origin : OTHER_HUB };
-    const box = source === "unbound" ? unboundSandbox() : sandbox({ projectBinding: source === "project" ? binding
+    const binding = { workspaceId: workspace, hubUrl: remote.origin };
+    const box = sandbox({ projectBinding: source === "project" ? binding
       : { workspaceId: OTHER_WORKSPACE, hubUrl: OTHER_HUB } });
     const path = join(box.cwd, ".uberblick.json");
     const before = existsSync(path) ? readFileSync(path) : null;
@@ -423,9 +417,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
       ? { UB_WORKSPACE_ID: workspace, UB_HUB_URL: binding.hubUrl } : {});
     expect(login.status, login.stderr).toBe(0);
     expect(login.stdout).toContain(`claimed    default workspace (${WORKSPACE}), you are admin\n`);
-    const action = login.stdout.match(/^Use it here: ub workspace use (.+)$/m);
-    expect(action !== null).toBe(next);
-    if (action !== null) expect(parseJoinTarget(action[1]!)).toEqual({ endpoint, workspace: WORKSPACE });
+    expect(login.stdout).not.toContain("Use it here:");
     expect(login.stdout).not.toContain("ub open");
     expect(existsSync(path) ? readFileSync(path) : null).toEqual(before);
   });

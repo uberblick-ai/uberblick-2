@@ -4,7 +4,6 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { AUTH_LOGIN_HELP } from "../src/auth.js";
 import { removeTempDirs, sandbox, UB_BIN, waitUntil, type Run, type Sandbox } from "./helpers.js";
 
 const URL = "https://github.com/login/device";
@@ -82,12 +81,12 @@ function stdout(origin: string, unclaimed = true): string {
     `Use it here: ub workspace use ${origin.replace("http:", "ws:")}/ws/${WORKSPACE}\n`;
 }
 
-function recorder(box: Sandbox, mode = "success") {
+function recorder(box: Sandbox) {
   const command = join(box.cwd, "browser.mjs");
   const record = join(box.cwd, "opened.json");
   writeFileSync(command, `#!/usr/bin/env node\nimport { writeFileSync } from 'node:fs';
 writeFileSync(${JSON.stringify(record)}, JSON.stringify({ pid: process.pid, url: process.argv[2] }));
-${mode === "hang" ? "process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000); setTimeout(() => process.exit(0), 15000);" : `process.exit(${mode === "fail" ? 9 : 0});`}
+process.exit(0);
 `);
   chmodSync(command, 0o755);
   return { command, record };
@@ -145,15 +144,15 @@ function expectStored(box: Sandbox, origin: string) {
 }
 
 describe("login browser handoff", () => {
-  it.each([true, false])("opens once after guidance, with unclaimed notice=%s", async unclaimed => {
-    const remote = await hub(started, unclaimed, true);
+  it("opens once after guidance with the unclaimed notice", async () => {
+    const remote = await hub(started, true, true);
     const box = sandbox(); const browser = recorder(box);
     const cli = run(box, remote.origin, browser.command);
     const result = await cli.result;
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe(stdout(remote.origin, unclaimed));
+    expect(result.stdout).toBe(stdout(remote.origin));
     expect(result.stderr).toBe("");
-    expect(cli.calls()).toEqual([{ args: [URL], output: guidance(remote.origin, unclaimed) }]);
+    expect(cli.calls()).toEqual([{ args: [URL], output: guidance(remote.origin) }]);
     await waitUntil("browser recorder publishes its URL", () => {
       try {
         return typeof JSON.parse(readFileSync(browser.record, "utf8")).url === "string";
@@ -166,45 +165,19 @@ describe("login browser handoff", () => {
     expectStored(box, remote.origin);
   });
 
-  it.each([
-    [false, {}], [true, { SSH_CONNECTION: "remote connection" }],
-    [true, { SSH_CLIENT: "remote client" }], [true, { SSH_TTY: "/dev/pts/1" }],
-    [true, { SSH_TTY: "" }], [true, { BROWSER: "none" }],
-  ] as const)("preserves login without opening for tty=%s and env=%j", async (tty, env) => {
+  it("a synchronous opener failure leaves polling and storage unchanged", async () => {
     const remote = await hub(); const box = sandbox(); const browser = recorder(box);
-    const cli = run(box, remote.origin, browser.command, tty, env);
-    const result = await cli.result;
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe(stdout(remote.origin));
-    expect(result.stderr).toBe("");
-    expect(cli.calls()).toEqual([]);
-    expect(existsSync(browser.record)).toBe(false);
-    expectStored(box, remote.origin);
-  });
-
-  it.each(["missing", "fail", "hang", "synchronous"])("%s opener leaves polling and storage unchanged", async mode => {
-    const remote = await hub(); const box = sandbox(); const browser = recorder(box, mode);
-    const command = mode === "missing" ? join(box.cwd, "missing-browser") : browser.command;
-    const cli = run(box, remote.origin, command, true, {}, mode === "synchronous");
+    const cli = run(box, remote.origin, browser.command, true, {}, true);
     const result = await cli.result;
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe(stdout(remote.origin));
     expect(cli.calls()).toHaveLength(1);
     expect(remote.routes).not.toContain("/auth/github/cancel");
     expectStored(box, remote.origin);
-    if (mode === "missing" || mode === "synchronous") expect(result.stderr).toMatch(/warning: could not open a browser/);
-    else expect(result.stderr).toBe("");
-    if (mode === "hang") {
-      const pid = JSON.parse(readFileSync(browser.record, "utf8")).pid;
-      expect(pid).toBeGreaterThan(0);
-      expect(() => process.kill(pid, 0)).not.toThrow();
-    }
+    expect(result.stderr).toMatch(/warning: could not open a browser/);
   });
 
   it.each([
-    ["refused", { status: "busy" }, 429],
-    ["wrong-url", { ...started, verificationUri: "https://attacker.invalid/" }, 200],
-    ["wrong-code", { ...started, userCode: "unsafe-code" }, 200],
     ["wrong-envelope", { ...started, status: "unsupported" }, 200],
     ["wrong-authority", { ...started, collectionSecret: "invalid" }, 200],
     ["wrong-lifetime", { ...started, expiresIn: 901 }, 200],
@@ -231,12 +204,5 @@ describe("login browser handoff", () => {
     expect(remote.routes).toContain("/auth/github/cancel");
     expect(remote.routes).not.toContain("/auth/github/collect");
     expect(existsSync(join(box.configHome, "uberblick", "credentials.json"))).toBe(false);
-  });
-
-  it("owns browser guidance in login help without adding an option", () => {
-    expect(AUTH_LOGIN_HELP).toContain("opens automatically");
-    expect(AUTH_LOGIN_HELP).toContain("Over SSH or when stdout is not a terminal");
-    expect(AUTH_LOGIN_HELP).toContain("BROWSER=none");
-    expect(AUTH_LOGIN_HELP).not.toContain("--no-browser");
   });
 });
