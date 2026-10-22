@@ -22,7 +22,8 @@ export const STARTUP_ORIENTATION =
   "Discover additional product help through MCP resources, or call `get_help(topic)`. " +
   "Built-in help is repo agnostic; the conventions for this repo are in the corpus. " +
   "Follow recovery guidance on failures. " +
-  "Help topics: orientation, workspaces, lifecycle, markdown, ablauf, data, tools, tool-contracts. " +
+  "Help topics: orientation, edit_doc, decisions, workspaces, markdown, ablauf, data, tools, " +
+  "tool-contracts. " +
   "Read uberblick://help/{topic} or get_help({topic}).";
 
 const workspaces = `# Workspaces and documents
@@ -39,12 +40,12 @@ Start with \`get_sidebar({})\` for curated entry points, \`list_docs({})\` for d
 - \`description\` is read only by agents and never shown to people. Write whatever best helps an agent find this document with list_docs and search and decide whether to open it: what it covers, how it differs from its neighbours and the terms someone would search for. A keyword list is fine. list_docs, search and backlinks all answer with it, so a good one saves a get_doc and a bad one wastes it. At most ${MAX_DESCRIPTION_LENGTH} characters.
 - \`tldr\` is one or two sentences of plain English for a person opening a regular document, independent of its description. \`set_metadata\` accepts up to ${MAX_TLDR_LENGTH} characters for it, refuses empty or whitespace-only strings, and accepts null to clear it. A person can choose Remove TL;DR from the web's Document actions to clear the summary and mark the page as having none on purpose. Marked pages return \`tldr: null\` and \`tldrOptOut: true\` only in \`get_doc\`, and content writes omit TL;DR hints. A non-null summary on a marked page refuses with \`tldr_opted_out\` and \`field: "tldr"\` unless \`set_metadata\` passes \`tldr_opt_in: true\` in the same call. The flag requires a non-null \`tldr\`; writing it lifts the mark. Null preserves the mark. The web's Add TL;DR lifts it before editing, even if editing is cancelled. Summary text takes precedence over the mark after concurrent or older-client writes. MCP cannot set the mark. Decisions have no TL;DR: they use answer blocks, return \`tldr: null\`, omit it from directory entries and never report the mark. Ordinary stubs, search and Markdown do not carry TL;DR or the mark. ${TLDR_AFTER_CONTENT_CHANGE}
 - \`tags\` store stable catalog ids. Call \`list_tags\` before choosing active ids or current names (case ignored). \`set_metadata\` with \`tags\` replaces the complete assignment set; an empty array clears it. Existing retired or unresolved assignments may be preserved by their returned ids, or removed; they cannot be newly assigned. MCP cannot curate the catalog. \`list_tags\` reports \`complete: false\` until the catalog arrives from a configured hub, so an unseen selection cannot be assumed invalid in the full workspace.
-- Curated \`links\` are target document UUIDs, replaced by \`set_metadata\` with \`links\`; an empty array clears them. Newly added targets must be known to this replica's directory, archived targets are accepted, and existing curated targets can be retained unchanged. Inline document references also contribute backlinks. Decision-derived links and lifecycle metadata are explained in \`lifecycle\`.
+- Curated \`links\` are target document UUIDs, replaced by \`set_metadata\` with \`links\`; an empty array clears them. Newly added targets must be known to this replica's directory, archived targets are accepted, and existing curated targets can be retained unchanged. Inline document references also contribute backlinks. Decision-derived links and decision metadata are explained in \`decisions\`.
 - \`code_check\` records a regular page's latest comparison with code per repository. \`set_metadata\` takes one \`{repository, commit, result, rev, paths?}\` entry: \`matches\` means agreement with the commit, \`ahead\` means intentionally undelivered behavior, and \`drift\` means unintended disagreement. \`rev\` must match the page-level revision read with \`get_doc\`, the same value the web status row shows for regular pages and decisions. Missing or stale rev refuses the whole call with \`field: "code_check"\`: read the page again and compare it with code before recording, rather than just resending with a new rev. Optional \`paths\` are hints about repo-relative files/folders looked at, not a complete dependency list; see \`set_metadata\` help for limits. Repository identity ignores case; the writing replica supplies \`checked_at\` in UTC. Only that repository's entry is replaced. \`get_doc\` returns the entries or []; \`list_docs\` returns cached entries, with absence meaning not cached yet. Both retain recorded rev and paths when present; earlier entries and older-client rewrites can omit them, making compared text or paths unknown. list_docs never returns the page's current rev. Decisions omit the attribute and refuse writes to it. Content edits and other metadata writes leave it unchanged; blocks and Markdown export never carry it.
 
-\`set_metadata\` accepts any non-empty subset of these fields and leaves unnamed fields untouched. All named fields are validated before any write; a field-specific refusal preserves its error code and names \`field\`. Title and description cannot be cleared. Its successful answer returns the descriptive metadata as get_doc would read it, with shared write durability and no TL;DR review reminder. Open decision records additionally accept \`discussion\`, as explained in \`lifecycle\`.
+\`set_metadata\` accepts any non-empty subset of these fields and leaves unnamed fields untouched. All named fields are validated before any write; a field-specific refusal preserves its error code and names \`field\`. Title and description cannot be cleared. Its successful answer returns the descriptive metadata as get_doc would read it, with shared write durability and no TL;DR review reminder. Open decision records additionally accept \`discussion\`, as explained in \`decisions\`.
 
-Reads return absent description and TL;DR as null. Document writes can return non-blocking hints for a missing description, missing tags or a TL;DR needing review. Lifecycle metadata and content locks belong to \`lifecycle\`; write durability and the guidance briefing belong to \`tool-contracts\`.
+Reads return absent description and TL;DR as null. Document writes can return non-blocking hints for a missing description, missing tags or a TL;DR needing review. Decision metadata and the decided-answer lock belong to \`decisions\`, the archive lock to \`archive_doc\`; write durability and the guidance briefing belong to \`tool-contracts\`.
 
 ## Sidebar organization
 
@@ -54,84 +55,94 @@ The sidebar holds ordered named groups and pinned document UUIDs. Unpinned docum
 
 ## Related
 
-[Lifecycle](uberblick://help/lifecycle) · [Supported Markdown](uberblick://help/markdown) · [Structured data](uberblick://help/data) · [Tool contracts](uberblick://help/tool-contracts)`;
+[Decision records](uberblick://help/decisions) · [Supported Markdown](uberblick://help/markdown) · [Structured data](uberblick://help/data) · [Tool contracts](uberblick://help/tool-contracts)`;
 
-const lifecycle = `# Decision records and lifecycle
+const editDoc = `# Editing documents
 
-Ordinary documents omit \`kind\` and \`status\`. Decision records have kind \`decision\` and states \`open\`, \`decided\`, \`rejected\`, \`withdrawn\`. \`kind\` and \`status\` record what sort of document this is and where it stands; they do not grant permission to act.
+Create and change documents with the fewest calls. Details live in \`decisions\`, \`markdown\`, \`data\` and each tool's own help.
 
-\`create_doc\` with \`kind: "decision"\` defaults to \`open\`. \`set_status\` can adopt the decision kind on an ordinary document; an existing kind is fixed through MCP. A decision is created only open or decided. An open proposal may withdraw without an answer. Decided records cannot reopen or withdraw; rejected and withdrawn records are final. Rejection requires a non-empty reason and a recorded person's answer, and applies to an open proposal, an agent stance or a decided record in conflict.
+## Before you write
 
-## Decision answers and topics
+- Search first. Change the page that already owns a fact instead of creating another one.
+- Read the document with \`get_doc\`. It returns each block's \`id\`, \`text\` and \`rev\`; edits assert them.
 
-A decision topic is the enduring question being decided; it stays the same when its answer changes. A topic has one title, stored on its first record. Every record shows that title, which names the question, never the answer. A rename through any record renames the topic, writing only the first record. Successors take the topic's title; create_doc may omit their title and refuses a different supplied title before creating anything. Older clients show, and can still write, each record's own title. A settled record states the settled answer concisely and readably, with only the context needed to understand its meaning and scope. An open record may instead hold a proposal or recommendation; it is not a settled answer.
+## Regular page or decision record
 
-Lead the answer with the choice in one plain sentence naming the chosen option, without hedging such as "should consider" or "where possible". Give the reason in one clause or sentence. Keep the whole answer, across all its blocks, to 60 words or fewer. This is editorial guidance, not a validated word limit. Short never means vague: retain the concrete terms needed to apply the decision. Put extended rationale, alternatives and process in a linked RFC when needed; do not repeat that discussion in the record. An RFC may later be archived and remain readable as historical context. Put product guidance and implementation mechanics on the owning regular page or in code. Do not restate the topic as a "Topic:" line or write a specification. A successor in the same topic states the changed outcome and reason concisely.
+- A **regular page** holds content that changes over time. Most edits belong here.
+- A **decision record** (\`kind: "decision"\`) holds the short answer to one lasting question. Once decided, its answer is read-only and changes only through a successor record. Read \`decisions\` before you create or change one.
+- Archived documents are read-only until \`restore_doc\`.
 
-A decision record holds its answer in one to three answer blocks: paragraphs, code blocks, tables or lists. A list is a maximal run of adjacent \`list-item\` blocks, regardless of style or indent, and counts as one answer block. Headings, quotes, terminal, chart, card and figma blocks refuse with \`decision_block_unsupported\`; creation or insertion that would exceed three answer blocks refuses with \`decision_answer_too_long\`, without writing anything.
+## Create and change
 
-Open records may be empty. Every move from another state to \`decided\`, including creation and kind adoption, requires at least one answer block with non-blank text, a valid answer shape, no visible TL;DR and no structured data. Decisions have no TL;DR: stored values are ignored without changing them. A regular page adopting the decision kind directly as decided still refuses a visible TL;DR. Refusals use \`decision_answer_empty\`, \`decision_tldr_unsupported\`, \`decision_data_unsupported\` or the matching shape code and write nothing. Decision content writes carry no TL;DR review reminder. An already decided record is not re-checked when its stance is confirmed or rejected.
+- \`create_doc\` needs a title and a description. Only agents read the description: write whatever helps \`list_docs\` and \`search\` find the page; a keyword list is fine. Tags come from \`list_tags\`.
+- \`insert_block\` adds blocks after a block id, or at the top. \`edit_block\` changes one block against the \`old_text\` and \`rev\` you read. \`delete_block\` removes one. There is no whole-document replace.
+- Documents merge live (Yjs): people and other agents may edit at the same time and watch your changes. Change only the words that need changing; \`edit_block\` keeps everyone else's edits and comment anchors, while deleting and re-inserting a block drops them.
+- A refused edit returns \`currentText\` and \`currentRev\`: apply your change to them and retry, without another read.
+- \`set_metadata\` changes title, description, tags, links and TL;DR, a regular page's code check and an open decision's \`discussion\`. Structured data uses \`get_data\` and \`update_data\`.
 
-The answer blocks are separate from \`answer: {who, when, where}\`, which records a person's attribution. A topic's first record, with no \`supersedes\`, may become \`decided\` as an \`agentStance\` without that attribution. Every later move to \`decided\`, and confirmation of an agent stance, requires a recorded person's answer. Recording it stores \`decidedBy\`, \`decidedAt\` and \`decidedWhere\`, clears the stance marker and approves the ordered answer block text and structured data with an \`approvalFingerprint\`. Stored legacy summary text remains part of the fingerprint for compatibility, though decisions have no TL;DR and never report it. Approval covers the answer, not the topic title: a title-only rename preserves approval and any existing changed-after-approval warning. Comments, comment anchors, \`discussion\` and approval bookkeeping are excluded. \`approvalChanged: true\` means changed after approval; recording an answer again approves the current content. Existing approved legacy content retains its fingerprint. get_doc returns where; list_docs and every \`inForce\`, \`pending\` and \`conflicts\` entry expose the stance, who, when and approvalChanged from stubs. During version skew, older clients fingerprint without structured data, so a decided record holding data can show \`approvalChanged\` differently per client. Older clients also hash the live title instead of its stored compatibility baseline, so renamed records and approvals recorded by older servers can show \`approvalChanged\` differently; recording approval with an updated server restores the updated-client view.
+## Markdown essentials
 
-MCP validates the lifecycle transition and whether a recorded answer is required. It stores the supplied answer; it does not authenticate that person's external approval or decide which choices a project's workflow reserves to a person. Callers must obtain the authority their workflow requires before recording an answer or acting on a decision.
-
-A first record uses its own UUID as its immutable \`topic\`. A superseding record names its predecessor with \`supersedes\` and inherits that topic; topic is not a caller-supplied field. Optional \`related\` on create_doc identifies one live, locally readable regular page; a decision-record target refuses with \`related_not_regular_document\`. That page is fixed at creation. A successor inherits its predecessor's page unless \`related\` gives another. Metadata and stubs retain the stored key \`governs\`, including existing records, without migration. Creation targets must be readable on this replica. A successor to an archived topic is refused until that topic is restored.
-
-### Connect RFC discussion
-
-Create or reuse the RFC first as an ordinary regular document. New workspaces include an ordinary \`rfc\` tag that can be applied deliberately; no tool requires it. For a new topic, create an open first record with \`related\` and \`discussion\`: it has no answer until one is recorded. To reconsider an answer, create an open successor with \`supersedes\` and \`discussion\`; the current answer stays in force while the proposal is open. Optional \`discussion\` also works when recording a decision directly with \`status: "decided"\`. It names that record's RFC, separately from curated \`links\` and recorded \`answer\` attribution. A successor never inherits its predecessor's discussion.
-
-The discussion UUID must name a live, locally readable regular document. A decision-record target refuses with \`discussion_not_regular_document\`; archived, unknown and unhydrated targets refuse with \`doc_archived\`, \`doc_not_found\` and \`doc_not_hydrated\`. These checks happen before allocation or writes. \`discussion\` without \`kind: "decision"\` is an argument error. While the record is open, \`set_metadata\` can correct the UUID with the same checks or clear it with \`discussion: null\`, atomically with its other named fields. Settle, reject or withdraw with \`set_status\` under the recorded-answer contract above. The reference is fixed once the record leaves \`open\` and survives RFC renaming or archival. Connecting, changing or clearing it never creates a document, tags or edits the RFC or related page, or changes \`approvalFingerprint\` or \`approvalChanged\`.
-
-Reading any regular page returns live topics in \`decisions\`: first those whose any record has this related page, marked \`relation: "related"\`, then other topics whose any record links to it through the backlinks index, marked \`relation: "linked"\`. Each group is oldest-topic-first, with each topic appearing once; superseded, rejected and withdrawn records still establish the relation. Archived topics are omitted. Resolution uses directory stubs without opening decision rooms; indexed links can lag content that has not been indexed. Each record carries its stored \`governs\`, immutable \`topic\`, immutable \`supersedes\` and \`discussion\`, which is null when absent. \`governs\`, \`supersedes\` and \`discussion\` are derived outbound edges in its effective \`links\`; backlinks on a predecessor finds direct successors, and backlinks on an RFC finds its connected records. Reading the RFC returns its topic marked linked unless the RFC is also its related page. A decision read returns every predecessor, every direct successor with its status, and its topic's resolution. Conflicts name every maximal decided record and have nothing in force; no successor is selected as the replacement. \`set_metadata\` with \`links\` replaces only the curated link array; passing get_doc's effective \`links\` back stores those UUIDs there too, and get_doc deduplicates the resulting edges.
-
-Decision directory entries cache \`discussion\` and a derived \`answerPreview\` for listings, page decisions, predecessors, successors and all resolution entries, including every pending proposal. A null discussion means no reference; a missing value means the cache is unknown until a newer client repairs the stub. The preview is plain text from the first answer paragraph or list, with list items joined by \`; \`, marks dropped and whitespace collapsed. At most 300 characters are shown, ending in \`…\` when cut. Code-only or table-only answers return null. A missing preview is unknown until a newer client repairs the stub; it does not mean an empty answer. No tool accepts a preview as input. Decisions have no TL;DR, so stored legacy summary text never supplies the preview.
-
-\`list_docs({})\` omits decision records. Use \`list_docs({kind: "decision"})\` for one row per topic; a status or tag filter also asks for exact matching topics. Each row presents its record in force, otherwise a pending record, otherwise the first record. \`include_superseded: true\` returns individual records. A topic with conflicting maximal decided records has nothing in force; get_doc returns every predecessor, direct successor and the resolution rather than choosing one replacement.
-
-### When to create a decision record
-
-Create an initial decision record only when **all four** conditions hold:
-
-1. **Significance:** it establishes a central product principle, an architectural direction, a substantial system-wide commitment or a major change to user-facing behavior. Judge significance by consequences, not implementation size.
-2. **Meaningful alternatives:** credible approaches have materially different consequences, and current guidance does not already settle the choice.
-3. **Lasting consequences:** the choice constrains future work beyond the current feature or task.
-4. **Useful rationale:** understanding the tradeoff matters to future work; preserving the outcome and rationale where needed helps future maintainers understand or reconsider the choice. Extended explanation belongs in a linked RFC, not in the record.
-
-Significance, persistence or reversal cost alone is insufficient. Even an important initial choice does not automatically warrant a record. Routine feature details, formatting, refactors and bug fixes normally belong in the owning regular document and issue or PR, unless they independently satisfy all four conditions. When in doubt, do not create a new topic.
-
-Check existing topics first. When revising a previously recorded answer, use a successor in the same topic and explain the changed outcome and reason concisely, linking an RFC for extended rationale when needed. This does not mean every change to ordinary documentation needs a record. Agents may create qualifying records within their existing authority; follow the project's authority rules and the successor approval lifecycle above. These are editorial judgments, not runtime validation.
-
-## Content locks
-
-Both content locks leave document-room access and structured-data reads available.
-
-A decided decision record's answer blocks and structured data are read-only: content-writing tools refuse with \`decision_read_only\` and change nothing. A \`set_metadata\` call naming tldr or discussion also refuses the whole call and names the locked field. Discussion changes on rejected or withdrawn records, or non-decision documents, refuse with \`discussion_not_writable\` and \`field: "discussion"\`. Decisions have no TL;DR. An open decision refuses non-null tldr with \`decision_tldr_unsupported\` and accepts null. \`update_data\` on other decision states refuses with \`decision_data_unsupported\`. Use a new superseding record for a decided answer change. Titles, comments, description, tags and curated links stay writable; renaming the title never changes answer approval. This check runs on this replica at call time; an unseen offline answer edit can still merge later, detected as changed after approval.
-
-Archived documents are read-only, including comments and lifecycle changes. Ordinary document mutations refuse with \`doc_archived\` and change nothing while the document or its decision topic is archived. restore_doc is the only way back; delete_doc permanently removes an archived regular document. Reading is unaffected by archive — get_doc, export_markdown, backlinks and \`list_docs\` with \`include_deleted: true\` all still answer for it; a decision additionally needs a matching \`kind\`, \`status\`, \`tag\` or \`has_open_threads\` predicate in list_docs. Use \`include_superseded: true\` to list individually archived records.
-
-The honest scope, the same discipline \`rev\` has: the check runs against THIS replica's directory state at the moment of the call. It is refusal-at-call, not a cross-replica lock — an edit made on a replica that has not seen the archive yet is an ordinary CRDT write and merges normally when the two replicas meet.
-
-## Archive, restoration and permanent deletion
-
-\`archive_doc\` tombstones the directory entry and removes its sidebar pin. \`restore_doc\` is an explicit lifecycle action: it reactivates the document without changing its content, bypassing decided-content locks or changing workspace access. A generic content or metadata write cannot restore a document.
-
-For a decision, archive_doc archives every record in its topic. The web also archives individual records that are neither in force nor conflicting, retaining their graph relationships while hiding them from history, search and live listings. An archived proposal no longer counts as pending. Only the first record's directory tombstone decides whether the topic is archived; its individual record archive never archives the topic. The first record's UUID stays the live topic's address, including for pins and citations.
-
-restore_doc removes one archive layer: in an archived topic it restores the topic and the records archived with it, leaving earlier individual archives intact; in a live topic it restores the addressed record. A second call may therefore remove another layer. The result's \`archived\` flag says whether the addressed answer remains archived. Neither action changes the related page, and archiving that page does not archive its decision topics.
-
-Individual archive marks survive whole-entry metadata rewrites, including older clients. A mark cannot hide an answer that currently resolves as in force or conflicting, including after a concurrent approval. Older clients continue showing and indexing individually archived answers and accepting writes until updated. Concurrent archives on different replicas can leave no live record; the topic remains reachable and restorable.
-
-Concurrency: a directory entry is written as a whole object, so an archive_doc racing a restore_doc on another replica converges on whichever update Yjs orders last — not on whichever call happened later by the clock. The same applies to a plain rename or retag made on a replica that had not yet seen the archive: it is a whole-entry write too, so it can bring the document back with nobody calling restore_doc. An archive holds against writers that have seen it, which is not the same as holding against every concurrent one. When it matters which way it went, re-read with list_docs and \`include_deleted: true\`; for a decision, also pass a matching \`kind\`, \`status\` or \`tag\` predicate.
-
-\`delete_doc({uuid})\` permanently deletes an archived regular document, including its content, comments, data and history. Live documents refuse with \`doc_not_archived\`; decision records and topics refuse with \`decision_delete_unsupported\`. The directory keeps only the UUID and a permanent mark. Hubs purge and refuse that room; replicas drop their copy when they see the mark or receive the deleted-room refusal. Missing entries and incomplete directory sync never authorize deletion. The mark wins over concurrent or offline restore, rename, retag and stub repair. Protocol 4 fences clients and hubs that lack this support.
-
-Deleted documents leave all discovery and sidebar results, including \`include_deleted: true\`. Reads, writes and new references to a deleted UUID refuse with \`doc_deleted\`; existing inline and curated links in other documents stay stored as written. Delete never edits another document. Earlier backups and freed SQLite pages are outside the deletion guarantee.
+- One block per paragraph, heading, list item, quote, code fence or table. Lists are flat: \`indent\` 0–3.
+- A block's \`text\` is plain text: \`**bold**\` stays literal. For formatting or links in prose, pass \`inline\` runs with marks when creating or inserting.
+- Tables, cards, embeds and GitHub references are in \`markdown\`.
+- Check the result with \`export_markdown\`.
 
 ## Related
 
-[Workspaces and documents](uberblick://help/workspaces) · [Tool contracts](uberblick://help/tool-contracts) · [set_status](uberblick://help/set_status) · [archive_doc](uberblick://help/archive_doc) · [restore_doc](uberblick://help/restore_doc) · [delete_doc](uberblick://help/delete_doc)`;
+[Decision records](uberblick://help/decisions) · [Markdown](uberblick://help/markdown) · [Structured data](uberblick://help/data) · [Tool contracts](uberblick://help/tool-contracts)`;
+
+const decisions = `# Decision records
+
+A decision record holds the short answer to one lasting question. Ordinary documents omit \`kind\` and \`status\`; a decision record has \`kind: "decision"\` and a status: \`open\`, \`decided\`, \`rejected\` or \`withdrawn\`. The status says where the question stands; it grants no permission to act.
+
+## When to create one
+
+Create a first record only when all four hold:
+
+1. **Significance:** a central product principle, an architectural direction, a substantial system-wide commitment or a major change to user-facing behavior. Judge by consequences, not implementation size.
+2. **Meaningful alternatives:** credible approaches have materially different consequences, and current guidance does not settle the choice.
+3. **Lasting consequences:** the choice constrains work beyond the current task.
+4. **Useful rationale:** future work needs to understand the tradeoff.
+
+Routine feature details, formatting, refactors and bug fixes belong on the owning regular page and in the issue or pull request. When in doubt, do not create a topic. Check existing topics first with \`list_docs({kind: "decision"})\` or \`search\` with \`kind: "decision"\`.
+
+## Topics and titles
+
+A topic is the question; it keeps its identity while its answer changes. The first record's UUID is the topic's address for citations and pins. The title names the question, never the answer, and is stored once on the first record: renaming any record renames the topic. A successor takes the topic's title; omit \`title\` when creating it.
+
+## Writing the answer
+
+- Lead with the choice in one plain sentence naming the chosen option, without hedging such as "should consider". Give the reason in one clause or sentence.
+- Keep the whole answer to 60 words or fewer, in one to three answer blocks: paragraphs, code blocks, tables or lists (adjacent list items count as one). Other block types refuse.
+- Short is not vague: keep the concrete terms needed to apply the answer.
+- Put alternatives, extended rationale and process in a linked RFC, and product detail on the owning regular page. Do not restate the topic or write a specification.
+- Decisions have no TL;DR, and a decided record holds no structured data.
+
+## Status changes
+
+- \`create_doc\` with \`kind: "decision"\` creates an open record, or a decided one with its answer. \`set_status\` moves it later, or turns an ordinary page into a decision record.
+- An open record may be empty or hold a proposal. Moving to \`decided\` needs a non-blank answer.
+- A topic's first record may be decided as an agent stance without a person. Every later decision, and confirming a stance, needs \`answer: {who, when, where}\`: who gave the answer, when and where. MCP stores it without verifying it, so have that authority first.
+- An open proposal may be withdrawn. Rejecting needs a reason and a person's answer. Decided records cannot reopen; rejected and withdrawn records are final.
+
+## Changing a decided answer
+
+A decided record's answer is read-only: content writes refuse with \`decision_read_only\`. Title, description, tags, links and comments stay editable, and a rename keeps the approval. To change the answer, create a successor with \`create_doc\`, \`kind: "decision"\` and \`supersedes\` naming the record it replaces. It joins the same topic, and the current answer stays in force while the successor is open. State the changed outcome and why. An answer edit that still arrives, for example from an offline editor, shows \`approvalChanged: true\` until a person's answer is recorded again.
+
+## Discussion and related pages
+
+- \`related\` on the first record names the regular page the decision belongs to; successors inherit it.
+- \`discussion\` names the RFC: an ordinary regular page holding the options and reasoning. Create or reuse it first. While the record is open, \`set_metadata\` can change or clear it; after that it is fixed. A successor never inherits it.
+- Reading a regular page returns its topics in \`decisions\`: related topics first, then topics whose records link to it.
+
+## Reading topics
+
+- \`list_docs({kind: "decision"})\` lists one row per topic: the record in force, else a pending one, else the first, with the UUIDs of the record in force, the pending records and any conflicts. \`include_superseded: true\` lists every record.
+- \`get_doc\` on a record returns its predecessors, direct successors and the topic's resolution. Competing decided answers form a conflict with nothing in force; a decided record in conflict can be rejected with a person's answer.
+
+## Related
+
+[Editing documents](uberblick://help/edit_doc) · [archive_doc](uberblick://help/archive_doc) · [set_status](uberblick://help/set_status) · [create_doc](uberblick://help/create_doc)`;
 
 const markdown = `# Supported Markdown
 
@@ -398,7 +409,7 @@ A document can own named collections beside its prose. Each collection has one s
 
 \`after\` is an exclusive id cursor. \`limit\` defaults to 100 and is at most 1,000; \`max_bytes\` defaults to 65,536 and is at most 1,048,576. An optional \`ids\` filter accepts at most 1,000 ids and reports missing ids. The byte budget measures canonical UTF-8 JSON of the page's id/value array, excluding schemas, diagnostics and response formatting. With a positive limit, the first remaining record is included even when it exceeds that budget. Follow \`next_after\` until \`complete\`; pages are not snapshots and traverse each record once only while the data stays unchanged. Invalid merged data stays visible with diagnostics; reads neither repair nor discard it.
 
-\`update_data\` takes one validated batch, naming each touched collection once. For each collection it sets \`schema\`, optionally \`replaceRecords\`, then applies \`deleteRecords\` and \`upsert\` whole id/value records. \`deleteCollection: true\` excludes other changes. Every retained record must satisfy the resulting schema before the batch commits in one local transaction. An identical refresh returns \`changed: false\` and emits no update. Keep producer records and human dispositions in separate collections, sharing ids by convention. Content locks are in \`lifecycle\`; briefing and durability are in \`tool-contracts\`.
+\`update_data\` takes one validated batch, naming each touched collection once. For each collection it sets \`schema\`, optionally \`replaceRecords\`, then applies \`deleteRecords\` and \`upsert\` whole id/value records. \`deleteCollection: true\` excludes other changes. Every retained record must satisfy the resulting schema before the batch commits in one local transaction. An identical refresh returns \`changed: false\` and emits no update. Keep producer records and human dispositions in separate collections, sharing ids by convention. The decided-answer lock is in \`decisions\` and the archive lock in \`archive_doc\`; briefing and durability are in \`tool-contracts\`.
 
 ## Closed version-1 schema vocabulary
 
@@ -455,7 +466,7 @@ For both views, limit has no upper bound of its own. Records hidden by the autho
 
 ## Related
 
-[get_data](uberblick://help/get_data) · [update_data](uberblick://help/update_data) · [Lifecycle](uberblick://help/lifecycle) · [Tool contracts](uberblick://help/tool-contracts) · [Supported Markdown](uberblick://help/markdown)`;
+[get_data](uberblick://help/get_data) · [update_data](uberblick://help/update_data) · [Decision records](uberblick://help/decisions) · [Tool contracts](uberblick://help/tool-contracts) · [Supported Markdown](uberblick://help/markdown)`;
 
 const toolContracts = `# Shared tool contracts
 
@@ -483,7 +494,7 @@ ${GUIDANCE_INSTRUCTIONS}
 
 ## Related
 
-[Lifecycle and content locks](uberblick://help/lifecycle) · [Workspaces and metadata](uberblick://help/workspaces) · [Structured data](uberblick://help/data) · [sync_status](uberblick://help/sync_status)`;
+[Decision records](uberblick://help/decisions) · [Workspaces and metadata](uberblick://help/workspaces) · [Structured data](uberblick://help/data) · [sync_status](uberblick://help/sync_status)`;
 
 /** One owner for each shared contract; per-tool pages link to these topics. */
 export const conceptTopics: readonly HelpTopic[] = [
@@ -494,16 +505,22 @@ export const conceptTopics: readonly HelpTopic[] = [
     text: STARTUP_ORIENTATION,
   },
   {
+    id: "edit_doc",
+    title: "Editing documents",
+    description: "One short entry point before creating or changing a document: regular page or decision record, the read-and-edit loop and Markdown essentials.",
+    text: editDoc,
+  },
+  {
     id: "workspaces",
     title: "Workspaces and documents",
     description: "Workspace selection, document and block identities, metadata, links, tags and sidebar organization.",
     text: workspaces,
   },
   {
-    id: "lifecycle",
-    title: "Decision records and lifecycle",
-    description: "Ordinary documents, decision topics, when to create decision records, supersession, status, authority, content locks, archive and restoration.",
-    text: lifecycle,
+    id: "decisions",
+    title: "Decision records",
+    description: "When to create a decision record, writing the short answer, status changes and recorded answers, successors, RFC discussion and reading topics.",
+    text: decisions,
   },
   {
     id: "markdown",

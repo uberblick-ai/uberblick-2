@@ -10,7 +10,7 @@ import { INTERNAL_RESOURCE_ERROR_MESSAGE } from "../src/resource-adapter.js";
 import { FailingStore, removeTempDirs, startServer, TEST_SECRET, testConfig, toolNamed } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
-const concepts = ["orientation", "workspaces", "lifecycle", "markdown", "ablauf", "data", "tools", "tool-contracts"];
+const concepts = ["orientation", "edit_doc", "decisions", "workspaces", "markdown", "ablauf", "data", "tools", "tool-contracts"];
 const rigs: Rig[] = [];
 
 async function local(config = testConfig(), store?: FailingStore): Promise<Rig> {
@@ -37,8 +37,8 @@ it("lists every concept and registered tool once, with the same Markdown through
   const rig = await local();
   const { tools } = await rig.client.listTools();
   const { topics } = await rig.ok("get_help");
-  expect(topics.find(({ id }: { id: string }) => id === "lifecycle")?.description)
-    .toContain("when to create decision records");
+  expect(topics.find(({ id }: { id: string }) => id === "decisions")?.description)
+    .toContain("When to create a decision record");
   expect(topics.map(({ id }: { id: string }) => id).sort()).toEqual(
     [...concepts, ...tools.map(({ name }) => name)].sort(),
   );
@@ -134,7 +134,7 @@ it("renders each tool's actual full description and schemas, with an accepted ex
   }
   for (const [tool, topic] of [
     ["set_metadata", "workspaces"], ["get_sidebar", "workspaces"],
-    ["edit_block", "lifecycle"], ["archive_doc", "lifecycle"], ["set_status", "lifecycle"],
+    ["edit_block", "edit_doc"], ["create_doc", "decisions"], ["set_status", "decisions"],
     ["get_data", "data"], ["update_data", "data"], ["export_markdown", "markdown"],
   ]) {
     expect((await rig.ok("get_help", { topic: tool })).text.split("## Related\n")[1])
