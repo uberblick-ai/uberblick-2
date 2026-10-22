@@ -38,6 +38,8 @@
   --accent: light-dark(oklch(0.97 0 0), oklch(0.22 0.01 65));
   --accent-foreground: light-dark(oklch(0.205 0 0), oklch(0.985 0 0));
   --destructive: light-dark(oklch(0.577 0.245 27.325), oklch(0.704 0.191 22.216));
+  /* Plain destructive text needs stronger ink on tinted surfaces. */
+  --destructive-ink: light-dark(oklch(0.54 0.22 27.325), var(--destructive));
   --destructive-foreground: light-dark(#ffffff, #111827);
   /* The unsupported-content banner uses a tinted destructive ground. */
   --destructive-subtle: light-dark(oklch(0.95 0.03 27.325), oklch(0.25 0.04 22.216));
@@ -94,6 +96,9 @@
   --status-warning-subtle: light-dark(oklch(0.95 0.04 75), oklch(0.25 0.04 75));
   /* Warning text needs darker light-mode ink than the fill/stroke accent. */
   --status-warning-ink: light-dark(oklch(0.48 0.1 75), var(--status-warning));
+
+  --archived-background: light-dark(oklch(0.97 0.015 75), oklch(0.23 0.015 75));
+  --archived-icon: light-dark(oklch(0.52 0.07 75), oklch(0.7 0.07 75));
 
   /* Running prose steps back from heading ink to preserve contrast hierarchy. */
   --prose-text: light-dark(oklch(0.3 0 0), oklch(0.92 0 0));
@@ -2445,6 +2450,13 @@ h6.ub-heading {
   text-underline-offset: inherit;
 }
 
+.ub-doclink[data-doc-link-state="deleted"],
+.ub-doclink[data-doc-link-state="deleted"] .ub-decision-rfc-title {
+  color: var(--muted-foreground);
+  text-decoration: line-through solid;
+  cursor: default;
+}
+
 @container decision-history (max-width: 34rem) {
   .ub-decision-timeline > li {
     --rail-center: 1rem;
@@ -3242,7 +3254,7 @@ button.ub-docs-tag-chip:hover {
   .ub-mention,
   .ub-threads-toggle,
   .ub-appearance-option,
-  .ub-archived-banner > button {
+  .ub-archived-banner button {
     min-height: 2.75rem;
   }
 

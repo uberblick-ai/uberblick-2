@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { archiveDocument, archiveDecisionRecord, getDirectoryEntry, decisionTopicArchived, decisionTopicTitle, getMeta, isDirectoryEntryArchived, resolveDecisionTopics, restoreDirectoryEntry } from "@uberblick/schema";
+import { archiveDocument, archiveDecisionRecord, deleteDirectoryEntry, getDirectoryEntry, decisionTopicArchived, decisionTopicTitle, getMeta, isDirectoryEntryArchived, resolveDecisionTopics, restoreDirectoryEntry, unpinDoc } from "@uberblick/schema";
 import { toast } from "sonner";
 import { acquireRoom } from "../../collab/rooms.js";
 import type { ShellEnvironment } from "./environment.js";
@@ -36,6 +36,17 @@ export function useArchive({ directory, doc, sidebar, selected, defaultIdentity,
     restoreFocusRoom.current = null;
     archiveConfirmationFocusRoom.current = null;
   }, []);
+
+  const onDelete = useCallback(() => {
+    if (directory === null || selected === null || !directory.status.writable) return;
+    const entry = getDirectoryEntry(directory.ydoc, selected);
+    if (entry === null || entry.kind === "decision" || entry.deleted !== true ||
+      (doc !== null && getMeta(doc.ydoc).kind === "decision")) return;
+    deleteDirectoryEntry(directory.ydoc, selected);
+    // Pin cleanup cannot hold up deletion; readers hide deleted UUIDs even
+    // when this replica cannot write the sidebar yet.
+    if (sidebar?.status.writable) unpinDoc(sidebar.ydoc, selected);
+  }, [directory, selected, doc, sidebar]);
 
   /**
    * Remember focus inside archive confirmation so a remote tombstone can
@@ -118,5 +129,5 @@ export function useArchive({ directory, doc, sidebar, selected, defaultIdentity,
     });
   }, [directory, doc, sidebar, selected, defaultIdentity, workspace, navigate]);
 
-  return { restoreFocusRoom, archiveConfirmationFocusRoom, onRestore, onRestoreFocused, onArchiveConfirmationFocusChange, onArchive };
+  return { restoreFocusRoom, archiveConfirmationFocusRoom, onRestore, onRestoreFocused, onArchiveConfirmationFocusChange, onArchive, onDelete };
 }

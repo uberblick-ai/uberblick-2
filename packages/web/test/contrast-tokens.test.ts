@@ -122,6 +122,8 @@ const pairs: Pair[] = [
   ...["--background", "--card", "--accent", "--page-ground[0]", "--page-ground[1]"]
     .map((ground) => text("neutral kind badge ink", "--muted-foreground", ground)),
   text("archived pill ink", "--muted-foreground", "--muted"),
+  ...["--foreground", "--destructive-ink"].map((ink) => text("archived banner ink", ink, "--archived-background")),
+  text("archived Restore ink", "--secondary-foreground", "--secondary"),
   ...["--foreground", "--card-foreground"].map((ink) => text("neutral submit emphasis ink", ink, "--card-accent")),
   ...["--background", "--card", "--page-ground[0]", "--page-ground[1]"]
     .map((ground): Pair => ({ name: "table drop indicator", ink: "--foreground", ground, floor: 3 })),

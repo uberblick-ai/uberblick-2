@@ -40,6 +40,7 @@ import {
   getMeta,
   getMetaMap,
   initDoc,
+  isDirectoryEntryDeleted,
   listAnnotations,
   listDirectory,
   pinDoc,
@@ -260,6 +261,101 @@ function action(label: string): HTMLElement | undefined {
 }
 
 describe("an archived document is readable, says so, and offers one way back", () => {
+  it("confirms permanent deletion, shares its mark and removes its pin", async () => {
+    const directory = room(directoryRoom(WORKSPACE)).ydoc;
+    const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
+    initDoc(room(roomForDoc(WORKSPACE, UUID)).ydoc, { uuid: UUID, title: "Retired draft" });
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Retired draft" });
+    tombstoneDirectoryEntry(directory, UUID);
+    const peer = peerDirectory(directory);
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+    act(() => pinDoc(sidebar, createGroup(sidebar, "Reading"), UUID));
+    expect(restoreButton(host)?.getAttribute("data-variant")).toBe("secondary");
+    act(() => within(host).getByRole("button", { name: "Delete…" }).click());
+    const dialog = screen.getByRole("alertdialog", { name: 'Delete "Retired draft"?' });
+    expect(dialog.textContent).toContain("It will be gone for everyone, with its comments and history. Links to it will show it was deleted. This can't be undone.");
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" }));
+    act(() => within(dialog).getByRole("button", { name: "Cancel" }).click());
+    expect(isDirectoryEntryDeleted(directory, UUID)).toBe(false);
+    expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
+    act(() => within(host).getByRole("button", { name: "Delete…" }).click());
+    act(() => screen.getByRole("button", { name: "Delete" }).click());
+    expect(isDirectoryEntryDeleted(directory, UUID)).toBe(true);
+    expect(isDirectoryEntryDeleted(peer, UUID)).toBe(true);
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
+    expect(within(host).getByText("This document was deleted.")).not.toBeNull();
+    expect(toast.success).not.toHaveBeenCalled();
+    peer.destroy();
+  });
+
+  it("disables Delete with a reason before and during confirmation when the directory cannot write", async () => {
+    const directoryName = directoryRoom(WORKSPACE);
+    const directory = room(directoryName).ydoc;
+    initDoc(room(roomForDoc(WORKSPACE, UUID)).ydoc, { uuid: UUID, title: "Retired draft" });
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Retired draft" });
+    tombstoneDirectoryEntry(directory, UUID);
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+    emitStatus(directoryName, { writable: false });
+    const trigger = within(host).getByRole<HTMLButtonElement>("button", { name: "Delete…" });
+    expect(trigger.disabled).toBe(true);
+    expect(within(host).getByText("Delete is unavailable while the directory is not ready to write.")).not.toBeNull();
+    act(() => trigger.click());
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    emitStatus(directoryName, { writable: true });
+    act(() => trigger.click());
+    emitStatus(directoryName, { writable: false });
+    const dialog = screen.getByRole("alertdialog");
+    const confirm = within(dialog).getByRole<HTMLButtonElement>("button", { name: "Delete" });
+    expect(confirm.disabled).toBe(true);
+    expect(dialog.textContent).toContain("Delete is unavailable while the directory is not ready to write. Nothing has been deleted.");
+    const before = Y.encodeStateAsUpdate(directory);
+    act(() => confirm.click());
+    expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
+    expect(isDirectoryEntryDeleted(directory, UUID)).toBe(false);
+    emitStatus(directoryName, { writable: true });
+    act(() => confirm.click());
+    expect(isDirectoryEntryDeleted(directory, UUID)).toBe(true);
+  });
+
+  it.each(["restored", "decision", "missing", "unwritable"] as const)("refuses a stale confirmation when the document becomes %s before React commits", async (change) => {
+    const directoryName = directoryRoom(WORKSPACE);
+    const directory = room(directoryName).ydoc;
+    initDoc(room(roomForDoc(WORKSPACE, UUID)).ydoc, { uuid: UUID, title: "Retired draft" });
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Retired draft" });
+    tombstoneDirectoryEntry(directory, UUID);
+    const peer = peerDirectory(directory);
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+    act(() => within(host).getByRole("button", { name: "Delete…" }).click());
+    const confirm = screen.getByRole<HTMLButtonElement>("button", { name: "Delete" });
+    act(() => {
+      if (change === "restored") restoreDirectoryEntry(peer, UUID);
+      if (change === "decision") upsertDirectoryEntry(peer, { ...getDirectoryEntry(peer, UUID)!, kind: "decision", status: "open" });
+      if (change === "missing") getDirectoryMap(peer).delete(UUID);
+      if (change === "unwritable") roomStatus.set(directoryName, { ...LIVE, writable: false });
+      const before = Y.encodeStateAsUpdate(directory);
+      confirm.click();
+      expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
+    });
+    expect(isDirectoryEntryDeleted(directory, UUID)).toBe(false);
+    peer.destroy();
+  });
+
+  it("deletes with an unavailable sidebar and leaves stale pins hidden", async () => {
+    const directory = room(directoryRoom(WORKSPACE)).ydoc;
+    const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
+    initDoc(room(roomForDoc(WORKSPACE, UUID)).ydoc, { uuid: UUID, title: "Retired draft" });
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Retired draft" });
+    tombstoneDirectoryEntry(directory, UUID);
+    pinDoc(sidebar, createGroup(sidebar, "Reading"), UUID);
+    roomStatus.set(sidebarRoom(WORKSPACE), { ...LIVE, writable: false, synced: false });
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+    act(() => within(host).getByRole("button", { name: "Delete…" }).click());
+    act(() => screen.getByRole("button", { name: "Delete" }).click());
+    expect(isDirectoryEntryDeleted(directory, UUID)).toBe(true);
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
+    expect(within(host).queryByRole("button", { name: /b4e6f1c2/ })).toBeNull();
+  });
+
   it("stops rendering an open document when permanent deletion arrives", async () => {
     const directory = room(directoryRoom(WORKSPACE)).ydoc;
     const document = room(roomForDoc(WORKSPACE, UUID)).ydoc;
