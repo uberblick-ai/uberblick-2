@@ -29,13 +29,16 @@ export const toolHelpDetails = {
     "and set_metadata with `title` is the repair for the untitled ones the web UI creates.\n\n" +
     "Pass `kind: decision` to create a decision record. Its `status` defaults to `open`; `status` " +
     "without `kind` is refused before a document is created. A decision " +
-    "may pass `related`, the UUID of one live, locally readable regular page. " +
-    "A decision target refuses with related_not_regular_document. The page is fixed at creation, stored as " +
-    "`governs` for compatibility; existing governs values stay related pages without migration. Any other " +
+    "may pass `related` as one UUID or a non-empty list of UUIDs of live, locally readable regular pages. " +
+    "Every target is validated; a refusal names the offending UUID and a decision target refuses with " +
+    "related_not_regular_document. The set is fixed at creation. Existing `governs` values stay related " +
+    "pages without migration; `governs` still returns one page for compatibility, while `related` returns " +
+    "the whole set. Any other " +
     "use of `related` is refused before a UUID is allocated or a room is written. A decision may also pass " +
     "`supersedes`, the UUID of a hydrated decision in a live topic it replaces. The reference is immutable, " +
-    "and its predecessor's topic is copied forward; a successor without related also inherits its page. " +
-    "An explicit related selects the page given. A first record uses its own UUID as topic. `topic` is " +
+    "and its predecessor's topic is copied forward; a successor without related inherits its whole set. " +
+    "An explicit related selects exactly the supplied set for the successor; its predecessor keeps its own set. " +
+    "A first record uses its own UUID as topic. `topic` is " +
     "never an input. Supersession is returned by get_doc and is a derived link: backlinks on the earlier " +
     "decision exposes every successor without editing that earlier document. A non-decision target or a " +
     "self-reference is refused before any room is written. An archived predecessor topic is refused with " +
@@ -45,7 +48,7 @@ export const toolHelpDetails = {
     "room. Optional `discussion` names a live, locally readable regular document " +
     "for this record's RFC. Create or reuse it first as an ordinary regular document. New " +
     "workspaces include an ordinary `rfc` tag to apply deliberately; connecting never requires or applies " +
-    "that tag, creates an RFC or edits the RFC or related page. A decision target refuses with " +
+    "that tag, creates an RFC or edits the RFC or related pages. A decision target refuses with " +
     "`discussion_not_regular_document`; archived, unknown or unhydrated targets refuse with `doc_archived`, " +
     "`doc_not_found` or `doc_not_hydrated`, before a UUID is allocated or a room is written. `discussion` " +
     "without `kind: \"decision\"` is an argument error. For a new topic, create an open first record with " +
@@ -58,12 +61,12 @@ export const toolHelpDetails = {
     "These answer blocks are distinct from " +
     "recorded `answer: {who, when, where}` attribution. A record created decided " +
     "can also name its discussion. Successors never inherit discussion, even when they inherit the related " +
-    "page. set_metadata can correct or clear it only while open; set_status settles, rejects or withdraws " +
+    "pages. set_metadata can correct or clear it only while open; set_status settles, rejects or withdraws " +
     "under the existing recorded-answer contract. The reference is fixed once the record leaves open. " +
     "It is returned separately from curated links and recorded answer attribution. Directory decision " +
     "entries cache discussion, null for none and absent when unknown, and derive answerPreview from the " +
     "first answer paragraph/list; decisions have no TL;DR. " +
-    "get_doc on the related page returns its topic marked related, and other linking topics marked linked.\n\n" +
+    "get_doc on every related page returns its topic marked related, and other linking topics marked linked.\n\n" +
     "`sidebar` is optional and is the only way to say where the document goes: omit it and the document is " +
     "created unpinned (the default, unchanged), or pass `{group: {id, position?}}` to pin it into a group " +
     "that ALREADY exists — the id comes from get_sidebar, `position` is clamped into range and omitted means " +
@@ -73,7 +76,7 @@ export const toolHelpDetails = {
     "brings a group into being. The answer echoes the placement it made as `sidebar: {group: {id, name}, " +
     "position}`.\n\n" +
     "This call writes up to three independently persisted rooms — the document, the directory, and the " +
-    "sidebar when you place it — so it reports them one by one. The related page and RFC are never written. " +
+    "sidebar when you place it — so it reports them one by one. The related pages and RFC are never written. " +
     "If the local update log refuses a write part-way, the call fails with `persistence_failed` carrying the " +
     "`uuid`, the rooms already `completed`, the `failed` room, `rolledBack: false`, and a stage-aware " +
     "`recovery` line — the earlier rooms stay durable, and recovery never risks creating the decision twice.",

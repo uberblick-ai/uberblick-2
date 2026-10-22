@@ -155,7 +155,7 @@ function stageDecision(input: AlterDecisionInput, draft: Y.Doc, uuid: string, rf
       ...(predecessor.description == null ? {} : { description: predecessor.description }),
       tags: predecessor.tags, topic: predecessor.topic ?? predecessor.uuid,
       supersedes: predecessor.uuid,
-      ...(predecessor.governs === undefined ? {} : { governs: predecessor.governs }),
+      ...(predecessor.related === undefined ? {} : { related: predecessor.related }),
     });
     setKind(record, "decision");
     setStatus(record, input.mode === "decide" ? "decided" : "open");

@@ -79,6 +79,8 @@ export const listDocsOperation = operation(READ, inputSchema, (context, { tag, k
             kind: "decision" as const,
             status: entry.status,
             topic: entry.topic,
+            ...(entry.governs === undefined ? {} : { governs: entry.governs }),
+            ...(entry.related === undefined ? {} : { related: entry.related }),
             ...(entry.discussion === undefined ? {} : { discussion: entry.discussion }),
             ...(entry.answerPreview === undefined ? {} : { answerPreview: entry.answerPreview }),
             ...entry.resolution,

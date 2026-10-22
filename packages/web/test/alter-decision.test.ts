@@ -35,6 +35,7 @@ const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const CURRENT = "9ebf44bd-97f8-479d-8e7c-5fbc96173504";
 const NEXT = "e795b3c7-cd85-4e6f-8950-a4f479b077ba";
 const RELATED = "34865e42-d48f-497a-8e1b-132c504a3e45";
+const OTHER_RELATED = "f96ea9b7-012a-4f05-98b0-d92ac4c4b0df";
 const DISCUSSION = "63c11ea4-0e60-40ee-a46d-6feef7e55b61";
 const TAG = "00000000-0000-4000-8000-000000000001";
 const RFC_TAG = "00000000-0000-4000-8000-000000000006";
@@ -118,12 +119,12 @@ function draftOf(source: Y.Doc): Y.Doc {
   return draft;
 }
 
-function fixture(blocks: BlockInput[] = [{ type: "paragraph", text: "The current answer." }]) {
+function fixture(blocks: BlockInput[] = [{ type: "paragraph", text: "The current answer." }], related?: string[]) {
   const source = room(roomForDoc(WORKSPACE, CURRENT), true);
   const directory = room(directoryRoom(WORKSPACE), true);
   initDoc(source.connection.ydoc, {
     uuid: CURRENT, title: "Current question", description: "A useful description.",
-    tags: [TAG], governs: RELATED,
+    tags: [TAG], ...(related === undefined ? { governs: RELATED } : { related }),
   });
   setKind(source.connection.ydoc, "decision");
   for (const block of blocks) appendBlock(source.connection.ydoc, block);
@@ -288,6 +289,25 @@ describe("copying the current decision answer", () => {
 });
 
 describe("MCP-compatible stored successors", () => {
+  it.each([
+    { mode: "decide", legacy: false }, { mode: "rfc", legacy: false },
+    { mode: "decide", legacy: true }, { mode: "rfc", legacy: true },
+  ] as const)("inherits every related page in $mode mode (legacy=$legacy)", async ({ mode, legacy }) => {
+    const related = legacy ? [RELATED] : [RELATED, OTHER_RELATED];
+    const { source, directory, input } = fixture(undefined, related);
+    if (legacy) getMetaMap(source.connection.ydoc).delete("related");
+    const before = Y.encodeStateAsUpdate(source.connection.ydoc);
+    const pending = recordAlteredDecision({ ...input, mode });
+    await admitAll();
+    const result = await pending;
+    if (!result.ok) throw new Error(result.message);
+    expect(getMeta(stored(result.decision)).related).toEqual(related);
+    expect(getMeta(stored(result.decision)).governs).toBe(RELATED);
+    expect(getDirectoryEntry(directory.connection.ydoc, result.decision)?.related).toEqual(related);
+    expect(Y.encodeStateAsUpdate(source.connection.ydoc)).toEqual(before);
+    result.release();
+  });
+
   it("uses the source room identity when stored metadata names another record", async () => {
     const { source, input } = fixture();
     getMetaMap(source.connection.ydoc).set("uuid", NEXT);

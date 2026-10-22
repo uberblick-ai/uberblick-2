@@ -13,6 +13,7 @@ import { decisionApprovalChanged } from "./approval.js";
 import { decisionAnswerPreview } from "./decision-answer.js";
 import { readCodeChecks } from "./code-check.js";
 import { resolveDecisionTopics } from "./decisions.js";
+import { canonicalRelatedPages, readRelatedPages } from "./decision-related.js";
 import type {
   CodeCheck,
   DirectoryEntry,
@@ -29,6 +30,9 @@ export const DIRECTORY_DELETED_KEY = "deleted-docs";
 
 /** Individual archives survive whole-stub rewrites by older clients. */
 export const DIRECTORY_ARCHIVED_RECORDS_KEY = "archived-records";
+
+/** Full related sets survive older clients replacing a decision's whole stub. */
+export const DIRECTORY_RELATED_PAGES_KEY = "decision-related-pages";
 
 /** At most one content-only authored stamp per document in this window. */
 export const UPDATED_AT_COARSENESS_MS = 5 * 60_000;
@@ -104,6 +108,7 @@ export function directoryStubDiffers(
     (meta.kind !== "decision" && fields?.code_check !== undefined && !sameCodeChecks(stub.code_check, fields.code_check)) ||
     (meta.kind === "decision" && (
       stub.governs !== meta.governs ||
+      !sameSet(stub.related ?? [], meta.related ?? []) ||
       stub.topic !== meta.topic ||
       stub.supersedes !== meta.supersedes ||
       stub.discussion !== (meta.discussion ?? null) ||
@@ -171,6 +176,7 @@ export function enforceDeletedDirectoryEntries(dirDoc: Y.Doc): void {
     const docs = getDirectoryMap(dirDoc);
     for (const uuid of deleted) {
       if (docs.has(uuid)) docs.delete(uuid);
+      dirDoc.getMap<unknown>(DIRECTORY_RELATED_PAGES_KEY).delete(uuid);
     }
     const stamps = getUpdatedAtMap(dirDoc);
     for (const key of stamps.keys()) {
@@ -374,6 +380,8 @@ export interface DirectoryUpsert {
   code_check?: CodeCheck[] | null;
   /** Decision-only fields: omission preserves, null/empty clears. */
   governs?: string | null;
+  /** Full immutable set, stored outside replaceable stubs; omission preserves it. */
+  related?: string[] | null;
   topic?: string | null;
   supersedes?: string | null;
   discussion?: string | null;
@@ -386,7 +394,7 @@ export interface DirectoryUpsert {
 }
 
 export type DecisionDirectoryFields = Pick<DirectoryUpsert,
-  "governs" | "topic" | "supersedes" | "agentStance" |
+  "governs" | "related" | "topic" | "supersedes" | "agentStance" |
   "decidedBy" | "decidedAt" | "approvalChanged" | "commentCount" | "answerPreview" | "discussion">;
 
 export type DocumentDirectoryFields = DecisionDirectoryFields & { openThreadCount: number; code_check?: CodeCheck[] };
@@ -455,6 +463,7 @@ export function decisionDirectoryFields(doc: Y.Doc, authoritativeUuid?: string):
   if (meta.kind !== "decision") return {};
   return {
     governs: meta.governs ?? null,
+    related: meta.related ?? null,
     topic: meta.topic ?? meta.uuid,
     supersedes: meta.supersedes ?? null,
     discussion: meta.discussion ?? null,
@@ -465,6 +474,21 @@ export function decisionDirectoryFields(doc: Y.Doc, authoritativeUuid?: string):
     approvalChanged: decisionApprovalChanged(doc),
     commentCount: listAnnotations(doc).reduce((count, thread) => count + thread.comments.length, 0),
   };
+}
+
+function cacheRelatedPages(dirDoc: Y.Doc, entry: DirectoryUpsert, next: StoredEntry): void {
+  if (next.kind !== "decision" || entry.related === undefined) return;
+  const related = canonicalRelatedPages(entry.related);
+  const pages = dirDoc.getMap<unknown>(DIRECTORY_RELATED_PAGES_KEY);
+  if (related === null) {
+    if (entry.related === null) pages.delete(entry.uuid);
+    return;
+  }
+  if (!sameSet(readRelatedPages(pages.get(entry.uuid), undefined), related)) {
+    pages.set(entry.uuid, related);
+  }
+  const first = related[0];
+  if (first !== undefined) next.governs = first;
 }
 
 /**
@@ -525,6 +549,7 @@ export function upsertDirectoryEntry(
       ...(codeCheck === undefined ? {} : { code_check: codeCheck }),
       ...(kind === "decision" ? readDecisionFields(cache) : {}),
     };
+    cacheRelatedPages(dirDoc, entry, next);
     docs.set(entry.uuid, next);
   });
 }
@@ -642,7 +667,9 @@ export interface ListDirectoryOptions {
   includeDeleted?: boolean;
 }
 
-function toEntry(uuid: string, stored: StoredEntry, recordArchived = false): DirectoryEntry {
+function toEntry(uuid: string, stored: StoredEntry, dirDoc: Y.Doc, recordArchived = false): DirectoryEntry {
+  const related = stored.kind === "decision"
+    ? readRelatedPages(dirDoc.getMap<unknown>(DIRECTORY_RELATED_PAGES_KEY).get(uuid), stored.governs) : [];
   return {
     uuid,
     title: stored.title,
@@ -659,6 +686,7 @@ function toEntry(uuid: string, stored: StoredEntry, recordArchived = false): Dir
     ...(stored.openThreadCount === undefined ? {} : { openThreadCount: stored.openThreadCount }),
     ...(stored.kind === "decision" || stored.code_check === undefined ? {} : { code_check: stored.code_check }),
     ...(stored.kind === "decision" ? readDecisionFields(stored as unknown as Record<string, unknown>) : {}),
+    ...(related.length > 0 ? { governs: related[0], related } : {}),
   };
 }
 
@@ -677,7 +705,7 @@ export function getDirectoryEntry(
   if (stored.kind === "decision" && dirDoc.getMap<unknown>(DIRECTORY_ARCHIVED_RECORDS_KEY).get(uuid) === true) {
     return listDirectory(dirDoc, { includeDeleted: true }).find((entry) => entry.uuid === uuid) ?? null;
   }
-  return toEntry(uuid, stored);
+  return toEntry(uuid, stored, dirDoc);
 }
 
 /**
@@ -708,7 +736,7 @@ export function listDirectory(
       updatedAts.get(uuid),
     );
     if (stored === null) continue;
-    out.push(toEntry(uuid, stored, dirDoc.getMap<unknown>(DIRECTORY_ARCHIVED_RECORDS_KEY).get(uuid) === true));
+    out.push(toEntry(uuid, stored, dirDoc, dirDoc.getMap<unknown>(DIRECTORY_ARCHIVED_RECORDS_KEY).get(uuid) === true));
   }
   const archivedRecords = new Set(out.some((entry) => entry.recordArchived === true)
     ? resolveDecisionTopics(out).flatMap((topic) => topic.archivedRecords.map((record) => record.uuid)) : []);

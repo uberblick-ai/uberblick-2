@@ -25,6 +25,7 @@ interface StoredDoc {
   status?: string;
   decidedBy?: string;
   discussion?: string | null;
+  related?: string[];
   blocks: Array<{ type: string; text: string }>;
   resolution?: { inForce: { uuid: string } | null; pending: Array<{ uuid: string }> };
   tags?: Array<{ name: string }>;
@@ -227,7 +228,15 @@ test("answer references preserve the draft on desktop pointer and Enter or iPad 
 
 test("Decide records a successor at the topic address and RFC opens its new page", async ({ browser }) => {
   const writer = session();
-  const source = await create(writer, docTitle("Alter outcomes"));
+  const related: StoredDoc[] = [];
+  for (const label of ["First", "Second"]) {
+    related.push(await writer.call<StoredDoc>("create_doc", {
+      title: docTitle(`${label} related page`), description: "Shared decision owner.",
+      blocks: [{ type: "paragraph", text: `${label} related guidance.` }],
+    }));
+  }
+  const relatedUuids = related.map((doc) => doc.uuid);
+  const source = await create(writer, docTitle("Alter outcomes"), undefined, { related: relatedUuids });
   const page = await openApp(browser, `/${harness().workspace}/${source.uuid}`);
   await openDialog(page);
   await expect(draft(page)).toHaveText("Keep the original answer.");
@@ -244,6 +253,15 @@ test("Decide records a successor at the topic address and RFC opens its new page
   await expect(page.locator(".ub-decision-answer-header .ub-decision-answer-state")).toHaveText("In force");
   await expect(page.locator(`.ub-decision-timeline > li[data-record="${source.uuid}"]`)).toContainText("Superseded");
   await expect(page.locator(".ub-decision-answer-header time")).toHaveAttribute("datetime", /^\d{4}-/);
+  let decided: string | undefined;
+  await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: source.uuid }), (stored) => {
+    decided = stored.resolution?.inForce?.uuid;
+    expect(decided).toBeDefined();
+    expect(decided).not.toBe(source.uuid);
+  });
+  await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: decided }), (stored) => {
+    expect(stored.related).toEqual(relatedUuids);
+  });
 
   await openDialog(page);
   await draft(page).fill("Discuss this proposed replacement first.");
@@ -262,6 +280,23 @@ test("Decide records a successor at the topic address and RFC opens its new page
   await expect(editor(page)).toContainText("Use the replacement answer.");
   await expect(page.getByRole("button", { name: "Alter decision", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /^(Approve|Reject|Withdraw)$/ })).toHaveCount(0);
+  let proposal: string | undefined;
+  await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: source.uuid }), (stored) => {
+    expect(stored.resolution?.pending).toHaveLength(1);
+    proposal = stored.resolution?.pending[0]?.uuid;
+    expect(proposal).toBeDefined();
+  });
+  await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: proposal }), (stored) => {
+    expect(stored.related).toEqual(relatedUuids);
+    expect(stored.discussion).toBe(rfc);
+  });
+  for (const relatedUuid of relatedUuids) {
+    await page.goto(new URL(`/${harness().workspace}/${relatedUuid}`, harness().appUrl).href);
+    await expect(page.getByRole("link", { name: "1 decision · 1 under review", exact: true })).toBeVisible();
+    const block = page.getByRole("region", { name: "Decisions", exact: true });
+    await expect(block.getByRole("link", { name: `Under review: ${source.title}`, exact: true })).toBeVisible();
+    await expect(block).toContainText("Use the replacement answer.");
+  }
 });
 
 test("Escape and an outside click discard the isolated answer without writes", async ({ browser }) => {

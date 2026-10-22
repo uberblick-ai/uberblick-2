@@ -137,17 +137,15 @@ export const tools: readonly Tool[] = [
     name: "create_doc",
     title: "Create a document",
     description:
-      "Create doc/stub; optional blocks/regular-page TL;DR. Require nonblank description; title is required except for successors. " +
-      "A decision topic has one title stored on its first record. Renaming any record renames the topic. Successors inherit it: omit title or supply the same title; another refuses. " +
-      "List-item seeds: bullet/ordered list, integer indent 0–3 (defaults bullet/0). " +
-      "Existing tags by id/name (case ignored); unknown/deleted refuse. Kind defaults first status; invalid pairs refuse. " +
-      "Decision topics/answers: consult get_help({topic: \"decisions\"}). " +
-      "Links/GitHub references: markdown. " +
-      "Open/decided only; deciding needs supported nonblank answer blocks, no TL;DR/data; decided successors require recorded human answer. " +
-      "related: live readable regular page; inherited unless supplied. supersedes: hydrated decision in live topic. Targets validated pre-write. " +
-      "discussion: live, readable regular RFC UUID; reuse/create first. Never inherited; set_metadata corrects/clears while open, then fixed. RFC/page untouched. Separate from curated links/recorded answer. " +
-      "Sidebar: get_sidebar group id; invalid = group_not_found, no creation; omit = unpinned. Independent rooms: persistence_failed: uuid, completed/failed, rolledBack: false, duplicate-safe recovery. " +
-      "answerPreview: first answer paragraph/list. Page get_doc: related/linked topics.",
+      "Create doc/stub with optional blocks or regular-page TL;DR. Nonblank description required; title required except successors. " +
+      "Decision topic title lives on its first record; successor title must be omitted or match. " +
+      "Decisions: open/decided only; deciding needs supported nonblank blocks, no TL;DR/data. Decided successors require human answer attribution. " +
+      "related: UUID or non-empty list of live readable regular pages; fixed at creation. Successor: omit to inherit whole set; supply to replace. " +
+      "supersedes: hydrated decision in live topic. Validate targets before allocation/writes. " +
+      "discussion: one live readable RFC UUID, never inherited; correct/clear only while open. Referenced pages untouched. " +
+      "sidebar: existing get_sidebar group id; omit for unpinned. " +
+      "persistence_failed reports uuid, completed/failed rooms and duplicate-safe recovery. " +
+      "Answer guidance: decisions; links: markdown.",
     input: createDocInput,
     operation: createDocOperation,
     // Adds a fresh document and optional pin; repeating adds another document.
