@@ -14,9 +14,9 @@ export interface HelpTopic {
 /** The same orientation is served in initialize.instructions and its help topic. */
 export const STARTUP_ORIENTATION =
   "Uberblick stores this repo's documents and decision records. " +
-  "Before you change anything, search the corpus for relevant ones with `search` (query or tags). " +
+  "Before you change anything, search the corpus for relevant documents and decisions, then read them with `get_doc`. " +
   "If the request conflicts with a decision in force, ask before building. " +
-  "You can list all documents and decision records via `list_docs`, read them with `get_doc`. " +
+  "Use `list_docs` for broader discovery; pass `kind: \"decision\"` to list decision topics. " +
   "Documents can store arbitrary, structured json as additional data. " +
   "Consult `get_help(edit_doc)` to understand how to edit or create documents. " +
   "Discover additional product help through MCP resources, or call `get_help(topic)`. " +
