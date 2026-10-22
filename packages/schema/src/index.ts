@@ -64,6 +64,14 @@ export type { InlineIconName } from "./inline-icons.js";
 export { blockRev } from "./rev.js";
 export type { RevInput } from "./rev.js";
 
+export { compareRevisions } from "./revisions.js";
+export type {
+  RevisionBlockComparison, RevisionChangeKind, RevisionCollectionComparison,
+  RevisionComparison, RevisionFieldComparison, RevisionRecordComparison,
+} from "./revisions.js";
+export type { RevisionCellComparison, RevisionRowComparison } from "./revision-blocks.js";
+export type { TextSpan } from "./revision-sequence.js";
+
 export {
   COMMENT_MARK,
   addComment,
