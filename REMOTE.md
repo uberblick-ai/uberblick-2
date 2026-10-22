@@ -196,6 +196,13 @@ own HTTP listener and the web image checks Caddy's loopback admin listener.
 These checks use no public DNS name, TLS certificate or deployment route; still
 check the selected site and `/ws` from the client.
 
+If you replace the `web` image's Caddyfile with your own, keep
+`admin 127.0.0.1:2019` in its global options. With `admin off` or the admin
+listener moved, the `web` container reports `unhealthy` even while the site
+serves. In the route that serves the app, keep
+`import /etc/caddy/uberblick-csp.caddy`; without it the app is served without
+the release's Content-Security-Policy.
+
 **When to update:** choose a release containing a change you want live, and
 stay present to verify it. Deploying a release neither creates, moves nor
 deletes a workspace on existing hub data. A database holding any hub data when
