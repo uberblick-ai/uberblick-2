@@ -1,18 +1,17 @@
 /** General facts, tag-catalog curation and live workspace access. */
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactElement, ReactNode } from "react";
 import type { Doc } from "yjs";
 import {
   createTagCatalogEntry,
+  deleteTagCatalogEntry,
   directoryRoom,
   getWorkspaceMainRepository,
   getWorkspaceName,
   isTagCatalogSeeded,
   isTagName,
   listTagCatalog,
-  restoreTagCatalogEntry,
-  retireTagCatalogEntry,
   seedTagCatalog,
   setWorkspaceMainRepository,
   setWorkspaceName,
@@ -30,6 +29,8 @@ import type { SettingsPage as SettingsRoutePage, Workspace } from "../route.js";
 import { Button } from "../shadcn/button.js";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../shadcn/collapsible.js";
 import { Input } from "../shadcn/input.js";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogTitle } from "../shadcn/alert-dialog.js";
 import { statusReading } from "../status/status-reading.js";
 import { useTagCatalog } from "../tags.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
@@ -91,7 +92,7 @@ function GeneralSettings({
   const documents = entries.filter((entry) => !entry.kind && !entry.deleted).length;
   const archived = entries.filter((entry) => !entry.kind && entry.deleted).length;
   const tagsReceived = catalogConnection?.room === settingsRoom(workspace.uuid) && catalogStatus.hasReceivedServerState;
-  const tags = tagsReceived ? catalog?.entries.filter((entry) => entry.state === "active").length : null;
+  const tags = tagsReceived ? catalog?.entries.length : null;
   const latest = entries.reduce<number | null>((stamp, entry) =>
     entry.deleted || entry.updatedAt === undefined ? stamp : Math.max(stamp ?? entry.updatedAt, entry.updatedAt), null);
   const edited = directoryReceived && latest !== null ? formatTimestamp(latest, now, true) : null;
@@ -299,17 +300,9 @@ function TagSettings({
   const catalog = useTagCatalog(connection);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const groups = useRef<HTMLDivElement | null>(null);
-  /**
-   * Remember position only for a local lifecycle gesture: moving catalog
-   * entries unmounts their focused button. Resolve a surviving focus target
-   * after both lists commit; remote catalog changes must not move focus.
-   */
-  const [refocus, setRefocus] = useState<{
-    from: "active" | "retired";
-    at: number;
-    moved: string;
-  } | null>(null);
+  const [deleting, setDeleting] = useState<TagCatalogEntry | null>(null);
+  const createInput = useRef<HTMLInputElement | null>(null);
+  const deleteTrigger = useRef<HTMLButtonElement | null>(null);
   const arrived =
     connection !== null &&
     connection.room === settingsRoom(workspace.uuid) &&
@@ -318,7 +311,7 @@ function TagSettings({
 
   // The examples are one schema-owned, merge-safe transition. Wait for the
   // server's answer first: seeding an empty Y.Doc before that answer could
-  // recreate an example another client already retired.
+  // recreate an example another client already deleted.
   useEffect(() => {
     if (
       connection === null ||
@@ -331,24 +324,6 @@ function TagSettings({
     }
     seedTagCatalog(connection.ydoc);
   }, [arrived, connection, local, status.writable]);
-
-  useLayoutEffect(() => {
-    if (refocus === null) return;
-    setRefocus(null);
-    const card = groups.current;
-    if (card === null) return;
-    const left = [
-      ...card.querySelectorAll<HTMLButtonElement>(
-        `[aria-labelledby="ub-${refocus.from}-tags"] [data-tag-entry]`,
-      ),
-    ];
-    // The control that took the moved entry's place, the last one when it was
-    // last, and the entry's own new control when the list it left is now empty.
-    const target =
-      left[Math.min(refocus.at, left.length - 1)] ??
-      card.querySelector<HTMLButtonElement>(`[data-tag-entry="${refocus.moved}"]`);
-    target?.focus();
-  }, [refocus]);
 
   if (!arrived) {
     return (
@@ -363,8 +338,6 @@ function TagSettings({
   }
 
   const entries = catalog?.entries ?? [];
-  const active = entries.filter((entry) => entry.state === "active");
-  const retired = entries.filter((entry) => entry.state === "retired");
 
   const create = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -381,9 +354,7 @@ function TagSettings({
       (entry) => entry.name === name,
     );
     if (existing !== undefined) {
-      setError(existing.state === "retired"
-        ? `“${name}” is retired. Restore it from the retired list.`
-        : `“${name}” is already an active tag.`);
+      setError(`“${name}” is already a tag.`);
       return;
     }
     createTagCatalogEntry(connection.ydoc, name);
@@ -392,47 +363,12 @@ function TagSettings({
     setDraft("");
   };
 
-  const changeState = (entry: TagCatalogEntry, at: number): void => {
+  const remove = (entry: TagCatalogEntry): void => {
     if (connection === null || !connection.status.writable) return;
-    if (entry.state === "active") retireTagCatalogEntry(connection.ydoc, entry.id);
-    else restoreTagCatalogEntry(connection.ydoc, entry.id);
-    setRefocus({ from: entry.state, at, moved: entry.id });
+    deleteTagCatalogEntry(connection.ydoc, entry.id);
     setError(null);
-    toast.success(`${entry.state === "active" ? "Retired" : "Restored"} “${entry.name}”.`, { id: "workspace-settings" });
+    toast.success(`Deleted “${entry.name}”.`, { id: "workspace-settings" });
   };
-
-  const list = (state: "active" | "retired", items: TagCatalogEntry[]) => (
-    <section className="min-w-0" aria-labelledby={`ub-${state}-tags`}>
-      <h2 id={`ub-${state}-tags`} className="mt-0 mb-2 ub-type-h2 font-semibold">
-        {state === "active" ? "Active" : "Retired"}
-      </h2>
-      {items.length === 0 ? (
-        <p className="m-0 ub-type-ui">No {state} tags.</p>
-      ) : (
-        <ul className="m-0 flex list-none flex-col gap-2 p-0" data-tag-list>
-          {items.map((entry, at) => (
-            <li
-              key={entry.id}
-              className="flex items-center justify-between gap-3 rounded-(--radius-sm) border border-(--border) p-2 ub-type-body"
-            >
-              <span className="min-w-0 wrap-anywhere">{entry.name}</span>
-              <Button
-                variant="outline"
-                size="sm"
-                type="button"
-                data-tag-entry={entry.id}
-                disabled={!writable}
-                onClick={() => changeState(entry, at)}
-              >
-                {entry.state === "active" ? "Retire" : "Restore"}
-                <span className="sr-only"> {entry.name}</span>
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
 
   return (
     <SettingsPage title="Tags">
@@ -441,6 +377,7 @@ function TagSettings({
           <label htmlFor="ub-new-tag" className="ub-type-ui font-medium">Create a tag</label>
           <div className="flex gap-2">
             <Input
+              ref={createInput}
               className="flex-1"
               id="ub-new-tag"
               value={draft}
@@ -470,10 +407,32 @@ function TagSettings({
             {error}
           </p>
         )}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2" ref={groups}>
-          {list("active", active)}
-          {list("retired", retired)}
-        </div>
+        {entries.length === 0 ? <p className="m-0 ub-type-ui">No tags.</p> : (
+          <ul className="m-0 flex list-none flex-col gap-2 p-0" data-tag-list>
+            {entries.map((entry) => <li key={entry.id} className="flex items-center justify-between gap-3 rounded-(--radius-sm) border border-(--border) p-2 ub-type-body">
+              <span className="min-w-0 wrap-anywhere">{entry.name}</span>
+              <Button variant="outline" size="sm" type="button" data-tag-entry={entry.id} aria-label={`Delete ${entry.name}`} disabled={!writable}
+                onClick={(event) => { deleteTrigger.current = event.currentTarget; setDeleting(entry); }}>
+                Delete<span className="sr-only"> {entry.name}</span>
+              </Button>
+            </li>)}
+          </ul>
+        )}
+        <AlertDialog open={deleting !== null} onOpenChange={(open) => { if (!open) setDeleting(null); }}>
+          <AlertDialogContent onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const trigger = deleteTrigger.current;
+            if (trigger?.isConnected) trigger.focus();
+            else createInput.current?.focus();
+          }}>
+            <AlertDialogTitle>Delete “{deleting?.name}”?</AlertDialogTitle>
+            <AlertDialogDescription>It disappears from documents and cannot be restored.</AlertDialogDescription>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" disabled={!writable} onClick={() => { if (deleting !== null) remove(deleting); }}>Delete</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </SettingsPage>
   );

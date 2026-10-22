@@ -101,7 +101,7 @@ it("leaves the refusal notice pending if claiming it cannot commit", () => {
 });
 
 it("rebuilds already-open peer replicas with fresh clocks instead of merging refused updates back", () => {
-  const config = testConfig();
+  const config = { ...testConfig(), localWorkspace: false };
   const first = openWorkspaceReplicas(config, { hubFree: true });
   const peer = openWorkspaceReplicas(config, { hubFree: true });
   workspaces.push(first, peer);

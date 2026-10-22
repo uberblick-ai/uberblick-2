@@ -14,10 +14,10 @@
  * are identity, so two independently built documents are genuinely different
  * ones; replication is also what the bridge is actually comparing.
  */
-import { COMMENT_MARK, addComment, appendBlock, createAnnotation, findBlockElement, getBlocks, getMeta, getMetaMap, initDoc, listAnnotationRanges, listAnnotations, setDescription, setKind, setLinks, setStatus, setTags, setTldr, setTitle, tableCellText, tableRows } from "@uberblick/schema";
+import { COMMENT_MARK, addComment, appendBlock, createAnnotation, createTagCatalogEntry, deleteTagCatalogEntry, findBlockElement, getBlocks, getMeta, getMetaMap, initDoc, listAnnotationRanges, listAnnotations, setDescription, setKind, setLinks, setStatus, setTagCatalogDescription, setTags, setTldr, setTitle, tableCellText, tableRows } from "@uberblick/schema";
 import * as Y from "yjs";
 import { describe, expect, it } from "vitest";
-import { compareCorpus, docFingerprint, isIdentical } from "../src/remote.js";
+import { compareCorpus, docFingerprint, isIdentical, workspaceSnapshot } from "../src/remote.js";
 import type { CorpusDoc } from "../src/remote.js";
 
 const UUID = "3f0a3d4c-6f6c-4e5f-9b9a-1f2e3d4c5b6a";
@@ -25,6 +25,38 @@ const DECISION_A = "11111111-1111-4111-8111-111111111111";
 const DECISION_B = "22222222-2222-4222-8222-222222222222";
 const DECISION_C = "33333333-3333-4333-8333-333333333333";
 const RECORD_KEY = JSON.stringify(["record", "observations", "row-a"]);
+
+describe("workspace promotion verification", () => {
+  it("compares tag descriptions and deletion evidence even when visible catalogs are empty", () => {
+    const settings = new Y.Doc();
+    const sidebar = new Y.Doc();
+    const directory = new Y.Doc();
+    const tag = createTagCatalogEntry(settings, "research");
+    const copy = replicate(settings);
+    const snapshot = (doc: Y.Doc) => workspaceSnapshot(doc, sidebar, directory);
+    expect(isIdentical(compareCorpus(snapshot(settings), snapshot(copy)))).toBe(true);
+
+    setTagCatalogDescription(settings, tag.id, "Prior investigations");
+    expect(compareCorpus(snapshot(settings), snapshot(copy)).differing.map((entry) => entry.uuid)).toEqual(["_settings"]);
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(settings));
+    expect(isIdentical(compareCorpus(snapshot(settings), snapshot(copy)))).toBe(true);
+
+    deleteTagCatalogEntry(settings, tag.id);
+    const empty = new Y.Doc();
+    const before = snapshot(empty);
+    const after = snapshot(settings);
+    // Hold clocks equal so this specifically proves deletion-content coverage.
+    const sameClocks = before.map((entry, index) => ({ ...entry, stateVector: after[index]!.stateVector }));
+    expect(compareCorpus(after, sameClocks).differing.map((entry) => entry.uuid)).toEqual(["_settings"]);
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(settings));
+    expect(isIdentical(compareCorpus(snapshot(settings), snapshot(copy)))).toBe(true);
+    settings.destroy();
+    copy.destroy();
+    empty.destroy();
+    sidebar.destroy();
+    directory.destroy();
+  });
+});
 
 function source(): Y.Doc {
   const ydoc = new Y.Doc();

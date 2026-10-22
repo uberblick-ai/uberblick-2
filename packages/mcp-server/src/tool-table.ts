@@ -121,9 +121,8 @@ export const tools: readonly Tool[] = [
     name: "list_tags",
     title: "List assignable tags",
     description:
-      "The active workspace tag catalog, in deterministic name order. Each entry carries the stable canonical " +
-      "`id` documents store and its current display `name`. Retired entries are absent here but remain visible, " +
-      "marked retired, on documents that still carry them. MCP cannot curate this catalog.\n\n" +
+      "The existing workspace tag catalog, in deterministic name order. Each entry carries the stable canonical " +
+      "`id` documents store, its current display `name` and its optional `description`. Documents show only existing catalog tags. MCP cannot curate this catalog.\n\n" +
       "`complete` says whether this is the whole workspace vocabulary. It is false while a configured hub has " +
       "not delivered the catalog room to this replica: what is listed is then a local copy that may be missing " +
       "curated entries, and a tag value this replica has never seen is refused rather than assigned. `hub` says " +
@@ -140,7 +139,7 @@ export const tools: readonly Tool[] = [
       "Create doc/stub; optional blocks/regular-page TL;DR. Require nonblank description; title is required except for successors. " +
       "A decision topic has one title stored on its first record. Renaming any record renames the topic. Successors inherit it: omit title or supply the same title; another refuses. " +
       "List-item seeds: bullet/ordered list, integer indent 0–3 (defaults bullet/0). " +
-      "Active tags by id/name (case ignored); unknown/retired refuse. Kind defaults first status; invalid pairs refuse. " +
+      "Existing tags by id/name (case ignored); unknown/deleted refuse. Kind defaults first status; invalid pairs refuse. " +
       "Decision topics/answers: consult get_help({topic: \"decisions\"}). " +
       "Links/GitHub references: markdown. " +
       "Open/decided only; deciding needs supported nonblank answer blocks, no TL;DR/data; decided successors require recorded human answer. " +
@@ -418,7 +417,7 @@ export const tools: readonly Tool[] = [
       "Set title/description/tldr/tags/links/code_check or decision discussion; require one. Omissions stay; " +
       "refusals write nothing and field failures name field. " +
       "Title/description cannot be cleared. tldr: null clears but preserves deliberate absence; replacing a marked TL;DR requires tldr_opt_in: true with non-null tldr. Tags/links " +
-      "replace; [] clears. list_tags active ids/names (case ignored); assigned retired/unresolved ids stay. New " +
+      "replace; [] clears existing tags or links. list_tags ids/names (case ignored); hidden pending tag references stay stored. New " +
       "links: directory-known; archived/unchanged accepted. Regular-only code_check replaces one repository's entry " +
       "(case-insensitive); {repository, commit, result, rev, paths?}. rev must match get_doc's page rev; on refusal reread and compare before recording. paths are hints, not complete dependencies. Writer sets UTC checked_at. Content edits preserve checks; " +
       "decisions refuse. Only open decisions accept discussion: live, readable non-decision RFC UUID/null. " +

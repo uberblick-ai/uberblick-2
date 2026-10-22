@@ -65,11 +65,8 @@ const multipleRoomDurability = {
   rooms: z.array(touchedRoom).describe("Each independently persisted room touched; top-level synced is their conjunction."),
 };
 
-const tag = z.union([
-  z.object({ id: z.string(), name: z.string(), state: z.enum(["active", "retired"]) }).strict(),
-  z.object({ id: z.string(), name: z.null(), state: z.literal("unresolved") }).strict(),
-]);
-const tags = z.array(tag).describe("Canonical tag identities, current names and active, retired or unresolved state.");
+const tag = z.object({ id: z.string(), name: z.string(), description: z.string().optional() }).strict();
+const tags = z.array(tag).describe("Existing catalog tags with canonical identities, names and optional descriptions.");
 const searchHitFields = { uuid, title: z.string(), description, tags, snippet: z.string() };
 const searchHit = z.union([
   z.object({
@@ -266,7 +263,7 @@ export const outputSchemas = {
   list_tags: z.object({
     workspace: z.string(),
     complete: z.boolean(),
-    tags: z.array(z.object({ id: z.string(), name: z.string() }).strict()),
+    tags,
     hub,
   }).strict(),
   create_doc: z.object({

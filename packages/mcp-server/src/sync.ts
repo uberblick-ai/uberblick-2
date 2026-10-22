@@ -1181,6 +1181,11 @@ export class HubSync {
     return provider.hasCurrentSync() && provider.isSynced && !provider.hasUnsyncedChanges;
   }
 
+  /** Current hub admission, after the authoritative room has arrived. */
+  canWriteRoom(room: string): boolean {
+    return this.isRoomQuiet(room) && this.providers.get(room)?.authorizedScope === "read-write";
+  }
+
   private stateChanged(): void {
     for (const listener of this.stateListeners) listener();
   }

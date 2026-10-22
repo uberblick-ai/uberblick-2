@@ -73,10 +73,9 @@ const mapped: FailureCase[] = [
   { name: "invalid document lifecycle", error: new InvalidDocumentLifecycleError("decision", "planned") },
   { name: "invalid lifecycle null values", error: new InvalidDocumentLifecycleError(null, null) },
   { name: "invalid lifecycle missing values", error: new InvalidDocumentLifecycleError(undefined, undefined) },
-  { name: "tag assignment on metadata", error: new InvalidTagAssignmentError(["missing"], ["retired"]), tool: { name: "set_metadata", writes: "document" } },
-  { name: "tag assignment on create", error: new InvalidTagAssignmentError(["missing"], ["retired"]), tool: { name: "create_doc", writes: "document" } },
-  { name: "tag assignment unknown only", error: new InvalidTagAssignmentError(["missing"], []) },
-  { name: "tag assignment retired only", error: new InvalidTagAssignmentError([], ["retired"]) },
+  { name: "tag assignment on metadata", error: new InvalidTagAssignmentError(["missing"]), tool: { name: "set_metadata", writes: "document" } },
+  { name: "tag assignment on create", error: new InvalidTagAssignmentError(["missing"]), tool: { name: "create_doc", writes: "document" } },
+  { name: "tag assignment unknown only", error: new InvalidTagAssignmentError(["missing"]) },
   { name: "data error", error: new DataError("data_record_invalid", "Record /count: expected type number", { collection: "observations", recordId: "row-1", path: "/count" }) },
 ];
 
@@ -123,12 +122,9 @@ describe("schema failure wire compatibility", () => {
 
   it("keeps tag assignment details independent of the caller's arrays", () => {
     const unknown = ["missing"];
-    const retired = ["retired"];
-    const error = new InvalidTagAssignmentError(unknown, retired);
+    const error = new InvalidTagAssignmentError(unknown);
     unknown.push("later-unknown");
-    retired.push("later-retired");
     expect(error.unknown).toEqual(["missing"]);
-    expect(error.retired).toEqual(["retired"]);
-    expect(toFailure(write, error).payload).toMatchObject({ unknown: ["missing"], retired: ["retired"] });
+    expect(toFailure(write, error).payload).toMatchObject({ unknown: ["missing"] });
   });
 });

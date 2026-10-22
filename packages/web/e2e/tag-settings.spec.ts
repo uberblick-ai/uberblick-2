@@ -106,11 +106,11 @@ test("Tags settings is address-selected and its catalog changes converge", async
   await expect(first).toHaveURL(new URL(path, harness().appUrl).href);
   await expect(first.getByRole("heading", { name: "Tags", level: 1 })).toBeVisible();
   await expect(
-    first.getByRole("region", { name: "Active" }).getByRole("listitem"),
+    first.locator("[data-tag-list]").getByRole("listitem"),
   ).toHaveCount(examples.length);
   await expect(
     first
-      .getByRole("region", { name: "Active" })
+      .locator("[data-tag-list]")
       .getByRole("listitem")
       .locator(":scope > span"),
   ).toHaveText(examples);
@@ -119,19 +119,23 @@ test("Tags settings is address-selected and its catalog changes converge", async
   await first.getByRole("button", { name: "Create", exact: true }).click();
   await expectSuccess(first, "Created “product”.");
   await expect(first.getByRole("button", { name: "Create", exact: true })).toBeFocused();
-  await expect(second.getByRole("button", { name: "Retire product" })).toBeVisible();
+  await expect(second.getByRole("button", { name: "Delete product" })).toBeVisible();
 
-  // Curated from the keyboard, so focus has to survive the entry moving lists:
-  // the control that took its place, and its own new control once the list it
-  // left is empty.
-  await first.getByRole("button", { name: "Retire product" }).press("Enter");
-  await expectSuccess(first, "Retired “product”.");
-  await expect(second.getByRole("button", { name: "Restore product" })).toBeVisible();
-  await expect(first.getByRole("button", { name: "Retire rfc" })).toBeFocused();
-  await first.getByRole("button", { name: "Restore product" }).press("Enter");
-  await expectSuccess(first, "Restored “product”.");
-  await expect(second.getByRole("button", { name: "Retire product" })).toBeVisible();
-  await expect(first.getByRole("button", { name: "Retire product" })).toBeFocused();
+  await first.getByRole("button", { name: "Delete product" }).press("Enter");
+  let dialog = first.getByRole("alertdialog", { name: "Delete “product”?" });
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await expect(second.getByRole("button", { name: "Delete product" })).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(first.getByRole("button", { name: "Delete product" })).toBeFocused();
+  await first.getByRole("button", { name: "Delete product" }).press("Enter");
+  dialog = first.getByRole("alertdialog", { name: "Delete “product”?" });
+  await dialog.getByRole("button", { name: "Delete", exact: true }).press("Enter");
+  await expectSuccess(first, "Deleted “product”.");
+  await expect(second.getByRole("button", { name: "Delete product" })).toHaveCount(0);
+  await expect(first.getByLabel("Create a tag")).toBeFocused();
+  await first.getByLabel("Create a tag").fill("PRODUCT");
+  await first.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(second.getByRole("button", { name: "Delete product" })).toBeVisible();
 
   await first
     .getByRole("navigation", { name: "Workspace settings" })
@@ -176,18 +180,13 @@ test("Tags settings is address-selected and its catalog changes converge", async
     "product",
   );
 
-  // Retirement remains visible on the assigned document, but once removed it
-  // cannot be selected again.
+  // Deletion immediately hides the assignment on the other browser.
   await second.goto(new URL(path, harness().appUrl).href);
-  await second.getByRole("button", { name: "Retire product" }).click();
-  await expect(picker).toContainText("product (retired)");
+  await second.getByRole("button", { name: "Delete product" }).click();
+  await second.getByRole("alertdialog", { name: "Delete “product”?" }).getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(picker).toContainText("Add tags");
   await picker.click();
-  const retired = first.getByRole("option", { name: "product retired" });
-  await expect(retired).toHaveAttribute("aria-selected", "true");
-  await retired.press("Space");
-  await expect(first.getByRole("option", { name: "product retired" })).toHaveCount(
-    0,
-  );
+  await expect(first.getByRole("option", { name: "product", exact: true })).toHaveCount(0);
   await picker.click();
   await second.goto(documentUrl);
   await expect(second.getByRole("button", { name: "Edit tags" })).toContainText(
@@ -254,7 +253,7 @@ test("settings successes use shared notices and preserve native submission focus
   await expectSubmissionFocusRetained(page);
 
   // With the preceding success expired, neither validation failure adds
-  // a notice. Field edits clear alerts; later lifecycle success does too.
+  // a notice. Field edits clear alerts; later deletion success does too.
   await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
   for (const invalid of ["iOS app", "ios--app"]) {
     await field.fill(invalid);
@@ -266,22 +265,18 @@ test("settings successes use shared notices and preserve native submission focus
   await field.fill(draft);
   await expect(page.getByRole("alert")).toHaveCount(0);
   await field.press("Enter");
-  await expect(page.getByRole("alert")).toHaveText(`“${tag}” is already an active tag.`);
+  await expect(page.getByRole("alert")).toHaveText(`“${tag}” is already a tag.`);
   await expect(field).toHaveValue(draft);
   await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
 
-  // The keyboard catalog test above owns the exact refocus target; shared
-  // feedback must leave lifecycle focus in the tag lists.
-  const tagLists = page.getByRole("region", { name: /^(Active|Retired)$/ });
-  await page.getByRole("button", { name: `Retire ${tag}`, exact: true }).press("Enter");
-  await expectSuccess(page, `Retired “${tag}”.`);
+  await page.getByRole("button", { name: `Delete ${tag}`, exact: true }).press("Enter");
+  const confirmation = page.getByRole("alertdialog", { name: `Delete “${tag}”?` });
+  await confirmation.getByRole("button", { name: "Delete", exact: true }).press("Enter");
+  await expectSuccess(page, `Deleted “${tag}”.`);
   await expect(page.getByRole("alert")).toHaveCount(0);
-  await expect(tagLists.locator("button:focus")).toHaveCount(1);
+  await expect(field).toBeFocused();
   await field.fill(draft);
   await field.press("Enter");
-  await expect(page.getByRole("alert")).toHaveText(`“${tag}” is retired. Restore it from the retired list.`);
-  await expect(field).toHaveValue(draft);
-  await page.getByRole("button", { name: `Restore ${tag}`, exact: true }).press("Enter");
-  await expectSuccess(page, `Restored “${tag}”.`);
-  await expect(tagLists.locator("button:focus")).toHaveCount(1);
+  await expectSuccess(page, `Created “${tag}”.`);
+  await expect(field).toBeFocused();
 });

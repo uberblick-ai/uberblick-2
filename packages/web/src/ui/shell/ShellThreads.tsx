@@ -1,8 +1,9 @@
 import { ThreadsPane } from "../comments/ThreadsPane.js";
 import type { AppShell } from "./use-app-shell.js";
+import { isDirectoryEntryArchived, parseRoom } from "@uberblick/schema";
 
 export function ShellThreads({ shell }: { shell: AppShell }) {
-  const { doc, docStatus, topic } = shell.rooms;
+  const { doc, docStatus, topic, catalog, directory } = shell.rooms;
   const { archived, meta } = shell.readings;
   const { identity } = shell.environment;
   const { narrowLayout } = shell.layout;
@@ -16,6 +17,8 @@ export function ShellThreads({ shell }: { shell: AppShell }) {
         {/* Draft state survives the sheet's unmount and resize. */}
         <ThreadsPane
           connection={doc}
+          catalogConnection={catalog}
+          canCleanupTags={() => directory !== null && doc.status.writable && !isDirectoryEntryArchived(directory.ydoc, parseRoom(doc.room).uuid)}
           threads={threads}
           focused={focusedThread}
           author={identity.name}

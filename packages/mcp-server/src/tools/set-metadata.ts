@@ -2,9 +2,11 @@ import {
   MAX_TLDR_LENGTH,
   CODE_CHECK_RESULTS,
   assignDocumentTags,
+  cleanupDeletedDocumentTags,
   docRev,
   getMeta,
   getMetaMap,
+  isDirectoryEntryArchived,
   normalizeCodeCheck,
   setCodeCheck,
   setDescription,
@@ -130,7 +132,7 @@ export const setMetadataOperation = operation(DOCUMENT_WRITE, inputSchema, (cont
     throw new ToolError("tldr_opted_out", "A person removed this page's TL;DR on purpose.", { uuid, field: "tldr" });
   }
   const tagIds = tags === undefined ? undefined : forField("tags", () =>
-    resolveTagSelectors(context.replicas, tags, context.documentTags(replica)));
+    resolveTagSelectors(context.replicas, tags));
   if (links !== undefined) {
     // getMeta also adds decision-derived edges; only the stored curated set
     // can preserve an unknown target without creating a new curated reference.
@@ -154,6 +156,7 @@ export const setMetadataOperation = operation(DOCUMENT_WRITE, inputSchema, (cont
     if (links !== undefined) setLinks(replica.doc, links);
     if (discussionUuid !== undefined) setDiscussion(replica.doc, discussionUuid);
     if (codeCheck !== undefined) setCodeCheck(replica.doc, codeCheck);
+    cleanupDeletedDocumentTags(replica.doc, context.tagCatalog());
   });
   let durability: Record<string, unknown>;
   if (titleReplica === replica) {
@@ -167,7 +170,12 @@ export const setMetadataOperation = operation(DOCUMENT_WRITE, inputSchema, (cont
       () => "Restart the MCP server, then re-read the addressed record and its topic with get_doc before repeating set_metadata. Completed rooms are durable; no writes were rolled back.",
     );
     if (fields.some(field => field !== "title" && args[field] !== undefined)) stage("document", replica, writeMetadata);
-    if (title !== undefined) stage("topic", titleReplica, () => setTitle(titleReplica.doc, title));
+    if (title !== undefined) stage("topic", titleReplica, () => titleReplica.doc.transact(() => {
+      setTitle(titleReplica.doc, title);
+      if (!isDirectoryEntryArchived(directory.doc, titleReplica.id)) {
+        cleanupDeletedDocumentTags(titleReplica.doc, context.tagCatalog());
+      }
+    }));
     stage("directory", directory, () => {});
     durability = context.durabilityAcross(replica, completed);
   }

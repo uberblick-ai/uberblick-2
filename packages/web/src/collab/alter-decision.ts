@@ -182,7 +182,7 @@ function stageRfc(input: AlterDecisionInput, uuid: string, decision: string, now
     const topic = resolveDecisionTopics(input.directory.ydoc).find((entry) => entry.topic === source.topic);
     if (topic === undefined) throw new Error(messages.stale_decision);
     const title = decisionTopicTitle(topic);
-    const tag = listTagCatalog(input.tagCatalog).find((entry) => entry.name === "rfc" && entry.state === "active");
+    const tag = listTagCatalog(input.tagCatalog).find((entry) => entry.name === "rfc");
     initDoc(discussion, { uuid, title, tags: tag === undefined ? [] : [tag.id] });
     appendBlock(discussion, { type: "paragraph", inline: [
       { text: "Proposed change to ", marks: {} },

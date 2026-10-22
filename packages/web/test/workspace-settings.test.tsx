@@ -11,7 +11,7 @@ import {
   getWorkspaceMainRepository,
   setWorkspaceMainRepository,
   setWorkspaceName,
-  retireTagCatalogEntry,
+  deleteTagCatalogEntry,
   restoreDirectoryEntry,
   settingsRoom,
   tombstoneDirectoryEntry,
@@ -323,7 +323,7 @@ it("counts regular documents and active tags live, and takes the newest stamp fr
   upsertDirectoryEntry(directory.connection.ydoc, { uuid: archivedSuccessor, title: "Archived successor", kind: "decision", topic: archivedTopic, updatedAt: now - 10_000 });
   const tag = createTagCatalogEntry(settings.connection.ydoc, "product");
   const retired = createTagCatalogEntry(settings.connection.ydoc, "auth");
-  retireTagCatalogEntry(settings.connection.ydoc, retired.id);
+  deleteTagCatalogEntry(settings.connection.ydoc, retired.id);
   const host = await mount(directory.connection, ENDPOINT, settings.connection);
   expect(facts(host).get("Documents")).toBe("1 (1 archived)");
   expect(facts(host).get("Tags")).toBe("1");
@@ -341,7 +341,7 @@ it("counts regular documents and active tags live, and takes the newest stamp fr
   expect(stamp.getAttribute("dateTime")).toBe(new Date(now + 1_000).toISOString());
   act(() => createTagCatalogEntry(settings.connection.ydoc, "architecture"));
   expect(facts(host).get("Tags")).toBe("2");
-  act(() => retireTagCatalogEntry(settings.connection.ydoc, tag.id));
+  act(() => deleteTagCatalogEntry(settings.connection.ydoc, tag.id));
   expect(facts(host).get("Tags")).toBe("1");
 });
 
@@ -418,68 +418,21 @@ it.each([
   }
 });
 
-it("waits for server state, seeds once, and keeps a retired-only reading offline", async () => {
-  const room = statusRoom(
-    {
-      ...SYNCED,
-      connected: false,
-      synced: false,
-      hasReceivedServerState: false,
-      hasAnswered: true,
-      writable: false,
-      storeRefused: true,
-    },
-    settingsRoom(WORKSPACE.uuid),
-  );
+it("waits for server state, seeds once and keeps deleted examples absent offline", async () => {
+  const room = statusRoom({ ...SYNCED, connected: false, synced: false, hasReceivedServerState: false, writable: false }, settingsRoom(WORKSPACE.uuid));
   const host = await mountTags(room.connection);
-
   expect(host.textContent).toContain("Waiting for the tag catalog");
   expect(within(host).queryByLabelText("Create a tag")).toBeNull();
-  expect(within(host).queryAllByRole("list", { hidden: true })).toHaveLength(0);
-
-  room.update({
-    connected: true,
-    synced: true,
-    hasReceivedServerState: true,
-    writable: true,
-    storeRefused: false,
-  });
-  await act(async () => {});
-  expect(
-    within(within(host).getByRole("region", { name: "Active" })).getAllByRole("listitem", { hidden: true }).map(
-      // The tag is repeated in the button's screen-reader text; the row's
-      // visible label precedes that second occurrence.
-      (row) => within(row).getAllByText(/^[a-z0-9-]+$/)[0]?.textContent,
-    ),
-  ).toEqual(EXAMPLE_TAGS.map((entry) => entry.name));
-
-  act(() => {
-    for (const entry of listTagCatalog(room.connection.ydoc)) {
-      retireTagCatalogEntry(room.connection.ydoc, entry.id);
-    }
-  });
-  expect(host.textContent).toContain("No active tags.");
-  expect(
-    within(within(host).getByRole("region", { name: "Retired" })).getAllByRole("listitem", { hidden: true }),
-  ).toHaveLength(EXAMPLE_TAGS.length);
-
+  room.update({ connected: true, synced: true, hasReceivedServerState: true, writable: true });
+  expect(listTagCatalog(room.connection.ydoc).map((entry) => entry.name)).toEqual(EXAMPLE_TAGS.map((entry) => entry.name));
+  act(() => { for (const entry of listTagCatalog(room.connection.ydoc)) deleteTagCatalogEntry(room.connection.ydoc, entry.id); });
+  expect(host.textContent).toContain("No tags.");
+  expect(within(host).queryByText("Retired")).toBeNull();
   room.update({ connected: false, synced: false, writable: false });
-  expect(host.textContent).not.toContain("Waiting for the tag catalog");
   expect(host.textContent).toContain("Tag changes are unavailable");
-  const controls = within(host).getAllByRole<HTMLButtonElement>("button", { hidden: true });
-  expect(controls).toHaveLength(EXAMPLE_TAGS.length + 1);
-  expect(controls.every((button) => button.disabled)).toBe(true);
   expect(within(host).getByRole<HTMLInputElement>("textbox", { name: "Create a tag" }).disabled).toBe(true);
-
   room.update({ connected: true, synced: true, writable: true });
-  expect(
-    within(within(host).getByRole("region", { name: "Retired" })).getAllByRole<HTMLButtonElement>("button", { hidden: true }).every(
-      (button) => !button.disabled,
-    ),
-  ).toBe(true);
-  expect(listTagCatalog(room.connection.ydoc)).toHaveLength(EXAMPLE_TAGS.length);
-  expect(listTagCatalog(room.connection.ydoc).every((entry) => entry.state === "retired"))
-    .toBe(true);
+  expect(listTagCatalog(room.connection.ydoc)).toEqual([]);
 });
 
 it("lets an admin curate an unseeded hub catalog without creating example tags", async () => {
@@ -490,7 +443,7 @@ it("lets an admin curate an unseeded hub catalog without creating example tags",
   expect(input.disabled).toBe(false);
   act(() => typeInto(input, "product"));
   act(() => within(host).getByRole<HTMLButtonElement>("button", { name: "Create" }).click());
-  expect(listTagCatalog(room.connection.ydoc)).toEqual([expect.objectContaining({ name: "product", state: "active" })]);
+  expect(listTagCatalog(room.connection.ydoc)).toEqual([expect.objectContaining({ name: "product" })]);
   room.connection.ydoc.destroy();
 });
 
@@ -522,7 +475,7 @@ it("folds tag drafts, validates unique names, and converges lifecycle changes wi
   expect(within(host).queryByRole("alert")).toBeNull();
   act(() => submit.click());
   const created = listTagCatalog(peer).find((entry) => entry.name === "ios");
-  expect(created).toMatchObject({ name: "ios", state: "active" });
+  expect(created).toMatchObject({ name: "ios" });
   expect(input.value).toBe("");
   expect(toast.success).toHaveBeenLastCalledWith("Created “ios”.", { id: "workspace-settings" });
   expect(host.textContent).not.toContain("Created “ios”.");
@@ -532,7 +485,7 @@ it("folds tag drafts, validates unique names, and converges lifecycle changes wi
     submit.click();
   });
   expect(within(host).getByRole("alert").textContent).toBe(
-    "“ios” is already an active tag.",
+    "“ios” is already a tag.",
   );
   expect(input.value).toBe("iOS");
   expect(listTagCatalog(peer).filter((entry) => entry.name === "ios")).toHaveLength(1);
@@ -543,86 +496,54 @@ it("folds tag drafts, validates unique names, and converges lifecycle changes wi
   expect(within(host).queryByRole("alert")).toBeNull();
   act(() => submit.click());
   expect(listTagCatalog(peer).find((entry) => entry.name === "billing-v2"))
-    .toMatchObject({ name: "billing-v2", state: "active" });
+    .toMatchObject({ name: "billing-v2" });
   expect(input.value).toBe("");
   expect(toast.success).toHaveBeenLastCalledWith("Created “billing-v2”.", { id: "workspace-settings" });
 
-  act(() => within(within(host).getByRole("region", { name: "Active" })).getByRole<HTMLButtonElement>("button", { name: /^Retire\s*ios$/ }).click());
-  expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)?.state).toBe(
-    "retired",
-  );
-  expect(toast.success).toHaveBeenLastCalledWith("Retired “ios”.", { id: "workspace-settings" });
-  expect(host.textContent).not.toContain("Retired “ios”.");
-
-  act(() => {
-    typeInto(input, "iOS");
-    submit.click();
-  });
-  expect(within(host).getByRole("alert").textContent).toBe(
-    "“ios” is retired. Restore it from the retired list.",
-  );
-  expect(input.value).toBe("iOS");
-  expect(listTagCatalog(peer).filter((entry) => entry.name === "ios")).toHaveLength(1);
-  expect(toast.success).toHaveBeenCalledTimes(3);
-
-  act(() => within(within(host).getByRole("region", { name: "Retired" })).getByRole<HTMLButtonElement>("button", { name: /^Restore\s*ios$/ }).click());
-  expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)?.state).toBe(
-    "active",
-  );
-  expect(within(host).queryByRole("alert")).toBeNull();
-  expect(toast.success).toHaveBeenLastCalledWith("Restored “ios”.", { id: "workspace-settings" });
-  expect(host.textContent).not.toContain("Restored “ios”.");
-
-  act(() => {
-    createTagCatalogEntry(peer, "zeta");
-  });
+  const trigger = within(host).getByRole<HTMLButtonElement>("button", { name: /^Delete\s*ios$/ });
+  activate(trigger);
+  let dialog = screen.getByRole("alertdialog", { name: "Delete “ios”?" });
+  expect(listTagCatalog(peer).some((entry) => entry.id === created?.id)).toBe(true);
+  activate(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Cancel" }));
+  expect(listTagCatalog(peer).some((entry) => entry.id === created?.id)).toBe(true);
+  activate(trigger);
+  dialog = screen.getByRole("alertdialog", { name: "Delete “ios”?" });
+  activate(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Delete" }));
+  expect(listTagCatalog(peer).some((entry) => entry.id === created?.id)).toBe(false);
+  expect(toast.success).toHaveBeenLastCalledWith("Deleted “ios”.", { id: "workspace-settings" });
+  act(() => { typeInto(input, "iOS"); submit.click(); });
+  const recreated = listTagCatalog(peer).find((entry) => entry.name === "ios");
+  expect(recreated?.id).not.toBe(created?.id);
+  expect(input.value).toBe("");
+  act(() => createTagCatalogEntry(peer, "zeta"));
   expect(host.textContent).toContain("zeta");
 });
 
-/** The Retire or Restore control of one entry, by its accessible name. */
-function lifecycle(host: HTMLElement, name: string): HTMLButtonElement {
-  // Without the Tailwind stylesheet, jsdom joins the sr-only tag to the verb.
-  return within(host).getByRole<HTMLButtonElement>("button", { name: new RegExp(`^${name.replace(" ", "\\s*")}$`) });
-}
-
-/** Activate a control the way a keyboard does: on the focused element. */
 function activate(control: HTMLButtonElement): void {
-  act(() => {
-    control.focus();
-    control.click();
-  });
+  act(() => { control.focus(); control.click(); });
 }
 
-it("leaves focus on the nearest lifecycle control after a retire or restore", async () => {
-  const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+it("rechecks writability when confirming deletion", async () => {
+  const room = statusRoom({ ...SYNCED }, settingsRoom(WORKSPACE.uuid));
   const host = await mountTags(room.connection);
-
-  // The entry that took the retired one's place in the list it left.
-  activate(lifecycle(host, "Retire billing"));
-  expect(document.activeElement).toBe(lifecycle(host, "Retire mcp"));
-
-  // Restoring the only retired entry empties that list: its own new control.
-  activate(lifecycle(host, "Restore billing"));
-  expect(document.activeElement).toBe(lifecycle(host, "Retire billing"));
-
-  // The last entry has no successor, so the new last one takes the focus.
-  activate(lifecycle(host, "Retire sync"));
-  expect(document.activeElement).toBe(lifecycle(host, "Retire rfc"));
+  activate(within(host).getByRole<HTMLButtonElement>("button", { name: /^Delete\s*auth$/ }));
+  const dialog = screen.getByRole("alertdialog", { name: "Delete “auth”?" });
+  room.connection.status.writable = false;
+  activate(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Delete" }));
+  expect(listTagCatalog(room.connection.ydoc).some((entry) => entry.name === "auth")).toBe(true);
 });
 
 it("leaves focus untouched when a peer changes the catalog", async () => {
   const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
   const peer = peerOf(room.connection.ydoc);
   const host = await mountTags(room.connection);
-  const focused = lifecycle(host, "Retire mcp");
+  const focused = within(host).getByRole<HTMLButtonElement>("button", { name: /^Delete\s*mcp$/ });
   act(() => focused.focus());
-
   act(() => createTagCatalogEntry(peer, "product"));
   expect(document.activeElement).toBe(focused);
-
   const auth = listTagCatalog(peer).find((entry) => entry.name === "auth");
-  act(() => retireTagCatalogEntry(peer, auth?.id ?? ""));
-  expect(host.textContent).toContain("Restore auth");
+  act(() => deleteTagCatalogEntry(peer, auth?.id ?? ""));
+  expect(within(host).queryByRole("button", { name: /^Delete\s*auth$/ })).toBeNull();
   expect(document.activeElement).toBe(focused);
 });
 

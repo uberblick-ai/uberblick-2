@@ -325,8 +325,8 @@ const RECOVERIES: Record<string, Recovery> = {
   invalid_tag_assignment: {
     recoveryClass: "manual",
     guidance:
-      "Call list_tags for the complete active catalog, then call again with active ids or active names (case ignored). " +
-      "An existing retired or unresolved assignment can be preserved by passing the id returned by the document read.",
+      "Call list_tags for the complete existing catalog, then call again with existing ids or names (case ignored). " +
+      "Hidden references awaiting a catalog entry stay stored automatically; deleted tags cannot be assigned.",
   },
   supersedes_not_decision: {
     recoveryClass: "reread",

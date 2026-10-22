@@ -200,7 +200,7 @@ const EXPECTED: Record<
   decision_answer_too_long: { recoveryClass: "manual", detail: ["kind", "status"] },
   invalid_tag_assignment: {
     recoveryClass: "manual",
-    detail: ["unknown", "retired"],
+    detail: ["unknown"],
   },
   supersedes_not_decision: {
     recoveryClass: "reread",

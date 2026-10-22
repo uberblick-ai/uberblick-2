@@ -3,7 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { compareDirectoryEntries, decisionCurrentRecord, readDirectoryTags, resolveDecisionTopics } from "@uberblick/schema";
-import type { DecisionTopicState, DirectoryEntry, SidebarGroup, TagAssignment, TagCatalogEntry } from "@uberblick/schema";
+import type { DecisionTopicState, DirectoryEntry, SidebarGroup, TagCatalogEntry } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useRoomStatus } from "../ui/hooks.js";
 import { LifecycleBadge } from "../ui/document/LifecycleBadge.js";
@@ -161,12 +161,8 @@ function PinIcon({ active }: { active: boolean }): ReactElement {
   );
 }
 
-function namedTag(tag: TagAssignment): tag is TagCatalogEntry {
-  return tag.name !== null;
-}
-
 function tagLabel(tag: TagCatalogEntry): string {
-  return tag.state === "retired" ? `${tag.name} (retired)` : tag.name;
+  return tag.name;
 }
 
 function FilterChevron(): ReactElement {
@@ -201,7 +197,7 @@ function TagFilter({
           <span className="ub-sr-only">Find tags</span>
           <input type="search" className="w-full rounded-(--radius-sm) border border-border bg-transparent px-2 py-1 [font:inherit]" placeholder="Find tags" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
         </label>}
-        <PickerList id={listId} label="Tags" multiple options={options.filter((tag) => needle === "" || tag.name.toLowerCase().includes(needle)).map((tag) => ({ id: tag.id, label: tag.name, selected: selected.includes(tag.id) }))} onPick={(id) => onChange(selected.includes(id) ? selected.filter((tag) => tag !== id) : [...selected, id])} empty={needle === "" ? "No active tags." : "No tags match."} />
+        <PickerList id={listId} label="Tags" multiple options={options.filter((tag) => needle === "" || tag.name.toLowerCase().includes(needle)).map((tag) => ({ id: tag.id, label: tag.name, selected: selected.includes(tag.id) }))} onPick={(id) => onChange(selected.includes(id) ? selected.filter((tag) => tag !== id) : [...selected, id])} empty={needle === "" ? "No tags." : "No tags match."} />
         <button type="button" className="ub-docs-clear-tags" disabled={selected.length === 0} onClick={() => onChange([])}>Clear tags</button>
       </PopoverContent>
     </Popover>
@@ -325,10 +321,10 @@ export function DocumentList({
   const relevance = listState.relevance ?? query.trim() !== "";
   const catalog = useTagCatalog(catalogConnection);
   const selectedAssignments = catalog === null
-    ? selectedTags.map((id) => ({ id, name: null, state: "unresolved" as const }))
+    ? []
     : readDirectoryTags({ tags: selectedTags }, catalog.connection.ydoc);
   const selectedIds = selectedAssignments.map((tag) => tag.id);
-  const selectedLabels = selectedAssignments.map((tag) => tag.name ?? "Unknown tag");
+  const selectedLabels = selectedAssignments.map((tag) => tag.name);
   const searchText = query.trim();
   const { hits, unavailable: searchUnavailable, pending: searchPending } = useDocumentSearch(searchText, searchClient, entries);
   // Browser history may contain a type removed by a newer client.
@@ -352,7 +348,7 @@ export function DocumentList({
     },
     [modeRows, mode, searchText, searchUnavailable, searchPending, hits, selectedIds, rowTags, stateFilter, sort, relevance],
   );
-  const hasFilters = searchText !== "" || mode === "decision" || selectedTags.length > 0 || stateFilter !== "all";
+  const hasFilters = searchText !== "" || mode === "decision" || selectedIds.length > 0 || stateFilter !== "all";
   const emptyMessage = noMatchesMessage({ mode, stateFilter, selectedLabels, query, synced: status.synced, hasFilters, hasDocuments: entries.some((entry) => !entry.deleted) });
 
   return (
@@ -379,7 +375,7 @@ export function DocumentList({
             />
           </label>
           <div className="ub-docs-filter-group">
-            <TagFilter options={(catalog?.entries ?? []).filter((tag) => tag.state === "active")} selected={selectedIds} labels={selectedLabels} onChange={(tags) => updateState({ selectedTags: tags })} />
+            <TagFilter options={catalog?.entries ?? []} selected={selectedIds} labels={selectedLabels} onChange={(tags) => updateState({ selectedTags: tags })} />
             {mode === "decision" && <label className="ub-docs-state-filter ub-docs-filter-control">
               <span aria-hidden="true">State</span>
               <span aria-hidden="true" className="ub-docs-filter-value">{STATE_LABELS[stateFilter]}</span>
@@ -493,7 +489,7 @@ export function DocumentList({
                       ? <span className="ub-docs-group">{entry.groupName}</span>
                       : <span className="ub-docs-stage" data-stage={topicStage(entry.topicState)}>{STAGE_LABELS[topicStage(entry.topicState)]}</span>}
                   </td>
-                  <td className="ub-docs-tags-cell"><RowTags tags={(rowTags.get(entry.uuid) ?? []).filter(namedTag)} title={entry.title} onPick={(id) => updateState({ selectedTags: [id] })} /></td>
+                  <td className="ub-docs-tags-cell"><RowTags tags={rowTags.get(entry.uuid) ?? []} title={entry.title} onPick={(id) => updateState({ selectedTags: [id] })} /></td>
                   <td className="ub-docs-age-cell">
                     <ChangedStamp at={entry.updatedAt} now={now} />
                   </td>

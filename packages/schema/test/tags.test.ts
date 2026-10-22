@@ -3,31 +3,37 @@ import * as Y from "yjs";
 import {
   EXAMPLE_TAGS,
   InvalidTagAssignmentError,
+  InvalidTagDescriptionError,
   assignDocumentTags,
+  cleanupDeletedDocumentTags,
   createTagCatalogEntry,
+  deleteTagCatalogEntry,
+  getDirectoryEntry,
   getMeta,
   getMetaMap,
+  getTagCatalogEntry,
   getTagCatalogIdentities,
   initDoc,
   isTagCatalogSeeded,
+  isTagDeleted,
+  listDeletedTagCatalogEntries,
   listTagCatalog,
+  migrateRetiredTagCatalogEntries,
   readDirectoryTags,
   readDocumentTags,
-  restoreTagCatalogEntry,
-  retireTagCatalogEntry,
   seedTagCatalog,
+  setTagCatalogDescription,
   setTags,
   upsertDirectoryEntry,
-  getDirectoryEntry,
 } from "../src/index.js";
 import { InvalidTagNameError } from "../src/errors.js";
-import { getTagCatalogFlags } from "../src/tags.js";
+import { getTagCatalogFlags, TAG_CATALOG_DESCRIPTIONS_KEY, TAG_CATALOG_RESTORED_KEY, TAG_CATALOG_RETIRED_KEY } from "../src/tags.js";
 import { replicaPair, syncDocs } from "./helpers.js";
 
 const DOCUMENT = "11111111-1111-4111-8111-111111111111";
 const AUTH = "22222222-2222-4222-8222-222222222222";
 const BILLING = "33333333-3333-4333-8333-333333333333";
-const RETIRED = "44444444-4444-4444-8444-444444444444";
+const DELETED = "44444444-4444-4444-8444-444444444444";
 const UNKNOWN = "55555555-5555-4555-8555-555555555555";
 
 function document(tags: string[] = []): Y.Doc {
@@ -36,50 +42,35 @@ function document(tags: string[] = []): Y.Doc {
   return doc;
 }
 
+function retireLegacy(catalog: Y.Doc, name: string): void {
+  catalog.getMap<number>(TAG_CATALOG_RETIRED_KEY).set(`${name}#legacy`, 1);
+}
+
 describe("workspace tag catalog", () => {
-  it("stores every complete tag set as deterministic flat presence entries", () => {
+  it("stores complete tag sets as deterministic flat presence entries", () => {
     const catalog = new Y.Doc();
     createTagCatalogEntry(catalog, "auth", AUTH);
     createTagCatalogEntry(catalog, "billing", BILLING);
     const doc = document([BILLING, AUTH, BILLING]);
-    const meta = getMetaMap(doc);
-
-    expect(meta.has("tags")).toBe(false);
+    expect(getMetaMap(doc).has("tags")).toBe(false);
     expect(getMeta(doc).tags).toEqual([AUTH, BILLING]);
-    expect(
-      [...meta.entries()]
-        .filter(([key]) => key.startsWith("tag-assigned:"))
-        .sort(([left], [right]) => left.localeCompare(right)),
-    ).toEqual([
-      [`tag-assigned:${AUTH}`, true],
-      [`tag-assigned:${BILLING}`, true],
+    expect([...getMetaMap(doc).keys()].filter((key) => key.startsWith("tag-assigned:")).sort()).toEqual([
+      `tag-assigned:${AUTH}`, `tag-assigned:${BILLING}`,
     ]);
-
-    setTags(doc, [RETIRED, RETIRED]);
-    expect(getMeta(doc).tags).toEqual([RETIRED]);
+    setTags(doc, [DELETED, DELETED]);
+    expect(getMeta(doc).tags).toEqual([DELETED]);
     assignDocumentTags(doc, catalog, [BILLING, AUTH]);
-    expect(getMeta(doc).tags).toEqual([AUTH, BILLING]);
-    expect(meta.has("tags")).toBe(false);
+    expect(getMeta(doc).tags).toEqual([AUTH, BILLING, DELETED]);
   });
 
   it("merges concurrent additions and removals independently per tag", () => {
-    const [left, right] = replicaPair((doc) => {
-      initDoc(doc, {
-        uuid: DOCUMENT,
-        title: "Tagged",
-        tags: [AUTH, BILLING],
-      });
-    });
-
-    setTags(left, [BILLING, RETIRED]);
+    const [left, right] = replicaPair((doc) => { initDoc(doc, { uuid: DOCUMENT, title: "Tagged", tags: [AUTH, BILLING] }); });
+    setTags(left, [BILLING, DELETED]);
     setTags(right, [AUTH, UNKNOWN]);
     syncDocs(left, right);
-    expect(getMeta(left).tags).toEqual([RETIRED, UNKNOWN]);
+    expect(getMeta(left).tags).toEqual([DELETED, UNKNOWN]);
     expect(getMeta(right).tags).toEqual(getMeta(left).tags);
-
-    const [first, second] = replicaPair((doc) => {
-      initDoc(doc, { uuid: DOCUMENT, title: "First assignment" });
-    });
+    const [first, second] = replicaPair((doc) => { initDoc(doc, { uuid: DOCUMENT, title: "First" }); });
     setTags(first, [AUTH]);
     setTags(second, [BILLING]);
     syncDocs(first, second);
@@ -88,15 +79,11 @@ describe("workspace tag catalog", () => {
   });
 
   it("converges same-tag toggles to one assignment", () => {
-    const [left, right] = replicaPair((doc) => {
-      initDoc(doc, { uuid: DOCUMENT, title: "Same tag" });
-    });
+    const [left, right] = replicaPair((doc) => { initDoc(doc, { uuid: DOCUMENT, title: "Same" }); });
     setTags(left, [AUTH, AUTH]);
     setTags(right, [AUTH]);
     syncDocs(left, right);
     expect(getMeta(left).tags).toEqual([AUTH]);
-    expect(getMeta(right).tags).toEqual([AUTH]);
-
     setTags(left, []);
     setTags(right, []);
     syncDocs(left, right);
@@ -110,202 +97,227 @@ describe("workspace tag catalog", () => {
     expect(getMeta(legacy).tags).toEqual([]);
   });
 
-  it("validates unique names and exposes ordinary active and retired entries", () => {
+  it("validates unique names without writing", () => {
     const catalog = new Y.Doc();
-    expect(createTagCatalogEntry(catalog, "auth", AUTH)).toEqual({
-      id: AUTH,
-      name: "auth",
-      state: "active",
-    });
+    expect(createTagCatalogEntry(catalog, "auth", AUTH)).toEqual({ id: AUTH, name: "auth" });
     expect(createTagCatalogEntry(catalog, "auth", BILLING).id).toBe(AUTH);
-    expect(listTagCatalog(catalog)).toHaveLength(1);
-
     const before = Y.encodeStateAsUpdate(catalog);
     for (const name of ["Auth", "two words", "two--words", "a".repeat(31)]) {
-      expect(() => createTagCatalogEntry(catalog, name)).toThrow(
-        InvalidTagNameError,
-      );
+      expect(() => createTagCatalogEntry(catalog, name)).toThrow(InvalidTagNameError);
     }
     expect(Y.encodeStateAsUpdate(catalog)).toEqual(before);
-
-    retireTagCatalogEntry(catalog, AUTH);
-    expect(listTagCatalog(catalog)[0]?.state).toBe("retired");
-    restoreTagCatalogEntry(catalog, AUTH);
-    expect(listTagCatalog(catalog)[0]?.state).toBe("active");
   });
 
-  it("converges same-name offline creates without orphaning either identity", () => {
-    const a = new Y.Doc();
-    const b = new Y.Doc();
-    const later = createTagCatalogEntry(a, "auth", BILLING);
-    const earlier = createTagCatalogEntry(b, "auth", AUTH);
-    const assignedBeforeMerge = document();
-    assignDocumentTags(assignedBeforeMerge, a, [later.id]);
-
-    syncDocs(a, b);
-    expect(listTagCatalog(a)).toEqual(listTagCatalog(b));
-    expect(listTagCatalog(a)).toEqual([
-      { id: earlier.id, name: "auth", state: "active" },
-    ]);
-    expect(readDocumentTags(assignedBeforeMerge, a)).toEqual([
-      { id: earlier.id, name: "auth", state: "active" },
-    ]);
+  it("stores, replaces and clears optional trimmed descriptions", () => {
+    const catalog = new Y.Doc();
+    expect(createTagCatalogEntry(catalog, "auth", AUTH, "  Sign in  ")).toEqual({ id: AUTH, name: "auth", description: "Sign in" });
+    setTagCatalogDescription(catalog, AUTH, "x".repeat(300));
+    expect(listTagCatalog(catalog)[0]?.description).toHaveLength(300);
+    setTagCatalogDescription(catalog, AUTH, "  Replaced  ");
+    expect(listTagCatalog(catalog)[0]?.description).toBe("Replaced");
+    setTagCatalogDescription(catalog, AUTH, "   ");
+    expect(listTagCatalog(catalog)).toEqual([{ id: AUTH, name: "auth" }]);
+    setTagCatalogDescription(catalog, AUTH, "Another");
+    setTagCatalogDescription(catalog, AUTH, null);
+    expect(listTagCatalog(catalog)).toEqual([{ id: AUTH, name: "auth" }]);
+    expect(createTagCatalogEntry(catalog, "billing", BILLING, "  ")).toEqual({ id: BILLING, name: "billing" });
   });
 
-  it("seeds one editable example set without reviving a retired example", () => {
-    const retired = new Y.Doc();
-    const stale = new Y.Doc();
-    seedTagCatalog(retired);
-    retireTagCatalogEntry(retired, EXAMPLE_TAGS[0].id);
+  it("refuses long and multiline descriptions atomically using document-description counting", () => {
+    const catalog = new Y.Doc();
+    createTagCatalogEntry(catalog, "auth", AUTH);
+    const before = Y.encodeStateAsUpdate(catalog);
+    for (const description of ["x".repeat(301), "😀".repeat(151), "one\ntwo", "one\rtwo", "\ntrimmed", "one\u2028two"]) {
+      expect(() => setTagCatalogDescription(catalog, AUTH, description)).toThrow(InvalidTagDescriptionError);
+      expect(() => createTagCatalogEntry(catalog, "billing", BILLING, description)).toThrow(InvalidTagDescriptionError);
+    }
+    expect(Y.encodeStateAsUpdate(catalog)).toEqual(before);
+    setTagCatalogDescription(catalog, AUTH, "😀".repeat(150));
+    expect(listTagCatalog(catalog)[0]?.description).toHaveLength(300);
+  });
 
-    // This replica has seen neither the seed flag nor the retirement.
+  it("converges concurrent description edits and clears", () => {
+    const [left, right] = replicaPair((catalog) => { createTagCatalogEntry(catalog, "auth", AUTH, "Original"); });
+    setTagCatalogDescription(left, AUTH, "From left");
+    setTagCatalogDescription(right, AUTH, "From right");
+    syncDocs(left, right);
+    expect(listTagCatalog(left)).toEqual(listTagCatalog(right));
+    expect(["From left", "From right"]).toContain(listTagCatalog(left)[0]?.description);
+    setTagCatalogDescription(left, AUTH, null);
+    setTagCatalogDescription(right, AUTH, "Concurrent");
+    syncDocs(left, right);
+    expect(listTagCatalog(left)).toEqual(listTagCatalog(right));
+    expect([undefined, "Concurrent"]).toContain(listTagCatalog(left)[0]?.description);
+  });
+
+  it("converges duplicate names, resolves aliases and deletes every converged identity", () => {
+    const first = new Y.Doc();
+    const second = new Y.Doc();
+    createTagCatalogEntry(first, "auth", BILLING, "Later identity");
+    createTagCatalogEntry(second, "auth", AUTH, "Earlier identity");
+    const doc = document([BILLING]);
+    syncDocs(first, second);
+    expect(listTagCatalog(first)).toEqual([{ id: AUTH, name: "auth", description: "Earlier identity" }]);
+    expect(readDocumentTags(doc, first)).toEqual(listTagCatalog(first));
+    setTagCatalogDescription(first, BILLING, null);
+    expect(listTagCatalog(first)).toEqual([{ id: AUTH, name: "auth" }]);
+    deleteTagCatalogEntry(first, BILLING);
+    syncDocs(first, second);
+    expect(listTagCatalog(first)).toEqual([]);
+    expect(listTagCatalog(second)).toEqual([]);
+    expect(isTagDeleted(first, AUTH)).toBe(true);
+    expect(isTagDeleted(first, BILLING)).toBe(true);
+    expect(getMeta(doc).tags).toEqual([BILLING]);
+    expect(readDocumentTags(doc, first)).toEqual([]);
+  });
+
+  it("never revives deleted identities after stale description, identity, legacy restore or seed writes", () => {
+    const [deleted, stale] = replicaPair((catalog) => { createTagCatalogEntry(catalog, "rfc", AUTH, "Original"); });
+    deleteTagCatalogEntry(deleted, AUTH);
+    setTagCatalogDescription(stale, AUTH, "Stale");
+    getTagCatalogIdentities(stale).set(AUTH, "rfc");
+    stale.getMap<number>(TAG_CATALOG_RESTORED_KEY).set("rfc#legacy", 10);
     seedTagCatalog(stale);
-    syncDocs(retired, stale);
-
-    expect(isTagCatalogSeeded(retired)).toBe(true);
-    expect(listTagCatalog(retired)).toEqual(listTagCatalog(stale));
-    expect(listTagCatalog(retired)).toHaveLength(EXAMPLE_TAGS.length);
-    expect(listTagCatalog(retired).find((entry) => entry.name === "auth")?.state)
-      .toBe("retired");
-    expect(listTagCatalog(retired).map((entry) => entry.name)).toEqual([
-      "auth",
-      "billing",
-      "mcp",
-      "permissions",
-      "rfc",
-      "sync",
-    ]);
-
-    restoreTagCatalogEntry(retired, EXAMPLE_TAGS[0].id);
-    expect(listTagCatalog(retired).find((entry) => entry.name === "auth")?.state)
-      .toBe("active");
+    syncDocs(deleted, stale);
+    expect(listTagCatalog(deleted).some((entry) => entry.name === "rfc")).toBe(false);
+    expect(listTagCatalog(stale)).toEqual(listTagCatalog(deleted));
+    expect(isTagDeleted(deleted, "00000000-0000-4000-8000-000000000006")).toBe(true);
+    expect(() => createTagCatalogEntry(deleted, "rfc", AUTH)).toThrow();
+    const recreated = createTagCatalogEntry(deleted, "rfc", BILLING);
+    expect(recreated).toEqual({ id: BILLING, name: "rfc" });
+    expect(readDocumentTags(document([AUTH]), deleted)).toEqual([]);
+    expect(readDocumentTags(document([BILLING]), deleted)).toEqual([recreated]);
   });
 
-  it("seeds the ordinary rfc tag with one fixed identity, including concurrent first seeds", () => {
+  it("seeds one example set and never recreates a deleted curated example", () => {
     const first = new Y.Doc();
     const second = new Y.Doc();
     seedTagCatalog(first);
     seedTagCatalog(second);
     syncDocs(first, second);
-    const rfc = { id: "00000000-0000-4000-8000-000000000006", name: "rfc", state: "active" };
-    expect(listTagCatalog(first).filter((entry) => entry.name === "rfc")).toEqual([rfc]);
-    expect(listTagCatalog(second)).toEqual(listTagCatalog(first));
-    const doc = document();
-    assignDocumentTags(doc, first, [rfc.id]);
-    expect(readDocumentTags(doc, first)).toEqual([rfc]);
-    first.destroy();
-    second.destroy();
-    doc.destroy();
+    expect(isTagCatalogSeeded(first)).toBe(true);
+    expect(listTagCatalog(first)).toEqual(listTagCatalog(second));
+    expect(listTagCatalog(first)).toHaveLength(EXAMPLE_TAGS.length);
+    const fresh = new Y.Doc();
+    createTagCatalogEntry(fresh, "rfc", AUTH);
+    deleteTagCatalogEntry(fresh, AUTH);
+    seedTagCatalog(fresh);
+    expect(listTagCatalog(fresh).some((entry) => entry.name === "rfc")).toBe(false);
+    const before = Y.encodeStateAsUpdate(fresh);
+    seedTagCatalog(fresh);
+    expect(Y.encodeStateAsUpdate(fresh)).toEqual(before);
   });
 
-  it("does not add rfc to an already seeded catalog or recreate a retired or deleted rfc", () => {
+  it("does not add newly introduced examples to an already seeded catalog", () => {
     const older = new Y.Doc();
-    for (const example of EXAMPLE_TAGS.filter((entry) => entry.name !== "rfc")) {
-      createTagCatalogEntry(older, example.name, example.id);
-    }
+    for (const example of EXAMPLE_TAGS.filter((entry) => entry.name !== "rfc")) createTagCatalogEntry(older, example.name, example.id);
     getTagCatalogFlags(older).set("examples-seeded", true);
     const before = Y.encodeStateAsUpdate(older);
     seedTagCatalog(older);
     expect(Y.encodeStateAsUpdate(older)).toEqual(before);
     expect(listTagCatalog(older).some((entry) => entry.name === "rfc")).toBe(false);
-
-    const current = new Y.Doc();
-    seedTagCatalog(current);
-    const rfc = listTagCatalog(current).find((entry) => entry.name === "rfc")!;
-    retireTagCatalogEntry(current, rfc.id);
-    const retired = Y.encodeStateAsUpdate(current);
-    seedTagCatalog(current);
-    expect(Y.encodeStateAsUpdate(current)).toEqual(retired);
-    expect(listTagCatalog(current).find((entry) => entry.name === "rfc")?.state).toBe("retired");
-    getTagCatalogIdentities(current).delete(rfc.id);
-    const deleted = Y.encodeStateAsUpdate(current);
-    seedTagCatalog(current);
-    expect(Y.encodeStateAsUpdate(current)).toEqual(deleted);
-    expect(listTagCatalog(current).some((entry) => entry.name === "rfc")).toBe(false);
-    older.destroy();
-    current.destroy();
   });
 
-  it("resolves UUID assignments for documents and directory stubs", () => {
+  it("does not write catalogs without legacy state or consume lifecycle before its identity arrives", () => {
+    const catalog = new Y.Doc();
+    const empty = Y.encodeStateAsUpdate(catalog);
+    migrateRetiredTagCatalogEntries(catalog);
+    expect(Y.encodeStateAsUpdate(catalog)).toEqual(empty);
+    seedTagCatalog(catalog);
+    const seeded = Y.encodeStateAsUpdate(catalog);
+    migrateRetiredTagCatalogEntries(catalog);
+    expect(Y.encodeStateAsUpdate(catalog)).toEqual(seeded);
+
+    retireLegacy(catalog, "delayed");
+    const delayed = Y.encodeStateAsUpdate(catalog);
+    migrateRetiredTagCatalogEntries(catalog);
+    expect(Y.encodeStateAsUpdate(catalog)).toEqual(delayed);
+    getTagCatalogIdentities(catalog).set(AUTH, "delayed");
+    migrateRetiredTagCatalogEntries(catalog);
+    expect(isTagDeleted(catalog, AUTH)).toBe(true);
+  });
+
+  it("freezes restored legacy state so late old lifecycle edits cannot delete active identities", () => {
     const catalog = new Y.Doc();
     createTagCatalogEntry(catalog, "auth", AUTH);
-    const doc = document(["auth"]);
+    retireLegacy(catalog, "auth");
+    catalog.getMap<number>(TAG_CATALOG_RESTORED_KEY).set("auth#legacy", 2);
+    migrateRetiredTagCatalogEntries(catalog);
+    catalog.getMap<number>(TAG_CATALOG_RETIRED_KEY).set("auth#stale", 3);
+    migrateRetiredTagCatalogEntries(catalog);
+    expect(listTagCatalog(catalog)).toEqual([{ id: AUTH, name: "auth" }]);
+    expect(isTagDeleted(catalog, AUTH)).toBe(false);
+  });
+
+  it("hides legacy retired tags without writing, then migrates every alias without touching documents", () => {
+    const catalog = new Y.Doc();
+    createTagCatalogEntry(catalog, "auth", AUTH);
+    getTagCatalogIdentities(catalog).set(BILLING, "auth");
+    createTagCatalogEntry(catalog, "keep", UNKNOWN);
+    retireLegacy(catalog, "auth");
+    const doc = document([AUTH, BILLING, UNKNOWN]);
+    const catalogBefore = Y.encodeStateAsUpdate(catalog);
+    const docBefore = Y.encodeStateAsUpdate(doc);
+    expect(listTagCatalog(catalog)).toEqual([{ id: UNKNOWN, name: "keep" }]);
+    expect(readDocumentTags(doc, catalog)).toEqual([{ id: UNKNOWN, name: "keep" }]);
+    expect(Y.encodeStateAsUpdate(catalog)).toEqual(catalogBefore);
+    cleanupDeletedDocumentTags(doc, catalog);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(docBefore);
+    migrateRetiredTagCatalogEntries(catalog);
+    expect(isTagDeleted(catalog, AUTH)).toBe(true);
+    expect(isTagDeleted(catalog, BILLING)).toBe(true);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(docBefore);
+    expect(createTagCatalogEntry(catalog, "auth", DELETED)).toEqual({ id: DELETED, name: "auth" });
+    catalog.getMap<number>(TAG_CATALOG_RESTORED_KEY).set("auth#legacy", 20);
+    retireLegacy(catalog, "keep");
+    expect(listTagCatalog(catalog)).toEqual([{ id: DELETED, name: "auth" }, { id: UNKNOWN, name: "keep" }]);
+    const migrated = Y.encodeStateAsUpdate(catalog);
+    migrateRetiredTagCatalogEntries(catalog);
+    expect(Y.encodeStateAsUpdate(catalog)).toEqual(migrated);
+  });
+
+  it("omits provisional, absent and deleted tags from document and directory reads without writing", () => {
+    const catalog = new Y.Doc();
+    createTagCatalogEntry(catalog, "auth", AUTH, "Identity");
+    createTagCatalogEntry(catalog, "deleted", DELETED);
+    const doc = document([AUTH, DELETED, UNKNOWN, "provisional"]);
     const directory = new Y.Doc();
-    upsertDirectoryEntry(directory, {
-      uuid: DOCUMENT,
-      title: "Tagged",
-      tags: ["auth"],
-    });
-
-    // Provisional names are neither accepted nor exposed as identities.
-    expect(readDocumentTags(doc, catalog)).toEqual([]);
-    expect(readDirectoryTags(getDirectoryEntry(directory, DOCUMENT)!, catalog))
-      .toEqual([]);
-
-    assignDocumentTags(doc, catalog, [AUTH]);
-    upsertDirectoryEntry(directory, {
-      uuid: DOCUMENT,
-      title: "Tagged",
-      tags: getMeta(doc).tags,
-    });
-    retireTagCatalogEntry(catalog, AUTH);
-    const resolved = [{ id: AUTH, name: "auth", state: "retired" }] as const;
-    expect(getMeta(doc).tags).toEqual([AUTH]);
-    expect(readDocumentTags(doc, catalog)).toEqual(resolved);
-    expect(readDirectoryTags(getDirectoryEntry(directory, DOCUMENT)!, catalog))
-      .toEqual(resolved);
+    upsertDirectoryEntry(directory, { uuid: DOCUMENT, title: "Tagged", tags: getMeta(doc).tags });
+    const before = Y.encodeStateAsUpdate(doc);
+    deleteTagCatalogEntry(catalog, DELETED);
+    expect(readDocumentTags(doc, catalog)).toEqual([{ id: AUTH, name: "auth", description: "Identity" }]);
+    expect(readDirectoryTags(getDirectoryEntry(directory, DOCUMENT)!, catalog)).toEqual(readDocumentTags(doc, catalog));
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    cleanupDeletedDocumentTags(doc, catalog);
+    expect(getMeta(doc).tags).toEqual([AUTH, UNKNOWN, "provisional"]);
+    expect(getTagCatalogEntry(catalog, DELETED)).toBeNull();
+    expect(listDeletedTagCatalogEntries(catalog)).toContainEqual({ id: DELETED, name: "deleted" });
   });
 
-  it("validates a complete assignment before replacing provisional values", () => {
+  it("validates a complete assignment before any cleanup and preserves delayed UUIDs on whole-set writes", () => {
     const catalog = new Y.Doc();
     createTagCatalogEntry(catalog, "auth", AUTH);
-    createTagCatalogEntry(catalog, "billing", BILLING);
-    createTagCatalogEntry(catalog, "retired", RETIRED);
-    retireTagCatalogEntry(catalog, RETIRED);
-    const doc = document(["provisional"]);
-
+    createTagCatalogEntry(catalog, "deleted", DELETED);
+    deleteTagCatalogEntry(catalog, DELETED);
+    const doc = document([AUTH, DELETED, UNKNOWN, "provisional"]);
     const before = Y.encodeStateAsUpdate(doc);
-    expect(() => assignDocumentTags(doc, catalog, [AUTH, RETIRED, UNKNOWN]))
-      .toThrow(InvalidTagAssignmentError);
-    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
-
-    // A valid identity-based write is a clean cut from old strings.
-    assignDocumentTags(doc, catalog, [AUTH, BILLING, AUTH]);
-    expect(getMeta(doc).tags).toEqual([AUTH, BILLING]);
-
-    // Retirement after assignment permits keeping or removing that identity.
-    retireTagCatalogEntry(catalog, BILLING);
-    assignDocumentTags(doc, catalog, [BILLING, AUTH]);
-    expect(getMeta(doc).tags).toEqual([AUTH, BILLING]);
+    for (const requested of [[AUTH, DELETED], [AUTH, UNKNOWN], [AUTH, "provisional"]]) {
+      expect(() => assignDocumentTags(doc, catalog, requested)).toThrow(InvalidTagAssignmentError);
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    }
+    assignDocumentTags(doc, catalog, []);
+    expect(getMeta(doc).tags).toEqual([UNKNOWN]);
+    expect(readDocumentTags(doc, catalog)).toEqual([]);
+    createTagCatalogEntry(catalog, "arrived", UNKNOWN);
+    expect(readDocumentTags(doc, catalog)).toEqual([{ id: UNKNOWN, name: "arrived" }]);
     assignDocumentTags(doc, catalog, [AUTH]);
-    expect(getMeta(doc).tags).toEqual([AUTH]);
-
-    expect(() => assignDocumentTags(doc, catalog, [AUTH, BILLING])).toThrow(
-      InvalidTagAssignmentError,
-    );
     expect(getMeta(doc).tags).toEqual([AUTH]);
   });
 
-  it("preserves an assigned UUID while the local catalog cannot resolve it", () => {
-    const completeCatalog = new Y.Doc();
-    createTagCatalogEntry(completeCatalog, "auth", AUTH);
-    createTagCatalogEntry(completeCatalog, "billing", BILLING);
-    const partialCatalog = new Y.Doc();
-    createTagCatalogEntry(partialCatalog, "auth", AUTH);
-    const doc = document();
-    assignDocumentTags(doc, completeCatalog, [AUTH, BILLING]);
-
-    const assignments = readDocumentTags(doc, partialCatalog);
-    expect(assignments).toEqual([
-      { id: AUTH, name: "auth", state: "active" },
-      { id: BILLING, name: null, state: "unresolved" },
-    ]);
-
-    assignDocumentTags(
-      doc,
-      partialCatalog,
-      assignments.map((entry) => entry.id),
-    );
-    expect(getMeta(doc).tags).toEqual([AUTH, BILLING]);
+  it("ignores malformed foreign description registers", () => {
+    const catalog = new Y.Doc();
+    createTagCatalogEntry(catalog, "auth", AUTH);
+    catalog.getMap<string>(TAG_CATALOG_DESCRIPTIONS_KEY).set(AUTH, "bad\nvalue");
+    expect(listTagCatalog(catalog)).toEqual([{ id: AUTH, name: "auth" }]);
   });
 });

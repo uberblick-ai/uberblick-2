@@ -11,7 +11,7 @@ import { MAX_TOKEN_LENGTH } from "./token.js";
  * or 401 sign-in-required on equality.
  */
 // Device credentials use device-generated Ed25519 keys and bind renewal keys.
-export const SYNC_PROTOCOL_VERSION = 6;
+export const SYNC_PROTOCOL_VERSION = 7;
 
 /** Terminal, room-local refusal; the client must discard its copy and stop publishing. */
 export const DOC_DELETED_REASON = "uberblick:doc-deleted";

@@ -5,6 +5,7 @@ import * as Y from "yjs";
 import { ySyncPluginKey } from "y-prosemirror";
 import { endUndoCapture, findBlockById } from "./blocks.js";
 import { isOrdinaryTable } from "./table.js";
+import { writeEditorDocument } from "./document-write.js";
 
 export interface TableRowTarget {
   tableId: string;
@@ -82,7 +83,7 @@ export function deleteTableColumn(editor: Editor, target: TableColumnTarget): bo
   const doc = target.table.doc;
   if (live === null || live.node.child(0).childCount === 1 || doc === null) return false;
   endUndoCapture(editor.state);
-  doc.transact(() => {
+  writeEditorDocument(editor, doc, () => {
     for (const row of target.table.toArray()) (row as Y.XmlElement).delete(live.columnIndex, 1);
   }, ySyncPluginKey);
   endUndoCapture(editor.state);
@@ -112,7 +113,7 @@ export function moveTableColumnToGap(editor: Editor, target: TableColumnTarget, 
   const header = copies[0];
   if (header === undefined) return false;
   endUndoCapture(editor.state);
-  doc.transact(() => {
+  writeEditorDocument(editor, doc, () => {
     copies.forEach(({ row, cell }) => {
       row.delete(live.columnIndex, 1);
       row.insert(destination, [cell]);
@@ -185,7 +186,7 @@ export function moveTableRow(editor: Editor, target: TableRowTarget, gap: number
   const copy = target.row.clone();
   const destination = gap > live.rowIndex ? gap - 1 : gap;
   endUndoCapture(editor.state);
-  doc.transact(() => {
+  writeEditorDocument(editor, doc, () => {
     target.table.delete(live.rowIndex, 1);
     target.table.insert(destination, [copy]);
   }, ySyncPluginKey);

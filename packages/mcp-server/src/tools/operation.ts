@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { cleanupDeletedDocumentTags } from "@uberblick/schema";
 import type { Replica } from "../replica.js";
 import type { ToolContext } from "./context.js";
 
@@ -81,7 +82,16 @@ export function documentOperation<Args extends { uuid: string }, Payload extends
 ) {
   return operation(DOCUMENT_WRITE, input, (context, args, request) => {
     const replica = context.requireWritableDoc(args.uuid, policy.content);
-    const payload = body(context, args, request, replica);
+    let changed = false;
+    const noteChange = () => { changed = true; };
+    replica.doc.on("update", noteChange);
+    let payload: Payload;
+    try {
+      payload = body(context, args, request, replica);
+    } finally {
+      replica.doc.off("update", noteChange);
+    }
+    if (changed) cleanupDeletedDocumentTags(replica.doc, context.tagCatalog());
     return {
       ...payload,
       ...(policy.contentDurability ? context.contentDurability(replica) : context.durability(replica)),

@@ -10,6 +10,8 @@ import type { ReactElement, ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
 import { autoUpdate, computePosition, flip, hide, inline, offset, shift, size } from "@floating-ui/dom";
 import type * as Y from "yjs";
+import type { RoomConnection } from "../../collab/rooms.js";
+import { writeDocument } from "../../collab/document-write.js";
 import {
   AnnotationRangeError,
   createAnnotation,
@@ -210,6 +212,8 @@ export function CommentComposer({
   contentReadOnly = false,
   formattingOnly = false,
   ydoc,
+  catalogConnection = null,
+  canCleanupTags,
   author,
   mentions,
   host,
@@ -221,6 +225,8 @@ export function CommentComposer({
   /** Detached answer drafts support formatting and links without comments. */
   formattingOnly?: boolean;
   ydoc: Y.Doc;
+  catalogConnection?: RoomConnection | null;
+  canCleanupTags?: (() => boolean) | undefined;
   /** The awareness name this client publishes — the comment's author. */
   author: string;
   /** Peer names offered as `@name` chips. */
@@ -469,7 +475,7 @@ export function CommentComposer({
 
   const create = (text: string): boolean => {
     try {
-      const thread = createAnnotation(
+      const thread = writeDocument(ydoc, catalogConnection?.ydoc ?? null, () => createAnnotation(
         ydoc,
         target.blockId,
         target.start,
@@ -477,7 +483,7 @@ export function CommentComposer({
         author,
         text,
         cell ? { row: target.row, column: target.column } : card ? { part: target.part } : undefined,
-      );
+      ), undefined, canCleanupTags);
       close();
       onCreated(thread.id);
       editor.commands.focus(target.contentStart + target.end);

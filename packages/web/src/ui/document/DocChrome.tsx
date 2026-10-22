@@ -13,7 +13,7 @@ import {
   parseRoom,
   resolveTagAssignments,
 } from "@uberblick/schema";
-import type { DocMeta, TagAssignment, TagCatalogEntry } from "@uberblick/schema";
+import type { DocMeta } from "@uberblick/schema";
 import { writeToClipboard } from "../../editor/source-chrome.js";
 import { toast } from "sonner";
 import type { RoomConnection } from "../../collab/rooms.js";
@@ -67,17 +67,9 @@ function titleOf(meta: DocMeta): string {
   return meta.title === "" ? UNTITLED : meta.title;
 }
 
-function named(entry: TagAssignment): entry is TagCatalogEntry {
-  return entry.name !== null;
-}
-
-function tagLabel(entry: TagCatalogEntry): string {
-  return entry.state === "retired" ? `${entry.name} (retired)` : entry.name;
-}
-
 /**
- * Offer search only at the live entry threshold, including assigned retired
- * tags. Below it, keyboard entry goes directly to the list; a changing count
+ * Offer search only at the live entry threshold. Below it, keyboard entry
+ * goes directly to the list; a changing count
  * must also remove any hidden filter.
  */
 const TAG_SEARCH_THRESHOLD = 10;
@@ -130,8 +122,6 @@ function TagStrip({
   const search = useRef<HTMLInputElement | null>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const list = useRef<HTMLDivElement | null>(null);
-  /** Set when a toggle is about to unmount the option that holds focus. */
-  const repairFocus = useRef(false);
   const listId = useId();
   const arrived =
     catalogConnection !== null && catalogStatus.hasReceivedServerState;
@@ -139,13 +129,11 @@ function TagStrip({
     arrived && catalogConnection !== null
       ? resolveTagAssignments(catalogConnection.ydoc, tags)
       : [];
-  const shown = assignments.filter(named).sort((left, right) =>
+  const shown = assignments.sort((left, right) =>
     left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
   );
   const selected = new Set(assignments.map((entry) => entry.id));
-  const options = (catalog?.entries ?? []).filter(
-    (entry) => entry.state === "active" || selected.has(entry.id),
-  );
+  const options = catalog?.entries ?? [];
   const showSearch = options.length >= TAG_SEARCH_THRESHOLD;
   // No field, no filter. `query` survives until the popover closes, so a count
   // that drops below the threshold while the panel is open would otherwise
@@ -174,15 +162,6 @@ function TagStrip({
     else trigger.current?.focus();
   };
 
-  // A retired-tag removal may unmount the focused option and search field.
-  // Repair focus after that render, using the one-shot ref rather than a
-  // keyed effect.
-  useEffect(() => {
-    if (!repairFocus.current) return;
-    repairFocus.current = false;
-    focusPanelEntry();
-  });
-
   const toggle = (id: string): void => {
     if (
       readOnly ||
@@ -200,8 +179,7 @@ function TagStrip({
     ).map((assigned) => assigned.id);
     const isSelected = liveIds.includes(id);
     const liveEntry = getTagCatalogEntry(catalogConnection.ydoc, id);
-    if (!isSelected && liveEntry?.state !== "active") return;
-    if (isSelected && liveEntry?.state === "retired") repairFocus.current = true;
+    if (liveEntry === null) return;
     assignDocumentTags(
       ydoc,
       catalogConnection.ydoc,
@@ -213,7 +191,7 @@ function TagStrip({
 
   const labels = shown.map((entry) => (
     <span className="ub-tag" key={entry.id}>
-      <span className="ub-tag-name">{tagLabel(entry)}</span>
+      <span className="ub-tag-name">{entry.name}</span>
     </span>
   ));
 
@@ -304,7 +282,6 @@ function TagStrip({
             id: entry.id,
             label: entry.name,
             selected: selected.has(entry.id),
-            ...(entry.state === "retired" ? { detail: "retired" } : {}),
           }))}
           multiple
           onPick={toggle}
@@ -373,6 +350,7 @@ export function DocMetaLine({
   hasTldr = false,
   onEditTldr,
   onRemoveTldr,
+  canCleanupTags,
 }: {
   connection: RoomConnection;
   /** The workspace settings room that owns the curated tag catalog. */
@@ -394,6 +372,7 @@ export function DocMetaLine({
   hasTldr?: boolean;
   onEditTldr?: (() => void) | undefined;
   onRemoveTldr?: (() => void) | undefined;
+  canCleanupTags?: (() => boolean) | undefined;
 }): ReactElement {
   return (
     <p className="ub-doc-meta">
@@ -407,7 +386,7 @@ export function DocMetaLine({
             tags={meta.tags}
             catalogConnection={catalogConnection}
             readOnly={archived || readOnly}
-            canWrite={() => connection.status.writable}
+            canWrite={() => connection.status.writable && canCleanupTags?.() !== false}
           />
           <span className="ub-document-controls">
             <button

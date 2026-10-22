@@ -10,7 +10,7 @@ export const listTagsOperation = operation(READ, inputSchema, (context, _args, _
   return {
     workspace: replicas.config.workspaceId,
     complete: tagCatalogComplete(replicas),
-    tags: activeTagCatalog(tagCatalog()).map(({ id, name }) => ({ id, name })),
+    tags: activeTagCatalog(tagCatalog()),
     hub: replicas.sync.state(),
   };
 });
