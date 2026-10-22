@@ -18,6 +18,7 @@ import {
   ConflictingLinkMarksError,
   InlineLinkRangeError,
   InvalidDocLinkTargetError,
+  InvalidBlockMoveError,
   InvalidListAttributesError,
   InvalidTableMappingError,
   OldTextMismatchError,
@@ -444,6 +445,63 @@ export function deleteBlock(ydoc: Y.Doc, blockId: string): void {
       fragment.delete(index, 1);
     }
   });
+}
+
+/**
+ * Move visible block copies together, preserving their attributes and marks.
+ * Concurrent edits to their deleted originals do not follow the copies.
+ * Returns false without writing when the requested visible order already holds.
+ */
+export function moveBlocks(
+  ydoc: Y.Doc,
+  blockIds: readonly string[],
+  afterBlockId: string | null = null,
+): boolean {
+  if (blockIds.length === 0) throw new InvalidBlockMoveError("empty_block_ids");
+  const selected = new Set<string>();
+  for (const id of blockIds) {
+    if (selected.has(id)) throw new InvalidBlockMoveError("duplicate_block_id", id);
+    selected.add(id);
+  }
+  if (afterBlockId !== null && selected.has(afterBlockId)) {
+    throw new InvalidBlockMoveError("move_target_in_selection", afterBlockId);
+  }
+
+  const fragment = getBlocksFragment(ydoc);
+  const { visible } = partitionById(fragment);
+  const byId = new Map<string, Y.XmlElement>();
+  for (const element of visible) {
+    const id = element.getAttribute("id");
+    if (id !== undefined && !byId.has(id)) byId.set(id, element);
+  }
+  const moving = blockIds.map((id) => {
+    const element = byId.get(id);
+    if (element === undefined) throw new BlockNotFoundError(id);
+    return element;
+  });
+  if (afterBlockId !== null && !byId.has(afterBlockId)) {
+    throw new BlockNotFoundError(afterBlockId);
+  }
+
+  const isSelected = (element: Y.XmlElement): boolean => {
+    const id = element.getAttribute("id");
+    return id !== undefined && selected.has(id);
+  };
+  const remaining = visible.filter((element) => !isSelected(element));
+  const position = afterBlockId === null ? 0 : remaining.findIndex((element) => element.getAttribute("id") === afterBlockId) + 1;
+  const ordered = [...remaining.slice(0, position), ...moving, ...remaining.slice(position)];
+  if (ordered.every((element, index) => element === visible[index])) return false;
+
+  const copies = moving.map((element) => element.clone());
+  const indexes = fragment.toArray().flatMap((node, index) =>
+    node instanceof Y.XmlElement && isSelected(node) ? [index] : [],
+  );
+  ydoc.transact(() => {
+    for (const index of indexes.reverse()) fragment.delete(index, 1);
+    const destination = afterBlockId === null ? 0 : indexOfBlock(fragment, afterBlockId) + 1;
+    fragment.insert(destination, copies);
+  });
+  return true;
 }
 
 /** Remove retired Mermaid elements, including shadowed or malformed copies. */

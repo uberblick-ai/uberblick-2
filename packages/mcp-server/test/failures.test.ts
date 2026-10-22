@@ -127,6 +127,8 @@ const EXPECTED: Record<
     detail: ["blockId", "currentText", "currentRev", "retry"],
   },
   block_not_found: { recoveryClass: "reread", detail: ["blockId"] },
+  duplicate_block_id: { recoveryClass: "manual", detail: ["blockId"] },
+  move_target_in_selection: { recoveryClass: "manual", detail: ["blockId"] },
   open_thread_anchored: { recoveryClass: "manual", detail: ["blockId", "threads"] },
   annotation_range: {
     recoveryClass: "reread",
@@ -245,6 +247,13 @@ describe("the failure contract", () => {
     const record = (payload: any): void => {
       failures.set(payload.error, payload);
     };
+
+    record((await rig.call("move_block", {
+      uuid: doc.uuid, block_ids: [doc.blockId, doc.blockId],
+    })).payload);
+    record((await rig.call("move_block", {
+      uuid: doc.uuid, block_ids: [doc.blockId], after_block_id: doc.blockId,
+    })).payload);
 
     record((await rig.call("edit_block", {
       uuid: doc.uuid, block_id: doc.blockId, old_text: "one", new_text: "two", list: "ordered",

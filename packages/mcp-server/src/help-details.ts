@@ -343,6 +343,26 @@ export const toolHelpDetails = {
     "Scope of that guarantee, stated plainly: it is a check against THIS replica at the moment of the call. " +
     "There is no cross-replica compare-and-swap — an edit made elsewhere that has not reached this replica " +
     "yet cannot be detected, and the window widens the longer this server stays offline.",
+  move_block:
+    "Move the nonempty, ordered `block_ids` array directly after `after_block_id`, or to the top when " +
+    "it is omitted or null. The blocks need not be adjacent; unselected blocks keep their relative order. " +
+    "Each moved block keeps its id, type, attributes, content, inline marks and rev. Comment anchors keep " +
+    "their offsets, table coordinates or card/Figma part; threads, replies and resolution are unchanged. " +
+    "A thread whose marks survive only outside its recorded block already resolves to the first marked " +
+    "block in document order, so a reorder can change the blockId reported for that thread.\n\n" +
+    "Unknown ids refuse with `block_not_found`; repeated ids with `duplicate_block_id`; an anchor in the " +
+    "moved set with `move_target_in_selection`. Id refusals name the offending id. An open decision's " +
+    "resulting answer must retain its supported shape or `decision_block_unsupported` or " +
+    "`decision_answer_too_long` refuses. Archived documents and decided records refuse content writes. " +
+    "These validation and content-lock refusals write nothing. A success returns `blocks` in requested order, each with id and rev, " +
+    "and the shared write durability fields. It reaches peers as one document update. If the order already " +
+    "holds, no block is recreated and no document update is written.\n\n" +
+    "Concurrent-edit limit: moving copies the current blocks and deletes their old copies. An edit or a " +
+    "new comment another replica makes to a moved block before receiving the move is dropped, including " +
+    "offline edits synced later. A dropped new comment keeps its thread, with `range: null` in `get_doc` " +
+    "and an orphaned comment in the web. The call first settles with the hub within its bounded budget, " +
+    "so it carries edits the hub has already delivered to this replica; later edits are not detected, " +
+    "reported or reapplied.",
   insert_block:
     "Insert the ordered, nonempty `blocks` array consecutively after `after_block_id`, or at the top " +
     "when it is omitted. Each entry has the same shape as a `create_doc` seed; a single block uses a " +

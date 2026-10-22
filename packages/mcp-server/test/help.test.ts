@@ -72,6 +72,21 @@ it("points Markdown authors to Ablauf help and requires checking edits in the we
   expect(ablauf).toContain("MCP does not return the renderer's diagnostics");
 });
 
+it("documents move preservation, refusal recovery and the full concurrent-edit limit", async () => {
+  const rig = await local();
+  const { text } = await rig.ok("get_help", { topic: "move_block" });
+  for (const rule of [
+    "blocks need not be adjacent", "id, type, attributes, content, inline marks and rev",
+    "threads, replies and resolution are unchanged", "first marked block in document order",
+    "`block_not_found`", "`duplicate_block_id`", "`move_target_in_selection`",
+    "These validation and content-lock refusals write nothing", "one document update", "no document update is written",
+    "before receiving the move is dropped", "offline edits synced later",
+    "dropped new comment keeps its thread", "`range: null`", "orphaned comment in the web",
+  ]) expect(text.replace(/\s+/g, " "), rule).toContain(rule);
+  const editing = await rig.ok("get_help", { topic: "edit_doc" });
+  expect(editing.text).toContain("`move_block` reorders existing blocks");
+});
+
 it("refuses unknown topics through the tool failure contract and the resource-not-found protocol error", async () => {
   const rig = await local();
   const { topics } = await rig.ok("get_help");

@@ -36,6 +36,9 @@ it("refuses every document mutation before logging, teaches recovery, and leaves
   const first = await doc(rig, "Editorial guidance");
   const second = await doc(rig, "Tagging guidance");
   const target = await doc(rig, "Target");
+  await rig.ok("insert_block", {
+    uuid: target.uuid, blocks: [{ type: "paragraph", text: "Another block." }],
+  });
   const archived = await doc(rig, "Archived target");
   await rig.ok("archive_doc", { uuid: archived.uuid });
   const read = await rig.ok("get_doc", { uuid: target.uuid });
@@ -46,6 +49,7 @@ it("refuses every document mutation before logging, teaches recovery, and leaves
     create_doc: { title: "Must not exist", description: "Refused creation." },
     edit_block: { uuid, block_id: block.id, old_text: block.text, new_text: "Changed", rev: block.rev },
     insert_block: { uuid, blocks: [{ type: "paragraph", text: "Changed" }] },
+    move_block: { uuid, block_ids: [block.id], after_block_id: read.blocks[1].id },
     delete_block: { uuid, block_id: block.id },
     set_metadata: { uuid, title: "Changed" }, set_status: { uuid, status: "open" },
     update_data: { uuid, operations: [] },

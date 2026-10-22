@@ -345,6 +345,12 @@ export const outputSchemas = {
   }).strict(),
   edit_block: z.object({ uuid, block: block.nullable(), ...documentDurability, ...contentReview }).strict(),
   insert_block: z.object({ uuid, blocks: z.array(block).min(1), ...documentDurability, ...contentReview }).strict(),
+  move_block: z.object({
+    uuid,
+    blocks: z.array(z.object({ id: z.string(), rev: z.string() }).strict()).min(1),
+    ...documentDurability,
+    ...contentReview,
+  }).strict(),
   delete_block: z.object({ uuid, blockId: z.string(), ...documentDurability, ...contentReview }).strict(),
   set_metadata: z.object({
     uuid,

@@ -897,6 +897,55 @@
     }
   },
   {
+    "name": "move_block",
+    "title": "Move blocks",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "uuid": {
+          "description": "Document UUID.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "block_ids": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Distinct block ids, in their destination order."
+        },
+        "after_block_id": {
+          "description": "Move after this block. Omit or null to move first.",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "uuid",
+        "block_ids"
+      ],
+      "additionalProperties": false
+    },
+    "description": "Reorder existing blocks after after_block_id, or first when omitted/null, in block_ids order. Preserves ids, revs, content, attributes and comment anchors in one update; invalid moves write nothing. Concurrent edits or new comments on moved blocks before their replica receives the move are dropped, including offline edits.\n\nHelp: move_block, edit_doc, workspaces, tool-contracts, decisions, markdown.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
     "name": "delete_block",
     "title": "Delete a block",
     "inputSchema": {
@@ -920,7 +969,7 @@
       ],
       "additionalProperties": false
     },
-    "description": "Delete one block. Deleting is never how a block changes type — use insert_block plus edit_block only for new content, and never delete-and-reinsert to re-type, which churns the block id and orphans its annotations. Refuses with open_thread_anchored if any open thread would lose its last document anchor. Use annotate to resolve that thread or move its anchor before deleting.\n\nHelp: delete_block, edit_doc, workspaces, tool-contracts, decisions, markdown.",
+    "description": "Delete one block. Deleting is never how a block changes type — use insert_block plus edit_block only for new content, and never delete-and-reinsert to re-type, which churns the block id and orphans its annotations. Refuses with open_thread_anchored if any open thread would lose its last document anchor. Use annotate to resolve that thread or move its anchor before deleting. Use move_block to reorder blocks.\n\nHelp: delete_block, edit_doc, workspaces, tool-contracts, decisions, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
