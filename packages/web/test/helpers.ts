@@ -66,7 +66,7 @@ export function snapshotFragment(ydoc: Y.Doc): FragmentSnapshot[] {
  */
 export function mountEditor(
   ydoc: Y.Doc,
-  options: { newBlockId?: () => string; docLinks?: DocLinkContext | null; workspaceSettings?: Y.Doc | null } = {},
+  options: { newBlockId?: () => string; docLinks?: DocLinkContext | null; workspaceSettings?: Y.Doc | null; canCleanupTags?: () => boolean } = {},
 ): { editor: Editor; element: HTMLElement } {
   const element = document.createElement("div");
   document.body.appendChild(element);
@@ -82,6 +82,7 @@ export function mountEditor(
     // real state of the app too (see `CreateEditorOptions.docLinks`).
     ...(options.docLinks === undefined ? {} : { docLinks: options.docLinks }),
     ...(options.workspaceSettings === undefined ? {} : { workspaceSettings: options.workspaceSettings }),
+    ...(options.canCleanupTags === undefined ? {} : { canCleanupTags: options.canCleanupTags }),
   });
   const forgetEditor = onTestCleanup(() => {
     if (!editor.isDestroyed) editor.destroy();

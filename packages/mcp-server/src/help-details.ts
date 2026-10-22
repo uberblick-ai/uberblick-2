@@ -21,9 +21,9 @@ export const toolHelpDetails = {
     "decision_tldr_unsupported. Creation as decided requires a non-blank answer and valid shape, without " +
     "TL;DR or data. Answer blocks differ from `answer: {who, when, where}`, the recorded person's attribution. " +
     "Decision writes carry no TL;DR review reminder; an editable regular document seeded with blocks does.\n\n" +
-    "`tags` is a complete assignment set of active catalog ids or active names. Name matching ignores case. Names are selectors; " +
+    "`tags` is a complete assignment set of existing catalog ids or names. Name matching ignores case. Names are selectors; " +
     "the document stores canonical ids and the answer resolves each id beside its current name. An unknown or " +
-    "retired selection refuses the whole call before a document exists; list_tags is the active vocabulary.\n\n" +
+    "deleted selection refuses the whole call before a document exists; list_tags is the existing vocabulary.\n\n" +
     "A `description` is REQUIRED; `title` is also required except for a successor with `supersedes`. " +
     "A missing required field creates nothing. A title cannot be empty or whitespace: an untitled document cannot be picked out of a listing, " +
     "and set_metadata with `title` is the repair for the untitled ones the web UI creates.\n\n" +
@@ -205,14 +205,13 @@ export const toolHelpDetails = {
     "for the changes it made itself, so a document you never edit keeps the stamp its editor wrote. " +
     "Concurrent stamps resolve to the greater value, so a future-skewed clock pins the hint until a later " +
     "stamp exceeds it. It is also deliberately coarse — at most one re-stamp every few minutes of its own " +
-    "edits, immediately on a metadata or cached thread-count change. Recording only a code check leaves updatedAt unchanged. It comes from the clock of whichever replica wrote it, " +
+    "edits, immediately on a metadata or cached thread-count change. A code check leaves updatedAt unchanged when it is the document's only change. It comes from the clock of whichever replica wrote it, " +
     "so treat it as approximate, and expect it to be missing on a stub written before it existed.\n\n" +
     "Decision rows include `kind` and their compatible `status`; ordinary documents omit both. The " +
     "optional `kind` and `status` filters are answered from those directory stubs without opening a document " +
     "room, and combine with `tag` and `has_open_threads`. A tag filter accepts a catalog id or current name, ignoring name case; a value this " +
     "catalog does not have is refused rather than answered with an empty listing. Each returned assignment " +
-    "carries its canonical id, current name (or null while unresolved), and active, retired or unresolved " +
-    "state.",
+    "carries its canonical id, current name and optional description. Only existing catalog tags are displayed.",
   search:
     "Full-text search over live document titles, descriptions, content and assigned tag names, from the local FTS5 index. The index " +
     "is derived from the replicas and updated as updates are observed, so it reflects edits from any client " +
@@ -236,7 +235,7 @@ export const toolHelpDetails = {
     "score. Filters combine and apply before `limit`, which defaults to 20 and accepts up to 100. Unknown tags " +
     "refuse.\n\n" +
     "Every hit carries `kind`, `description` (null when unwritten), a snippet and canonical tag assignments " +
-    "with current names and retirement state. Every decision hit carries `state`: `in-force`, `superseded`, " +
+    "with current names and optional descriptions; only existing catalog tags appear. Every decision hit carries `state`: `in-force`, `superseded`, " +
     "`open`, `rejected`, `withdrawn` or `conflict`. State is resolved from the current topic records, so a " +
     "previously indexed answer can become superseded without being edited. Tag-name matching uses the names " +
     "the hit shows, updated when catalog tags are renamed.",
@@ -487,16 +486,16 @@ export const toolHelpDetails = {
     "directory answerPreview derives from the first answer paragraph/list. It is distinct from " +
     "recorded `answer: {who, when, where}` attribution. get_doc page decisions are marked related or linked. " +
     "Ordinary document stubs, search and Markdown do not carry TL;DR.\n\n" +
-    "Tags replace the assignment set with catalog ids or active names; name matching ignores case and names resolve to canonical ids " +
-    "before storage. Already assigned retired or unresolved ids may be preserved or removed, but cannot be " +
-    "newly added. Invalid values produce `invalid_tag_assignment` with `field: \"tags\"` before the document, " +
+    "Tags replace existing-tag assignments with catalog ids or names; name matching ignores case and names resolve to canonical ids " +
+    "before storage. References awaiting a catalog entry remain stored and hidden. Confirmed-deleted references are removed only during a later permitted document write. " +
+    "Invalid values produce `invalid_tag_assignment` with `field: \"tags\"` before the document, " +
     "directory or index changes.\n\n" +
     "Links replace the curated UUID array and update backlinks. A newly added target unknown to this " +
     "replica's directory produces `doclink_target_not_known_locally` with `field: \"links\"`; archived " +
     "targets are accepted and an existing curated target can be retained unchanged. Passing get_doc's " +
     "effective links back stores derived governs, supersedes and discussion UUIDs in the curated array too; " +
     "get_doc " +
-    "deduplicates the resulting edges. Empty arrays clear tags or curated links.\n\n" +
+    "deduplicates the resulting edges. Empty arrays clear existing tags or curated links.\n\n" +
     "An open decision accepts `discussion` as a live, locally readable regular document UUID, " +
     "or null to clear it. Create or reuse the RFC first as an ordinary regular document. " +
     "A decision target refuses with `discussion_not_regular_document`; archived, unknown and unhydrated " +

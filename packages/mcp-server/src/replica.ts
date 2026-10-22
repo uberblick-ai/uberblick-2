@@ -28,6 +28,8 @@ import {
   getWorkspaceName,
   getWorkspaceMainRepository,
   listTagCatalog,
+  listDeletedTagCatalogEntries,
+  migrateRetiredTagCatalogEntries,
   normalizeLegacyTables,
   removeLegacyMermaidBlocks,
   repairDuplicateBlocks,
@@ -976,6 +978,7 @@ export class Replicas {
     }
 
     this.refreshReplicas();
+    this.migrateTagCatalog();
     if (this.persistenceFailure !== null) {
       this.assertHealthy();
       return;
@@ -983,6 +986,14 @@ export class Replicas {
     this.releaseQuietRooms();
     this.compactLargeLogs();
     this.recordLastSyncIfCaughtUp();
+  }
+
+  private migrateTagCatalog(): boolean {
+    if (this.persistenceFailure !== null ||
+      !(this.config.localWorkspace === true || this.sync.canWriteRoom(this.settings().room))) return false;
+    const changed = migrateRetiredTagCatalogEntries(this.settings().doc);
+    if (changed && this.sync.enabled) this.settleNeeded = true;
+    return changed;
   }
 
   /** Await hub acknowledgement of the replica, never hub storage. */
@@ -1075,7 +1086,8 @@ export class Replicas {
       const changes: string[] = [];
       if (getWorkspaceName(old) !== getWorkspaceName(authoritative)) changes.push("workspace name");
       if (getWorkspaceMainRepository(old) !== getWorkspaceMainRepository(authoritative)) changes.push("main repository");
-      if (JSON.stringify(listTagCatalog(old)) !== JSON.stringify(listTagCatalog(authoritative))) changes.push("tag catalog");
+      if (JSON.stringify([listTagCatalog(old), listDeletedTagCatalogEntries(old)]) !==
+        JSON.stringify([listTagCatalog(authoritative), listDeletedTagCatalogEntries(authoritative)])) changes.push("tag catalog");
       const notice = `The hub refused changes to ${changes.length === 0 ? "workspace settings" : changes.join(", ")} because workspace-admin authority is required. The hub's settings have been restored.`;
       this.store.replaceSettings(state, notice, replica.settingsResetSeq);
       this.reloadSettingsIfReplaced();
@@ -1148,6 +1160,12 @@ export class Replicas {
     }
 
     if (this.persistenceFailure !== null) return;
+    if (this.migrateTagCatalog() && this.sync.enabled) {
+      await this.sync.waitForQuiet();
+      if (this.persistenceFailure !== null) return;
+      this.pollAll();
+      this.settleNeeded = this.sync.isDraining();
+    }
     this.releaseQuietRooms();
     this.compactLargeLogs();
     this.recordLastSyncIfCaughtUp();

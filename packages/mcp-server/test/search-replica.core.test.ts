@@ -2,7 +2,7 @@
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { createTagCatalogEntry, getMeta, getMetaMap, getTagCatalogIdentities, retireTagCatalogEntry, setTags } from "@uberblick/schema";
+import { createTagCatalogEntry, deleteTagCatalogEntry, getMeta, getMetaMap, getTagCatalogIdentities, setTags } from "@uberblick/schema";
 import type { MirrorStore } from "../src/store.js";
 import { removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
@@ -60,17 +60,15 @@ describe("replica search derivation", () => {
     const count = rig.instance.store.updateCount(document.room);
 
     expect((await rig.ok("search", { query: "orchard" })).hits).toMatchObject([
-      { uuid: created.uuid, tags: [{ id: tag.id, name: "orchard", state: "active" }] },
+      { uuid: created.uuid, tags: [{ id: tag.id, name: "orchard" }] },
     ]);
     getTagCatalogIdentities(catalog).set(tag.id, "grove");
     expect((await rig.ok("search", { query: "orchard" })).hits).toEqual([]);
     expect((await rig.ok("search", { query: "grove" })).hits).toMatchObject([
-      { uuid: created.uuid, tags: [{ id: tag.id, name: "grove", state: "active" }] },
+      { uuid: created.uuid, tags: [{ id: tag.id, name: "grove" }] },
     ]);
-    retireTagCatalogEntry(catalog, tag.id);
-    expect((await rig.ok("search", { query: "grove" })).hits).toMatchObject([
-      { uuid: created.uuid, tags: [{ id: tag.id, name: "grove", state: "retired" }] },
-    ]);
+    deleteTagCatalogEntry(catalog, tag.id);
+    expect((await rig.ok("search", { query: "grove" })).hits).toEqual([]);
     expect(Y.encodeStateAsUpdate(document.doc)).toEqual(before);
     expect(rig.instance.store.updateCount(document.room)).toBe(count);
 
@@ -78,7 +76,7 @@ describe("replica search derivation", () => {
     expect((await rig.ok("search", { query: "grove" })).hits).toEqual([]);
     expect((await rig.ok("search", { query: UNKNOWN_TAG })).hits).toEqual([]);
     expect((await rig.ok("search", { query: "Catalog" })).hits).toMatchObject([
-      { uuid: created.uuid, tags: [{ id: UNKNOWN_TAG, name: null, state: "unresolved" }] },
+      { uuid: created.uuid, tags: [] },
     ]);
   });
 

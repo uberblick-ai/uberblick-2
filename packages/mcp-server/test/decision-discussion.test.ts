@@ -6,7 +6,7 @@ import {
   getDirectoryMap,
   getMetaMap,
   listDirectory,
-  retireTagCatalogEntry,
+  deleteTagCatalogEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
@@ -300,7 +300,7 @@ describe("explicit decision discussion references", () => {
     const rig = await localRig(databasePath);
     const rfcTag = EXAMPLE_TAGS.find(tag => tag.name === "rfc");
     expect(rfcTag).toBeDefined();
-    retireTagCatalogEntry(rig.instance.replicas.settings().doc, rfcTag!.id);
+    deleteTagCatalogEntry(rig.instance.replicas.settings().doc, rfcTag!.id);
     const rfc = await page(rig);
     const record = await decision(rig, { status: "decided", discussion: rfc.uuid, answer });
     await rig.ok("set_metadata", { uuid: rfc.uuid, title: "Renamed RFC" });

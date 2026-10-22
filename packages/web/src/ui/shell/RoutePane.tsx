@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactElement } from "react";
-import { decisionCurrentRecord } from "@uberblick/schema";
+import { decisionCurrentRecord, isDirectoryEntryArchived, parseRoom } from "@uberblick/schema";
 import type { DecisionTopicResolution, DocMeta } from "@uberblick/schema";
 import type { RoomConnection } from "../../collab/rooms.js";
 import type { DocLinkContext } from "../../editor/doc-links.js";
@@ -142,6 +142,8 @@ function editorProperties(props: RoutePaneProps, segment: string, connection: Ro
     connection, segment, presence: props.presence, syncReading: props.syncReading ?? {},
     author: props.author,
     catalogConnection: props.catalogConnection ?? null, archived: props.archived, updatedAt: props.updatedAt,
+    canCleanupTags: () => props.directoryConnection != null && connection.status.writable &&
+      !isDirectoryEntryArchived(props.directoryConnection.ydoc, parseRoom(connection.room).uuid),
     docLinks: props.docLinks, actions: props.actions ?? {},
     onSelectThread: props.onSelectThread, threads: props.threads ?? [], threadsOpen: props.threadsOpen ?? false,
     onToggleThreads: props.onToggleThreads,

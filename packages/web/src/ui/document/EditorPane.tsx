@@ -26,6 +26,7 @@ import { linkAnchorFromTarget } from "../../editor/external-links.js";
 import { describeForeignBlocks } from "../../editor/palette.js";
 import type { LinkConflict } from "../../editor/palette.js";
 import { repairLinkConflict } from "../../editor/link-repair.js";
+import { writeDocument } from "../../collab/document-write.js";
 import type { LinkSurvivor } from "../../editor/link-repair.js";
 import type { HubEndpoint } from "../../config.js";
 import type { RoomConnection } from "../../collab/rooms.js";
@@ -194,6 +195,8 @@ function ArchivedBanner({
 /** The person-facing summary and its one in-place write surface. */
 function TldrCallout({
   connection,
+  catalogConnection,
+  canCleanupTags,
   tldr,
   editing,
   archived,
@@ -202,6 +205,8 @@ function TldrCallout({
   onEditingChange,
 }: {
   connection: RoomConnection;
+  catalogConnection: RoomConnection | null;
+  canCleanupTags: (() => boolean) | undefined;
   tldr: string | null;
   editing: boolean;
   archived: boolean;
@@ -240,7 +245,7 @@ function TldrCallout({
     // `readOnly` describes the committed render; the live connection and the
     // tombstone guard the write itself, as the title field does below.
     if (!canWriteContent(connection, archived)) return;
-    setTldr(connection.ydoc, next);
+    writeDocument(connection.ydoc, catalogConnection?.ydoc ?? null, () => setTldr(connection.ydoc, next), undefined, canCleanupTags);
     onEditingChange(false);
   };
 
@@ -518,11 +523,15 @@ export function StatusLine({
  */
 function LinkConflictRepair({
   connection,
+  catalogConnection,
+  canCleanupTags,
   contentReadOnly,
   writable,
   docLinks,
 }: {
   connection: RoomConnection;
+  catalogConnection: RoomConnection | null;
+  canCleanupTags: (() => boolean) | undefined;
   contentReadOnly: boolean;
   writable: boolean;
   docLinks: DocLinkContext | null;
@@ -531,7 +540,7 @@ function LinkConflictRepair({
   const repair = (conflict: LinkConflict, keep: LinkSurvivor): void => {
     // Guard the write too: the room can become a decision before React observes it.
     if (!canWriteContent(connection, contentReadOnly)) return;
-    repairLinkConflict(conflict, keep);
+    writeDocument(connection.ydoc, catalogConnection?.ydoc ?? null, () => repairLinkConflict(conflict, keep), undefined, canCleanupTags);
     // Unconditional: a repair changes the list, and a refusal means live state
     // has already moved on without this render hearing about it yet.
     refresh();
@@ -579,12 +588,16 @@ function LinkConflictRepair({
  */
 function ForeignFallback({
   connection,
+  catalogConnection,
+  canCleanupTags,
   summary,
   contentReadOnly,
   writable,
   docLinks,
 }: {
   connection: RoomConnection;
+  catalogConnection: RoomConnection | null;
+  canCleanupTags: (() => boolean) | undefined;
   summary: string;
   contentReadOnly: boolean;
   writable: boolean;
@@ -598,6 +611,8 @@ function ForeignFallback({
       </p>
       <LinkConflictRepair
         connection={connection}
+        catalogConnection={catalogConnection}
+        canCleanupTags={canCleanupTags}
         contentReadOnly={contentReadOnly}
         writable={writable}
         docLinks={docLinks}
@@ -621,6 +636,7 @@ function ForeignFallback({
 const BoundEditor = memo(function BoundEditor({
   connection,
   catalogConnection,
+  canCleanupTags,
   author,
   archived,
   contentReadOnly,
@@ -629,6 +645,7 @@ const BoundEditor = memo(function BoundEditor({
 }: {
   connection: RoomConnection;
   catalogConnection: RoomConnection | null;
+  canCleanupTags: (() => boolean) | undefined;
   author: string;
   /** Archived documents also withhold comments. */
   archived: boolean;
@@ -652,6 +669,7 @@ const BoundEditor = memo(function BoundEditor({
    * changes must not rebind.
    */
   const readContentReadOnly = useEffectEvent(() => contentReadOnly);
+  const readCleanupPermission = useEffectEvent(() => canCleanupTags?.() !== false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: The epoch rebinds after the synchronous guard destroys an editor that normalization immediately made bindable again.
   useEffect(() => {
@@ -666,6 +684,7 @@ const BoundEditor = memo(function BoundEditor({
       awareness: connection.provider.awareness,
       editable: canWriteContent(connection, readContentReadOnly()),
       canWrite: () => connection.status.writable,
+      canCleanupTags: () => canWriteContent(connection, readContentReadOnly()) && readCleanupPermission(),
       canNormalize: () => connection.status.writable && connection.status.synced,
       onUnbind: () => {
         setEditor(null);
@@ -832,6 +851,8 @@ const BoundEditor = memo(function BoundEditor({
             editor={editor}
             contentReadOnly={contentReadOnly}
             ydoc={connection.ydoc}
+            catalogConnection={catalogConnection}
+            canCleanupTags={canCleanupTags}
             author={author}
             mentions={peers.map((peer) => peer.name)}
             host={frame}
@@ -849,6 +870,7 @@ export function EditorPane({
   presence,
   author,
   catalogConnection = null,
+  canCleanupTags,
   archived,
   updatedAt,
   actions = {},
@@ -878,6 +900,7 @@ export function EditorPane({
   author: string;
   /** The workspace settings room that owns the curated tag catalog. */
   catalogConnection?: RoomConnection | null;
+  canCleanupTags?: (() => boolean) | undefined;
   /**
    * Observe directory tombstones in both directions so remote archive and
    * restore update this pane.
@@ -971,6 +994,7 @@ export function EditorPane({
         <DocMetaLine
           connection={connection}
           catalogConnection={catalogConnection}
+          canCleanupTags={canCleanupTags}
           segment={segment}
           meta={meta === null || displayTitle === undefined ? meta : { ...meta, title: displayTitle }}
           actionTitle={actionTitle}
@@ -983,12 +1007,12 @@ export function EditorPane({
           hasTldr={meta?.tldr != null}
           onEditTldr={() => {
             if (!canWriteContent(connection, contentReadOnly)) return;
-            if (getMeta(connection.ydoc).tldrOptOut === true) setTldrOptOut(connection.ydoc, false);
+            if (getMeta(connection.ydoc).tldrOptOut === true) writeDocument(connection.ydoc, catalogConnection?.ydoc ?? null, () => setTldrOptOut(connection.ydoc, false), undefined, canCleanupTags);
             setTldrEditorRoom(connection.room);
           }}
           onRemoveTldr={() => {
             if (!canWriteContent(connection, contentReadOnly)) return;
-            setTldrOptOut(connection.ydoc, true);
+            writeDocument(connection.ydoc, catalogConnection?.ydoc ?? null, () => setTldrOptOut(connection.ydoc, true), undefined, canCleanupTags);
             setTldrEditorRoom(null);
           }}
         />
@@ -999,7 +1023,7 @@ export function EditorPane({
           // this readOnly render updates.
           onChange={(value) => {
             if (!canWriteContent(connection, contentReadOnly)) return;
-            setTitle(connection.ydoc, value);
+            writeDocument(connection.ydoc, catalogConnection?.ydoc ?? null, () => setTitle(connection.ydoc, value), undefined, canCleanupTags);
           }}
         />}
         {/* The editor draws only for a document that is here: `RoutePane` sends
@@ -1020,6 +1044,8 @@ export function EditorPane({
           {!decision && <TldrCallout
             key={connection.room}
             connection={connection}
+            catalogConnection={catalogConnection}
+            canCleanupTags={canCleanupTags}
             tldr={meta?.tldr ?? null}
             editing={editingTldr}
             archived={archived}
@@ -1032,6 +1058,8 @@ export function EditorPane({
           {foreign.length > 0 ? (
             <ForeignFallback
               connection={connection}
+              catalogConnection={catalogConnection}
+              canCleanupTags={canCleanupTags}
               summary={describeForeignBlocks(foreign, { repairable: !contentReadOnly, decision })}
               contentReadOnly={contentReadOnly}
               writable={writable}
@@ -1041,6 +1069,7 @@ export function EditorPane({
             <BoundEditor
               connection={connection}
               catalogConnection={catalogConnection}
+              canCleanupTags={canCleanupTags}
               author={author}
               archived={archived}
               contentReadOnly={contentReadOnly}

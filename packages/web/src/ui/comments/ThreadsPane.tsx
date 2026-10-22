@@ -12,6 +12,7 @@ import type { ReactElement } from "react";
 import { addComment, getAnnotation, setAnnotationResolved } from "@uberblick/schema";
 import type { AnnotationComment } from "@uberblick/schema";
 import type { RoomConnection } from "../../collab/rooms.js";
+import { writeDocument } from "../../collab/document-write.js";
 import { CommentForm } from "./CommentForm.js";
 import {
   commentTimestamp,
@@ -167,6 +168,8 @@ function ThreadCard({
 
 export function ThreadsPane({
   connection,
+  catalogConnection = null,
+  canCleanupTags,
   threads,
   focused,
   author,
@@ -178,6 +181,8 @@ export function ThreadsPane({
   onCloseAutoFocus,
 }: {
   connection: RoomConnection | null;
+  catalogConnection?: RoomConnection | null;
+  canCleanupTags?: (() => boolean) | undefined;
   /**
    * Share the shell's ordered thread list with the pane-edge count and drawer
    * gate instead of recomputing it in three observers.
@@ -312,7 +317,7 @@ export function ThreadsPane({
       }}
       onReplyClose={cancelReply}
       onReply={(text) => {
-        if (!connection.status.writable) return false;
+        if (readOnly || !connection.status.writable) return false;
         // Re-read the live thread at submit; a remote resolve or deletion
         // must refuse the reply.
         if (getAnnotation(ydoc, thread.id)?.resolved === true) {
@@ -325,7 +330,7 @@ export function ThreadsPane({
         }
         // addComment performs the final lookup and returns null if the thread
         // disappeared.
-        if (addComment(ydoc, thread.id, author, text) === null) {
+        if (writeDocument(ydoc, catalogConnection?.ydoc ?? null, () => addComment(ydoc, thread.id, author, text), undefined, canCleanupTags) === null) {
           setRefusal({ id: thread.id, message: "This thread no longer exists." });
           return false;
         }
@@ -333,8 +338,8 @@ export function ThreadsPane({
         return true;
       }}
       onResolve={(next) => {
-        if (!connection.status.writable) return;
-        setAnnotationResolved(ydoc, thread.id, next);
+        if (readOnly || !connection.status.writable) return;
+        writeDocument(ydoc, catalogConnection?.ydoc ?? null, () => setAnnotationResolved(ydoc, thread.id, next), undefined, canCleanupTags);
         setReplyTo((current) => (current === thread.id ? null : current));
         setExpanded(null);
       }}

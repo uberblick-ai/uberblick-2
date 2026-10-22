@@ -3,6 +3,7 @@ import { decisionCurrentRecord, decisionTopicState, decisionTopicTitle, getDirec
 import type { DecisionTopicResolution, DirectoryEntry } from "@uberblick/schema";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import type { RoomConnection } from "../../collab/rooms.js";
+import { writeDocument } from "../../collab/document-write.js";
 import { EditorPane } from "./EditorPane.js";
 import { DocumentTitle } from "./DocumentTitle.js";
 import { readRoomMeta, useDocMeta, useRoomStatus } from "../hooks.js";
@@ -226,10 +227,11 @@ function Timeline({ topic, selected, linkedRecord, segment, navigate, docLinks, 
   </section>;
 }
 
-function TopicTitle({ topic, current, selected, connection, titleConnection, directoryConnection, archived }: {
+function TopicTitle({ topic, current, selected, connection, titleConnection, directoryConnection, catalogConnection, archived }: {
   topic: DecisionTopicResolution; current: DirectoryEntry; selected: string;
   connection: RoomConnection | null; titleConnection: RoomConnection | null;
   directoryConnection: RoomConnection | null; archived: boolean;
+  catalogConnection: RoomConnection | null;
 }): ReactElement {
   const observedMeta = useDocMeta(connection);
   const meta = observedMeta ?? (connection === null ? null : readRoomMeta(connection));
@@ -253,7 +255,9 @@ function TopicTitle({ topic, current, selected, connection, titleConnection, dir
       if (liveMeta.uuid === "" || liveMeta.kind !== "decision" || liveTitleMeta.uuid !== topic.topic ||
         liveTitleMeta.kind !== "decision" || liveTopic === undefined ||
         liveTopic.archived || decisionCurrentRecord(liveTopic)?.uuid !== current.uuid) return;
-      setTitle(titleConnection.ydoc, value);
+      const titleArchived = getDirectoryEntry(directoryConnection.ydoc, topic.topic)?.recordArchived === true;
+      writeDocument(titleConnection.ydoc, titleArchived ? null : catalogConnection?.ydoc ?? null,
+        () => setTitle(titleConnection.ydoc, value));
     }}
   />;
 }
@@ -288,7 +292,7 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
     copyPath={explicit || (linkedRecord === selected && record.recordArchived === true)
       ? decisionRecordPath(segment, topic.topic, selected) : topicPath}
     header={<TopicTitle topic={topic} current={current} selected={selected} connection={connection} titleConnection={titleSource}
-      directoryConnection={directoryConnection} archived={editorProps.archived} />}
+      directoryConnection={directoryConnection} catalogConnection={editorProps.catalogConnection ?? null} archived={editorProps.archived} />}
     beforeAnswer={<>
       <AnswerHeader topic={topic} record={record} topicPath={topicPath} navigate={navigate} docLinks={docLinks}
         onAlterDecision={!topic.archived && !editorProps.archived && topic.inForce?.uuid === selected &&

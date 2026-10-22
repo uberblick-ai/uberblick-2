@@ -1347,6 +1347,11 @@ export class HubSync {
     this.providers.get(room)?.flushLog();
   }
 
+  /** Current hub admission, after the authoritative room has arrived. */
+  canWriteRoom(room: string): boolean {
+    return this.isRoomQuiet(room) && this.providers.get(room)?.authorizedScope === "read-write";
+  }
+
   /** A correlated, bounded read over the room's existing authenticated connection. */
   requestRevisions(
     room: string,

@@ -370,20 +370,12 @@ export interface TagCatalogEntry {
   id: string;
   /** Validated human-facing name. It is display data, never document identity. */
   name: string;
-  /** Retired entries remain visible on documents but cannot be newly assigned. */
-  state: "active" | "retired";
+  /** Optional one-line explanation of this workspace-specific purpose. */
+  description?: string;
 }
 
-/** A stored catalog UUID this replica cannot resolve from its current catalog. */
-export interface UnresolvedTagAssignment {
-  id: string;
-  /** No display name is available until the catalog entry hydrates. */
-  name: null;
-  state: "unresolved";
-}
-
-/** One stored tag assignment as the current catalog replica can read it. */
-export type TagAssignment = TagCatalogEntry | UnresolvedTagAssignment;
+/** Only existing catalog entries are exposed as document assignments. */
+export type TagAssignment = TagCatalogEntry;
 
 /** One group in the sidebar doc: a stable id, a name, and what it pins. */
 export interface SidebarGroup {

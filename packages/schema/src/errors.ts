@@ -321,6 +321,13 @@ export class InvalidTagNameError extends Error {
 
 export type InvalidTagIdentityReason = "not-a-uuid" | "unknown" | "in-use";
 
+export class InvalidTagDescriptionError extends Error {
+  constructor() {
+    super("A tag description is one line of at most 300 characters");
+    this.name = "InvalidTagDescriptionError";
+  }
+}
+
 export class InvalidTagIdentityError extends Error {
   readonly reason: InvalidTagIdentityReason;
   readonly identity: string;
@@ -342,18 +349,13 @@ export class InvalidTagIdentityError extends Error {
 /** A whole-request refusal from the catalog-aware document assignment boundary. */
 export class InvalidTagAssignmentError extends SchemaError {
   readonly unknown: string[];
-  readonly retired: string[];
 
-  constructor(unknown: string[], retired: string[]) {
-    const reason = [
-      ...(unknown.length === 0 ? [] : [`unknown: ${unknown.join(", ")}`]),
-      ...(retired.length === 0 ? [] : [`retired: ${retired.join(", ")}`]),
-    ].join("; ");
-    const details = { unknown: [...unknown], retired: [...retired] };
+  constructor(unknown: string[]) {
+    const reason = `unknown: ${unknown.join(", ")}`;
+    const details = { unknown: [...unknown] };
     super("invalid_tag_assignment", `Invalid tag assignment (${reason})`, details);
     this.name = "InvalidTagAssignmentError";
     this.unknown = details.unknown;
-    this.retired = details.retired;
   }
 }
 

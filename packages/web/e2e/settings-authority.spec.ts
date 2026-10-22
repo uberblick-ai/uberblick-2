@@ -27,8 +27,8 @@ test("a confirmed admin edits settings offline and keeps access after reloading"
     await expect(tag).toBeEnabled();
     await tag.fill("offline-admin");
     await page.getByRole("button", { name: "Create", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Retire offline-admin", exact: true })).toBeVisible();
-    await expect(page.getByRole("region", { name: "Active", exact: true }).getByRole("listitem")).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Delete offline-admin", exact: true })).toBeVisible();
+    await expect(page.locator("[data-tag-list]").getByRole("listitem")).toHaveCount(1);
   } finally {
     await harness().startHub();
   }

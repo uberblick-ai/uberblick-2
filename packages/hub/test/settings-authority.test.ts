@@ -9,7 +9,7 @@ import {
   getWorkspaceMainRepository,
   getWorkspaceName,
   listTagCatalog,
-  retireTagCatalogEntry,
+  deleteTagCatalogEntry,
   setWorkspaceMainRepository,
   setWorkspaceName,
   settingsRoom,
@@ -146,13 +146,13 @@ describe("current workspace-admin settings authority", () => {
       setWorkspaceName(raw.doc, "Member's name");
       setWorkspaceMainRepository(raw.doc, "attacker/elsewhere");
       createTagCatalogEntry(raw.doc, "member-made");
-      retireTagCatalogEntry(raw.doc, curated.id);
+      deleteTagCatalogEntry(raw.doc, curated.id);
     });
     await waitUntil("the member's settings update to be refused", () => raw.getRefusals() === 1);
     expect(getWorkspaceName(adminView.doc)).toBe("Admin's name");
     expect(getWorkspaceMainRepository(adminView.doc)).toBe("team/project");
-    expect(listTagCatalog(adminView.doc).map(({ name, state }) => ({ name, state })))
-      .toEqual([{ name: "curated", state: "active" }]);
+    expect(listTagCatalog(adminView.doc).map(({ name }) => ({ name })))
+      .toEqual([{ name: "curated" }]);
     const listed = await manage(hub, admin.issued, { operation: "list-hub-workspaces" });
     expect(JSON.stringify(listed.result)).toContain("Admin's name");
     expect(JSON.stringify(listed.result)).not.toContain("Member's name");
@@ -166,8 +166,8 @@ describe("current workspace-admin settings authority", () => {
       Y.applyUpdate(settings, row!.data as Uint8Array);
       expect(getWorkspaceName(settings)).toBe("Admin's name");
       expect(getWorkspaceMainRepository(settings)).toBe("team/project");
-      expect(listTagCatalog(settings).map(({ name, state }) => ({ name, state })))
-        .toEqual([{ name: "curated", state: "active" }]);
+      expect(listTagCatalog(settings).map(({ name }) => ({ name })))
+        .toEqual([{ name: "curated" }]);
     } finally {
       settings.destroy();
       stored.close();

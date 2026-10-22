@@ -116,14 +116,14 @@ async function maximalToken(): Promise<string> {
 }
 
 describe("the version exchange", () => {
-  it("refuses an offline writer speaking another protocol before syncing or acknowledging it", async () => {
+  it("refuses a protocol-6 offline writer before syncing or acknowledging it", async () => {
     // The hub compares the integer only, so any other version stands for every
     // released writer whose document model it no longer accepts.
     const room = testRoom();
     const oldDoc = new Y.Doc();
     oldDoc.getText("body").insert(0, "offline content from an older client");
     const old = createClient({ port: hub.port, room, token: await token(), doc: oldDoc,
-      protocolVersion: SYNC_PROTOCOL_VERSION - 1, reconnectDelayMs: 60_000 });
+      protocolVersion: 6, reconnectDelayMs: 60_000 });
     clients.push(old);
     try {
       await expect(old.denied).resolves.toBe(`protocol-mismatch:${SYNC_PROTOCOL_VERSION}`);
