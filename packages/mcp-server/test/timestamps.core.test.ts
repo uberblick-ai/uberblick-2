@@ -85,14 +85,15 @@ afterAll(() => {
 });
 
 describe("directory timestamps", () => {
-  it("stamps createdAt on create_doc and returns both from list_docs", async () => {
+  it("stamps createdAt on create_doc and lists only updatedAt", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", { title: "Stamped", description: "A test document." });
 
+    expect(stub(rig, doc.uuid)).toMatchObject({ createdAt: T0, updatedAt: T0 });
     const listed = await rig.ok("list_docs");
     const entry = listed.docs.find((row: any) => row.uuid === doc.uuid);
-    expect(entry.createdAt).toBe(T0);
     expect(entry.updatedAt).toBe(T0);
+    expect(entry).not.toHaveProperty("createdAt");
   });
 
   it("bumps updatedAt at most once per window under a burst of edits", async () => {
@@ -161,9 +162,7 @@ describe("directory timestamps", () => {
       vi.setSystemTime(time);
       const written = await rig.ok("set_metadata", { uuid: doc.uuid, code_check: { ...codeCheck, rev } });
       expect(written.code_check).toEqual([{ ...codeCheck, rev, checked_at: new Date(time).toISOString() }]);
-      expect(stub(rig, doc.uuid)).toMatchObject({ createdAt: T0, updatedAt: T0 });
-      const listed = (await rig.ok("list_docs")).docs.find((entry: any) => entry.uuid === doc.uuid);
-      expect(listed).toMatchObject({ code_check: written.code_check, updatedAt: T0 });
+      expect(stub(rig, doc.uuid)).toMatchObject({ createdAt: T0, updatedAt: T0, code_check: written.code_check });
     }
 
     vi.setSystemTime(T0 + 2 * WINDOW + 1_000);
@@ -193,9 +192,7 @@ describe("directory timestamps", () => {
 
     vi.setSystemTime(T0 + 1_000);
     const written = await rig.ok("set_metadata", { uuid: doc.uuid, [field]: changed, code_check: { ...CHECK, rev } });
-    expect(stub(rig, doc.uuid)).toMatchObject({ updatedAt: T0 + 1_000, createdAt: T0 });
-    const listed = (await rig.ok("list_docs")).docs.find((entry: any) => entry.uuid === doc.uuid);
-    expect(listed).toMatchObject({ code_check: written.code_check, updatedAt: T0 + 1_000 });
+    expect(stub(rig, doc.uuid)).toMatchObject({ updatedAt: T0 + 1_000, createdAt: T0, code_check: written.code_check });
   });
 
   it("stamps a code check immediately when the same transaction also edits content", async () => {

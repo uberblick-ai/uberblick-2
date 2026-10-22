@@ -114,6 +114,26 @@ const topicResolution = {
   archived: z.boolean(),
 };
 const decisionTopic = directoryEntry.extend(topicResolution).strict();
+const listEntry = z.object({
+  uuid,
+  title: z.string(),
+  tags,
+  description,
+  updatedAt: z.number().optional().describe("Approximate edit epoch milliseconds on the authoring replica's clock, where known."),
+  openThreadCount: count.optional().describe("Cached count of this document's threads whose resolved is not true. Absent when unknown."),
+  deleted: z.literal(true).optional().describe("Archived; only listed with include_deleted."),
+  pinned: z.boolean(),
+}).strict();
+const listDecision = listEntry.extend({
+  kind: z.literal("decision"),
+  status: status.optional(),
+  topic: z.string().optional().describe("First record's UUID identifying this decision topic."),
+  discussion: discussion.optional().describe("Cached RFC discussion document UUID; null when none, absent when the cache is unknown."),
+  answerPreview: z.string().nullable().optional().describe("First answer paragraph or list, at most 300 characters; null when neither exists, absent when unknown."),
+  inForce: z.string().nullable().optional().describe("Topic rows: UUID of the record in force, or null."),
+  pending: z.array(z.string()).optional().describe("Topic rows: UUIDs of pending records."),
+  conflicts: z.array(z.string()).optional().describe("Topic rows: UUIDs of conflicting decided records."),
+}).strict();
 
 const docLink = z.object({
   start: count,
@@ -305,10 +325,7 @@ export const outputSchemas = {
   }).strict(),
   list_docs: z.object({
     workspace: z.string(),
-    docs: z.array(z.union([
-      directoryEntry.extend({ pinned: z.boolean() }).strict(),
-      decisionTopic.extend({ pinned: z.boolean() }).strict(),
-    ])),
+    docs: z.array(z.union([listEntry, listDecision])),
     hub,
   }).strict(),
   search: z.object({

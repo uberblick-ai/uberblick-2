@@ -17,7 +17,7 @@ export const inputSchema = strictInput({
 });
 
 export const listDocsOperation = operation(READ, inputSchema, (context, { tag, kind, status, has_open_threads, include_deleted, include_superseded }, _request) => {
-  const { replicas, tagCatalog, topicJson } = context;
+  const { replicas, tagCatalog } = context;
 
   const hasPredicate = tag !== undefined || kind !== undefined || status !== undefined || has_open_threads === true;
   const catalog = tagCatalog();
@@ -45,23 +45,42 @@ export const listDocsOperation = operation(READ, inputSchema, (context, { tag, k
         (tagId === null || live.some(entry => readDirectoryTags(entry, catalog).some(assignment => assignment.id === tagId))) &&
         (has_open_threads !== true || live.some(entry => (entry.openThreadCount ?? 0) > 0));
     })
-      .map(topic => ({ ...topic.representative, title: decisionTopicTitle(topic), deleted: topic.archived, ...topicJson(topic) }));
+      .map(topic => ({
+        ...topic.representative,
+        topic: topic.topic,
+        title: decisionTopicTitle(topic),
+        deleted: topic.archived,
+        resolution: {
+          inForce: topic.inForce?.uuid ?? null,
+          pending: topic.pending.map(entry => entry.uuid),
+          conflicts: topic.conflicts.map(entry => entry.uuid),
+        },
+      }));
   // Derived, never stored: the sidebar doc is the one place a pin lives.
   const pinned = pinnedUuids(replicas);
   return {
     workspace: replicas.config.workspaceId,
     docs: [...documents, ...decisionRows]
       .sort(compareDirectoryEntries)
-      .map((entry) => {
-        const { recordArchived: _recordArchived, ...fields } = entry;
-        return {
-          ...fields,
-          tags: readDirectoryTags(entry, catalog),
-          // Keep absent descriptions explicit as null.
-          description: entry.description ?? null,
-          pinned: pinned.has(entry.uuid),
-        };
-      }),
+      .map((entry: DirectoryEntry & { resolution?: { inForce: string | null; pending: string[]; conflicts: string[] } }) => ({
+        uuid: entry.uuid,
+        title: entry.title,
+        tags: readDirectoryTags(entry, catalog),
+        // Keep absent descriptions explicit as null.
+        description: entry.description ?? null,
+        ...(entry.updatedAt === undefined ? {} : { updatedAt: entry.updatedAt }),
+        ...(entry.openThreadCount === undefined ? {} : { openThreadCount: entry.openThreadCount }),
+        ...(entry.deleted === true ? { deleted: true as const } : {}),
+        pinned: pinned.has(entry.uuid),
+        ...(entry.kind === "decision" ? {
+          kind: "decision" as const,
+          status: entry.status,
+          topic: entry.topic,
+          ...(entry.discussion === undefined ? {} : { discussion: entry.discussion }),
+          ...(entry.answerPreview === undefined ? {} : { answerPreview: entry.answerPreview }),
+          ...entry.resolution,
+        } : {}),
+      })),
     hub: replicas.sync.state(),
   };
 });

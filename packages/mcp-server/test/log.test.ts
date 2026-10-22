@@ -13,7 +13,7 @@
 
 import { afterAll, describe, expect, it } from "vitest";
 import { MirrorStore } from "../src/store.js";
-import { WORKSPACE, removeTempDirs, startServer, tempDatabasePath, testConfig } from "./helpers.js";
+import { WORKSPACE, directoryStub, removeTempDirs, startServer, tempDatabasePath, testConfig } from "./helpers.js";
 
 afterAll(() => {
   removeTempDirs();
@@ -85,12 +85,11 @@ describe("the update log", () => {
           ],
           description: "A test document.",
           pinned: false,
-          createdAt: expect.any(Number),
           updatedAt: expect.any(Number),
           openThreadCount: 0,
-          code_check: [],
         },
       ]);
+      expect(directoryStub(second.instance, uuid)).toMatchObject({ createdAt: expect.any(Number), code_check: [] });
 
       const read = await second.ok("get_doc", { uuid });
       expect(read.blocks.map((block: { text: string }) => block.text)).toEqual([

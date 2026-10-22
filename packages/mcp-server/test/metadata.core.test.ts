@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { docRev, EXAMPLE_TAGS, getDirectoryEntry, getDirectoryMap, getMetaMap, setCodeCheck, setLinks, setTldrOptOut, upsertDirectoryEntry } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
-import { removeTempDirs, startServer, testConfig } from "./core-helpers.js";
+import { directoryStub, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
@@ -146,9 +146,7 @@ describe("set_metadata", () => {
     const written = await rig.ok("set_metadata", { uuid: source.uuid, code_check: { ...CHECK, rev, paths } });
     expect(written.code_check[0].paths).toEqual(paths);
     expect((await rig.ok("get_doc", { uuid: source.uuid })).code_check).toEqual(written.code_check);
-    const listed = (await rig.ok("list_docs")).docs.find((entry: any) => entry.uuid === source.uuid);
-    expect(listed.code_check).toEqual(written.code_check);
-    expect(listed).not.toHaveProperty("rev");
+    expect(directoryStub(rig.instance, source.uuid)?.code_check).toEqual(written.code_check);
   });
 
   it("publishes check changes confined to paths or revision in the next directory listing", async () => {
@@ -163,7 +161,7 @@ describe("set_metadata", () => {
       uuid: source.uuid, code_check: { ...CHECK, rev: read.rev, paths },
     });
     expect(withPaths.code_check).toEqual([{ ...first.code_check[0], paths }]);
-    expect((await rig.ok("list_docs")).docs.find((entry: any) => entry.uuid === source.uuid)?.code_check)
+    expect(directoryStub(rig.instance, source.uuid)?.code_check)
       .toEqual(withPaths.code_check);
     await rig.ok("edit_block", {
       uuid: source.uuid, block_id: read.blocks[0].id, old_text: read.blocks[0].text,
@@ -175,7 +173,7 @@ describe("set_metadata", () => {
     });
     expect(withRev.code_check).toEqual([{ ...withPaths.code_check[0], rev: read.rev }]);
     expect(withRev.code_check[0].rev).not.toBe(withPaths.code_check[0].rev);
-    expect((await rig.ok("list_docs")).docs.find((entry: any) => entry.uuid === source.uuid)?.code_check)
+    expect(directoryStub(rig.instance, source.uuid)?.code_check)
       .toEqual(withRev.code_check);
   });
 
@@ -186,7 +184,7 @@ describe("set_metadata", () => {
     setCodeCheck(ydoc, CHECK);
     const legacy = getMetaMap(ydoc).get(`code-check:${CHECK.repository}`);
     expect((await rig.ok("get_doc", { uuid: source.uuid })).code_check).toEqual([legacy]);
-    expect((await rig.ok("list_docs")).docs.find((entry: any) => entry.uuid === source.uuid)?.code_check)
+    expect(directoryStub(rig.instance, source.uuid)?.code_check)
       .toEqual([legacy]);
     const { rev } = await rig.ok("get_doc", { uuid: source.uuid });
     const written = await rig.ok("set_metadata", {
@@ -197,11 +195,11 @@ describe("set_metadata", () => {
     const directory = rig.instance.replicas.directory().doc;
     const map = getDirectoryMap(directory);
     map.set(source.uuid, { ...map.get(source.uuid) as Record<string, unknown>, code_check: [oldEntry] });
-    expect((await rig.ok("list_docs")).docs.find((entry: any) => entry.uuid === source.uuid)?.code_check)
+    expect(directoryStub(rig.instance, source.uuid)?.code_check)
       .toEqual([oldEntry]);
     getMetaMap(ydoc).set(`code-check:${CHECK.repository}`, oldEntry);
     expect((await rig.ok("get_doc", { uuid: source.uuid })).code_check).toEqual([oldEntry]);
-    expect((await rig.ok("list_docs")).docs.find((entry: any) => entry.uuid === source.uuid)?.code_check)
+    expect(directoryStub(rig.instance, source.uuid)?.code_check)
       .toEqual([oldEntry]);
   });
 
@@ -240,7 +238,7 @@ describe("set_metadata", () => {
     expect(read.code_check).toEqual(replaced.code_check);
     expect(read.blocks).toEqual(source.blocks);
     expect(await rig.ok("export_markdown", { uuid: source.uuid })).toEqual(beforeExport);
-    expect((await rig.ok("list_docs")).docs.find((entry: any) => entry.uuid === source.uuid)?.code_check)
+    expect(directoryStub(rig.instance, source.uuid)?.code_check)
       .toEqual(replaced.code_check);
     expect((await rig.ok("search", { query: "aardvark" })).hits[0]).not.toHaveProperty("code_check");
   });
@@ -268,11 +266,11 @@ describe("set_metadata", () => {
     const exported = await rig.ok("export_markdown", { uuid: source.uuid });
     expect(exported.markdown).not.toContain("code_check");
     expect(exported.markdown).not.toContain(COMMIT);
-    expect((await rig.ok("list_docs")).docs.find((entry: any) => entry.uuid === source.uuid)?.code_check)
+    expect(directoryStub(rig.instance, source.uuid)?.code_check)
       .toEqual(written.code_check);
   });
 
-  it("lists cached checks and unknown caches without opening document rooms, and repairs a dropped cache on a write", async () => {
+  it("keeps checks out of listings, caches them on stubs without opening rooms, and repairs a dropped cache on a write", async () => {
     const rig = await localRig();
     const source = await document(rig);
     const uuid = randomUUID();
@@ -284,10 +282,12 @@ describe("set_metadata", () => {
     await rig.instance.replicas.settle();
     const opening = vi.spyOn(rig.instance.replicas, "replica");
     const listing = await rig.ok("list_docs");
-    expect(listing.docs.find((entry: any) => entry.uuid === uuid)).toHaveProperty("code_check", [cached]);
-    expect(listing.docs.find((entry: any) => entry.uuid === unknown)).not.toHaveProperty("code_check");
-    expect(listing.docs.find((entry: any) => entry.uuid === source.uuid)).toHaveProperty("code_check", []);
+    for (const entry of listing.docs) expect(entry).not.toHaveProperty("code_check");
+    expect(listing.docs.map((entry: any) => entry.uuid)).toEqual(expect.arrayContaining([uuid, unknown, source.uuid]));
     expect(opening).not.toHaveBeenCalled();
+    expect(directoryStub(rig.instance, uuid)).toHaveProperty("code_check", [cached]);
+    expect(directoryStub(rig.instance, unknown)).not.toHaveProperty("code_check");
+    expect(directoryStub(rig.instance, source.uuid)).toHaveProperty("code_check", []);
     opening.mockRestore();
     expect(rig.instance.replicas.hydrated(uuid)).toBe(false);
     expect(rig.instance.replicas.hydrated(unknown)).toBe(false);
@@ -300,7 +300,7 @@ describe("set_metadata", () => {
     map.set(source.uuid, oldClient);
     expect(getDirectoryEntry(directory, source.uuid)).not.toHaveProperty("code_check");
     await rig.ok("set_metadata", { uuid: source.uuid, description: "An authored change repairs the cache." });
-    expect((await rig.ok("list_docs")).docs.find((entry: any) => entry.uuid === source.uuid)?.code_check)
+    expect(directoryStub(rig.instance, source.uuid)?.code_check)
       .toEqual(written.code_check);
   });
 

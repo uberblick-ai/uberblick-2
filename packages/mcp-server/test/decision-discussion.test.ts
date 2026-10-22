@@ -12,7 +12,7 @@ import {
 import type { DirectoryEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { removeTempDirs, startServer, tempDatabasePath, testConfig } from "./helpers.js";
+import { directoryStub, removeTempDirs, startServer, tempDatabasePath, testConfig } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
 vi.mock("node:crypto", async (importOriginal) => {
@@ -73,6 +73,10 @@ function stub(rig: Rig, fields: Partial<DirectoryEntry> = {}, regular = false): 
 
 function references(entries: any[]) {
   return entries.map(entry => [entry.uuid, entry.discussion]).sort();
+}
+
+function stubReferences(rig: Rig, uuids: string[]) {
+  return references(uuids.map(uuid => directoryStub(rig.instance, uuid)));
 }
 
 describe("explicit decision discussion references", () => {
@@ -223,8 +227,8 @@ describe("explicit decision discussion references", () => {
     const next = await decision(rig, { supersedes: first.uuid, discussion: nextRfc.uuid });
     const noDiscussion = await decision(rig, { supersedes: first.uuid });
     const current = (await rig.ok("list_docs", { kind: "decision" })).docs[0];
-    expect(current.inForce).toMatchObject({ uuid: first.uuid, discussion: firstRfc.uuid });
-    expect(references(current.pending)).toEqual([[next.uuid, nextRfc.uuid], [noDiscussion.uuid, null]].sort());
+    expect(current).toMatchObject({ uuid: first.uuid, discussion: firstRfc.uuid, inForce: first.uuid });
+    expect(stubReferences(rig, current.pending)).toEqual([[next.uuid, nextRfc.uuid], [noDiscussion.uuid, null]].sort());
     const conflict = stub(rig, { topic: first.uuid, supersedes: first.uuid, status: "decided", discussion: firstRfc.uuid, createdAt: 1 });
     const absent = stub(rig, { topic: first.uuid, supersedes: first.uuid, status: "decided", discussion: null, createdAt: 2 });
     const unknown = stub(rig, { createdAt: 3 });
@@ -234,7 +238,7 @@ describe("explicit decision discussion references", () => {
     expect(topic).toHaveProperty("discussion");
     expect(topic.inForce).toBeNull();
     const expectedConflicts = [[conflict.uuid, firstRfc.uuid], [absent.uuid, null]].sort();
-    expect(references(topic.conflicts)).toEqual(expectedConflicts);
+    expect(stubReferences(rig, topic.conflicts)).toEqual(expectedConflicts);
     const records = (await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs;
     expect(references(records.filter((entry: any) => entry.topic === first.uuid))).toEqual([
       [first.uuid, firstRfc.uuid], [next.uuid, nextRfc.uuid], [noDiscussion.uuid, null], ...expectedConflicts,
@@ -242,14 +246,14 @@ describe("explicit decision discussion references", () => {
     expect(records.find((entry: any) => entry.uuid === unknown.uuid)).not.toHaveProperty("discussion");
     const readNext = await rig.ok("get_doc", { uuid: next.uuid });
     expect(readNext.predecessors).toMatchObject([{ uuid: first.uuid, discussion: firstRfc.uuid }]);
-    expect(references(readNext.resolution.pending)).toEqual(references(topic.pending));
+    expect(references(readNext.resolution.pending)).toEqual(stubReferences(rig, topic.pending));
     expect(references(readNext.resolution.conflicts)).toEqual(expectedConflicts);
     const readFirst = await rig.ok("get_doc", { uuid: first.uuid });
     expect(references(readFirst.successors)).toEqual([[next.uuid, nextRfc.uuid], [noDiscussion.uuid, null], ...expectedConflicts].sort());
     const pageTopic = (await rig.ok("get_doc", { uuid: owner.uuid })).decisions[0];
     expect(pageTopic).toMatchObject({ topic: first.uuid, relation: "related" });
     expect(pageTopic).toHaveProperty("discussion");
-    expect(references(pageTopic.pending)).toEqual(references(topic.pending));
+    expect(references(pageTopic.pending)).toEqual(stubReferences(rig, topic.pending));
     expect(references(pageTopic.conflicts)).toEqual(expectedConflicts);
     for (const entry of [conflict, absent, unknown]) expect(rig.instance.replicas.hydrated(entry.uuid)).toBe(false);
   });
@@ -303,7 +307,7 @@ describe("explicit decision discussion references", () => {
     await rig.ok("archive_doc", { uuid: rfc.uuid });
     expect(await rig.ok("get_doc", { uuid: rfc.uuid })).toMatchObject({ uuid: rfc.uuid, title: "Renamed RFC" });
     expect(await rig.ok("get_doc", { uuid: record.uuid })).toMatchObject({ discussion: rfc.uuid, links: [rfc.uuid], approvalChanged: false });
-    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ discussion: rfc.uuid, inForce: { discussion: rfc.uuid } }]);
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ uuid: record.uuid, discussion: rfc.uuid, inForce: record.uuid }]);
     expect((await rig.ok("list_tags")).tags).not.toContainEqual(rfcTag);
     await rig.close();
     rigs.splice(rigs.indexOf(rig), 1);

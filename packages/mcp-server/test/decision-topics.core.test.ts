@@ -66,12 +66,12 @@ describe("decision topics through directory stubs", () => {
     rawDeleted(rig, d, true);
     const rows = (await rig.ok("list_docs", { kind: "decision", tag: "sync" })).docs;
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ topic: a.uuid, inForce: null, pending: [{ uuid: f }] });
-    expect(rows[0].conflicts.map((record: any) => record.uuid).sort()).toEqual([c, d].sort());
+    expect(rows[0]).toMatchObject({ topic: a.uuid, inForce: null, pending: [f] });
+    expect([...rows[0].conflicts].sort()).toEqual([c, d].sort());
     expect(rows[0].superseded).toBeUndefined();
     const combined = (await rig.ok("list_docs", { kind: "decision", status: "open", tag: "sync" })).docs;
-    expect(combined).toMatchObject([{ topic: a.uuid, inForce: null, pending: [{ uuid: f }] }]);
-    expect(combined[0].conflicts.map((record: any) => record.uuid).sort()).toEqual([c, d].sort());
+    expect(combined).toMatchObject([{ topic: a.uuid, inForce: null, pending: [f] }]);
+    expect([...combined[0].conflicts].sort()).toEqual([c, d].sort());
     expect((await rig.ok("list_docs", { kind: "decision", status: "open", tag: "sync", include_superseded: true })).docs).toEqual([]);
     const read = await rig.ok("get_doc", { uuid: a.uuid });
     expect(read.successors.map((record: any) => [record.uuid, record.status]).sort()).toEqual([[b, "rejected"], [c, "decided"]].sort());
@@ -131,9 +131,10 @@ describe("decision topics through directory stubs", () => {
       { uuid: b.uuid, title: "Topic", status: "ok" },
     ]);
     expect((await rig.ok("search", { query: "constraints" })).hits.map((hit: any) => hit.uuid).sort()).toEqual([a.uuid, b.uuid].sort());
-    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ uuid: b.uuid, inForce: { uuid: b.uuid } }]);
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ uuid: b.uuid, inForce: b.uuid }]);
     expect(getDirectoryEntry(rig.instance.replicas.directory().doc, b.uuid)).not.toHaveProperty("tldr");
-    expect((await rig.ok("list_docs", { kind: "decision" })).docs[0].inForce.deleted).toBe(false);
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs[0]).not.toHaveProperty("deleted");
+    expect((await rig.ok("get_doc", { uuid: b.uuid })).resolution.inForce).toMatchObject({ uuid: b.uuid, deleted: false });
     rawDeleted(rig, a.uuid, true);
     rawDeleted(rig, b.uuid, false);
     expect((await rig.ok("get_sidebar")).groups[0].docs).toEqual([
@@ -154,7 +155,7 @@ describe("decision topics through directory stubs", () => {
     expect(archived.records.sort()).toEqual([a.uuid, b.uuid].sort());
     expect(archived.rooms.map((room: any) => room.purpose)).toEqual(["directory", "sidebar"]);
     for (const uuid of [a.uuid, b.uuid]) expect(getDirectoryEntry(rig.instance.replicas.directory().doc, uuid)?.deleted).toBe(true);
-    expect((await rig.ok("list_docs", { kind: "decision", include_deleted: true })).docs).toMatchObject([{ inForce: { uuid: b.uuid }, deleted: true }]);
+    expect((await rig.ok("list_docs", { kind: "decision", include_deleted: true })).docs).toMatchObject([{ inForce: b.uuid, deleted: true }]);
   });
 
   it("lists a rejected or withdrawn first proposal even with no live records", async () => {
