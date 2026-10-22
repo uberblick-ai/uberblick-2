@@ -12,9 +12,13 @@ queue:
 stop-labels: [needs-human]
 
 # Dependabot PRs need no maintainer start or head approval, and their bodies
-# (upstream release notes) never reach agents. Needs the ub-agents release that
-# adds trusted-pr-authors.
+# (upstream release notes) never reach agents. Needs ub-agents 0.3.5 or later.
 trusted-pr-authors: [dependabot]
+
+# The Cloudflare Pages preview comment is trusted feedback, so it neither
+# suspends a started PR nor labels it outside-input. This grants no starts,
+# head approvals or title and body trust.
+trusted-bots: [cloudflare-workers-and-pages]
 
 cleanup:
   command: [python3, scripts/cleanup-agent-worktree.py]
