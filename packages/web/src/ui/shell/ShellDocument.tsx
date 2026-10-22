@@ -36,12 +36,13 @@ export function ShellDocument({ shell }: { shell: AppShell }) {
   const { docLinks } = shell.navigation;
   const { onFocusThread, threads, threadsOpen, onToggleThreads } = shell.threads;
   const { syncOpen, setSyncOpen } = shell.sync;
+  const historyVisible = shell.history.active && !deleted;
   const lastUpdated = !deleted && documentPaneState({
     route, connection: doc, meta, topic, selectedUuid: selected, navigate,
   }, docStatus.hasAnswered) === "shown" ? selectedDirectoryEntry?.updatedAt : undefined;
   return (
     <Popover open={syncOpen} onOpenChange={setSyncOpen}>
-      <div className={shell.history.active ? "hidden" : "contents"} inert={shell.history.active}>
+      <div className={historyVisible ? "hidden" : "contents"} inert={historyVisible}>
       <RoutePane
         route={route}
         topic={topic}
@@ -75,11 +76,11 @@ export function ShellDocument({ shell }: { shell: AppShell }) {
         threadsOpen={threadsOpen}
         onToggleThreads={onToggleThreads}
         historyControl={<HistoryControls history={shell.history} />}
-        historyActive={shell.history.active}
+        historyActive={historyVisible}
       />
       </div>
-      {!deleted && shell.history.active && <RevisionPane history={shell.history} docLinks={docLinks} workspaceSettings={catalog?.ydoc ?? null} />}
-      {!deleted && !shell.history.active && (route.kind === "doc" || route.kind === "decision") && (
+      {historyVisible && <RevisionPane history={shell.history} docLinks={docLinks} workspaceSettings={catalog?.ydoc ?? null} />}
+      {!deleted && !historyVisible && (route.kind === "doc" || route.kind === "decision") && (
         <PopoverContent
           align="start"
           collisionPadding={8}
