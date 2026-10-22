@@ -47,6 +47,8 @@ try {
 		assert.equal(config.services.hub.ports, undefined);
 		assert.equal(config.services.hub.build, undefined);
 		assert.equal(config.services.caddy.build, undefined);
+		assert.equal(config.services.hub.platform, undefined);
+		assert.equal(config.services.caddy.platform, undefined);
 		assert.deepEqual(config.services.caddy.ports.map(({ host_ip, published, target }) => ({ host_ip, published, target })),
 			[{ host_ip: ip, published: port, target: port === "443" ? 443 : 80 }]);
 		assert.equal(config.services.caddy.volumes.some((volume) => volume.type === "bind"), bind);
@@ -61,6 +63,7 @@ try {
 			assert.equal(config.volumes[volume].name, `uberblick-remote_${volume}`);
 		}
 		writeFileSync(join(scratch, "docker-compose.yml"), readFileSync(join(root, "compose.release.yml"), "utf8")
+			.replaceAll("    image:", "    platform: linux/amd64\n    image:")
 			.replaceAll("__HUB_IMAGE__", "ghcr.io/uberblick-ai/hub:0.4.7")
 			.replaceAll("__WEB_IMAGE__", "ghcr.io/uberblick-ai/hub-web:0.4.7"));
 		const migration = compose(["config", "--format", "json"]);

@@ -1,7 +1,8 @@
 # Docker hub deployment
 
-Run a published hub release with Docker on Linux x86_64 or Docker Desktop on
-macOS. Apple Silicon Macs run the published `linux/amd64` images under emulation.
+Run a published hub release with Docker on Linux x86_64 or arm64, or Docker
+Desktop on macOS. Both `linux/amd64` and `linux/arm64` images are published;
+Docker selects the host's native platform, including on Apple Silicon Macs.
 The Docker-only route needs no repository checkout, build tools, `ub`, GitHub
 account or registry login on the host. One version supplies the hub image, the
 prebuilt web image and all host files. By default Caddy serves plain HTTP only on the host's loopback
@@ -20,9 +21,9 @@ the corpus Permissions (eb9a7801-05f3-417a-81d5-07c18795ac81).
 
 Check these before deploying:
 
-- **Linux x86_64 with Docker Engine 28.0.0 or newer, or Docker Desktop on macOS
+- **Linux x86_64 or arm64 with Docker Engine 28.0.0 or newer, or Docker Desktop on macOS
   with an Engine meeting that floor; Docker Compose 2.24.4 or newer.**
-  Only `linux/amd64` images are published; Apple Silicon uses emulation.
+  The published images support `linux/amd64` and `linux/arm64`.
   Compose 5 satisfies the floor too. `docker version --format '{{.Server.Version}}'`
   checks the Engine. Older engines can expose localhost-published ports to
   [other hosts on the same network segment](https://docs.docker.com/engine/network/port-publishing/).
@@ -80,6 +81,9 @@ Choose other settings from [the route guide below](#choose-how-clients-reach-the
 refuses an unset or empty version before pulling or starting containers. It
 has no host build. The same prebuilt web image serves every host, with its
 endpoint and workspace list supplied only by `/uberblick-config.json`.
+Compose sets no `platform`; Docker selects the host's platform. An operator can
+override it with Docker's `DOCKER_DEFAULT_PLATFORM` setting. Older releases
+remain amd64-only; choose a multi-platform release for native arm64 hosting.
 
 Validate and start the selected release:
 
@@ -173,6 +177,10 @@ The project remains `uberblick-remote`, and its
 `hub-data`, `caddy-data` and `caddy-config` volumes keep documents, private access
 records and Caddy's certificate state across replacement. Do not pass
 `--volumes` to `down`, rename the project or change these volume names.
+On an arm64 host upgrading from an amd64-only release, refresh the target
+Compose files as above to remove the old `platform: linux/amd64` pins. Clear
+any `DOCKER_DEFAULT_PLATFORM=linux/amd64` override to use native arm64. The same
+volumes retain documents, claim state and certificates across this change.
 
 Before a newer hub release writes to an existing database, it makes a complete,
 integrity-checked startup copy beside the database (`/data` in the container,
@@ -365,7 +373,7 @@ candidate_protocol=$(sed -n 's/^export const SYNC_PROTOCOL_VERSION = \([1-9][0-9
   "$candidate_root/source/packages/schema/src/protocol.ts")
 test -n "$candidate_protocol"
 candidate_build_args=(
-  --platform linux/amd64 --file "$candidate_root/source/Dockerfile.hub-release"
+  --file "$candidate_root/source/Dockerfile.hub-release"
   --build-arg HUB_RELEASE_VERSION=0.0.0
   --build-arg "HUB_RELEASE_COMMIT=$candidate_sha"
   --build-arg "HUB_SYNC_PROTOCOL_VERSION=$candidate_protocol"

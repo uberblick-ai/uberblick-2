@@ -130,7 +130,7 @@ Run these in a separate Bash session with the chosen version and SHA filled
 in. Pick a free unprivileged loopback port and replace `18080` if needed. The
 temporary Compose project is unique; do not reuse an existing deployment's
 project name or directory. Check REMOTE.md's Docker Engine/Compose floors
-first. Use this fresh empty Docker credential directory for **both** pulls;
+first. Use this fresh empty Docker credential directory for every platform pull;
 do not log in or copy a credential configuration.
 Preserve the current local daemon's Unix-socket endpoint before the anonymous
 pulls; Docker Desktop, OrbStack and Colima may select it through a named context.
@@ -201,61 +201,83 @@ trap release_cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' HUP TERM
 
-release_pull_failed=0
 for release_image in hub hub-web; do
   release_ref="ghcr.io/uberblick-ai/$release_image:$release_version"
   # Remove only these dry-run tag references, without --force; never prune.
   if docker image inspect "$release_ref" >/dev/null 2>&1; then
     if ! docker image rm "$release_ref"; then
       printf 'Blocked removing local dry-run tag: %s\n' "$release_ref" >&2
-      release_pull_failed=1
-      continue
+      exit 1
     fi
   fi
-  if ! docker --config "$release_root/docker-config" pull --platform linux/amd64 "$release_ref"; then
-    printf 'Anonymous pull failed: %s; check its GHCR Package settings visibility.\n' "$release_ref" >&2
-    release_pull_failed=1
-    continue
-  fi
-  docker image inspect "$release_ref" --format '{{json .RepoDigests}}'
 done
-test "$release_pull_failed" = 0
 
-docker create --platform linux/amd64 --name "$release_extract" \
-  "ghcr.io/uberblick-ai/hub:$release_version"
-docker cp "$release_extract:/release/." "$release_root/host"
-docker rm "$release_extract"
-cd "$release_root/host"
-cat release.json
-docker image inspect "ghcr.io/uberblick-ai/hub:$release_version" \
-  "ghcr.io/uberblick-ai/hub-web:$release_version" \
-  --format '{{json .Config.Labels}}'
-
-node --input-type=module - "$release_version" "$release_sha" <<'NODE'
+node --input-type=module - "$release_version" "$release_sha" "$release_root" "$release_extract" <<'NODE'
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-const [version, sha] = process.argv.slice(2);
-const metadata = JSON.parse(readFileSync('release.json', 'utf8'));
+import { join } from 'node:path';
+const [version, sha, root, extract] = process.argv.slice(2);
+const docker = args => execFileSync('docker', args, { encoding: 'utf8' });
+const anonymous = args => {
+  try { return docker(['--config', join(root, 'docker-config'), ...args]); }
+  catch (error) { throw new Error(`Anonymous registry check failed for ${args.at(-1)}; check its GHCR Package settings visibility.`, { cause: error }); }
+};
+const native = docker(['version', '--format', '{{.Server.Arch}}']).trim();
+assert.ok(['amd64', 'arm64'].includes(native), `Unsupported Docker host: ${native}`);
 const refs = {
   hub: `ghcr.io/uberblick-ai/hub:${version}`,
   web: `ghcr.io/uberblick-ai/hub-web:${version}`,
 };
-assert.equal(metadata.version, version);
-assert.equal(metadata.sourceCommit, sha);
-assert.deepEqual(metadata.images, refs);
+let release;
+const nativeImages = new Map();
 for (const ref of Object.values(refs)) {
-  const [image] = JSON.parse(execFileSync('docker', ['image', 'inspect', ref], { encoding: 'utf8' }));
-  assert.equal(image.Os, 'linux');
-  assert.equal(image.Architecture, 'amd64');
-  assert.ok(image.RepoDigests?.some(digest => digest.startsWith(`${ref.slice(0, ref.lastIndexOf(':'))}@sha256:`)));
-  assert.equal(image.Config.Labels['org.opencontainers.image.version'], version);
-  assert.equal(image.Config.Labels['org.opencontainers.image.revision'], sha);
-  assert.equal(image.Config.Labels['io.uberblick.sync-protocol-version'], String(metadata.syncProtocolVersion));
+  const index = JSON.parse(anonymous(['manifest', 'inspect', ref]));
+  const entries = index.manifests.filter(entry =>
+    !(entry.platform?.os === 'unknown' && entry.platform?.architecture === 'unknown' &&
+      entry.annotations?.['vnd.docker.reference.type'] === 'attestation-manifest'));
+  assert.deepEqual(entries.map(entry => `${entry.platform.os}/${entry.platform.architecture}`).sort(),
+    ['linux/amd64', 'linux/arm64'], `${ref} must publish exactly both runnable platforms`);
+  for (const architecture of ['amd64', 'arm64']) {
+    const entry = entries.find(entry => entry.platform.architecture === architecture);
+    assert.match(entry.digest, /^sha256:[0-9a-f]{64}$/);
+    const pinned = `${ref.slice(0, ref.lastIndexOf(':'))}@${entry.digest}`;
+    const platform = `linux/${architecture}`;
+    anonymous(['pull', '--platform', platform, pinned]);
+    const [image] = JSON.parse(docker(['image', 'inspect', pinned]));
+    assert.equal(image.Os, 'linux');
+    assert.equal(image.Architecture, architecture);
+    assert.ok(image.RepoDigests?.includes(pinned));
+    docker(['create', '--platform', platform, '--name', extract, '--entrypoint', '/bin/true', pinned]);
+    try {
+      const file = join(root, 'platform-release.json');
+      docker(['cp', `${extract}:/release/release.json`, file]);
+      const metadata = JSON.parse(readFileSync(file, 'utf8'));
+      assert.equal(metadata.version, version);
+      assert.equal(metadata.sourceCommit, sha);
+      assert.deepEqual(metadata.images, refs);
+      assert.ok(Number.isSafeInteger(metadata.syncProtocolVersion) && metadata.syncProtocolVersion > 0);
+      if (release) assert.deepEqual(metadata, release, 'Every platform has the same release identity');
+      release = metadata;
+      assert.equal(image.Config.Labels['org.opencontainers.image.version'], version);
+      assert.equal(image.Config.Labels['org.opencontainers.image.revision'], sha);
+      assert.equal(image.Config.Labels['io.uberblick.sync-protocol-version'], String(metadata.syncProtocolVersion));
+      if (architecture === native) nativeImages.set(ref, pinned);
+      console.log(`${ref} ${platform} ${entry.digest}: registry identity verified`);
+    } finally { docker(['rm', extract]); }
+  }
 }
-console.log('Both registry image identities match the approved release.');
+// Launch the native digests already checked, even if a registry tag changes.
+for (const [ref, pinned] of nativeImages) docker(['image', 'tag', pinned, ref]);
+docker(['create', '--platform', `linux/${native}`, '--name', extract, refs.hub]);
+try { docker(['cp', `${extract}:/release/.`, join(root, 'host')]); }
+finally { docker(['rm', extract]); }
+console.log('All four registry image identities match the approved release; extracted native host files.');
 NODE
 
+cd "$release_root/host"
+cat release.json
+unset DOCKER_DEFAULT_PLATFORM
 cp remote.env.example .env
 chmod 600 .env
 printf '\nLOOPBACK_PORT=%s\n' "$release_port" >> .env
@@ -291,9 +313,12 @@ printf 'Removed disposable Compose project %s and its directory.\n' "$release_pr
 Require `release.json.version == X.Y.Z`, `sourceCommit == approved SHA`, and
 its two image references equal the pulled versioned refs. Require both images'
 `org.opencontainers.image.version` and `.revision` labels to match those
-values and `io.uberblick.sync-protocol-version` to match `release.json`.
-Non-empty registry digests and successful anonymous pulls establish registry
-copies; mismatched identity fails the smoke check before startup. A denied
+values and `io.uberblick.sync-protocol-version` to match `release.json` on each
+platform. Require exactly `linux/amd64` and `linux/arm64` runnable entries in
+each published index; ignore `unknown/unknown` entries marked `attestation-manifest`.
+Extract metadata from each digest's own container without executing it, then
+launch the native platform. Matching registry digests and anonymous pulls
+establish registry copies; mismatched identity fails the smoke check before startup. A denied
 pull names the manual GHCR visibility step for the affected package. If tag
 removal refuses because an image is in use, do not force it or touch an existing
 container; report the check blocked.
