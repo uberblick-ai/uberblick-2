@@ -203,6 +203,46 @@ describe("management replies exposed to a browser", () => {
     }
   });
 
+  it.each(["private/provider", "<img src=x onerror=alert(1)>", 'stored"\\login\n\u001b\u007f\u009b', " "])(
+    "preserves a non-empty stored login %j in every member reply", githubUsername => {
+      const stored = { ...member, githubUsername };
+      const other = { ...member, principalId: DEVICE, githubAccountId: "5678" };
+      expect(sanitizeManagementReply({ operation: "list-members", workspaceId: WORKSPACE }, {
+        status: 200, body: { status: "ok", members: [other, stored] },
+      }, login)).toEqual({ status: 200, body: { status: "ok", members: [other, stored] } });
+      for (const status of ["ok", "already-member"]) {
+        expect(sanitizeManagementReply({ operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "1234" }, {
+          status: 200, body: { status, member: stored },
+        }, login)).toEqual({ status: 200, body: { status, member: stored } });
+      }
+    },
+  );
+
+  it.each([
+    null, [], { ...member, principalId: "invalid" }, { ...member, githubAccountId: "0" },
+    { ...member, githubAccountId: 1234 }, { ...member, role: "owner" },
+    { ...member, githubUsername: "" }, { ...member, githubUsername: null }, { ...member, githubUsername: 1234 },
+    { ...member, githubUsername: login.credential.key }, { ...member, githubUsername: `stored-${login.credential.key}-login` },
+  ])("refuses an invalid or credential-bearing row %j in every member reply", stored => {
+    const other = { ...member, principalId: DEVICE, githubAccountId: "5678" };
+    expect(() => sanitizeManagementReply({ operation: "list-members", workspaceId: WORKSPACE }, {
+      status: 200, body: { status: "ok", members: [other, stored] },
+    }, login)).toThrow(ManagementResponseError);
+    for (const status of ["ok", "already-member"]) {
+      expect(() => sanitizeManagementReply({ operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "1234" }, {
+        status: 200, body: { status, member: stored },
+      }, login)).toThrow(ManagementResponseError);
+    }
+  });
+
+  it.each(["private/provider", "<b>octocat</b>", "octocat\n"])(
+    "still refuses a malformed live account lookup login %j", githubUsername => {
+      expect(() => sanitizeManagementReply({ operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "octocat" }, {
+        status: 200, body: { status: "ok", githubAccountId: "1234", githubUsername },
+      }, login)).toThrow(ManagementResponseError);
+    },
+  );
+
   it.each([
     [404, "account-not-found"], [503, "lookup-unavailable"], [401, "sign-in-required"], [503, "not-configured"],
   ])("preserves %s %s and drops provider text", (status, state) => {
@@ -245,7 +285,6 @@ describe("management replies exposed to a browser", () => {
     [{ operation: "list-devices" }, { status: "ok", devices: [{ ...device, signedInAt: "private" }] }],
     [{ operation: "list-devices" }, { status: "ok", devices: [device, device] }],
     [{ operation: "list-devices" }, { status: "ok", devices: [{ ...device, deviceId: "private-token" }] }],
-    [{ operation: "list-members", workspaceId: WORKSPACE }, { status: "ok", members: [{ ...member, githubUsername: "private/provider" }] }],
     [{ operation: "list-members", workspaceId: WORKSPACE }, { status: "ok", members: [member, member] }],
     [{ operation: "own-role", workspaceId: WORKSPACE }, { status: "ok", role: "owner" }],
     [{ operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "5678" }, { status: "ok", member }],
