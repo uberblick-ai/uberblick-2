@@ -99,6 +99,13 @@ function syncTextSelection(view: EditorView): void {
   if (!view.editable || !view.hasFocus() || !(view.state.selection instanceof TextSelection) || dom?.rangeCount !== 1 ||
     dom.anchorNode === null || dom.focusNode === null ||
     !view.dom.contains(dom.anchorNode) || !view.dom.contains(dom.focusNode)) return;
+  // Node-view chrome can hold a native caret that ProseMirror deliberately ignores.
+  for (const node of [dom.anchorNode, dom.focusNode]) {
+    for (let element = node.nodeType === 1 ? node as HTMLElement : node.parentElement;
+      element !== null && element !== view.dom; element = element.parentElement) {
+      if (element.contentEditable === "false") return;
+    }
+  }
   // Native caret movement can precede selectionchange. Both deletion guards
   // must use the current caret, including Home's position before the widget.
   const $anchor = view.state.doc.resolve(view.posAtDOM(dom.anchorNode, dom.anchorOffset, 1));

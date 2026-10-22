@@ -203,6 +203,38 @@ it.each([
   } finally { editor.destroy(); ydoc.destroy(); }
 });
 
+it.each([
+  { eventType: "keydown", forward: true }, { eventType: "keydown", forward: false },
+  { eventType: "beforeinput", forward: true }, { eventType: "beforeinput", forward: false },
+])("leaves chart source unchanged with a native caret in noneditable chrome ($eventType, forward $forward)", async ({ eventType, forward }) => {
+  const ydoc = documentFixture();
+  appendBlock(ydoc, { type: "paragraph", text: "Before" });
+  appendBlock(ydoc, { type: "chart", text: "not a chart" });
+  const after = appendBlock(ydoc, { type: "paragraph", text: "After" });
+  const { editor, element } = mountEditor(ydoc);
+  try {
+    const message = await waitFor(() => {
+      const target = element.querySelector(".ub-chart-message");
+      expect(target?.textContent).toContain("Invalid chart configuration");
+      return target!;
+    });
+    editor.view.focus();
+    editor.commands.setTextSelection(blockPosition(editor, after) + 1 + "After".length);
+    const before = getBlocks(ydoc);
+    const selection = editor.state.selection;
+    const text = message.firstChild!;
+    document.getSelection()!.collapse(text, 1);
+    const event = eventType === "keydown"
+      ? new KeyboardEvent("keydown", { key: forward ? "Delete" : "Backspace", bubbles: true, cancelable: true })
+      : new InputEvent("beforeinput", { inputType: forward ? "deleteContentForward" : "deleteContentBackward", bubbles: true, cancelable: true });
+    editor.view.dom.dispatchEvent(event);
+
+    expect(getBlocks(ydoc)).toEqual(before);
+    expect(editor.state.selection.eq(selection)).toBe(true);
+    expect(document.getSelection()!.focusNode).toBe(text);
+  } finally { editor.destroy(); ydoc.destroy(); }
+});
+
 it("keeps expansion through position changes, resets a recreated toggle and isolates separate views", async () => {
   const ydoc = documentFixture();
   const preface = appendBlock(ydoc, { type: "paragraph", text: "Before" });
