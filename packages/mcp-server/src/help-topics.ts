@@ -409,7 +409,9 @@ A document can own named collections beside its prose. Each collection has one s
 
 \`get_doc\` reports collection names and record counts without schemas or values. \`get_data({uuid})\` returns an area summary, or \`data: null\` when no data exists. Add \`collection\` to read its stored schema, validity, diagnostics and a detached page of records. Use \`limit: 0\` for the schema only. Unknown collections are refused and direct the caller to the summary read.
 
-\`after\` is an exclusive id cursor. \`limit\` defaults to 100 and is at most 1,000; \`max_bytes\` defaults to 65,536 and is at most 1,048,576. An optional \`ids\` filter accepts at most 1,000 ids and reports missing ids. The byte budget measures canonical UTF-8 JSON of the page's id/value array, excluding schemas, diagnostics and response formatting. With a positive limit, the first remaining record is included even when it exceeds that budget. Follow \`next_after\` until \`complete\`; pages are not snapshots and traverse each record once only while the data stays unchanged. Invalid merged data stays visible with diagnostics; reads neither repair nor discard it.
+\`after\` is an exclusive id cursor. \`limit\` defaults to 100 and is at most 1,000; \`max_bytes\` defaults to 65,536 and is at most 1,048,576. An optional \`ids\` filter accepts at most 1,000 ids and reports missing ids. The byte budget measures canonical UTF-8 JSON of the page's id/value array, excluding schemas, diagnostics and response formatting. With a positive limit, the first remaining record is included even when it exceeds that budget. Follow \`next_after\` until \`complete\`; live pages are not snapshots and traverse each record once only while the data stays unchanged. Invalid merged data stays visible with diagnostics; reads neither repair nor discard it.
+
+For an earlier state, pass \`revision\`, a hub revision ID returned by \`list_revisions\`, to \`get_data\`. It uses the same summary and bounded collection paging from that revision, including for archived documents. Keep the same revision on every page; an open revision can still change between calls. An unavailable revision refuses rather than falling back to live data. \`get_revision\` returns the same area summary beside the revision's title and blocks. Hub revision IDs differ from \`get_doc\`'s page and block \`rev\` content hashes, and writing tools do not accept them.
 
 \`update_data\` takes one validated batch, naming each touched collection once. For each collection it sets \`schema\`, optionally \`replaceRecords\`, then applies \`deleteRecords\` and \`upsert\` whole id/value records. \`deleteCollection: true\` excludes other changes. Every retained record must satisfy the resulting schema before the batch commits in one local transaction. An identical refresh returns \`changed: false\` and emits no update. Keep producer records and human dispositions in separate collections, sharing ids by convention. The decided-answer lock is in \`decisions\` and the archive lock in \`archive_doc\`; briefing and durability are in \`tool-contracts\`.
 
@@ -481,6 +483,19 @@ Every registered tool declares its input and output schemas. Input objects accep
 ${FAILURE_INSTRUCTIONS}
 
 Failures are marked \`isError: true\` and omit structuredContent, so success-schema validation does not misinterpret a failure. A call started after shutdown begins is refused with \`server_shutting_down\`; begin a new MCP session before repeating that call. A persistence failure quarantines the replica until restart: ordinary workspace reads also refuse rather than returning state ahead of its durable log. A workspace removed from this computer refuses with \`workspace_removed\`; writes report \`applied: false\`. Fetching a new copy does not revive the old session: restart the MCP server to use it. The diagnostic tool sync_status still answers. Static help reads and get_help remain available because they do not open or settle replicas.
+
+\`list_revisions\`, \`get_revision\` and \`get_data\` with \`revision\` read history from the hub, never from the local replica. An unknown document UUID refuses with \`doc_not_found\` before any hub request; permanent deletion refuses with \`doc_deleted\`. History failures keep these specific codes and recoveries:
+
+| Code | Recovery |
+| --- | --- |
+| \`revisions_local_only\` | Use a team-hub workspace; local-only workspaces have no hub history. |
+| \`revisions_unreachable\` | Restore the hub connection, then retry the same read; sync_status reports the connection state. |
+| \`revisions_sign_in_required\` | Run ub auth login, restart the MCP server, then repeat the read. |
+| \`revisions_forbidden\` | Ask a workspace maintainer to grant read access before repeating the read. |
+| \`revisions_unsupported\` | Ask the hub operator to update to a version that serves automatic revisions. |
+| \`revision_not_found\` | List this document's revisions again and select an ID belonging to it. |
+
+An empty history is returned only when the hub confirms it has no revisions. Archived documents remain readable.
 
 Unknown help topics through get_help are manual refusals and name all valid topic ids. An unknown \`uberblick://help/{topic}\` resource raises JSON-RPC resource-not-found error -32002 naming its URI. Help is built in and version matched; no workspace document, tag or guidance content supplies it.
 

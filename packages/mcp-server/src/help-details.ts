@@ -113,7 +113,8 @@ export const toolHelpDetails = {
     "It is null without a paragraph or list, or absent when the cache is unknown. For decision answers, " +
     "see [Decision records](uberblick://help/decisions). " +
     "Recorded `answer: {who, when, where}` is attribution, not the answer content.\n\n" +
-    "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
+    "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read. " +
+    "These page and block hashes differ from the hub revision IDs returned by list_revisions; use get_revision to read an earlier state.\n\n" +
     "For a table, `text` is canonical GFM with cell formatting as inline markdown, literal punctuation and " +
     "pipes escaped, and every row padded to the widest row; `rev` includes that formatting. Card text is " +
     "canonical container content with inline Markdown prose parts and repeated `button: [Text](destination)` " +
@@ -134,6 +135,31 @@ export const toolHelpDetails = {
     "have block-level `doc_links` ranges.\n\n" +
     "Reading eligible guidance with get_doc counts toward this process’s briefing. This best-effort " +
     "bookkeeping never fails the read or writes usage to a room or update log.",
+  list_revisions:
+    "List a known document's automatic revisions from the hub, newest first, including an archived document. " +
+    "The whole list is returned without paging. An empty list means the hub confirmed there are no revisions; " +
+    "unavailable history is a failure, never an empty list.\n\n" +
+    "Each entry has `id`, `author`, `startedAt` and `endedAt`. The author is " +
+    "`{githubUsername, surface: {kind, name}}`, using the author's current GitHub username, or null when unknown. " +
+    "Times are epoch milliseconds: null `startedAt` means an unknown start for content from before history began, " +
+    "and null `endedAt` means the revision is still open.\n\n" +
+    "Pass an entry's `id` as `revision` to get_revision or get_data. It is a hub revision ID, distinct from " +
+    "get_doc's page and block `rev` content hashes. Writing tools do not accept revision IDs. " +
+    "A UUID unknown to this workspace refuses with doc_not_found before contacting the hub; a permanently " +
+    "deleted document refuses with doc_deleted. See tool-contracts for hub history failures and recovery.",
+  get_revision:
+    "Read a known document as it was at the hub revision ID from list_revisions, including an archived document. " +
+    "The result returns `uuid`, `revision`, `title`, visible `blocks` and `data`. Blocks use get_doc's shape " +
+    "and canonical table, card and Figma text, but carry no block `rev`. The result has no page `rev`, comment " +
+    "threads, tags, description, TL;DR, code checks or decision context.\n\n" +
+    "`data` is get_data's area summary, or null when absent: collection names, record counts, validity and " +
+    "invalid-record counts, canonical UTF-8 bytes, area validity and area error count. It has no schemas or " +
+    "record values; read those deliberately with get_data using the same `uuid` and `revision`.\n\n" +
+    "This read fetches the snapshot from the hub and never reads an earlier state from the local replica or " +
+    "changes the live document. Revision IDs are distinct from get_doc's page and block `rev` content hashes. " +
+    "An unknown revision, including one belonging to another document, refuses with revision_not_found. " +
+    "Unknown document UUIDs refuse with doc_not_found before contacting the hub, and permanently deleted " +
+    "documents refuse with doc_deleted. See tool-contracts for other hub history failures and recovery.",
   get_data:
     "Read structured data deliberately. Without `collection`, return `data: null` for none, or an area " +
     "summary of collection names, record counts, validity and invalid-record counts, canonical UTF-8 bytes, " +
@@ -149,8 +175,15 @@ export const toolHelpDetails = {
     "`next_after` is the last returned id when more remain, otherwise null; `complete` states whether the " +
     "filtered collection is exhausted. For schema-only reads with remaining records, keep the current cursor " +
     "and use a positive limit to advance. Optional `ids` (up to 1000) filters the same ordered paging and " +
-    "returns `missing_ids` for requested ids absent from the collection. Cursors are not snapshots: following " +
-    "them visits each record exactly once only while the data stays unchanged.\n\n" +
+    "returns `missing_ids` for requested ids absent from the collection. Live cursors are not snapshots: " +
+    "following them visits each record exactly once only while the data stays unchanged.\n\n" +
+    "Optional `revision` selects the hub revision ID returned by list_revisions, distinct from get_doc's " +
+    "page and block `rev` content hashes. It reads the revision's data from the hub with the same summary " +
+    "and bounded collection paging, including for archived documents. Pass the same revision on every page " +
+    "to keep reading that revision; an open revision can still change between calls. For example, `get_data({uuid, revision, collection: \"observations\", " +
+    "limit: 100})` pages that revision's observations. An unknown revision, including one from another " +
+    "document, refuses with revision_not_found; it never falls back to live data. See tool-contracts for " +
+    "hub history failures and recovery.\n\n" +
     "Merged invalidity is observed through the shared reader without dropping, repairing or writing values.",
   list_docs:
     "Documents in the workspace, from the synced directory document — never from locally observed creations. " +

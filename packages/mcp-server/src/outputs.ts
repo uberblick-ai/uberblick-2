@@ -145,15 +145,16 @@ const blockFields = {
 const linkRanges = {
   doc_links: z.array(docLink).optional().describe("Prose character ranges that reference documents; absent when there are none."),
 };
-function blockSchema(withLinks: boolean) {
-  const prose = { ...blockFields, ...(withLinks ? linkRanges : {}) };
+function blockSchema(withLinks: boolean, withRev = true) {
+  const fields = { id: blockFields.id, text: blockFields.text, ...(withRev ? { rev: blockFields.rev } : {}) };
+  const prose = { ...fields, ...(withLinks ? linkRanges : {}) };
   return z.union([
     z.object({ ...prose, type: z.enum(["paragraph", "quote"]) }).strict(),
     z.object({ ...prose, type: z.literal("heading"), level: z.number().int().min(1).max(6) }).strict(),
     z.object({ ...prose, type: z.literal("list-item"), list: z.enum(LIST_STYLES), indent: z.number().int().min(0).max(MAX_LIST_INDENT) }).strict(),
-    z.object({ ...blockFields, type: z.literal("code"), language: z.string() }).strict(),
-    z.object({ ...blockFields, type: z.enum(["table", "terminal", "chart", "card"]) }).strict(),
-    z.object({ ...blockFields, type: z.literal("figma"), figma: z.object({
+    z.object({ ...fields, type: z.literal("code"), language: z.string() }).strict(),
+    z.object({ ...fields, type: z.enum(["table", "terminal", "chart", "card"]) }).strict(),
+    z.object({ ...fields, type: z.literal("figma"), figma: z.object({
       kind: z.enum(["frame", "file", "prototype", "board", "slides", "community file"]),
       file: z.string(),
       fileName: z.string().optional(),
@@ -189,6 +190,7 @@ const dataSummary = z.object({
   valid: z.boolean(),
   errorCount: count,
 }).strict();
+const revisionId = z.string().describe("Hub revision ID from list_revisions, distinct from page and block rev hashes.");
 
 /**
  * The SDK requires a root object; strictInput must enforce and advertise the
@@ -196,6 +198,7 @@ const dataSummary = z.object({
  */
 const getData = strictInput({
   uuid,
+  revision: revisionId.optional().describe("Present when reading this hub revision's data instead of the live document."),
   data: dataSummary.nullable().optional(),
   collection: z.string().optional(),
   schema: z.unknown().optional().describe("Raw caller-stored schema, including missing or unsupported schemas; never normalized."),
@@ -260,6 +263,25 @@ const sidebar = {
 /** All registered tools use these exact objects for advertisement and checking. */
 export const outputSchemas = {
   get_help: getHelp,
+  list_revisions: z.object({
+    uuid,
+    revisions: z.array(z.object({
+      id: revisionId,
+      author: z.object({
+        githubUsername: z.string().describe("Author's current GitHub username."),
+        surface: z.object({ kind: z.string(), name: z.string() }).strict(),
+      }).strict().nullable().describe("Verified GitHub account and surface, or null when unknown."),
+      startedAt: z.number().nullable().describe("Start in epoch milliseconds; null only for content predating history."),
+      endedAt: z.number().nullable().describe("End in epoch milliseconds; null means this revision is still open."),
+    }).strict()).describe("Hub-confirmed revisions, newest first; empty only when the hub confirms no history."),
+  }).strict(),
+  get_revision: z.object({
+    uuid,
+    revision: revisionId,
+    title: z.string(),
+    blocks: z.array(blockSchema(true, false)).describe("Historical visible blocks in stored order, without edit-assertion rev hashes."),
+    data: dataSummary.nullable(),
+  }).strict(),
   list_tags: z.object({
     workspace: z.string(),
     complete: z.boolean(),

@@ -4,6 +4,7 @@ import {
 } from "@uberblick/schema";
 import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
+import { RevisionClientError, type RevisionClientFailure } from "./revision-client.js";
 import { ServerShuttingDownError } from "./server-work.js";
 import { WorkspaceRemovedError } from "./store.js";
 import type { Writes } from "./tools/operation.js";
@@ -229,6 +230,30 @@ const RECOVERIES: Record<string, Recovery> = {
     recoveryClass: "manual",
     guidance: "This UUID was permanently deleted and cannot be restored or reused. Choose another document from list_docs or search. Nothing was written.",
   },
+  revisions_local_only: {
+    recoveryClass: "manual",
+    guidance: "Automatic revisions require a team hub. Use a workspace connected to a team hub before reading revisions.",
+  },
+  revisions_unreachable: {
+    recoveryClass: "retry",
+    guidance: "Call again once the hub is reachable; sync_status reports the connection state.",
+  },
+  revisions_sign_in_required: {
+    recoveryClass: "manual",
+    guidance: "Run ub auth login to sign in, restart the MCP server, then read revisions again.",
+  },
+  revisions_forbidden: {
+    recoveryClass: "manual",
+    guidance: "Ask a workspace maintainer to grant read access before reading this document's revisions again.",
+  },
+  revisions_unsupported: {
+    recoveryClass: "manual",
+    guidance: "Ask the hub operator to update the hub to a version that serves automatic document revisions, then read revisions again.",
+  },
+  revision_not_found: {
+    recoveryClass: "reread",
+    guidance: "Call list_revisions for this document's uuid, then choose one of its revision IDs. A revision from another document cannot be read here.",
+  },
   doc_not_archived: {
     recoveryClass: "manual",
     guidance: "Call archive_doc for this UUID before deliberately calling delete_doc. Nothing was written.",
@@ -424,6 +449,16 @@ export const FAILURE_CODES: readonly string[] = [
   "internal_error",
 ];
 
+const REVISION_FAILURE_CODES: Record<RevisionClientFailure, string> = {
+  "local-only": "revisions_local_only",
+  unreachable: "revisions_unreachable",
+  "sign-in-required": "revisions_sign_in_required",
+  forbidden: "revisions_forbidden",
+  deleted: "doc_deleted",
+  "revision-not-found": "revision_not_found",
+  unsupported: "revisions_unsupported",
+};
+
 /**
  * Bundle shared failure prose once in tool-contracts; per-tool descriptions
  * point to that help topic.
@@ -490,6 +525,9 @@ export function toFailure(tool: FailedTool, error: unknown): ToolFailure {
   }
   if (error instanceof ServerShuttingDownError) {
     return stamped(tool, { error: "server_shutting_down", message: error.message });
+  }
+  if (error instanceof RevisionClientError) {
+    return stamped(tool, { error: REVISION_FAILURE_CODES[error.code], message: error.message });
   }
   if (error instanceof SchemaError || error instanceof DataError) {
     return stamped(tool, {

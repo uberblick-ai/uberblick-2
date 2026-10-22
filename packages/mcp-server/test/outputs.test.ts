@@ -5,6 +5,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import * as Y from "yjs";
+import * as revisionClient from "../src/revision-client.js";
 import { INTERNAL_ERROR_MESSAGE } from "../src/failures.js";
 import { guarded } from "../src/tool-adapter.js";
 import { ServerWork } from "../src/server-work.js";
@@ -85,6 +87,14 @@ describe("successful MCP output contracts", () => {
     });
     const uuid = created.uuid;
     const read = await success("get_doc", { uuid });
+    vi.spyOn(revisionClient, "listDocumentRevisions").mockResolvedValue([]);
+    vi.spyOn(revisionClient, "getDocumentRevision").mockImplementation(async () => {
+      const snapshot = new Y.Doc();
+      Y.applyUpdate(snapshot, Y.encodeStateAsUpdate(rig.instance.replicas.replica(uuid).doc));
+      return snapshot;
+    });
+    await success("list_revisions", { uuid });
+    await success("get_revision", { uuid, revision: "fixture-revision" });
     await success("list_docs");
     await success("search", { query: "Output contract" });
     await success("find_decisions", { github_ref: "uberblick-ai/uberblick-2#1429" });
