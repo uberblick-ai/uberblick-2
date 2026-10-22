@@ -18,7 +18,10 @@ import * as Y from "yjs";
 import { directoryRoom } from "@uberblick/schema";
 
 const acquireRoom = vi.hoisted(() => vi.fn());
-vi.mock("../src/collab/rooms.js", () => ({ acquireRoom }));
+vi.mock("../src/collab/rooms.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/collab/rooms.js")>(),
+  acquireRoom,
+}));
 
 const { App } = await import("../src/ui/App.js");
 const { ReboundNotice } = await import("../src/ui/shell/ShellNotices.js");

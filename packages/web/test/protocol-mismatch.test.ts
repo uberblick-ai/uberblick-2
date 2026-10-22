@@ -23,6 +23,7 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import { WebSocketStatus } from "@hocuspocus/provider";
 import { createHub } from "@uberblick/hub";
 import type { Hub, HubLogRecord } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
@@ -119,6 +120,8 @@ const TEST_TIMEOUT_MS = 60_000;
 it("stops the page's socket for good when the hub refuses its protocol version", async () => {
   const hub = await hubFromAnotherRelease();
   const first = await openTab(`${WORKSPACE}/${randomUUID()}`, hub.port);
+  const second = await openTab(`${WORKSPACE}/${randomUUID()}`, hub.port);
+  expect(second.latest().protocolMismatch).toBeNull();
 
   await waitFor(
     "the refusal to reach the open room",
@@ -130,7 +133,10 @@ it("stops the page's socket for good when the hub refuses its protocol version",
     hub: SYNC_PROTOCOL_VERSION + 1,
     client: SYNC_PROTOCOL_VERSION,
   });
-  expect(first.latest().connected).toBe(false);
+  for (const tab of [first, second]) {
+    expect(tab.latest()).toMatchObject({ connected: false, synced: false, writable: false });
+    expect(tab.latest().protocolMismatch).toEqual(first.latest().protocolMismatch);
+  }
 
   // Stopped, and not merely down: `shouldConnect` is the library's own record
   // of whether it intends to come back, and the socket's retry reads it. A
@@ -143,10 +149,18 @@ it("stops the page's socket for good when the hub refuses its protocol version",
   const socket = sharedSocket(first.connection);
   expect(socket.shouldConnect).toBe(false);
 
-  // Counted at the hub rather than waited out: exactly one attempt for the one
-  // room the page opened, so nothing retried behind it.
+  await waitFor("the halted socket to close", () => socket.webSocket === null);
+  // Count at the hub so opening a later room cannot hide another dial.
   const afterFirst = refusals.length;
-  expect(afterFirst).toBe(1);
+  expect(afterFirst).toBeGreaterThanOrEqual(1);
+
+  // Late events may still carry stale provider and socket state after halt.
+  socket.status = WebSocketStatus.Connected;
+  first.connection.provider.synced = true;
+  first.connection.provider.forwardStatus({ status: WebSocketStatus.Connected });
+  first.connection.provider.forwardClose({ event: { reason: "late close" } as CloseEvent });
+  expect(first.latest()).toMatchObject({ connected: false, synced: false, writable: false });
+  expect(socket.shouldConnect).toBe(false);
 
   // A room opened after the refusal reads the same terminal state, and sends
   // nothing: attaching is what would put its token on the wire, and its absence
@@ -157,6 +171,7 @@ it("stops the page's socket for good when the hub refuses its protocol version",
     client: SYNC_PROTOCOL_VERSION,
   });
   expect(later.connection.provider.isAttached).toBe(false);
+  expect(later.latest()).toMatchObject({ connected: false, synced: false, writable: false });
   expect(socket.shouldConnect).toBe(false);
   expect(refusals.length).toBe(afterFirst);
 }, TEST_TIMEOUT_MS);

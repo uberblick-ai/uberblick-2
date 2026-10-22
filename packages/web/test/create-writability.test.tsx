@@ -66,7 +66,8 @@ function update(record: Record, patch: Partial<RoomStatus>): void {
   for (const listener of record.listeners) listener(record.connection.status);
 }
 
-vi.mock("../src/collab/rooms.js", () => ({
+vi.mock("../src/collab/rooms.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/collab/rooms.js")>(),
   acquireRoom: vi.fn((name: string) => ({
     connection: room(name).connection,
     release: vi.fn(),

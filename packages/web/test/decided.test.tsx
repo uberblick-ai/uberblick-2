@@ -70,7 +70,8 @@ function room(name: string): RoomConnection {
   return connection;
 }
 
-vi.mock("../src/collab/rooms.js", () => ({
+vi.mock("../src/collab/rooms.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/collab/rooms.js")>(),
   acquireRoom: (name: string) => ({ connection: room(name), release: () => {} }),
 }));
 const { App } = await import("../src/ui/App.js");
