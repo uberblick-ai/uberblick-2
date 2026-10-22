@@ -135,6 +135,48 @@ describe("the detached revision view", () => {
     } finally { view.destroy(); before.destroy(); after.destroy(); }
   });
 
+  it("keeps removed trailing cells selectable when a stored table becomes ragged", () => {
+    const before = new Y.Doc();
+    appendBlock(before, { type: "table", text: "| First | Second |\n| --- | --- |\n| Keep | Removed trailing cell |" });
+    const after = clone(before);
+    const table = getBlocksFragment(after).get(0) as Y.XmlElement;
+    (table.get(1) as Y.XmlElement).delete(1, 1);
+    const oldState = Y.encodeStateAsUpdate(before);
+    const newState = Y.encodeStateAsUpdate(after);
+    const view = mount(before, after);
+    try {
+      expect(view.editor.state.doc.child(0).child(1).childCount).toBe(2);
+      const removed = view.element.querySelector('[data-revision-change="removed"]');
+      expect(removed?.textContent).toBe("Removed trailing cell");
+      if (removed === null) throw new Error("Removed trailing cell did not render");
+      const range = document.createRange();
+      range.selectNodeContents(removed);
+      document.getSelection()?.removeAllRanges();
+      document.getSelection()?.addRange(range);
+      expect(document.getSelection()?.toString()).toBe("Removed trailing cell");
+      expect(Y.encodeStateAsUpdate(before)).toEqual(oldState);
+      expect(Y.encodeStateAsUpdate(after)).toEqual(newState);
+      view.editor.state.doc.check();
+    } finally { view.destroy(); before.destroy(); after.destroy(); }
+  });
+
+  it("highlights an added trailing cell when a stored ragged row gains a cell", () => {
+    const before = new Y.Doc();
+    appendBlock(before, { type: "table", text: "| First | Second |\n| --- | --- |\n| Keep | Added trailing cell |" });
+    const after = clone(before);
+    const table = getBlocksFragment(before).get(0) as Y.XmlElement;
+    (table.get(1) as Y.XmlElement).delete(1, 1);
+    const oldState = Y.encodeStateAsUpdate(before);
+    const newState = Y.encodeStateAsUpdate(after);
+    const view = mount(before, after);
+    try {
+      expect(view.element.querySelector('[data-revision-change="added"]')?.textContent).toBe("Added trailing cell");
+      expect(Y.encodeStateAsUpdate(before)).toEqual(oldState);
+      expect(Y.encodeStateAsUpdate(after)).toEqual(newState);
+      view.editor.state.doc.check();
+    } finally { view.destroy(); before.destroy(); after.destroy(); }
+  });
+
   it("keeps removed content selectable when a block changes containers or table columns", () => {
     const before = new Y.Doc();
     appendBlock(before, { type: "paragraph", text: "Old prose" });

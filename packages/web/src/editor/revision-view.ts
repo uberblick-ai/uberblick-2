@@ -151,14 +151,20 @@ function tableChanges(before: PMNode, after: PMNode, change: RevisionBlockCompar
     if (!newRow) continue;
     if (!oldRow || !row.cells) { rows.push(newRow); continue; }
     const cells: PMNode[] = [];
-    newRow.forEach((cell, _pos, column) => {
+    for (let column = 0; column < Math.max(oldRow.childCount, newRow.childCount); column += 1) {
+      const cell = newRow.maybeChild(column);
       const oldCell = oldRow.maybeChild(column);
+      if (!cell) {
+        if (oldCell) cells.push(markTree(oldCell, "removed"));
+        continue;
+      }
+      if (!oldCell) { cells.push(markTree(cell, "added")); continue; }
       const comparison = row.cells?.find((entry) => entry.column === column);
-      const oldText = oldCell?.firstChild;
+      const oldText = oldCell.firstChild;
       const newText = cell.firstChild;
       cells.push(oldText && newText && comparison && comparison.spans.length > 0
         ? copyNode(cell, [inlineChanges(oldText, newText, comparison.spans)]) : cell);
-    });
+    }
     rows.push(copyNode(newRow, cells));
   }
   return copyNode(after, rows);
