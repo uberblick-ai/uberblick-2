@@ -94,6 +94,20 @@ function deletesFoldedNeighbor(state: EditorState, forward: boolean): boolean {
   return containing(fold, neighbor).length > 0;
 }
 
+function syncTextSelection(view: EditorView): void {
+  const dom = view.dom.ownerDocument.getSelection();
+  if (!view.editable || !view.hasFocus() || !(view.state.selection instanceof TextSelection) || dom?.rangeCount !== 1 ||
+    dom.anchorNode === null || dom.focusNode === null ||
+    !view.dom.contains(dom.anchorNode) || !view.dom.contains(dom.focusNode)) return;
+  // Native caret movement can precede selectionchange. Both deletion guards
+  // must use the current caret, including Home's position before the widget.
+  const $anchor = view.state.doc.resolve(view.posAtDOM(dom.anchorNode, dom.anchorOffset, 1));
+  const $head = view.state.doc.resolve(view.posAtDOM(dom.focusNode, dom.focusOffset, 1));
+  if (!$anchor.parent.inlineContent || !$head.parent.inlineContent) return;
+  const selection = TextSelection.between($anchor, $head);
+  if (!selection.eq(view.state.selection)) view.dispatch(view.state.tr.setSelection(selection));
+}
+
 function deleteLeadingMarker(view: EditorView): boolean {
   const { selection } = view.state;
   const { $head } = selection;
@@ -148,20 +162,22 @@ export const ToggleHeadings = Extension.create({
       },
       props: {
         handleKeyDown: (view, event) => {
+          if (event.key !== "Delete" && event.key !== "Backspace" || event.isComposing) return false;
+          syncTextSelection(view);
           if (event.key === "Delete" && !event.altKey && !event.ctrlKey && !event.metaKey &&
-            !event.shiftKey && !event.isComposing && deleteLeadingMarker(view)) return true;
-          return (event.key === "Backspace" || event.key === "Delete") &&
-            deletesFoldedNeighbor(view.state, event.key === "Delete");
+            !event.shiftKey && deleteLeadingMarker(view)) return true;
+          return deletesFoldedNeighbor(view.state, event.key === "Delete");
         },
         handleDOMEvents: {
           beforeinput: (view, event) => {
             const input = event as InputEvent;
-            if (input.inputType === "deleteContentForward" && !input.isComposing && deleteLeadingMarker(view)) {
+            if (input.inputType !== "deleteContentBackward" && input.inputType !== "deleteContentForward" || input.isComposing) return false;
+            syncTextSelection(view);
+            if (input.inputType === "deleteContentForward" && deleteLeadingMarker(view)) {
               event.preventDefault();
               return true;
             }
-            if ((input.inputType === "deleteContentBackward" || input.inputType === "deleteContentForward") &&
-              deletesFoldedNeighbor(view.state, input.inputType === "deleteContentForward")) {
+            if (deletesFoldedNeighbor(view.state, input.inputType === "deleteContentForward")) {
               event.preventDefault();
               return true;
             }
