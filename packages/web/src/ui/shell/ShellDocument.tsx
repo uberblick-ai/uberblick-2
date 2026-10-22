@@ -42,7 +42,6 @@ export function ShellDocument({ shell }: { shell: AppShell }) {
   }, docStatus.hasAnswered) === "shown" ? selectedDirectoryEntry?.updatedAt : undefined;
   return (
     <Popover open={syncOpen} onOpenChange={setSyncOpen}>
-      <div className={historyVisible ? "hidden" : "contents"} inert={historyVisible}>
       <RoutePane
         route={route}
         topic={topic}
@@ -78,7 +77,6 @@ export function ShellDocument({ shell }: { shell: AppShell }) {
         historyControl={<HistoryControls history={shell.history} />}
         historyActive={historyVisible}
       />
-      </div>
       {historyVisible && <RevisionPane history={shell.history} docLinks={docLinks} workspaceSettings={catalog?.ydoc ?? null} />}
       {!deleted && !historyVisible && (route.kind === "doc" || route.kind === "decision") && (
         <PopoverContent

@@ -982,7 +982,8 @@ export function EditorPane({
   // The shared page pane anchors the column beside the sibling rail;
   // document controls use `ub-document-pane` to find their scroll container.
   return (
-    <section className="ub-pane ub-page-pane ub-document-pane" ref={pane}>
+    <section className="ub-pane ub-page-pane ub-document-pane" ref={pane}
+      inert={historyActive} style={historyActive ? { display: "none" } : undefined}>
       {threads.length > 0 && onToggleThreads !== undefined && (
         <button
           type="button"
