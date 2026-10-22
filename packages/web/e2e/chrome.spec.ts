@@ -2598,9 +2598,11 @@ async function contrastDocument(
     const catalog = (await peer(settingsRoom(harness().workspaceUuid))).doc;
     seedTagCatalog(catalog);
     for (let index = 0; index < 6; index += 1) createTagCatalogEntry(catalog, `contrast-${index}`);
-    const retired = createTagCatalogEntry(catalog, `retired-${scheme}-${randomUUID().slice(0, 8)}`);
-    assignDocumentTags(doc, catalog, [retired.id]);
-    deleteTagCatalogEntry(catalog, retired.id);
+    const existing = createTagCatalogEntry(catalog, "contrast-0");
+    const deleted = createTagCatalogEntry(catalog, `deleted-${scheme}-${randomUUID().slice(0, 8)}`);
+    assignDocumentTags(doc, catalog, [existing.id, deleted.id]);
+    deleteTagCatalogEntry(catalog, deleted.id);
+    await expect(page.locator(".ub-tag-name")).toHaveText("contrast-0");
     for (let index = 0; index < 4; index += 1) {
       const { provider } = await peer(`${harness().workspaceUuid}/${uuid}`);
       provider.setAwarenessField("user", { name: `Contrast peer ${index}`, color: "#0675c9" });
@@ -3125,7 +3127,7 @@ for (const scheme of ["light"] as const) {
       await expect(page.getByPlaceholder("Search tags")).toBeVisible();
       await check(picker);
       // Include every option's neutral check box over the highlighted ground,
-      // and the retired small text, rather than only reading a panel at rest.
+      // rather than only reading a panel at rest.
       for (const option of await page.locator(`${picker} [role=option]`).all()) {
         await option.hover();
         await check(picker);
