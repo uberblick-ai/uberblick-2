@@ -23,6 +23,7 @@ import {
   hydrationRecovery,
   toFailure,
 } from "../src/failures.js";
+import { RevisionClientError } from "../src/revision-client.js";
 import { ServerShuttingDownError } from "../src/server-work.js";
 import { MirrorStore, WorkspaceRemovedError } from "../src/store.js";
 import type { SearchHit } from "../src/store.js";
@@ -39,6 +40,15 @@ import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
 const stores: MirrorStore[] = [];
+const REVISION_FAILURES = [
+  ["local-only", "revisions_local_only", "manual", "team hub"],
+  ["unreachable", "revisions_unreachable", "retry", "once the hub is reachable"],
+  ["sign-in-required", "revisions_sign_in_required", "manual", "ub auth login"],
+  ["forbidden", "revisions_forbidden", "manual", "grant read access"],
+  ["deleted", "doc_deleted", "manual", "permanently deleted"],
+  ["revision-not-found", "revision_not_found", "reread", "list_revisions"],
+  ["unsupported", "revisions_unsupported", "manual", "update the hub"],
+] as const;
 
 async function localRig(): Promise<Rig> {
   const rig = await startServer(testConfig());
@@ -154,6 +164,12 @@ const EXPECTED: Record<
   },
   doc_archived: { recoveryClass: "manual", detail: ["uuid", "archived"] },
   doc_deleted: { recoveryClass: "manual", detail: ["uuid"] },
+  revisions_local_only: { recoveryClass: "manual", detail: [] },
+  revisions_unreachable: { recoveryClass: "retry", detail: [] },
+  revisions_sign_in_required: { recoveryClass: "manual", detail: [] },
+  revisions_forbidden: { recoveryClass: "manual", detail: [] },
+  revisions_unsupported: { recoveryClass: "manual", detail: [] },
+  revision_not_found: { recoveryClass: "reread", detail: [] },
   doc_not_archived: { recoveryClass: "manual", detail: ["uuid"] },
   decision_delete_unsupported: { recoveryClass: "manual", detail: ["uuid"] },
   guidance_required: { recoveryClass: "reread", detail: ["unread"] },
@@ -595,6 +611,12 @@ describe("the failure contract", () => {
     // mapper for shared-model lifecycle errors from an internal caller.
     record(toFailure(toolNamed("set_status"), new InvalidDocumentLifecycleError("decision", "planned")).payload);
 
+    for (const [clientCode] of REVISION_FAILURES) {
+      if (clientCode !== "deleted") {
+        record(toFailure(toolNamed("get_data"), new RevisionClientError(clientCode)).payload);
+      }
+    }
+
     // Every code the code itself knows about was triggered above.
     expect([...failures.keys()].sort()).toEqual([...FAILURE_CODES].sort());
 
@@ -635,6 +657,19 @@ describe("the failure contract", () => {
     const crash = failures.get("internal_error");
     expect(crash.message).toBe(INTERNAL_ERROR_MESSAGE);
     expect(crash.message).not.toContain("exploded");
+  });
+
+  it.each(REVISION_FAILURES)("maps revision client %s to %s with actionable read recovery", (clientCode, code, recoveryClass, recovery) => {
+    const error = new RevisionClientError(clientCode);
+    expect(toFailure(toolNamed("get_data"), error)).toEqual({
+      isError: true,
+      payload: {
+        error: code,
+        message: error.message,
+        recoveryClass,
+        recovery: expect.stringContaining(recovery),
+      },
+    });
   });
 
   it("says a failed write changed nothing, and invents nothing for a read", async () => {

@@ -128,17 +128,19 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     }
   };
 
-  /**
-   * Refuse unknown UUIDs before joining a room: a typo would create an empty
-   * document on the hub. Known but unhydrated rooms get a separate refusal.
-   */
-  const requireDoc = (uuid: string): Replica => {
+  /** Refuse unknown UUIDs before a room join can create an empty hub document. */
+  const requireKnownDoc = (uuid: string): DirectoryEntry | null => {
     requireNotDeleted(uuid);
     const stub = getDirectoryEntry(replicas.directory().doc, uuid);
     if (!replicas.known(uuid) && stub === null && !replicas.hasLog(uuid)) {
       throw notKnownLocally(uuid, "document");
     }
+    return stub;
+  };
 
+  /** Live reads also need hydrated content; hub revision reads do not. */
+  const requireDoc = (uuid: string): Replica => {
+    const stub = requireKnownDoc(uuid);
     const replica = replicas.replica(uuid);
     if (getMeta(replica.doc, replica.id).uuid !== "") {
       // Touch only tools that access the document room; directory/index reads
@@ -351,7 +353,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   /**
    * doc_links exposes prose ranges; table links stay in GFM text and its rev.
    */
-  const blocksJson = (replica: Replica): Record<string, unknown>[] =>
+  const blocksJson = (replica: Pick<Replica, "doc">): Record<string, unknown>[] =>
     getBlocksWithInline(replica.doc).map(({ block, inline }) => {
       const links = docLinkRanges(block, inline);
       return { ...block, ...(links.length === 0 ? {} : { doc_links: links }) };
@@ -457,6 +459,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     briefing,
     work,
     requireStub,
+    requireKnownDoc,
     requireNotDeleted,
     durability,
     tagCatalog,

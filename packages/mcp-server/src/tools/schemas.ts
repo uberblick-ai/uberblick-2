@@ -21,6 +21,9 @@ export const uuidArg = z.uuid().transform((value, ctx) => {
   return uuid;
 }).describe("Document UUID.");
 
+export const revisionArg = z.string().min(1).max(256)
+  .describe("Hub revision ID from list_revisions for this document; distinct from get_doc's page and block rev hashes.");
+
 /**
  * Trim before measuring and storing; whitespace must not satisfy the minimum
  * or silence the missing-description nudge.

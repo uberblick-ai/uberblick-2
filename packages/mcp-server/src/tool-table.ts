@@ -29,10 +29,12 @@ import { inputSchema as findDecisionsInput, findDecisionsOperation } from "./too
 import { inputSchema as getDataInput, getDataOperation } from "./tools/get-data.js";
 import { inputSchema as getDocInput, getDocOperation } from "./tools/get-doc.js";
 import { inputSchema as getHelpInput, getHelpOperation } from "./tools/get-help.js";
+import { inputSchema as getRevisionInput, getRevisionOperation } from "./tools/get-revision.js";
 import { inputSchema as insertBlockInput, insertBlockOperation } from "./tools/insert-block.js";
 import { inputSchema as linkRangeInput, linkRangeOperation } from "./tools/link-range.js";
 import { inputSchema as listDocsInput, listDocsOperation } from "./tools/list-docs.js";
 import { inputSchema as listTagsInput, listTagsOperation } from "./tools/list-tags.js";
+import { inputSchema as listRevisionsInput, listRevisionsOperation } from "./tools/list-revisions.js";
 import { inputSchema as moveBlockInput, moveBlockOperation } from "./tools/move-block.js";
 import type { Operation, ToolOperation, Writes } from "./tools/operation.js";
 import { inputSchema as restoreDocInput, restoreDocOperation } from "./tools/restore-doc.js";
@@ -95,8 +97,7 @@ function tool<Input extends z.ZodObject, W extends Writes>(spec: ToolSpec<Input,
     // with that input before the operation runs.
     operation: spec.operation as unknown as Operation<Record<string, unknown>>,
     writes: spec.operation.writes,
-    // Every tool reads or writes this replica; find_decisions looks up local
-    // references only, so its openWorldHint also stays false.
+    // Tools stay within this workspace's replica and hub, including revision reads.
     annotations: {
       readOnlyHint: spec.operation.writes === null,
       destructiveHint: spec.hints?.destructive ?? false,
@@ -165,19 +166,9 @@ export const tools: readonly Tool[] = [
     name: "get_doc",
     title: "Read a document",
     description:
-      "Read metadata, blocks/rev and threads; page rev equals the web status row's revision. Regular pages return related then linked decision topics; " +
-      "code_check is [] or latest repository/commit/checked_at/result plus recorded rev/paths when known; paths are hints, not complete dependencies. Results: matches (agrees), ahead " +
-      "(intentionally undelivered), drift (unintended disagreement). Content edits preserve checks; decisions " +
-      "omit them. Decision discussion: RFC UUID/null, apart from curated links and recorded answer. Decisions " +
-      "have no TL;DR (tldr: null); entries cache discussion and answerPreview (first paragraph/list, max 300 " +
-      "chars), absent if unknown. Unset description/TL;DR: null; data lists collections/counts for get_data. " +
-      "Tables: canonical GFM. Cards: canonical content with ordered button lines after footer; see get_help for link/style/color syntax. " +
-      "Figma: :::figma content, no delimiters, normalized url, optional plain title/height, blank line, marked " +
-      "caption; read-only kind (frame/file/prototype/board/slides/community file), file, optional decoded " +
-      "fileName (dashes as spaces), node (12:345). Tables/cards/Figma rev includes formatting and button " +
-      "values/order; other rev ignores marks. Prose doc_links has ranges; containers have none. Card thread " +
-      "ranges name part; Figma uses caption offsets. No Figma request; eligible guidance counts toward this " +
-      "process's briefing.",
+      "Read live metadata, blocks with edit-assertion rev hashes, comment threads and decision context. " +
+      "Data lists collections/counts; use get_data for records. Use get_revision for a historical state. " +
+      "Eligible guidance reads count toward this process's briefing.",
     input: getDocInput,
     operation: getDocOperation,
     example: { uuid },
@@ -185,17 +176,36 @@ export const tools: readonly Tool[] = [
     details: toolHelpDetails.get_doc,
   }),
   tool({
+    name: "list_revisions",
+    title: "List document revisions",
+    description:
+      "List hub revisions newest first, including archived documents. IDs differ from get_doc rev hashes; " +
+      "use them with get_revision or get_data. Empty means hub-confirmed no history.",
+    input: listRevisionsInput,
+    operation: listRevisionsOperation,
+    example: { uuid },
+    related: documentContracts,
+    details: toolHelpDetails.list_revisions,
+  }),
+  tool({
+    name: "get_revision",
+    title: "Read a document revision",
+    description:
+      "Read a hub revision from list_revisions: title, visible blocks without rev, and data summary. " +
+      "Archived documents work. Page records with get_data and the same revision.",
+    input: getRevisionInput,
+    operation: getRevisionOperation,
+    example: { uuid, revision: "revision-id-from-list_revisions" },
+    related: [...documentContracts, "data"],
+    details: toolHelpDetails.get_revision,
+  }),
+  tool({
     name: "get_data",
     title: "Read document data",
     description:
-      "Read a document's structured data without changing it, including merged invalidity and diagnostics. Omit " +
-      "collection for an area summary with no schemas or values, or data: null when absent. Name a collection " +
-      "for its raw schema and a detached page in Unicode code-point id order; an unknown collection refuses. " +
-      "after is an exclusive cursor; ids optionally filters it and reports missing_ids. limit: 0 reads only the " +
-      "schema. max_bytes bounds canonical JSON of the page's id/value array, excluding schemas, diagnostics and " +
-      "formatting; a positive-limit page includes its first remaining record even over budget. It does not " +
-      "bound the whole response or token count. Follow next_after until complete; schema-only reads do not " +
-      "advance, and pages are not snapshots.",
+      "Read a data summary, or name collection for bounded records and diagnostics. limit: 0 reads schema; " +
+      "follow next_after until complete. Optional revision uses a hub ID from list_revisions, including " +
+      "archived documents; omission reads live data. Live data and open revisions can change between calls.",
     input: getDataInput,
     operation: getDataOperation,
     example: { uuid, collection: "tasks", limit: 20 },

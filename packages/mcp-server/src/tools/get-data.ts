@@ -2,13 +2,15 @@ import { canonicalJson, compareCodePoints, readDocData } from "@uberblick/schema
 import { z } from "zod";
 import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
-import { uuidArg } from "./schemas.js";
+import { getDocumentRevision } from "../revision-client.js";
+import { revisionArg, uuidArg } from "./schemas.js";
 import { READ, operation } from "./operation.js";
 
 const encoder = new TextEncoder();
 
 export const inputSchema = strictInput({
   uuid: uuidArg,
+  revision: revisionArg.optional(),
   collection: z.string().optional().describe("Collection name; omit for the area summary."),
   after: z.string().optional().describe("Exclusive record-id cursor."),
   limit: z.number().int().min(0).max(1000).optional(),
@@ -19,22 +21,43 @@ export const inputSchema = strictInput({
   { title: "Collection page", when: { field: "collection", present: true } },
 ]);
 
-export const getDataOperation = operation(READ, inputSchema, (context, { uuid, collection, after, limit = 100, max_bytes = 64 * 1024, ids }, _request) => {
-  const { requireDoc } = context;
+export function dataSummary(data: ReturnType<typeof readDocData>) {
+  return data === null ? null : {
+    collections: data.collections.map((entry) => ({
+      name: entry.name, recordCount: entry.records.length,
+      valid: entry.valid, invalidRecordCount: entry.invalidRecordIds.length,
+    })),
+    bytes: data.bytes, valid: data.valid, errorCount: data.errors.length,
+  };
+}
 
-  const data = readDocData(requireDoc(uuid).doc);
+export const getDataOperation = operation(READ, inputSchema, async (context, args) => {
+  const { uuid, revision } = args;
+  if (revision !== undefined) context.requireKnownDoc(uuid);
+  const doc = revision === undefined ? context.requireDoc(uuid).doc
+    : await getDocumentRevision(context.replicas, uuid, revision);
+  try {
+    return { ...readData(doc, args), ...(revision === undefined ? {} : { revision }) };
+  } finally {
+    if (revision !== undefined) doc.destroy();
+  }
+});
+
+function readData(doc: Parameters<typeof readDocData>[0], {
+  uuid, collection, after, limit = 100, max_bytes = 64 * 1024, ids, revision,
+}: z.infer<typeof inputSchema>) {
+  const data = readDocData(doc);
   if (collection === undefined) {
-    return { uuid, data: data === null ? null : {
-      collections: data.collections.map((entry) => ({
-        name: entry.name, recordCount: entry.records.length,
-        valid: entry.valid, invalidRecordCount: entry.invalidRecordIds.length,
-      })),
-      bytes: data.bytes, valid: data.valid, errorCount: data.errors.length,
-    } };
+    return { uuid, data: dataSummary(data) };
   }
   const selected = data?.collections.find((entry) => entry.name === collection);
   if (selected === undefined) {
-    throw new ToolError("data_collection_not_found", `No collection ${collection} in document ${uuid}`, { uuid, collection });
+    throw new ToolError("data_collection_not_found", `No collection ${collection} in document ${uuid}`, {
+      uuid, collection,
+      ...(revision === undefined ? {} : { revision,
+        recovery: "Call get_data with this uuid and revision to list that revision's collections, then choose an existing collection.",
+      }),
+    });
   }
   const requested = ids === undefined ? undefined : new Set(ids);
   const existing = new Set(selected.records.map((record) => record.id));
@@ -77,4 +100,4 @@ export const getDataOperation = operation(READ, inputSchema, (context, { uuid, c
       missing_ids: [...requested].filter((id) => !existing.has(id)).sort(compareCodePoints),
     }),
   };
-});
+}
