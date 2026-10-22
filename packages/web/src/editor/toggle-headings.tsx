@@ -162,22 +162,23 @@ export const ToggleHeadings = Extension.create({
       },
       props: {
         handleKeyDown: (view, event) => {
-          if (event.key !== "Delete" && event.key !== "Backspace" || event.isComposing) return false;
-          syncTextSelection(view);
+          if ((event.key === "Delete" || event.key === "Backspace") && !event.isComposing) syncTextSelection(view);
           if (event.key === "Delete" && !event.altKey && !event.ctrlKey && !event.metaKey &&
-            !event.shiftKey && deleteLeadingMarker(view)) return true;
-          return deletesFoldedNeighbor(view.state, event.key === "Delete");
+            !event.shiftKey && !event.isComposing && deleteLeadingMarker(view)) return true;
+          return (event.key === "Backspace" || event.key === "Delete") &&
+            deletesFoldedNeighbor(view.state, event.key === "Delete");
         },
         handleDOMEvents: {
           beforeinput: (view, event) => {
             const input = event as InputEvent;
-            if (input.inputType !== "deleteContentBackward" && input.inputType !== "deleteContentForward" || input.isComposing) return false;
-            syncTextSelection(view);
-            if (input.inputType === "deleteContentForward" && deleteLeadingMarker(view)) {
+            if ((input.inputType === "deleteContentBackward" || input.inputType === "deleteContentForward") &&
+              !input.isComposing) syncTextSelection(view);
+            if (input.inputType === "deleteContentForward" && !input.isComposing && deleteLeadingMarker(view)) {
               event.preventDefault();
               return true;
             }
-            if (deletesFoldedNeighbor(view.state, input.inputType === "deleteContentForward")) {
+            if ((input.inputType === "deleteContentBackward" || input.inputType === "deleteContentForward") &&
+              deletesFoldedNeighbor(view.state, input.inputType === "deleteContentForward")) {
               event.preventDefault();
               return true;
             }
