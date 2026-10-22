@@ -290,6 +290,7 @@ export const outputSchemas = {
   }).strict(),
   get_doc: z.object({
     uuid,
+    createdAt: z.number().optional().describe("Creation epoch milliseconds on the creating replica's clock, where known. Absent when unknown."),
     rev: z.string().describe("Revision of the page's ordered block content, identical to the web status row. Applies to regular pages and decisions; excludes metadata and comments."),
     title: z.string(),
     description,

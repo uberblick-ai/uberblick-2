@@ -85,7 +85,7 @@ afterAll(() => {
 });
 
 describe("directory timestamps", () => {
-  it("stamps createdAt on create_doc and lists only updatedAt", async () => {
+  it("keeps discovery slim and returns the stored creation stamp through get_doc", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", { title: "Stamped", description: "A test document." });
 
@@ -94,6 +94,21 @@ describe("directory timestamps", () => {
     const entry = listed.docs.find((row: any) => row.uuid === doc.uuid);
     expect(entry.updatedAt).toBe(T0);
     expect(entry).not.toHaveProperty("createdAt");
+    const read = await rig.ok("get_doc", { uuid: entry.uuid });
+    expect(read.createdAt).toBe(stub(rig, doc.uuid).createdAt);
+  });
+
+  it("omits an unknown creation stamp from get_doc without inventing one", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", { title: "Legacy", description: "A test document." });
+    await rig.ok("get_doc", { uuid: doc.uuid });
+    const directory = getDirectoryMap(rig.instance.replicas.directory().doc);
+    const { createdAt: _createdAt, ...legacy } = directory.get(doc.uuid) as Record<string, unknown>;
+    directory.set(doc.uuid, legacy);
+
+    const read = await rig.ok("get_doc", { uuid: doc.uuid });
+    expect(read).not.toHaveProperty("createdAt");
+    expect(stub(rig, doc.uuid)).not.toHaveProperty("createdAt");
   });
 
   it("bumps updatedAt at most once per window under a burst of edits", async () => {

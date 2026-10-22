@@ -87,6 +87,7 @@ export const toolHelpDetails = {
     "compatible `status`; ordinary documents omit both. When structured data exists, `data` lists collection " +
     "names and record counts and names `get_data` for deliberate reads. It contains no schemas or record " +
     "values; documents without data omit it.\n\n" +
+    "`createdAt` is the known creation time in epoch milliseconds on the creating replica's clock; it is omitted when unknown. " +
     "Every document returns a page-level `rev`, identical to the web status row's full revision of its ordered block content. Metadata and comments do not affect it. " +
     "Regular documents return `code_check`: the latest comparison per repository, or [] when never checked. " +
     "Each entry has repository (owner/name), commit, checked_at (writer's UTC recording time) and result: " +
