@@ -146,7 +146,8 @@ function emitStatus(name: string, change: Partial<RoomStatus>): void {
   });
 }
 
-vi.mock("../src/collab/rooms.js", () => ({
+vi.mock("../src/collab/rooms.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/collab/rooms.js")>(),
   acquireRoom: vi.fn((name: string) => ({ connection: room(name), release: vi.fn() })),
 }));
 

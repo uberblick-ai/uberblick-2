@@ -2,6 +2,7 @@
 
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { RoomConnection, RoomStatus } from "../../collab/rooms.js";
+import { refused } from "../../collab/rooms.js";
 
 export interface DocumentSyncActivity {
   lastConfirmedAt: number | null;
@@ -24,8 +25,7 @@ interface HubEvidence {
 }
 
 function admitted(status: RoomStatus): boolean {
-  return status.connected && status.writable && !status.storeRefused &&
-    !status.authFailed && !status.tokenMissing && status.protocolMismatch === null;
+  return status.connected && status.writable && !refused(status);
 }
 
 /**

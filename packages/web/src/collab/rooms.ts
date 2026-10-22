@@ -116,16 +116,8 @@ function haltForProtocolMismatch(hub: number): void {
   socket?.disconnect();
   for (const entry of entries.values()) {
     const status = entry.connection.status;
-    status.protocolMismatch = protocolMismatch;
     status.hasAnswered = true;
-    // disconnect() precedes its close event; settle both flags immediately and
-    // keep refresh from reviving stale socket/provider state after the halt.
-    status.connected = false;
-    status.synced = false;
-    status.writable = false;
-    for (const listener of entry.listeners) {
-      listener({ ...status });
-    }
+    entry.refreshStatus();
   }
 }
 
@@ -193,13 +185,8 @@ function setTokenMissing(workspace: string, missing: boolean): void {
     if (parseRoom(entry.connection.room).workspaceId !== workspace) continue;
     const status = entry.connection.status;
     status.tokenMissing = missing;
-    if (missing) {
-      status.writable = false;
-      status.hasAnswered = true;
-    }
-    for (const listener of entry.listeners) {
-      listener({ ...status });
-    }
+    if (missing) status.hasAnswered = true;
+    entry.refreshStatus();
   }
 }
 
@@ -323,9 +310,29 @@ export interface RoomConnection {
   onStatusChange(listener: (status: RoomStatus) => void): () => void;
 }
 
+export const BLANK_ROOM_STATUS: RoomStatus = {
+  connected: false,
+  synced: false,
+  hasReceivedServerState: false,
+  hasAnswered: false,
+  writable: false,
+  storeRefused: false,
+  deleted: false,
+  unsyncedChanges: 0,
+  protocolMismatch: null,
+  authFailed: false,
+  tokenMissing: false,
+};
+
+export function refused(status: RoomStatus): boolean {
+  return status.protocolMismatch !== null || status.storeRefused || status.deleted === true ||
+    status.authFailed || status.tokenMissing;
+}
+
 interface Entry {
   connection: RoomConnection;
   listeners: Set<(status: RoomStatus) => void>;
+  refreshStatus: () => void;
   startPresence: () => void;
   stopPresence: (withdraw: boolean) => void;
   presenceRefs: number;
@@ -356,25 +363,16 @@ function refreshRoomStatus(
   provider: PacedRoomProvider,
   socket: HocuspocusProviderWebsocket,
 ): void {
-  const halted = protocolMismatch !== null;
-  status.connected = !halted && !status.storeRefused && !status.deleted &&
+  // disconnect() precedes its close event, so the page-wide halt wins over
+  // socket/provider state even during a late or re-entrant refresh.
+  status.protocolMismatch = protocolMismatch;
+  const halted = protocolMismatch !== null || status.storeRefused || status.deleted;
+  status.connected = !halted &&
     provider.isAttached && socket.status === WebSocketStatus.Connected;
-  status.synced = !halted && !status.storeRefused && !status.deleted && provider.isSynced;
-  status.writable = status.connected && provider.hasAuthenticated &&
-    !status.storeRefused && !status.deleted && !status.tokenMissing;
+  status.synced = !halted && provider.isSynced;
+  // Permission denial emits before the provider clears its authentication.
+  status.writable = status.connected && provider.hasAuthenticated && !refused(status);
   status.unsyncedChanges = status.deleted ? 0 : provider.unsyncedChanges;
-}
-
-function settingsRefusalNotifier(uuid: string): (event: { payload: string }) => void {
-  return ({ payload }) => {
-    if (uuid !== SETTINGS_SUFFIX) return;
-    let notice: unknown;
-    try { notice = JSON.parse(payload); }
-    catch { return; }
-    if (notice === null || typeof notice !== "object" || !("type" in notice) ||
-      notice.type !== "settings-reset" || !("message" in notice) || typeof notice.message !== "string") return;
-    toast.error(notice.message, { id: "workspace-settings-refused" });
-  };
 }
 
 function createRoomProvider(room: string, identity: AwarenessUser, onSettingsReset: () => void): PacedRoomProvider {
@@ -393,13 +391,19 @@ function createRoomProvider(room: string, identity: AwarenessUser, onSettingsRes
       return hubToken(room, identity);
     },
   }, () => syncReady);
-  provider.on("stateless", settingsRefusalNotifier(parsed.uuid));
   provider.on("stateless", ({ payload }: { payload: string }) => {
     if (parsed.uuid !== SETTINGS_SUFFIX) return;
-    let notice: { type?: unknown; generation?: unknown } | null;
+    let notice: unknown;
     try { notice = JSON.parse(payload); }
     catch { return; }
-    if (notice?.type !== "settings-generation" ||
+    if (notice === null || typeof notice !== "object" || !("type" in notice)) return;
+    if (notice.type === "settings-reset") {
+      if ("message" in notice && typeof notice.message === "string") {
+        toast.error(notice.message, { id: "workspace-settings-refused" });
+      }
+      return;
+    }
+    if (notice.type !== "settings-generation" || !("generation" in notice) ||
       typeof notice.generation !== "number" || !Number.isSafeInteger(notice.generation) || notice.generation < 0) return;
     if (settingsGeneration !== null && settingsGeneration !== notice.generation) {
       onSettingsReset();
@@ -467,25 +471,16 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   // A room joining an already-connected socket receives no status transition;
   // seed from the socket or it would stay falsely offline.
   const status: RoomStatus = {
-    connected:
-      protocolMismatch === null &&
-      !storeRefused &&
-      !deleted &&
-      socket.status === WebSocketStatus.Connected,
-    synced: protocolMismatch === null && !storeRefused && !deleted && provider.isSynced,
+    ...BLANK_ROOM_STATUS,
     hasReceivedServerState: provider.isSynced,
     hasAnswered:
       provider.isSynced || protocolMismatch !== null || storeRefused || deleted || tokenMissing,
-    writable: false,
     storeRefused,
     deleted,
-    unsyncedChanges: provider.unsyncedChanges,
-    // New rooms inherit the page's terminal refusal.
-    protocolMismatch,
-    authFailed: false,
     // Seed the workspace's known missing-key state before its first attempt.
     tokenMissing,
   };
+  refreshRoomStatus(status, provider, socket);
   const listeners = new Set<(status: RoomStatus) => void>();
   const emit = (): void => {
     for (const listener of listeners) listener({ ...status });
@@ -495,13 +490,9 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     status.deleted = true;
     status.authFailed = false;
     status.hasAnswered = true;
-    status.connected = false;
-    status.synced = false;
-    status.writable = false;
-    status.unsyncedChanges = 0;
     stopPresence(false);
     provider.detach();
-    emit();
+    refresh();
   };
 
   // Read current socket/provider state: synced emits only true, so mirroring
@@ -531,8 +522,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     }
     status.authFailed = true;
     status.hasAnswered = true;
-    status.writable = false;
-    emit();
+    refresh();
   });
   provider.on("authenticated", () => {
     status.authFailed = false;
@@ -571,10 +561,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     if (reason === STORE_REFUSED_REASON) {
       storeRefusedRooms.add(room);
       status.storeRefused = true;
-      status.connected = false;
-      status.synced = false;
-      status.writable = false;
-      emit();
+      refresh();
       // Refusal is room-local. Detach this provider without disrupting the
       // shared socket, so other rooms remain live and this one cannot rejoin.
       provider.detach();
@@ -604,7 +591,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
 
   if (parsed.isDirectory) watchDirectoryDeletion(ydoc, parsed.workspaceId);
 
-  return { connection, listeners, startPresence, stopPresence, haltDeleted, replacements: new Set(), presenceRefs: 0, refs: 0 };
+  return { connection, listeners, refreshStatus: refresh, startPresence, stopPresence, haltDeleted, replacements: new Set(), presenceRefs: 0, refs: 0 };
 }
 
 /** A refused replica's clocks must never join its authoritative replacement. */
@@ -618,6 +605,7 @@ function replaceSettingsRoom(room: string, identity: AwarenessUser, previous: Ro
   const next = openRoom(room, identity);
   held.connection = next.connection;
   held.listeners = next.listeners;
+  held.refreshStatus = next.refreshStatus;
   held.startPresence = next.startPresence;
   held.stopPresence = next.stopPresence;
   held.haltDeleted = next.haltDeleted;

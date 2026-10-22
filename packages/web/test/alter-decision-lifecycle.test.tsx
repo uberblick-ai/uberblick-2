@@ -39,7 +39,8 @@ function room(name: string): RoomConnection {
   return connection;
 }
 
-vi.mock("../src/collab/rooms.js", () => ({
+vi.mock("../src/collab/rooms.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/collab/rooms.js")>(),
   acquireRoom: (name: string) => {
     events.push(`acquire ${name}`);
     const release = vi.fn(() => { events.push(`release ${name}`); });

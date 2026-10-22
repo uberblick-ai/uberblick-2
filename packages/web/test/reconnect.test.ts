@@ -533,6 +533,31 @@ it("ignores inbound sync and sends only auth until each room authenticates again
   expect(isDirectoryEntryDeleted(directory.connection.ydoc, uuid)).toBe(false);
 }, TEST_TIMEOUT_MS);
 
+it("keeps an authentication-refused room read-only during a re-entrant status refresh", async () => {
+  const endpoint = await unauthenticatedEndpoint();
+  const room = `${WORKSPACE}/${randomUUID()}`;
+  const tab = await openTab(room, endpoint.hub.port);
+  teardown.push(() => sharedSocket(tab.connection).destroy());
+  await waitFor("the room auth frame", () => endpoint.frames.length === 1 &&
+    roomFrameTypes(endpoint.frames[0]!, room).includes(MessageType.Auth));
+  endpoint.sockets[0]!.send(wireFrame(room, MessageType.Auth, 2, ...wireString("read-write")));
+  await waitFor("room authentication", () => tab.latest().writable);
+
+  let refreshed = false;
+  let authenticatedDuringRefusal = false;
+  teardown.push(tab.connection.onStatusChange((status) => {
+    if (!status.authFailed || refreshed) return;
+    refreshed = true;
+    authenticatedDuringRefusal = (tab.connection.provider as PacedRoomProvider).hasAuthenticated;
+    tab.connection.provider.incrementUnsyncedChanges();
+  }));
+  endpoint.sockets[0]!.send(wireFrame(room, MessageType.Auth, 1, ...wireString("not authorized")));
+  await waitFor("the refusal and nested refresh", () => refreshed);
+  expect(authenticatedDuringRefusal).toBe(true);
+  expect(tab.latest()).toMatchObject({ authFailed: true, hasAnswered: true, writable: false });
+  expect(tab.history.filter((status) => status.authFailed).every((status) => !status.writable)).toBe(true);
+}, TEST_TIMEOUT_MS);
+
 it.each([false, true])("a doc-deleted room CLOSE only detaches that room (authenticated: %s)", async (authenticated) => {
   const endpoint = await unauthenticatedEndpoint();
   const uuid = randomUUID();
