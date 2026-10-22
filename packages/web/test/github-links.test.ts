@@ -5,9 +5,33 @@ import {
   getBlocksFragment, importMarkdown, initDoc,
   setWorkspaceMainRepository, WORKSPACE_SETTINGS_KEY,
 } from "@uberblick/schema";
+import type { InlineRun } from "@uberblick/schema";
+import { HelpCatalog } from "../../mcp-server/src/help.js";
 import { mountEditor } from "./helpers.js";
 
 const HREF = "http://github.com/Owner/Repo/pull/0012/files#diff-abc";
+
+it("renders the markdown help's GitHub reference example as a pill without changing its inline runs", async () => {
+  const topic = new HelpCatalog().read("markdown").text;
+  const section = topic.split("### GitHub references\n")[1]?.split(/\n#{2,3} /)[0];
+  const example = section?.match(/```json\n([\s\S]*?)\n```/)?.[1];
+  expect(example).toBeDefined();
+  const { inline } = JSON.parse(`{${example!}}`) as { inline: InlineRun[] };
+  const ydoc = new Y.Doc();
+  initDoc(ydoc, { uuid: "22222222-3333-4444-5555-666666666666", title: "Help example" });
+  const blockId = appendBlock(ydoc, { type: "paragraph", inline });
+  expect(getBlockInline(ydoc, blockId)).toEqual(inline);
+  const { editor, element } = mountEditor(ydoc);
+  try {
+    const anchor = element.querySelector(".ub-github-pill")?.closest("a.ub-link");
+    expect(anchor?.getAttribute("href")).toBe("https://github.com/acme/app/pull/2005");
+    expect(anchor?.getAttribute("aria-label")).toBe("Pull request acme/app#2005");
+    expect(anchor?.querySelector(".ub-github-pill-repo")?.textContent).toBe("app");
+    expect(anchor?.querySelector(".ub-github-pill-number")?.textContent).toBe("#2005");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(getBlockInline(ydoc, blockId)).toEqual(inline);
+  } finally { editor.destroy(); ydoc.destroy(); }
+});
 
 it.each([true, false])("repaints local and remote main-repository changes without document writes (editable %s)", async (editable) => {
   const { ydoc } = fixture("Owner/Repo#12");
