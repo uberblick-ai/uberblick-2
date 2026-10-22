@@ -535,7 +535,7 @@ describe("ub doctor observational database reading", () => {
     const observed = new DatabaseSync(databasePath, { readOnly: true });
     try {
       expect(observed.prepare("SELECT COUNT(*) AS count FROM updates").get()?.count).toBe(0);
-      expect(observed.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger'").get()?.name)
+      expect(observed.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'refuse_updates'").get()?.name)
         .toBe("refuse_updates");
     } finally {
       observed.close();

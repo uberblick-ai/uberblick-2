@@ -3,10 +3,9 @@
 import { mainProcess } from "./process-helpers.js";
 import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { getBlocks } from "@uberblick/schema";
+import { getBlocks, readOriginUpdate } from "@uberblick/schema";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { afterEach, expect, it } from "vitest";
-import { messageYjsUpdate } from "y-protocols/sync";
 import { cleanupTestResources, closeChild, hubUrl, LIVE_HUB_SETTLE, PACKAGE_ROOT, peerClient, sleep, startHub, startServer, tempDatabasePath, TEST_SECRET, testConfig, trackChild, WAIT_TIMEOUT_MS, waitUntil, WORKSPACE, type PeerClient, type Rig, type TestHub, } from "./helpers.js";
 
 const SESSION = "shutdown-proof";
@@ -144,10 +143,10 @@ async function pendingWrite() {
   if (connection === undefined) throw new Error("the writer left its hub room before the sync gate was armed");
   let release!: () => void;
   const withheld = new Promise<void>((resolve) => { release = resolve; });
-  const beforeSync = connection.callbacks.beforeSync;
-  connection.beforeSync(async (active, payload) => {
-    if (payload.type === messageYjsUpdate) await withheld;
-    await beforeSync(active, payload);
+  const stateless = connection.callbacks.statelessCallback;
+  connection.onStatelessCallback(async (payload) => {
+    if (readOriginUpdate(payload.payload) !== null) await withheld;
+    await stateless(payload);
   });
   const published: Record<string, any>[] = [];
   const awareness = peer.provider.awareness!;

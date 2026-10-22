@@ -105,6 +105,7 @@ describe("replica search derivation", () => {
     });
     await first.ok("archive_doc", { uuid: archived.uuid });
     const replica = first.instance.replicas.replica(live.uuid);
+    first.instance.store.clearPending(replica.room, replica.indexedThroughSeq);
     first.instance.store.compact(replica.room, Y.encodeStateAsUpdate(replica.doc), replica.indexedThroughSeq);
     const before = sourceRows(databasePath);
     expect(before.snapshots).not.toHaveLength(0);
