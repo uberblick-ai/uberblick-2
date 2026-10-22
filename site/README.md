@@ -23,6 +23,9 @@ python3 -m http.server 8000 --directory site/out  # then open http://127.0.0.1:8
   used only by the landing page's demo frame, which shows the editor as it is),
   the favicon and touch icon (the same files as the web app's in
   `packages/web/public`) and `_headers`.
+- The home page's Recent changes list is built from the repository's
+  `CHANGELOG.md`: the five newest release sections, each with its date and
+  summary paragraph. Edit the changelog, not the page.
 - Links are root-relative, so serve the output rather than opening the files.
   The build lists links to pages that are not written yet.
 
@@ -33,8 +36,8 @@ to linking this one.
 ## Deploying
 
 A Cloudflare Pages project connected to this repository builds the site from
-`main` on every push that touches `site/`. Its settings, all in the Pages
-dashboard, are a maintainer step; no token lives in the repository:
+`main` on every push that touches `site/` or `CHANGELOG.md`. Its settings, all
+in the Pages dashboard, are a maintainer step; no token lives in the repository:
 
 | Setting | Value |
 | --- | --- |
@@ -42,6 +45,7 @@ dashboard, are a maintainer step; no token lives in the repository:
 | Root directory | `site`, so Cloudflare's framework detection does not run against the pnpm workspace at the repository root, which it refuses to build |
 | Build command | `python3 build.py`, relative to the root directory |
 | Build output directory | `out`, relative to the root directory; a root directory also limits builds to pushes that change it |
+| Build watch paths | include `site/*` and `CHANGELOG.md`, so a changelog-only push rebuilds the home page's Recent changes |
 | Environment variable `SITE_URL` | the origin the project serves, for example `https://next.uberblick.ai`; omitted, the canonical links name `https://uberblick.ai` |
 | Environment variable `SITE_NOINDEX` | set to `1` on a host search engines should not index |
 | Custom domain | the host name; Cloudflare adds the DNS record when the zone is on Cloudflare, otherwise add a CNAME to the project's `pages.dev` host |

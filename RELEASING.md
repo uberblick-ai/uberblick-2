@@ -49,6 +49,13 @@ draft listing merged PR titles and numbers since the previous `v*` tag under
 features, fixes and breaking changes. Those groups are heuristics for a
 maintainer to edit; the task publishes no notes.
 
+After a successful release, edit that draft into a new section at the top of
+[CHANGELOG.md](CHANGELOG.md) and merge it to `main`, following the format its
+introduction describes. The heading must read `## vX.Y.Z — YYYY-MM-DD`, followed
+by a one-sentence summary paragraph: uberblick.ai builds its Recent changes from
+the five newest sections in that form, so a missing or misshapen section leaves
+the home page behind the releases.
+
 After success, the skill upgrades Homebrew, checks the installed `ub --version`
 and reports `ub doctor`. It pulls both images with an empty Docker credential
 configuration, verifies the registry copies rather than dry-run local tags,
