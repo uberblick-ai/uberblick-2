@@ -34,6 +34,9 @@ packages/*/data/
 mise.local.toml
 .mise.local.toml
 
+# Deliberate per-checkout permission for branch code to open shared replicas.
+.uberblick-use-shared-replicas
+
 # the timestamped copy `ub mcp install --force` leaves beside a config file it
 # replaces. It is there so the previous version is recoverable by hand, not so
 # it can be committed — and the one config file this repository carries,

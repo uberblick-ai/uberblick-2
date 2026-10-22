@@ -8,7 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const UB = join(repoRoot, "packages", "cli", "bin", "ub.mjs");
+const UB = join(repoRoot, "packages", "cli", "test", "source-ub.mjs");
 const GRACEFUL_EXIT_MS = 5_000;
 
 /** A JSON-RPC response frame, as much of one as these clients read. */
