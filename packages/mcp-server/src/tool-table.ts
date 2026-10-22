@@ -167,6 +167,7 @@ export const tools: readonly Tool[] = [
     title: "Read a document",
     description:
       "Read live metadata, blocks with edit-assertion rev hashes, comment threads and decision context. " +
+      "Creation time createdAt and decision entries' createdAt/updatedAt are ISO 8601 UTC strings when known and representable. " +
       "Data lists collections/counts; use get_data for records. Use get_revision for a historical state. " +
       "Eligible guidance reads count toward this process's briefing.",
     input: getDocInput,
@@ -261,7 +262,7 @@ export const tools: readonly Tool[] = [
     title: "List documents",
     description:
       "List documents from synced directory stubs without opening rooms: uuid, title, tags, description, " +
-      "updatedAt, openThreadCount (absent means unknown) and pinned. Unfiltered omits decisions; " +
+      "updatedAt (ISO 8601 UTC when known and representable), openThreadCount (absent means unknown) and pinned. Unfiltered omits decisions; " +
       "kind/status/tag/has_open_threads predicates include them. A decision topic row shows the record in force, " +
       "else pending, else first, with status, topic, discussion, answerPreview and inForce/pending/conflicts UUIDs. " +
       "include_superseded returns one row per record; include_deleted admits archived rows (deleted: true). " +

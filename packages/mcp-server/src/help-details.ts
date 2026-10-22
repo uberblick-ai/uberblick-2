@@ -90,7 +90,9 @@ export const toolHelpDetails = {
     "compatible `status`; ordinary documents omit both. When structured data exists, `data` lists collection " +
     "names and record counts and names `get_data` for deliberate reads. It contains no schemas or record " +
     "values; documents without data omit it.\n\n" +
-    "`createdAt` is the known creation time in epoch milliseconds on the creating replica's clock; it is omitted when unknown. " +
+    "`createdAt` is the creation time as an ISO 8601 UTC string on the creating replica's clock, " +
+    "like `2026-10-21T18:36:13.213Z`. Decision directory entries return `createdAt` and `updatedAt` in the same format. " +
+    "These stamps are omitted when unknown or unrepresentable as a date. " +
     "Every document returns a page-level `rev`, identical to the web status row's full revision of its ordered block content. Metadata and comments do not affect it. " +
     "Regular documents return `code_check`: the latest comparison per repository, or [] when never checked. " +
     "Each entry has repository (owner/name), commit, checked_at (writer's UTC recording time) and result: " +
@@ -233,7 +235,8 @@ export const toolHelpDetails = {
     "`pinned` says whether the sidebar carries the document as an entry point — derived from the sidebar doc, " +
     "read with get_sidebar. Unpinned documents are fully alive; the flag separates entry points from the long " +
     "tail.\n\n" +
-    "`updatedAt` is epoch milliseconds, present only where known — a sort key, not history. " +
+    "`updatedAt` is an ISO 8601 UTC string, like `2026-10-21T18:36:13.213Z`, " +
+    "omitted when unknown or unrepresentable as a date — an approximate edit time, not history. " +
     "It says when someone changed the document, not when a replica noticed: each replica stamps only " +
     "for the changes it made itself, so a document you never edit keeps the stamp its editor wrote. " +
     "Concurrent stamps resolve to the greater value, so a future-skewed clock pins the hint until a later " +

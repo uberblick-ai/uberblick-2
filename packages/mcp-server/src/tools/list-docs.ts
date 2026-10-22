@@ -4,6 +4,7 @@ import { z } from "zod";
 import { strictInput } from "../inputs.js";
 import { pinnedUuids } from "../sidebar.js";
 import { resolveTagFilter } from "../tag-catalog.js";
+import { isoTimestamp } from "../timestamps.js";
 import { documentKindArg, documentStatusArg } from "./schemas.js";
 import { READ, operation } from "./operation.js";
 
@@ -62,25 +63,28 @@ export const listDocsOperation = operation(READ, inputSchema, (context, { tag, k
     workspace: replicas.config.workspaceId,
     docs: [...documents, ...decisionRows]
       .sort(compareDirectoryEntries)
-      .map((entry: DirectoryEntry & { resolution?: { inForce: string | null; pending: string[]; conflicts: string[] } }) => ({
-        uuid: entry.uuid,
-        title: entry.title,
-        tags: readDirectoryTags(entry, catalog),
-        // Keep absent descriptions explicit as null.
-        description: entry.description ?? null,
-        ...(entry.updatedAt === undefined ? {} : { updatedAt: entry.updatedAt }),
-        ...(entry.openThreadCount === undefined ? {} : { openThreadCount: entry.openThreadCount }),
-        ...(entry.deleted === true ? { deleted: true as const } : {}),
-        pinned: pinned.has(entry.uuid),
-        ...(entry.kind === "decision" ? {
-          kind: "decision" as const,
-          status: entry.status,
-          topic: entry.topic,
-          ...(entry.discussion === undefined ? {} : { discussion: entry.discussion }),
-          ...(entry.answerPreview === undefined ? {} : { answerPreview: entry.answerPreview }),
-          ...entry.resolution,
-        } : {}),
-      })),
+      .map((entry: DirectoryEntry & { resolution?: { inForce: string | null; pending: string[]; conflicts: string[] } }) => {
+        const updatedAt = isoTimestamp(entry.updatedAt);
+        return {
+          uuid: entry.uuid,
+          title: entry.title,
+          tags: readDirectoryTags(entry, catalog),
+          // Keep absent descriptions explicit as null.
+          description: entry.description ?? null,
+          ...(updatedAt === undefined ? {} : { updatedAt }),
+          ...(entry.openThreadCount === undefined ? {} : { openThreadCount: entry.openThreadCount }),
+          ...(entry.deleted === true ? { deleted: true as const } : {}),
+          pinned: pinned.has(entry.uuid),
+          ...(entry.kind === "decision" ? {
+            kind: "decision" as const,
+            status: entry.status,
+            topic: entry.topic,
+            ...(entry.discussion === undefined ? {} : { discussion: entry.discussion }),
+            ...(entry.answerPreview === undefined ? {} : { answerPreview: entry.answerPreview }),
+            ...entry.resolution,
+          } : {}),
+        };
+      }),
     hub: replicas.sync.state(),
   };
 });
