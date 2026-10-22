@@ -89,6 +89,9 @@ function expectKeywords(element: HTMLElement, expected: string[]): void {
 describe("code syntax highlighting", () => {
   it.each([
     ["json", "JSON"], ["ts", "TypeScript"], ["wireframe", "Wireframe"],
+    ["php", "PHP"], ["python-repl", "Python REPL"], ["pycon", "Python REPL"],
+    ["toml", "TOML"], ["ini", "INI"], ["html", "HTML"], ["xml", "XML"],
+    ["shell", "Shell session"], ["console", "Shell session"],
     ["plaintext", "Plain text"], ["", "Plain text"], ["my-language", "My-language"],
   ])("shows the grammar's display name for %s without changing its stored id", (language, label) => {
     const ydoc = new Y.Doc();
