@@ -161,7 +161,13 @@ describe("MCP protects the last anchor of an open comment thread", () => {
       target.format(0, 1, { comment: { threadId: created.threadId } });
       await rig.ok("edit_block", { uuid: created.uuid, block_id: created.id, old_text: PROSE, new_text: "No timeout remains." });
       await rig.ok("delete_block", { uuid: created.uuid, block_id: created.id });
-      expect((await rig.ok("get_doc", { uuid: created.uuid })).annotations[0].range).toBeNull();
+      expect((await rig.ok("get_doc", { uuid: created.uuid })).annotations[0]).toMatchObject({
+        blockId: other,
+        range: { start: 0, end: 1, collapsed: false,
+          ...(type === "table" ? { row: 1, column: 0 } : {}),
+          ...(type === "card" ? { part: "body" } : type === "figma" ? { part: "caption" } : {}),
+        },
+      });
       await refusal(rig, created.uuid, "delete_block", { block_id: other }, [{ id: created.threadId, text: anchored }]);
     },
   );

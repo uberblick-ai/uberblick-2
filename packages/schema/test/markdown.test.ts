@@ -5,7 +5,9 @@ import {
   assignDocumentTags,
   createTagCatalogEntry,
   createAnnotation,
+  COMMENT_MARK,
   exportMarkdown,
+  findBlockElement,
   getBlocks,
   getMetaMap,
   importMarkdown,
@@ -15,6 +17,7 @@ import {
   listNumbers,
   parseGfmTable,
   setTags,
+  structuredInlineParts,
 } from "../src/index.js";
 
 const UUID = "66666666-6666-4666-8666-666666666666";
@@ -60,6 +63,48 @@ function docFrom(markdown: string): Y.Doc {
   for (const block of imported.blocks) appendBlock(doc, block);
   return doc;
 }
+
+describe("comment anchor placement", () => {
+  it.each([
+    { type: "paragraph", text: "Moved brave text", coordinates: "" },
+    { type: "table", text: "| Moved brave text |\n| --- |", coordinates: "row=0 column=0 " },
+    { type: "card", text: "title: Moved brave text", coordinates: "part=title " },
+    { type: "figma", text: "url: https://www.figma.com/design/Abc123/File\n\nMoved brave text", coordinates: "part=caption " },
+  ] as const)("exports a moved thread after its $type anchor and omits it when orphaned", ({ type, text, coordinates }) => {
+    const doc = docFrom("Original brave text");
+    const originalId = getBlocks(doc)[0]!.id;
+    const thread = createAnnotation(doc, originalId, 9, 14, "Reader", "Why?");
+    const movedId = appendBlock(doc, { type, text });
+    appendBlock(doc, { type: "paragraph", text: "After the anchor" });
+    const original = findBlockElement(doc, originalId)!.firstChild as Y.XmlText;
+    const moved = findBlockElement(doc, movedId)!;
+    const target = (type === "paragraph" ? moved.firstChild : structuredInlineParts(moved).find(part => part.texts.some(value => value.length > 0))!.texts[0]) as Y.XmlText;
+    target.format(6, 5, { [COMMENT_MARK]: { threadId: thread.id } });
+    original.format(0, original.length, { [COMMENT_MARK]: null });
+
+    const exported = exportMarkdown(doc, { frontmatter: false, annotations: "html-comments" });
+    const comment = `<!-- annotation ${thread.id} ${coordinates}range=6-11 Reader: "Why?" -->`;
+    expect(exported).toContain(comment);
+    expect(exported.indexOf(comment)).toBeGreaterThan(exported.indexOf("Moved brave text"));
+    expect(exported.indexOf(comment)).toBeLessThan(exported.indexOf("After the anchor"));
+    expect(exported.match(/<!-- annotation /g)).toHaveLength(1);
+
+    target.format(0, target.length, { [COMMENT_MARK]: null });
+    expect(exportMarkdown(doc, { frontmatter: false, annotations: "html-comments" })).not.toContain("<!-- annotation");
+    doc.destroy();
+  });
+
+  it("keeps an existing export unchanged when an earlier block copies the mark", () => {
+    const doc = docFrom("Earlier brave text\n\nRecorded brave text");
+    const [earlier, recorded] = getBlocks(doc);
+    const thread = createAnnotation(doc, recorded!.id, 9, 14, "Reader", "Keep here");
+    const before = exportMarkdown(doc, { frontmatter: false, annotations: "html-comments" });
+    const copy = findBlockElement(doc, earlier!.id)!.firstChild as Y.XmlText;
+    copy.format(8, 5, { [COMMENT_MARK]: { threadId: thread.id } });
+    expect(exportMarkdown(doc, { frontmatter: false, annotations: "html-comments" })).toBe(before);
+    doc.destroy();
+  });
+});
 
 describe("structured data omission", () => {
   it("preserves data-free exports and notices data without exporting its contents", () => {

@@ -8,7 +8,7 @@ import { getBlocksWithInline } from "./blocks.js";
 import { getMeta } from "./doc.js";
 import { hasDocData } from "./data.js";
 import { decisionRelations, decisionTopicTitle, readDecisions } from "./decisions.js";
-import { listAnnotations, resolveAnnotationRange } from "./annotations.js";
+import { listAnnotations, resolveAnnotationAnchors } from "./annotations.js";
 import {
   hasInlineMarks,
   inlineLinkTarget,
@@ -634,10 +634,12 @@ export function exportMarkdown(
 
   const annotationsByBlock = new Map<string, string[]>();
   if (annotationMode === "html-comments") {
+    const anchors = resolveAnnotationAnchors(ydoc);
     for (const annotation of listAnnotations(ydoc)) {
-      const range = resolveAnnotationRange(ydoc, annotation.id);
+      const anchor = anchors.get(annotation.id);
       // An unresolved anchor has no exported text to point at.
-      if (range === null) continue;
+      if (anchor === undefined) continue;
+      const { range } = anchor;
       const body = annotation.comments
         .map((comment) => `${comment.author}: ${JSON.stringify(comment.text)}`)
         .join(" | ");
@@ -647,9 +649,9 @@ export function exportMarkdown(
         annotation.resolved === true,
         body,
       );
-      const existing = annotationsByBlock.get(annotation.blockId);
+      const existing = annotationsByBlock.get(anchor.blockId);
       if (existing === undefined) {
-        annotationsByBlock.set(annotation.blockId, [line]);
+        annotationsByBlock.set(anchor.blockId, [line]);
       } else {
         existing.push(line);
       }

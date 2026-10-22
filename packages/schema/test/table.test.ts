@@ -4,9 +4,9 @@ import {
   AnnotationCellError, InvalidTableError, InvalidTableMappingError, OldTextMismatchError, StaleBlockError, TableMappingRequiredError,
   addComment, appendBlock, createAnnotation, editBlock,
   exportMarkdown, findBlockElement, getBlock, getBlocks, getBlocksFragment,
-  initDoc, insertBlock, isSupportedTable, listAnnotations,
+  initDoc, insertBlock, isSupportedTable, listAnnotationRanges, listAnnotations,
   normalizeLegacyTables, parseGfmTable, parseTableCell, repairDuplicateBlocks,
-  resolveAnnotationRange, setAnnotationResolved,
+  resolveAnnotationAnchors, resolveAnnotationRange, setAnnotationResolved,
   tableCellText, tableRows, writeGfmTable,
   type TableMapping,
 } from "../src/index.js";
@@ -796,7 +796,10 @@ describe("structured table contract", () => {
     threadMap.set("blockId", id);
     source.format(2, 4, { comment: { threadId: thread.id } });
     normalizeLegacyTables(doc);
-    expect(resolveAnnotationRange(doc, thread.id)).toBeNull();
+    expect(listAnnotationRanges(doc, id)).toEqual([]);
+    expect(resolveAnnotationAnchors(doc).get(thread.id)).toMatchObject({
+      blockId: paragraphId, range: { start: 2, end: 6 },
+    });
     expect(addComment(doc, thread.id, "writer", "Reply")?.comments).toHaveLength(2);
     expect(setAnnotationResolved(doc, thread.id, true)?.resolved).toBe(true);
     expect(setAnnotationResolved(doc, thread.id, false)?.resolved).toBe(false);

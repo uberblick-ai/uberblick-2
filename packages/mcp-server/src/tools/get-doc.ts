@@ -1,4 +1,4 @@
-import { decisionTopicTitle, docRev, getMeta, listAnnotations, readDecisions, resolveDecisionTopics, summarizeDocData } from "@uberblick/schema";
+import { decisionTopicTitle, docRev, getMeta, listAnnotations, readDecisions, resolveAnnotationAnchors, resolveDecisionTopics, summarizeDocData } from "@uberblick/schema";
 import { strictInput } from "../inputs.js";
 import { uuidArg } from "./schemas.js";
 import { READ, operation } from "./operation.js";
@@ -18,6 +18,7 @@ export const getDocOperation = operation(READ, inputSchema, (context, { uuid }, 
     new Set(replicas.store.backlinks(uuid).map(entry => entry.uuid));
   const linked = meta.kind === "decision" ? [] : resolveDecisionTopics(directory).filter(topic =>
     !topic.archived && !relatedTopics.has(topic.topic) && topic.records.some(record => backlinks.has(record.uuid)));
+  const anchors = resolveAnnotationAnchors(replica.doc);
   const result = {
     ...meta,
     rev: docRev(replica.doc),
@@ -31,7 +32,7 @@ export const getDocOperation = operation(READ, inputSchema, (context, { uuid }, 
     ...(meta.kind === "decision" ? decisionReadJson(uuid) : {}),
     blocks: blocksJson(replica),
     annotations: listAnnotations(replica.doc).map((annotation) =>
-      annotationJson(replica, annotation),
+      annotationJson(replica, annotation, anchors),
     ),
     ...(collections === null ? {} : { data: { collections, readWith: "get_data" } }),
   };

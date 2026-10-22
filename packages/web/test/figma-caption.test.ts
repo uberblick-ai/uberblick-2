@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
-  appendBlock, createAnnotation, figmaCaptionTexts, getBlocks, getBlocksFragment,
+  COMMENT_MARK, appendBlock, createAnnotation, figmaCaptionTexts, getBlocks, getBlocksFragment,
   initDoc, listAnnotationRanges,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
@@ -84,6 +84,21 @@ describe("Figma caption integration", () => {
     expect(commentTargetOf(editor, ydoc)).toBeNull();
     editor.commands.setNodeSelection(0);
     expect(commentTargetOf(editor, ydoc)).toBeNull();
+  });
+
+  it("follows the marked caption when it moves into another Figma block", () => {
+    const { ydoc, id, figma } = figmaDoc();
+    const destination = appendBlock(ydoc, {
+      type: "figma", text: "url: https://www.figma.com/design/key/Next\n\nMoved caption words",
+    });
+    const next = getBlocksFragment(ydoc).get(1) as Y.XmlElement;
+    const thread = createAnnotation(ydoc, id, 0, 7, "Reader", "Follow caption", { part: "caption" });
+    figmaCaptionTexts(next)[0]!.format(6, 7, { [COMMENT_MARK]: { threadId: thread.id } });
+    const original = figmaCaptionTexts(figma)[0]!;
+    original.delete(0, original.length);
+    expect(threadsFromDoc(ydoc)[0]).toMatchObject({
+      blockId: id, anchorBlockId: destination, blockRef: "Figma 2", excerpt: "caption", orphaned: false,
+    });
   });
 
   it("gates caption link conflicts while retaining the live text handle for repair", () => {

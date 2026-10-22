@@ -19,11 +19,12 @@ import {
   CARD_PARTS,
   readDirectoryTags,
   readDocumentTags,
-  resolveAnnotationRange,
+  resolveAnnotationAnchors,
   resolveDecisionTopics,
 } from "@uberblick/schema";
 import type {
   Annotation,
+  AnnotationAnchor,
   BlockInput,
   DecisionTopicResolution,
   DirectoryEntry,
@@ -439,10 +440,15 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   const annotationJson = (
     replica: Replica,
     annotation: Annotation,
-  ): Record<string, unknown> => ({
-    ...annotation,
-    range: resolveAnnotationRange(replica.doc, annotation.id),
-  });
+    anchors: ReadonlyMap<string, AnnotationAnchor> = resolveAnnotationAnchors(replica.doc),
+  ): Record<string, unknown> => {
+    const anchor = anchors.get(annotation.id);
+    return {
+      ...annotation,
+      blockId: anchor?.blockId ?? annotation.blockId,
+      range: anchor?.range ?? null,
+    };
+  };
 
   return {
     replicas,

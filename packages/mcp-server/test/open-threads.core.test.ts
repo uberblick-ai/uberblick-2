@@ -61,10 +61,11 @@ describe("open comment threads through directory stubs", () => {
     deleteBlock(rig.instance.replicas.replica(doc.uuid).doc, doc.blocks[0].id);
     const annotations = (await rig.ok("get_doc", { uuid: doc.uuid })).annotations;
     expect(annotations).toHaveLength(2);
-    expect(annotations.find((thread: any) => thread.id === first.annotation.id)).toMatchObject({ range: null });
-    expect(annotations.find((thread: any) => thread.id === second.annotation.id)).toMatchObject({ range: null, resolved: true });
+    expect(annotations.find((thread: any) => thread.id === first.annotation.id)).toMatchObject({ blockId: doc.blocks[0].id, range: null });
+    expect(annotations.find((thread: any) => thread.id === second.annotation.id)).toMatchObject({ blockId: doc.blocks[0].id, range: null, resolved: true });
     expect(await rows(rig, { has_open_threads: true })).toMatchObject([{ openThreadCount: 1 }]);
-    await rig.ok("annotate", { uuid: doc.uuid, thread_id: first.annotation.id, text: "Resolved", resolved: true });
+    const resolved = await rig.ok("annotate", { uuid: doc.uuid, thread_id: first.annotation.id, text: "Resolved", resolved: true });
+    expect(resolved.annotation).toMatchObject({ blockId: doc.blocks[0].id, range: null, resolved: true });
     expect(await rows(rig)).toMatchObject([{ openThreadCount: 0 }]);
     expect(await rows(rig, { has_open_threads: true, include_superseded: true })).toEqual([]);
     await rig.ok("annotate", { uuid: doc.uuid, thread_id: first.annotation.id, text: "A reply to the resolved thread" });

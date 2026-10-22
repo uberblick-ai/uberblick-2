@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
-  CARD_PARTS, appendBlock, cardPartElement, cardPartTexts, createAnnotation,
+  CARD_PARTS, COMMENT_MARK, appendBlock, cardPartElement, cardPartTexts, createAnnotation,
   getBlocks, getBlocksFragment, initDoc, listAnnotationRanges, writeCardButton,
 } from "@uberblick/schema";
 import type { CardPart } from "@uberblick/schema";
@@ -145,6 +145,21 @@ describe("card editor", () => {
     const threads = [...CARD_PARTS].reverse().map((part) =>
       createAnnotation(ydoc, id, 0, 2, "Reader", part, { part }));
     expect(threadsFromDoc(ydoc).map((thread) => thread.id)).toEqual(threads.reverse().map((thread) => thread.id));
+  });
+
+  it("quotes the first marked part when a thread's text moves to another card", () => {
+    const { ydoc, id, card } = cardDoc();
+    const destination = appendBlock(ydoc, { type: "card", text: "title: New title\nfooter: Last part\n\nMoved body" });
+    const next = getBlocksFragment(ydoc).get(1) as Y.XmlElement;
+    const thread = createAnnotation(ydoc, id, 0, 4, "Reader", "Follow this text", { part: "title" });
+    const mark = { [COMMENT_MARK]: { threadId: thread.id } };
+    cardPartTexts(next, "footer")[0]!.format(0, 4, mark);
+    cardPartTexts(next, "body")[0]!.format(0, 5, mark);
+    const original = cardPartTexts(card, "title")[0]!;
+    original.delete(0, original.length);
+    expect(threadsFromDoc(ydoc)[0]).toMatchObject({
+      blockId: id, anchorBlockId: destination, blockRef: "Card 2", excerpt: "Moved", orphaned: false,
+    });
   });
 
   it("gates unsupported card shape before binding and locates link conflicts in every part", () => {

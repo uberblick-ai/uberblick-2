@@ -12,15 +12,18 @@ import {
   editBlock,
   exportMarkdown,
   getAnnotation,
+  getAnnotationsMap,
   getBlock,
   getBlocksFragment,
   findBlockElement,
   cardPartTexts,
   figmaCaptionTexts,
   initDoc,
+  insertBlock,
   listAnnotationRanges,
   listAnnotations,
   moveAnnotation,
+  resolveAnnotationAnchors,
   resolveAnnotationRange,
   tableCellTexts,
   tableRows,
@@ -74,6 +77,74 @@ function deltaOf(doc: Y.Doc, blockId: string): Array<[string, unknown]> {
 }
 
 describe("annotations", () => {
+  it.each(["paragraph", "table", "card", "figma"] as const)("resolves moved marks in a %s block without rewriting the thread", (type) => {
+    const { doc, blockId, threadId } = annotated();
+    const text = type === "table" ? "| brave gap world | Later |\n| --- | --- |\n| Later | Last |"
+      : type === "card" ? "title: brave gap world\n\nLater"
+        : type === "figma" ? "url: https://www.figma.com/design/Abc123/File\n\nbrave gap world"
+          : "brave gap world";
+    const target = appendBlock(doc, { type, text });
+    const element = findBlockElement(doc, target)!;
+    const texts = type === "table" ? [
+      tableCellTexts(tableRows(element)[0]![0]!)[0]!,
+      tableCellTexts(tableRows(element)[1]![0]!)[0]!,
+    ] : type === "card" ? [...cardPartTexts(element, "title"), ...cardPartTexts(element, "body")]
+      : type === "figma" ? figmaCaptionTexts(element)
+        : [element.firstChild as Y.XmlText];
+    texts[0]!.format(0, 5, { [COMMENT_MARK]: { threadId } });
+    texts[0]!.format(10, 5, { [COMMENT_MARK]: { threadId } });
+    for (const later of texts.slice(1)) later.format(0, later.length, { [COMMENT_MARK]: { threadId } });
+    (findBlockElement(doc, blockId)!.firstChild as Y.XmlText).format(6, 5, { [COMMENT_MARK]: null });
+    const coordinates = type === "table" ? { row: 0, column: 0 }
+      : type === "card" ? { part: "title" }
+        : type === "figma" ? { part: "caption" } : {};
+    const range = { ...coordinates, start: 0, end: 15, collapsed: false };
+
+    expect(resolveAnnotationAnchors(doc).get(threadId)).toEqual({ blockId: target, range, text: "brave gap world" });
+    expect(resolveAnnotationRange(doc, threadId)).toEqual(range);
+    expect(getAnnotation(doc, threadId)?.blockId).toBe(blockId);
+    expect(listAnnotationRanges(doc, blockId)).toEqual([]);
+    doc.destroy();
+  });
+
+  it("prefers a marked recorded block over an earlier copy, then falls back in document order", () => {
+    const { doc, blockId, threadId } = annotated();
+    const earlier = insertBlock(doc, null, { type: "paragraph", text: "Earlier copy" });
+    const later = appendBlock(doc, { type: "paragraph", text: "Later copy" });
+    (findBlockElement(doc, earlier)!.firstChild as Y.XmlText).format(0, 7, { [COMMENT_MARK]: { threadId } });
+    (findBlockElement(doc, later)!.firstChild as Y.XmlText).format(0, 5, { [COMMENT_MARK]: { threadId } });
+
+    expect(resolveAnnotationAnchors(doc).get(threadId)).toEqual({
+      blockId, range: { start: 6, end: 11, collapsed: false }, text: "brave",
+    });
+    (findBlockElement(doc, blockId)!.firstChild as Y.XmlText).format(6, 5, { [COMMENT_MARK]: null });
+    expect(resolveAnnotationAnchors(doc).get(threadId)).toEqual({
+      blockId: earlier, range: { start: 0, end: 7, collapsed: false }, text: "Earlier",
+    });
+    deleteBlock(doc, earlier);
+    expect(resolveAnnotationAnchors(doc).get(threadId)).toEqual({
+      blockId: later, range: { start: 0, end: 5, collapsed: false }, text: "Later",
+    });
+    doc.destroy();
+  });
+
+  it("excludes missing and malformed stored threads from resolved anchors", () => {
+    const { doc, blockId, threadId } = annotated();
+    const missing = appendBlock(doc, { type: "paragraph", text: "Missing" });
+    const malformed = appendBlock(doc, { type: "paragraph", text: "Malformed" });
+    (findBlockElement(doc, missing)!.firstChild as Y.XmlText).format(0, 7, { [COMMENT_MARK]: { threadId: "missing" } });
+    (findBlockElement(doc, malformed)!.firstChild as Y.XmlText).format(0, 9, { [COMMENT_MARK]: { threadId: "malformed" } });
+    getAnnotationsMap(doc).set("malformed", new Y.Map<unknown>([["id", "malformed"], ["blockId", malformed]]));
+
+    expect(resolveAnnotationAnchors(doc)).toEqual(new Map([[threadId, {
+      blockId, range: { start: 6, end: 11, collapsed: false }, text: "brave",
+    }]]));
+    expect(resolveAnnotationRange(doc, "missing")).toBeNull();
+    expect(resolveAnnotationRange(doc, "malformed")).toBeNull();
+    expect(annotationAnchors(doc).get("missing")).toBe("Missing");
+    doc.destroy();
+  });
+
   it("moves all copies of an anchor with one reply while preserving the thread's metadata", () => {
     const { doc, blockId, threadId } = annotated();
     addComment(doc, threadId, "owner", "Earlier reply");
@@ -145,14 +216,26 @@ describe("annotations", () => {
     unidentified.removeAttribute("id");
     getBlocksFragment(doc).insert(getBlocksFragment(doc).length, [shadow, unidentified]);
     expect(annotationAnchors(doc)).toEqual(new Map([[threadId, "brave"]]));
+    expect(resolveAnnotationAnchors(doc).get(threadId)?.blockId).toBe(blockId);
     (findBlockElement(doc, blockId)!.firstChild as Y.XmlText).format(6, 5, { [COMMENT_MARK]: null });
     expect(annotationAnchors(doc).has(threadId)).toBe(false);
+    expect(resolveAnnotationAnchors(doc).has(threadId)).toBe(false);
+    expect(resolveAnnotationRange(doc, threadId)).toBeNull();
   });
 
   it("keeps anchor excerpts aligned when foreign embeds precede the marked text", () => {
     const { doc, blockId, threadId } = annotated();
     (findBlockElement(doc, blockId)!.firstChild as Y.XmlText).insertEmbed(0, { foreign: true });
     expect(annotationAnchors(doc).get(threadId)).toBe("brave");
+    expect(resolveAnnotationAnchors(doc).get(threadId)).toEqual({
+      blockId, range: { start: 7, end: 12, collapsed: false }, text: "brave",
+    });
+    const text = findBlockElement(doc, blockId)!.firstChild as Y.XmlText;
+    text.insertEmbed(9, { foreign: true });
+    text.format(9, 1, { [COMMENT_MARK]: { threadId } });
+    expect(resolveAnnotationAnchors(doc).get(threadId)).toEqual({
+      blockId, range: { start: 7, end: 13, collapsed: false }, text: "br\uFFFCave",
+    });
   });
 
   it("anchors the range as a comment mark on the block's text", () => {

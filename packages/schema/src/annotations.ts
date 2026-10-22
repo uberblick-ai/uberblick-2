@@ -34,6 +34,13 @@ export interface CommentRun {
   end: number;
 }
 
+/** One visible location in the offset space of its block, cell or part. */
+export interface AnnotationAnchor {
+  blockId: string;
+  range: AnnotationRange;
+  text: string;
+}
+
 function threadIdOf(attributes: unknown): string | null {
   if (typeof attributes !== "object" || attributes === null) return null;
   const mark = (attributes as Record<string, unknown>)[COMMENT_MARK];
@@ -313,59 +320,77 @@ export function listAnnotationRanges(
   );
 }
 
-/** Anchored text across visible blocks, independent of a thread's recorded block. */
-export function annotationAnchors(ydoc: Y.Doc): Map<string, string> {
-  const anchors = new Map<string, string>();
+function* visibleAnnotationParts(ydoc: Y.Doc) {
   const claimed = new Set<string>();
   for (const child of getBlocksFragment(ydoc).toArray()) {
     if (!(child instanceof Y.XmlElement)) continue;
     const blockId = child.getAttribute("id") ?? "";
     if (blockId === "" || claimed.has(blockId)) continue;
     claimed.add(blockId);
-    for (const { texts } of annotationTexts(child)) {
-      // Foreign embeds occupy one Yjs offset even without displayed text.
-      const plain = texts.flatMap(value => value.toDelta() as Array<{ insert?: unknown }>)
-        .map(op => typeof op.insert === "string" ? op.insert : op.insert === undefined ? "" : "\uFFFC").join("");
-      for (const run of commentRuns(texts)) {
-        const prior = anchors.get(run.threadId);
-        const text = plain.slice(run.start, run.end);
-        anchors.set(run.threadId, prior === undefined ? text : `${prior} … ${text}`);
-      }
+    for (const part of annotationTexts(child)) yield { blockId, ...part };
+  }
+}
+
+function annotationPlainText(texts: readonly Y.XmlText[]): string {
+  // Foreign embeds occupy one Yjs offset even without displayed text.
+  return texts.flatMap(value => value.toDelta() as Array<{ insert?: unknown }>)
+    .map(op => typeof op.insert === "string" ? op.insert : op.insert === undefined ? "" : "\uFFFC").join("");
+}
+
+/** Anchored text across visible blocks, independent of a thread's recorded block. */
+export function annotationAnchors(ydoc: Y.Doc): Map<string, string> {
+  const anchors = new Map<string, string>();
+  for (const { texts } of visibleAnnotationParts(ydoc)) {
+    const plain = annotationPlainText(texts);
+    for (const run of commentRuns(texts)) {
+      const prior = anchors.get(run.threadId);
+      const text = plain.slice(run.start, run.end);
+      anchors.set(run.threadId, prior === undefined ? text : `${prior} … ${text}`);
     }
   }
   return anchors;
 }
 
 /**
- * Resolve current block or cell offsets. Unknown threads, deleted blocks and
- * fully deleted spans return null; losing an anchor never deletes the thread.
+ * Prefer the recorded block while marked; otherwise use the first visible
+ * marked block. Each anchor spans the first to last mark in its first part.
  */
+export function resolveAnnotationAnchors(ydoc: Y.Doc): Map<string, AnnotationAnchor> {
+  const recordedBlocks = new Map<string, string>();
+  for (const [id, value] of getAnnotationsMap(ydoc)) {
+    if (isThreadMap(value)) recordedBlocks.set(id, value.get("blockId") as string);
+  }
+  const anchors = new Map<string, AnnotationAnchor>();
+  if (recordedBlocks.size === 0) return anchors;
+  for (const { blockId, texts, ...coordinates } of visibleAnnotationParts(ydoc)) {
+    const spans = new Map<string, { start: number; end: number }>();
+    for (const run of commentRuns(texts)) {
+      if (!recordedBlocks.has(run.threadId)) continue;
+      const span = spans.get(run.threadId);
+      if (span === undefined) spans.set(run.threadId, { start: run.start, end: run.end });
+      else span.end = run.end;
+    }
+    if (spans.size === 0) continue;
+    const plain = annotationPlainText(texts);
+    for (const [threadId, span] of spans) {
+      const prior = anchors.get(threadId);
+      if (prior !== undefined && (blockId !== recordedBlocks.get(threadId) || prior.blockId === blockId)) continue;
+      anchors.set(threadId, {
+        blockId,
+        range: { ...coordinates, ...span, collapsed: span.start === span.end },
+        text: plain.slice(span.start, span.end),
+      });
+    }
+  }
+  return anchors;
+}
+
+/** Losing every visible mark leaves the stored thread intact and unanchored. */
 export function resolveAnnotationRange(
   ydoc: Y.Doc,
   threadId: string,
 ): AnnotationRange | null {
-  // Range resolution needs no conversation materialization on each rail update.
-  const thread = threadMap(ydoc, threadId);
-  if (thread === null) return null;
-
-  const runs = listAnnotationRanges(ydoc, thread.get("blockId") as string).filter(
-    (run) => run.threadId === threadId,
-  );
-  const first = runs[0];
-  if (first === undefined) return null;
-  // Foreign writers can copy marks into other cells. A cell thread still has
-  // one cell's offset space, so resolve the first marked cell in reading order.
-  const sameCell = runs.filter((run) => run.row === first.row && run.column === first.column && run.part === first.part);
-  const last = sameCell[sameCell.length - 1];
-  if (last === undefined) return null;
-
-  return {
-    ...(first.row === undefined || first.column === undefined ? {} : { row: first.row, column: first.column }),
-    ...(first.part === undefined ? {} : { part: first.part }),
-    start: first.start,
-    end: last.end,
-    collapsed: first.start === last.end,
-  };
+  return resolveAnnotationAnchors(ydoc).get(threadId)?.range ?? null;
 }
 
 /**
