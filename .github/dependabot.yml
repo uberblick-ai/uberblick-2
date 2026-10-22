@@ -1,4 +1,6 @@
 version: 2
+# No `labels:` key: Dependabot's default `dependencies` label is the loop's
+# integrator trigger (ub-agents.yaml), and a custom list would replace it.
 updates:
   # One pnpm workspace: the root lockfile covers every package.
   - package-ecosystem: npm

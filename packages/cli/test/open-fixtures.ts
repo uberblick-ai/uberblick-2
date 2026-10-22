@@ -5,18 +5,20 @@
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import { createConnection, createServer } from "node:net";
-import { userInfo } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { setTimeout as delay } from "node:timers/promises";
 import type { Hub } from "@uberblick/hub";
 import type { TokenClaims, TokenScope } from "@uberblick/schema/token";
 import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "@uberblick/schema/token";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
+import { type InitLock, tryAcquireLock } from "@uberblick/mcp-server/init-lock";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
 import { SESSION_HEADER } from "../src/open-session.js";
 import { probeHubState } from "../src/probes.js";
@@ -47,16 +49,57 @@ export const listeners: (() => Promise<void>)[] = [];
 export const children: (() => Promise<void>)[] = [];
 
 /**
+ * A binding without a hub address makes `ub open` start its hub on
+ * `ws://localhost:1234`, and a machine has one such port. Suites run in
+ * parallel, so a second such hub finds the first one still serving or stopping
+ * there and `ub open` refuses. A test that starts its hub on the default holds
+ * this lock; `cleanUp` releases it once the test's processes have exited.
+ */
+const DEFAULT_HUB_LOCK = join(tmpdir(), "uberblick-cli-test-default-hub.lock");
+let defaultHub: InitLock | null = null;
+
+export async function holdDefaultHub(): Promise<void> {
+  while (defaultHub === null) {
+    defaultHub = tryAcquireLock(DEFAULT_HUB_LOCK);
+    if (defaultHub === null) {
+      clearDeadHolder();
+      await delay(50);
+    }
+  }
+}
+
+/** A run killed mid-test leaves its lock behind, naming a process that is gone. */
+function clearDeadHolder(): void {
+  let pid: number;
+  try {
+    pid = Number(readFileSync(DEFAULT_HUB_LOCK, "utf8"));
+  } catch {
+    return;
+  }
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") rmSync(DEFAULT_HUB_LOCK, { force: true });
+  }
+}
+
+/**
  * Stop everything a test left running and remove its sandboxes. Every `ub
  * open` suite registers it with `afterEach`.
  */
 export async function cleanUp(): Promise<void> {
-  await cleanUpResources(
-    children.splice(0),
-    hubs.splice(0).map((hub) => () => hub.stop()),
-    listeners.splice(0),
-    [removeTempDirs],
-  );
+  try {
+    await cleanUpResources(
+      children.splice(0),
+      hubs.splice(0).map((hub) => () => hub.stop()),
+      listeners.splice(0),
+      [removeTempDirs],
+    );
+  } finally {
+    defaultHub?.release();
+    defaultHub = null;
+  }
 }
 
 // --- fixtures ----------------------------------------------------------------

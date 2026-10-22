@@ -25,10 +25,17 @@ function DocumentReference({ uuid, label, context, compact = false, className }:
   if (context === null) return null;
   const link = context.lookup(uuid);
   const text = label ?? link.title ?? uuid;
-  return <a className={className === undefined ? "ub-doclink" : `ub-doclink ${className}`} href={context.href(uuid)}
+  const deleted = link.state === "deleted";
+  return <a className={className === undefined ? "ub-doclink" : `ub-doclink ${className}`} href={deleted ? undefined : context.href(uuid)}
     data-doc-link-state={link.state}
-    title={link.state === "archived" ? "This document is archived. The link opens it read-only." : undefined}
+    aria-disabled={deleted || undefined}
+    tabIndex={deleted ? -1 : undefined}
+    title={deleted ? "This document was deleted." : link.state === "archived" ? "This document is archived. The link opens it read-only." : undefined}
     onClick={(event) => {
+      if (context.lookup(uuid).state === "deleted") {
+        event.preventDefault();
+        return;
+      }
       if (!isPlainClick(event)) return;
       event.preventDefault();
       context.open(uuid);

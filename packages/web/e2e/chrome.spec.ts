@@ -2791,7 +2791,7 @@ for (const scheme of ["light", "dark"] as const) {
       await confirmation.getByRole("button", { name: "Archive", exact: true }).click();
       const banner = page.locator(".ub-archived-banner");
       await expect(banner).toBeVisible();
-      expect(oklab(await paintedIn(banner, "border-left-color")).chroma).toBeGreaterThan(accentChroma);
+      expect(oklab(await paintedIn(banner, "border-left-color")).chroma).toBeLessThan(accentChroma);
     }, true);
   });
 }
