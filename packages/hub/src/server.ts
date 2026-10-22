@@ -1,5 +1,6 @@
 import type {
   Extension,
+  Connection,
   Hocuspocus,
   WebSocketLike,
   onAuthenticatePayload,
@@ -36,6 +37,8 @@ import type {
 import { clampToken, importRootSecret, inspectToken } from "@uberblick/schema/token";
 import { isLoopbackHost } from "@uberblick/schema/loopback";
 import { prepareDatabaseRelease } from "./database-release.js";
+import { OriginUpdates, type UpdateAuthor } from "./update-attribution.js";
+import type { UpdateOriginMetadata } from "@uberblick/schema";
 
 /**
  * Local connections carry verified claims. Remote connections carry the
@@ -80,6 +83,21 @@ export interface HubExtension {
   handleRequest(request: IncomingMessage, response: ServerResponse): Promise<boolean>;
   start(): Promise<void>;
   stop(): Promise<void>;
+  assertCurrent?(connection: Connection<CredentialContext>, room: string): void;
+  resolveAuthor?(context: CredentialContext, origin: UpdateOriginMetadata | null): UpdateAuthor | null;
+}
+
+function createOriginUpdates(deletedRooms: DeletedRooms, extension: HubExtension | undefined, requireMetadata: boolean): OriginUpdates {
+  return new OriginUpdates({
+    requireMetadata,
+    assertCurrent(connection, room) {
+      deletedRooms.requireRoom(room, connection);
+      if ("principalId" in connection.context) {
+        extension?.assertCurrent?.(connection as Connection<CredentialContext>, room);
+      }
+    },
+    resolveAuthor(context, origin) { return extension?.resolveAuthor?.(context, origin) ?? null; },
+  });
 }
 
 /** Preserve the HTTP surface of an embedded hub with no sign-in configured. */
@@ -542,6 +560,7 @@ export async function createHub(config: HubConfig, options: {
   }
 
   const deletedRooms: DeletedRooms = new DeletedRooms(database, () => server.hocuspocus);
+  const originUpdates = createOriginUpdates(deletedRooms, extension, deviceCredentials);
   const server = new Server<HubContext>({
     port: config.port ?? DEFAULT_PORT,
     address,
@@ -557,7 +576,7 @@ export async function createHub(config: HubConfig, options: {
     ...(config.maxDebounce === undefined
       ? {}
       : { maxDebounce: config.maxDebounce }),
-    extensions: [database, ...(extension?.extensions ?? [])],
+    extensions: [database, ...(extension?.extensions ?? []), originUpdates],
 
     /**
      * Stamp the direct peer before losing the socket. Never throw: Hocuspocus

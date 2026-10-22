@@ -15,7 +15,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { HocuspocusProvider } from "@hocuspocus/provider";
+import { HocuspocusProvider, MessageType } from "@hocuspocus/provider";
+import { IncomingMessage } from "@hocuspocus/server";
+import { encodeOriginUpdate, readOriginAck } from "@uberblick/schema";
 import * as Y from "yjs";
 import type { TeamHubConfig as HubConfig } from "../src/team-config.js";
 import { silentLogger } from "../src/log.js";
@@ -181,6 +183,45 @@ export interface ClientOptions {
    * the token, and it must reach the token check to find out.
    */
   protocolVersion?: number | null;
+  /** Protocol 7 team transport, with intentionally unknown original authorship. */
+  originUpdates?: boolean;
+}
+
+class OriginTestProvider extends HocuspocusProvider {
+  private readonly emptyDocument = new Y.Doc();
+
+  constructor(options: ConstructorParameters<typeof HocuspocusProvider>[0]) {
+    super(options);
+    this.on("stateless", ({ payload }: { payload: string }) => {
+      if (readOriginAck(payload)?.applied === true) this.decrementUnsyncedChanges();
+    });
+  }
+
+  override documentUpdateHandler(update: Uint8Array, origin: unknown): void {
+    if (origin === this) return;
+    this.incrementUnsyncedChanges();
+    this.sendStateless(encodeOriginUpdate(randomUUID(), update, null));
+  }
+
+  override onMessage(event: MessageEvent): void {
+    const message = new IncomingMessage(new Uint8Array(event.data));
+    message.readVarString();
+    if (message.readVarUint() !== MessageType.Sync || message.readVarUint() !== 0) {
+      super.onMessage(event);
+      return;
+    }
+    const document = this.configuration.document;
+    this.configuration.document = this.emptyDocument;
+    try { super.onMessage(event); }
+    finally { this.configuration.document = document; }
+    this.incrementUnsyncedChanges();
+    this.sendStateless(encodeOriginUpdate(randomUUID(), Y.encodeStateAsUpdate(document), null));
+  }
+
+  override destroy(): void {
+    super.destroy();
+    this.emptyDocument.destroy();
+  }
 }
 
 export function createClient(options: ClientOptions): TestClient {
@@ -194,7 +235,8 @@ export function createClient(options: ClientOptions): TestClient {
         };
   const claimed = options.protocolVersion;
 
-  const provider = new HocuspocusProvider({
+  const Provider = options.originUpdates ? OriginTestProvider : HocuspocusProvider;
+  const provider = new Provider({
     // Loopback is a test concern: the hub itself never names an address.
     url: `ws://127.0.0.1:${options.port}`,
     name: options.room,

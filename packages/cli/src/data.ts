@@ -130,6 +130,7 @@ async function dataCommand(command: DataCommand, io: Io): Promise<number> {
     for (const warning of resolved.warnings) io.err(`ub: warning: ${warning}\n`);
     await ensureWorkspaceBinding(binding, resolved.env, resolved.paths.projectConfig ?? "environment");
     const instance = openWorkspaceReplicas(config, { publishOwnPresence: false, hubFree: binding.hubUrl === null });
+    instance.replicas.setWriteSurface({ kind: "cli", name: "ub data" });
     try {
       if (command.command === "get") {
         const data = await readWorkspaceData(instance.replicas, uuid);
