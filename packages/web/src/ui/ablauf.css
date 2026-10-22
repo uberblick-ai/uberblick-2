@@ -1,5 +1,5 @@
 .ub-ablauf { margin: 0.7em 0; min-width: 0; max-width: 100%; white-space: normal; }
-.ub-ablauf-panel { position: relative; max-width: 100%; }
+.ub-ablauf-panel { position: relative; max-width: 100%; margin-inline: auto; }
 .ub-ablauf-viewport {
   max-width: 100%;
   overflow: hidden;

@@ -71,6 +71,22 @@ async function sourceIsFramed(page: Page): Promise<void> {
     const frame = element.closest(".ub-block-frame");
     return frame !== null && !frame.classList.contains("ub-ablauf");
   })).toBe(true);
+  const frame = await page.locator(".ub-ablauf-source-frame").boundingBox();
+  const column = await neighbor(page).boundingBox();
+  if (frame === null || column === null) throw new Error("e2e: source frame bounds missing");
+  expect(Math.abs(frame.x - column.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(frame.width - column.width)).toBeLessThanOrEqual(1);
+  expect(await source(page).evaluate(element => ["start", "left"].includes(getComputedStyle(element).textAlign))).toBe(true);
+}
+
+async function viewerIsCentered(page: Page): Promise<void> {
+  await expect.poll(() => viewer(page).locator(".ub-ablauf-viewer-drawing").evaluate(element => {
+    const canvas = element.parentElement?.getBoundingClientRect();
+    const diagram = element.getBoundingClientRect();
+    if (canvas === undefined) throw new Error("e2e: viewer canvas missing");
+    return Math.max(Math.abs(diagram.x + diagram.width / 2 - canvas.x - canvas.width / 2),
+      Math.abs(diagram.y + diagram.height / 2 - canvas.y - canvas.height / 2));
+  })).toBeLessThanOrEqual(1);
 }
 
 async function toolbarShown(button: Locator): Promise<boolean> {
@@ -182,6 +198,13 @@ test("the renderer loads on first use, hides the pending drawing and retries fai
   await waitForDocumentDraw(page, session, uuid, { source: FLOW, outcome: "error" });
   const diagnostics = page.locator(".ub-ablauf-diagnostics");
   await expect(diagnostics).toContainText("Preview cannot be loaded:");
+  const failure = await page.locator(".ub-ablauf-panel").boundingBox();
+  const column = await neighbor(page).boundingBox();
+  const list = await diagnostics.boundingBox();
+  if (failure === null || column === null || list === null) throw new Error("e2e: failure bounds missing");
+  expect(Math.abs(failure.x - column.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(failure.width - column.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(list.x - column.x)).toBeLessThanOrEqual(1);
   expect(requests).toHaveLength(1);
   await activateControl(neighbor(page));
   await expect(source(page)).toBeHidden();
@@ -192,6 +215,9 @@ test("the renderer loads on first use, hides the pending drawing and retries fai
     if (bounds === null) throw new Error("e2e: source recovery control missing");
     expect(bounds.width).toBeGreaterThanOrEqual(44);
     expect(bounds.height).toBeGreaterThanOrEqual(44);
+    const toolbar = await page.locator(".ub-ablauf-panel > .ub-figure-toolbar").boundingBox();
+    if (toolbar === null) throw new Error("e2e: source recovery toolbar missing");
+    expect(Math.abs(toolbar.x - column.x)).toBeLessThanOrEqual(1);
     await expect(expand(page)).toBeHidden();
     await activateControl(action);
     await expect(source(page)).toBeVisible();
@@ -341,7 +367,7 @@ test("comments keep the source visible and read-only diagrams lose their authori
   await expect(openSource(fresh)).toBeHidden();
 });
 
-test("frameless diagrams fit every column, keep natural size, and open by pointer only below 75%", async ({ browser }) => {
+test("frameless diagrams fit every column, center at natural size, and open by pointer only below 75%", { tag: "@webkit" }, async ({ browser }) => {
   const session = writer();
   const { uuid } = await session.call<{ uuid: string }>("create_doc", {
     title: "Ablauf column fitting", description: "Natural and wide flows stay inside the reading column.",
@@ -372,21 +398,46 @@ test("frameless diagrams fit every column, keep natural size, and open by pointe
       const svg = element.querySelector(".ub-ablauf-drawing")?.shadowRoot?.querySelector("svg");
       const column = element.closest(".ProseMirror");
       if (viewport === null || svg === null || svg === undefined || column === null) throw new Error("e2e: diagram fitting probes missing");
-      return { drawn: svg.getBoundingClientRect().width, natural: Number(svg.getAttribute("width")),
-        column: column.getBoundingClientRect().width, scroll: viewport.scrollWidth - viewport.clientWidth };
+      const surface = viewport.getBoundingClientRect(), diagram = svg.getBoundingClientRect(), bounds = column.getBoundingClientRect();
+      const toolbar = element.querySelector(".ub-figure-toolbar");
+      if (toolbar === null) throw new Error("e2e: diagram toolbar missing");
+      const tools = toolbar.getBoundingClientRect();
+      return { drawn: diagram.width, natural: Number(svg.getAttribute("width")),
+        column: bounds.width, scroll: viewport.scrollWidth - viewport.clientWidth,
+        gapDifference: (diagram.x - bounds.x) - (bounds.right - diagram.right),
+        surfaceDifference: Math.max(Math.abs(surface.x - diagram.x), Math.abs(surface.width - diagram.width),
+          Math.abs(surface.y - diagram.y), Math.abs(surface.height - diagram.height)),
+        toolbarRight: diagram.right - tools.right, toolbarTop: tools.y - diagram.y };
     }));
     for (const fit of fits) {
       expect(fit.drawn).toBeLessThanOrEqual(fit.column + 0.5);
       expect(fit.drawn).toBeLessThanOrEqual(fit.natural + 0.5);
       expect(fit.scroll).toBeLessThanOrEqual(1);
+      expect(Math.abs(fit.drawn - Math.min(fit.column, fit.natural))).toBeLessThanOrEqual(1);
+      expect(Math.abs(fit.gapDifference)).toBeLessThanOrEqual(1);
+      expect(fit.surfaceDifference).toBeLessThanOrEqual(1);
+      expect(fit.toolbarRight).toBeGreaterThanOrEqual(0);
+      expect(fit.toolbarRight).toBeLessThan(10);
+      expect(fit.toolbarTop).toBeGreaterThanOrEqual(0);
+      expect(fit.toolbarTop).toBeLessThan(10);
     }
+    expect(fits[0]?.natural).toBeLessThan((fits[0]?.column ?? 0) * 0.75);
     expect(fits[1]?.drawn).toBeLessThan((fits[1]?.natural ?? 0) * 0.6);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
   await first.locator(".ub-ablauf-viewport").click();
   await expect(first.locator(".ub-ablauf-viewport")).toBeFocused();
+  await expect(first.locator(".ub-ablauf-viewport")).not.toHaveCSS("box-shadow", "none");
   await expect(viewer(page)).toHaveCount(0);
+  await first.evaluate(element => {
+    const root = element.closest(".ProseMirror") as (HTMLElement & { editor: Editor }) | null;
+    if (root === null) throw new Error("e2e: diagram editor missing");
+    root.editor.commands.setNodeSelection(root.editor.view.posAtDOM(element, 0) - 1);
+  });
+  await expect(first).toHaveClass(/ProseMirror-selectednode/);
+  await page.locator(".ub-title").focus();
+  await expect(first.locator(".ub-ablauf-viewport")).not.toHaveCSS("box-shadow", "none");
   const blockId = await first.getAttribute("id");
   if (blockId === null) throw new Error("e2e: Ablauf block identity missing");
   const sheet = await page.addStyleTag({ content: `[id='${blockId}'] { max-width: ${natural * 0.76}px; }` });
@@ -425,6 +476,7 @@ test("the viewer preserves history state, restores focus on every close path, an
     const bounds = await viewer(page).boundingBox();
     expect(bounds).toMatchObject({ x: 0, y: 0, width: 1366, height: 900 });
     await expect.poll(() => zoomLevel(page)).toBe(100);
+    await viewerIsCentered(page);
     if (close === "escape") await page.keyboard.press("Escape");
     else if (close === "button") await viewer(page).getByRole("button", { name: "Close diagram viewer", exact: true }).click();
     else await page.goBack();
@@ -461,6 +513,7 @@ test("Fit shows a tall flow below 25%, while manual zoom, wheel zoom and drag st
   await page.keyboard.press("Enter");
   await expect(viewer(page)).toBeVisible();
   await expect.poll(() => zoomLevel(page)).toBeLessThan(25);
+  await viewerIsCentered(page);
   const fit = await zoomLevel(page);
   const canvas = viewer(page).locator(".ub-ablauf-viewer-viewport");
   const svg = viewer(page).locator(".ub-ablauf-viewer-drawing svg");
@@ -497,6 +550,7 @@ test("Fit shows a tall flow below 25%, while manual zoom, wheel zoom and drag st
   await expect.poll(() => zoomLevel(page)).toBe(25);
   await viewer(page).getByRole("button", { name: "Fit", exact: true }).click();
   await expect.poll(() => zoomLevel(page)).toBe(fit);
+  await viewerIsCentered(page);
   await page.keyboard.press("Escape");
   await expect(viewer(page)).toHaveCount(0);
 });
