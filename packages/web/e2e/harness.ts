@@ -60,7 +60,7 @@ const SECRET = "uberblick-e2e-hub-secret";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(packageRoot, "..", "..");
-const UB = join(repoRoot, "packages", "cli", "bin", "ub.mjs");
+const UB = join(repoRoot, "packages", "cli", "test", "source-ub.mjs");
 
 const OPEN_ATTEMPTS = 5;
 const OPEN_READY_MS = 30_000;

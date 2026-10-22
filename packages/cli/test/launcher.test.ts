@@ -24,17 +24,28 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { SHIPPED_UB, removeTempDirs, sandbox } from "./helpers.js";
+import { PACKAGE_ROOT, REPO_ROOT, SHIPPED_UB, removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
 
 describe("bin/ub.mjs", () => {
   it("runs from outside the checkout, and drops one warning while printing the rest", () => {
     const box = sandbox();
+    // An archive-shaped copy runs this checkout's shim and source instead of
+    // selecting a linked worktree's primary checkout during the test.
+    const archive = join(box.cwd, "archive");
+    const cli = join(archive, "packages", "cli");
+    const launcher = join(cli, "bin", "ub.mjs");
+    mkdirSync(join(cli, "bin"), { recursive: true });
+    copyFileSync(SHIPPED_UB, launcher);
+    symlinkSync(join(PACKAGE_ROOT, "src"), join(cli, "src"), "dir");
+    symlinkSync(join(PACKAGE_ROOT, "node_modules"), join(cli, "node_modules"), "dir");
+    symlinkSync(join(PACKAGE_ROOT, "tsconfig.json"), join(cli, "tsconfig.json"), "file");
+    symlinkSync(join(REPO_ROOT, "tsconfig.base.json"), join(archive, "tsconfig.base.json"), "file");
 
     // `--import`, not `NODE_OPTIONS`: tsx runs its module hooks on a worker
     // thread, and NODE_OPTIONS reaches that thread too — the probe would run
@@ -55,7 +66,7 @@ describe("bin/ub.mjs", () => {
 
     const run = spawnSync(
       process.execPath,
-      ["--import", pathToFileURL(probe).href, SHIPPED_UB, "--version"],
+      ["--import", pathToFileURL(probe).href, launcher, "--version"],
       { cwd: box.cwd, env: box.env, encoding: "utf8", timeout: 25_000 },
     );
 

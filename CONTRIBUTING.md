@@ -252,8 +252,11 @@ root (`touch .uberblick-use-shared-replicas`) and restart its MCP sessions and
 `ub open`. This opts in every workspace those commands serve, so branch schema
 can reach shared files. Remove the file (`rm .uberblick-use-shared-replicas`)
 and restart to restore primary-code routing. Removing it does not undo schema
-already applied. Use the private-storage test harnesses for branch testing
-without that risk.
+already applied. For branch testing, `mise run test` uses candidate-built CLI
+bundles and `mise run e2e` starts the checkout's own CLI source directly; both
+keep replicas in private test homes. The source-launcher test copies the
+checkout's shim into a private archive-shaped fixture so Git routing cannot
+silently substitute the primary checkout's implementation.
 
 ### Rebuilding a replica after an unmerged schema change
 

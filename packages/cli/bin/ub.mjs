@@ -58,8 +58,9 @@ function checkoutEntry() {
 let entry;
 try {
   entry = checkoutEntry();
-} catch {
-  process.stderr.write("ub: cannot safely select primary checkout; restore/setup the primary checkout before running worktree ub\n");
+} catch (error) {
+  process.stderr.write(`ub: cannot safely select primary checkout: ${error.message}\n`);
+  process.stderr.write("restore/setup the primary checkout, or deliberately opt this checkout into shared replicas with a regular .uberblick-use-shared-replicas file at its root\n");
   process.exit(1);
 }
 

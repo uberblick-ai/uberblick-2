@@ -3,6 +3,7 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -164,6 +165,36 @@ describe("linked-worktree source launcher", () => {
     for (const path of f.databases) expect(schema(path)).toEqual(["primary_schema_marker"]);
   });
 
+  it.each([["open"], ["mcp", "serve"], ["data", "get", "document"]])(
+    "private harness entry runs candidate code for %j without a usable primary checkout",
+    (...args: string[]) => {
+      const f = fixture();
+      rmSync(launcher(f.primary));
+      const entry = join(f.linked, "packages", "cli", "test", "source-ub.mjs");
+      mkdirSync(dirname(entry));
+      copyFileSync(new URL("./source-ub.mjs", import.meta.url), entry);
+      const dependency = join(f.linked, "node_modules", "schema-owner");
+      mkdirSync(dependency, { recursive: true });
+      writeFileSync(join(dependency, "package.json"), '{"type":"module","main":"index.js"}\n');
+      writeFileSync(join(dependency, "index.js"), 'export {};\n');
+      const main = join(f.linked, "packages", "cli", "src", "main.ts");
+      writeFileSync(main, `import "schema-owner";\n${readFileSync(main, "utf8")}`);
+      const hostile = join(f.cwd, "wrong-source.ts");
+      writeFileSync(hostile, 'throw new Error("Caller aliases must not choose the implementation");\n');
+      const config = join(f.cwd, "tsconfig.json");
+      writeFileSync(config, JSON.stringify({ compilerOptions: { paths: { "schema-owner": [hostile] } } }));
+      const result = spawnSync(process.execPath, [entry, ...args], {
+        cwd: f.cwd, env: { ...f.env, TSX_TSCONFIG_PATH: config }, encoding: "utf8", timeout: 25_000,
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        source: "branch", cwd: f.cwd, args,
+        configHome: f.env.XDG_CONFIG_HOME, session: "worktree-test",
+      });
+      for (const path of f.databases) expect(schema(path)).toEqual(["branch_schema_marker"]);
+    },
+  );
+
   it("allows only an explicit opt-in in that linked checkout to run branch code", () => {
     const f = fixture();
     writeFileSync(join(f.linked, ".uberblick-use-shared-replicas"), "");
@@ -273,7 +304,9 @@ describe("linked-worktree source launcher", () => {
     expect(result.status).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("ub: cannot safely select primary checkout");
+    expect(result.stderr).toContain("primary checkout entry missing");
     expect(result.stderr).toContain("restore/setup the primary checkout");
+    expect(result.stderr).toContain(".uberblick-use-shared-replicas");
     for (const path of f.databases) expect(existsSync(path)).toBe(false);
   });
 
@@ -283,6 +316,8 @@ describe("linked-worktree source launcher", () => {
     const result = run(f, f.linked, ["open"]);
     expect(result.status).toBe(1);
     expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("opt-in must be a regular file");
+    expect(result.stderr).toContain(".uberblick-use-shared-replicas");
     for (const path of f.databases) expect(existsSync(path)).toBe(false);
   });
 });
