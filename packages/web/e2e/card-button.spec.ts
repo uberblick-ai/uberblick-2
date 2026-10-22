@@ -224,7 +224,7 @@ test("Remove card shares the hover controls and restores focus for native undo",
     await expect(controls).toHaveCSS("opacity", "1");
     await expect(remove).toHaveCSS("pointer-events", "auto");
     await expect(edit).toHaveCSS("pointer-events", "auto");
-    const layout = await controls.evaluate((element) => {
+    const readLayout = () => controls.evaluate((element) => {
       const [remove, edit] = [...element.querySelectorAll("button")];
       if (remove === undefined || edit === undefined) throw new Error("e2e: missing card controls");
       const left = remove.getBoundingClientRect();
@@ -239,10 +239,14 @@ test("Remove card shares the hover controls and restores focus for native undo",
         sameRow: left.top === right.top, height: left.height, editHeight: right.height,
         removePaint: paint(remove), editPaint: paint(edit), icons: element.querySelectorAll("svg").length };
     });
+    const layout = await readLayout();
     expect(layout).toMatchObject({ top: "8px", right: "8px", gap: 4, sameRow: true, icons: 0 });
     expect(layout.height).toBe(layout.editHeight);
     if (touch) expect(layout.height).toBeGreaterThanOrEqual(44);
-    expect(layout.removePaint).toEqual(layout.editPaint);
+    await expect.poll(async () => {
+      const settled = await readLayout();
+      return JSON.stringify(settled.removePaint) === JSON.stringify(settled.editPaint);
+    }, { message: "Remove and Edit share the same settled paint" }).toBe(true);
     await expect(remove).toHaveAttribute("data-variant", "outline");
     await expect(remove).toHaveAttribute("data-size", "sm");
     if (process.env.UB_AGENTS_SCRATCH !== undefined) {
