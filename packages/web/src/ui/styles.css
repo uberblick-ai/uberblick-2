@@ -315,8 +315,7 @@ body {
 }
 
 .ub-rebound-notice code,
-.ub-notice code,
-.ub-inline-code {
+.ub-notice code {
   font-family: var(--font-mono);
   font-size: inherit;
   line-height: inherit;
@@ -1699,12 +1698,18 @@ h6.ub-heading {
   }
 }
 
-/* Inline code keeps machine text distinct with its mono face and box. */
+/* Inline code keeps machine text distinct with its mono face and box.
+   Geist Mono's box is about 1.3em tall, so 0.85em with no vertical padding
+   keeps the box inside the tight h2/h3 leading, and line-height 1 stops the
+   smaller baseline-aligned face from growing the line. */
 .ub-inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  line-height: 1;
   background: var(--muted);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 0.05em 0.3em;
+  padding: 0 0.35em;
 }
 
 .ub-link,

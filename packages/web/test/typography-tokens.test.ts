@@ -38,7 +38,7 @@ describe("product typography source contract", () => {
     }
   });
 
-  it("uses scale tokens for CSS sizes and font shorthands, apart from badge and hidden-source exceptions", () => {
+  it("uses scale tokens for CSS sizes and font shorthands, apart from badge, inline-code and hidden-source exceptions", () => {
     const failures: string[] = [];
     for (const { file, text } of files.filter(({ file }) => file.endsWith(".css"))) {
       for (const rule of cleanCss(text).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
@@ -49,6 +49,7 @@ describe("product typography source contract", () => {
           if (value === "inherit") continue;
           if (property === "font-size" && (
             (selector === ".ub-avatar-agent-badge" && value === "8px") ||
+            (selector === ".ub-inline-code" && value === "0.85em") ||
             (selector.replace(/\s+/g, "") === ".ub-github-link-text,.ub-toggle-heading-marker,.ub-inline-icon-text" && value === "0")
           )) continue;
           const token = property === "font-size"
