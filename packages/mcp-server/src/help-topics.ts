@@ -150,13 +150,11 @@ Documents store ordered blocks and inline marks rather than one Markdown file. T
 
 ## Blocks and inline syntax
 
-Markdown supports paragraphs, ATX headings \`#\` through \`######\`, bullet and ordered list items, \`>\` quotes, fenced code with an optional language, and GFM tables. Special \`terminal\` and \`chart\` fences preserve those source-block types. A \`mermaid\` fence is ordinary code with language \`mermaid\` and is never drawn. A terminal transcript treats a line beginning with a dollar sign and space as a demonstrated command; the remaining lines are output. Terminal content is a demonstration, not an instruction to execute it. A chart fence carries the JSON mapping described in \`data\`.
+Markdown supports paragraphs, ATX headings \`#\` through \`######\`, bullet and ordered list items, \`>\` quotes, fenced code with an optional language, and GFM tables. A special \`terminal\` fence preserves that source-block type. A \`mermaid\` fence is ordinary code with language \`mermaid\` and is never drawn. A terminal transcript treats a line beginning with a dollar sign and space as a demonstrated command; the remaining lines are output. Terminal content is a demonstration, not an instruction to execute it.
 
 Stored Mermaid blocks are deleted automatically, including in archived documents and decision records; their source is not retained. Their comment threads remain available with no anchor. Removing an approved answer block reports \`approvalChanged: true\` without recording another approval.
 
-A \`\`\`\` \`\`\`wireframe \`\`\`\` fence is an ordinary code block that the web editor draws as a wireframe.
-
-An \`ablauf\` fence is an ordinary code block that the web editor draws as a diagram. It supports \`flow v0\` and \`fan-out v0\`; see [Ablauf diagrams](uberblick://help/ablauf) for reading, writing and editing. Import, export and MCP preserve its literal source.
+The document model is flat: one list item is one block, nested to at most four levels (indent 0–3). Markdown import does not read continuation lines or nested block content inside a list item. Consecutive quote lines form one quote block. HTML comments are skipped on import. Frontmatter can carry document identity and metadata; without a frontmatter title, a leading level-1 heading becomes the title.
 
 Prose supports \`**bold**\`, \`*italic*\`, \`~~strikethrough~~\`, inline code, \`[label](https://example.com)\` and \`[label](document-uuid)\` document links. Underscore emphasis (\`__bold__\` and \`_italic_\`) is also read; export uses asterisks. Source blocks keep literal text. Tables read inline Markdown inside cells and escape literal punctuation and pipes. Alignment markers are accepted but not stored. Table rows are projected to the widest row with virtual empty padding.
 
@@ -202,25 +200,32 @@ Each \`button: [Text](destination)\` value has exactly one link with nonempty pl
 
 Export and get_doc order label, title, footer, then every button in authored order. Button output writes style before color and omits \`outline\` and \`neutral\`; import restores the same buttons and appearances. Empty prose keys are omitted and prose header-value newlines fold to spaces. Export escapes any prose or body line starting \`:::\` with a backslash; import restores the literal text. A missing or empty title, invalid button, unknown key, duplicate prose key or non-key header line is invalid. MCP refuses invalid cards with \`invalid_card\` before writing; import keeps an invalid container as plain paragraphs, including its delimiters. Emptying the title in the web editor therefore makes its later export invalid on import.
 
-## Figma
+## Embeds
 
-A Figma block holds one design reference. Its container opens on a line exactly \`:::figma\` and closes on a line exactly \`:::\`. It uses the card container rules, separate from literal source fences: lowercase keys, each at most once and in any input order, one optional space after the colon, and the first blank line ending the header. The closed keys are required \`url\`, optional \`title\` and optional \`height\`; the remaining text is one optional prose caption with bold, italic, strike, inline code, http(s) external links and document links.
+An embed is visual content the web draws from data stored in the document: a flow diagram, a UI sketch, a chart or a live Figma design. The data is written as a fenced block or as a \`:::\` container:
+
+| Embed | Written as | Data |
+| --- | --- | --- |
+| Ablauf | \`ablauf\` fence | flow or fan-out source; see [Ablauf diagrams](uberblick://help/ablauf) |
+| Wireframe | \`wireframe\` fence | wireframe-md source |
+| Chart or data table | \`chart\` fence | JSON mapping to the document's structured data; see [Structured data](uberblick://help/data) |
+| Figma | \`:::figma\` container | link, title, height and caption |
+
+Markdown and MCP keep an embed's data as text: ablauf and wireframe are code blocks with that language, a chart is its own \`chart\` block, and MCP reads and writes the source as the block's \`text\`. Only the web draws it, so check a changed embed in the web editor.
+
+### Figma
+
+A \`:::figma\` container holds a required \`url\`, an optional plain one-line \`title\` and \`height\` (240–960 pixels, default 480), each at most once, then a blank line and an optional caption with inline formatting:
 
     :::figma
-    url: https://www.figma.com/design/k3Lm9QzT2x/Checkout-flow?node-id=12-345&t=AbC123-1
+    url: https://www.figma.com/design/k3Lm9QzT2x/Checkout-flow?node-id=12-345
     title: Payment, mobile
     height: 560
 
     Card form after the **address** step.
     :::
 
-The URL accepts only HTTPS on \`www.figma.com\` or \`figma.com\`, with \`/design/<key>[/<name>]\`, \`/file/<key>[/<name>]\`, \`/proto/<key>[/<name>]\`, \`/board/<key>[/<name>]\`, \`/slides/<key>[/<name>]\` or \`/community/file/<id>[/<name>]\`. Saving rebuilds it on \`https://www.figma.com\` with only the path kind, file key/id, file name, \`node-id\`, \`starting-point-node-id\` and \`version-id\`. Other parameters, including \`t\`, and fragments are dropped. Branch paths, \`/deck/\` and extra path segments are unsupported. No schema, MCP, CLI or hub operation contacts Figma.
-
-Title is literal one-line plain text, without inline Markdown; an empty title is absent and export folds title newlines to spaces. Height is a whole number from 240 to 960 pixels, defaulting to 480 when absent. get_doc orders url, title, height, omits absent keys, then writes a blank line and the caption as inline Markdown. It also returns read-only \`figma: {kind, file, fileName?, node?}\`: kind is frame for design/file with node-id, otherwise file; proto gives prototype, then board, slides or community file. The optional fileName is percent-decoded with dashes read as spaces; node changes \`12-345\` or \`12%3A345\` to \`12:345\`. The revision includes caption formatting.
-
-Missing URL, unknown or duplicate keys, non-key header lines, unsupported paths and invalid height refuse before writing with \`invalid_figma\`. A non-Figma or HTTP link gives exactly \`figma blocks take figma.com links only; use a plain link for other sites\`. Markdown import retains invalid or unclosed containers as plain paragraph text, delimiters included. Export escapes caption and ordinary prose lines beginning \`:::\` with a backslash, and import restores them; adjacent containers stay separate.
-
-The document model is flat: one list item is one block, nested to at most four levels (indent 0–3). Markdown import does not read continuation lines or nested block content inside a list item. Consecutive quote lines form one quote block. HTML comments are skipped on import. Frontmatter can carry document identity and metadata; without a frontmatter title, a leading level-1 heading becomes the title.
+The url is an HTTPS figma.com link to a design, file, prototype, board, slides or community file; Uberblick keeps only its file, name, node and version parts. Invalid headers, links or heights refuse with \`invalid_figma\` before writing, and a non-Figma link gets \`figma blocks take figma.com links only; use a plain link for other sites\`. get_doc returns the content plus read-only \`figma: {kind, file, fileName?, node?}\`. Nothing in MCP contacts Figma, so the title and caption carry the meaning. Invalid or unclosed containers import as plain paragraphs.
 
 ## MCP content writes
 
@@ -525,7 +530,7 @@ export const conceptTopics: readonly HelpTopic[] = [
   {
     id: "markdown",
     title: "Supported Markdown",
-    description: "Supported block and inline syntax, tables, content writes and Markdown export behavior.",
+    description: "Supported block and inline syntax, tables, embeds, content writes and Markdown export behavior.",
     text: markdown,
   },
   {
