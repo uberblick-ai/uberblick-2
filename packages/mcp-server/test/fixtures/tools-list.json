@@ -32,7 +32,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 300,
-          "description": "Agent-facing description used to choose whether to open the document."
+          "description": "Read only by agents, never shown to people: whatever best helps an agent find this document with list_docs and search and decide whether to open it. A keyword list is fine."
         },
         "tldr": {
           "anyOf": [
@@ -950,7 +950,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 300,
-          "description": "Agent-facing description used to choose whether to open the document."
+          "description": "Read only by agents, never shown to people: whatever best helps an agent find this document with list_docs and search and decide whether to open it. A keyword list is fine."
         },
         "tldr": {
           "description": "Person-facing regular-document summary, at most 300 characters. Null clears it without changing a deliberate removal mark. On a marked page, a non-null summary requires tldr_opt_in: true. Decisions have no TL;DR; open records accept null.",

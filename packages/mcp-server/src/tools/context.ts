@@ -49,8 +49,9 @@ import type { DecisionAnswer, blockInputSchema, inlineArg } from "./schemas.js";
 
 /** The one-line prompt a mutating tool carries when a document has none. */
 const DESCRIPTION_NUDGE =
-  "This document has no description: call set_metadata with `description`: one or two sentences saying what it is for, so " +
-  "list_docs and search can answer for it without anyone opening it.";
+  "This document has no description: call set_metadata with `description`. Only agents read it, never people: write " +
+  "whatever best helps an agent find this page with list_docs and search and decide whether to open it, such as what it " +
+  "covers and the terms someone would search for. A keyword list is fine.";
 
 /** The one-line prompt a mutating tool carries when a document has no tags. */
 const TAG_NUDGE =

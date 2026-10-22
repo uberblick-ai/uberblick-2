@@ -13,18 +13,17 @@ export interface HelpTopic {
 
 /** The same orientation is served in initialize.instructions and its help topic. */
 export const STARTUP_ORIENTATION =
-  "Uberblick organizes local-first workspaces into documents, blocks and decision records. " +
-  "Before you change anything in this repo, consult the corpus and its decision records for relevant documents: " +
-  "use `search` with a query or tags. If the request conflicts with a decision in force, ask before building. " +
-  "Document tools operate on your selected workspace: discover with `get_sidebar`, `list_docs` or `search`, " +
-  "then read with `get_doc` before editing. Use returned text and rev for block edits. " +
-  "Structured data has dedicated tools and can supply document views. Discover version-matched product help " +
-  "through MCP resources, or call `get_help(topic)`, for concepts, lifecycle, supported Markdown syntax and tool usage. " +
-  "Built-in help is workspace-agnostic; workspace conventions are ordinary documents, not initialization " +
-  "instructions or help resources. Follow recovery guidance on failures. " +
+  "Uberblick stores this repo's documents and decision records. " +
+  "Before you change anything, search the corpus for relevant ones with `search` (query or tags). " +
+  "If the request conflicts with a decision in force, ask before building. " +
+  "You can list all documents and decision records via `list_docs`, read them with `get_doc`. " +
+  "Documents can store arbitrary, structured json as additional data. " +
+  "Consult `get_help(edit_doc)` to understand how to edit or create documents. " +
+  "Discover additional product help through MCP resources, or call `get_help(topic)`. " +
+  "Built-in help is repo agnostic; the conventions for this repo are in the corpus. " +
+  "Follow recovery guidance on failures. " +
   "Help topics: orientation, workspaces, lifecycle, markdown, ablauf, data, tools, tool-contracts. " +
-  "Read uberblick://help/{topic} or get_help({topic}). Registered tool names are per-tool topic ids; " +
-  "discover them with get_help({}) or tools.";
+  "Read uberblick://help/{topic} or get_help({topic}).";
 
 const workspaces = `# Workspaces and documents
 
@@ -37,7 +36,7 @@ Start with \`get_sidebar({})\` for curated entry points, \`list_docs({})\` for d
 ## Metadata
 
 - \`title\` names the document. MCP creation requires a non-empty title and description; \`set_metadata\` with \`title\` repairs untitled documents.
-- \`description\` is written for an agent deciding whether to open this document. One or two sentences saying what is in it and what it is for, concrete enough to tell it apart from its neighbours — list_docs, search and backlinks all answer with it, so a good one saves a get_doc and a bad one wastes it. At most ${MAX_DESCRIPTION_LENGTH} characters.
+- \`description\` is read only by agents and never shown to people. Write whatever best helps an agent find this document with list_docs and search and decide whether to open it: what it covers, how it differs from its neighbours and the terms someone would search for. A keyword list is fine. list_docs, search and backlinks all answer with it, so a good one saves a get_doc and a bad one wastes it. At most ${MAX_DESCRIPTION_LENGTH} characters.
 - \`tldr\` is one or two sentences of plain English for a person opening a regular document, independent of its description. \`set_metadata\` accepts up to ${MAX_TLDR_LENGTH} characters for it, refuses empty or whitespace-only strings, and accepts null to clear it. A person can choose Remove TL;DR from the web's Document actions to clear the summary and mark the page as having none on purpose. Marked pages return \`tldr: null\` and \`tldrOptOut: true\` only in \`get_doc\`, and content writes omit TL;DR hints. A non-null summary on a marked page refuses with \`tldr_opted_out\` and \`field: "tldr"\` unless \`set_metadata\` passes \`tldr_opt_in: true\` in the same call. The flag requires a non-null \`tldr\`; writing it lifts the mark. Null preserves the mark. The web's Add TL;DR lifts it before editing, even if editing is cancelled. Summary text takes precedence over the mark after concurrent or older-client writes. MCP cannot set the mark. Decisions have no TL;DR: they use answer blocks, return \`tldr: null\`, omit it from directory entries and never report the mark. Ordinary stubs, search and Markdown do not carry TL;DR or the mark. ${TLDR_AFTER_CONTENT_CHANGE}
 - \`tags\` store stable catalog ids. Call \`list_tags\` before choosing active ids or current names (case ignored). \`set_metadata\` with \`tags\` replaces the complete assignment set; an empty array clears it. Existing retired or unresolved assignments may be preserved by their returned ids, or removed; they cannot be newly assigned. MCP cannot curate the catalog. \`list_tags\` reports \`complete: false\` until the catalog arrives from a configured hub, so an unseen selection cannot be assumed invalid in the full workspace.
 - Curated \`links\` are target document UUIDs, replaced by \`set_metadata\` with \`links\`; an empty array clears them. Newly added targets must be known to this replica's directory, archived targets are accepted, and existing curated targets can be retained unchanged. Inline document references also contribute backlinks. Decision-derived links and lifecycle metadata are explained in \`lifecycle\`.
