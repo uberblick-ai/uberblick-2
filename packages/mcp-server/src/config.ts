@@ -4,7 +4,7 @@ import { DEFAULT_PORT } from "@uberblick/hub/config";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
 import { usesDeviceCredentials as usesDeviceLogin } from "@uberblick/mcp-server/auth-store";
 export { usesDeviceCredentials as usesDeviceLogin } from "@uberblick/mcp-server/auth-store";
-import { parseWorkspaceId } from "@uberblick/schema";
+import { parseWorkspaceId, UPDATED_AT_COARSENESS_MS } from "@uberblick/schema";
 import { trimmed } from "./strings.js";
 
 /** Internal fallback; public startup resolves the project's workspace binding. */
@@ -142,6 +142,6 @@ export function resolveMcpConfig(
     cursorTtlMs: 30_000,
     compactAfter: 500,
     reconcileRetryMs: 5_000,
-    updatedAtCoarsenessMs: 5 * 60_000,
+    updatedAtCoarsenessMs: UPDATED_AT_COARSENESS_MS,
   };
 }

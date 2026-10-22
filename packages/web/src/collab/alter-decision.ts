@@ -5,7 +5,7 @@ import {
   decisionAnswerShapeFailure,
   decisionApprovalFingerprint,
   decisionTopicTitle,
-  documentDirectoryFields,
+  documentStubFields,
   getBlocks,
   getBlocksFragment,
   getBlocksWithInline,
@@ -140,13 +140,8 @@ function destinationState(destinations: Destination[], directory: Y.Doc): Refusa
 }
 
 function stageDocument(doc: Y.Doc, now: number) {
-  const meta = getMeta(doc);
   return { update: Y.encodeStateAsUpdate(doc), stub: {
-    uuid: meta.uuid, title: meta.title, tags: meta.tags,
-    ...(meta.description == null ? {} : { description: meta.description }),
-    ...(meta.kind === undefined ? {} : { kind: meta.kind }),
-    ...(meta.status === undefined ? {} : { status: meta.status }),
-    ...documentDirectoryFields(doc), createdAt: now, updatedAt: now,
+    ...documentStubFields(doc), createdAt: now, updatedAt: now,
   } };
 }
 

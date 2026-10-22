@@ -159,16 +159,19 @@ export {
   decisionTopicArchived,
   directoryStubDiffers,
   documentDirectoryFields,
+  documentStubFields,
   getDirectoryEntry,
   getDirectoryMap,
   isDirectoryEntryArchived,
   isDirectoryEntryDeleted,
   listDeletedDirectoryUuids,
   listDirectory,
+  repairDirectoryStub,
   restoreDirectoryEntry,
   tombstoneDecisionRecord,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
+  UPDATED_AT_COARSENESS_MS,
 } from "./directory.js";
 
 export {

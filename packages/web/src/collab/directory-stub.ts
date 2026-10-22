@@ -1,6 +1,6 @@
 /**
  * The document owns metadata; its directory stub is only a cache. This is the
- * web's sole repair path for existing documents, using the shared schema diff.
+ * web's sole repair path for existing documents, using the shared schema repair.
  * Local metadata edits stamp immediately; content edits coarsen timestamps to
  * bound workspace-wide traffic. Hydration and peer edits repair without stamping.
  * transaction.local also includes local repairs and undo, but excludes applyUpdate.
@@ -11,55 +11,9 @@
 
 import type * as Y from "yjs";
 import {
-  documentDirectoryFields,
-  directoryStubDiffers,
-  getDirectoryEntry,
-  getMeta,
-  isDirectoryEntryDeleted,
-  upsertDirectoryEntry,
+  repairDirectoryStub,
+  UPDATED_AT_COARSENESS_MS,
 } from "@uberblick/schema";
-
-/**
- * At most one stamp per document per window for edits not already writing the
- * stub. Match the MCP writer's window so replicas do not restamp inside it.
- */
-export const UPDATED_AT_COARSENESS_MS = 5 * 60_000;
-
-/**
- * Unchanged stubs inside the window cause no write. Leave ordinary tombstones
- * to restoreDirectoryEntry; decision caches still repair while archived because
- * their metadata resolves the topic and their tombstone mirrors topic archive.
- */
-function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, uuid: string, changedAt: number | null): void {
-  const meta = getMeta(docDoc, uuid);
-  if (meta.uuid === "") return;
-  if (isDirectoryEntryDeleted(dirDoc, uuid)) return;
-  const stub = getDirectoryEntry(dirDoc, uuid);
-  if (stub?.deleted === true && meta.kind !== "decision") return;
-
-  const documentFields = documentDirectoryFields(docDoc, uuid);
-  const metaChanged = directoryStubDiffers(stub, meta, documentFields);
-  const staleStamp =
-    stub?.updatedAt === undefined ||
-    (changedAt !== null &&
-      changedAt - stub.updatedAt >= UPDATED_AT_COARSENESS_MS);
-  const stamp = changedAt !== null && (metaChanged || staleStamp);
-  if (!metaChanged && !stamp && stub?.createdAt !== undefined) return;
-
-  upsertDirectoryEntry(dirDoc, {
-    uuid,
-    title: meta.title,
-    tags: meta.tags,
-    // Supply every optional field so repair cannot retain stale metadata.
-    // A not-yet-synced document can be stale too; its next update repairs again.
-    description: meta.description ?? "",
-    kind: meta.kind ?? "",
-    status: meta.status ?? "",
-    ...documentFields,
-    createdAt: Date.now(),
-    ...(stamp ? { updatedAt: changedAt } : {}),
-  });
-}
 
 /**
  * Repair on attachment and updates; return unsubscribe. Gated repairs need both
@@ -88,7 +42,11 @@ export function watchDocumentStub(
     ) {
       return;
     }
-    repairStub(docDoc, dirDoc, uuid, pendingChangedAt);
+    repairDirectoryStub(docDoc, dirDoc, uuid, {
+      now: Date.now(),
+      changedAt: pendingChangedAt,
+      coarsenessMs: UPDATED_AT_COARSENESS_MS,
+    });
     pendingChangedAt = null;
   };
   const onUpdate = (
