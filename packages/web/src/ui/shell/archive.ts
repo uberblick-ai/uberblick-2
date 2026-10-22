@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { archiveDocument, archiveDecisionRecord, deleteDirectoryEntry, getDirectoryEntry, decisionTopicArchived, decisionTopicTitle, getMeta, isDirectoryEntryArchived, resolveDecisionTopics, restoreDirectoryEntry, unpinDoc } from "@uberblick/schema";
+import { archiveDocument, archiveDecisionRecord, deleteDecisionTopic, deleteDirectoryEntry, getDirectoryEntry, decisionTopicArchived, decisionTopicTitle, getMeta, isDirectoryEntryArchived, resolveDecisionTopics, restoreDirectoryEntry, unpinDoc } from "@uberblick/schema";
 import { toast } from "sonner";
 import { acquireRoom } from "../../collab/rooms.js";
 import type { ShellEnvironment } from "./environment.js";
@@ -37,15 +37,24 @@ export function useArchive({ directory, doc, sidebar, selected, defaultIdentity,
     archiveConfirmationFocusRoom.current = null;
   }, []);
 
-  const onDelete = useCallback(() => {
+  const onDelete = useCallback((topic: boolean) => {
     if (directory === null || selected === null || !directory.status.writable) return;
     const entry = getDirectoryEntry(directory.ydoc, selected);
-    if (entry === null || entry.kind === "decision" || entry.deleted !== true ||
-      (doc !== null && getMeta(doc.ydoc).kind === "decision")) return;
-    deleteDirectoryEntry(directory.ydoc, selected);
+    if (entry === null || (entry.kind === "decision") !== topic) return;
+    let records: string[];
+    if (entry.kind === "decision") {
+      if (!decisionTopicArchived(directory.ydoc, selected)) return;
+      records = deleteDecisionTopic(directory.ydoc, selected);
+    } else {
+      if (entry.deleted !== true || (doc !== null && getMeta(doc.ydoc).kind === "decision")) return;
+      deleteDirectoryEntry(directory.ydoc, selected);
+      records = [selected];
+    }
     // Pin cleanup cannot hold up deletion; readers hide deleted UUIDs even
     // when this replica cannot write the sidebar yet.
-    if (sidebar?.status.writable) unpinDoc(sidebar.ydoc, selected);
+    if (sidebar?.status.writable) {
+      for (const uuid of records) unpinDoc(sidebar.ydoc, uuid);
+    }
   }, [directory, selected, doc, sidebar]);
 
   /**

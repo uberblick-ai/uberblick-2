@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getMetaMap, isDirectoryEntryDeleted, pinDoc, readSidebar, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
+import { DIRECTORY_ARCHIVED_RECORDS_KEY, getMetaMap, isDirectoryEntryArchived, isDirectoryEntryDeleted, pinDoc, readSidebar, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import { startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
@@ -90,7 +90,7 @@ describe("delete_doc", () => {
     expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
   });
 
-  it("requires archive, refuses decision records and can delete an archived stub without joining it", async () => {
+  it("requires archive, refuses implicit topic deletion and can delete an archived stub without joining it", async () => {
     const rig = await local();
     const doc = await seed(rig);
     const size = rig.instance.store.logSize();
@@ -99,7 +99,8 @@ describe("delete_doc", () => {
     const decision = await rig.ok("create_doc", { title: "Which deletion scope?", description: "A decision record.", kind: "decision" });
     await rig.ok("archive_doc", { uuid: decision.uuid });
     const decisionSize = rig.instance.store.logSize();
-    expect(await rig.call("delete_doc", { uuid: decision.uuid })).toMatchObject({ isError: true, payload: { error: "decision_delete_unsupported", applied: false } });
+    expect(await rig.call("delete_doc", { uuid: decision.uuid })).toMatchObject({ isError: true, payload: { error: "decision_delete_unsupported", recovery: expect.stringContaining("topic: true"), applied: false } });
+    expect(await rig.call("delete_doc", { uuid: decision.uuid, topic: false })).toMatchObject({ isError: true, payload: { error: "decision_delete_unsupported", applied: false } });
     expect(rig.instance.store.logSize()).toBe(decisionSize);
     const uuid = "11111111-1111-4111-8111-111111111111";
     const replicas = rig.instance.replicas;
@@ -107,5 +108,88 @@ describe("delete_doc", () => {
     tombstoneDirectoryEntry(replicas.directory().doc, uuid);
     expect((await rig.ok("delete_doc", { uuid })).title).toBe("Unhydrated");
     expect(replicas.known(uuid)).toBe(false);
+  });
+
+  it("refuses a live topic through an individually archived record without writing", async () => {
+    const rig = await local();
+    const first = await rig.ok("create_doc", { title: "Live topic", description: "Its first answer.", kind: "decision", status: "decided", blocks: [{ type: "paragraph", text: "Keep the topic live." }] });
+    const current = await rig.ok("create_doc", { title: "Live topic", description: "Its current answer.", kind: "decision", status: "decided", supersedes: first.uuid, answer: { who: "A person", when: "2026-10-22", where: "Recorded approval." }, blocks: [{ type: "paragraph", text: "Keep the topic live." }] });
+    const proposal = await rig.ok("create_doc", { title: "Live topic", description: "An archived proposal.", kind: "decision", supersedes: current.uuid });
+    const directory = rig.instance.replicas.directory().doc;
+    directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).set(first.uuid, true);
+    directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).set(proposal.uuid, true);
+    const before = Y.encodeStateAsUpdate(directory);
+    const size = rig.instance.store.logSize();
+    for (const uuid of [first.uuid, current.uuid, proposal.uuid]) {
+      expect(await rig.call("delete_doc", { uuid, topic: true })).toMatchObject({
+        isError: true, payload: { error: "doc_not_archived", applied: false, partial: false, synced: false },
+      });
+      expect(await rig.call("delete_doc", { uuid })).toMatchObject({
+        isError: true, payload: { error: "decision_delete_unsupported", recovery: expect.stringContaining("topic: true"), applied: false },
+      });
+    }
+    expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
+    expect(rig.instance.store.logSize()).toBe(size);
+  });
+
+  it.each(["topic", "record"])("deletes every archived topic record via its %s UUID and removes every entry point", async (address) => {
+    const rig = await local();
+    const source = await rig.ok("create_doc", { title: "Deletion references", description: "An owning page whose links survive.", blocks: [{ type: "paragraph", text: "Keep these references." }] });
+    const recipient = await rig.ok("create_doc", { title: "New references", description: "A page for refusing new references." });
+    const fields = {
+      title: "Erase this topic", description: "A permanent topic deletion.", kind: "decision", related: source.uuid,
+      blocks: [{ type: "paragraph", inline: [{ text: "Erase this topic answer.", marks: { link: "https://github.com/owner/repo/issues/42" } }] }],
+    };
+    const answer = { who: "A person", when: "2026-10-22", where: "Recorded approval." };
+    const first = await rig.ok("create_doc", { ...fields, status: "decided" });
+    const middle = await rig.ok("create_doc", { ...fields, supersedes: first.uuid, status: "decided", answer });
+    const current = await rig.ok("create_doc", { ...fields, supersedes: middle.uuid, status: "decided", answer });
+    const records = [first.uuid, middle.uuid, current.uuid];
+    await rig.ok("set_metadata", { uuid: source.uuid, links: records });
+    const inserted = await rig.ok("insert_block", { uuid: source.uuid, blocks: [{ type: "paragraph", inline: records.map(uuid => ({ text: "Topic record", marks: { docLink: uuid } })) }] });
+    const originalBlocks = (await rig.ok("get_doc", { uuid: source.uuid })).blocks;
+    expect((await rig.ok("get_doc", { uuid: source.uuid })).decisions).toHaveLength(1);
+    expect((await rig.ok("find_decisions", { github_ref: "owner/repo#42" })).decisions).toHaveLength(3);
+    const { replicas, store } = rig.instance;
+    const directory = replicas.directory().doc;
+    directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).set(middle.uuid, true);
+    expect(isDirectoryEntryArchived(directory, middle.uuid)).toBe(true);
+    await rig.ok("pin_doc", { uuid: first.uuid, group: "Topics" });
+    await rig.ok("archive_doc", { uuid: current.uuid });
+    const sidebar = replicas.sidebar();
+    const group = readSidebar(sidebar.doc)[0]!.id;
+    for (const uuid of records) pinDoc(sidebar.doc, group, uuid);
+
+    const uuid = address === "topic" ? first.uuid : middle.uuid;
+    const deleted = await rig.ok("delete_doc", { uuid, topic: true });
+    expect(deleted).toMatchObject({ uuid, title: "Erase this topic", deleted: true, applied: true });
+    expect(deleted.records.sort()).toEqual(records.toSorted());
+    expect(deleted.rooms.map((room: { purpose: string }) => room.purpose)).toEqual(["directory", "sidebar"]);
+    expect(readSidebar(sidebar.doc).flatMap(entry => entry.docs)).toEqual([]);
+    expect((await rig.ok("get_sidebar")).groups.flatMap((entry: { docs: unknown[] }) => entry.docs)).toEqual([]);
+    for (const options of [{}, { include_deleted: true }, { include_superseded: true }, { include_deleted: true, include_superseded: true }]) {
+      expect((await rig.ok("list_docs", { kind: "decision", ...options })).docs).toEqual([]);
+    }
+    expect((await rig.ok("search", { query: "Erase" })).hits).toEqual([]);
+    expect((await rig.ok("find_decisions", { github_ref: "owner/repo#42" })).decisions).toEqual([]);
+    const after = await rig.ok("get_doc", { uuid: source.uuid });
+    expect(after.decisions).toEqual([]);
+    expect(after.blocks).toEqual(originalBlocks);
+    expect(getMetaMap(replicas.replica(source.uuid).doc).get("links")).toEqual(records);
+    for (const deletedUuid of records) {
+      expect(isDirectoryEntryDeleted(directory, deletedUuid)).toBe(true);
+      expect(store.hasRoom(`${rig.config.workspaceId}/${deletedUuid}`)).toBe(false);
+      expect(replicas.known(deletedUuid)).toBe(false);
+      for (const [name, args] of [
+        ["get_doc", { uuid: deletedUuid }],
+        ["create_doc", { title: "Refused predecessor", description: "Must not exist.", kind: "decision", supersedes: deletedUuid }],
+        ["set_metadata", { uuid: recipient.uuid, links: [deletedUuid] }],
+        ["insert_block", { uuid: source.uuid, blocks: [{ type: "paragraph", inline: [{ text: "Deleted", marks: { docLink: deletedUuid } }] }] }],
+        ["link_range", { uuid: source.uuid, block_id: inserted.blocks[0].id, start: 0, end: 1, doc_id: deletedUuid, rev: inserted.blocks[0].rev }],
+      ] as const) {
+        expect(await rig.call(name, args), `${name} ${deletedUuid}`).toMatchObject({ isError: true, payload: { error: "doc_deleted" } });
+      }
+      expect((await rig.call("delete_doc", { uuid: deletedUuid, topic: true })).payload.error).toBe("doc_deleted");
+    }
   });
 });

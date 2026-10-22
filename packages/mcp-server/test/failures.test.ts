@@ -518,7 +518,7 @@ describe("the failure contract", () => {
     await rig.ok("delete_doc", { uuid: archived.uuid });
     record((await rig.call("get_doc", { uuid: archived.uuid })).payload);
     const undeletableDecision = await rig.ok("create_doc", {
-      title: "Which deletion operations are available?", description: "A decision cannot be deleted yet.", kind: "decision",
+      title: "Which deletion operations are available?", description: "A decision requires an explicit topic deletion.", kind: "decision",
     });
     record((await rig.call("delete_doc", { uuid: undeletableDecision.uuid })).payload);
     record(

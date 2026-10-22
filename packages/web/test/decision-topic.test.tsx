@@ -18,6 +18,7 @@ import {
   getMeta,
   getMetaMap,
   initDoc,
+  isDirectoryEntryDeleted,
   listDirectory,
   pinDoc,
   readSidebar,
@@ -951,7 +952,7 @@ describe("decision topic navigation and history", () => {
     const host = archivedView.container;
     expect(answer(host).textContent).toContain("Keep the original answer.");
     expect(host.querySelector(".ub-archived-banner")).not.toBeNull();
-    expect(within(host).queryByRole("button", { name: "Delete…" })).toBeNull();
+    expect(within(host).queryByRole("button", { name: /^Delete(?: topic)?…$/ })).toBeNull();
     expect(host.querySelector(".ub-thread-actions")).toBeNull();
     expect(timeline(host).querySelector(`li[data-record="${FIRST}"]`)).toBeNull();
     const clipboard = copiedUrls();
@@ -1004,16 +1005,61 @@ describe("decision topic navigation and history", () => {
     expect(new URL(clipboard.mock.calls[0]?.[0] as string).pathname).toBe(decisionRecordPath(WORKSPACE, FIRST, REJECTED));
     await act(async () => tombstoneDirectoryEntry(directory(), CURRENT));
     expect(host.querySelector(".ub-archived-banner")).not.toBeNull();
-    expect(within(host).queryByRole("button", { name: "Delete…" })).toBeNull();
+    expect(within(host).getByRole("button", { name: "Delete topic…" })).not.toBeNull();
     await act(async () => within(host).getByRole("button", { name: "Restore" }).click());
     expect(resolveDecisionTopics(directory())[0]?.archived).toBe(false);
     expect(host.querySelector(".ub-archived-banner")).not.toBeNull();
-    expect(within(host).queryByRole("button", { name: "Delete…" })).toBeNull();
+    expect(within(host).queryByRole("button", { name: /^Delete(?: topic)?…$/ })).toBeNull();
     expect(timeline(host).querySelector(`li[data-record="${REJECTED}"]`)).toBeNull();
     await act(async () => restoreDirectoryEntry(directory(), REJECTED));
     expect(host.querySelector(".ub-archived-banner")).toBeNull();
     expect(selection(host)).toBe(REJECTED);
     expectAnswerState(host, "Rejected");
+  });
+
+  it.each([FIRST, CURRENT, REJECTED, WITHDRAWN, OPEN])("deletes every archived topic record from the selected record %s", async (selected) => {
+    story();
+    const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
+    archiveDecisionRecord(directory(), sidebar, REJECTED);
+    tombstoneDirectoryEntry(directory(), CURRENT);
+    const group = createGroup(sidebar, "Stale topic pins");
+    const host = (await open(decisionRecordPath(WORKSPACE, FIRST, selected))).container;
+    act(() => {
+      pinDoc(sidebar, group, FIRST);
+      pinDoc(sidebar, group, REJECTED);
+    });
+    await act(async () => within(host).getByRole("button", { name: "Delete topic…" }).click());
+    const dialog = screen.getByRole("alertdialog", { name: 'Delete topic "Original title"?' });
+    expect(dialog.textContent).toContain("The topic and all its records will be deleted for everyone, with their comments and history.");
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" }));
+    await act(async () => within(dialog).getByRole("button", { name: "Cancel" }).click());
+    expect(isDirectoryEntryDeleted(directory(), selected)).toBe(false);
+    await act(async () => within(host).getByRole("button", { name: "Delete topic…" }).click());
+    await act(async () => screen.getByRole("button", { name: "Delete topic" }).click());
+    for (const uuid of [FIRST, CURRENT, REJECTED, WITHDRAWN, OPEN]) {
+      expect(isDirectoryEntryDeleted(directory(), uuid)).toBe(true);
+    }
+    expect(resolveDecisionTopics(directory())).toEqual([]);
+    expect(readSidebar(sidebar).find((entry) => entry.id === group)?.docs).toEqual([]);
+    expect(host.querySelector(".ub-document-pane")?.textContent).toBe("This document was deleted.");
+  });
+
+  it("refuses a stale topic-delete confirmation after the topic is restored", async () => {
+    story();
+    archiveDecisionRecord(directory(), room(sidebarRoom(WORKSPACE)).ydoc, REJECTED);
+    tombstoneDirectoryEntry(directory(), CURRENT);
+    const host = (await open(decisionRecordPath(WORKSPACE, FIRST, REJECTED))).container;
+    await act(async () => within(host).getByRole("button", { name: "Delete topic…" }).click());
+    const confirm = screen.getByRole("button", { name: "Delete topic" });
+    act(() => {
+      restoreDirectoryEntry(directory(), CURRENT);
+      const before = Y.encodeStateAsUpdate(directory());
+      confirm.click();
+      expect(Y.encodeStateAsUpdate(directory())).toEqual(before);
+    });
+    expect(within(host).queryByRole("button", { name: /^Delete(?: topic)?…$/ })).toBeNull();
+    expect(getDirectoryEntry(directory(), REJECTED)?.recordArchived).toBe(true);
+    expect(isDirectoryEntryDeleted(directory(), REJECTED)).toBe(false);
   });
 
   it("shows only the selected record's RFC directly between its answer and History", async () => {

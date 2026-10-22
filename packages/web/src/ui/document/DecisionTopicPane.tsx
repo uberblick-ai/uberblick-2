@@ -286,6 +286,7 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
     : getDirectoryEntry(directoryConnection.ydoc, record.discussion)?.title || undefined;
   return <EditorPane {...editorProps}
     isDecisionTopic
+    topicArchived={topic.archived}
     actionTitle={decisionTopicTitle(topic)}
     decisionView
     displayTitle={decisionTopicTitle(topic)}

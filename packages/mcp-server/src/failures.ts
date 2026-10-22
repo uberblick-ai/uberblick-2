@@ -224,7 +224,7 @@ const RECOVERIES: Record<string, Recovery> = {
   doc_archived: {
     recoveryClass: "manual",
     guidance:
-      "Archived documents are read-only. Call restore_doc for this uuid before editing, or delete_doc to permanently delete an archived regular document.",
+      "Archived documents are read-only. Call restore_doc for this uuid before editing. To permanently delete, call delete_doc for an archived regular document, or delete_doc with topic: true for an archived decision topic. One decision record cannot be deleted on its own yet.",
   },
   doc_deleted: {
     recoveryClass: "manual",
@@ -256,11 +256,11 @@ const RECOVERIES: Record<string, Recovery> = {
   },
   doc_not_archived: {
     recoveryClass: "manual",
-    guidance: "Call archive_doc for this UUID before deliberately calling delete_doc. Nothing was written.",
+    guidance: "Call archive_doc for this UUID before deliberately calling delete_doc; decision topics require topic: true. One decision record cannot be deleted on its own yet. Nothing was written.",
   },
   decision_delete_unsupported: {
     recoveryClass: "manual",
-    guidance: "Decision records and topics cannot be permanently deleted through this tool yet. Keep the topic archived. Nothing was written.",
+    guidance: "One decision record cannot be deleted on its own yet. To permanently delete every record, archive the whole topic with archive_doc, then call delete_doc with this UUID and topic: true. Nothing was written.",
   },
   group_not_found: {
     recoveryClass: "reread",

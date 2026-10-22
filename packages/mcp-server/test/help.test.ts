@@ -72,6 +72,16 @@ it.each(["get_doc", "list_docs"])("describes %s timestamps as ISO 8601 UTC", asy
   expect(tool?.description).toContain("ISO 8601 UTC");
 });
 
+it.each(["delete_doc", "archive_doc", "unpin_doc"])("explains explicit topic deletion in %s help and description", async (topic) => {
+  const rig = await local();
+  const { text } = await rig.ok("get_help", { topic });
+  const description = (await rig.client.listTools()).tools.find(({ name }) => name === topic)?.description;
+  for (const prose of [text, description]) {
+    expect(prose).toContain("topic: true");
+    expect(prose).toContain("record cannot be deleted on its own yet");
+  }
+});
+
 it("points Markdown authors to Ablauf help and requires checking edits in the web editor", () => {
   const help = new HelpCatalog();
   const markdown = help.read("markdown").text;

@@ -28,6 +28,9 @@ export const DIRECTORY_DOCS_KEY = "docs";
 /** Grow-only deletion evidence, independent of whole-entry metadata writes. */
 export const DIRECTORY_DELETED_KEY = "deleted-docs";
 
+/** UUID-only topic evidence survives deletion of a late record's metadata. */
+export const DIRECTORY_DELETED_DECISION_TOPICS_KEY = "deleted-decision-topics";
+
 /** Individual archives survive whole-stub rewrites by older clients. */
 export const DIRECTORY_ARCHIVED_RECORDS_KEY = "archived-records";
 
@@ -157,15 +160,26 @@ function getUpdatedAtMap(dirDoc: Y.Doc): Y.Map<unknown> {
 
 /** Absence is never deletion evidence; only an explicit permanent mark is. */
 export function isDirectoryEntryDeleted(dirDoc: Y.Doc, uuid: string): boolean {
-  return dirDoc.getMap<unknown>(DIRECTORY_DELETED_KEY).get(uuid) === true;
+  const marks = dirDoc.getMap<unknown>(DIRECTORY_DELETED_KEY);
+  if (marks.get(uuid) === true) return true;
+  const entry = readStored(getDirectoryMap(dirDoc).get(uuid));
+  return entry?.kind === "decision" && entry.topic !== undefined && marks.get(entry.topic) === true;
 }
 
 /** Deleted UUIDs remain discoverable for physical replica and hub cleanup. */
 export function listDeletedDirectoryUuids(dirDoc: Y.Doc): string[] {
-  return [...dirDoc.getMap<unknown>(DIRECTORY_DELETED_KEY).entries()]
+  const marks = dirDoc.getMap<unknown>(DIRECTORY_DELETED_KEY);
+  const deleted = new Set([...marks.entries()]
     .filter(([uuid, value]) => readSyncedDocId(uuid, "directory key") !== null && value === true)
-    .map(([uuid]) => uuid)
-    .sort();
+    .map(([uuid]) => uuid));
+  if (deleted.size === 0) return [];
+  for (const [uuid, value] of getDirectoryMap(dirDoc).entries()) {
+    if (readSyncedDocId(uuid, "directory key") === null) continue;
+    const entry = readStored(value);
+    if (entry?.kind === "decision" && entry.topic !== undefined &&
+      marks.get(entry.topic) === true) deleted.add(uuid);
+  }
+  return [...deleted].sort();
 }
 
 /** Remove metadata that an unseen whole-entry writer may have reintroduced. */
@@ -174,7 +188,13 @@ export function enforceDeletedDirectoryEntries(dirDoc: Y.Doc): void {
   if (deleted.size === 0) return;
   dirDoc.transact(() => {
     const docs = getDirectoryMap(dirDoc);
+    const marks = dirDoc.getMap<unknown>(DIRECTORY_DELETED_KEY);
+    const topics = dirDoc.getMap<unknown>(DIRECTORY_DELETED_DECISION_TOPICS_KEY);
     for (const uuid of deleted) {
+      const entry = readStored(docs.get(uuid));
+      if (entry?.kind === "decision" && entry.topic !== undefined && entry.topic !== uuid &&
+        deleted.has(entry.topic) && topics.get(uuid) !== entry.topic) topics.set(uuid, entry.topic);
+      if (marks.get(uuid) !== true) marks.set(uuid, true);
       if (docs.has(uuid)) docs.delete(uuid);
       dirDoc.getMap<unknown>(DIRECTORY_RELATED_PAGES_KEY).delete(uuid);
     }
@@ -189,11 +209,24 @@ export function enforceDeletedDirectoryEntries(dirDoc: Y.Doc): void {
 /** The caller owns access and archive checks; permanent deletion applies to any UUID. */
 export function deleteDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
   dirDoc.transact(() => {
-    if (!isDirectoryEntryDeleted(dirDoc, uuid)) {
+    if (dirDoc.getMap<unknown>(DIRECTORY_DELETED_KEY).get(uuid) !== true) {
       dirDoc.getMap<unknown>(DIRECTORY_DELETED_KEY).set(uuid, true);
     }
     enforceDeletedDirectoryEntries(dirDoc);
   });
+}
+
+/** The caller owns access and whole-topic archive checks, including record archives. */
+export function deleteDecisionTopic(dirDoc: Y.Doc, uuid: string): string[] {
+  const targets = archiveTargets(dirDoc, uuid);
+  dirDoc.transact(() => {
+    const marks = dirDoc.getMap<unknown>(DIRECTORY_DELETED_KEY);
+    for (const target of targets) {
+      if (marks.get(target) !== true) marks.set(target, true);
+    }
+    enforceDeletedDirectoryEntries(dirDoc);
+  });
+  return targets;
 }
 
 function greaterStamp(

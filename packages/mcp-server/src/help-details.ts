@@ -555,7 +555,8 @@ export const toolHelpDetails = {
     "serves the document by uuid, and list_docs with `include_deleted: true` still lists it, flagged " +
     "`deleted`. For a decision UUID it always archives the whole topic, including records previously " +
     "archived individually in the web. No MCP argument archives one record. delete_doc permanently removes " +
-    "an archived regular document.\n\n" +
+    "an archived regular document, or with `topic: true` every record of an archived topic, given its topic " +
+    "UUID or any record UUID. One decision record cannot be deleted on its own yet.\n\n" +
     "It also leaves the sidebar, because it is unpinned: a document that has left every other listing is not " +
     "an entry point. The unpin is unconditional — it does not first look for a pin, and it hides every pin " +
     "this replica can see — so `unpinned` says what the call asserted, not that a pin was found: it is true " +
@@ -574,15 +575,18 @@ export const toolHelpDetails = {
     "unaffected either way: `applied` is the durable half.",
   delete_doc:
     "Permanently remove an archived regular document's content, comments, structured data and history. " +
-    "Archive first: a live document refuses with doc_not_archived. Decision records and topics refuse with " +
-    "decision_delete_unsupported until their deletion operation is available. A repeated deletion refuses with doc_deleted.\n\n" +
-    "Only its UUID and permanent mark remain in the directory. The mark wins over concurrent or offline restores, " +
+    "For an archived decision topic, pass `topic: true` with the topic UUID or any record UUID to delete every " +
+    "record, including records archived on their own before the topic. One decision record cannot be deleted " +
+    "on its own yet: a decision UUID without `topic: true` refuses with decision_delete_unsupported. " +
+    "Archive the whole topic first: a live document or topic refuses with doc_not_archived, even when the " +
+    "addressed record was archived on its own. These refusals write nothing. A repeated deletion refuses with doc_deleted.\n\n" +
+    "Only permanent UUID deletion evidence remains in the directory. The mark wins over concurrent or offline restores, " +
     "renames, retags and stub repair. A missing directory entry never authorizes removing a copy. Hubs purge " +
     "the room and refuse all later connections and updates; replicas remove stored and in-memory copies when " +
     "they learn the mark or receive the deleted-room refusal, without an authentication error.\n\n" +
     "Deleted UUIDs never appear in discovery, search or sidebar results, including include_deleted listings. " +
     "Reads, writes and newly added references refuse with doc_deleted. Other documents keep their stored links. " +
-    "The result reports uuid, title, records: [uuid], deleted: true and independent directory/sidebar durability. " +
+    "The result reports uuid, title, records listing every deleted UUID, deleted: true and independent directory/sidebar durability. " +
     "Protocol 4 requires a matching hub and client. Freed SQLite pages and earlier backups are not overwritten.",
   restore_doc:
     "Remove one archive layer. In an archived decision topic this restores the topic and the records archived " +

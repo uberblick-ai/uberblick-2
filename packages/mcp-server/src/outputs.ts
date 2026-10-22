@@ -415,8 +415,8 @@ export const outputSchemas = {
   delete_doc: z.object({
     uuid,
     title: z.string(),
-    records: z.array(z.string()),
-    deleted: z.literal(true).describe("The archived regular document was permanently deleted; this UUID cannot be restored or reused."),
+    records: z.array(z.string()).describe("Every UUID permanently deleted by this call: the regular document or every record of the decision topic."),
+    deleted: z.literal(true).describe("The archived document or decision topic was permanently deleted; its record UUIDs cannot be restored or reused."),
     ...multipleRoomDurability,
   }).strict(),
   annotate: z.object({ uuid, annotation, ...documentDurability }).strict(),
