@@ -20,6 +20,7 @@ import type {
   BlockType,
 } from "@uberblick/schema";
 import { formatTimestamp } from "../timestamps.js";
+import { revealFoldedTarget } from "../../editor/toggle-headings.js";
 
 /** Longest quoted excerpt a card shows before it is cut short. */
 const EXCERPT_MAX = 160;
@@ -281,6 +282,8 @@ const flashTimers = new WeakMap<Element, ReturnType<typeof setTimeout>>();
  * the class and forcing layout before reapplying it.
  */
 export function flashThreadHighlight(threadId: string): void {
+  const target = document.querySelector<HTMLElement>(`[data-comment-thread="${CSS.escape(threadId)}"]`);
+  if (target !== null) revealFoldedTarget(target);
   const spans = document.querySelectorAll<HTMLElement>(
     `[data-comment-thread="${CSS.escape(threadId)}"]`,
   );

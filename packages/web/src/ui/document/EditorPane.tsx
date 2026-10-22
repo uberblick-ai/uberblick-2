@@ -32,6 +32,7 @@ import type { RoomConnection } from "../../collab/rooms.js";
 import type { NotSharedReason } from "../../shell/document-search.js";
 import { toast } from "sonner";
 import { writeToClipboard } from "../../editor/source-chrome.js";
+import { revealFoldedTarget } from "../../editor/toggle-headings.js";
 import { rawSyncState, useCalmSyncState } from "../status/calm.js";
 import { statusReading } from "../status/status-reading.js";
 import { documentSyncFacts } from "../status/sync-facts.js";
@@ -859,6 +860,7 @@ export function EditorPane({
     ) {
       return;
     }
+    revealFoldedTarget(target);
     target.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
   const observedMeta = useDocMeta(connection);

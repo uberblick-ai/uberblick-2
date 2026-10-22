@@ -103,6 +103,19 @@ describe("typing a markdown prefix", () => {
     }
   });
 
+  it("keeps a quote prefix typed at the start of a heading as ordinary heading text", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "heading-rule", title: "Heading rule" });
+    const id = appendBlock(ydoc, { type: "heading", level: 2, text: "" });
+    const { editor } = mountEditor(ydoc);
+    try {
+      caret(editor, 0, 0);
+      typeText(editor, "> Help");
+      expect(getBlocks(ydoc)).toMatchObject([{ id, type: "heading", level: 2, text: "> Help" }]);
+      expect(editor.state.selection.$head.parent.type.name).toBe("heading");
+    } finally { editor.destroy(); ydoc.destroy(); }
+  });
+
   /**
    * How a reader writes a literal `# `: type it, undo once. One step, not two —
    * the conversion is its own undo step, so the typing survives it. Nothing is

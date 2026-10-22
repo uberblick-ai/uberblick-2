@@ -1719,11 +1719,38 @@ h6.ub-heading {
 
 /* Zero-sized text retains native character-wise caret movement. */
 .ub-github-link-text,
+.ub-toggle-heading-marker,
 .ub-inline-icon-text {
   font-size: 0;
   line-height: 0;
   letter-spacing: 0;
   word-spacing: 0;
+}
+.ub-editor .ProseMirror > .ub-toggle-folded { display: none; }
+.ub-toggle-heading-control {
+  display: inline-block;
+  position: relative;
+  width: 1.25em;
+  height: 1em;
+  vertical-align: text-bottom;
+}
+.ub-toggle-heading-button {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc((1em - 2.25rem) / 2);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+.ub-toggle-heading-button > span { font-size: var(--type-body-size); }
+.ub-toggle-heading-button:hover { color: var(--foreground); background: var(--muted); }
+@media (any-pointer: coarse) {
+  .ub-toggle-heading-button { top: calc((1em - 44px) / 2); }
 }
 .ub-inline-icon {
   display: inline-block;
