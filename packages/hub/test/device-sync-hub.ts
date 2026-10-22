@@ -5,7 +5,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { Server, type onAuthenticatePayload } from "@hocuspocus/server";
+import { Server, type Connection, type onAuthenticatePayload } from "@hocuspocus/server";
 import * as Y from "yjs";
 import type { StoredHubLogin } from "../../mcp-server/src/auth-store.js";
 import { CredentialAdmission, type CredentialContext } from "../src/credential-admission.js";
@@ -18,6 +18,14 @@ import { HubDatabase } from "../src/persistence.js";
 import { readAuthEnvelope, SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import type { TokenClaims } from "@uberblick/schema/token";
 import { issueCredential } from "./device-credentials.js";
+import { getUpdateAttribution, OriginUpdates, resolveUpdateAuthor, type UpdateAttribution } from "../src/update-attribution.js";
+
+export type { UpdateAttribution } from "../src/update-attribution.js";
+
+export interface DeviceSyncChange {
+  room: string;
+  attribution: UpdateAttribution | null;
+}
 
 export interface DeviceSyncAuthentication {
   room: string;
@@ -51,6 +59,7 @@ export async function startDeviceSyncHub(options: {
   admins.grant(adminId);
   const logs: HubLogRecord[] = [];
   const authentications: DeviceSyncAuthentication[] = [];
+  const changes: DeviceSyncChange[] = [];
   let server: Server<CredentialContext> | undefined;
   let port = 0;
   let renewalCount = 0;
@@ -59,6 +68,8 @@ export async function startDeviceSyncHub(options: {
   let closed = false;
   /** Pending renewal delays, ended by close() so no caller waits one out. */
   const delays = new Set<() => void>();
+  const messageReleases = new Set<() => void>();
+  let nextMessage: { room: string; entered(): void; released: Promise<void> } | null = null;
 
   const log = (record: HubLogRecord): void => { logs.push(record); };
   const captureAuthentication = async ({ documentName, token }: onAuthenticatePayload<CredentialContext>): Promise<void> => {
@@ -77,10 +88,30 @@ export async function startDeviceSyncHub(options: {
     if (closed) throw new Error("device sync test hub is closed");
     if (server !== undefined) return;
     const admission = new CredentialAdmission(credentials, memberships, { protocolVersion, log }, admins);
+    const originUpdates = new OriginUpdates({
+      requireMetadata: true,
+      assertCurrent(connection, room) {
+        admission.assertCurrent(connection as Connection<CredentialContext>, room);
+        database.requireRoom(room);
+      },
+      resolveAuthor(context, origin) { return resolveUpdateAuthor(context, credentials, origin); },
+    });
     const candidate = new Server<CredentialContext>({
       address: "127.0.0.1", port, quiet: true, stopOnSignals: false,
       debounce: 10, maxDebounce: 50,
-      extensions: [{ priority: 1_000, onAuthenticate: captureAuthentication }, database, admission],
+      extensions: [{ priority: 1_000, onAuthenticate: captureAuthentication }, database, admission, originUpdates, {
+        priority: -1_000,
+        async beforeHandleMessage({ documentName }) {
+          if (nextMessage?.room !== documentName) return;
+          const gate = nextMessage;
+          nextMessage = null;
+          gate.entered();
+          await gate.released;
+        },
+      }],
+      async onChange({ documentName, transactionOrigin }) {
+        changes.push({ room: documentName, attribution: getUpdateAttribution(transactionOrigin) });
+      },
       async onRequest({ request, response }) {
         if (request.url !== "/auth/credential/renew") return;
         renewalCount += 1;
@@ -131,7 +162,17 @@ export async function startDeviceSyncHub(options: {
     get url(): string { return `ws://127.0.0.1:${port}`; },
     get port(): number { return port; },
     get renewalCount(): number { return renewalCount; },
-    principalId, logs, authentications,
+    principalId, logs, authentications, changes,
+    holdNextMessage(room: string): { entered: Promise<void>; release(): void } {
+      let arrived = (): void => {};
+      let end = (): void => {};
+      const entered = new Promise<void>(resolve => { arrived = resolve; });
+      const released = new Promise<void>(resolve => { end = resolve; });
+      const release = (): void => { messageReleases.delete(release); end(); };
+      messageReleases.add(release);
+      nextMessage = { room, entered: arrived, released };
+      return { entered, release };
+    },
     issue(request: { workspaces: string[]; principalId?: string; deviceId?: string }): StoredHubLogin {
       const issued = issueCredential(credentials, {
         workspaces: request.workspaces,
@@ -144,7 +185,7 @@ export async function startDeviceSyncHub(options: {
         credential: { record, key: Buffer.from(issued.keyBytes).toString("base64url") },
       };
     },
-    grant(workspaceId: string, memberId = principalId): void {
+    grant(workspaceId: string, memberId: string = principalId): void {
       if (memberships.roleFor(workspaceId, adminId) === null) memberships.grant({ workspaceId, principalId: adminId, role: "admin" });
       if (memberships.roleFor(workspaceId, memberId) === null) memberships.grant({ workspaceId, principalId: memberId, role: "member" });
     },
@@ -178,6 +219,7 @@ export async function startDeviceSyncHub(options: {
       if (closed) return;
       closed = true;
       for (const end of [...delays]) end();
+      for (const release of [...messageReleases]) release();
       try { await pause(); } finally { database.close(); }
     },
   };

@@ -173,6 +173,16 @@ Continue the pull request's remote head; never rebase or force-push it.
   carries risk of its own; otherwise finish `integrate`.
 - **An integrator's `changes`,** or ub-agents' `changes` for a PR GitHub reports
   as conflicting: fix what it names and finish `integrate`.
+- **A Dependabot pull request's `changes`:** before editing, check whether an
+  implementer repair round already ran on this PR. If so, finish `needs-human`
+  without another repair, including when ub-agents routed a conflict directly
+  here. Otherwise make the smallest adaptation and regenerate `pnpm-lock.yaml`
+  with `pnpm install` rather than editing it. Route the revised diff by
+  ["Reviews owed"](../protocols/delivery-policy.md#reviews-owed); the
+  Dependabot-only exemption no longer applies after an implementer commit.
+  A fix that needs a product, architecture or API-migration decision finishes
+  `needs-human` (one fix round,
+  [delivery-policy.md](../protocols/delivery-policy.md#dependabot-pull-requests)).
 - **A person's answer:** act on it, and finish `review` when the answer asks
   for verification or the Rounds rule still requires a second round, otherwise
   `integrate`. When it leaves nothing to change, finish without a commit.
