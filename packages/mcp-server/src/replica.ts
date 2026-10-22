@@ -6,9 +6,8 @@ import {
   SETTINGS_SUFFIX,
   SIDEBAR_SUFFIX,
   directoryRoom,
-  directoryStubDiffers,
   enforceDeletedDirectoryEntries,
-  documentDirectoryFields,
+  repairDirectoryStub,
   isDirectoryEntryArchived,
   decisionTopicArchived,
   decisionTopicTitle,
@@ -43,7 +42,6 @@ import {
   figmaCaptionTexts,
   figmaCaptionElement,
   CARD_PARTS,
-  upsertDirectoryEntry,
   githubReference,
 } from "@uberblick/schema";
 import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
@@ -659,12 +657,12 @@ export class Replicas {
         return;
       }
       // Live updates and rebuilds must keep archived documents out of the index.
-      if (meta.kind === "decision") this.repairStub(replica, meta, authored);
+      if (meta.kind === "decision") this.repairStub(replica, authored);
       if (isDirectoryEntryArchived(this.directory().doc, replica.id)) {
         this.store.unindexDoc(replica.id);
         return;
       }
-      if (meta.kind !== "decision") this.repairStub(replica, meta, authored);
+      if (meta.kind !== "decision") this.repairStub(replica, authored);
       this.indexRows(replica, meta);
     } catch (error) {
       log.warn("failed to mirror a document change", error);
@@ -816,7 +814,7 @@ export class Replicas {
     }
     // Restore repairs metadata without stamping a new document edit.
     const replica = this.replica(uuid);
-    this.repairStub(replica, getMeta(replica.doc, replica.id), false);
+    this.repairStub(replica, false);
     return true;
   }
 
@@ -848,48 +846,13 @@ export class Replicas {
     }
   }
 
-  /**
-   * Repair cached metadata without churning sticky tombstones. Description
-   * updates are whole-field metadata writes, like renames, not keystrokes.
-   * Cache comparisons are shared with web, which uses transaction.local,
-   * its own clock and its own coarseness window for authored stamping.
-   */
-  private repairStub(replica: Replica, meta: DocMeta, authored: boolean): void {
-    const directory = this.directory();
-    if (isDirectoryEntryDeleted(directory.doc, replica.id)) return;
-    const stub = getDirectoryEntry(directory.doc, replica.id);
-    if (meta.kind !== "decision" && stub?.deleted === true) {
-      return;
-    }
+  /** Receipt, replay, rebuild and restore repair caches without an authored stamp. */
+  private repairStub(replica: Replica, authored: boolean): void {
     const now = Date.now();
-    const fields = documentDirectoryFields(replica.doc, replica.id);
-    const metaChanged = directoryStubDiffers(stub, meta, fields);
-    const staleStamp =
-      stub?.updatedAt === undefined ||
-      now - stub.updatedAt >= this.config.updatedAtCoarsenessMs;
-    // Stamp authored writes, including local repairs prompted by remote state,
-    // never receipt, replay, rebuild or restore. Metadata changes stamp now;
-    // content-only bursts share a coarseness window. The directory's resolved
-    // maximum suppresses peer stamps and keeps future-skewed values until a
-    // later authored stamp exceeds them, even if a whole-entry write loses.
-    const stamp = authored && (metaChanged || staleStamp);
-    // Backfill createdAt once even without other changes or an updatedAt stamp.
-    if (!metaChanged && !stamp && stub?.createdAt !== undefined) {
-      return;
-    }
-    upsertDirectoryEntry(directory.doc, {
-      uuid: replica.id,
-      title: meta.title,
-      tags: meta.tags,
-      // State this replica's answer, including absence. Stubs converge LWW;
-      // a replica holding newer document state repairs the cache on an update.
-      description: meta.description ?? "",
-      // Explicit absence clears a stale cached lifecycle instead of retaining it.
-      kind: meta.kind ?? "",
-      status: meta.status ?? "",
-      ...fields,
-      createdAt: now,
-      ...(stamp ? { updatedAt: now } : {}),
+    repairDirectoryStub(replica.doc, this.directory().doc, replica.id, {
+      now,
+      changedAt: authored ? now : null,
+      coarsenessMs: this.config.updatedAtCoarsenessMs,
     });
   }
 

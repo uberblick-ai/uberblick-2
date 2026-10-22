@@ -30,6 +30,9 @@ export const DIRECTORY_DELETED_KEY = "deleted-docs";
 /** Individual archives survive whole-stub rewrites by older clients. */
 export const DIRECTORY_ARCHIVED_RECORDS_KEY = "archived-records";
 
+/** At most one content-only authored stamp per document in this window. */
+export const UPDATED_AT_COARSENESS_MS = 5 * 60_000;
+
 /**
  * Per-client max candidates survive losing whole-stub writes. Retained until
  * permanent deletion: one key per uuid/client, resolved by a local index.
@@ -81,10 +84,9 @@ function sameCodeChecks(a: CodeCheck[] | undefined, b: CodeCheck[]): boolean {
 }
 
 /**
- * Repair from the hydrated document even when it lags the stub; tag order and
- * empty descriptions do not differ. Callers preserve ordinary tombstones,
- * repair document caches, and backfill createdAt. They own clocks, authorship,
- * timestamp coarseness and write gates; cache-only repairs may omit updatedAt.
+ * Compare hydrated metadata and caches even when the document lags the stub;
+ * tag order and empty descriptions do not differ. repairDirectoryStub owns
+ * tombstones, backfill and stamp coarsening; callers own clocks and write gates.
  */
 export function directoryStubDiffers(
   stub: DirectoryEntry | null,
@@ -397,6 +399,54 @@ export function documentDirectoryFields(doc: Y.Doc, authoritativeUuid?: string):
     openThreadCount: listAnnotations(doc).filter((thread) => thread.resolved !== true).length,
     ...(meta.kind === "decision" ? {} : { code_check: meta.code_check ?? [] }),
   };
+}
+
+/** Complete hydrated stub fields, including explicit clears of absent metadata. */
+export function documentStubFields(doc: Y.Doc, authoritativeUuid?: string) {
+  const meta = getMeta(doc, authoritativeUuid);
+  return {
+    uuid: meta.uuid,
+    title: meta.title,
+    tags: meta.tags,
+    description: meta.description ?? "",
+    kind: meta.kind ?? "",
+    status: meta.status ?? "",
+    ...documentDirectoryFields(doc, authoritativeUuid),
+  } satisfies DirectoryUpsert;
+}
+
+/**
+ * Repair a hydrated document's cache without reviving ordinary archives or
+ * permanently deleted UUIDs. Decision caches still repair while archived.
+ * Call only after the caller's directory sync and write gates admit the repair.
+ * changedAt is the authored change time, or null for receipt, replay or restore;
+ * now supplies createdAt backfill independently of a delayed authored stamp.
+ */
+export function repairDirectoryStub(
+  doc: Y.Doc,
+  directory: Y.Doc,
+  uuid: string,
+  { now, changedAt, coarsenessMs }: { now: number; changedAt: number | null; coarsenessMs: number },
+): void {
+  const meta = getMeta(doc, uuid);
+  if (meta.uuid === "" || isDirectoryEntryDeleted(directory, uuid)) return;
+  const stub = getDirectoryEntry(directory, uuid);
+  if (stub?.deleted === true && meta.kind !== "decision") return;
+
+  const fields = documentStubFields(doc, uuid);
+  const metaChanged = directoryStubDiffers(stub, meta, fields);
+  // The resolved maximum survives losing whole-entry writes and suppresses a
+  // window another replica already stamped, including future-skewed clocks.
+  const staleStamp = stub?.updatedAt === undefined ||
+    (changedAt !== null && changedAt - stub.updatedAt >= coarsenessMs);
+  const stamp = changedAt !== null && (metaChanged || staleStamp);
+  if (!metaChanged && !stamp && stub?.createdAt !== undefined) return;
+
+  upsertDirectoryEntry(directory, {
+    ...fields,
+    createdAt: now,
+    ...(stamp ? { updatedAt: changedAt } : {}),
+  });
 }
 
 /** Hydrated writers restate every decision cache, including deliberate clears. */
