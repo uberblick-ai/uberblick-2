@@ -82,6 +82,7 @@ function createTeamExtension(
     resolveAuthor(credentialContext, origin) {
       return credentials === undefined ? null : resolveUpdateAuthor(credentialContext, credentials, origin);
     },
+    revisionUsername(principalId) { return principals?.get(principalId)?.githubUsername ?? null; },
     async handleRequest(request, response) {
       if (handleHubClaimState(claims, signIn !== undefined, request, response)) return true;
       if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response, workspaceNames)) return true;

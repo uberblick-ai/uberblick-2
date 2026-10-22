@@ -30,9 +30,11 @@ import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
 import { HubConnection } from "./hub-connection.js";
 import type { HubFailureCause } from "./hub-failure.js";
-import { createHash } from "node:crypto";
-import { encodeOriginUpdate, readOriginAck } from "@uberblick/schema";
+import { createHash, randomUUID } from "node:crypto";
+import { encodeOriginUpdate, readOriginAck, encodeRevisionRequest, createRevisionResponseReader } from "@uberblick/schema";
+import type { RevisionRequest, RevisionResponse } from "@uberblick/schema";
 import type { LogSlice } from "./store.js";
+import { RevisionClientError } from "./revision-client.js";
 
 export type HubStatus =
   | "disabled"
@@ -431,6 +433,8 @@ export class HubSync {
   private readonly roomQuietListeners = new Set<() => void>();
 
   private readonly stateListeners = new Set<() => void>();
+
+  private readonly revisionReplies = new Map<string, { room: string; receive: (payload: string) => void }>();
 
   private readonly socket: HocuspocusProviderWebsocket | null = null;
 
@@ -1012,7 +1016,12 @@ export class HubSync {
         this.stateChanged();
         this.finishSettingsRecovery(room, provider);
       },
-      onStateless: ({ payload }) => provider.acknowledgeLog(payload),
+      onStateless: ({ payload }) => {
+        provider.acknowledgeLog(payload);
+        for (const pending of this.revisionReplies.values()) {
+          if (pending.room === room) pending.receive(payload);
+        }
+      },
       onMessage: ({ message }) => {
         provider.observeLogMessage(message);
         if (room !== settingsRoom(this.config.workspaceId) || this.onSettingsReset === undefined) return;
@@ -1341,6 +1350,93 @@ export class HubSync {
   /** Current hub admission, after the authoritative room has arrived. */
   canWriteRoom(room: string): boolean {
     return this.isRoomQuiet(room) && this.providers.get(room)?.authorizedScope === "read-write";
+  }
+
+  /** A correlated, bounded read over the room's existing authenticated connection. */
+  requestRevisions(
+    room: string,
+    operation: Omit<RevisionRequest, "requestId">,
+    timeoutMs = 5_000,
+  ): Promise<RevisionResponse> {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) {
+      return Promise.reject(new RangeError("Revision timeout must be between 1 and 2147483647 milliseconds."));
+    }
+    if (this.config.localWorkspace === true) return Promise.reject(new RevisionClientError("local-only"));
+    const requestId = randomUUID();
+    const readResponse = createRevisionResponseReader(requestId);
+    return new Promise<RevisionResponse>((resolve, reject) => {
+      let finished = false;
+      let sent = false;
+      let generation: number | undefined;
+      let queued = false;
+      let unsubscribe = () => {};
+      const cleanup = () => {
+        finished = true;
+        clearTimeout(timer);
+        unsubscribe();
+        this.revisionReplies.delete(requestId);
+      };
+      const fail = (code: ConstructorParameters<typeof RevisionClientError>[0]) => {
+        cleanup();
+        reject(new RevisionClientError(code));
+      };
+      const evaluate = () => {
+        queued = false;
+        if (finished) return;
+        if (this.deletedRooms.has(room)) { fail("deleted"); return; }
+        const state = this.state();
+        if (state.authRecovery === "sign-in-required") { fail("sign-in-required"); return; }
+        if (state.authRecovery === "no-workspace-access") { fail("forbidden"); return; }
+        if (state.status === "auth-failed" && !this.checkingDeviceRefusal) { fail("forbidden"); return; }
+        if (state.status === "update-required") { fail("unsupported"); return; }
+        if (this.stopped || state.status === "disabled" || state.status === "quarantined" ||
+            (state.status === "hub-down" && !this.checkingDeviceRefusal)) {
+          fail("unreachable"); return;
+        }
+        const provider = this.providers.get(room);
+        if (sent) {
+          if (generation !== this.socketGeneration && !this.checkingDeviceRefusal) fail("unreachable");
+          return;
+        }
+        // Admission is sufficient for a read-only client; update acknowledgements
+        // and queued writes are unrelated to whether it may request history.
+        if (provider?.hasCurrentSync() !== true) return;
+        sent = true;
+        generation = this.socketGeneration;
+        try {
+          provider.sendStateless(encodeRevisionRequest({ requestId, ...operation }));
+        } catch {
+          fail("unreachable");
+        }
+      };
+      const wake = () => {
+        if (finished || queued) return;
+        queued = true;
+        queueMicrotask(evaluate);
+      };
+      const timer = setTimeout(() => {
+        if (finished) return;
+        evaluate();
+        if (finished) return;
+        // An admitted, still-live old hub silently ignores this additive request.
+        // Failed admission or transport never masquerades as an empty history.
+        const provider = this.providers.get(room);
+        fail(sent && generation === this.socketGeneration && provider?.hasCurrentSync() === true
+          ? "unsupported" : "unreachable");
+      }, timeoutMs);
+      this.revisionReplies.set(requestId, {
+        room,
+        receive: payload => {
+          if (finished) return;
+          const response = readResponse(payload);
+          if (response === null) return;
+          cleanup();
+          resolve(response);
+        },
+      });
+      unsubscribe = this.onStateChange(wake);
+      wake();
+    });
   }
 
   private stateChanged(): void {

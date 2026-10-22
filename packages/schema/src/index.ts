@@ -65,6 +65,11 @@ export { blockRev } from "./rev.js";
 export type { RevInput } from "./rev.js";
 
 export { compareRevisions } from "./revisions.js";
+export { snapshotRevision } from "./revision-snapshot.js";
+export type { RevisionSnapshot } from "./revision-snapshot.js";
+export { encodeRevisionRequest, readRevisionRequest, encodeRevisionResponse, encodeRevisionResponseFrames,
+  readRevisionResponse, createRevisionResponseReader } from "./revision-protocol.js";
+export type { RevisionEntry, RevisionRequest, RevisionResponse } from "./revision-protocol.js";
 export type {
   RevisionBlockComparison, RevisionChangeKind, RevisionCollectionComparison,
   RevisionComparison, RevisionFieldComparison, RevisionRecordComparison,
