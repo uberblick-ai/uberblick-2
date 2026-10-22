@@ -3,7 +3,7 @@ import { fireEvent, screen, within } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
 import * as Y from "yjs";
 import {
-  appendBlock, createAnnotation, createTagCatalogEntry, decisionDirectoryFields,
+  appendBlock, createAnnotation, createTagCatalogEntry, decisionApprovalFingerprint, decisionDirectoryFields,
   directoryRoom, getBlocks, getBlocksFragment, getMeta, initDoc, listDirectory,
   listTagCatalog, resolveDecisionTopics, roomForDoc, setKind, setStatus,
   settingsRoom, tombstoneDirectoryEntry, upsertDirectoryEntry,
@@ -119,12 +119,6 @@ async function open(data: ReturnType<typeof fixture>, displayName = "Current rea
   return { view, dialog, editor };
 }
 
-async function writeReason(dialog: HTMLElement): Promise<void> {
-  await act(async () => fireEvent.change(within(dialog).getByRole("textbox", { name: /Why the change/ }), {
-    target: { value: "A clearer answer is needed." },
-  }));
-}
-
 async function replaceAnswer(editor: Editor, text: string): Promise<void> {
   await act(async () => editor.commands.setContent({ type: "doc", content: [
     { type: "paragraph", ...(text === "" ? {} : { content: [{ type: "text", text }] }) },
@@ -164,7 +158,8 @@ describe("Alter decision dialog", () => {
     expect(dialog.textContent).toContain("Decide puts the answer in force now under Current reader");
     expect(dialog.querySelector('[aria-label="Current answer"]')?.getAttribute("contenteditable")).toBe("false");
     expect(editor().getText()).toBe("The current answer.");
-    expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Decide" }).disabled).toBe(true);
+    expect(within(dialog).queryByRole("textbox", { name: /Why the change/ })).toBeNull();
+    expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Decide" }).disabled).toBe(false);
     expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Open an RFC instead" }).disabled).toBe(false);
     await replaceAnswer(editor(), "A typed replacement answer.");
     await act(async () => within(dialog).getByRole("button", { name: "Cancel" }).click());
@@ -177,10 +172,9 @@ describe("Alter decision dialog", () => {
     expect(catalogUpdates).not.toHaveBeenCalled();
   });
 
-  it("requires a non-blank answer and a display name for Decide while an RFC can omit its reason", async () => {
+  it("requires a non-blank answer and a display name for Decide while an RFC needs no display name", async () => {
     const data = fixture();
     const { dialog, editor } = await open(data, "  ");
-    await writeReason(dialog);
     const decide = within(dialog).getByRole<HTMLButtonElement>("button", { name: "Decide" });
     const rfc = within(dialog).getByRole<HTMLButtonElement>("button", { name: "Open an RFC instead" });
     expect(decide.disabled).toBe(true);
@@ -196,15 +190,19 @@ describe("Alter decision dialog", () => {
     expectUnwritten(data);
   });
 
-  it("copies a three-block current answer but requires shortening it before either action", async () => {
+  it("copies a three-block current answer and only disables both actions at a fourth block", async () => {
     const data = fixture([
       { type: "paragraph", text: "One" }, { type: "paragraph", text: "Two" },
       { type: "paragraph", text: "Three" },
     ]);
     const { dialog, editor } = await open(data);
-    await writeReason(dialog);
     expect(editor().getText()).toContain("Three");
-    expect(dialog.textContent).toMatch(/at most two blocks/i);
+    expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Decide" }).disabled).toBe(false);
+    expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Open an RFC instead" }).disabled).toBe(false);
+    await act(async () => editor().commands.setContent({ type: "doc", content: ["One", "Two", "Three", "Four"].map((text) => ({
+      type: "paragraph", content: [{ type: "text", text }],
+    })) }));
+    expect(dialog.textContent).toMatch(/at most three blocks/i);
     expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Decide" }).disabled).toBe(true);
     expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Open an RFC instead" }).disabled).toBe(true);
     await replaceAnswer(editor(), "The shortened answer.");
@@ -224,7 +222,6 @@ describe("Alter decision dialog", () => {
       getBlocksFragment(data.source.connection.ydoc).insert(0, [unknown]);
     }
     const { dialog } = await open(data);
-    await writeReason(dialog);
     expect(dialog.textContent).toContain(type);
     expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Decide" }).disabled).toBe(true);
     expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Open an RFC instead" }).disabled).toBe(true);
@@ -236,7 +233,6 @@ describe("Alter decision dialog", () => {
     const sourceUpdates = vi.fn();
     data.source.connection.ydoc.on("update", sourceUpdates);
     const { dialog, editor } = await open(data);
-    await writeReason(dialog);
     const decide = within(dialog).getByRole<HTMLButtonElement>("button", { name: "Decide" });
     const rfc = within(dialog).getByRole<HTMLButtonElement>("button", { name: "Open an RFC instead" });
     expect(decide.disabled).toBe(false);
@@ -268,7 +264,6 @@ describe("Alter decision dialog", () => {
   ])("$dismissal abandons a waiting $action without a late record, RFC or tag write", async ({ dismissal, action, rooms: count }) => {
     const data = fixture();
     const { dialog } = await open(data);
-    await writeReason(dialog);
     await act(async () => within(dialog).getByRole("button", { name: action }).click());
     expect(acquired.filter((held) => held.connection !== data.directory.connection)).toHaveLength(count);
     expect(dialog.textContent).toMatch(/Waiting for the new rooms/i);
@@ -289,11 +284,10 @@ describe("Alter decision dialog", () => {
     expect(acquired.every((held) => held.releases === 1)).toBe(true);
   });
 
-  it.each(["archived", "unwritable"])("keeps the typed answer and reason when a waiting action becomes %s", async (state) => {
+  it.each(["archived", "unwritable"])("keeps the typed answer when a waiting action becomes %s", async (state) => {
     const data = fixture();
     const { dialog, editor } = await open(data);
     await replaceAnswer(editor(), "Keep this typed answer.");
-    await writeReason(dialog);
     await act(async () => within(dialog).getByRole("button", { name: "Decide" }).click());
     await act(async () => {
       if (state === "archived") tombstoneDirectoryEntry(data.directory.connection.ydoc, CURRENT);
@@ -303,7 +297,6 @@ describe("Alter decision dialog", () => {
     await admitDestinations();
     expect(within(dialog).getByRole("alert").textContent).toMatch(state === "archived" ? /no longer.*answer|live topic/i : /writ/i);
     expect(dialog.textContent).toContain("Keep this typed answer.");
-    expect(within(dialog).getByRole("textbox", { name: /Why the change/ })).toHaveProperty("value", "A clearer answer is needed.");
     expect(data.recorded).not.toHaveBeenCalled();
     expectUnwritten(data);
   });
@@ -311,8 +304,10 @@ describe("Alter decision dialog", () => {
   it.each(["Decide", "Open an RFC instead"])("hands the successful $0 result to navigation while retaining its destination rooms", async (action) => {
     const data = fixture();
     const { dialog, editor } = await open(data);
-    await replaceAnswer(editor(), "The replacement answer.");
-    if (action === "Decide") await writeReason(dialog);
+    const answer = ["The replacement answer.", "A second answer block.", "A third answer block."];
+    await act(async () => editor().commands.setContent({ type: "doc", content: answer.map((text) => ({
+      type: "paragraph", content: [{ type: "text", text }],
+    })) }));
     await act(async () => within(dialog).getByRole("button", { name: action }).click());
     expect(data.recorded).not.toHaveBeenCalled();
     await admitDestinations();
@@ -320,16 +315,20 @@ describe("Alter decision dialog", () => {
     const result = data.recorded.mock.calls[0]![0];
     const topic = resolveDecisionTopics(data.directory.connection.ydoc)[0]!;
     const decision = room(roomForDoc(WORKSPACE, result.decision)).connection.ydoc;
+    expect(getBlocks(decision).map((block) => block.text)).toEqual(answer);
     if (action === "Decide") {
       expect(topic.inForce?.uuid).toBe(result.decision);
       expect(getMeta(decision).decidedBy).toBe("Current reader");
-      expect(getBlocks(decision).map((block) => block.text)).toEqual(["The replacement answer.", "A clearer answer is needed."]);
+      expect(getMeta(decision).approvalFingerprint).toBe(decisionApprovalFingerprint(decision));
       expect(result.rfc).toBeUndefined();
     } else {
       expect(topic.inForce?.uuid).toBe(CURRENT);
       expect(topic.pending.map((entry) => entry.uuid)).toEqual([result.decision]);
       expect(result.rfc).toBeDefined();
-      expect(getMeta(room(roomForDoc(WORKSPACE, result.rfc!)).connection.ydoc).tags).toEqual([RFC_TAG]);
+      const rfc = room(roomForDoc(WORKSPACE, result.rfc!)).connection.ydoc;
+      expect(getMeta(rfc).tags).toEqual([RFC_TAG]);
+      expect(getBlocks(rfc).map((block) => ({ type: block.type, text: block.text })))
+        .toEqual([{ type: "paragraph", text: "Proposed change to Database for the hub." }]);
     }
     expect(acquired.every((held) => held.releases === 0)).toBe(true);
     result.release();
