@@ -106,7 +106,7 @@ async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
 
 function openEnvironment(runDir: string, bundleDir: string): NodeJS.ProcessEnv {
   const env = { ...process.env };
-  for (const key of ["HOME", "HUB_AUTH_TOKEN", "HUB_URL", "WORKSPACE_ID", "WORKSPACES", "UB_WORKSPACE_ID", "UB_HUB_URL"]) {
+  for (const key of ["HOME", "HUB_AUTH_TOKEN", "HUB_URL", "WORKSPACE_ID", "WORKSPACES", "UB_WORKSPACE_ID", "UB_HUB_URL", "UBERBLICK_DB"]) {
     delete env[key];
   }
   env.HOME = runDir;
