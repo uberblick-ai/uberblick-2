@@ -12,6 +12,7 @@ import {
   createGroup,
   decisionTopicTitle,
   deleteGroup,
+  isDirectoryEntryDeleted,
   pinDoc,
   readSidebar,
   renameGroup,
@@ -208,6 +209,10 @@ function SidebarContent({
    * archived titles after leaving ordinary listings.
    */
   const stubs = useDirectory(connection, true);
+  const visibleGroups = groups.map((group) => ({
+    ...group,
+    docs: group.docs.filter((uuid) => connection === null || !isDirectoryEntryDeleted(connection.ydoc, uuid)),
+  }));
   const labels = useMemo(() => {
     const entries = new Map(stubs.map((entry) => [entry.uuid, entry]));
     for (const topic of resolveDecisionTopics(stubs)) {
@@ -276,6 +281,7 @@ function SidebarContent({
       </button>
       <SidebarDragProvider
         connection={sidebar}
+        directory={connection?.ydoc ?? null}
         onDraggingChange={onDraggingChange}
         active={!collapsed && !settingsOpen && sidebarWritable}
       >
@@ -307,7 +313,7 @@ function SidebarContent({
                 menu.
               </p>
             )}
-            {groups.map((group, index) => (
+            {visibleGroups.map((group, index) => (
                 <GroupSection
                   key={group.id}
                   index={index}

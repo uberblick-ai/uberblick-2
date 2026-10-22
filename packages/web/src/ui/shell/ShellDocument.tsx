@@ -7,7 +7,7 @@ function documentActions(shell: AppShell) {
   const { selected, topic, sidebarStatus, directoryStatus, doc } = shell.rooms;
   const { selectedDirectoryEntry, archived } = shell.readings;
   const { pinned, onTogglePin } = shell.pins;
-  const { onArchive, onRestore, onArchiveConfirmationFocusChange, restoreFocusRoom, archiveConfirmationFocusRoom, onRestoreFocused } = shell.archive;
+  const { onArchive, onRestore, onDelete, onArchiveConfirmationFocusChange, restoreFocusRoom, archiveConfirmationFocusRoom, onRestoreFocused } = shell.archive;
   return {
     pinned,
     onTogglePin: sidebarStatus.writable && sidebarStatus.synced && selected !== null ? onTogglePin : null,
@@ -22,19 +22,20 @@ function documentActions(shell: AppShell) {
     focusRestore: doc !== null && (restoreFocusRoom.current === doc.room || archiveConfirmationFocusRoom.current === doc.room),
     onRestoreFocused,
     onRestore: directoryStatus.writable ? onRestore : null,
+    onDelete: directoryStatus.writable ? onDelete : null,
   };
 }
 
 export function ShellDocument({ shell }: { shell: AppShell }) {
   const { route, hubReady, statusEndpoint, serving, identity } = shell.environment;
-  const { topic, selected, directory, doc, docStatus, topicTitleRoom, catalog } = shell.rooms;
+  const { topic, selected, directory, doc, docStatus, topicTitleRoom, catalog, deleted } = shell.rooms;
   const { openAlterDecision } = shell.alter;
   const { relatedTopics, titlePresence, servingStatus, meta, archived, selectedDirectoryEntry, chromeRoom } = shell.readings;
   const { navigate } = shell;
   const { docLinks } = shell.navigation;
   const { onFocusThread, threads, threadsOpen, onToggleThreads } = shell.threads;
   const { syncOpen, setSyncOpen } = shell.sync;
-  const lastUpdated = !docStatus.deleted && documentPaneState({
+  const lastUpdated = !deleted && documentPaneState({
     route, connection: doc, meta, topic, selectedUuid: selected, navigate,
   }, docStatus.hasAnswered) === "shown" ? selectedDirectoryEntry?.updatedAt : undefined;
   return (
@@ -63,6 +64,7 @@ export function ShellDocument({ shell }: { shell: AppShell }) {
         author={identity.name}
         catalogConnection={catalog}
         archived={archived}
+        deleted={deleted}
         updatedAt={selectedDirectoryEntry?.updatedAt}
         docLinks={docLinks}
         actions={documentActions(shell)}
@@ -71,7 +73,7 @@ export function ShellDocument({ shell }: { shell: AppShell }) {
         threadsOpen={threadsOpen}
         onToggleThreads={onToggleThreads}
       />
-      {(route.kind === "doc" || route.kind === "decision") && (
+      {!deleted && (route.kind === "doc" || route.kind === "decision") && (
         <PopoverContent
           align="start"
           collisionPadding={8}

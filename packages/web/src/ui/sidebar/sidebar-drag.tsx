@@ -7,7 +7,7 @@ import { isSortable } from "@dnd-kit/react/sortable";
 import { Accessibility, KeyboardSensor, PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
 import { announce, cleanup } from "@atlaskit/pragmatic-drag-and-drop-live-region";
 import { OptimisticSortingPlugin } from "@dnd-kit/dom/sortable";
-import { moveDoc, moveGroup, readSidebar } from "@uberblick/schema";
+import { isDirectoryEntryDeleted, moveDoc, moveGroup, readSidebar } from "@uberblick/schema";
 import type * as Y from "yjs";
 import type { RoomConnection } from "../../collab/rooms.js";
 
@@ -51,8 +51,8 @@ type SidebarDrop =
   | { kind: "group"; id: string; index: number }
   | { kind: "doc"; id: string; group: string; index: number };
 
-/** Final indices are after removal, exactly the schema move functions' contract. */
-function commitSidebarDrop(doc: Y.Doc, drop: SidebarDrop): void {
+/** Translate displayed positions past hidden pins before committing stored order. */
+function commitSidebarDrop(doc: Y.Doc, drop: SidebarDrop, directory: Y.Doc | null): void {
   const groups = readSidebar(doc);
   if (drop.kind === "group") {
     const at = groups.findIndex((group) => group.id === drop.id);
@@ -61,13 +61,18 @@ function commitSidebarDrop(doc: Y.Doc, drop: SidebarDrop): void {
   }
   const source = groups.find((group) => group.docs.includes(drop.id));
   const target = groups.find((group) => group.id === drop.group);
-  if (!source || !target) return;
-  if (source.id === target.id && source.docs.indexOf(drop.id) === drop.index) return;
-  moveDoc(doc, drop.id, drop.group, drop.index);
+  const visible = (uuid: string) => directory === null || !isDirectoryEntryDeleted(directory, uuid);
+  if (!source || !target || !visible(drop.id)) return;
+  if (source.id === target.id && source.docs.filter(visible).indexOf(drop.id) === drop.index) return;
+  const remaining = target.docs.filter((uuid) => uuid !== drop.id);
+  const before = remaining.filter(visible)[drop.index];
+  moveDoc(doc, drop.id, drop.group, before === undefined ? remaining.length : remaining.indexOf(before));
 }
 
-function order(doc: Y.Doc): string {
-  return JSON.stringify(readSidebar(doc).map(({ id, docs }) => [id, docs]));
+function order(doc: Y.Doc, directory: Y.Doc | null): string {
+  return JSON.stringify(readSidebar(doc).map(({ id, docs }) => [id, docs.map((uuid) =>
+    [uuid, directory !== null && isDirectoryEntryDeleted(directory, uuid)],
+  )]));
 }
 
 /** Keep optimistic sorting within a React-owned list, never between parents. */
@@ -95,11 +100,13 @@ class SidebarSortingPlugin extends OptimisticSortingPlugin {
 
 export function SidebarDragProvider({
   connection,
+  directory = null,
   active,
   onDraggingChange,
   children,
 }: {
   connection: RoomConnection | null;
+  directory?: Y.Doc | null;
   active: boolean;
   onDraggingChange?: (active: boolean) => void;
   children: ReactNode;
@@ -135,18 +142,20 @@ export function SidebarDragProvider({
   useEffect(() => {
     if (connection === null) return;
     const changed = (): void => {
-      if (order(connection.ydoc) !== initialOrder.current) cancel();
+      if (order(connection.ydoc, directory) !== initialOrder.current) cancel();
     };
     connection.ydoc.on("update", changed);
+    directory?.on("update", changed);
     const stopStatus = connection.onStatusChange((status) => {
       if (!status.writable) cancel();
     });
     return () => {
       cancel();
       connection.ydoc.off("update", changed);
+      directory?.off("update", changed);
       stopStatus();
     };
-  }, [connection, cancel]);
+  }, [connection, directory, cancel]);
   useEffect(() => {
     if (!active) cancel();
   }, [active, cancel]);
@@ -172,7 +181,7 @@ export function SidebarDragProvider({
         announce(`Moving ${event.operation.source?.data.label ?? "item"}.`);
         dragging.current = manager;
         onDraggingChange?.(true);
-        initialOrder.current = connection === null ? null : order(connection.ydoc);
+        initialOrder.current = connection === null ? null : order(connection.ydoc, directory);
       }}
       onDragOver={({ operation: { source, target } }: DragOverEvent) => {
         // The initial collision is the row itself, not a newly chosen position.
@@ -187,22 +196,23 @@ export function SidebarDragProvider({
         const expectedOrder = initialOrder.current;
         initialOrder.current = null;
         if (event.canceled || !active || connection?.status.writable !== true) return;
-        if (order(connection.ydoc) !== expectedOrder) return;
+        if (order(connection.ydoc, directory) !== expectedOrder) return;
         const { source, target } = event.operation;
         if (!isSortable(source) || target === null) return;
         const id = source.data.id;
         if (typeof id !== "string") return;
         if (source.data.kind === "group") {
-          commitSidebarDrop(connection.ydoc, { kind: "group", id, index: source.index });
+          commitSidebarDrop(connection.ydoc, { kind: "group", id, index: source.index }, directory);
         } else if (source.data.kind === "doc") {
           const group = target.data.kind === "append" ? target.data.group
             : isSortable(target) ? target.group : source.group;
           if (typeof group !== "string") return;
           const index = target.data.kind === "append"
-            ? readSidebar(connection.ydoc).find((item) => item.id === group)?.docs.filter((uuid) => uuid !== id).length
+            ? readSidebar(connection.ydoc).find((item) => item.id === group)?.docs.filter((uuid) =>
+              uuid !== id && (directory === null || !isDirectoryEntryDeleted(directory, uuid))).length
             : isSortable(target) && target.group !== source.group ? target.index : source.index;
           if (index === undefined) return;
-          commitSidebarDrop(connection.ydoc, { kind: "doc", id, group, index });
+          commitSidebarDrop(connection.ydoc, { kind: "doc", id, group, index }, directory);
         }
       }}
     >
