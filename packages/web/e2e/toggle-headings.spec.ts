@@ -124,6 +124,41 @@ test("nested toggles fold their sections, stay local and restart collapsed", asy
   await expect(block(page, created, 1)).toBeHidden();
 });
 
+test("expanded sections and their caret survive remote edits and actual undo and redo", async ({ browser }) => {
+  const session = writer();
+  const created = await create(session, [
+    { type: "paragraph", text: "Before" },
+    { type: "heading", level: 2, text: "> Help" },
+    { type: "paragraph", text: "Details" },
+    { type: "heading", level: 2, text: "Next" },
+  ]);
+  const page = await open(browser, created.uuid);
+  const body = block(page, created, 2);
+  await control(page, "Help").click();
+  await placeCaretIn(body);
+  await session.call("edit_block", {
+    uuid: created.uuid, block_id: created.blocks[0]?.id, old_text: "Before", new_text: "Before remote",
+    rev: created.blocks[0]?.rev,
+  });
+  await expect(block(page, created, 0)).toContainText("Before remote");
+  await expect(control(page, "Help", true)).toHaveAttribute("aria-expanded", "true");
+  await expect(body).toBeVisible();
+  await expect.poll(() => caret(page)).toEqual({ id: created.blocks[2]?.id, offset: "Details".length, empty: true });
+
+  await page.keyboard.type(" more");
+  await expect(body).toHaveText("Details more");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(body).toHaveText("Details");
+  await expect(control(page, "Help", true)).toHaveAttribute("aria-expanded", "true");
+  await expect(body).toBeVisible();
+  await expect.poll(() => caret(page)).toEqual({ id: created.blocks[2]?.id, offset: "Details".length, empty: true });
+  await page.keyboard.press("ControlOrMeta+Shift+z");
+  await expect(body).toHaveText("Details more");
+  await expect(control(page, "Help", true)).toHaveAttribute("aria-expanded", "true");
+  await expect(body).toBeVisible();
+  await expect.poll(() => caret(page)).toEqual({ id: created.blocks[2]?.id, offset: "Details more".length, empty: true });
+});
+
 test("typing and removing the marker keeps a heading editable and navigation outside folded blocks", async ({ browser }) => {
   const session = writer();
   const created = await create(session, [

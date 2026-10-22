@@ -4,7 +4,7 @@ import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { CellSelection } from "@tiptap/pm/tables";
 import { expect, it } from "vitest";
 import * as Y from "yjs";
-import { undo, yUndoPluginKey } from "y-prosemirror";
+import { redo, undo, yUndoPluginKey } from "y-prosemirror";
 import {
   appendBlock, docRev, editBlock, exportMarkdown, getBlocks, initDoc,
 } from "@uberblick/schema";
@@ -167,6 +167,54 @@ it("keeps expansion through position changes, resets a recreated toggle and isol
     await waitFor(() => expect(within(first.element).getByRole("button", { name: "Expand Help" }).getAttribute("aria-expanded")).toBe("false"));
     expect(isFolded(first.element, body)).toBe(true);
   } finally { second?.editor.destroy(); first.editor.destroy(); ydoc.destroy(); }
+});
+
+it("keeps expansion and the caret inside its section across a peer update", async () => {
+  const ydoc = documentFixture();
+  const preface = appendBlock(ydoc, { type: "paragraph", text: "Before" });
+  appendBlock(ydoc, { type: "heading", level: 2, text: "> Help" });
+  const body = appendBlock(ydoc, { type: "paragraph", text: "Details" });
+  appendBlock(ydoc, { type: "heading", level: 2, text: "Next" });
+  const peer = new Y.Doc();
+  Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+  const { editor, element } = mountEditor(ydoc);
+  try {
+    await toggle(element, "Expand Help");
+    editor.view.focus();
+    editor.commands.setTextSelection(blockPosition(editor, body) + 4);
+    editBlock(peer, preface, "Before", "Before remote");
+    Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(peer), "remote");
+
+    expect(blockElement(element, preface).textContent).toBe("Before remote");
+    expect(isFolded(element, body)).toBe(false);
+    await waitFor(() => expect(within(element).getByRole("button", { name: "Collapse Help" }).getAttribute("aria-expanded")).toBe("true"));
+    expect(editor.state.selection.head).toBe(blockPosition(editor, body) + 4);
+    expect(editor.state.selection.empty).toBe(true);
+  } finally { editor.destroy(); peer.destroy(); ydoc.destroy(); }
+});
+
+it("keeps expansion and the caret inside its section across actual undo and redo", async () => {
+  const ydoc = documentFixture();
+  appendBlock(ydoc, { type: "heading", level: 2, text: "> Help" });
+  const body = appendBlock(ydoc, { type: "paragraph", text: "Details" });
+  appendBlock(ydoc, { type: "heading", level: 2, text: "Next" });
+  const { editor, element } = mountEditor(ydoc);
+  try {
+    await toggle(element, "Expand Help");
+    editor.view.focus();
+    editor.commands.setTextSelection(blockPosition(editor, body) + 1 + "Details".length);
+    editor.view.dispatch(editor.state.tr.insertText(" more"));
+    expect(blockElement(element, body).textContent).toBe("Details more");
+    expect(undo(editor.state)).toBe(true);
+    expect(blockElement(element, body).textContent).toBe("Details");
+    expect(isFolded(element, body)).toBe(false);
+    expect(editor.state.selection.head).toBe(blockPosition(editor, body) + 1 + "Details".length);
+    expect(redo(editor.state)).toBe(true);
+    expect(blockElement(element, body).textContent).toBe("Details more");
+    expect(isFolded(element, body)).toBe(false);
+    expect(editor.state.selection.head).toBe(blockPosition(editor, body) + 1 + "Details more".length);
+    await waitFor(() => expect(within(element).getByRole("button", { name: "Collapse Help" }).getAttribute("aria-expanded")).toBe("true"));
+  } finally { editor.destroy(); ydoc.destroy(); }
 });
 
 it("moves text, node and cell selections out of a collapsed section and skips hidden endpoints", async () => {

@@ -17,7 +17,7 @@ interface Section {
 }
 interface FoldState {
   sections: Section[];
-  expanded: Set<number>;
+  expanded: Set<string>;
 }
 const folds = new PluginKey<FoldState>("toggleHeadings");
 type FoldAction = { positions: number[]; expanded: boolean };
@@ -40,7 +40,7 @@ function sections(doc: PMNode): Section[] {
 }
 
 function containing(state: FoldState, pos: number): Section[] {
-  return state.sections.filter((section) => !state.expanded.has(section.pos) && section.from <= pos && pos < section.to);
+  return state.sections.filter((section) => !state.expanded.has(section.node.attrs.id) && section.from <= pos && pos < section.to);
 }
 
 function setExpanded(view: EditorView, positions: number[], expanded: boolean): void {
@@ -114,7 +114,7 @@ export const ToggleHeadings = Extension.create({
       const fold = folds.getState(view.state);
       const section = fold?.sections.find((candidate) => pos !== undefined && candidate.pos === pos - 1);
       if (section === undefined || fold === undefined) return;
-      const expanded = fold.expanded.has(section.pos);
+      const expanded = fold.expanded.has(section.node.attrs.id);
       const label = section.node.textContent.slice(2).trim() || "section";
       // Content remains in ProseMirror's flat tree. Radix owns the trigger's
       // native activation and expanded state; decorations project visibility.
@@ -134,15 +134,14 @@ export const ToggleHeadings = Extension.create({
         init: (_config, state) => ({ sections: sections(state.doc), expanded: new Set() }),
         apply(tr, previous) {
           const nextSections = tr.docChanged ? sections(tr.doc) : previous.sections;
-          const expanded = new Set<number>();
-          for (const pos of previous.expanded) {
-            const mapped = tr.mapping.mapResult(pos, 1);
-            if (!mapped.deleted && nextSections.some((section) => section.pos === mapped.pos)) expanded.add(mapped.pos);
-          }
+          const expanded = new Set<string>();
           const action = tr.getMeta(folds) as FoldAction | undefined;
-          for (const pos of action?.positions ?? []) {
-            if (action?.expanded) expanded.add(pos);
-            else expanded.delete(pos);
+          // Yjs peer edits and undo replace the whole ProseMirror document.
+          // Block ids survive those replacements; mapped positions do not.
+          for (const { node, pos } of nextSections) {
+            const id = node.attrs.id;
+            if (typeof id !== "string" || id === "") continue;
+            if (action?.positions.includes(pos) ? action.expanded : previous.expanded.has(id)) expanded.add(id);
           }
           return { sections: nextSections, expanded };
         },
