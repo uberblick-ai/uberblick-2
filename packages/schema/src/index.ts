@@ -197,6 +197,7 @@ export {
   InvalidListAttributesError,
   InvalidWorkspaceIdError,
   OldTextMismatchError,
+  SchemaError,
   StaleBlockError,
   InvalidTableError,
   InvalidCardError,
