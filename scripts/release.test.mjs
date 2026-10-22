@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { REQUIRED_CHECKS, release } from "./release.mjs";
+import { REQUIRED_CHECKS, productionServices, release } from "./release.mjs";
 
 const SHA = "a".repeat(40);
 const OTHER_SHA = "b".repeat(40);
@@ -331,4 +331,24 @@ test("a repository's first client release requests notes without an invented pre
   const fake = services({ previousTag: async () => null, remoteTags: async () => [] });
   await release(TAG, fake);
   assert.deepEqual(fake.calls.filter(([name]) => name === "notes"), [["notes", null, SHA]]);
+});
+
+test("read-only GitHub lookups retry server errors and give up after ten attempts", async () => {
+  const waits = [];
+  let lookups = 0;
+  const command = (cmd) => {
+    if (cmd === "git") return SHA;
+    lookups += 1;
+    if (lookups < 3) throw new Error("release: gh api failed: unexpected end of JSON input");
+    return JSON.stringify({ number: 7, title: "Fix", merge_commit_sha: SHA });
+  };
+  const prs = await productionServices({ command, sleep: (ms) => waits.push(ms) }).mergedPrs(PREVIOUS_TAG, SHA);
+  assert.deepEqual(prs, [{ number: 7, title: "Fix", merge_commit_sha: SHA }]);
+  assert.deepEqual(waits, [2000, 4000]);
+
+  const failing = productionServices({ command: (cmd) => {
+    if (cmd === "git") return SHA;
+    throw new Error("release: gh api failed: HTTP 500");
+  }, sleep: () => {} });
+  await assert.rejects(failing.mergedPrs(PREVIOUS_TAG, SHA), /HTTP 500/);
 });
