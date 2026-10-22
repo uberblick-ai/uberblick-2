@@ -7,11 +7,12 @@
 import * as Y from "yjs";
 import fastDiff from "fast-diff";
 import { getBlocksFragment } from "./doc.js";
-import { CARD_PARTS, buildCardElement, cardButtons, cardInline, cardText, cardTextParts, editCard, parseCardInput, writeCardInline } from "./card.js";
+import { CARD_PARTS, buildCardElement, cardButtons, cardText, cardTextParts, editCard, parseCardInput, writeCardInline } from "./card.js";
 import type { CardButton, CardInline } from "./card.js";
-import { buildFigmaElement, editFigma, figmaFields, figmaInline, figmaText, parseFigmaInput, writeFigmaInline } from "./figma.js";
+import { buildFigmaElement, editFigma, figmaFields, figmaText, parseFigmaInput, writeFigmaInline } from "./figma.js";
 import type { FigmaInline } from "./figma.js";
 import { parseInline } from "./markdown.js";
+import { plainXmlText, structuredInlineParts } from "./inline-parts.js";
 import {
   BlockNotFoundError,
   ConflictingLinkMarksError,
@@ -29,7 +30,7 @@ import {
 } from "./marks.js";
 import { blockRev } from "./rev.js";
 import { canonicalDocumentUuid } from "./rooms.js";
-import { buildTableElement, editTable, parseGfmTable, parseTableInput, parseTableCell, tableCellTexts, tableRows, tableText } from "./table.js";
+import { buildTableElement, editTable, parseGfmTable, parseTableInput, parseTableCell, tableRows, tableText } from "./table.js";
 import type { TableMapping } from "./table.js";
 import {
   MAX_LIST_INDENT,
@@ -82,16 +83,6 @@ function elementType(element: Y.XmlElement): BlockType {
 function textOf(element: Y.XmlElement): Y.XmlText | null {
   const first = element.firstChild;
   return first instanceof Y.XmlText ? first : null;
-}
-
-/** Read a Y.XmlText as plain text, ignoring any formatting marks. */
-function readText(text: Y.XmlText | null): string {
-  if (text === null) return "";
-  let out = "";
-  for (const op of text.toDelta() as Array<{ insert?: unknown }>) {
-    if (typeof op.insert === "string") out += op.insert;
-  }
-  return out;
 }
 
 /**
@@ -200,7 +191,7 @@ function toBlock(element: Y.XmlElement): Block {
   const text = type === "card" ? cardText(element)
     : type === "figma" ? figmaText(element)
     : type === "table" && element.toArray().some((node) => node instanceof Y.XmlElement && node.nodeName === "tableRow")
-      ? tableText(element) : readText(textOf(element));
+      ? tableText(element) : plainXmlText(textOf(element));
   if (type === "heading") {
     const level = levelOf(element);
     return { id, type, text, rev: blockRev({ type, text, level }), level };
@@ -301,15 +292,24 @@ export function getBlockInline(ydoc: Y.Doc, blockId: string): InlineRun[] {
 export function getBlocksWithInline(
   ydoc: Y.Doc,
 ): Array<{ block: Block; inline: InlineRun[]; table?: InlineRun[][][]; card?: CardInline; cardButtons?: CardButton[]; figma?: FigmaInline }> {
-  return partitionById(getBlocksFragment(ydoc)).visible.map((element) => ({
-    block: toBlock(element),
-    inline: readInlineRuns(textOf(element)),
-    ...(element.nodeName === "table" ? {
-      table: tableRows(element).map((row) => row.map((cell) => tableCellTexts(cell).flatMap(readInlineRuns))),
-    } : {}),
-    ...(element.nodeName === "card" ? { card: cardInline(element), cardButtons: cardButtons(element) } : {}),
-    ...(element.nodeName === "figma" ? { figma: figmaInline(element) } : {}),
-  }));
+  return partitionById(getBlocksFragment(ydoc)).visible.map((element) => {
+    const table: InlineRun[][][] = tableRows(element).map(() => []);
+    const card = {} as CardInline;
+    const figma: FigmaInline = { caption: [] };
+    for (const part of structuredInlineParts(element)) {
+      const runs = part.texts.flatMap(readInlineRuns);
+      if (part.kind === "table") table[part.row]?.push(runs);
+      else if (part.kind === "card") card[part.part] = runs;
+      else figma.caption = runs;
+    }
+    return {
+      block: toBlock(element),
+      inline: readInlineRuns(textOf(element)),
+      ...(element.nodeName === "table" ? { table } : {}),
+      ...(element.nodeName === "card" ? { card, cardButtons: cardButtons(element) } : {}),
+      ...(element.nodeName === "figma" ? { figma } : {}),
+    };
+  });
 }
 
 /**
@@ -379,13 +379,11 @@ function writeInline(element: Y.XmlElement, input: BlockInput): void {
   }
   if (input.type === "table") {
     const table = parseTableInput(input.text ?? "");
-    const cells = tableRows(element);
-    for (const [row, values] of [table.header, ...table.rows].entries()) {
-      for (const [column, value] of values.entries()) {
-        const cell = cells[row]?.[column];
-        const text = cell === undefined ? null : tableCellTexts(cell)[0];
-        if (text !== null && text !== undefined) applyInlineRuns(text, parseTableCell(value));
-      }
+    const values = [table.header, ...table.rows];
+    for (const part of structuredInlineParts(element)) {
+      if (part.kind !== "table") continue;
+      const text = part.texts[0];
+      if (text !== undefined) applyInlineRuns(text, parseTableCell(values[part.row]?.[part.column] ?? ""));
     }
     return;
   }
@@ -500,7 +498,7 @@ export function normalizeLegacyTables(ydoc: Y.Doc): number {
       continue;
     }
     if (children.length !== 1 || !(children[0] instanceof Y.XmlText)) continue;
-    const source = readText(children[0]);
+    const source = plainXmlText(children[0]);
     const delta = children[0].toDelta();
     const parsed = parseGfmTable(source);
     const index = fragment.toArray().indexOf(element);

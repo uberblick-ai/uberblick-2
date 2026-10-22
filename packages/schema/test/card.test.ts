@@ -195,6 +195,20 @@ describe("card block contract", () => {
     expect(cardInline(findBlockElement(copy, getBlocks(copy)[0]!.id)!)).toEqual(cardInline(card));
   });
 
+  it.each(["\r", "\n"])("keeps stored part newlines during another part's edit: %j", (newline) => {
+    const { doc, id, card } = fixture();
+    const footer = partText(card, "footer");
+    footer.insert(4, newline);
+    const delta = footer.toDelta();
+    expect(isSupportedCard(card)).toBe(true);
+    const before = getBlock(doc, id)!.text;
+    expect(before).toContain("footer: Meta data");
+    editBlock(doc, id, before, before.replace("A useful title", "Changed title"));
+    expect(footer.toDelta()).toEqual(delta);
+    expect(cardInline(card).footer).toEqual([{ text: `Meta${newline}data`, marks: {} }]);
+    doc.destroy();
+  });
+
   it("retains independent concurrent edits and first writes into seeded empty parts", () => {
     let id = "";
     const [a, b] = replicaPair((doc) => {
@@ -219,14 +233,24 @@ describe("card block contract", () => {
     const mutations = [
       (card: Y.XmlElement) => card.delete(0, 1),
       (card: Y.XmlElement) => card.insert(0, [new Y.XmlText("stray")]),
-      (card: Y.XmlElement) => cardPartElement(card, "title")!.setAttribute("future", "shape"),
-      (card: Y.XmlElement) => partText(card, "title").insertEmbed(0, { hidden: true }),
-      (card: Y.XmlElement) => partText(card, "title").format(0, 1, { future: {} }),
+      (card: Y.XmlElement) => cardPartElement(card, "footer")!.setAttribute("future", "shape"),
+      (card: Y.XmlElement) => partText(card, "footer").insertEmbed(0, { hidden: true }),
+      (card: Y.XmlElement) => partText(card, "footer").format(0, 1, { future: {} }),
+      (card: Y.XmlElement) => partText(card, "footer").format(0, 1, { bold: false }),
+      (card: Y.XmlElement) => (cardPartElement(card, "footer")!.firstChild as Y.XmlElement).setAttribute("future", "shape"),
+      (card: Y.XmlElement) => (cardPartElement(card, "footer")!.firstChild as Y.XmlElement).insert(1, [new Y.XmlText("extra")]),
     ];
     for (const mutate of mutations) {
-      const { card } = fixture();
+      const { doc, id, card } = fixture();
       mutate(card);
       expect(isSupportedCard(card)).toBe(false);
+      const before = Y.encodeStateAsUpdate(doc);
+      const oldText = getBlock(doc, id)!.text;
+      const edit = () => editBlock(doc, id, oldText, oldText.replace("A useful title", "Changed title").replace("body text", "body prose"));
+      expect(edit).toThrow(InvalidCardError);
+      expect(edit).toThrow("Invalid card: Stored card shape is unsupported; it cannot be rewritten");
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+      doc.destroy();
     }
     const doc = new Y.Doc();
     const emptyCard = buildCardElement(UUID);

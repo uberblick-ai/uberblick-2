@@ -13,7 +13,7 @@
  */
 
 import * as Y from "yjs";
-import { CARD_PARTS, cardPartTexts, figmaCaptionTexts, isBlockType, readsAsMark, isSupportedCard, isSupportedFigma, isSupportedTable, tableRows, tableCellTexts } from "@uberblick/schema";
+import { isBlockType, readsAsMark, isSupportedCard, isSupportedFigma, isSupportedTable, structuredInlineParts } from "@uberblick/schema";
 import type { CardPart } from "@uberblick/schema";
 import { uberblickSchema } from "./create-editor.js";
 
@@ -107,21 +107,19 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
     }
     if (child.nodeName === "figma") {
       if (!isSupportedFigma(child)) foreign.push({ index, nodeName: "#figma-shape", id, preview: previewOf(child) });
-      else if (figmaCaptionTexts(child).some((text) => linkConflictsIn(text).length > 0)) {
+      else if (hasStructuredLinkConflicts(child)) {
         foreign.push({ index, nodeName: LINK_CONFLICT, id, preview: previewOf(child) });
       }
       continue;
     }
     if (child.nodeName === "table") {
       if (!isSupportedTable(child)) foreign.push({ index, nodeName: "#table-shape", id, preview: previewOf(child) });
-      else if (tableRows(child).some((row) => row.some((cell) =>
-        tableCellTexts(cell).some((text) => linkConflictsIn(text).length > 0),
-      ))) foreign.push({ index, nodeName: LINK_CONFLICT, id, preview: previewOf(child) });
+      else if (hasStructuredLinkConflicts(child)) foreign.push({ index, nodeName: LINK_CONFLICT, id, preview: previewOf(child) });
       continue;
     }
     if (child.nodeName === "card") {
       if (!isSupportedCard(child)) foreign.push({ index, nodeName: "#card-shape", id, preview: previewOf(child) });
-      else if (CARD_PARTS.some((part) => cardPartTexts(child, part).some((text) => linkConflictsIn(text).length > 0))) {
+      else if (hasStructuredLinkConflicts(child)) {
         foreign.push({ index, nodeName: LINK_CONFLICT, id, preview: previewOf(child) });
       }
       continue;
@@ -224,23 +222,16 @@ export function linkConflictsIn(text: Y.XmlText): LinkConflictRange[] {
  * limit would hide repairs. Only prose permitting both marks can be repaired;
  * the same pair in source is a disallowed-mark problem.
  */
-function cardLinkConflicts(child: Y.XmlElement, index: number, blockId: string | null): LinkConflict[] {
-  return CARD_PARTS.flatMap((part) => cardPartTexts(child, part).flatMap((text, textIndex) =>
-    linkConflictsIn(text).map((range) => ({ ...range, index, textIndex, part, blockId, text })),
-  ));
+function hasStructuredLinkConflicts(child: Y.XmlElement): boolean {
+  return structuredInlineParts(child).some(({ texts }) => texts.some((text) => linkConflictsIn(text).length > 0));
 }
 
-function figmaLinkConflicts(child: Y.XmlElement, index: number, blockId: string | null): LinkConflict[] {
-  return figmaCaptionTexts(child).flatMap((text, textIndex) =>
-    linkConflictsIn(text).map((range) => ({ ...range, index, textIndex, part: "caption", blockId, text })),
-  );
-}
-
-function tableLinkConflicts(child: Y.XmlElement, index: number, blockId: string | null): LinkConflict[] {
-  return tableRows(child).flatMap((row, rowIndex) => row.flatMap((cell, column) =>
-    tableCellTexts(cell).flatMap((text, textIndex) => linkConflictsIn(text).map((range) => ({
-      ...range, index, textIndex, cell: { row: rowIndex, column }, blockId, text,
-    }))),
+function structuredLinkConflicts(child: Y.XmlElement, index: number, blockId: string | null): LinkConflict[] {
+  return structuredInlineParts(child).flatMap((entry) => entry.texts.flatMap((text, textIndex) =>
+    linkConflictsIn(text).map((range) => ({
+      ...range, index, textIndex, blockId, text,
+      ...(entry.kind === "table" ? { cell: { row: entry.row, column: entry.column } } : { part: entry.part }),
+    })),
   ));
 }
 
@@ -252,16 +243,8 @@ export function findLinkConflicts(fragment: Y.XmlFragment): LinkConflict[] {
     if (!(child instanceof Y.XmlElement)) continue;
     if (!isBlockType(child.nodeName)) continue;
     const blockId = child.getAttribute("id") ?? null;
-    if (child.nodeName === "card") {
-      conflicts.push(...cardLinkConflicts(child, index, blockId));
-      continue;
-    }
-    if (child.nodeName === "figma") {
-      conflicts.push(...figmaLinkConflicts(child, index, blockId));
-      continue;
-    }
-    if (child.nodeName === "table") {
-      conflicts.push(...tableLinkConflicts(child, index, blockId));
+    if (child.nodeName === "card" || child.nodeName === "figma" || child.nodeName === "table") {
+      conflicts.push(...structuredLinkConflicts(child, index, blockId));
       continue;
     }
     if (!blockAllowsMark(child.nodeName, "link")) continue;

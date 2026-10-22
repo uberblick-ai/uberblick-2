@@ -7,7 +7,7 @@ import type { Extensions } from "@tiptap/core";
 import type { Schema } from "@tiptap/pm/model";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
-import { seedNewCardParts, seedNewFigmaCaptions, seedNewTableCells } from "@uberblick/schema";
+import { seedNewInlineParts } from "@uberblick/schema";
 import { BlockIds } from "./block-ids.js";
 import type { BlockMenuEntry } from "./block-menu.js";
 import { CaretMenuKeys } from "./caret-menu.js";
@@ -64,11 +64,9 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
   // shared text before observers/transport publish the creating transaction,
   // so replicas' first keystrokes target one existing CRDT type.
   const ydoc = options.fragment.doc;
-  const seedCells = (transaction: Y.Transaction): void => {
+  const seedParts = (transaction: Y.Transaction): void => {
     if (options.canWrite?.() !== false) {
-      seedNewTableCells(transaction);
-      seedNewCardParts(transaction);
-      seedNewFigmaCaptions(transaction);
+      seedNewInlineParts(transaction);
     }
   };
   const extensions: Extensions = [
@@ -123,7 +121,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     enableContentCheck: true,
     injectCSS: false,
   });
-  ydoc?.on("beforeObserverCalls", seedCells);
-  editor.on("destroy", () => ydoc?.off("beforeObserverCalls", seedCells));
+  ydoc?.on("beforeObserverCalls", seedParts);
+  editor.on("destroy", () => ydoc?.off("beforeObserverCalls", seedParts));
   return editor;
 }
