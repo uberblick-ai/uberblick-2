@@ -139,8 +139,8 @@ export const tools: readonly Tool[] = [
       "A decision topic has one title stored on its first record. Renaming any record renames the topic. Successors inherit it: omit title or supply the same title; another refuses. " +
       "List-item seeds: bullet/ordered list, integer indent 0–3 (defaults bullet/0). " +
       "Active tags by id/name (case ignored); unknown/retired refuse. Kind defaults first status; invalid pairs refuse. " +
-      "Before creating a decision topic, consult get_help({topic: \"lifecycle\"}) for when to create a record. " +
-      "For decision answers, see lifecycle's Decision answers and topics section. " +
+      "Decision topics/answers: consult get_help({topic: \"lifecycle\"}), including When to create a decision record and Decision answers and topics. " +
+      "Links/GitHub references: markdown. " +
       "Open/decided only; deciding needs supported nonblank answer blocks, no TL;DR/data; decided successors require recorded human answer. " +
       "related: live readable regular page; inherited unless supplied. supersedes: hydrated decision in live topic. Targets validated pre-write. " +
       "discussion: live, readable regular RFC UUID; reuse/create first. Never inherited; set_metadata corrects/clears while open, then fixed. RFC/page untouched. Separate from curated links/recorded answer. " +
@@ -341,7 +341,7 @@ export const tools: readonly Tool[] = [
       "starting-point-node-id, version-id on www.figma.com. invalid_figma refuses without writing. " +
       "Changed headers update their fields; unchanged caption marks/anchors survive. Figma rev includes " +
       "caption formatting. Card/Figma conversions and table_mapping are refused; new document targets " +
-      "must be known locally.",
+      "must be known locally. Link and GitHub reference syntax: markdown.",
     input: editBlockInput,
     operation: editBlockOperation,
     // Replaces text; table_mapping can replace rows again under identical text and rev.
@@ -368,7 +368,8 @@ export const tools: readonly Tool[] = [
       "must keep their supported shape across the whole batch. Success sends one document update " +
       "and moves the cursor once, to the end of the last inserted block's stored text. Lists use " +
       "adjacent list-item entries with list/indent (default bullet/0). Container syntax lives in " +
-      "each entry's text field. Document-link targets must be known locally; chart source stays literal.",
+      "each entry's text field. Document-link targets must be known locally; chart source stays literal. " +
+      "For links and GitHub references, see markdown.",
     input: insertBlockInput,
     operation: insertBlockOperation,
     // Adds blocks; repeating adds another batch.

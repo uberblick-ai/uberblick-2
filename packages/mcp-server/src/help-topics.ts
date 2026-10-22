@@ -150,6 +150,22 @@ An \`ablauf\` fence is an ordinary code block that the web editor draws as a dia
 
 Prose supports \`**bold**\`, \`*italic*\`, \`~~strikethrough~~\`, inline code, \`[label](https://example.com)\` and \`[label](document-uuid)\` document links. Underscore emphasis (\`__bold__\` and \`_italic_\`) is also read; export uses asterisks. Source blocks keep literal text. Tables read inline Markdown inside cells and escape literal punctuation and pipes. Alignment markers are accepted but not stored. Table rows are projected to the widest row with virtual empty padding.
 
+### GitHub references
+
+To cite a GitHub issue or pull request, write an external link to the item's \`github.com\` address with the reference as its text: \`owner/repo#n\`, \`repo#n\`, \`#n\` or the URL itself. The text must name the same item as the address. The web shows it as a pill; everywhere else it stays an ordinary link. Pills need no special syntax or mark.
+
+Use \`/pull/<n>\` for a pull request and \`/issues/<n>\` for an issue; the pill's icon follows the address. Link the reference, not a title: a linked title stays a plain link. Plain \`owner/repo#n\` text renders as text, and \`find_decisions\` does not find it because it reads only external link addresses in prose.
+
+For a paragraph in \`create_doc\` or \`insert_block\`, supply inline runs:
+
+\`\`\`json
+"inline": [
+  {"text": "Make caret placement deterministic (", "marks": {}},
+  {"text": "app#2005", "marks": {"link": "https://github.com/acme/app/pull/2005"}},
+  {"text": ").", "marks": {}}
+]
+\`\`\`
+
 ### Inline icons
 
 Write \`:name:\` to show a curated icon in the web app. Available names are ${Object.keys(INLINE_ICONS).map((name) => `\`:${name}:\``).join(", ")}. Names use lowercase kebab case. Icons use the surrounding text's size and color in paragraphs, headings, list items, quotes, table cells, all four card prose parts, Figma captions and card button labels. For example, \`button: [:claude: Discuss with Claude](claude://code/new?prompt=Review)\` shows the Claude mark beside its label.
