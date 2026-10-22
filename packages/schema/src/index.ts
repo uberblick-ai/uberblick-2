@@ -168,6 +168,7 @@ export {
   DIRECTORY_DOCS_KEY,
   DIRECTORY_DELETED_KEY,
   DIRECTORY_ARCHIVED_RECORDS_KEY,
+  DIRECTORY_RELATED_PAGES_KEY,
   compareDirectoryEntries,
   deleteDirectoryEntry,
   enforceDeletedDirectoryEntries,

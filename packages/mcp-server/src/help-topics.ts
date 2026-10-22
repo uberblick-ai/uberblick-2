@@ -131,7 +131,7 @@ A decided record's answer is read-only: content writes refuse with \`decision_re
 
 ## Discussion and related pages
 
-- \`related\` on the first record names the regular page the decision belongs to; successors inherit it.
+- \`related\` accepts one regular-page UUID or a non-empty list of them. The set is fixed at creation. A successor that omits \`related\` inherits its predecessor's whole set; supplying it replaces that set for the successor only.
 - \`discussion\` names the RFC: an ordinary regular page holding the options and reasoning. Create or reuse it first. While the record is open, \`set_metadata\` can change or clear it; after that it is fixed. A successor never inherits it.
 - Reading a regular page returns its topics in \`decisions\`: related topics first, then topics whose records link to it.
 

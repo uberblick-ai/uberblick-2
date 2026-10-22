@@ -302,11 +302,13 @@ describe("explicit decision discussion references", () => {
     expect(rfcTag).toBeDefined();
     deleteTagCatalogEntry(rig.instance.replicas.settings().doc, rfcTag!.id);
     const rfc = await page(rig);
-    const record = await decision(rig, { status: "decided", discussion: rfc.uuid, answer });
+    const left = await page(rig, { title: "Left owning page" });
+    const right = await page(rig, { title: "Right owning page" });
+    const record = await decision(rig, { status: "decided", related: [left.uuid, right.uuid], discussion: rfc.uuid, answer });
     await rig.ok("set_metadata", { uuid: rfc.uuid, title: "Renamed RFC" });
     await rig.ok("archive_doc", { uuid: rfc.uuid });
     expect(await rig.ok("get_doc", { uuid: rfc.uuid })).toMatchObject({ uuid: rfc.uuid, title: "Renamed RFC" });
-    expect(await rig.ok("get_doc", { uuid: record.uuid })).toMatchObject({ discussion: rfc.uuid, links: [rfc.uuid], approvalChanged: false });
+    expect(await rig.ok("get_doc", { uuid: record.uuid })).toMatchObject({ discussion: rfc.uuid, related: [left.uuid, right.uuid], approvalChanged: false });
     expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ uuid: record.uuid, discussion: rfc.uuid, inForce: record.uuid }]);
     expect((await rig.ok("list_tags")).tags).not.toContainEqual(rfcTag);
     await rig.close();
@@ -315,7 +317,12 @@ describe("explicit decision discussion references", () => {
     const restarted = await localRig(databasePath);
     expect(getDirectoryEntry(restarted.instance.replicas.directory().doc, record.uuid)?.discussion).toBe(rfc.uuid);
     expect((await restarted.ok("list_tags")).tags).not.toContainEqual(rfcTag);
-    expect(await restarted.ok("get_doc", { uuid: record.uuid })).toMatchObject({ discussion: rfc.uuid, links: [rfc.uuid], approvalChanged: false });
+    expect(await restarted.ok("get_doc", { uuid: record.uuid })).toMatchObject({ discussion: rfc.uuid, related: [left.uuid, right.uuid], approvalChanged: false });
+    expect((await restarted.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ uuid: record.uuid, related: [left.uuid, right.uuid] }]);
+    for (const target of [left.uuid, right.uuid]) {
+      expect((await restarted.ok("get_doc", { uuid: target })).decisions).toMatchObject([{ topic: record.uuid, relation: "related" }]);
+      expect((await restarted.ok("backlinks", { uuid: target })).backlinks).toMatchObject([{ uuid: record.uuid }]);
+    }
     expect((await restarted.ok("backlinks", { uuid: rfc.uuid })).backlinks).toMatchObject([{ uuid: record.uuid }]);
     expect(await restarted.ok("get_doc", { uuid: rfc.uuid })).toMatchObject({ uuid: rfc.uuid, title: "Renamed RFC", decisions: [{ topic: record.uuid, relation: "linked" }] });
   });

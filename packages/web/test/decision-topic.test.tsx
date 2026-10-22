@@ -118,7 +118,7 @@ afterEach(() => {
 
 interface RecordOptions {
   supersedes?: string;
-  related?: string;
+  related?: string | string[];
   discussion?: string;
   answerer?: string;
   answerDate?: string;
@@ -139,7 +139,8 @@ function record(uuid: string, title: string, status: DecisionStatus, answer: str
   initDoc(ydoc, {
     uuid, title,
     ...(options.supersedes === undefined ? {} : { topic: FIRST, supersedes: options.supersedes }),
-    ...(options.related === undefined ? {} : { governs: options.related }),
+    ...(options.related === undefined ? {} : typeof options.related === "string"
+      ? { governs: options.related } : { related: options.related }),
   });
   setKind(ydoc, "decision");
   appendBlock(ydoc, { type: "paragraph", text: answer });
@@ -253,6 +254,34 @@ async function copy(host: HTMLElement): Promise<void> {
 }
 
 describe("decision topic navigation and history", () => {
+  it.each([RELATED_FIRST, RELATED_CURRENT])("lists a multi-page topic and header count on related page %s through its earlier record", async (uuid) => {
+    for (const related of [RELATED_FIRST, RELATED_CURRENT]) {
+      const page = room(roomForDoc(WORKSPACE, related)).ydoc;
+      initDoc(page, { uuid: related, title: "A related page" });
+      appendBlock(page, { type: "paragraph", text: "Related guidance." });
+      regular(related, "A related page");
+    }
+    regular(RFC, "Replacement related page");
+    record(FIRST, "Shared decision", "decided", "The earlier answer.", {
+      related: [RELATED_FIRST, RELATED_CURRENT], agent: true,
+    });
+    record(CURRENT, "Shared decision", "decided", "The current answer.", {
+      supersedes: FIRST, related: RFC, answerer: "Ben", answerDate: DATE, order: 1,
+    });
+    const host = (await open(docPath(WORKSPACE, uuid))).container;
+    const block = within(host).getByRole("region", { name: "Decisions" });
+    expect(within(block).getAllByRole("link")).toHaveLength(1);
+    const topic = within(block).getByRole("link", { name: "In force: Shared decision" });
+    expect(topic.getAttribute("href")).toBe(docPath(WORKSPACE, FIRST));
+    expect(topic.textContent).toContain("The current answer.");
+    expect(within(host).getByRole("link", { name: "1 decision in force" }).getAttribute("href")).toBe(`#${block.id}`);
+    await act(async () => {
+      expect(archiveDecisionRecord(directory(), room(sidebarRoom(WORKSPACE)).ydoc, FIRST)).toBe(true);
+    });
+    expect(within(host).queryByRole("region", { name: "Decisions" })).toBeNull();
+    expect(within(host).queryByRole("link", { name: "1 decision in force" })).toBeNull();
+  });
+
   it("keeps a topic usable when a malformed synced key claims to join it", async () => {
     story();
     getDirectoryMap(directory()).set("evil/key", {

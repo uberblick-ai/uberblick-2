@@ -91,10 +91,10 @@ export const inputSchema = strictInput(
     tags: z.array(z.string().min(1)).optional(),
     kind: documentKindArg.optional(),
     status: documentStatusArg.optional(),
-    related: uuidArg
+    related: z.union([uuidArg, z.array(uuidArg).min(1)])
       .optional()
       .describe(
-        "Live, locally readable regular document UUID this decision relates to. Fixed at creation; omitted successors inherit their predecessor's page. Accepted only with `kind: decision`.",
+        "One live, locally readable regular document UUID or a non-empty list of them. The related set is fixed at creation. Omitted successors inherit their predecessor's whole set; supplying related replaces it. Accepted only with `kind: decision`.",
       ),
     discussion: uuidArg
       .optional()
@@ -186,15 +186,18 @@ export const createDocOperation = operation(DOCUMENT_WRITE, inputSchema, (contex
     });
   }
 
-  const relatedPage =
-    related === undefined ? null : requireWritableDoc(related);
-  if (relatedPage !== null && getMeta(relatedPage.doc, relatedPage.id).kind === "decision") {
-    throw new ToolError(
-      "related_not_regular_document",
-      `Document ${related} is a decision record, so it cannot be the related page`,
-      { related, kind: "decision" },
-    );
-  }
+  const relatedPages = related === undefined ? undefined :
+    [...new Set(typeof related === "string" ? [related] : related)].map(uuid => {
+      const page = requireWritableDoc(uuid);
+      if (getMeta(page.doc, page.id).kind === "decision") {
+        throw new ToolError(
+          "related_not_regular_document",
+          `Document ${uuid} is a decision record, so it cannot be a related page`,
+          { related: uuid, kind: "decision" },
+        );
+      }
+      return page.id;
+    });
 
   const discussionUuid = discussion === undefined ? null : discussionTarget(context, discussion);
 
@@ -232,7 +235,7 @@ export const createDocOperation = operation(DOCUMENT_WRITE, inputSchema, (contex
       : requireGroup(replicas, sidebar.group.id);
 
   const inputs = initialBlocks(context, { blocks, tldr, answer }, lifecycle, superseded !== null);
-  const governs = relatedPage === null ? (superseded === null ? undefined : getMeta(superseded.doc, superseded.id).governs) : relatedPage.id;
+  const relatedSet = relatedPages ?? (superseded === null ? undefined : getMeta(superseded.doc, superseded.id).related);
 
   const uuid = randomUUID();
   const replica = replicas.replica(uuid);
@@ -264,7 +267,7 @@ export const createDocOperation = operation(DOCUMENT_WRITE, inputSchema, (contex
         uuid,
         title: documentTitle,
         description,
-        ...(governs === undefined ? {} : { governs }),
+        ...(relatedSet === undefined ? {} : { related: relatedSet }),
         ...(lifecycle?.kind === "decision"
           ? { topic: superseded === null ? uuid : (getMeta(superseded.doc, superseded.id).topic ?? superseded.id) }
           : {}),
@@ -350,7 +353,7 @@ export const createDocOperation = operation(DOCUMENT_WRITE, inputSchema, (contex
     description,
     tags: documentTags(replica),
     ...(lifecycle === null ? {} : lifecycle),
-    ...(governs === undefined ? {} : { governs }),
+    ...(relatedSet === undefined ? {} : { governs: relatedSet[0], related: relatedSet }),
     ...(lifecycle?.kind === "decision" ? { topic: getMeta(replica.doc, replica.id).topic, discussion: getMeta(replica.doc, replica.id).discussion } : {}),
     ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
     ...(tldr === undefined ? {} : { tldr: getMeta(replica.doc, replica.id).tldr }),

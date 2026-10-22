@@ -121,7 +121,8 @@ export function relatedDecisionTopics(
   page: Pick<DocMeta, "uuid" | "kind">,
 ): DecisionTopicResolution[] {
   if (page.kind === "decision") return [];
-  return topics.filter((topic) => !topic.archived && topic.records.some((record) => record.governs === page.uuid));
+  return topics.filter((topic) => !topic.archived && topic.records.some((record) =>
+    (record.related ?? (record.governs === undefined ? [] : [record.governs])).includes(page.uuid)));
 }
 
 /** Related-page membership may be on any record; topics stay oldest first. */

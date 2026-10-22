@@ -219,8 +219,10 @@ export interface DocMeta {
   kind?: DocumentKind;
   /** The lifecycle state, present only when it is legal for {@link kind}. */
   status?: DocumentStatus;
-  /** The product document this decision shapes. */
+  /** First related page, retained for older clients. */
   governs?: string;
+  /** Regular pages this decision shapes; fixed at creation. */
+  related?: string[];
   /** First record's UUID, shared by this topic; immutable after creation. */
   topic?: string;
   /** Earlier decision this decision replaces, by immutable document UUID. */
@@ -350,6 +352,7 @@ export interface DirectoryEntry {
   code_check?: CodeCheck[];
   /** Decision-only metadata caches. Other document kinds carry none of these. */
   governs?: string;
+  related?: string[];
   topic?: string;
   supersedes?: string;
   /** Explicit discussion; absence means an older client has not cached it. */
