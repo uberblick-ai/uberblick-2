@@ -167,6 +167,14 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Call get_doc for the block ids this document actually holds, then call again with one of them.",
   },
+  duplicate_block_id: {
+    recoveryClass: "manual",
+    guidance: "Include each block id only once in block_ids, then retry the move. Nothing was written.",
+  },
+  move_target_in_selection: {
+    recoveryClass: "manual",
+    guidance: "Choose after_block_id outside block_ids, or omit it to move the blocks first. Nothing was written.",
+  },
   annotation_range: {
     recoveryClass: "reread",
     guidance:
@@ -465,9 +473,10 @@ function stamped(
     recoveryClass: recovery.recoveryClass,
     recovery: recovery.guidance,
     ...payload,
-    ...(tool.name === "insert_block" && [
+    ...((tool.name === "insert_block" || tool.name === "move_block") && [
       "block_not_found", "doc_not_found", "doc_not_hydrated", "doc_archived", "doc_deleted",
       "decision_read_only", "guidance_required", "server_shutting_down",
+      ...(tool.name === "move_block" ? ["duplicate_block_id", "move_target_in_selection"] : []),
     ].includes(payload.error) && !/nothing was written/i.test(payload.message)
       ? { message: `${payload.message} Nothing was written.` }
       : {}),

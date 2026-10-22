@@ -33,6 +33,7 @@ import { inputSchema as insertBlockInput, insertBlockOperation } from "./tools/i
 import { inputSchema as linkRangeInput, linkRangeOperation } from "./tools/link-range.js";
 import { inputSchema as listDocsInput, listDocsOperation } from "./tools/list-docs.js";
 import { inputSchema as listTagsInput, listTagsOperation } from "./tools/list-tags.js";
+import { inputSchema as moveBlockInput, moveBlockOperation } from "./tools/move-block.js";
 import type { Operation, ToolOperation, Writes } from "./tools/operation.js";
 import { inputSchema as restoreDocInput, restoreDocOperation } from "./tools/restore-doc.js";
 import { inputSchema as searchInput, searchOperation } from "./tools/search.js";
@@ -381,13 +382,27 @@ export const tools: readonly Tool[] = [
     details: toolHelpDetails.insert_block,
   }),
   tool({
+    name: "move_block",
+    title: "Move blocks",
+    description:
+      "Reorder existing blocks after after_block_id, or first when omitted/null, in block_ids order. " +
+      "Preserves ids, revs, content, attributes and comment anchors in one update; invalid moves write nothing. " +
+      "Concurrent edits or new comments on moved blocks before their replica receives the move are dropped, including offline edits.",
+    input: moveBlockInput,
+    operation: moveBlockOperation,
+    hints: { destructive: true, idempotent: true },
+    example: { uuid, block_ids: ["heading-1", "paragraph-2"], after_block_id: "paragraph-3" },
+    related: proseContracts,
+    details: toolHelpDetails.move_block,
+  }),
+  tool({
     name: "delete_block",
     title: "Delete a block",
     description:
       "Delete one block. Deleting is never how a block changes type — use insert_block plus edit_block only for " +
       "new content, and never delete-and-reinsert to re-type, which churns the block id and orphans its " +
       "annotations. Refuses with open_thread_anchored if any open thread would lose its last document anchor. " +
-      "Use annotate to resolve that thread or move its anchor before deleting.",
+      "Use annotate to resolve that thread or move its anchor before deleting. Use move_block to reorder blocks.",
     input: deleteBlockInput,
     operation: deleteBlockOperation,
     // Removes a block; repeating finds no block to remove.

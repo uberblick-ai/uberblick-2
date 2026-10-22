@@ -105,6 +105,10 @@ describe("successful MCP output contracts", () => {
     });
     await success("annotate", { uuid, block_id: created.blocks[0].id, start: 7, end: 16, text: "A comment." });
     const inserted = await success("insert_block", { uuid, blocks: [{ type: "paragraph", text: "temporary block" }] });
+    const moved = await success("move_block", {
+      uuid, block_ids: [inserted.blocks[0].id], after_block_id: created.blocks[0].id,
+    });
+    expect(moved.blocks).toEqual([{ id: inserted.blocks[0].id, rev: inserted.blocks[0].rev }]);
     await success("delete_block", { uuid, block_id: inserted.blocks[0].id });
     await success("get_data", { uuid });
     const storedValue = { arbitrary: { nested: [null, 4, { undeclared: true }] } };

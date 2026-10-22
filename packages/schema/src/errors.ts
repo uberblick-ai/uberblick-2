@@ -18,6 +18,22 @@ export class BlockNotFoundError extends SchemaError {
   }
 }
 
+/** A block move needs distinct blocks and a destination outside that selection. */
+export class InvalidBlockMoveError extends SchemaError {
+  constructor(
+    code: "empty_block_ids" | "duplicate_block_id" | "move_target_in_selection",
+    blockId?: string,
+  ) {
+    const message = code === "empty_block_ids"
+      ? "A block move requires at least one block id"
+      : code === "duplicate_block_id"
+        ? `Duplicate block id: ${blockId}`
+        : `Move target is also a moved block: ${blockId}`;
+    super(code, message, blockId === undefined ? {} : { blockId });
+    this.name = "InvalidBlockMoveError";
+  }
+}
+
 /** List attributes cannot be applied to this block or contain unsupported values. */
 export class InvalidListAttributesError extends SchemaError {
   constructor(reason: string) {
