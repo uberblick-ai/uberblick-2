@@ -459,7 +459,7 @@ describe("an archived document is read-only", () => {
         synced: false,
         message: `Document ${doc.uuid} is archived — restore_doc to edit${tool === "insert_block" ? " Nothing was written." : ""}`,
         recoveryClass: "manual",
-        recovery: "Archived documents are read-only. Call restore_doc for this uuid before editing, or delete_doc to permanently delete an archived regular document.",
+        recovery: "Archived documents are read-only. Call restore_doc for this uuid before editing. To permanently delete, call delete_doc for an archived regular document, or delete_doc with topic: true for an archived decision topic. One decision record cannot be deleted on its own yet.",
       });
     }
 
