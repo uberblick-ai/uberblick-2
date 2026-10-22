@@ -136,9 +136,23 @@ function command(command, args, options = {}) {
   return result.stdout?.trim() ?? "";
 }
 
-export function productionServices({ root = ROOT, command: execute = command } = {}) {
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+export function productionServices({ root = ROOT, command: execute = command, sleep = pause } = {}) {
   const run = (cmd, args, options = {}) => execute(cmd, args, { cwd: root, ...options });
-  const api = (path) => JSON.parse(run("gh", ["api", path, "--paginate", "--slurp"]));
+  // Read-only GitHub calls retry, since the API answers some requests with a 5xx.
+  const gh = (args) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return run("gh", args);
+      } catch (error) {
+        if (attempt === 10) throw error;
+        process.stderr.write(`release: gh ${args[0]} ${args[1]} failed (attempt ${attempt}/10), retrying: ${error.message}\n`);
+        sleep(Math.min(2000 * attempt, 10000));
+      }
+    }
+  };
+  const api = (path) => JSON.parse(gh(["api", path, "--paginate", "--slurp"]));
   return {
     head: async () => run("git", ["rev-parse", "HEAD"]),
     fetchMain: async () => {
@@ -170,7 +184,7 @@ export function productionServices({ root = ROOT, command: execute = command } =
       const prs = new Map();
       for (const commit of commits) {
         // Filter before text reaches this process, just as AGENTS.md requires.
-        const matches = run("gh", ["api", `repos/${REPOSITORY}/commits/${commit}/pulls?per_page=100`, "--paginate", "--jq",
+        const matches = gh(["api", `repos/${REPOSITORY}/commits/${commit}/pulls?per_page=100`, "--paginate", "--jq",
           '.[] | select(.merged_at != null and .base.ref == "main" and (.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR" or .user.login == "copilot-pull-request-reviewer")) | {number,title,merge_commit_sha} | @json'])
           .split("\n").filter(Boolean).map((line) => JSON.parse(line));
         for (const pr of matches) if (commits.includes(pr.merge_commit_sha)) prs.set(pr.number, pr);
@@ -198,7 +212,7 @@ export function productionServices({ root = ROOT, command: execute = command } =
     pushTags: async (sha, tags) => run("git", ["push", "--atomic",
       ...tags.map((tag) => `--force-with-lease=refs/tags/${tag}:`), "origin",
       ...tags.map((tag) => `${sha}:refs/tags/${tag}`)], { stdio: "inherit" }),
-    runs: async (tag, workflow, sha) => JSON.parse(run("gh", ["run", "list", "--repo", REPOSITORY,
+    runs: async (tag, workflow, sha) => JSON.parse(gh(["run", "list", "--repo", REPOSITORY,
       "--workflow", workflow, "--branch", tag, "--commit", sha, "--event", "push", "--limit", "20",
       "--json", "databaseId,headSha,headBranch,event,status,conclusion,url"])),
     jobs: async (run) => api(`repos/${REPOSITORY}/actions/runs/${run.databaseId}/jobs?per_page=100`).flatMap((page) => page.jobs),

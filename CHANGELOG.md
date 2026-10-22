@@ -5,6 +5,45 @@ first. The first paragraph of each release is its summary; uberblick.ai shows
 the five newest. Upgrade steps appear only when a release needs more than
 updating the client and the hub.
 
+## v0.4.9 — 2026-10-22
+
+Sync protocol 7, tag descriptions with Delete in place of Retire, sections that fold under toggle headings, deleting an archived document from its banner, and quieter table controls.
+
+### Breaking
+
+- Sync protocol 7. The hub and every client move together: upgrade the hub to 0.4.9 and run `brew upgrade uberblick` (or `ub update`) on every computer and agent host, then restart MCP servers and `ub open` and reload open tabs. A 0.4.8 client is refused with "update required" until it updates, and its edits made in the meantime sync afterwards with their author unknown. Nobody signs in again (#2128).
+- Workspace tags are deleted instead of retired. Workspace settings offers Delete, with a confirmation, in place of Retire and Restore, and tags retired before this release become deleted. Creating a deleted tag's name again makes a new tag; documents that carried the old one do not pick it up (#2131).
+
+### Added
+
+- Tags carry an optional one-line description, up to 300 characters. MCP `list_tags` returns it (#2131).
+- Headings fold: a toggle heading collapses the section under it (#2121, #2130).
+- An archived document's banner offers Delete…, with a confirmation. Links to a deleted document stay in place, muted and struck through (#2150).
+- Table controls appear on hover, with one right-click menu and column drag to reorder (#2037).
+- Ablauf diagrams and Figma embeds render without a frame, fit the page and open in a fullscreen viewer (#2065, #2069).
+- MCP inserts an ordered batch of blocks in one call, all or nothing (#2064).
+- MCP moves blocks while keeping their identities and comment anchors (#2122). It protects the anchors of open comments and can move an anchor (#2067).
+- The MCP server opens with a short orientation (search the corpus before changing anything, ask when a request conflicts with a decision in force) and help topics an agent can act on (#2105).
+
+### Changed
+
+- Inline code renders at 0.85 of the surrounding text, so its box sits inside the line (#2140).
+- MCP `list_docs` returns only discovery fields; read a document with `get_doc` (#2100).
+- The comment rail, MCP and Markdown export resolve comment anchors the same way (#2097).
+- Code-check details live in Sync details, and outdated checks are marked (#2085).
+- Archived pills look the same everywhere, and several web controls are tidied (#2079).
+- The starter workspace spells the product name Uberblick (#2068).
+
+### Fixed
+
+- A client confirms an apparent credential expiry by trying to renew before it signs out (#2073).
+- MCP tolerates Figma links it cannot read and explains refused resources (#2075).
+- Unicode line and paragraph separators survive in container headers (#2072).
+- A browser tab that is already open shows later settings refusals (#2081).
+- Browser input races and the iPad action target (#2083).
+- Member logins are treated as display data everywhere (#2127).
+- `ub` picks an unrecorded local replica from `UB_WORKSPACE_ID` (#2082).
+
 ## v0.4.8 — 2026-10-20
 
 Ablauf diagrams drawn in the editor, an Alter decision dialog on decision topics, and a hub that runs and updates with plain Docker Compose from release downloads, replacing `ub hub`.
