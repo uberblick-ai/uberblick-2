@@ -30,5 +30,7 @@ Where a corpus document governs the behavior you are changing, read it first.
 Run focused checks while editing, then the required checks on the final change.
 Always pass the intended SHA to `mise run review`; omitting it reviews the
 runner checkout's HEAD. A failing test is not automatically environmental:
-compare the relevant base before attributing the failure. Record real
-limitations, not assumed passes.
+compare the relevant base before attributing the failure. Never fix a timeout
+by raising a limit; find its cause, or fix the orchestration when several parts
+are involved ([Test deadlines](../CONTRIBUTING.md#test-deadlines)).
+Record real limitations, not assumed passes.

@@ -231,6 +231,16 @@ layout and explicit database overrides.
 
 ### Test deadlines
 
+Uberblick operations aim to finish well below 100 ms, so a test that runs out
+of time points to a bug, not a slow machine. Do not raise a ceiling, budget or
+test timeout to make it pass; find the cause. Typical causes are two tests
+sharing a fixed port, a blocked event loop, a missing `await`, or a wait on the
+wrong condition. When several parts are involved, such as a hub, a client and
+the test, fix how they are orchestrated: start each part only once the one
+before it is ready, wait on that readiness signal rather than a timer, and give
+each test its own ports and files. A longer limit hides the cause and slows
+every run.
+
 `UB_TEST_MAX_WAIT_MS` is a test seam, not a configuration layer. It caps the
 hub connect and sync budgets, port-owner probe, hub-clock observation,
 claim-state read, `ub auth status`'s request and device-management requests.
