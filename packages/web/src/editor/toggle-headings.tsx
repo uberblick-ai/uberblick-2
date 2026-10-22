@@ -94,6 +94,27 @@ function deletesFoldedNeighbor(state: EditorState, forward: boolean): boolean {
   return containing(fold, neighbor).length > 0;
 }
 
+function syncTextSelection(view: EditorView): void {
+  const dom = view.dom.ownerDocument.getSelection();
+  if (!view.editable || !view.hasFocus() || !(view.state.selection instanceof TextSelection) || dom?.rangeCount !== 1 ||
+    dom.anchorNode === null || dom.focusNode === null ||
+    !view.dom.contains(dom.anchorNode) || !view.dom.contains(dom.focusNode)) return;
+  // Node-view chrome can hold a native caret that ProseMirror deliberately ignores.
+  for (const node of [dom.anchorNode, dom.focusNode]) {
+    for (let element = node.nodeType === 1 ? node as HTMLElement : node.parentElement;
+      element !== null && element !== view.dom; element = element.parentElement) {
+      if (element.contentEditable === "false") return;
+    }
+  }
+  // Native caret movement can precede selectionchange. Both deletion guards
+  // must use the current caret, including Home's position before the widget.
+  const $anchor = view.state.doc.resolve(view.posAtDOM(dom.anchorNode, dom.anchorOffset, 1));
+  const $head = view.state.doc.resolve(view.posAtDOM(dom.focusNode, dom.focusOffset, 1));
+  if (!$anchor.parent.inlineContent || !$head.parent.inlineContent) return;
+  const selection = TextSelection.between($anchor, $head);
+  if (!selection.eq(view.state.selection)) view.dispatch(view.state.tr.setSelection(selection));
+}
+
 function deleteLeadingMarker(view: EditorView): boolean {
   const { selection } = view.state;
   const { $head } = selection;
@@ -148,6 +169,7 @@ export const ToggleHeadings = Extension.create({
       },
       props: {
         handleKeyDown: (view, event) => {
+          if ((event.key === "Delete" || event.key === "Backspace") && !event.isComposing) syncTextSelection(view);
           if (event.key === "Delete" && !event.altKey && !event.ctrlKey && !event.metaKey &&
             !event.shiftKey && !event.isComposing && deleteLeadingMarker(view)) return true;
           return (event.key === "Backspace" || event.key === "Delete") &&
@@ -156,6 +178,8 @@ export const ToggleHeadings = Extension.create({
         handleDOMEvents: {
           beforeinput: (view, event) => {
             const input = event as InputEvent;
+            if ((input.inputType === "deleteContentBackward" || input.inputType === "deleteContentForward") &&
+              !input.isComposing) syncTextSelection(view);
             if (input.inputType === "deleteContentForward" && !input.isComposing && deleteLeadingMarker(view)) {
               event.preventDefault();
               return true;

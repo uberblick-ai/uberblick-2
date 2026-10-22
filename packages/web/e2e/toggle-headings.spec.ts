@@ -213,6 +213,30 @@ test("typing and removing the marker keeps a heading editable and navigation out
     .toBe("Edit marker");
 });
 
+for (const key of ["Delete", "Backspace"]) {
+  test(`${key} after clicking chart chrome leaves source and neighboring prose unchanged`, async ({ browser }) => {
+    const session = writer();
+    const created = await create(session, [
+      { type: "paragraph", text: "Before" },
+      { type: "chart", text: "not a chart" },
+      { type: "paragraph", text: "After" },
+    ]);
+    const page = await open(browser, created.uuid);
+    await placeCaretIn(block(page, created, 2));
+    const before = await documentContent(page);
+    await block(page, created, 1).locator(".ub-chart-message").click();
+    expect(await editor(page).evaluate(element => {
+      const focus = document.getSelection()?.focusNode;
+      return focus !== null && focus !== undefined && element.querySelector(".ub-chart-panel")?.contains(focus);
+    })).toBe(true);
+    await page.keyboard.press(key);
+
+    expect(await documentContent(page)).toEqual(before);
+    await expectMcp(() => session.call<StoredDoc>("get_doc", { uuid: created.uuid }),
+      document => { expect(document.blocks).toEqual(created.blocks); });
+  });
+}
+
 test("comment cards and collaborator presence reveal every toggle enclosing their target", async ({ browser }) => {
   const session = writer();
   const created = await create(session, [

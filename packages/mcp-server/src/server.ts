@@ -30,6 +30,12 @@ export function agentDisplayName(
   return client?.title?.trim() || client?.name?.trim() || "agent";
 }
 
+export function mcpSurfaceName(
+  client: { name?: string | undefined; title?: string | undefined } | undefined,
+): string {
+  return client?.title?.trim() || client?.name?.trim() || "unknown MCP client";
+}
+
 export interface UberblickMcpServer {
   readonly server: McpServer;
   readonly replicas: Replicas;
@@ -51,6 +57,7 @@ export function createMcpServer(
 ): UberblickMcpServer {
   const workspace = openWorkspaceReplicas(config, injectedStore === undefined ? {} : { store: injectedStore });
   const { store, replicas } = workspace;
+  replicas.setWriteSurface({ kind: "mcp", name: "unknown MCP client" });
   const briefing = new GuidanceBriefing(replicas);
   const work = new ServerWork();
 
@@ -69,6 +76,7 @@ export function createMcpServer(
   // Use the initialized client's identity for cursors and default comment authors.
   server.server.oninitialized = () => {
     replicas.setAgentName(agentDisplayName(server.server.getClientVersion()));
+    replicas.setWriteSurface({ kind: "mcp", name: mcpSurfaceName(server.server.getClientVersion()) });
   };
 
   const help = registerTools(server, replicas, briefing, work);

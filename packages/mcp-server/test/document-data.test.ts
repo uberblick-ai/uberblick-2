@@ -155,7 +155,10 @@ describe("document-owned data persistence", () => {
         upsert: [{ id: "row-1", value: { text: `revision ${step}` } }],
       }] });
     }
-    await rig.ok("sync_status");
+    const replica = rig.instance.replicas.replica(created.uuid);
+    rig.instance.replicas.refresh();
+    rig.instance.store.clearPending(replica.room, replica.lastSeq);
+    rig.instance.replicas.refresh();
     const room = `${WORKSPACE}/${created.uuid}`;
     expect(rig.instance.store.snapshot(room)).not.toBeNull();
     expect(rig.instance.store.updateCount(room)).toBeLessThan(4);
