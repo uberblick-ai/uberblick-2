@@ -144,6 +144,97 @@ it("recognizes only the exact heading prefix and reveals the marker at the edita
   } finally { editor.destroy(); ydoc.destroy(); }
 });
 
+it.each(["keydown", "beforeinput"])("deletes the marker after native Home before selectionchange (%s)", async (eventType) => {
+  const ydoc = documentFixture();
+  const headingId = appendBlock(ydoc, { type: "heading", level: 2, text: "> Help" });
+  const body = appendBlock(ydoc, { type: "paragraph", text: "Details" });
+  const { editor, element } = mountEditor(ydoc);
+  try {
+    await waitFor(() => within(element).getByRole("button", { name: "Expand Help" }));
+    editor.view.focus();
+    const start = blockPosition(editor, headingId) + 1;
+    editor.commands.setTextSelection(start + "> Help".length);
+    const heading = blockElement(element, headingId);
+    expect(isFolded(element, body)).toBe(true);
+
+    // Home moves the native caret before the widget; selectionchange has not run.
+    document.getSelection()!.collapse(heading, 0);
+    expect(editor.state.selection.head).toBe(start + "> Help".length);
+    const event = eventType === "keydown"
+      ? new KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true })
+      : new InputEvent("beforeinput", { inputType: "deleteContentForward", bubbles: true, cancelable: true });
+    heading.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(getBlocks(ydoc)[0]?.text).toBe(" Help");
+    expect(editor.state.selection.head).toBe(start);
+    expect(isFolded(element, body)).toBe(false);
+  } finally { editor.destroy(); ydoc.destroy(); }
+});
+
+it.each([
+  { eventType: "keydown", forward: true }, { eventType: "keydown", forward: false },
+  { eventType: "beforeinput", forward: true }, { eventType: "beforeinput", forward: false },
+])("protects the current folded boundary before selectionchange ($eventType, forward $forward)", async ({ eventType, forward }) => {
+  const ydoc = documentFixture();
+  const heading = appendBlock(ydoc, { type: "heading", level: 2, text: "> Help" });
+  const body = appendBlock(ydoc, { type: "paragraph", text: "Details" });
+  const next = appendBlock(ydoc, { type: "heading", level: 2, text: "Next" });
+  const { editor, element } = mountEditor(ydoc);
+  try {
+    await waitFor(() => within(element).getByRole("button", { name: "Expand Help" }));
+    editor.view.focus();
+    const id = forward ? heading : next;
+    const start = blockPosition(editor, id) + 1;
+    const end = start + (forward ? "> Help" : "Next").length;
+    editor.commands.setTextSelection(forward ? start : end);
+    const target = blockElement(element, id);
+    const before = getBlocks(ydoc);
+    document.getSelection()!.collapse(target, forward ? target.childNodes.length : 0);
+    const event = eventType === "keydown"
+      ? new KeyboardEvent("keydown", { key: forward ? "Delete" : "Backspace", bubbles: true, cancelable: true })
+      : new InputEvent("beforeinput", { inputType: forward ? "deleteContentForward" : "deleteContentBackward", bubbles: true, cancelable: true });
+    target.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(editor.state.selection.head).toBe(forward ? end : start);
+    expect(getBlocks(ydoc)).toEqual(before);
+    expect(isFolded(element, body)).toBe(true);
+  } finally { editor.destroy(); ydoc.destroy(); }
+});
+
+it.each([
+  { eventType: "keydown", forward: true }, { eventType: "keydown", forward: false },
+  { eventType: "beforeinput", forward: true }, { eventType: "beforeinput", forward: false },
+])("leaves chart source unchanged with a native caret in noneditable chrome ($eventType, forward $forward)", async ({ eventType, forward }) => {
+  const ydoc = documentFixture();
+  appendBlock(ydoc, { type: "paragraph", text: "Before" });
+  appendBlock(ydoc, { type: "chart", text: "not a chart" });
+  const after = appendBlock(ydoc, { type: "paragraph", text: "After" });
+  const { editor, element } = mountEditor(ydoc);
+  try {
+    const message = await waitFor(() => {
+      const target = element.querySelector(".ub-chart-message");
+      expect(target?.textContent).toContain("Invalid chart configuration");
+      return target!;
+    });
+    editor.view.focus();
+    editor.commands.setTextSelection(blockPosition(editor, after) + 1 + "After".length);
+    const before = getBlocks(ydoc);
+    const selection = editor.state.selection;
+    const text = message.firstChild!;
+    document.getSelection()!.collapse(text, 1);
+    const event = eventType === "keydown"
+      ? new KeyboardEvent("keydown", { key: forward ? "Delete" : "Backspace", bubbles: true, cancelable: true })
+      : new InputEvent("beforeinput", { inputType: forward ? "deleteContentForward" : "deleteContentBackward", bubbles: true, cancelable: true });
+    editor.view.dom.dispatchEvent(event);
+
+    expect(getBlocks(ydoc)).toEqual(before);
+    expect(editor.state.selection.eq(selection)).toBe(true);
+    expect(document.getSelection()!.focusNode).toBe(text);
+  } finally { editor.destroy(); ydoc.destroy(); }
+});
+
 it("keeps expansion through position changes, resets a recreated toggle and isolates separate views", async () => {
   const ydoc = documentFixture();
   const preface = appendBlock(ydoc, { type: "paragraph", text: "Before" });
