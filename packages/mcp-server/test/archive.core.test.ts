@@ -12,7 +12,7 @@
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { DIRECTORY_ARCHIVED_RECORDS_KEY, getMetaMap, pinDoc, setTags, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
-import { WORKSPACE, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
+import { WORKSPACE, directoryStub, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 import { MirrorStore } from "../src/store.js";
 import type { IndexedDoc } from "../src/store.js";
@@ -213,12 +213,11 @@ describe("archive_doc", () => {
       deleted: true,
       pinned: false,
       openThreadCount: 0,
-      code_check: [],
       // Stamped at creation and carried through the tombstone — see
       // timestamps.test.ts for what they mean.
-      createdAt: expect.any(Number),
       updatedAt: expect.any(Number),
     });
+    expect(directoryStub(rig.instance, doc.uuid)).toMatchObject({ createdAt: expect.any(Number), code_check: [] });
 
     // Search reads the derived index, which a directory write does not itself
     // touch — so this is the assertion that the tool re-derives it.
@@ -573,11 +572,10 @@ describe("restore_doc", () => {
       ],
       description: "A test document.",
       pinned: false,
-      createdAt: expect.any(Number),
       updatedAt: expect.any(Number),
       openThreadCount: 0,
-      code_check: [],
     });
+    expect(directoryStub(rig.instance, doc.uuid)).toMatchObject({ createdAt: expect.any(Number), code_check: [] });
 
     const hits = await rig.ok("search", { query: "glossary" });
     expect(hits.hits.map((hit: any) => hit.uuid)).toEqual([doc.uuid]);
@@ -682,11 +680,10 @@ describe("restore_doc", () => {
       ],
       description: "A test document.",
       pinned: false,
-      createdAt: expect.any(Number),
       updatedAt: expect.any(Number),
       openThreadCount: 0,
-      code_check: [],
     });
+    expect(directoryStub(rig.instance, doc.uuid)).toMatchObject({ createdAt: expect.any(Number), code_check: [] });
   });
 });
 
@@ -713,7 +710,7 @@ describe("individual decision record archives", () => {
     expect(rig.instance.store.isIndexed(proposal.uuid)).toBe(false);
     expect((await rig.ok("search", { query: "archiveworthy" })).hits.map((hit: any) => hit.uuid)).toEqual([first.uuid]);
     expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([
-      { uuid: first.uuid, inForce: { uuid: first.uuid }, pending: [] },
+      { uuid: first.uuid, inForce: first.uuid, pending: [] },
     ]);
     expect((await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs.map((entry: any) => entry.uuid)).toEqual([first.uuid]);
     expect((await rig.ok("list_docs", { kind: "decision", include_superseded: true, include_deleted: true })).docs)
@@ -735,7 +732,7 @@ describe("individual decision record archives", () => {
     }
     expect(Y.encodeStateAsUpdate(rig.instance.replicas.replica(proposal.uuid).doc)).toEqual(before);
     expect(await rig.ok("restore_doc", { uuid: proposal.uuid })).toMatchObject({ records: [proposal.uuid], archived: false, indexed: true });
-    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ pending: [{ uuid: proposal.uuid }] }]);
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ pending: [proposal.uuid] }]);
     expect((await rig.ok("search", { query: "archiveworthy" })).hits.map((hit: any) => hit.uuid).sort()).toEqual([first.uuid, proposal.uuid].sort());
     expect((await rig.ok("set_status", { uuid: proposal.uuid, status: "withdrawn" })).applied).toBe(true);
   });
@@ -763,8 +760,8 @@ describe("individual decision record archives", () => {
     expect(await rig.ok("restore_doc", { uuid: middle.uuid })).toMatchObject({ records: [middle.uuid], archived: false, indexed: true });
     const archived = (await rig.ok("list_docs", { kind: "decision", include_superseded: true, include_deleted: true })).docs;
     expect(archived.find((entry: any) => entry.uuid === first.uuid).deleted).toBe(true);
-    expect(archived.find((entry: any) => entry.uuid === middle.uuid).deleted).toBe(false);
-    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ inForce: { uuid: current.uuid }, conflicts: [] }]);
+    expect(archived.find((entry: any) => entry.uuid === middle.uuid)).not.toHaveProperty("deleted");
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ inForce: current.uuid, conflicts: [] }]);
   });
 
   it("restores an individually archived record known only from directory stubs", async () => {
@@ -813,9 +810,9 @@ describe("individual decision record archives", () => {
 
     getMetaMap(rig.instance.replicas.replica(proposal.uuid).doc).set("status", "decided");
     expect((await rig.ok("search", { query: "archiveworthy" })).hits.map((hit: any) => hit.uuid).sort()).toEqual([first.uuid, proposal.uuid].sort());
-    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ inForce: { uuid: proposal.uuid } }]);
-    expect((await rig.ok("list_docs", { kind: "decision", include_superseded: true, include_deleted: true })).docs)
-      .toEqual(expect.arrayContaining([expect.objectContaining({ uuid: proposal.uuid, deleted: false })]));
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ inForce: proposal.uuid }]);
+    expect((await rig.ok("list_docs", { kind: "decision", include_superseded: true, include_deleted: true })).docs
+      .find((entry: any) => entry.uuid === proposal.uuid)).not.toHaveProperty("deleted");
     expect((await rig.ok("set_metadata", { uuid: proposal.uuid, description: "Live answer" })).applied).toBe(true);
     const rival = await record(rig, { supersedes: first.uuid });
     directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).set(first.uuid, true);
@@ -824,17 +821,17 @@ describe("individual decision record archives", () => {
     getMetaMap(rig.instance.replicas.replica(rival.uuid).doc).set("status", "decided");
     const topic = (await rig.ok("list_docs", { kind: "decision" })).docs[0];
     expect(topic.inForce).toBeNull();
-    expect(topic.conflicts.map((entry: any) => entry.uuid).sort()).toEqual([proposal.uuid, rival.uuid].sort());
-    for (const conflict of topic.conflicts) expect(conflict.deleted).toBe(false);
+    expect([...topic.conflicts].sort()).toEqual([proposal.uuid, rival.uuid].sort());
+    expect((await rig.ok("get_doc", { uuid: proposal.uuid })).resolution.conflicts).toMatchObject([{ deleted: false }, { deleted: false }]);
     const records = (await rig.ok("list_docs", { kind: "decision", include_superseded: true, include_deleted: true })).docs;
     expect(records.find((entry: any) => entry.uuid === first.uuid).deleted).toBe(true);
-    expect(records.find((entry: any) => entry.uuid === proposal.uuid).deleted).toBe(false);
-    expect(records.find((entry: any) => entry.uuid === rival.uuid).deleted).toBe(false);
+    expect(records.find((entry: any) => entry.uuid === proposal.uuid)).not.toHaveProperty("deleted");
+    expect(records.find((entry: any) => entry.uuid === rival.uuid)).not.toHaveProperty("deleted");
     expect(rig.instance.store.isIndexed(proposal.uuid)).toBe(true);
     expect(rig.instance.store.isIndexed(rival.uuid)).toBe(true);
     getMetaMap(rig.instance.replicas.replica(rival.uuid).doc).set("status", "rejected");
     getMetaMap(rig.instance.replicas.replica(proposal.uuid).doc).set("status", "rejected");
-    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ inForce: { uuid: first.uuid } }]);
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ inForce: first.uuid }]);
     expect(rig.instance.store.isIndexed(first.uuid)).toBe(true);
   });
 });

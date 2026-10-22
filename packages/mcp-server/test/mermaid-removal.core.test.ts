@@ -15,7 +15,7 @@ import {
 } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { cleanupTestResources, startServer, testConfig, WORKSPACE } from "./core-helpers.js";
+import { cleanupTestResources, directoryStub, startServer, testConfig, WORKSPACE } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
@@ -115,8 +115,9 @@ describe("stored Mermaid removal through MCP", () => {
     rig.instance.store.appendUpdate(roomForDoc(WORKSPACE, old.uuid), Y.encodeStateAsUpdate(old.doc), "local");
     rig.instance.replicas.replica(old.uuid);
     expect((await rig.ok("list_docs", { kind: "decision", has_open_threads: true })).docs).toMatchObject([
-      { uuid: old.uuid, openThreadCount: 1, approvalChanged: true },
+      { uuid: old.uuid, openThreadCount: 1 },
     ]);
+    expect(directoryStub(rig.instance, old.uuid)?.approvalChanged).toBe(true);
     for (const resolved of [false, true, false]) {
       const replied = await rig.ok("annotate", { uuid: old.uuid, thread_id: old.thread.id, text: "Continue discussion", resolved });
       expect(replied.annotation).toMatchObject({ range: null, resolved });

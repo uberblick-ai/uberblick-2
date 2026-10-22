@@ -20,7 +20,11 @@ async function assertReadTitles(rig: Rig, records: string[], page: string, title
   const rows = (await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs;
   expect(rows.map((row: { uuid: string }) => row.uuid).sort()).toEqual([...records].sort());
   const related = (await rig.ok("get_doc", { uuid: page })).decisions;
-  for (const topic of [...topics, ...related]) {
+  for (const topic of topics) {
+    expect(topic.title).toBe(title);
+    for (const uuid of [topic.inForce, ...topic.pending, ...topic.conflicts]) if (uuid !== null) expect(records).toContain(uuid);
+  }
+  for (const topic of related) {
     for (const entry of [topic, topic.inForce, ...topic.pending, ...topic.conflicts]) {
       if (entry !== null) expect(entry.title).toBe(title);
     }

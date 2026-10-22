@@ -87,6 +87,7 @@ export const toolHelpDetails = {
     "compatible `status`; ordinary documents omit both. When structured data exists, `data` lists collection " +
     "names and record counts and names `get_data` for deliberate reads. It contains no schemas or record " +
     "values; documents without data omit it.\n\n" +
+    "`createdAt` is the known creation time in epoch milliseconds on the creating replica's clock; it is omitted when unknown. " +
     "Every document returns a page-level `rev`, identical to the web status row's full revision of its ordered block content. Metadata and comments do not affect it. " +
     "Regular documents return `code_check`: the latest comparison per repository, or [] when never checked. " +
     "Each entry has repository (owner/name), commit, checked_at (writer's UTC recording time) and result: " +
@@ -150,33 +151,27 @@ export const toolHelpDetails = {
     "Merged invalidity is observed through the shared reader without dropping, repairing or writing values.",
   list_docs:
     "Documents in the workspace, from the synced directory document — never from locally observed creations. " +
+    "Every row carries `uuid`, `title`, `tags`, `description`, `updatedAt` and `openThreadCount` when known, and " +
+    "`pinned`; archived rows listed with `include_deleted` add `deleted: true`. Code checks, creation stamps, " +
+    "decision authority and threads are read per document with get_doc.\n\n" +
     "The unfiltered orientation listing omits `kind: \"decision\"` records. Pass any `kind`, `status`, `tag` or `has_open_threads` " +
     "predicate to ask for its exact matches, including matching decisions; `kind: \"decision\"` lists decision " +
     "topics with one row per topic. Each row presents the record in force, else a pending record, else the " +
-    "first record, and names all pending records and all conflicting maximal decided records. `inForce: null` " +
-    "means no answer is in force. A status, tag or open-thread predicate matches a topic if any live record matches; each " +
+    "first record, with `kind`, `status`, `topic`, `discussion` and `answerPreview`, and names the topic's records " +
+    "by UUID: `inForce` (null when no answer is in force), every `pending` record and every conflicting maximal " +
+    "decided record in `conflicts`. A status, tag or open-thread predicate matches a topic if any live record matches; each " +
     "predicate may match a different live record. Resolution still uses its whole graph. `include_superseded: " +
-    "true` returns every record with predicates applied per record. Permanently deleted UUIDs are always excluded. `include_deleted` admits archived topics " +
+    "true` returns one row per record, with predicates applied per record and no topic UUID lists. Permanently deleted UUIDs are always excluded. `include_deleted` admits archived topics " +
     "but is not a predicate and does not lift the default omission, so an archived decision needs it together " +
     "with a matching predicate. A fresh replica can list the whole corpus once the directory room has " +
-    "synced. See [Decision answers and topics](uberblick://help/lifecycle) for decision answer guidance. " +
-    "Every decision directory entry, " +
-    "including inForce, pending and conflicts, caches `discussion` as the RFC UUID, null when none or " +
-    "absent when unknown until a newer client repairs the stub. Each pending proposal therefore names " +
-    "its own discussion without opening its room. The reference is distinct from curated links and " +
-    "recorded answer attribution. Every decision directory entry also carries a derived " +
-    "answerPreview when known: plain text of the first answer paragraph or list, list items " +
+    "synced. See [Decision answers and topics](uberblick://help/lifecycle) for decision answer guidance.\n\n" +
+    "A decision row's `discussion` caches the record's RFC UUID, null when none or absent when unknown until a " +
+    "newer client repairs the stub. Listed with `include_superseded: true`, each pending proposal therefore names " +
+    "its own discussion without opening its room. The reference is distinct from curated links and recorded " +
+    "answer attribution. `answerPreview` is plain text of the first answer paragraph or list, list items " +
     "joined by `; ` and whitespace collapsed, at most 300 characters with `…` when cut. It is null when " +
-    "neither exists, and absent when unknown. Decisions have no TL;DR and their directory entries omit tldr. Page get_doc reads mark related and linked topics separately; " +
-    "recorded `answer: {who, when, where}` is attribution, separate from these answer blocks.\n\n" +
-    "Regular entries cache `code_check` without opening document rooms: [] means never checked, while " +
-    "absence means not cached yet. Decision entries omit it. Each entry records repository, commit, " +
-    "writer-stamped UTC checked_at and result: matches (agreement), ahead (intentionally undelivered " +
-    "behavior) or drift (unintended disagreement), plus recorded `rev` and `paths` when known. Paths are hints, not a complete dependency list. A missing rev means the compared text is unknown, including after an older client drops it. The page's current rev is not cached or returned by list_docs. Content edits leave the checks unchanged. A local " +
-    "set_metadata code_check write appears in the next listing. As with openThreadCount, hydration and " +
-    "peer updates repair this cache; an older whole-stub writer can drop it until a current replica " +
-    "recomputes it after a document change or restart.\n\n" +
-    "Every entry, regular or decision, including `inForce`, `pending` and `conflicts`, carries " +
+    "neither exists, and absent when unknown. Decisions have no TL;DR.\n\n" +
+    "Every row, regular or decision, carries " +
     "`openThreadCount` when known: the count of that document's threads whose `resolved` is not `true`, " +
     "including threads whose anchored text was deleted (`range: null`). Resolved threads do not count; " +
     "replies do not add threads. An absent field means the stub cache is unknown, not zero. " +
@@ -194,7 +189,7 @@ export const toolHelpDetails = {
     "live documents gain a known count on hydration or replay without a thread change. Whole-entry stub " +
     "writes use Yjs ordering: during version skew an older writer can drop the field, making it unknown " +
     "and excluding it from the filter until a current replica sees another document change or replays it " +
-    "on restart. Archived regular stubs are not repaired; restore supplies the current count and code checks.\n\n" +
+    "on restart. Archived regular stubs are not repaired; restore supplies the current count.\n\n" +
     "`description` is the document's own one-or-two-sentence description, cached in the stub so this listing " +
     "answers with it without opening a single room — read it before deciding what to get_doc. It is null for " +
     "a document nobody has described yet; documents created in the web UI start that way, and set_metadata " +
@@ -202,14 +197,14 @@ export const toolHelpDetails = {
     "`pinned` says whether the sidebar carries the document as an entry point — derived from the sidebar doc, " +
     "read with get_sidebar. Unpinned documents are fully alive; the flag separates entry points from the long " +
     "tail.\n\n" +
-    "`createdAt` and `updatedAt` are epoch milliseconds, present only where known — sort keys, not history. " +
-    "`updatedAt` says when someone changed the document, not when a replica noticed: each replica stamps only " +
+    "`updatedAt` is epoch milliseconds, present only where known — a sort key, not history. " +
+    "It says when someone changed the document, not when a replica noticed: each replica stamps only " +
     "for the changes it made itself, so a document you never edit keeps the stamp its editor wrote. " +
     "Concurrent stamps resolve to the greater value, so a future-skewed clock pins the hint until a later " +
     "stamp exceeds it. It is also deliberately coarse — at most one re-stamp every few minutes of its own " +
-    "edits, immediately on a metadata or cached thread-count change. Recording only a code check leaves updatedAt unchanged. Both come from the clock of whichever replica wrote them, " +
-    "so treat them as approximate, and expect either to be missing on a stub written before they existed.\n\n" +
-    "Lifecycle documents include `kind` and their compatible `status`; ordinary documents omit both. The " +
+    "edits, immediately on a metadata or cached thread-count change. Recording only a code check leaves updatedAt unchanged. It comes from the clock of whichever replica wrote it, " +
+    "so treat it as approximate, and expect it to be missing on a stub written before it existed.\n\n" +
+    "Decision rows include `kind` and their compatible `status`; ordinary documents omit both. The " +
     "optional `kind` and `status` filters are answered from those directory stubs without opening a document " +
     "room, and combine with `tag` and `has_open_threads`. A tag filter accepts a catalog id or current name, ignoring name case; a value this " +
     "catalog does not have is refused rather than answered with an empty listing. Each returned assignment " +
@@ -448,8 +443,7 @@ export const toolHelpDetails = {
     "repository, commit, result, rev or paths values and any decision-record code_check write refuse with " +
     "`field: \"code_check\"`, preserving every field in the call. Entries live only in metadata: " +
     "content edits and other metadata writes leave them unchanged, and Markdown export omits them. " +
-    "get_doc returns the entries, or []; list_docs caches them on regular entries, with absence meaning " +
-    "not cached yet. Earlier entries and older clients can omit rev and paths; those entries still return without the missing fields. No removal or check history is provided.\n\n" +
+    "get_doc returns the entries, or []; list_docs does not return them. Earlier entries and older clients can omit rev and paths; those entries still return without the missing fields. No removal or check history is provided.\n\n" +
     "A title is replaced wholesale without changing the document UUID, so links, backlinks and annotations " +
     "survive a rename. A decision topic has one title, stored on its first record; a rename through any " +
     "record renames the topic by writing only that first record. Successors take the topic's title. " +

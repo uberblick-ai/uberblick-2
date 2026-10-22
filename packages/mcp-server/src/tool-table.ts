@@ -250,20 +250,13 @@ export const tools: readonly Tool[] = [
     name: "list_docs",
     title: "List documents",
     description:
-      "List synced directory stubs without opening rooms. Unfiltered omits decisions; " +
-      "kind/status/tag/has_open_threads predicates include them. Topics present in-force, else pending, else " +
-      "first record, plus pending/conflicts. Predicates may match different live records; resolution uses " +
-      "the whole graph. include_superseded applies predicates per record. include_deleted admits archived, " +
-      "never permanently deleted UUIDs; it is no predicate. Filters combine; unknown tags refuse. " +
-      "has_open_threads accepts only true (known openThreadCount >= 1); false refuses. Every entry, including " +
-      "inForce/pending/conflicts, caches openThreadCount: threads not resolved, including deleted anchors; " +
-      "absent means unknown. Use get_doc for threads, annotate to reply/resolve. Regular " +
-      "code_check cache: repository/commit/checked_at/result plus recorded rev/paths when known; paths are hints, not complete dependencies. No current page rev is cached. [] if never checked, absent " +
-      "if uncached. Results: matches (agrees), ahead (intentionally undelivered), drift (unintended " +
-      "disagreement); content edits preserve checks. Decisions omit code_check/TL;DR; answerPreview: first " +
-      "answer paragraph/list or null; discussion: RFC UUID/null, apart from curated links/recorded answer; " +
-      "both absent if unknown. Rows cache description/tags/lifecycle/authority metadata, sidebar-derived " +
-      "pinned, approximate timestamps. get_doc marks related/linked topics.",
+      "List documents from synced directory stubs without opening rooms: uuid, title, tags, description, " +
+      "updatedAt, openThreadCount (absent means unknown) and pinned. Unfiltered omits decisions; " +
+      "kind/status/tag/has_open_threads predicates include them. A decision topic row shows the record in force, " +
+      "else pending, else first, with status, topic, discussion, answerPreview and inForce/pending/conflicts UUIDs. " +
+      "include_superseded returns one row per record; include_deleted admits archived rows (deleted: true). " +
+      "Filters combine; unknown tags refuse; has_open_threads accepts only true. get_doc reads code checks, " +
+      "threads and lifecycle details.",
     input: listDocsInput,
     operation: listDocsOperation,
     example: { kind: "decision", status: "open" },
