@@ -2,6 +2,7 @@ import { Popover, PopoverContent } from "../shadcn/popover.js";
 import { SyncPanel } from "../status/SyncPanel.js";
 import { documentPaneState, RoutePane } from "./RoutePane.js";
 import type { AppShell } from "./use-app-shell.js";
+import { HistoryControls, RevisionPane } from "../document/RevisionPane.js";
 
 function documentActions(shell: AppShell) {
   const { selected, topic, sidebarStatus, directoryStatus, doc } = shell.rooms;
@@ -35,6 +36,7 @@ export function ShellDocument({ shell }: { shell: AppShell }) {
   const { docLinks } = shell.navigation;
   const { onFocusThread, threads, threadsOpen, onToggleThreads } = shell.threads;
   const { syncOpen, setSyncOpen } = shell.sync;
+  const historyVisible = shell.history.active && !deleted;
   const lastUpdated = !deleted && documentPaneState({
     route, connection: doc, meta, topic, selectedUuid: selected, navigate,
   }, docStatus.hasAnswered) === "shown" ? selectedDirectoryEntry?.updatedAt : undefined;
@@ -72,8 +74,11 @@ export function ShellDocument({ shell }: { shell: AppShell }) {
         threads={threads}
         threadsOpen={threadsOpen}
         onToggleThreads={onToggleThreads}
+        historyControl={<HistoryControls history={shell.history} />}
+        historyActive={historyVisible}
       />
-      {!deleted && (route.kind === "doc" || route.kind === "decision") && (
+      {historyVisible && <RevisionPane history={shell.history} docLinks={docLinks} workspaceSettings={catalog?.ydoc ?? null} />}
+      {!deleted && !historyVisible && (route.kind === "doc" || route.kind === "decision") && (
         <PopoverContent
           align="start"
           collisionPadding={8}

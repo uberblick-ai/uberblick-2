@@ -50,6 +50,8 @@ export interface RoutePaneProps {
   titleConnection?: RoomConnection | null;
   relatedTopics?: readonly DecisionTopicResolution[];
   onAlterDecision?: (() => void) | null;
+  historyControl?: ReactElement | null;
+  historyActive?: boolean;
 }
 
 /** Share header eligibility with the separately mounted Sync details panel. */
@@ -147,6 +149,8 @@ function editorProperties(props: RoutePaneProps, segment: string, connection: Ro
     docLinks: props.docLinks, actions: props.actions ?? {},
     onSelectThread: props.onSelectThread, threads: props.threads ?? [], threadsOpen: props.threadsOpen ?? false,
     onToggleThreads: props.onToggleThreads,
+    historyControl: props.historyControl,
+    historyActive: props.historyActive,
   };
 }
 

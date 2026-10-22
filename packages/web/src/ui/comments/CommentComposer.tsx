@@ -209,6 +209,7 @@ function FormatButton({
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export function CommentComposer({
   editor,
+  hidden = false,
   contentReadOnly = false,
   formattingOnly = false,
   ydoc,
@@ -220,6 +221,8 @@ export function CommentComposer({
   onCreated,
 }: {
   editor: Editor;
+  /** Retain an unsent draft while its live document is hidden. */
+  hidden?: boolean;
   /** Comments remain writable while content is read-only. */
   contentReadOnly?: boolean;
   /** Detached answer drafts support formatting and links without comments. */
@@ -502,6 +505,8 @@ export function CommentComposer({
   return createPortal(
     <div
       ref={floating}
+      inert={hidden}
+      style={hidden ? { display: "none" } : undefined}
       data-slot="selection-composer"
       data-input={touch ? "touch" : "fine"}
       className={`ub-composer fixed top-0 left-0 z-5 flex overflow-auto text-card-foreground shadow-(--shadow-float) ${mode === "comment" ? "w-80 flex-col [&>*]:shrink-0 gap-[0.4rem] rounded-(--radius-sm) border border-(--border) border-l-(length:--border-width-emphasis) border-l-brand bg-card px-[0.6rem] py-2 ub-type-ui" : !formatting ? "w-max bg-transparent shadow-none" : "w-max items-center rounded-(--radius-sm) border border-(--border) bg-[color-mix(in_srgb,var(--card)_95%,transparent)] p-1 backdrop-blur-[8px]"}`}

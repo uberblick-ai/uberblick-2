@@ -640,6 +640,7 @@ const BoundEditor = memo(function BoundEditor({
   canCleanupTags,
   author,
   archived,
+  historyActive = false,
   contentReadOnly,
   docLinks,
   onSelectThread,
@@ -650,6 +651,7 @@ const BoundEditor = memo(function BoundEditor({
   author: string;
   /** Archived documents also withhold comments. */
   archived: boolean;
+  historyActive?: boolean;
   /** Title, decision line and blocks cannot change; comments may stay open. */
   contentReadOnly: boolean;
   /** See {@link EditorPane}. Must be referentially stable — it binds the editor. */
@@ -803,13 +805,13 @@ const BoundEditor = memo(function BoundEditor({
   useLayoutEffect(() => {
     if (editor === null || editor.isDestroyed) return;
     editor.setEditable(!contentReadOnly && !isDecision(connection) && writable);
-    if (!archived && writable) {
+    if (!archived && !historyActive && writable) {
       // A repair suppressed while the link was gone gets another plugin pass
       // as soon as the admitted room is writable again. Automatic block-id
       // maintenance remains independent of decision content permissions.
       editor.view.dispatch(editor.state.tr.setMeta("uberblick:writable", true));
     }
-  }, [editor, connection, archived, contentReadOnly, writable]);
+  }, [editor, connection, archived, contentReadOnly, historyActive, writable]);
 
   return (
     <>
@@ -853,6 +855,7 @@ const BoundEditor = memo(function BoundEditor({
         {editor !== null && !archived && writable && (
           <CommentComposer
             editor={editor}
+            hidden={historyActive}
             contentReadOnly={contentReadOnly}
             ydoc={connection.ydoc}
             catalogConnection={catalogConnection}
@@ -894,6 +897,8 @@ export function EditorPane({
   copyPath,
   decisionView = false,
   displayTitle,
+  historyControl,
+  historyActive = false,
 }: {
   connection: RoomConnection;
   /** The workspace as the address spells it — see {@link DocMetaLine}. */
@@ -942,6 +947,8 @@ export function EditorPane({
   copyPath?: string;
   /** A known decision route stays read-only while its room metadata catches up. */
   decisionView?: boolean;
+  historyControl?: ReactNode;
+  historyActive?: boolean | undefined;
 }): ReactElement {
   const pane = useRef<HTMLElement | null>(null);
   const [tldrEditorRoom, setTldrEditorRoom] = useState<string | null>(null);
@@ -965,7 +972,7 @@ export function EditorPane({
   // after mounting, so read this exact connection on the first frame too.
   const meta = observedMeta ?? readRoomMeta(connection);
   const decision = decisionView || meta?.kind === "decision";
-  const contentReadOnly = archived || decision;
+  const contentReadOnly = archived || decision || historyActive;
   const foreign = useForeignBlocks(connection);
   const { writable } = useRoomStatus(connection);
   const openThreads = threads.filter((thread) => !thread.resolved).length;
@@ -978,7 +985,8 @@ export function EditorPane({
   // The shared page pane anchors the column beside the sibling rail;
   // document controls use `ub-document-pane` to find their scroll container.
   return (
-    <section className="ub-pane ub-page-pane ub-document-pane" ref={pane}>
+    <section className="ub-pane ub-page-pane ub-document-pane" ref={pane}
+      inert={historyActive} style={historyActive ? { display: "none" } : undefined}>
       {threads.length > 0 && onToggleThreads !== undefined && (
         <button
           type="button"
@@ -1043,6 +1051,7 @@ export function EditorPane({
           revision={revision}
           codeChecks={meta?.code_check}
         />
+        {historyControl}
         {beforeAnswer}
         <div className={answerClassName}>
           {!decision && <TldrCallout
@@ -1052,9 +1061,9 @@ export function EditorPane({
             canCleanupTags={canCleanupTags}
             tldr={meta?.tldr ?? null}
             editing={editingTldr}
-            archived={archived}
+            archived={archived || historyActive}
             decision={decision}
-            writable={writable}
+            writable={writable && !historyActive}
             onEditingChange={(editing) =>
               setTldrEditorRoom(editing ? connection.room : null)
             }
@@ -1076,6 +1085,7 @@ export function EditorPane({
               canCleanupTags={canCleanupTags}
               author={author}
               archived={archived}
+              historyActive={historyActive}
               contentReadOnly={contentReadOnly}
               docLinks={docLinks}
               onSelectThread={onSelectThread}
