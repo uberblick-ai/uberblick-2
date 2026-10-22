@@ -12,8 +12,8 @@ export const toolHelpDetails = {
     "Figma seeds take the :::figma body without delimiters, as insert_block does; invalid_figma refuses " +
     "before creating anything. See markdown for keys, accepted links and normalization. " +
     "Optional `tldr` supplies a regular document's person-facing summary under set_metadata rules and limit. " +
-    "Before creating a decision topic, consult [When to create a decision record](uberblick://help/lifecycle). " +
-    "For decision answer guidance, see [Decision answers and topics](uberblick://help/lifecycle). " +
+    "Before creating a decision topic, consult [When to create a decision record](uberblick://help/decisions). " +
+    "For decision answer guidance, see [Decision records](uberblick://help/decisions). " +
     "Decision records accept paragraph, code, " +
     "table or a maximal run of adjacent list-item blocks. Other types refuse with decision_block_unsupported; " +
     "more than three answer blocks refuse with decision_answer_too_long, and either writes nothing. " +
@@ -54,7 +54,7 @@ export const toolHelpDetails = {
     "names the stable topic or question, never the answer. A topic has one title, stored on its first record. " +
     "Successors take the topic's title: omit title or supply that exact title; a different title refuses " +
     "with field title and creates nothing. A rename through any record renames the topic. " +
-    "Decision answer guidance is in [Decision answers and topics](uberblick://help/lifecycle). " +
+    "Decision answer guidance is in [Decision records](uberblick://help/decisions). " +
     "These answer blocks are distinct from " +
     "recorded `answer: {who, when, where}` attribution. A record created decided " +
     "can also name its discussion. Successors never inherit discussion, even when they inherit the related " +
@@ -111,7 +111,7 @@ export const toolHelpDetails = {
     "the first answer paragraph/list as plain " +
     "text, list items joined by `; `, whitespace collapsed, at most 300 characters with `…` when cut. " +
     "It is null without a paragraph or list, or absent when the cache is unknown. For decision answers, " +
-    "see [Decision answers and topics](uberblick://help/lifecycle). " +
+    "see [Decision records](uberblick://help/decisions). " +
     "Recorded `answer: {who, when, where}` is attribution, not the answer content.\n\n" +
     "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
     "For a table, `text` is canonical GFM with cell formatting as inline markdown, literal punctuation and " +
@@ -167,7 +167,7 @@ export const toolHelpDetails = {
     "true` returns one row per record, with predicates applied per record and no topic UUID lists. Permanently deleted UUIDs are always excluded. `include_deleted` admits archived topics " +
     "but is not a predicate and does not lift the default omission, so an archived decision needs it together " +
     "with a matching predicate. A fresh replica can list the whole corpus once the directory room has " +
-    "synced. See [Decision answers and topics](uberblick://help/lifecycle) for decision answer guidance.\n\n" +
+    "synced. See [Decision records](uberblick://help/decisions) for decision answer guidance.\n\n" +
     "A decision row's `discussion` caches the record's RFC UUID, null when none or absent when unknown until a " +
     "newer client repairs the stub. Listed with `include_superseded: true`, each pending proposal therefore names " +
     "its own discussion without opening its room. The reference is distinct from curated links and recorded " +
@@ -463,7 +463,7 @@ export const toolHelpDetails = {
     "concurrent and older-client writes. Only get_doc reports the mark as `tldrOptOut: true`. " +
     "On an open decision, non-null tldr refuses with " +
     "decision_tldr_unsupported; null is accepted. Decisions have no TL;DR and return tldr: null. Decision answer guidance is in " +
-    "[Decision answers and topics](uberblick://help/lifecycle). Their " +
+    "[Decision records](uberblick://help/decisions). Their " +
     "directory answerPreview derives from the first answer paragraph/list. It is distinct from " +
     "recorded `answer: {who, when, where}` attribution. get_doc page decisions are marked related or linked. " +
     "Ordinary document stubs, search and Markdown do not carry TL;DR.\n\n" +

@@ -2,7 +2,7 @@
 import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { normalizeObjectSchema } from "@modelcontextprotocol/sdk/server/zod-compat.js";
-import { toJsonSchemaCompat, parseWithCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
+import { parseWithCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
 import type { HelpCatalog, ToolHelp } from "./help.js";
 import type { ServerWork } from "./server-work.js";
 import { ClientSafeResourceError, guardedResource } from "./resource-adapter.js";
@@ -15,12 +15,7 @@ export function captureTool(help: HelpCatalog, entry: ToolHelp, tool: Registered
     throw new Error(`Help requires the full registered contract for ${entry.name}`);
   }
   parseWithCompat(input, entry.example);
-  help.addTool(entry, {
-    title: tool.title,
-    description: tool.description,
-    inputSchema: toJsonSchemaCompat(input, { strictUnions: true, pipeStrategy: "input" }),
-    outputSchema: toJsonSchemaCompat(output, { strictUnions: true, pipeStrategy: "output" }),
-  });
+  help.addTool(entry, { title: tool.title, description: tool.description });
 }
 
 export function registerHelpResources(server: McpServer, help: HelpCatalog, work: ServerWork): void {

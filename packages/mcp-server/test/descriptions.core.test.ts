@@ -82,7 +82,7 @@ describe("create_doc requires a description", () => {
     const rig = await localRig();
     const missing = await rig.call("create_doc", { title: "Undescribed" });
     expect(missing.isError).toBe(true);
-    expect(missing.payload.message).toContain("one or two sentences");
+    expect(missing.payload.message).toContain("A keyword list is fine.");
     // Spaces are not a description. Accepting them would satisfy the
     // requirement on paper, store blanks in the document and the stub, and
     // silence the nudge that exists to get a real one written.

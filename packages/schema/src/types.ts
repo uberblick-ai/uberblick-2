@@ -136,7 +136,7 @@ export interface BlockInput {
 }
 
 /**
- * Listing-description ceiling, not a target; use one or two sentences beside the title.
+ * Listing-description ceiling, not a target; the text is for agents' discovery, so terms beat prose.
  */
 export const MAX_DESCRIPTION_LENGTH = 300;
 

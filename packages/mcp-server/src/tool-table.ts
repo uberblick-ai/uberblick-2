@@ -110,8 +110,9 @@ function tool<Input extends z.ZodObject, W extends Writes>(spec: ToolSpec<Input,
 
 const uuid = "11111111-1111-4111-8111-111111111111";
 const targetUuid = "11111111-1111-4111-8111-111111111112";
-const documentContracts = ["workspaces", "lifecycle", "tool-contracts"];
-const proseContracts = [...documentContracts, "markdown"];
+const documentContracts = ["workspaces", "tool-contracts"];
+const decisionContracts = [...documentContracts, "decisions"];
+const proseContracts = ["edit_doc", ...decisionContracts, "markdown"];
 const dataContracts = [...documentContracts, "data"];
 
 export const tools: readonly Tool[] = [
@@ -139,7 +140,7 @@ export const tools: readonly Tool[] = [
       "A decision topic has one title stored on its first record. Renaming any record renames the topic. Successors inherit it: omit title or supply the same title; another refuses. " +
       "List-item seeds: bullet/ordered list, integer indent 0–3 (defaults bullet/0). " +
       "Active tags by id/name (case ignored); unknown/retired refuse. Kind defaults first status; invalid pairs refuse. " +
-      "Decision topics/answers: consult get_help({topic: \"lifecycle\"}), including When to create a decision record and Decision answers and topics. " +
+      "Decision topics/answers: consult get_help({topic: \"decisions\"}). " +
       "Links/GitHub references: markdown. " +
       "Open/decided only; deciding needs supported nonblank answer blocks, no TL;DR/data; decided successors require recorded human answer. " +
       "related: live readable regular page; inherited unless supplied. supersedes: hydrated decision in live topic. Targets validated pre-write. " +
@@ -216,8 +217,7 @@ export const tools: readonly Tool[] = [
       "schema/value budget across calls; they are not atomic together and supply no CAS or distributed lock. " +
       "Read with get_data; get_doc summarizes collections. " +
       "Decisions refuse data with decision_data_unsupported; decided records " +
-      "keep decision_read_only, and legacy data stays readable. Decision answer guidance is in lifecycle's " +
-      "Decision answers and topics section. Their " +
+      "keep decision_read_only, and legacy data stays readable. Decision answer guidance is in decisions. Their " +
       "directory answerPreview uses the first answer paragraph/list; decisions have no TL;DR. get_doc page " +
       "decisions are marked related or linked. Recorded attribution {who, when, where} is separate from " +
       "the answer's content blocks.",
@@ -260,7 +260,7 @@ export const tools: readonly Tool[] = [
     input: listDocsInput,
     operation: listDocsOperation,
     example: { kind: "decision", status: "open" },
-    related: documentContracts,
+    related: decisionContracts,
     details: toolHelpDetails.list_docs,
   }),
   tool({
@@ -279,7 +279,7 @@ export const tools: readonly Tool[] = [
     input: searchInput,
     operation: searchOperation,
     example: { query: "release checklist", kind: "regular", tag: ["mcp", "cli"], limit: 10 },
-    related: documentContracts,
+    related: decisionContracts,
     details: toolHelpDetails.search,
   }),
   tool({
@@ -311,7 +311,7 @@ export const tools: readonly Tool[] = [
     input: findDecisionsInput,
     operation: findDecisionsOperation,
     example: { github_ref: "example/project#42" },
-    related: documentContracts,
+    related: decisionContracts,
     details: toolHelpDetails.find_decisions,
   }),
   tool({
@@ -412,7 +412,7 @@ export const tools: readonly Tool[] = [
       "decision_tldr_unsupported, open null accepted. Decided records refuse tldr/discussion. " +
       "Title on any live record renames its decision topic; successors inherit it. Title renames preserve approval. " +
       "answerPreview: first answer paragraph/list; get_doc marks related/linked. " +
-      "See lifecycle's Decision answers and topics section. " +
+      "See decisions. " +
       "Archived metadata refuses; lifecycle: set_status.",
     input: setMetadataInput,
     operation: setMetadataOperation,
@@ -426,7 +426,7 @@ export const tools: readonly Tool[] = [
       tags: ["Release"],
       links: [targetUuid],
     },
-    related: documentContracts,
+    related: decisionContracts,
     details: toolHelpDetails.set_metadata,
   }),
   tool({
@@ -445,7 +445,7 @@ export const tools: readonly Tool[] = [
     // Overwrites lifecycle and answer; repeating leaves the same state or is refused.
     hints: { destructive: true, idempotent: true },
     example: { uuid, status: "open" },
-    related: documentContracts,
+    related: decisionContracts,
   }),
   tool({
     name: "archive_doc",

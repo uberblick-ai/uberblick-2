@@ -28,16 +28,16 @@ export const uuidArg = z.uuid().transform((value, ctx) => {
 export const descriptionArg = z
   .string({
     error:
-      "create_doc requires `description`, and set_metadata accepts it: one or two sentences saying what the document " +
-      "is for, so agents can judge it from list_docs and search without opening it.",
+      "create_doc requires `description`, and set_metadata accepts it: read only by agents, it is whatever best helps an " +
+      "agent find the document with list_docs and search and decide whether to open it. A keyword list is fine.",
   })
   .trim()
   .min(1, "a description cannot be empty or whitespace")
   .max(
     MAX_DESCRIPTION_LENGTH,
-    `a description is at most ${MAX_DESCRIPTION_LENGTH} characters — one or two sentences, not a summary`,
+    `a description is at most ${MAX_DESCRIPTION_LENGTH} characters — keep the terms that best help an agent find it`,
   )
-  .describe("Agent-facing description used to choose whether to open the document.");
+  .describe("Read only by agents, never shown to people: whatever best helps an agent find this document with list_docs and search and decide whether to open it. A keyword list is fine.");
 
 export const tldrArg = z
   .string({
