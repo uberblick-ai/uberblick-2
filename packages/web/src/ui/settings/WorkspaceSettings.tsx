@@ -402,108 +402,110 @@ function TagSettings({
   };
 
   return (
-    <SettingsPage title="Tags" gap="gap-4">
-      <form className="flex flex-col gap-3" onSubmit={create} aria-labelledby="ub-new-tag-title">
-        <h2 id="ub-new-tag-title" className="m-0 ub-type-h2 font-semibold">New tag</h2>
-        <p id="ub-tag-description-help" className="m-0 ub-type-small">A short description tells people and agents when to use it.</p>
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="flex min-w-0 flex-1 basis-40 flex-col gap-2">
-            <label htmlFor="ub-new-tag" className="ub-type-ui font-medium">Name</label>
-            <Input
-              ref={createInput}
-              id="ub-new-tag"
-              value={draft}
-              disabled={!writable}
-              aria-describedby={error === null ? undefined : "ub-new-tag-error"}
-              onChange={(event) => {
-                setDraft(event.currentTarget.value);
-                setError(null);
-              }}
-            />
-          </div>
-          <div className="flex min-w-0 flex-2 basis-64 flex-col gap-2">
-            <label htmlFor="ub-new-tag-description" className="ub-type-ui font-medium">Description (optional)</label>
-            <Input
-              id="ub-new-tag-description"
-              value={description}
-              disabled={!writable}
-              aria-describedby={`ub-tag-description-help${error === null ? "" : " ub-new-tag-error"}`}
-              onChange={(event) => { setDescription(event.currentTarget.value); setError(null); }}
-            />
-          </div>
-          <Button type="submit" disabled={!writable}>
-            Create
-          </Button>
-        </div>
-        {error !== null && <p id="ub-new-tag-error" className="m-0 ub-type-ui text-destructive" role="alert">{error}</p>}
-      </form>
-      {!writable && (
-        <p className="m-0 ub-type-ui" role="status">
-          Tag changes are unavailable while this page is disconnected.
-        </p>
-      )}
-      {entries.length === 0 ? <p className="m-0 ub-type-ui">No tags.</p> : (
-        <table className="w-full table-fixed border-collapse ub-type-ui" data-tag-list aria-label="Tags">
-          <colgroup><col className="w-[30%]" /><col /><col className="w-32" /></colgroup>
-          <TableHead columns={["Name", "Description"]} actions />
-          <tbody>{entries.map((entry) => <tr key={entry.id}>
-            <th className={ROW_HEADER} scope="row">
-              <span className="ub-tag max-w-full"><span className="ub-tag-name min-w-0">{entry.name}</span></span>
-            </th>
-            <td className={`${CELL} wrap-anywhere`}>{entry.description ?? <span className="text-muted-foreground">No description</span>}</td>
-            <td className={`${CELL} whitespace-nowrap`}>
-              <button className={ROW_ACTION} type="button" aria-label={`Edit ${entry.name}`} disabled={!writable}
-                onClick={(event) => {
-                  editTrigger.current = event.currentTarget;
-                  setEditing(entry);
-                  setEditDraft(entry.description ?? "");
-                  setEditError(null);
-                }}>Edit</button>
-              <button className={ROW_ACTION} type="button" data-tag-entry={entry.id} aria-label={`Delete ${entry.name}`} disabled={!writable}
-                onClick={(event) => { deleteTrigger.current = event.currentTarget; setDeleting(entry); }}>Delete</button>
-            </td>
-          </tr>)}</tbody>
-        </table>
-      )}
-      <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) setEditing(null); }}>
-        <DialogContent className="p-6" aria-describedby={undefined} onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          const trigger = editTrigger.current;
-          if (trigger?.isConnected) trigger.focus();
-          else createInput.current?.focus();
-        }}>
-          <form className="flex flex-col gap-4" onSubmit={saveDescription}>
-            <DialogTitle className="m-0 ub-type-h2 font-semibold">Edit “{editing?.name}”</DialogTitle>
-            <div className="flex flex-col gap-2">
-              <label htmlFor="ub-edit-tag-description" className="ub-type-ui font-medium">Description</label>
-              <Input id="ub-edit-tag-description" value={editDraft} aria-invalid={editError !== null}
-                aria-describedby={editError === null ? undefined : "ub-edit-tag-error"}
-                onChange={(event) => { setEditDraft(event.currentTarget.value); setEditError(null); }} />
-              {editError !== null && <p id="ub-edit-tag-error" className="m-0 ub-type-ui text-destructive" role="alert">{editError}</p>}
-              {!writable && <p className="m-0 ub-type-ui" role="status">Tag changes are unavailable while this page is disconnected.</p>}
+    <SettingsPage title="Tags">
+      <div className="flex flex-col gap-4">
+        <form className="flex flex-col gap-3" onSubmit={create} aria-labelledby="ub-new-tag-title">
+          <h2 id="ub-new-tag-title" className="m-0 ub-type-h2 font-semibold">New tag</h2>
+          <p id="ub-tag-description-help" className="m-0 ub-type-small">A short description tells people and agents when to use it.</p>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="flex min-w-0 flex-1 basis-40 flex-col gap-2">
+              <label htmlFor="ub-new-tag" className="ub-type-ui font-medium">Name</label>
+              <Input
+                ref={createInput}
+                id="ub-new-tag"
+                value={draft}
+                disabled={!writable}
+                aria-describedby={error === null ? undefined : "ub-new-tag-error"}
+                onChange={(event) => {
+                  setDraft(event.currentTarget.value);
+                  setError(null);
+                }}
+              />
             </div>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="secondary" className="bg-transparent" onClick={() => setEditing(null)}>Cancel</Button>
-              <Button type="submit" disabled={!writable}>Save</Button>
+            <div className="flex min-w-0 flex-2 basis-64 flex-col gap-2">
+              <label htmlFor="ub-new-tag-description" className="ub-type-ui font-medium">Description (optional)</label>
+              <Input
+                id="ub-new-tag-description"
+                value={description}
+                disabled={!writable}
+                aria-describedby={`ub-tag-description-help${error === null ? "" : " ub-new-tag-error"}`}
+                onChange={(event) => { setDescription(event.currentTarget.value); setError(null); }}
+              />
             </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-      <AlertDialog open={deleting !== null} onOpenChange={(open) => { if (!open) setDeleting(null); }}>
-        <AlertDialogContent onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          const trigger = deleteTrigger.current;
-          if (trigger?.isConnected) trigger.focus();
-          else createInput.current?.focus();
-        }}>
-          <AlertDialogTitle>Delete “{deleting?.name}”?</AlertDialogTitle>
-          <AlertDialogDescription>It disappears from documents and cannot be restored.</AlertDialogDescription>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={!writable} onClick={() => { if (deleting !== null) remove(deleting); }}>Delete</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            <Button type="submit" disabled={!writable}>
+              Create
+            </Button>
+          </div>
+          {error !== null && <p id="ub-new-tag-error" className="m-0 ub-type-ui text-destructive" role="alert">{error}</p>}
+        </form>
+        {!writable && (
+          <p className="m-0 ub-type-ui" role="status">
+            Tag changes are unavailable while this page is disconnected.
+          </p>
+        )}
+        {entries.length === 0 ? <p className="m-0 ub-type-ui">No tags.</p> : (
+          <table className="w-full table-fixed border-collapse ub-type-ui" data-tag-list aria-label="Tags">
+            <colgroup><col className="w-[30%]" /><col /><col className="w-32" /></colgroup>
+            <TableHead columns={["Name", "Description"]} actions />
+            <tbody>{entries.map((entry) => <tr key={entry.id}>
+              <th className={ROW_HEADER} scope="row">
+                <span className="ub-tag max-w-full"><span className="ub-tag-name min-w-0">{entry.name}</span></span>
+              </th>
+              <td className={`${CELL} wrap-anywhere`}>{entry.description ?? <span className="text-muted-foreground">No description</span>}</td>
+              <td className={`${CELL} whitespace-nowrap`}>
+                <button className={ROW_ACTION} type="button" aria-label={`Edit ${entry.name}`} disabled={!writable}
+                  onClick={(event) => {
+                    editTrigger.current = event.currentTarget;
+                    setEditing(entry);
+                    setEditDraft(entry.description ?? "");
+                    setEditError(null);
+                  }}>Edit</button>
+                <button className={ROW_ACTION} type="button" data-tag-entry={entry.id} aria-label={`Delete ${entry.name}`} disabled={!writable}
+                  onClick={(event) => { deleteTrigger.current = event.currentTarget; setDeleting(entry); }}>Delete</button>
+              </td>
+            </tr>)}</tbody>
+          </table>
+        )}
+        <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) setEditing(null); }}>
+          <DialogContent className="p-6" aria-describedby={undefined} onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const trigger = editTrigger.current;
+            if (trigger?.isConnected) trigger.focus();
+            else createInput.current?.focus();
+          }}>
+            <form className="flex flex-col gap-4" onSubmit={saveDescription}>
+              <DialogTitle className="m-0 ub-type-h2 font-semibold">Edit “{editing?.name}”</DialogTitle>
+              <div className="flex flex-col gap-2">
+                <label htmlFor="ub-edit-tag-description" className="ub-type-ui font-medium">Description</label>
+                <Input id="ub-edit-tag-description" value={editDraft} aria-invalid={editError !== null}
+                  aria-describedby={editError === null ? undefined : "ub-edit-tag-error"}
+                  onChange={(event) => { setEditDraft(event.currentTarget.value); setEditError(null); }} />
+                {editError !== null && <p id="ub-edit-tag-error" className="m-0 ub-type-ui text-destructive" role="alert">{editError}</p>}
+                {!writable && <p className="m-0 ub-type-ui" role="status">Tag changes are unavailable while this page is disconnected.</p>}
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="secondary" className="bg-transparent" onClick={() => setEditing(null)}>Cancel</Button>
+                <Button type="submit" disabled={!writable}>Save</Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+        <AlertDialog open={deleting !== null} onOpenChange={(open) => { if (!open) setDeleting(null); }}>
+          <AlertDialogContent onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const trigger = deleteTrigger.current;
+            if (trigger?.isConnected) trigger.focus();
+            else createInput.current?.focus();
+          }}>
+            <AlertDialogTitle>Delete “{deleting?.name}”?</AlertDialogTitle>
+            <AlertDialogDescription>It disappears from documents and cannot be restored.</AlertDialogDescription>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" disabled={!writable} onClick={() => { if (deleting !== null) remove(deleting); }}>Delete</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
     </SettingsPage>
   );
 }
