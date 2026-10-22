@@ -221,7 +221,8 @@ it("moves the caret out when a local heading-level edit folds its current block"
     expect(isFolded(element, boundary)).toBe(false);
     const at = blockPosition(editor, boundary);
     editor.commands.setTextSelection(at + 3);
-    const expectedBlocks = getBlocks(ydoc).map((block) => block.id === boundary ? { ...block, level: 3 } : block);
+    const expectedBlocks = getBlocks(ydoc).map((block) => block.id === boundary
+      ? { ...block, level: 3, rev: expect.any(String) } : block);
     const change = editor.state.tr.setNodeAttribute(at, "level", "3");
     expect(change.docChanged).toBe(true);
     expect(change.selectionSet).toBe(false);
