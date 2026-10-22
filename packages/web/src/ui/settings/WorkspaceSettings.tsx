@@ -7,12 +7,14 @@ import {
   createTagCatalogEntry,
   deleteTagCatalogEntry,
   directoryRoom,
+  getTagCatalogEntry,
   getWorkspaceMainRepository,
   getWorkspaceName,
   isTagCatalogSeeded,
   isTagName,
   listTagCatalog,
   seedTagCatalog,
+  setTagCatalogDescription,
   setWorkspaceMainRepository,
   setWorkspaceName,
   settingsRoom,
@@ -29,6 +31,7 @@ import type { SettingsPage as SettingsRoutePage, Workspace } from "../route.js";
 import { Button } from "../shadcn/button.js";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../shadcn/collapsible.js";
 import { Input } from "../shadcn/input.js";
+import { Dialog, DialogContent, DialogTitle } from "../shadcn/dialog.js";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogTitle } from "../shadcn/alert-dialog.js";
 import { statusReading } from "../status/status-reading.js";
@@ -37,7 +40,7 @@ import { formatTimestamp, useTimestampClock } from "../timestamps.js";
 import { workspaceLocationLabel } from "../workspace-location.js";
 import { useWorkspaceSetting } from "../workspace-setting.js";
 import { AccessSettings } from "./AccessSettings.js";
-import { SettingsPage } from "./settings-kit.js";
+import { CELL, ROW_ACTION, ROW_HEADER, SettingsPage, TableHead } from "./settings-kit.js";
 
 /** What a SyncPanel-style fact reads as before this client knows it. */
 const UNKNOWN = "—";
@@ -299,9 +302,14 @@ function TagSettings({
   const status = useRoomStatus(connection);
   const catalog = useTagCatalog(connection);
   const [draft, setDraft] = useState("");
+  const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<TagCatalogEntry | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<TagCatalogEntry | null>(null);
   const createInput = useRef<HTMLInputElement | null>(null);
+  const editTrigger = useRef<HTMLButtonElement | null>(null);
   const deleteTrigger = useRef<HTMLButtonElement | null>(null);
   const arrived =
     connection !== null &&
@@ -328,11 +336,7 @@ function TagSettings({
   if (!arrived) {
     return (
       <SettingsPage title="Tags">
-        <div className="rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
-          <p className="m-0 ub-type-ui" role="status">
-            Waiting for the tag catalog…
-          </p>
-        </div>
+        <p className="m-0 ub-type-ui" role="status">Waiting for the tag catalog…</p>
       </SettingsPage>
     );
   }
@@ -341,7 +345,8 @@ function TagSettings({
 
   const create = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
-    if (connection === null || !connection.status.writable) {
+    if (connection === null || connection.room !== settingsRoom(workspace.uuid) ||
+      !connection.status.hasReceivedServerState || !connection.status.writable) {
       setError("Reconnect before changing the tag catalog.");
       return;
     }
@@ -357,10 +362,36 @@ function TagSettings({
       setError(`“${name}” is already a tag.`);
       return;
     }
-    createTagCatalogEntry(connection.ydoc, name);
-    setError(null);
-    toast.success(`Created “${name}”.`, { id: "workspace-settings" });
-    setDraft("");
+    try {
+      createTagCatalogEntry(connection.ydoc, name, undefined, description);
+      setError(null);
+      toast.success(`Created “${name}”.`, { id: "workspace-settings" });
+      setDraft("");
+      setDescription("");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "The tag description is invalid.");
+    }
+  };
+
+  const saveDescription = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (connection === null || connection.room !== settingsRoom(workspace.uuid) ||
+      !connection.status.hasReceivedServerState || !connection.status.writable) {
+      setEditError("Reconnect before changing the tag catalog.");
+      return;
+    }
+    if (editing === null) return;
+    if (getTagCatalogEntry(connection.ydoc, editing.id) === null) {
+      setEditError("This tag no longer exists.");
+      return;
+    }
+    try {
+      setTagCatalogDescription(connection.ydoc, editing.id, editDraft);
+      toast.success(`Saved “${editing.name}”.`, { id: "workspace-settings" });
+      setEditing(null);
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : "The tag description is invalid.");
+    }
   };
 
   const remove = (entry: TagCatalogEntry): void => {
@@ -371,69 +402,108 @@ function TagSettings({
   };
 
   return (
-    <SettingsPage title="Tags">
-      <div className="flex flex-col gap-4 rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
-        <form className="flex flex-col gap-2" onSubmit={create}>
-          <label htmlFor="ub-new-tag" className="ub-type-ui font-medium">Create a tag</label>
-          <div className="flex gap-2">
+    <SettingsPage title="Tags" gap="gap-4">
+      <form className="flex flex-col gap-3" onSubmit={create} aria-labelledby="ub-new-tag-title">
+        <h2 id="ub-new-tag-title" className="m-0 ub-type-h2 font-semibold">New tag</h2>
+        <p id="ub-tag-description-help" className="m-0 ub-type-small">A short description tells people and agents when to use it.</p>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex min-w-0 flex-1 basis-40 flex-col gap-2">
+            <label htmlFor="ub-new-tag" className="ub-type-ui font-medium">Name</label>
             <Input
               ref={createInput}
-              className="flex-1"
               id="ub-new-tag"
               value={draft}
               disabled={!writable}
-              aria-describedby="ub-tag-name-help"
+              aria-describedby={error === null ? undefined : "ub-new-tag-error"}
               onChange={(event) => {
                 setDraft(event.currentTarget.value);
                 setError(null);
               }}
             />
-            <Button type="submit" disabled={!writable}>
-              Create
-            </Button>
           </div>
-          <p id="ub-tag-name-help" className="m-0 ub-type-small">
-            Letters and numbers, separated by hyphens; saved in lowercase; 30
-            characters maximum.
-          </p>
-        </form>
-        {!writable && (
-          <p className="m-0 ub-type-ui" role="status">
-            Tag changes are unavailable while this page is disconnected.
-          </p>
-        )}
-        {error !== null && (
-          <p className="m-0 rounded-(--radius-sm) border border-destructive p-2 ub-type-ui" role="alert">
-            {error}
-          </p>
-        )}
-        {entries.length === 0 ? <p className="m-0 ub-type-ui">No tags.</p> : (
-          <ul className="m-0 flex list-none flex-col gap-2 p-0" data-tag-list>
-            {entries.map((entry) => <li key={entry.id} className="flex items-center justify-between gap-3 rounded-(--radius-sm) border border-(--border) p-2 ub-type-body">
-              <span className="min-w-0 wrap-anywhere">{entry.name}</span>
-              <Button variant="outline" size="sm" type="button" data-tag-entry={entry.id} aria-label={`Delete ${entry.name}`} disabled={!writable}
-                onClick={(event) => { deleteTrigger.current = event.currentTarget; setDeleting(entry); }}>
-                Delete<span className="sr-only"> {entry.name}</span>
-              </Button>
-            </li>)}
-          </ul>
-        )}
-        <AlertDialog open={deleting !== null} onOpenChange={(open) => { if (!open) setDeleting(null); }}>
-          <AlertDialogContent onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            const trigger = deleteTrigger.current;
-            if (trigger?.isConnected) trigger.focus();
-            else createInput.current?.focus();
-          }}>
-            <AlertDialogTitle>Delete “{deleting?.name}”?</AlertDialogTitle>
-            <AlertDialogDescription>It disappears from documents and cannot be restored.</AlertDialogDescription>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction variant="destructive" disabled={!writable} onClick={() => { if (deleting !== null) remove(deleting); }}>Delete</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </div>
+          <div className="flex min-w-0 flex-2 basis-64 flex-col gap-2">
+            <label htmlFor="ub-new-tag-description" className="ub-type-ui font-medium">Description (optional)</label>
+            <Input
+              id="ub-new-tag-description"
+              value={description}
+              disabled={!writable}
+              aria-describedby={`ub-tag-description-help${error === null ? "" : " ub-new-tag-error"}`}
+              onChange={(event) => { setDescription(event.currentTarget.value); setError(null); }}
+            />
+          </div>
+          <Button type="submit" disabled={!writable}>
+            Create
+          </Button>
+        </div>
+        {error !== null && <p id="ub-new-tag-error" className="m-0 ub-type-ui text-destructive" role="alert">{error}</p>}
+      </form>
+      {!writable && (
+        <p className="m-0 ub-type-ui" role="status">
+          Tag changes are unavailable while this page is disconnected.
+        </p>
+      )}
+      {entries.length === 0 ? <p className="m-0 ub-type-ui">No tags.</p> : (
+        <table className="w-full table-fixed border-collapse ub-type-ui" data-tag-list aria-label="Tags">
+          <colgroup><col className="w-[30%]" /><col /><col className="w-32" /></colgroup>
+          <TableHead columns={["Name", "Description"]} actions />
+          <tbody>{entries.map((entry) => <tr key={entry.id}>
+            <th className={ROW_HEADER} scope="row">
+              <span className="ub-tag max-w-full"><span className="ub-tag-name min-w-0">{entry.name}</span></span>
+            </th>
+            <td className={`${CELL} wrap-anywhere`}>{entry.description ?? <span className="text-muted-foreground">No description</span>}</td>
+            <td className={`${CELL} whitespace-nowrap`}>
+              <button className={ROW_ACTION} type="button" aria-label={`Edit ${entry.name}`} disabled={!writable}
+                onClick={(event) => {
+                  editTrigger.current = event.currentTarget;
+                  setEditing(entry);
+                  setEditDraft(entry.description ?? "");
+                  setEditError(null);
+                }}>Edit</button>
+              <button className={ROW_ACTION} type="button" data-tag-entry={entry.id} aria-label={`Delete ${entry.name}`} disabled={!writable}
+                onClick={(event) => { deleteTrigger.current = event.currentTarget; setDeleting(entry); }}>Delete</button>
+            </td>
+          </tr>)}</tbody>
+        </table>
+      )}
+      <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) setEditing(null); }}>
+        <DialogContent className="p-6" aria-describedby={undefined} onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          const trigger = editTrigger.current;
+          if (trigger?.isConnected) trigger.focus();
+          else createInput.current?.focus();
+        }}>
+          <form className="flex flex-col gap-4" onSubmit={saveDescription}>
+            <DialogTitle className="m-0 ub-type-h2 font-semibold">Edit “{editing?.name}”</DialogTitle>
+            <div className="flex flex-col gap-2">
+              <label htmlFor="ub-edit-tag-description" className="ub-type-ui font-medium">Description</label>
+              <Input id="ub-edit-tag-description" value={editDraft} aria-invalid={editError !== null}
+                aria-describedby={editError === null ? undefined : "ub-edit-tag-error"}
+                onChange={(event) => { setEditDraft(event.currentTarget.value); setEditError(null); }} />
+              {editError !== null && <p id="ub-edit-tag-error" className="m-0 ub-type-ui text-destructive" role="alert">{editError}</p>}
+              {!writable && <p className="m-0 ub-type-ui" role="status">Tag changes are unavailable while this page is disconnected.</p>}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" className="bg-transparent" onClick={() => setEditing(null)}>Cancel</Button>
+              <Button type="submit" disabled={!writable}>Save</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <AlertDialog open={deleting !== null} onOpenChange={(open) => { if (!open) setDeleting(null); }}>
+        <AlertDialogContent onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          const trigger = deleteTrigger.current;
+          if (trigger?.isConnected) trigger.focus();
+          else createInput.current?.focus();
+        }}>
+          <AlertDialogTitle>Delete “{deleting?.name}”?</AlertDialogTitle>
+          <AlertDialogDescription>It disappears from documents and cannot be restored.</AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" disabled={!writable} onClick={() => { if (deleting !== null) remove(deleting); }}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SettingsPage>
   );
 }

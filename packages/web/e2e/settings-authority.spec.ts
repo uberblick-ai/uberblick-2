@@ -23,12 +23,12 @@ test("a confirmed admin edits settings offline and keeps access after reloading"
     await expect(name).toHaveValue("Offline admin name");
     await expect(page.getByRole("textbox", { name: "Main repository", exact: true })).toHaveValue("Owner/Offline");
     await page.getByRole("navigation", { name: "Workspace settings", exact: true }).getByRole("button", { name: "Tags", exact: true }).click();
-    const tag = page.getByRole("textbox", { name: "Create a tag", exact: true });
+    const tag = page.getByRole("textbox", { name: "Name", exact: true });
     await expect(tag).toBeEnabled();
     await tag.fill("offline-admin");
     await page.getByRole("button", { name: "Create", exact: true }).click();
     await expect(page.getByRole("button", { name: "Delete offline-admin", exact: true })).toBeVisible();
-    await expect(page.locator("[data-tag-list]").getByRole("listitem")).toHaveCount(1);
+    await expect(page.locator("[data-tag-list] tbody tr")).toHaveCount(1);
   } finally {
     await harness().startHub();
   }

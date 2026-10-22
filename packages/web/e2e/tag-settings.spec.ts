@@ -1,13 +1,17 @@
 import { waitForAcknowledged } from "./settle.js";
 /** Settings through the real browser, serving replica, and hub. */
 
-import { expect, test } from "@playwright/test";
+import { devices, expect, test } from "@playwright/test";
 import { EXAMPLE_TAGS } from "@uberblick/schema";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
-import { setupHarness } from "./app-helpers.js";
+import { activateControl, setupHarness } from "./app-helpers.js";
 
 const { harness, openApp } = setupHarness({ accessRole: "admin", seedExampleTags: true });
+
+function tagRow(page: Page, name: string): Locator {
+  return page.locator("[data-tag-list] tbody tr").filter({ has: page.getByText(name, { exact: true }) });
+}
 
 function successNotice(page: Page, message: string) {
   return page.locator("[data-sonner-toast]:not([data-removed=true])").filter({
@@ -105,21 +109,51 @@ test("Tags settings is address-selected and its catalog changes converge", async
 
   await expect(first).toHaveURL(new URL(path, harness().appUrl).href);
   await expect(first.getByRole("heading", { name: "Tags", level: 1 })).toBeVisible();
-  await expect(
-    first.locator("[data-tag-list]").getByRole("listitem"),
-  ).toHaveCount(examples.length);
-  await expect(
-    first
-      .locator("[data-tag-list]")
-      .getByRole("listitem")
-      .locator(":scope > span"),
-  ).toHaveText(examples);
+  await expect(first.getByRole("heading", { name: "New tag", level: 2 })).toBeVisible();
+  await expect(first.locator("[data-tag-list] tbody tr")).toHaveCount(examples.length);
+  await expect(first.locator("[data-tag-list] .ub-tag .ub-tag-name")).toHaveText(examples);
+  await expect(first.locator("[data-tag-list]").getByRole("columnheader")).toHaveText(["Name", "Description", "Actions"]);
 
-  await first.getByLabel("Create a tag").fill("product");
+  const name = first.getByLabel("Name", { exact: true });
+  const description = first.getByLabel("Description (optional)", { exact: true });
+  await name.fill("product");
+  await description.fill("Product research and planning.");
   await first.getByRole("button", { name: "Create", exact: true }).click();
   await expectSuccess(first, "Created “product”.");
+  await expect(name).toHaveValue("");
+  await expect(description).toHaveValue("");
   await expect(first.getByRole("button", { name: "Create", exact: true })).toBeFocused();
-  await expect(second.getByRole("button", { name: "Delete product" })).toBeVisible();
+  await expect(tagRow(second, "product")).toContainText("Product research and planning.");
+
+  const edit = first.getByRole("button", { name: "Edit product", exact: true });
+  await edit.press("Enter");
+  let editor = first.getByRole("dialog", { name: "Edit “product”", exact: true });
+  await expect(editor.getByLabel("Description", { exact: true })).toHaveValue("Product research and planning.");
+  await expect(editor.getByLabel("Description", { exact: true })).toBeFocused();
+  await editor.getByLabel("Description", { exact: true }).fill("An abandoned draft.");
+  await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(edit).toBeFocused();
+  await expect(tagRow(second, "product")).toContainText("Product research and planning.");
+  await edit.press("Enter");
+  editor = first.getByRole("dialog", { name: "Edit “product”", exact: true });
+  await expect(editor.getByLabel("Description", { exact: true })).toHaveValue("Product research and planning.");
+  await editor.getByLabel("Description", { exact: true }).fill("Another abandoned draft.");
+  await first.keyboard.press("Escape");
+  await expect(editor).toHaveCount(0);
+  await expect(edit).toBeFocused();
+  await edit.press("Enter");
+  editor = first.getByRole("dialog", { name: "Edit “product”", exact: true });
+  await expect(editor.getByLabel("Description", { exact: true })).toHaveValue("Product research and planning.");
+  await editor.getByLabel("Description", { exact: true }).fill("Shipping product decisions.");
+  await editor.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(edit).toBeFocused();
+  await expect(tagRow(second, "product")).toContainText("Shipping product decisions.");
+  await second.getByRole("button", { name: "Edit product", exact: true }).click();
+  const peerEditor = second.getByRole("dialog", { name: "Edit “product”", exact: true });
+  await peerEditor.getByLabel("Description", { exact: true }).fill(" ");
+  await peerEditor.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(tagRow(first, "product")).toContainText("No description");
 
   await first.getByRole("button", { name: "Delete product" }).press("Enter");
   let dialog = first.getByRole("alertdialog", { name: "Delete “product”?" });
@@ -132,8 +166,8 @@ test("Tags settings is address-selected and its catalog changes converge", async
   await dialog.getByRole("button", { name: "Delete", exact: true }).press("Enter");
   await expectSuccess(first, "Deleted “product”.");
   await expect(second.getByRole("button", { name: "Delete product" })).toHaveCount(0);
-  await expect(first.getByLabel("Create a tag")).toBeFocused();
-  await first.getByLabel("Create a tag").fill("PRODUCT");
+  await expect(name).toBeFocused();
+  await name.fill("PRODUCT");
   await first.getByRole("button", { name: "Create", exact: true }).click();
   await expect(second.getByRole("button", { name: "Delete product" })).toBeVisible();
 
@@ -237,7 +271,7 @@ test("settings successes use shared notices and preserve native submission focus
   await page.setViewportSize({ width: 1440, height: 900 });
 
   await page.getByRole("navigation", { name: "Workspace settings" }).getByRole("button", { name: "Tags", exact: true }).click();
-  const field = page.getByLabel("Create a tag");
+  const field = page.getByLabel("Name", { exact: true });
   const create = page.getByRole("button", { name: "Create", exact: true });
   const tag = `notice-${appearance}-${randomUUID().slice(0, 8)}`;
   const draft = `  ${tag.toUpperCase()} `;
@@ -280,3 +314,82 @@ test("settings successes use shared notices and preserve native submission focus
   await expectSuccess(page, `Created “${tag}”.`);
   await expect(field).toBeFocused();
 });
+
+for (const colorScheme of ["light", "dark"] as const) {
+  for (const touch of [false, true]) {
+    test(`Tags wraps maximum-length names and descriptions on ${touch ? "large iPad touch" : "MacBook desktop"} in ${colorScheme}`,
+      { tag: touch ? "@webkit-touch" : [] }, async ({ browser }, info) => {
+        const page = await openApp(browser, `/${harness().workspace}/settings/tags`, {
+          contextOptions: {
+            ...(touch ? devices["iPad Pro 11"] : { viewport: { width: 1280, height: 800 }, hasTouch: false, isMobile: false }),
+            colorScheme, reducedMotion: "reduce",
+          },
+          readySelector: "[data-settings-page]",
+        });
+        const pane = page.locator("[data-settings-page]");
+        const name = `layout-${randomUUID().replaceAll("-", "").slice(0, 23)}`;
+        const description = "abcdefghij".repeat(30);
+        const field = page.getByLabel("Name", { exact: true });
+        await expect(field).toBeEnabled();
+        await expect(pane.getByText("A short description tells people and agents when to use it.", { exact: true })).toBeVisible();
+        await expect(pane.locator('[class~="bg-card"], [data-slot="card"]')).toHaveCount(0);
+        await expect(pane.locator('button[data-variant="default"]')).toHaveText("Create");
+        await expect(pane.getByText("Use 1–30 letters or numbers", { exact: false })).toHaveCount(0);
+        await field.fill(name);
+        await page.getByLabel("Description (optional)", { exact: true }).fill(description);
+        await activateControl(page.getByRole("button", { name: "Create", exact: true }), { touch });
+        const row = tagRow(page, name);
+        await expect(row.locator(".ub-tag .ub-tag-name")).toHaveText(name);
+        await expect(row).toContainText(description);
+        await expect(row.getByRole("button", { name: `Edit ${name}`, exact: true })).toBeVisible();
+        await expect(row.getByRole("button", { name: `Delete ${name}`, exact: true })).toBeVisible();
+        await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+        for (const width of touch ? [1194, 834] : [1280]) {
+          await page.setViewportSize({ width, height: touch ? 1194 : 800 });
+          await row.scrollIntoViewIfNeeded();
+          await page.evaluate(() => document.fonts.ready);
+          const geometry = await row.evaluate((element) => {
+            const table = element.closest("table");
+            const pane = element.closest<HTMLElement>("[data-settings-page]");
+            const cells = [...element.querySelectorAll<HTMLElement>("th, td")];
+            const name = element.querySelector<HTMLElement>(".ub-tag-name");
+            const description = cells[1];
+            const range = document.createRange();
+            if (description !== undefined) range.selectNodeContents(description);
+            return {
+              pageOverflow: document.documentElement.scrollWidth - innerWidth,
+              paneOverflow: pane === null ? null : pane.scrollWidth - pane.clientWidth,
+              tableOverflow: table === null ? null : table.scrollWidth - table.clientWidth,
+              overflowingCells: cells.filter((cell) => cell.scrollWidth > cell.clientWidth + 1).length,
+              nameWithinCell: name !== null && cells[0] !== undefined
+                && name.getBoundingClientRect().right <= cells[0].getBoundingClientRect().right + 1,
+              descriptionLines: range.getClientRects().length,
+              actionsVisible: [...element.querySelectorAll<HTMLButtonElement>("button")].every((button) => {
+                const box = button.getBoundingClientRect();
+                return box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight
+                  && button.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+              }),
+              shortActions: [...element.querySelectorAll<HTMLButtonElement>("button")]
+                .filter((button) => button.getBoundingClientRect().height < 44).length,
+            };
+          });
+          expect(geometry.pageOverflow).toBeLessThanOrEqual(1);
+          expect(geometry.paneOverflow).toBeLessThanOrEqual(1);
+          expect(geometry.tableOverflow).toBeLessThanOrEqual(1);
+          expect(geometry.overflowingCells).toBe(0);
+          expect(geometry.nameWithinCell).toBe(true);
+          expect(geometry.descriptionLines).toBeGreaterThan(1);
+          expect(geometry.actionsVisible).toBe(true);
+          if (touch) expect(geometry.shortActions).toBe(0);
+          const screenshot = info.outputPath(`tags-${width}-${colorScheme}.png`);
+          await page.screenshot({ path: screenshot });
+          await info.attach(`Tags ${width} ${colorScheme}`, { path: screenshot, contentType: "image/png" });
+        }
+        await activateControl(row.getByRole("button", { name: `Edit ${name}`, exact: true }), { touch });
+        const dialog = page.getByRole("dialog", { name: `Edit “${name}”`, exact: true });
+        await expect(dialog.getByLabel("Description", { exact: true })).toHaveValue(description);
+        await activateControl(dialog.getByRole("button", { name: "Cancel", exact: true }), { touch });
+        await expect(dialog).toHaveCount(0);
+      });
+  }
+}
