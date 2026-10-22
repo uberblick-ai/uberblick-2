@@ -290,7 +290,7 @@ describe("workspace tag catalog", () => {
     expect(isTagDeleted(catalog, BILLING)).toBe(false);
   });
 
-  it.each(["create", "describe", "delete", "seed"] as const)("freezes the legacy snapshot during an actual %s write", (action) => {
+  it.each(["create", "describe", "delete", "seed"] as const)("does not migrate unrelated legacy identities during a %s write", (action) => {
     const catalog = new Y.Doc();
     getTagCatalogIdentities(catalog).set(AUTH, "auth");
     getTagCatalogIdentities(catalog).set(DELETED, "billing");
@@ -299,11 +299,70 @@ describe("workspace tag catalog", () => {
     if (action === "describe") setTagCatalogDescription(catalog, AUTH, "Purpose");
     if (action === "delete") deleteTagCatalogEntry(catalog, AUTH);
     if (action === "seed") seedTagCatalog(catalog);
-    expect(isTagDeleted(catalog, DELETED)).toBe(true);
+    expect(isTagDeleted(catalog, DELETED)).toBe(false);
     expect(listTagCatalog(catalog).some((entry) => entry.name === "billing")).toBe(false);
-    retireLegacy(catalog, "auth");
-    migrateRetiredTagCatalogEntries(catalog);
     expect(isTagDeleted(catalog, AUTH)).toBe(action === "delete");
+  });
+
+  it("keeps modern-only identities existing despite late legacy name levels without manufacturing migration writes", () => {
+    const catalog = new Y.Doc();
+    createTagCatalogEntry(catalog, "auth", AUTH);
+    retireLegacy(catalog, "auth");
+    const before = Y.encodeStateAsUpdate(catalog);
+    expect(migrateRetiredTagCatalogEntries(catalog)).toBe(false);
+    expect(Y.encodeStateAsUpdate(catalog)).toEqual(before);
+    expect(listTagCatalog(catalog)).toEqual([{ id: AUTH, name: "auth" }]);
+  });
+
+  it("migrates retired legacy identities while preserving a modern recreation with the same name", () => {
+    const catalog = new Y.Doc();
+    getTagCatalogIdentities(catalog).set(AUTH, "auth");
+    retireLegacy(catalog, "auth");
+    createTagCatalogEntry(catalog, "auth", BILLING);
+    expect(listTagCatalog(catalog)).toEqual([{ id: BILLING, name: "auth" }]);
+    migrateRetiredTagCatalogEntries(catalog);
+    expect(isTagDeleted(catalog, AUTH)).toBe(true);
+    expect(isTagDeleted(catalog, BILLING)).toBe(false);
+    expect(listTagCatalog(catalog)).toEqual([{ id: BILLING, name: "auth" }]);
+  });
+
+  it("keeps a restored hub identity when stale cached curation occurs before the restoration arrives", () => {
+    const [hub, cached] = replicaPair((catalog) => {
+      getTagCatalogIdentities(catalog).set(AUTH, "auth");
+      retireLegacy(catalog, "auth");
+    });
+    hub.getMap<number>(TAG_CATALOG_RESTORED_KEY).set("auth#hub", 2);
+    createTagCatalogEntry(cached, "unrelated", UNKNOWN);
+    expect(isTagDeleted(cached, AUTH)).toBe(false);
+    syncDocs(hub, cached);
+    migrateRetiredTagCatalogEntries(cached);
+    syncDocs(hub, cached);
+    expect(listTagCatalog(cached)).toEqual([{ id: AUTH, name: "auth" }, { id: UNKNOWN, name: "unrelated" }]);
+    expect(listTagCatalog(hub)).toEqual(listTagCatalog(cached));
+    expect(isTagDeleted(cached, AUTH)).toBe(false);
+  });
+
+  it("distinguishes an explicit new fixed identity from a stale fixed-identity seed during migration", () => {
+    const legacy = new Y.Doc();
+    getTagCatalogIdentities(legacy).set(AUTH, "auth");
+    retireLegacy(legacy, "auth");
+    const explicit = new Y.Doc();
+    createTagCatalogEntry(explicit, "auth", EXAMPLE_TAGS[0].id);
+    syncDocs(legacy, explicit);
+    migrateRetiredTagCatalogEntries(legacy);
+    expect(isTagDeleted(legacy, AUTH)).toBe(true);
+    expect(isTagDeleted(legacy, EXAMPLE_TAGS[0].id)).toBe(false);
+    expect(listTagCatalog(legacy)).toEqual([{ id: EXAMPLE_TAGS[0].id, name: "auth" }]);
+
+    const retired = new Y.Doc();
+    getTagCatalogIdentities(retired).set(AUTH, "auth");
+    retireLegacy(retired, "auth");
+    const seeded = new Y.Doc();
+    seedTagCatalog(seeded);
+    syncDocs(retired, seeded);
+    migrateRetiredTagCatalogEntries(retired);
+    expect(isTagDeleted(retired, EXAMPLE_TAGS[0].id)).toBe(true);
+    expect(listTagCatalog(retired).some((entry) => entry.name === "auth")).toBe(false);
   });
 
   it("does not migrate on refused or unchanged catalog curation", () => {

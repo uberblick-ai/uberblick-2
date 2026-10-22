@@ -22,6 +22,7 @@ export const MAX_TAG_NAME_LENGTH = 30;
 
 const SEEDED_FLAG = "examples-seeded";
 const MIGRATED_FLAG = "legacy-lifecycle-migrated";
+const CREATED_PREFIX = "created:";
 const TAG_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export const EXAMPLE_TAGS = [
@@ -80,6 +81,10 @@ function legacyRetired(catalogDoc: Y.Doc, name: string): boolean {
     levelFor(catalogDoc.getMap<number>(TAG_CATALOG_RESTORED_KEY), name);
 }
 
+function isNewIdentity(catalogDoc: Y.Doc, identity: string): boolean {
+  return getTagCatalogFlags(catalogDoc).get(`${CREATED_PREFIX}${identity}`) === true;
+}
+
 interface CatalogIndex {
   entries: TagCatalogEntry[];
   byIdentity: Map<string, TagCatalogEntry>;
@@ -98,7 +103,8 @@ function normalizeDescription(description: string | null): string {
 function catalogIndex(catalogDoc: Y.Doc): CatalogIndex {
   const identitiesByName = new Map<string, string[]>();
   for (const [id, name] of getTagCatalogIdentities(catalogDoc).entries()) {
-    if (canonicalDocumentUuid(id) !== id || !isTagName(name) || isTagDeleted(catalogDoc, id) || legacyRetired(catalogDoc, name)) continue;
+    if (canonicalDocumentUuid(id) !== id || !isTagName(name) || isTagDeleted(catalogDoc, id) ||
+      (!isNewIdentity(catalogDoc, id) && legacyRetired(catalogDoc, name))) continue;
     const identities = identitiesByName.get(name);
     if (identities === undefined) identitiesByName.set(name, [id]);
     else identities.push(id);
@@ -140,8 +146,8 @@ export function createTagCatalogEntry(catalogDoc: Y.Doc, name: string, identity?
   if (getTagCatalogIdentities(catalogDoc).has(id) || isTagDeleted(catalogDoc, id) ||
     EXAMPLE_TAGS.some((example) => example.id === id && legacyRetired(catalogDoc, example.name))) throw new InvalidTagIdentityError("in-use", id);
   catalogDoc.transact(() => {
-    migrateLegacyLifecycle(catalogDoc, true);
     getTagCatalogIdentities(catalogDoc).set(id, name);
+    getTagCatalogFlags(catalogDoc).set(`${CREATED_PREFIX}${id}`, true);
     if (normalized !== "") descriptions(catalogDoc).set(id, normalized);
   });
   return { id, name, ...(normalized === "" ? {} : { description: normalized }) };
@@ -157,50 +163,45 @@ export function setTagCatalogDescription(catalogDoc: Y.Doc, identity: string, de
   const normalized = normalizeDescription(description);
   const entry = requireEntry(catalogDoc, identity);
   if ((entry.description ?? "") === normalized) return;
-  catalogDoc.transact(() => {
-    migrateLegacyLifecycle(catalogDoc, true);
-    descriptions(catalogDoc).set(entry.id, normalized);
-  });
+  descriptions(catalogDoc).set(entry.id, normalized);
 }
 
-function deleteName(catalogDoc: Y.Doc, name: string): void {
+function deleteName(catalogDoc: Y.Doc, name: string, legacyOnly = false): void {
   const deleted = deletions(catalogDoc);
   for (const [id, candidate] of getTagCatalogIdentities(catalogDoc).entries()) {
-    if (candidate === name && canonicalDocumentUuid(id) === id && !deleted.has(id)) deleted.set(id, name);
+    if (candidate === name && canonicalDocumentUuid(id) === id &&
+      (!legacyOnly || !isNewIdentity(catalogDoc, id)) && !deleted.has(id)) deleted.set(id, name);
   }
   // A stale first-use seed must not reintroduce a curated example's name.
   for (const example of EXAMPLE_TAGS) {
-    if (example.name === name && !deleted.has(example.id)) deleted.set(example.id, name);
+    if (example.name === name && (!legacyOnly || !isNewIdentity(catalogDoc, example.id)) && !deleted.has(example.id)) deleted.set(example.id, name);
   }
 }
 
 export function deleteTagCatalogEntry(catalogDoc: Y.Doc, identity: string): void {
   const entry = requireEntry(catalogDoc, identity);
   catalogDoc.transact(() => {
-    migrateLegacyLifecycle(catalogDoc, true);
     deleteName(catalogDoc, entry.name);
   });
 }
 
-function migrateLegacyLifecycle(catalogDoc: Y.Doc, force: boolean): boolean {
+/** Call only with workspace-settings authority after the authoritative catalog arrives. */
+export function migrateRetiredTagCatalogEntries(catalogDoc: Y.Doc): boolean {
   if (getTagCatalogFlags(catalogDoc).get(MIGRATED_FLAG) === true) return false;
-  const names = [...getTagCatalogIdentities(catalogDoc).values()].filter(isTagName);
+  const names = [...getTagCatalogIdentities(catalogDoc).entries()]
+    .filter(([id, name]) => canonicalDocumentUuid(id) === id && isTagName(name) && !isNewIdentity(catalogDoc, id))
+    .map(([, name]) => name);
   const retiredLevels = catalogDoc.getMap<number>(TAG_CATALOG_RETIRED_KEY);
   const restoredLevels = catalogDoc.getMap<number>(TAG_CATALOG_RESTORED_KEY);
-  // Automatic migration waits for identity and lifecycle evidence. Explicit
-  // curation freezes the snapshot inside its already-permitted settings write.
-  if (!force && !names.some((name) => levelFor(retiredLevels, name) > 0 || levelFor(restoredLevels, name) > 0)) return false;
+  // Wait for legacy identity and lifecycle evidence rather than manufacturing
+  // a settings write on new or empty catalogs.
+  if (!names.some((name) => levelFor(retiredLevels, name) > 0 || levelFor(restoredLevels, name) > 0)) return false;
   const retired = new Set(names.filter((name) => legacyRetired(catalogDoc, name)));
   catalogDoc.transact(() => {
-    for (const name of retired) deleteName(catalogDoc, name);
+    for (const name of retired) deleteName(catalogDoc, name, true);
     getTagCatalogFlags(catalogDoc).set(MIGRATED_FLAG, true);
   });
   return true;
-}
-
-/** Call only with workspace-settings authority after the authoritative catalog arrives. */
-export function migrateRetiredTagCatalogEntries(catalogDoc: Y.Doc): boolean {
-  return migrateLegacyLifecycle(catalogDoc, false);
 }
 
 export function isTagCatalogSeeded(catalogDoc: Y.Doc): boolean {
@@ -210,10 +211,15 @@ export function isTagCatalogSeeded(catalogDoc: Y.Doc): boolean {
 export function seedTagCatalog(catalogDoc: Y.Doc): void {
   if (isTagCatalogSeeded(catalogDoc)) return;
   catalogDoc.transact(() => {
-    migrateLegacyLifecycle(catalogDoc, true);
     const deletedNames = new Set(listDeletedTagCatalogEntries(catalogDoc).map((entry) => entry.name));
     for (const example of EXAMPLE_TAGS) {
-      if (!deletedNames.has(example.name) && !legacyRetired(catalogDoc, example.name)) createTagCatalogEntry(catalogDoc, example.name, example.id);
+      if (deletedNames.has(example.name) || legacyRetired(catalogDoc, example.name) ||
+        listTagCatalog(catalogDoc).some((entry) => entry.name === example.name)) continue;
+      const identities = getTagCatalogIdentities(catalogDoc);
+      if (identities.has(example.id)) throw new InvalidTagIdentityError("in-use", example.id);
+      // Seeding reuses an existing fixed identity, rather than explicitly
+      // creating a fresh identity that supersedes legacy name lifecycle.
+      identities.set(example.id, example.name);
     }
     getTagCatalogFlags(catalogDoc).set(SEEDED_FLAG, true);
   });
