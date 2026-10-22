@@ -21,7 +21,6 @@ import { EditorControlsHost, editorControlsOwnEscape } from "../editor-controls/
 import { CommentComposer } from "../comments/CommentComposer.js";
 import { DialogContent, DialogTitle } from "../shadcn/dialog.js";
 import { Button } from "../shadcn/button.js";
-import { Textarea } from "../shadcn/textarea.js";
 import { useDirectory, useRoomStatus } from "../hooks.js";
 
 export interface AlterDecisionSession {
@@ -45,7 +44,7 @@ function answerProblem(draft: Y.Doc): string | null {
   if (problem === null) return null;
   if (problem.code === "decision_block_unsupported") return `Remove unsupported answer blocks: ${problem.blockTypes.join(", ")}. Use paragraphs, lists, code blocks or tables.`;
   if (problem.code === "decision_answer_too_long") {
-    return "Shorten the answer to at most two blocks; adjacent list items count as one block.";
+    return "Shorten the answer to at most three blocks; adjacent list items count as one block.";
   }
   return "Write a non-blank new answer.";
 }
@@ -108,7 +107,6 @@ export function AlterDecisionDialog({ session, displayName, docLinks, onClose, o
   });
   const [boundary, setBoundary] = useState<HTMLDivElement | null>(null);
   const [draftEditor, setDraftEditor] = useState<Editor | null>(null);
-  const [reason, setReason] = useState("");
   const [problem, setProblem] = useState(() => drafts.next === null ? drafts.error : answerProblem(drafts.next));
   const [failure, setFailure] = useState<string | null>(null);
   const [waiting, setWaiting] = useState(false);
@@ -141,7 +139,7 @@ export function AlterDecisionDialog({ session, displayName, docLinks, onClose, o
     try {
       const result = await recordAlteredDecision({
         source: session.source, directory: session.directory, draft: drafts.next,
-        identity: session.identity, mode, reason, displayName,
+        identity: session.identity, mode, displayName,
         tagCatalog: session.catalog.ydoc, signal: controller.signal,
       });
       if (result.ok) onRecorded(result);
@@ -169,8 +167,6 @@ export function AlterDecisionDialog({ session, displayName, docLinks, onClose, o
           <p className="ub-alter-label" id="alter-new-answer">New answer</p>
           {drafts.next !== null && <AnswerEditor draft={drafts.next} session={session} docLinks={docLinks} displayName={displayName} waiting={waiting} onEditor={setDraftEditor} />}
           {problem !== null && <p className="ub-alter-error" role="status">{problem}</p>}
-          <label className="ub-alter-label" htmlFor="alter-decision-reason">Why the change <span className="text-muted-foreground">(required)</span></label>
-          <Textarea id="alter-decision-reason" required value={reason} disabled={waiting} onChange={(event) => setReason(event.target.value)} />
           {failure !== null && <p className="ub-alter-error" role="alert">{failure}</p>}
           {waiting && <p role="status">Waiting for the new rooms to synchronize. You can still cancel.</p>}
           {!catalogStatus.synced && <p role="status">Waiting for workspace settings to synchronize.</p>}
@@ -179,7 +175,7 @@ export function AlterDecisionDialog({ session, displayName, docLinks, onClose, o
           <Button variant="outline" disabled={disabled} onClick={() => { void submit("rfc"); }}>Open an RFC instead</Button>
           <p className="ub-alter-hint">Decide puts the answer in force now under {displayName.trim() || "your display name (set one first)"}.</p>
           <Button variant="secondary" className="bg-transparent" onClick={close}>Cancel</Button>
-          <Button disabled={disabled || reason.trim() === "" || displayName.trim() === ""} onClick={() => { void submit("decide"); }}>Decide</Button>
+          <Button disabled={disabled || displayName.trim() === ""} onClick={() => { void submit("decide"); }}>Decide</Button>
         </div>
       </EditorControlsHost>
     </DialogContent>;
