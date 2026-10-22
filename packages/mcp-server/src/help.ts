@@ -11,12 +11,10 @@ export interface ToolHelp {
   readonly details?: string;
 }
 
-/** Public tool metadata with schemas already rendered at the MCP boundary. */
+/** Public tool metadata; the tool definition itself carries the schemas. */
 export interface ToolHelpContract {
   title: string;
   description: string;
-  inputSchema: unknown;
-  outputSchema: unknown;
 }
 
 export function helpUri(topic: string): string {
@@ -47,12 +45,10 @@ export class HelpCatalog {
     this.topics.set(name, {
       id: name,
       title: tool.title,
-      description: `Purpose, arguments, example, output and constraints for ${name}.`,
-      text: `# ${name}\n\n## Purpose\n\n${tool.title}\n\n## Description\n\n${tool.description}` +
-        `\n\n## Arguments\n\n${jsonBlock(tool.inputSchema)}` +
+      description: `Purpose, usage and an example call for ${name}.`,
+      // The tool definition already gives the agent its description and schemas; help adds prose and an example.
+      text: `# ${name}\n\n${tool.title}.\n\n${entry.details ?? tool.description}` +
         `\n\n## Example\n\nCall \`${name}\` with these arguments; replace document and block identities with returned values.\n\n${jsonBlock(entry.example)}` +
-        `\n\n## Output\n\n${jsonBlock(tool.outputSchema)}` +
-        (entry.details === undefined ? "" : `\n\n## Constraints\n\n${entry.details}`) +
         `\n\n## Related\n\n${related}\n`,
     });
     const index = this.topics.get("tools");

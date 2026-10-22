@@ -109,7 +109,7 @@ it.each(["list", "read"] as const)("contains an unexpected help resource %s fail
   expect(stderr).toHaveBeenCalledWith(expect.stringContaining(cause.stack!));
 });
 
-it("renders each tool's actual full description and schemas, with an accepted example and owning-topic links", async () => {
+it("renders each tool's prose with an accepted example and owning-topic links, without repeating its schemas", async () => {
   const rig = await local();
   const { tools } = await rig.client.listTools();
   const validator = new AjvJsonSchemaValidator();
@@ -117,16 +117,9 @@ it("renders each tool's actual full description and schemas, with an accepted ex
   for (const tool of tools) {
     const { text } = await rig.ok("get_help", { topic: tool.name });
     expect(text, tool.name).toContain(tool.title);
-    expect(text, tool.name).toContain(tool.description);
-    const inputSchema = jsonSection(text, "Arguments");
-    expect(inputSchema, tool.name).toEqual(tool.inputSchema);
-    expect(jsonSection(text, "Output"), tool.name).toEqual(tool.outputSchema);
-    const { details } = toolNamed(tool.name);
-    if (details !== undefined) {
-      const constraints = text.split("## Constraints\n")[1]?.split("\n## ")[0];
-      expect(constraints, `${tool.name} loses its expanded tool-specific contract`).toContain(details);
-    }
-    const checked = validator.getValidator(inputSchema)(jsonSection(text, "Example"));
+    expect(text, tool.name).not.toMatch(/## (Arguments|Output)/);
+    expect(text, `${tool.name} loses its tool-specific prose`).toContain(toolNamed(tool.name).details ?? tool.description);
+    const checked = validator.getValidator(tool.inputSchema as any)(jsonSection(text, "Example"));
     expect(checked.valid, `${tool.name}: ${checked.errorMessage ?? "invalid example"}`).toBe(true);
     const related = text.split("## Related\n")[1] ?? "";
     expect(related, tool.name).toContain("uberblick://help/tool-contracts");
@@ -292,7 +285,7 @@ it("documents the table mapping through both help routes and accepts its source 
   expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks[0]).toMatchObject({ type: "chart", text: source });
   expect((await rig.client.readResource({ uri: "uberblick://help/data" })).contents[0]).toMatchObject({ text });
   const insertHelp = await rig.ok("get_help", { topic: "insert_block" });
-  const constraints = insertHelp.text.split("## Constraints\n")[1]?.split("\n## ")[0];
+  const constraints = insertHelp.text.split("## Example\n")[0];
   for (const guidance of [
     '"type":"table"', "one to thirty ordered columns", "text (default), number, date or link",
     "Only number accepts unit (a suffix) and decimals (an integer from zero to ten)",
