@@ -82,9 +82,9 @@ it("hides legacy retired tags for members and migrates them only after an admin 
   const member = await client(config);
   await caughtUp(member);
   const room = settingsRoom(WORKSPACE);
-  let id = "";
+  const id = crypto.randomUUID();
   hub.readRoom(room, catalog => {
-    id = createTagCatalogEntry(catalog, "legacy").id;
+    catalog.getMap<string>("tag-identities").set(id, "legacy");
   });
   await waitUntil("the legacy tag to arrive", async () => (await member.ok("list_tags")).tags.some((tag: { id: string }) => tag.id === id));
   const created = await member.ok("create_doc", { title: "Legacy assignment", description: "Migration never rewrites documents.", tags: [id] });
@@ -122,9 +122,9 @@ it("waits for the hub restoration before migrating an admin's stale cached retir
   const member = await client(config);
   await caughtUp(member);
   const room = settingsRoom(WORKSPACE);
-  let id = "";
+  const id = crypto.randomUUID();
   hub.readRoom(room, catalog => {
-    id = createTagCatalogEntry(catalog, "restored").id;
+    catalog.getMap<string>("tag-identities").set(id, "restored");
     catalog.getMap<number>("tag-retired").set("restored#old", 1);
   });
   await waitUntil("the stale retirement to arrive", () => member.instance.replicas.settings().doc.getMap<number>("tag-retired").get("restored#old") === 1);

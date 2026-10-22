@@ -228,18 +228,19 @@ describe("workspace tag catalog", () => {
     migrateRetiredTagCatalogEntries(catalog);
     expect(Y.encodeStateAsUpdate(catalog)).toEqual(seeded);
 
-    retireLegacy(catalog, "delayed");
-    const delayed = Y.encodeStateAsUpdate(catalog);
-    migrateRetiredTagCatalogEntries(catalog);
-    expect(Y.encodeStateAsUpdate(catalog)).toEqual(delayed);
-    getTagCatalogIdentities(catalog).set(AUTH, "delayed");
-    migrateRetiredTagCatalogEntries(catalog);
-    expect(isTagDeleted(catalog, AUTH)).toBe(true);
+    const delayedCatalog = new Y.Doc();
+    retireLegacy(delayedCatalog, "delayed");
+    const delayed = Y.encodeStateAsUpdate(delayedCatalog);
+    migrateRetiredTagCatalogEntries(delayedCatalog);
+    expect(Y.encodeStateAsUpdate(delayedCatalog)).toEqual(delayed);
+    getTagCatalogIdentities(delayedCatalog).set(AUTH, "delayed");
+    migrateRetiredTagCatalogEntries(delayedCatalog);
+    expect(isTagDeleted(delayedCatalog, AUTH)).toBe(true);
   });
 
   it("freezes restored legacy state so late old lifecycle edits cannot delete active identities", () => {
     const catalog = new Y.Doc();
-    createTagCatalogEntry(catalog, "auth", AUTH);
+    getTagCatalogIdentities(catalog).set(AUTH, "auth");
     retireLegacy(catalog, "auth");
     catalog.getMap<number>(TAG_CATALOG_RESTORED_KEY).set("auth#legacy", 2);
     migrateRetiredTagCatalogEntries(catalog);
@@ -251,9 +252,9 @@ describe("workspace tag catalog", () => {
 
   it("hides legacy retired tags without writing, then migrates every alias without touching documents", () => {
     const catalog = new Y.Doc();
-    createTagCatalogEntry(catalog, "auth", AUTH);
+    getTagCatalogIdentities(catalog).set(AUTH, "auth");
     getTagCatalogIdentities(catalog).set(BILLING, "auth");
-    createTagCatalogEntry(catalog, "keep", UNKNOWN);
+    getTagCatalogIdentities(catalog).set(UNKNOWN, "keep");
     retireLegacy(catalog, "auth");
     const doc = document([AUTH, BILLING, UNKNOWN]);
     const catalogBefore = Y.encodeStateAsUpdate(catalog);
@@ -274,6 +275,51 @@ describe("workspace tag catalog", () => {
     const migrated = Y.encodeStateAsUpdate(catalog);
     migrateRetiredTagCatalogEntries(catalog);
     expect(Y.encodeStateAsUpdate(catalog)).toEqual(migrated);
+  });
+
+  it("keeps a recreated identity existing when a late legacy retirement arrives", () => {
+    const catalog = new Y.Doc();
+    getTagCatalogIdentities(catalog).set(AUTH, "auth");
+    expect(migrateRetiredTagCatalogEntries(catalog)).toBe(false);
+    deleteTagCatalogEntry(catalog, AUTH);
+    createTagCatalogEntry(catalog, "auth", BILLING);
+    retireLegacy(catalog, "auth");
+    migrateRetiredTagCatalogEntries(catalog);
+    expect(listTagCatalog(catalog)).toEqual([{ id: BILLING, name: "auth" }]);
+    expect(isTagDeleted(catalog, AUTH)).toBe(true);
+    expect(isTagDeleted(catalog, BILLING)).toBe(false);
+  });
+
+  it.each(["create", "describe", "delete", "seed"] as const)("freezes the legacy snapshot during an actual %s write", (action) => {
+    const catalog = new Y.Doc();
+    getTagCatalogIdentities(catalog).set(AUTH, "auth");
+    getTagCatalogIdentities(catalog).set(DELETED, "billing");
+    retireLegacy(catalog, "billing");
+    if (action === "create") createTagCatalogEntry(catalog, "new", UNKNOWN);
+    if (action === "describe") setTagCatalogDescription(catalog, AUTH, "Purpose");
+    if (action === "delete") deleteTagCatalogEntry(catalog, AUTH);
+    if (action === "seed") seedTagCatalog(catalog);
+    expect(isTagDeleted(catalog, DELETED)).toBe(true);
+    expect(listTagCatalog(catalog).some((entry) => entry.name === "billing")).toBe(false);
+    retireLegacy(catalog, "auth");
+    migrateRetiredTagCatalogEntries(catalog);
+    expect(isTagDeleted(catalog, AUTH)).toBe(action === "delete");
+  });
+
+  it("does not migrate on refused or unchanged catalog curation", () => {
+    const catalog = new Y.Doc();
+    getTagCatalogIdentities(catalog).set(AUTH, "auth");
+    getTagCatalogIdentities(catalog).set(DELETED, "billing");
+    retireLegacy(catalog, "billing");
+    const before = Y.encodeStateAsUpdate(catalog);
+    createTagCatalogEntry(catalog, "auth", BILLING);
+    setTagCatalogDescription(catalog, AUTH, " ");
+    expect(() => createTagCatalogEntry(catalog, "new", AUTH)).toThrow();
+    expect(() => createTagCatalogEntry(catalog, "new", EXAMPLE_TAGS[1].id)).toThrow();
+    expect(() => setTagCatalogDescription(catalog, AUTH, "bad\nvalue")).toThrow();
+    expect(() => deleteTagCatalogEntry(catalog, DELETED)).toThrow();
+    expect(Y.encodeStateAsUpdate(catalog)).toEqual(before);
+    expect(isTagDeleted(catalog, DELETED)).toBe(false);
   });
 
   it("omits provisional, absent and deleted tags from document and directory reads without writing", () => {

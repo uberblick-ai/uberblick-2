@@ -198,7 +198,7 @@ function option(name: string): HTMLButtonElement | undefined {
 describe("the document tag picker", () => {
   it.each([true, false])("keeps retired cache data read-only in a locally served browser, writable=%s", async (writable) => {
     const fix = documentFixture([TAGS.legacy]);
-    addCatalogTags(fix.catalog.ydoc, ["legacy"]);
+    fix.catalog.ydoc.getMap<string>("tag-identities").set(TAGS.legacy, "legacy");
     fix.catalog.ydoc.getMap<number>("tag-retired").set("legacy#old-client", 1);
     fix.catalog.status.writable = writable;
     vi.spyOn(config, "localServing").mockReturnValue({ workspace: WORKSPACE, remoteHubUrl: "wss://hub.example.test/ws", rebound: false });
@@ -211,7 +211,7 @@ describe("the document tag picker", () => {
 
   it.each([false, true])("a direct hub browser migrates only a writable hydrated catalog, writable=%s", async (writable) => {
     const fix = documentFixture([TAGS.legacy]);
-    addCatalogTags(fix.catalog.ydoc, ["legacy"]);
+    fix.catalog.ydoc.getMap<string>("tag-identities").set(TAGS.legacy, "legacy");
     fix.catalog.ydoc.getMap<number>("tag-retired").set("legacy#old-client", 1);
     fix.catalog.status.writable = writable;
     const before = Y.encodeStateAsUpdate(fix.document.ydoc);

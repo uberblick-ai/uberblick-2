@@ -137,8 +137,10 @@ export function createTagCatalogEntry(catalogDoc: Y.Doc, name: string, identity?
   if (existing !== undefined) return existing;
   const id = identity ?? crypto.randomUUID();
   if (canonicalDocumentUuid(id) !== id) throw new InvalidTagIdentityError("not-a-uuid", id);
-  if (getTagCatalogIdentities(catalogDoc).has(id) || isTagDeleted(catalogDoc, id)) throw new InvalidTagIdentityError("in-use", id);
+  if (getTagCatalogIdentities(catalogDoc).has(id) || isTagDeleted(catalogDoc, id) ||
+    EXAMPLE_TAGS.some((example) => example.id === id && legacyRetired(catalogDoc, example.name))) throw new InvalidTagIdentityError("in-use", id);
   catalogDoc.transact(() => {
+    migrateLegacyLifecycle(catalogDoc, true);
     getTagCatalogIdentities(catalogDoc).set(id, name);
     if (normalized !== "") descriptions(catalogDoc).set(id, normalized);
   });
@@ -154,7 +156,11 @@ function requireEntry(catalogDoc: Y.Doc, identity: string): TagCatalogEntry {
 export function setTagCatalogDescription(catalogDoc: Y.Doc, identity: string, description: string | null): void {
   const normalized = normalizeDescription(description);
   const entry = requireEntry(catalogDoc, identity);
-  descriptions(catalogDoc).set(entry.id, normalized);
+  if ((entry.description ?? "") === normalized) return;
+  catalogDoc.transact(() => {
+    migrateLegacyLifecycle(catalogDoc, true);
+    descriptions(catalogDoc).set(entry.id, normalized);
+  });
 }
 
 function deleteName(catalogDoc: Y.Doc, name: string): void {
@@ -170,18 +176,20 @@ function deleteName(catalogDoc: Y.Doc, name: string): void {
 
 export function deleteTagCatalogEntry(catalogDoc: Y.Doc, identity: string): void {
   const entry = requireEntry(catalogDoc, identity);
-  catalogDoc.transact(() => { deleteName(catalogDoc, entry.name); });
+  catalogDoc.transact(() => {
+    migrateLegacyLifecycle(catalogDoc, true);
+    deleteName(catalogDoc, entry.name);
+  });
 }
 
-/** Call only with workspace-settings authority after the authoritative catalog arrives. */
-export function migrateRetiredTagCatalogEntries(catalogDoc: Y.Doc): boolean {
+function migrateLegacyLifecycle(catalogDoc: Y.Doc, force: boolean): boolean {
   if (getTagCatalogFlags(catalogDoc).get(MIGRATED_FLAG) === true) return false;
   const names = [...getTagCatalogIdentities(catalogDoc).values()].filter(isTagName);
   const retiredLevels = catalogDoc.getMap<number>(TAG_CATALOG_RETIRED_KEY);
   const restoredLevels = catalogDoc.getMap<number>(TAG_CATALOG_RESTORED_KEY);
-  // New and empty catalogs have no legacy lifecycle to migrate. Wait for both
-  // identity and lifecycle evidence rather than manufacturing a settings write.
-  if (!names.some((name) => levelFor(retiredLevels, name) > 0 || levelFor(restoredLevels, name) > 0)) return false;
+  // Automatic migration waits for identity and lifecycle evidence. Explicit
+  // curation freezes the snapshot inside its already-permitted settings write.
+  if (!force && !names.some((name) => levelFor(retiredLevels, name) > 0 || levelFor(restoredLevels, name) > 0)) return false;
   const retired = new Set(names.filter((name) => legacyRetired(catalogDoc, name)));
   catalogDoc.transact(() => {
     for (const name of retired) deleteName(catalogDoc, name);
@@ -190,14 +198,20 @@ export function migrateRetiredTagCatalogEntries(catalogDoc: Y.Doc): boolean {
   return true;
 }
 
+/** Call only with workspace-settings authority after the authoritative catalog arrives. */
+export function migrateRetiredTagCatalogEntries(catalogDoc: Y.Doc): boolean {
+  return migrateLegacyLifecycle(catalogDoc, false);
+}
+
 export function isTagCatalogSeeded(catalogDoc: Y.Doc): boolean {
   return getTagCatalogFlags(catalogDoc).get(SEEDED_FLAG) === true;
 }
 
 export function seedTagCatalog(catalogDoc: Y.Doc): void {
   if (isTagCatalogSeeded(catalogDoc)) return;
-  const deletedNames = new Set(listDeletedTagCatalogEntries(catalogDoc).map((entry) => entry.name));
   catalogDoc.transact(() => {
+    migrateLegacyLifecycle(catalogDoc, true);
+    const deletedNames = new Set(listDeletedTagCatalogEntries(catalogDoc).map((entry) => entry.name));
     for (const example of EXAMPLE_TAGS) {
       if (!deletedNames.has(example.name) && !legacyRetired(catalogDoc, example.name)) createTagCatalogEntry(catalogDoc, example.name, example.id);
     }
