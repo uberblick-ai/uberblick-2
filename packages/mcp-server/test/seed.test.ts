@@ -28,7 +28,7 @@ import { Replicas } from "../src/replica.js";
 import { MirrorStore } from "../src/store.js";
 import { importSeedDir, importSeedDocs, readSeedDocs } from "../src/seed.js";
 import type { SeedImport } from "../src/seed.js";
-import { cleanupTestResources, LIVE_HUB_SETTLE, TEST_SECRET, WORKSPACE, hubUrl, peerClient, startHub, startServer, tempDatabasePath, tempDir, testConfig } from "./helpers.js";
+import { cleanupTestResources, directoryStub, LIVE_HUB_SETTLE, TEST_SECRET, WORKSPACE, hubUrl, peerClient, startHub, startServer, tempDatabasePath, tempDir, testConfig } from "./helpers.js";
 import type { PeerClient } from "./helpers.js";
 
 interface ImportRun {
@@ -210,9 +210,9 @@ describe("seed import", () => {
     try {
       const listed = await rig.ok("list_docs");
       for (const entry of listed.docs) {
-        expect(entry.createdAt).toEqual(expect.any(Number));
+        expect(directoryStub(rig.instance, entry.uuid)?.createdAt).toEqual(expect.any(Number));
       }
-      stamped = listed.docs.find((entry: any) => entry.uuid === uuid).createdAt;
+      stamped = directoryStub(rig.instance, uuid)!.createdAt!;
       // Strip the stamps the way a stub written before the fields existed would
       // have them: nothing at all.
       getDirectoryMap(rig.instance.replicas.directory().doc).set(uuid, {
@@ -227,8 +227,7 @@ describe("seed import", () => {
 
     const after = await startServer(testConfig({ databasePath }));
     try {
-      const listed = await after.ok("list_docs");
-      const entry = listed.docs.find((row: any) => row.uuid === uuid);
+      const entry = directoryStub(after.instance, uuid)!;
       // Backfilled, not restored: the importer stamps the time it noticed, so
       // the value is new. The point is that the field is no longer missing.
       expect(entry.createdAt).toEqual(expect.any(Number));

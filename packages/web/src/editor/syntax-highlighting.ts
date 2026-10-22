@@ -22,6 +22,19 @@ for (const [id, grammar] of Object.entries(common)) {
   });
 }
 
+// Some grammars omit a name or share one name across distinct fence languages.
+for (const [id, label] of [
+  ["php", "PHP"],
+  ["python-repl", "Python REPL"],
+  ["pycon", "Python REPL"],
+  ["toml", "TOML"],
+  ["ini", "INI"],
+  ["html", "HTML"],
+  ["xml", "XML"],
+  ["shell", "Shell session"],
+  ["console", "Shell session"],
+] as const) displayNames.set(id, label);
+
 /** Display labels never change the stored language or the Markdown fence. */
 export function codeLanguageLabel(language: unknown): string {
   if (typeof language !== "string" || language === "") return "Plain text";

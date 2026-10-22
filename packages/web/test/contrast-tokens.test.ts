@@ -121,6 +121,10 @@ const pairs: Pair[] = [
     .map((ground) => text("neutral link ink", "--foreground", ground)),
   ...["--background", "--card", "--accent", "--page-ground[0]", "--page-ground[1]"]
     .map((ground) => text("neutral kind badge ink", "--muted-foreground", ground)),
+  text("archived pill ink", "--muted-foreground", "--muted"),
+  ...["--foreground", "--card-foreground"].map((ink) => text("neutral submit emphasis ink", ink, "--card-accent")),
+  ...["--background", "--card", "--page-ground[0]", "--page-ground[1]"]
+    .map((ground): Pair => ({ name: "table drop indicator", ink: "--foreground", ground, floor: 3 })),
   // Selected list switches and the current workspace entry still use amber.
   ...["--brand-subtle", "--sidebar", "--sidebar-accent"]
     .map((ground) => text("retained functional brand ink", "--brand-ink", ground)),

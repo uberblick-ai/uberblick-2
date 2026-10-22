@@ -5,7 +5,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getDirectoryEntry } from "@uberblick/schema";
+import type { DirectoryEntry } from "@uberblick/schema";
 import type { McpConfig } from "../src/config.js";
+import type { Replicas } from "../src/replica.js";
 import { MirrorStore } from "../src/store.js";
 import type { UpdateOrigin } from "../src/store.js";
 import { tools } from "../src/tool-table.js";
@@ -118,6 +121,11 @@ export class FailingStore extends MirrorStore {
     }
     return super.appendUpdate(room, payload, origin);
   }
+}
+
+/** A document's whole directory stub, including caches list_docs does not return. */
+export function directoryStub(instance: { readonly replicas: Replicas }, uuid: string): DirectoryEntry | null {
+  return getDirectoryEntry(instance.replicas.directory().doc, uuid);
 }
 
 /** The hub's HMAC secret in tests. Never a valid token itself. */

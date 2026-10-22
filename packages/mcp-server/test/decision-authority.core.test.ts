@@ -2,7 +2,7 @@
 import * as Y from "yjs";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { MAX_TLDR_LENGTH, decisionApprovalFingerprint, editBlock, getBlocks, getDirectoryEntry, getDirectoryMap, getMetaMap, setTldr, setTitle } from "@uberblick/schema";
-import { removeTempDirs, startServer, testConfig } from "./core-helpers.js";
+import { directoryStub, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
@@ -102,7 +102,7 @@ describe("decision authority through MCP", () => {
     await rig.ok("set_status", { uuid: next.uuid, status: "decided", answer });
     expect(await rig.ok("get_doc", { uuid: next.uuid })).toMatchObject({ status: "decided", decidedBy: answer.who });
     expect((await rig.ok("get_doc", { uuid: next.uuid })).agentStance).not.toBe(true);
-    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ uuid: next.uuid, inForce: { uuid: next.uuid }, pending: [] }]);
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ uuid: next.uuid, inForce: next.uuid, pending: [] }]);
     expect((await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs).toHaveLength(2);
   });
 
@@ -244,8 +244,6 @@ describe("decision authority through MCP", () => {
         Y.applyUpdate(doc, Y.encodeStateAsUpdate(offline, vector), "remote");
         expect((await rig.ok("get_doc", { uuid: record.uuid })).approvalChanged).toBe(true);
         expect(getDirectoryEntry(rig.instance.replicas.directory().doc, record.uuid)?.approvalChanged).toBe(true);
-        const listing = (await rig.ok("list_docs", { kind: "decision" })).docs[0];
-        expect(listing).toMatchObject({ approvalChanged: true, inForce: { approvalChanged: true } });
         await rig.ok("set_status", { uuid: record.uuid, status: "decided", answer: changedAgain });
         expect(await rig.ok("get_doc", { uuid: record.uuid })).toMatchObject({ approvalChanged: false, decidedBy: changedAgain.who, decidedAt: changedAgain.when, decidedWhere: changedAgain.where });
         expect(getDirectoryEntry(rig.instance.replicas.directory().doc, record.uuid)?.approvalChanged).toBe(false);
@@ -283,12 +281,10 @@ describe("decision authority through MCP", () => {
     expect(await rig.ok("get_doc", { uuid: record.uuid })).toMatchObject({ approvalChanged: true });
     expect(getMetaMap(doc).get("approvalFingerprint")).toBe(fingerprint);
     const rows = (await rig.ok("list_docs", { kind: "decision" })).docs;
-    expect(rows.find((row: any) => row.uuid === record.uuid)).toMatchObject({
-      title: "How do we persist updates?", approvalChanged: true, inForce: { approvalChanged: true },
-    });
-    expect(rows.find((row: any) => row.uuid === untouched.uuid)).toMatchObject({
-      approvalChanged: false, inForce: { approvalChanged: false },
-    });
+    expect(rows.find((row: any) => row.uuid === record.uuid)).toMatchObject({ title: "How do we persist updates?", inForce: record.uuid });
+    expect(rows.find((row: any) => row.uuid === untouched.uuid)).toMatchObject({ inForce: untouched.uuid });
+    expect(directoryStub(rig.instance, record.uuid)?.approvalChanged).toBe(true);
+    expect(directoryStub(rig.instance, untouched.uuid)?.approvalChanged).toBe(false);
   });
 
   it("exposes stance and answer caches on representative, in-force, pending and conflict entries without opening record rooms", async () => {
@@ -308,20 +304,22 @@ describe("decision authority through MCP", () => {
     Y.applyUpdate(reader.instance.replicas.directory().doc, Y.encodeStateAsUpdate(author.instance.replicas.directory().doc));
     const rows = (await reader.ok("list_docs", { kind: "decision" })).docs;
     const stanceRow = rows.find((row: any) => row.topic === stance.uuid);
-    expect(stanceRow).toMatchObject({ agentStance: true, inForce: { uuid: stance.uuid, agentStance: true }, pending: [{ uuid: pending.uuid }] });
-    for (const entry of [stanceRow, stanceRow.inForce, ...stanceRow.pending]) expect(entry).not.toHaveProperty("tldr");
+    expect(stanceRow).toMatchObject({ uuid: stance.uuid, inForce: stance.uuid, pending: [pending.uuid] });
+    expect(stanceRow).not.toHaveProperty("tldr");
+    expect(directoryStub(reader.instance, stance.uuid)?.agentStance).toBe(true);
+    for (const uuid of [stance.uuid, pending.uuid]) expect(directoryStub(reader.instance, uuid)).not.toHaveProperty("tldr");
     const conflictRow = rows.find((row: any) => row.topic === first.uuid);
     expect(conflictRow.inForce).toBeNull();
-    expect(conflictRow.conflicts).toHaveLength(2);
-    for (const conflict of conflictRow.conflicts) {
+    expect([...conflictRow.conflicts].sort()).toEqual([left.uuid, right.uuid].sort());
+    for (const uuid of conflictRow.conflicts) {
+      const conflict = directoryStub(reader.instance, uuid);
       expect(conflict).toMatchObject({ decidedBy: answer.who, decidedAt: answer.when });
-      expect(conflict.agentStance).not.toBe(true);
+      expect(conflict?.agentStance).not.toBe(true);
       expect(conflict).not.toHaveProperty("tldr");
-      expect(conflict.answerPreview).toBe(body[0]!.text);
+      expect(conflict?.answerPreview).toBe(body[0]!.text);
     }
-    expect(conflictRow.conflicts.find((row: any) => row.uuid === right.uuid)?.approvalChanged).toBe(true);
-    const history = (await reader.ok("list_docs", { kind: "decision", include_superseded: true })).docs;
-    expect(history.find((row: any) => row.uuid === first.uuid)).toMatchObject({ decidedBy: answer.who, decidedAt: answer.when, approvalChanged: false });
+    expect(directoryStub(reader.instance, right.uuid)?.approvalChanged).toBe(true);
+    expect(directoryStub(reader.instance, first.uuid)).toMatchObject({ decidedBy: answer.who, decidedAt: answer.when, approvalChanged: false });
     for (const uuid of [stance.uuid, pending.uuid, first.uuid, left.uuid, right.uuid]) expect(reader.instance.replicas.hydrated(uuid)).toBe(false);
   });
 });

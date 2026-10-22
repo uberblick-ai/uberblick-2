@@ -108,7 +108,7 @@ describe("open comment threads through directory stubs", () => {
     ]) upsertDirectoryEntry(directory, { title: "Topic", kind: "decision", status: "decided", topic: first, tags: [], ...entry });
 
     expect(await rows(rig, { has_open_threads: true })).toMatchObject([
-      { uuid: current, openThreadCount: 0, inForce: { uuid: current, openThreadCount: 0 }, pending: [], conflicts: [] },
+      { uuid: current, openThreadCount: 0, inForce: current, pending: [], conflicts: [] },
     ]);
     expect(await rows(rig, { has_open_threads: true, kind: "decision", status: "decided", tag: "sync", include_superseded: true })).toMatchObject([
       { uuid: superseded, openThreadCount: 1 },
@@ -117,7 +117,7 @@ describe("open comment threads through directory stubs", () => {
     const topic = (await rows(rig, { has_open_threads: true }))[0];
     expect(topic.uuid).toBe(current);
     expect(topic).not.toHaveProperty("openThreadCount");
-    expect(topic.inForce).not.toHaveProperty("openThreadCount");
+    expect(topic.inForce).toBe(current);
     upsertDirectoryEntry(directory, { uuid: superseded, title: "Topic", openThreadCount: 0 });
     expect(await rows(rig, { has_open_threads: true })).toEqual([]);
     for (const uuid of [first, superseded, current]) expect(rig.instance.replicas.hydrated(uuid)).toBe(false);
@@ -137,13 +137,14 @@ describe("open comment threads through directory stubs", () => {
     ] as const) upsertDirectoryEntry(directory, { title: "Topic", kind: "decision", ...entry, tags: [...(entry.tags ?? [])] });
 
     const listed = await rows(rig, { kind: "decision", has_open_threads: true });
-    expect(listed.find(row => row.topic === first)).toMatchObject({
-      uuid: first, openThreadCount: 1, inForce: { uuid: first, openThreadCount: 1 }, pending: [{ uuid: pending, openThreadCount: 2 }],
-    });
+    expect(listed.find(row => row.topic === first)).toMatchObject({ uuid: first, openThreadCount: 1, inForce: first, pending: [pending] });
     const conflicted = listed.find(row => row.topic === fork);
-    expect(conflicted).toMatchObject({ uuid: proposal, openThreadCount: 5, inForce: null, pending: [{ uuid: proposal, openThreadCount: 5 }] });
-    expect(conflicted.conflicts.find((record: any) => record.uuid === left)).toMatchObject({ openThreadCount: 4 });
-    expect(conflicted.conflicts.find((record: any) => record.uuid === right)).not.toHaveProperty("openThreadCount");
+    expect(conflicted).toMatchObject({ uuid: proposal, openThreadCount: 5, inForce: null, pending: [proposal] });
+    expect([...conflicted.conflicts].sort()).toEqual([left, right].sort());
+    const records = new Map((await rows(rig, { kind: "decision", include_superseded: true })).map(row => [row.uuid, row]));
+    expect(records.get(pending)).toMatchObject({ openThreadCount: 2 });
+    expect(records.get(left)).toMatchObject({ openThreadCount: 4 });
+    expect(records.get(right)).not.toHaveProperty("openThreadCount");
     expect(await rows(rig, { kind: "decision", status: "open", tag: "sync", has_open_threads: true })).toMatchObject([{ topic: fork }]);
     expect(await rows(rig, { kind: "decision", status: "open", tag: "sync", has_open_threads: true, include_superseded: true })).toEqual([]);
     for (const uuid of [first, pending, fork, left, right, proposal]) expect(rig.instance.replicas.hydrated(uuid)).toBe(false);
