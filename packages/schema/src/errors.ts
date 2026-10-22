@@ -1,34 +1,43 @@
-/** Thrown when a block id does not resolve to a live block in the document. */
-export class BlockNotFoundError extends Error {
-  readonly blockId: string;
+/** A classified schema failure with its caller-visible domain details. */
+export class SchemaError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly details: Record<string, unknown> = {},
+  ) {
+    super(message);
+    this.name = "SchemaError";
+  }
+}
 
-  constructor(blockId: string) {
-    super(`Block not found: ${blockId}`);
+/** Thrown when a block id does not resolve to a live block in the document. */
+export class BlockNotFoundError extends SchemaError {
+  constructor(readonly blockId: string) {
+    super("block_not_found", `Block not found: ${blockId}`, { blockId });
     this.name = "BlockNotFoundError";
-    this.blockId = blockId;
   }
 }
 
 /** List attributes cannot be applied to this block or contain unsupported values. */
-export class InvalidListAttributesError extends Error {
+export class InvalidListAttributesError extends SchemaError {
   constructor(reason: string) {
-    super(`Invalid list attributes: ${reason}`);
+    super("invalid_list_attributes", `Invalid list attributes: ${reason}`);
     this.name = "InvalidListAttributesError";
   }
 }
 
 /** A table write did not contain exactly one supported GFM table. */
-export class InvalidTableError extends Error {
+export class InvalidTableError extends SchemaError {
   constructor() {
-    super("Table text must be exactly one GFM table");
+    super("invalid_table", "Table text must be exactly one GFM table");
     this.name = "InvalidTableError";
   }
 }
 
 /** A card write does not match the closed header and required title grammar. */
-export class InvalidCardError extends Error {
+export class InvalidCardError extends SchemaError {
   constructor(reason = "A nonempty title is required") {
-    super(`Invalid card: ${reason}`);
+    super("invalid_card", `Invalid card: ${reason}`);
     this.name = "InvalidCardError";
   }
 }
@@ -44,9 +53,9 @@ export class CardAnnotationError extends Error {
 }
 
 /** A Figma write does not match its closed header and provider link grammar. */
-export class InvalidFigmaError extends Error {
+export class InvalidFigmaError extends SchemaError {
   constructor(reason = "A url header is required") {
-    super(reason);
+    super("invalid_figma", reason);
     this.name = "InvalidFigmaError";
   }
 }
@@ -62,37 +71,37 @@ export class FigmaAnnotationError extends Error {
 }
 
 /** Structural or batched table edits need the caller's surviving identities. */
-export class TableMappingRequiredError extends Error {
+export class TableMappingRequiredError extends SchemaError {
   constructor() {
-    super("Table structure or multiple cell changes require a table mapping of surviving old rows and columns");
+    super("table_mapping_required", "Table structure or multiple cell changes require a table mapping of surviving old rows and columns");
     this.name = "TableMappingRequiredError";
   }
 }
 
 /** The table mapping cannot describe this asserted old and requested new table. */
-export class InvalidTableMappingError extends Error {
+export class InvalidTableMappingError extends SchemaError {
   constructor(reason: string) {
-    super(`Invalid table mapping: ${reason}`);
+    super("invalid_table_mapping", `Invalid table mapping: ${reason}`);
     this.name = "InvalidTableMappingError";
   }
 }
 
 /** A new annotation names no usable cell in the table's GFM projection. */
-export class AnnotationCellError extends Error {
-  readonly reason: "missing" | "not-table" | "out-of-bounds";
-  readonly blockId: string;
-
-  constructor(reason: "missing" | "not-table" | "out-of-bounds", blockId: string) {
+export class AnnotationCellError extends SchemaError {
+  constructor(
+    readonly reason: "missing" | "not-table" | "out-of-bounds",
+    readonly blockId: string,
+  ) {
     super(
+      "annotation_cell",
       reason === "missing"
         ? "A table comment requires both row and column coordinates"
         : reason === "not-table"
           ? "Row and column coordinates apply only to table comments"
           : "The comment cell is outside the table's GFM projection",
+      { blockId, reason },
     );
     this.name = "AnnotationCellError";
-    this.reason = reason;
-    this.blockId = blockId;
   }
 }
 
@@ -116,7 +125,7 @@ export interface StaleBlockDetails {
  * overwriting changes already seen locally; it is no cross-replica CAS and
  * cannot detect unseen remote edits, including while this replica is offline.
  */
-export class StaleBlockError extends Error {
+export class StaleBlockError extends SchemaError {
   readonly blockId: string;
   readonly expectedText: string | undefined;
   readonly expectedRev: string | undefined;
@@ -125,7 +134,16 @@ export class StaleBlockError extends Error {
 
   constructor(details: StaleBlockDetails) {
     super(
+      "stale_block",
       `Stale edit for block ${details.blockId}: the block has changed since it was read`,
+      {
+        blockId: details.blockId,
+        expectedText: details.expectedText ?? null,
+        expectedRev: details.expectedRev ?? null,
+        currentText: details.currentText,
+        currentRev: details.currentRev,
+        retry: "re-read nothing: call again with currentRev, against currentText",
+      },
     );
     this.name = "StaleBlockError";
     this.blockId = details.blockId;
@@ -152,7 +170,7 @@ export interface OldTextMismatchDetails {
  * Current rev with wrong oldText is an argument mismatch. Current text/rev
  * allow correcting the argument and retrying without another read.
  */
-export class OldTextMismatchError extends Error {
+export class OldTextMismatchError extends SchemaError {
   readonly blockId: string;
   readonly expectedText: string;
   readonly expectedRev: string;
@@ -161,7 +179,16 @@ export class OldTextMismatchError extends Error {
 
   constructor(details: OldTextMismatchDetails) {
     super(
+      "old_text_mismatch",
       `Old text mismatch for block ${details.blockId}: old_text does not match the current block text`,
+      {
+        blockId: details.blockId,
+        expectedText: details.expectedText,
+        expectedRev: details.expectedRev,
+        currentText: details.currentText,
+        currentRev: details.currentRev,
+        retry: "correct old_text, re-diff against currentText, and call again with currentRev",
+      },
     );
     this.name = "OldTextMismatchError";
     this.blockId = details.blockId;
@@ -178,26 +205,21 @@ export type AnnotationRangeErrorReason = "empty" | "overlap";
  * Empty spans have no anchor; overlaps would replace another thread's anchor,
  * since Yjs and ProseMirror permit one comment mark per character.
  */
-export class AnnotationRangeError extends Error {
-  readonly reason: AnnotationRangeErrorReason;
-  readonly blockId: string;
-  /** For `"overlap"`, the thread already anchored over the requested range. */
-  readonly conflictingThreadId: string | undefined;
-
+export class AnnotationRangeError extends SchemaError {
   constructor(
-    reason: AnnotationRangeErrorReason,
-    blockId: string,
-    conflictingThreadId?: string,
+    readonly reason: AnnotationRangeErrorReason,
+    readonly blockId: string,
+    /** For `"overlap"`, the thread already anchored over the requested range. */
+    readonly conflictingThreadId: string | undefined = undefined,
   ) {
     super(
+      "annotation_range",
       reason === "empty"
         ? `Cannot annotate an empty range in block ${blockId}`
         : `Range in block ${blockId} already carries thread ${conflictingThreadId ?? "unknown"}`,
+      { reason, blockId, conflictingThreadId: conflictingThreadId ?? null },
     );
     this.name = "AnnotationRangeError";
-    this.reason = reason;
-    this.blockId = blockId;
-    this.conflictingThreadId = conflictingThreadId;
   }
 }
 
@@ -240,18 +262,15 @@ export class InvalidDocLinkTargetError extends Error {
  * Writers refuse link/docLink pairs. Yjs merges can still produce both keys;
  * readers resolve them as docLink (see marks.ts).
  */
-export class ConflictingLinkMarksError extends Error {
-  readonly href: string;
-  readonly docId: string;
-
-  constructor(href: string, docId: string) {
+export class ConflictingLinkMarksError extends SchemaError {
+  constructor(readonly href: string, readonly docId: string) {
     super(
+      "inline_link_range",
       `One range cannot be both an external link (${JSON.stringify(href)}) and ` +
         `a reference to document ${JSON.stringify(docId)}. Write one or the other.`,
+      { reason: "overlap", href, docId },
     );
     this.name = "ConflictingLinkMarksError";
-    this.href = href;
-    this.docId = docId;
   }
 }
 
@@ -259,18 +278,15 @@ export class ConflictingLinkMarksError extends Error {
  * Refuse illegal kind/status before either write. Retain unknown values so
  * malformed foreign or stale metadata can also be reported.
  */
-export class InvalidDocumentLifecycleError extends Error {
-  readonly kind: unknown;
-  readonly status: unknown;
-
-  constructor(kind: unknown, status: unknown) {
+export class InvalidDocumentLifecycleError extends SchemaError {
+  constructor(readonly kind: unknown, readonly status: unknown) {
     super(
+      "invalid_document_lifecycle",
       `Invalid document lifecycle: kind=${renderUnknown(kind)} and ` +
         `status=${renderUnknown(status)} are not a legal pair`,
+      { kind, status },
     );
     this.name = "InvalidDocumentLifecycleError";
-    this.kind = kind;
-    this.status = status;
   }
 }
 
@@ -308,19 +324,20 @@ export class InvalidTagIdentityError extends Error {
 }
 
 /** A whole-request refusal from the catalog-aware document assignment boundary. */
-export class InvalidTagAssignmentError extends Error {
+export class InvalidTagAssignmentError extends SchemaError {
   readonly unknown: string[];
   readonly retired: string[];
 
   constructor(unknown: string[], retired: string[]) {
-    const details = [
+    const reason = [
       ...(unknown.length === 0 ? [] : [`unknown: ${unknown.join(", ")}`]),
       ...(retired.length === 0 ? [] : [`retired: ${retired.join(", ")}`]),
     ].join("; ");
-    super(`Invalid tag assignment (${details})`);
+    const details = { unknown: [...unknown], retired: [...retired] };
+    super("invalid_tag_assignment", `Invalid tag assignment (${reason})`, details);
     this.name = "InvalidTagAssignmentError";
-    this.unknown = [...unknown];
-    this.retired = [...retired];
+    this.unknown = details.unknown;
+    this.retired = details.retired;
   }
 }
 
@@ -368,27 +385,22 @@ export type InlineLinkRangeErrorReason = "empty" | "not-prose";
  * block-level docLink range. Cell offsets differ from GFM projection offsets.
  * External-link conflicts use ConflictingLinkMarksError to name both targets.
  */
-export class InlineLinkRangeError extends Error {
-  readonly reason: InlineLinkRangeErrorReason;
-  readonly blockId: string;
-  /** For `"not-prose"`, the block type that cannot hold the mark. */
-  readonly blockType: string | undefined;
-
+export class InlineLinkRangeError extends SchemaError {
   constructor(
-    reason: InlineLinkRangeErrorReason,
-    blockId: string,
-    blockType?: string,
+    readonly reason: InlineLinkRangeErrorReason,
+    readonly blockId: string,
+    /** For `"not-prose"`, the block type that cannot hold the mark. */
+    readonly blockType: string | undefined = undefined,
   ) {
     super(
+      "inline_link_range",
       reason === "empty"
         ? `Cannot link an empty range in block ${blockId}`
         : `Block ${blockId} is a ${blockType ?? "source"} block and cannot carry ` +
           "document links. Link a prose block instead.",
+      { reason, blockId, blockType: blockType ?? null },
     );
     this.name = "InlineLinkRangeError";
-    this.reason = reason;
-    this.blockId = blockId;
-    this.blockType = blockType;
   }
 }
 

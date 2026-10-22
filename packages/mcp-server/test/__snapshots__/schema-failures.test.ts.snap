@@ -1,0 +1,575 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`schema failure wire compatibility > keeps Figma annotation internal 1`] = `
+"{
+  "error": "internal_error",
+  "message": "The tool failed for an unhandled reason. Nothing here says whether anything was written; check sync_status, re-read the document, and see this server's stderr log for the cause."
+}"
+`;
+
+exports[`schema failure wire compatibility > keeps card annotation internal 1`] = `
+"{
+  "error": "internal_error",
+  "message": "The tool failed for an unhandled reason. Nothing here says whether anything was written; check sync_status, re-read the document, and see this server's stderr log for the cause."
+}"
+`;
+
+exports[`schema failure wire compatibility > keeps invalid document link target internal 1`] = `
+"{
+  "error": "internal_error",
+  "message": "The tool failed for an unhandled reason. Nothing here says whether anything was written; check sync_status, re-read the document, and see this server's stderr log for the cause."
+}"
+`;
+
+exports[`schema failure wire compatibility > keeps invalid link href internal 1`] = `
+"{
+  "error": "internal_error",
+  "message": "The tool failed for an unhandled reason. Nothing here says whether anything was written; check sync_status, re-read the document, and see this server's stderr log for the cause."
+}"
+`;
+
+exports[`schema failure wire compatibility > keeps invalid room internal 1`] = `
+"{
+  "error": "internal_error",
+  "message": "The tool failed for an unhandled reason. Nothing here says whether anything was written; check sync_status, re-read the document, and see this server's stderr log for the cause."
+}"
+`;
+
+exports[`schema failure wire compatibility > keeps invalid supersedes reference internal 1`] = `
+"{
+  "error": "internal_error",
+  "message": "The tool failed for an unhandled reason. Nothing here says whether anything was written; check sync_status, re-read the document, and see this server's stderr log for the cause."
+}"
+`;
+
+exports[`schema failure wire compatibility > keeps invalid tag identity internal 1`] = `
+"{
+  "error": "internal_error",
+  "message": "The tool failed for an unhandled reason. Nothing here says whether anything was written; check sync_status, re-read the document, and see this server's stderr log for the cause."
+}"
+`;
+
+exports[`schema failure wire compatibility > keeps invalid tag name internal 1`] = `
+"{
+  "error": "internal_error",
+  "message": "The tool failed for an unhandled reason. Nothing here says whether anything was written; check sync_status, re-read the document, and see this server's stderr log for the cause."
+}"
+`;
+
+exports[`schema failure wire compatibility > keeps invalid workspace id internal 1`] = `
+"{
+  "error": "internal_error",
+  "message": "The tool failed for an unhandled reason. Nothing here says whether anything was written; check sync_status, re-read the document, and see this server's stderr log for the cause."
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized annotation cell missing 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "Call get_doc and name a table cell with both row and column in its zero-based GFM projection (header row 0); omit both coordinates for a non-table block, then annotate its character range.",
+  "error": "annotation_cell",
+  "message": "A table comment requires both row and column coordinates",
+  "blockId": "block-1",
+  "reason": "missing"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized annotation cell outside table 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "Call get_doc and name a table cell with both row and column in its zero-based GFM projection (header row 0); omit both coordinates for a non-table block, then annotate its character range.",
+  "error": "annotation_cell",
+  "message": "The comment cell is outside the table's GFM projection",
+  "blockId": "block-1",
+  "reason": "out-of-bounds"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized annotation cell wrong block 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "Call get_doc and name a table cell with both row and column in its zero-based GFM projection (header row 0); omit both coordinates for a non-table block, then annotate its character range.",
+  "error": "annotation_cell",
+  "message": "Row and column coordinates apply only to table comments",
+  "blockId": "block-1",
+  "reason": "not-table"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized annotation empty range 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "reread",
+  "recovery": "Call get_doc for the block's current text and its existing threads, then annotate a range that fits it — \`reason\` says which of the two is in the way.",
+  "error": "annotation_range",
+  "message": "Cannot annotate an empty range in block block-1",
+  "reason": "empty",
+  "blockId": "block-1",
+  "conflictingThreadId": null
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized annotation overlapping thread 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "reread",
+  "recovery": "Call get_doc for the block's current text and its existing threads, then annotate a range that fits it — \`reason\` says which of the two is in the way.",
+  "error": "annotation_range",
+  "message": "Range in block block-1 already carries thread thread-1",
+  "reason": "overlap",
+  "blockId": "block-1",
+  "conflictingThreadId": "thread-1"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized annotation unknown conflicting thread 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "reread",
+  "recovery": "Call get_doc for the block's current text and its existing threads, then annotate a range that fits it — \`reason\` says which of the two is in the way.",
+  "error": "annotation_range",
+  "message": "Range in block block-1 already carries thread unknown",
+  "reason": "overlap",
+  "blockId": "block-1",
+  "conflictingThreadId": null
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized block not found 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "reread",
+  "recovery": "Call get_doc for the block ids this document actually holds, then call again with one of them.",
+  "error": "block_not_found",
+  "message": "Block not found: block-1",
+  "blockId": "block-1"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized block not found while inserting 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "reread",
+  "recovery": "Call get_doc for the block ids this document actually holds, then call again with one of them.",
+  "error": "block_not_found",
+  "message": "Block not found: block-1 Nothing was written.",
+  "blockId": "block-1"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized block not found while reading 1`] = `
+"{
+  "recoveryClass": "reread",
+  "recovery": "Call get_doc for the block ids this document actually holds, then call again with one of them.",
+  "error": "block_not_found",
+  "message": "Block not found: block-1",
+  "blockId": "block-1"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized conflicting link marks 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "reread",
+  "recovery": "Call get_doc for the block's current text, its type and its \`doc_links\`, then link a range that fits — \`reason\` says which of the three is in the way: \`empty\` (the range covers no characters), \`not-prose\` (code, terminal and chart hold source text; table, card and Figma links belong to their parts and have no block-level ranges) or \`overlap\` (the range is already an external link, and one range cannot be both).",
+  "error": "inline_link_range",
+  "message": "One range cannot be both an external link (\\"https://example.com\\") and a reference to document \\"doc-1\\". Write one or the other.",
+  "reason": "overlap",
+  "href": "https://example.com",
+  "docId": "doc-1"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized data error 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "Correct the named record or change its collection schema so every retained record validates, then apply the update again. No data was written.",
+  "error": "data_record_invalid",
+  "message": "Record /count: expected type number",
+  "collection": "observations",
+  "recordId": "row-1",
+  "path": "/count"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized inline link empty range 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "reread",
+  "recovery": "Call get_doc for the block's current text, its type and its \`doc_links\`, then link a range that fits — \`reason\` says which of the three is in the way: \`empty\` (the range covers no characters), \`not-prose\` (code, terminal and chart hold source text; table, card and Figma links belong to their parts and have no block-level ranges) or \`overlap\` (the range is already an external link, and one range cannot be both).",
+  "error": "inline_link_range",
+  "message": "Cannot link an empty range in block block-1",
+  "reason": "empty",
+  "blockId": "block-1",
+  "blockType": null
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized inline link unknown block type 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "reread",
+  "recovery": "Call get_doc for the block's current text, its type and its \`doc_links\`, then link a range that fits — \`reason\` says which of the three is in the way: \`empty\` (the range covers no characters), \`not-prose\` (code, terminal and chart hold source text; table, card and Figma links belong to their parts and have no block-level ranges) or \`overlap\` (the range is already an external link, and one range cannot be both).",
+  "error": "inline_link_range",
+  "message": "Block block-1 is a source block and cannot carry document links. Link a prose block instead.",
+  "reason": "not-prose",
+  "blockId": "block-1",
+  "blockType": null
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized inline link wrong block 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "reread",
+  "recovery": "Call get_doc for the block's current text, its type and its \`doc_links\`, then link a range that fits — \`reason\` says which of the three is in the way: \`empty\` (the range covers no characters), \`not-prose\` (code, terminal and chart hold source text; table, card and Figma links belong to their parts and have no block-level ranges) or \`overlap\` (the range is already an external link, and one range cannot be both).",
+  "error": "inline_link_range",
+  "message": "Block block-1 is a table block and cannot carry document links. Link a prose block instead.",
+  "reason": "not-prose",
+  "blockId": "block-1",
+  "blockType": "table"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized invalid Figma default 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "Supply Figma content without its :::figma and ::: delimiter lines: required url, optional plain one-line title and optional whole-number height from 240 to 960, each at most once, then a blank line and optional prose caption. Use an https figma.com or www.figma.com design, file, proto, board, slides or community/file link. Remove unknown or duplicate keys and non-key header lines. Nothing was written.",
+  "error": "invalid_figma",
+  "message": "A url header is required"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized invalid Figma reason 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "Supply Figma content without its :::figma and ::: delimiter lines: required url, optional plain one-line title and optional whole-number height from 240 to 960, each at most once, then a blank line and optional prose caption. Use an https figma.com or www.figma.com design, file, proto, board, slides or community/file link. Remove unknown or duplicate keys and non-key header lines. Nothing was written.",
+  "error": "invalid_figma",
+  "message": "unsupported provider"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized invalid card default 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "Supply card content without its :::card and ::: delimiter lines: label, title and footer at most once, a nonempty title, any number of button lines, then a blank line and optional prose body. Each button contains exactly one [Text](destination) link, with nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, optionally followed by ?query. After its link, allow at most one style (outline or filled) and one color (neutral, blue, green or violet), in either order; defaults are outline neutral. Remove other trailing text, unknown keys and non-key header lines. Nothing was written.",
+  "error": "invalid_card",
+  "message": "Invalid card: A nonempty title is required"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized invalid card reason 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "Supply card content without its :::card and ::: delimiter lines: label, title and footer at most once, a nonempty title, any number of button lines, then a blank line and optional prose body. Each button contains exactly one [Text](destination) link, with nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, optionally followed by ?query. After its link, allow at most one style (outline or filled) and one color (neutral, blue, green or violet), in either order; defaults are outline neutral. Remove other trailing text, unknown keys and non-key header lines. Nothing was written.",
+  "error": "invalid_card",
+  "message": "Invalid card: unknown header"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized invalid document lifecycle 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "The document's stored kind is fixed through MCP. Choose a status in that kind's lifecycle; if the kind itself is wrong, retrying cannot change or clear it through this interface.",
+  "error": "invalid_document_lifecycle",
+  "message": "Invalid document lifecycle: kind=\\"decision\\" and status=\\"planned\\" are not a legal pair",
+  "kind": "decision",
+  "status": "planned"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized invalid lifecycle missing values 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "The document's stored kind is fixed through MCP. Choose a status in that kind's lifecycle; if the kind itself is wrong, retrying cannot change or clear it through this interface.",
+  "error": "invalid_document_lifecycle",
+  "message": "Invalid document lifecycle: kind=undefined and status=undefined are not a legal pair"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized invalid lifecycle null values 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "The document's stored kind is fixed through MCP. Choose a status in that kind's lifecycle; if the kind itself is wrong, retrying cannot change or clear it through this interface.",
+  "error": "invalid_document_lifecycle",
+  "message": "Invalid document lifecycle: kind=null and status=null are not a legal pair",
+  "kind": null,
+  "status": null
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized invalid list attributes 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "Supply list or indent only when editing a list-item block, with list bullet or ordered and indent an integer from 0 to 3. Nothing was written.",
+  "error": "invalid_list_attributes",
+  "message": "Invalid list attributes: unsupported list"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized invalid table 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "Supply exactly one GFM table, with a header and matching delimiter row, then call again. Alignment markers are accepted but not stored; inline markdown writes cell formatting and escaped punctuation stays literal.",
+  "error": "invalid_table",
+  "message": "Table text must be exactly one GFM table"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized invalid table mapping 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "Correct table_mapping for this table: match the new dimensions, keep header row 0, and use unique increasing old indices in bounds or null for new positions. No table change was written.",
+  "error": "invalid_table_mapping",
+  "message": "Invalid table mapping: duplicate row"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized old text mismatch 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "The asserted \`rev\` is current, but \`old_text\` does not match this block. This answer already carries \`currentText\` and \`currentRev\`; correct \`old_text\`, re-diff the intended change against \`currentText\`, and call edit_block again with \`currentRev\`. No extra read is needed.",
+  "error": "old_text_mismatch",
+  "message": "Old text mismatch for block block-1: old_text does not match the current block text",
+  "blockId": "block-1",
+  "expectedText": "wrong text",
+  "expectedRev": "current-rev",
+  "currentText": "current text",
+  "currentRev": "current-rev",
+  "retry": "correct old_text, re-diff against currentText, and call again with currentRev"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized stale block empty assertions 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "reread",
+  "recovery": "The block changed under you. This answer already carries \`currentText\` and \`currentRev\`, so call the same tool again with \`currentRev\` — re-diffing against \`currentText\` first for edit_block, and re-measuring the offsets against it for link_range. No extra read is needed.",
+  "error": "stale_block",
+  "message": "Stale edit for block block-1: the block has changed since it was read",
+  "blockId": "block-1",
+  "expectedText": "",
+  "expectedRev": "",
+  "currentText": "current text",
+  "currentRev": "current-rev",
+  "retry": "re-read nothing: call again with currentRev, against currentText"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized stale block no assertions 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "reread",
+  "recovery": "The block changed under you. This answer already carries \`currentText\` and \`currentRev\`, so call the same tool again with \`currentRev\` — re-diffing against \`currentText\` first for edit_block, and re-measuring the offsets against it for link_range. No extra read is needed.",
+  "error": "stale_block",
+  "message": "Stale edit for block block-1: the block has changed since it was read",
+  "blockId": "block-1",
+  "expectedText": null,
+  "expectedRev": null,
+  "currentText": "current text",
+  "currentRev": "current-rev",
+  "retry": "re-read nothing: call again with currentRev, against currentText"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized stale block rev only 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "reread",
+  "recovery": "The block changed under you. This answer already carries \`currentText\` and \`currentRev\`, so call the same tool again with \`currentRev\` — re-diffing against \`currentText\` first for edit_block, and re-measuring the offsets against it for link_range. No extra read is needed.",
+  "error": "stale_block",
+  "message": "Stale edit for block block-1: the block has changed since it was read",
+  "blockId": "block-1",
+  "expectedText": null,
+  "expectedRev": "old-rev",
+  "currentText": "current text",
+  "currentRev": "current-rev",
+  "retry": "re-read nothing: call again with currentRev, against currentText"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized stale block text and rev 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "reread",
+  "recovery": "The block changed under you. This answer already carries \`currentText\` and \`currentRev\`, so call the same tool again with \`currentRev\` — re-diffing against \`currentText\` first for edit_block, and re-measuring the offsets against it for link_range. No extra read is needed.",
+  "error": "stale_block",
+  "message": "Stale edit for block block-1: the block has changed since it was read",
+  "blockId": "block-1",
+  "expectedText": "old text",
+  "expectedRev": "old-rev",
+  "currentText": "current text",
+  "currentRev": "current-rev",
+  "retry": "re-read nothing: call again with currentRev, against currentText"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized stale block text only 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "reread",
+  "recovery": "The block changed under you. This answer already carries \`currentText\` and \`currentRev\`, so call the same tool again with \`currentRev\` — re-diffing against \`currentText\` first for edit_block, and re-measuring the offsets against it for link_range. No extra read is needed.",
+  "error": "stale_block",
+  "message": "Stale edit for block block-1: the block has changed since it was read",
+  "blockId": "block-1",
+  "expectedText": "old text",
+  "expectedRev": null,
+  "currentText": "current text",
+  "currentRev": "current-rev",
+  "retry": "re-read nothing: call again with currentRev, against currentText"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized table mapping required 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "Supply table_mapping with rows and columns naming the surviving old projection indices, or null for new positions. Include header row 0; an identity map supports a positional multi-cell batch. No table change was written.",
+  "error": "table_mapping_required",
+  "message": "Table structure or multiple cell changes require a table mapping of surviving old rows and columns"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized tag assignment on create 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "Call list_tags for the complete active catalog, then call again with active ids or active names (case ignored). An existing retired or unresolved assignment can be preserved by passing the id returned by the document read.",
+  "error": "invalid_tag_assignment",
+  "message": "Invalid tag assignment (unknown: missing; retired: retired)",
+  "unknown": [
+    "missing"
+  ],
+  "retired": [
+    "retired"
+  ]
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized tag assignment on metadata 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "Call list_tags for the complete active catalog, then call again with active ids or active names (case ignored). An existing retired or unresolved assignment can be preserved by passing the id returned by the document read.",
+  "error": "invalid_tag_assignment",
+  "message": "Invalid tag assignment (unknown: missing; retired: retired)",
+  "unknown": [
+    "missing"
+  ],
+  "retired": [
+    "retired"
+  ],
+  "field": "tags"
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized tag assignment retired only 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "Call list_tags for the complete active catalog, then call again with active ids or active names (case ignored). An existing retired or unresolved assignment can be preserved by passing the id returned by the document read.",
+  "error": "invalid_tag_assignment",
+  "message": "Invalid tag assignment (retired: retired)",
+  "unknown": [],
+  "retired": [
+    "retired"
+  ]
+}"
+`;
+
+exports[`schema failure wire compatibility > preserves serialized tag assignment unknown only 1`] = `
+"{
+  "applied": false,
+  "partial": false,
+  "synced": false,
+  "recoveryClass": "manual",
+  "recovery": "Call list_tags for the complete active catalog, then call again with active ids or active names (case ignored). An existing retired or unresolved assignment can be preserved by passing the id returned by the document read.",
+  "error": "invalid_tag_assignment",
+  "message": "Invalid tag assignment (unknown: missing)",
+  "unknown": [
+    "missing"
+  ],
+  "retired": []
+}"
+`;
