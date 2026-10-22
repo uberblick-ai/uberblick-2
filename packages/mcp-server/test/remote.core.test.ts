@@ -27,6 +27,23 @@ const DECISION_C = "33333333-3333-4333-8333-333333333333";
 const RECORD_KEY = JSON.stringify(["record", "observations", "row-a"]);
 
 describe("workspace promotion verification", () => {
+  it("detects a missing creation marker even when visible tags and Yjs clocks match", () => {
+    const settings = new Y.Doc();
+    const sidebar = new Y.Doc();
+    const directory = new Y.Doc();
+    const tag = createTagCatalogEntry(settings, "research");
+    const copy = replicate(settings);
+    copy.getMap("tag-flags").delete(`created:${tag.id}`);
+    expect(Y.encodeStateVector(copy)).toEqual(Y.encodeStateVector(settings));
+    const source = workspaceSnapshot(settings, sidebar, directory);
+    const destination = workspaceSnapshot(copy, sidebar, directory);
+    expect(compareCorpus(source, destination).differing.map((entry) => entry.uuid)).toEqual(["_settings"]);
+    settings.destroy();
+    copy.destroy();
+    sidebar.destroy();
+    directory.destroy();
+  });
+
   it("compares tag descriptions and deletion evidence even when visible catalogs are empty", () => {
     const settings = new Y.Doc();
     const sidebar = new Y.Doc();

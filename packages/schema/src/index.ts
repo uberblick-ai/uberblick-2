@@ -185,6 +185,7 @@ export {
   createTagCatalogEntry,
   deleteTagCatalogEntry,
   getTagCatalogEntry,
+  getTagCatalogFlags,
   getTagCatalogIdentities,
   isTagCatalogSeeded,
   isTagDeleted,
