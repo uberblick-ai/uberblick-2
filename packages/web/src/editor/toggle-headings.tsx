@@ -94,6 +94,17 @@ function deletesFoldedNeighbor(state: EditorState, forward: boolean): boolean {
   return containing(fold, neighbor).length > 0;
 }
 
+function deleteLeadingMarker(view: EditorView): boolean {
+  const { selection } = view.state;
+  const { $head } = selection;
+  if (!view.editable || !selection.empty || $head.depth !== 1 || $head.parentOffset !== 0 ||
+    $head.parent.type.name !== "heading" || !$head.parent.textContent.startsWith("> ")) return false;
+  // Native Home can leave the DOM caret before the noneditable widget. Delete
+  // must remove the literal character rather than deleting and restoring chrome.
+  view.dispatch(view.state.tr.delete(selection.from, selection.from + 1));
+  return true;
+}
+
 export const ToggleHeadings = Extension.create({
   name: "uberblickToggleHeadings",
   addProseMirrorPlugins() {
@@ -138,12 +149,18 @@ export const ToggleHeadings = Extension.create({
       },
       props: {
         handleKeyDown: (view, event) => {
+          if (event.key === "Delete" && !event.altKey && !event.ctrlKey && !event.metaKey &&
+            !event.shiftKey && !event.isComposing && deleteLeadingMarker(view)) return true;
           return (event.key === "Backspace" || event.key === "Delete") &&
             deletesFoldedNeighbor(view.state, event.key === "Delete");
         },
         handleDOMEvents: {
           beforeinput: (view, event) => {
             const input = event as InputEvent;
+            if (input.inputType === "deleteContentForward" && !input.isComposing && deleteLeadingMarker(view)) {
+              event.preventDefault();
+              return true;
+            }
             if ((input.inputType === "deleteContentBackward" || input.inputType === "deleteContentForward") &&
               deletesFoldedNeighbor(view.state, input.inputType === "deleteContentForward")) {
               event.preventDefault();

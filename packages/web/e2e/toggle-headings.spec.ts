@@ -165,10 +165,12 @@ test("typing and removing the marker keeps a heading editable and navigation out
   await expect(block(page, created, 1)).toBeHidden();
   await expect.poll(() => caret(page)).toEqual({ id: created.blocks[0]?.id, offset: "> Edit marker".length, empty: true });
   await placeCaretIn(heading);
-  for (let index = 0; index < "Edit marker".length; index += 1) await page.keyboard.press("ArrowLeft");
-  await expect.poll(() => caret(page)).toEqual({ id: created.blocks[0]?.id, offset: 2, empty: true });
-  await page.keyboard.press("Backspace");
-  await page.keyboard.press("Backspace");
+  await page.keyboard.press(keys.lineStart);
+  await page.keyboard.press("Delete");
+  await expectMcp(() => session.call<StoredDoc>("get_doc", { uuid: created.uuid }), document => {
+    expect(document.blocks[0]?.text).toBe(" Edit marker");
+  });
+  await page.keyboard.press("Delete");
   await expect(heading).toContainText("Edit marker");
   await expect(heading.locator("button")).toHaveCount(0);
   await expect(block(page, created, 1)).toBeVisible();
