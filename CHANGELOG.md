@@ -41,6 +41,11 @@ Ablauf diagrams drawn in the editor, an Alter decision dialog on decision topics
 
 ### Breaking
 
+- Device-created signing keys replace earlier HMAC credentials, which the upgraded
+  hub revokes. Update the hub and every client to the matching protocol together,
+  then run `ub auth login <hub-origin>` again on every computer and unattended
+  agent host. Restart MCP servers and `ub open`, and reload host-served pages.
+  See the [device-created-key upgrade procedure](https://github.com/uberblick-ai/uberblick-2/blob/v0.4.7/REMOTE.md#upgrade-an-existing-deployment-to-device-created-keys) (#1918).
 - `ub workspace member add` asks for confirmation; pass `--yes` to grant without a terminal (#1943).
 
 ### Added
@@ -280,7 +285,12 @@ GitHub sign-in with revocable device credentials, hub-owned memberships and role
 
 ### Breaking
 
-- Remote hubs and clients switch to device credentials (#1220).
+- Remote hubs and clients switch to device credentials. Before switching either
+  side, configure GitHub sign-in, run host-only first-admin setup for each existing
+  workspace while retaining its UUID, and run `ub auth login <hub-origin>` on every
+  computer and unattended agent host. Update the hub and all clients to the matching
+  protocol together, restart MCP servers and `ub open`, and reload host-served pages.
+  See the [device-credential upgrade procedure](https://github.com/uberblick-ai/uberblick-2/blob/v0.2.9/REMOTE.md#upgrade-an-existing-deployment-to-device-credentials) (#1220).
 
 ### Added
 
