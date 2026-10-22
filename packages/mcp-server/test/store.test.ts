@@ -81,6 +81,46 @@ afterEach(() => {
   removeTempDirs();
 });
 
+it("refuses an older peer's snapshot and prune transaction while authored rows are pending", () => {
+  const path = tempDatabasePath();
+  const opened = store(path);
+  const room = `${WORKSPACE}/pending-origin`;
+  const doc = new Y.Doc();
+  const peer = new DatabaseSync(path);
+  try {
+    doc.getText("text").insert(0, "already acknowledged");
+    const first = opened.appendUpdate(room, Y.encodeStateAsUpdate(doc), "remote");
+    expect(opened.compact(room, Y.encodeStateAsUpdate(doc), first)).toBe(true);
+    const before = Y.encodeStateVector(doc);
+    doc.getText("text").insert(doc.getText("text").length, " and offline");
+    const metadata = {
+      updateId: "pending-update", credentialId: "writing-credential",
+      surface: { kind: "mcp", name: "Test client" },
+    };
+    const pending = opened.appendUpdate(room, Y.encodeStateAsUpdate(doc, before), "local", undefined, metadata);
+    expect(opened.compact(room, Y.encodeStateAsUpdate(doc), pending)).toBe(false);
+
+    peer.exec("BEGIN");
+    expect(() => {
+      peer.prepare("INSERT INTO snapshots (room, state, through_seq, updated_at) VALUES (?, ?, ?, ?) " +
+        "ON CONFLICT (room) DO UPDATE SET state = excluded.state, through_seq = excluded.through_seq, " +
+        "updated_at = excluded.updated_at WHERE snapshots.through_seq < excluded.through_seq")
+        .run(room, Y.encodeStateAsUpdate(doc), pending, Date.now());
+      peer.prepare("DELETE FROM updates WHERE room = ? AND seq <= ?").run(room, pending);
+    }).toThrow(/pending updates must retain their origin/);
+    peer.exec("ROLLBACK");
+    expect(opened.readSince(room, 0).snapshot?.throughSeq).toBe(first);
+    expect(opened.readSince(room, first).updates).toEqual([
+      { seq: pending, payload: Y.encodeStateAsUpdate(doc, before), metadata },
+    ]);
+    expect(opened.pendingRooms()).toEqual([{ room, seq: pending }]);
+  } finally {
+    if (peer.isTransaction) peer.exec("ROLLBACK");
+    peer.close();
+    doc.destroy();
+  }
+});
+
 it("re-purges peer index rows without scanning unrelated FTS content for absent copies", () => {
   const opened = store(tempDatabasePath());
   const room = `${WORKSPACE}/deleted`;

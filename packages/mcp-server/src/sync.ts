@@ -29,6 +29,9 @@ import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
 import { HubConnection } from "./hub-connection.js";
 import type { HubFailureCause } from "./hub-failure.js";
+import { createHash } from "node:crypto";
+import { encodeOriginUpdate, readOriginAck } from "@uberblick/schema";
+import type { LogSlice } from "./store.js";
 
 export type HubStatus =
   | "disabled"
@@ -168,6 +171,76 @@ class AdmittedHocuspocusProvider extends HocuspocusProvider {
 
   private currentGeneration: () => number | null = () => null;
 
+  private readLog: ((seq: number) => LogSlice) | undefined;
+  private logChanged: () => void = () => {};
+  private logRefused: () => void = () => {};
+  private logReady = false;
+  private acknowledgedLogSeq = 0;
+  private logCaughtUp = false;
+  private logInFlight: { updateId: string; throughSeq: number } | null = null;
+  private readonly emptySyncDocument = new Y.Doc();
+
+  useLog(readLog: (seq: number) => LogSlice, changed: () => void, refused: () => void): void {
+    this.readLog = readLog;
+    this.logChanged = changed;
+    this.logRefused = refused;
+  }
+
+  flushLog(): void {
+    if (this.readLog === undefined || !this.logReady || !this.hasCurrentSync() || this.logInFlight !== null) return;
+    for (;;) {
+      const slice = this.readLog(this.acknowledgedLogSeq);
+      const next = slice.snapshot !== null
+        ? { seq: slice.snapshot.throughSeq, payload: slice.snapshot.state, metadata: undefined, remote: undefined }
+        : slice.updates[0];
+      if (next === undefined) {
+        this.logCaughtUp = true;
+        return;
+      }
+      // After the initial replay, an inbound row is already held by this hub.
+      // Relaying it again would turn a quiet refresh into new acknowledgement debt.
+      if (this.logCaughtUp && next.remote === true) {
+        this.acknowledgedLogSeq = next.seq;
+        continue;
+      }
+      const updateId = next.metadata?.updateId ?? createHash("sha256")
+        .update(`${this.configuration.name}\0${next.seq}\0`).update(next.payload).digest("hex");
+      this.logInFlight = { updateId, throughSeq: next.seq };
+      this.sendStateless(encodeOriginUpdate(updateId, next.payload, next.metadata ?? null));
+      this.logChanged();
+      return;
+    }
+  }
+
+  acknowledgeLog(payload: string): void {
+    const ack = readOriginAck(payload);
+    if (ack === null || !this.hasCurrentSync() || ack.updateId !== this.logInFlight?.updateId) return;
+    if (!ack.applied) {
+      this.logRefused();
+      return;
+    }
+    this.acknowledgedLogSeq = this.logInFlight.throughSeq;
+    this.logInFlight = null;
+    this.flushLog();
+    this.logChanged();
+  }
+
+  logIsQuiet(): boolean {
+    if (this.readLog === undefined) return true;
+    this.flushLog();
+    if (!this.logReady || this.logInFlight !== null) return false;
+    const slice = this.readLog(this.acknowledgedLogSeq);
+    return slice.snapshot === null && slice.updates.length === 0;
+  }
+
+  override documentUpdateHandler(update: Uint8Array, origin: unknown): void {
+    if (this.readLog === undefined) {
+      super.documentUpdateHandler(update, origin);
+      return;
+    }
+    this.flushLog();
+  }
+
   useGeneration(source: () => number | null): void {
     this.currentGeneration = source;
   }
@@ -186,6 +259,10 @@ class AdmittedHocuspocusProvider extends HocuspocusProvider {
     this.tokenSent = false;
     this.syncStarted = false;
     this.isAuthenticated = false;
+    this.logReady = false;
+    this.acknowledgedLogSeq = 0;
+    this.logCaughtUp = false;
+    this.logInFlight = null;
   }
 
   hasCurrentSync(): boolean {
@@ -194,27 +271,44 @@ class AdmittedHocuspocusProvider extends HocuspocusProvider {
 
   override onMessage(event: MessageEvent): void {
     if (!this.isAttached || !this.socketOpen()) return;
+    const bytes = new Uint8Array(event.data);
+    let typeOffset = -1;
+    let nameLength = 0;
+    let factor = 1;
+    for (let offset = 0; offset < 5 && offset < bytes.length; offset += 1) {
+      const byte = bytes[offset];
+      if (byte === undefined) return;
+      nameLength += (byte & 0x7f) * factor;
+      if (nameLength > bytes.length) return;
+      if (byte < 0x80) {
+        typeOffset = offset + 1 + nameLength;
+        break;
+      }
+      factor *= 128;
+    }
+    const type = bytes[typeOffset];
     if (!this.hasCurrentSync()) {
       // The socket has already routed the room name. Inspect only its bounded
       // byte-length prefix and frame type; Hocuspocus still decodes the payload.
-      const bytes = new Uint8Array(event.data);
-      let nameLength = 0;
-      let factor = 1;
-      let type: number | undefined;
-      for (let offset = 0; offset < 5 && offset < bytes.length; offset += 1) {
-        const byte = bytes[offset];
-        if (byte === undefined) return;
-        nameLength += (byte & 0x7f) * factor;
-        if (nameLength > bytes.length) return;
-        if (byte < 0x80) {
-          type = bytes[offset + 1 + nameLength];
-          break;
-        }
-        factor *= 128;
-      }
       if (type !== MessageType.Auth && type !== MessageType.CLOSE) return;
     }
+    if (this.readLog !== undefined && type === MessageType.Sync && bytes[typeOffset + 1] === 0) {
+      // Let the provider serialize its empty handshake response. Authored bytes
+      // travel only as the original, ordered log entries with their metadata.
+      const document = this.configuration.document;
+      this.configuration.document = this.emptySyncDocument;
+      try { super.onMessage(event); }
+      finally { this.configuration.document = document; }
+      this.logReady = true;
+      this.flushLog();
+      return;
+    }
     super.onMessage(event);
+  }
+
+  override destroy(): void {
+    super.destroy();
+    this.emptySyncDocument.destroy();
   }
 
   private socketOpen(): boolean {
@@ -268,6 +362,7 @@ class AdmittedHocuspocusProvider extends HocuspocusProvider {
 }
 
 export interface HubSyncOptions {
+  readLog?: (room: string, seq: number) => LogSlice;
   /** An authenticated room's deletion refusal authorizes purging only its copy. */
   onDocDeleted?: (room: string) => void;
   /** Replace a refused settings replica only after a clean hub read completes. */
@@ -307,6 +402,7 @@ export class HubSync {
   private readonly onDocDeleted: ((room: string) => void) | undefined;
 
   private readonly onSettingsReset: ((state: Uint8Array, refused: Y.Doc) => void) | undefined;
+  private readonly readLog: HubSyncOptions["readLog"];
 
   private settingsRecovery: { doc: Y.Doc; awareness: Awareness; refused: Y.Doc } | null = null;
 
@@ -430,6 +526,7 @@ export class HubSync {
   ) {
     this.onDocDeleted = options.onDocDeleted;
     this.onSettingsReset = options.onSettingsReset;
+    this.readLog = options.readLog;
     if (!isLoopbackEndpoint(config.hubUrl)) {
       config = { ...config, authSecret: null, deviceLogin: config.deviceLogin ?? {} };
     }
@@ -874,6 +971,7 @@ export class HubSync {
         this.stateChanged();
         this.finishSettingsRecovery(room, provider);
       },
+      onStateless: ({ payload }) => provider.acknowledgeLog(payload),
       onMessage: ({ message }) => {
         if (room !== settingsRoom(this.config.workspaceId) || this.onSettingsReset === undefined) return;
         message.readVarString();
@@ -947,6 +1045,18 @@ export class HubSync {
     });
     provider.useGeneration(() =>
       this.socketStatus === "connected" ? this.socketGeneration : null,
+    );
+    const readLog = this.readLog;
+    if (readLog !== undefined && doc !== this.settingsRecovery?.doc) provider.useLog(
+      (seq) => readLog(room, seq),
+      () => {
+        for (const listener of this.roomQuietListeners) listener();
+        this.stateChanged();
+      },
+      () => {
+        if (room === settingsRoom(this.config.workspaceId) && this.onSettingsReset !== undefined) this.recoverSettings(room);
+        else this.hubDisownedRoom();
+      },
     );
     // Shared-socket providers require explicit attach to subscribe and authenticate.
     this.providers.set(room, provider);
@@ -1178,7 +1288,11 @@ export class HubSync {
       return false;
     }
     if (provider.document === this.settingsRecovery?.doc) return false;
-    return provider.hasCurrentSync() && provider.isSynced && !provider.hasUnsyncedChanges;
+    return provider.hasCurrentSync() && provider.isSynced && !provider.hasUnsyncedChanges && provider.logIsQuiet();
+  }
+
+  flushLog(room: string): void {
+    this.providers.get(room)?.flushLog();
   }
 
   private stateChanged(): void {
@@ -1209,6 +1323,7 @@ export class HubSync {
     let total = 0;
     for (const provider of this.providers.values()) {
       total += provider.unsyncedChanges;
+      if (!provider.logIsQuiet()) total += 1;
     }
     return total;
   }

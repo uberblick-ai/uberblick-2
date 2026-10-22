@@ -10,3 +10,5 @@ export {
 export type { HubConfig } from "./config.js";
 export { silentLogger, stderrLogger } from "./log.js";
 export type { HubLogger, HubLogRecord } from "./log.js";
+export { getUpdateAttribution } from "./update-attribution.js";
+export type { UpdateAttribution, UpdateAuthor } from "./update-attribution.js";

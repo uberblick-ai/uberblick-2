@@ -1,4 +1,5 @@
 import * as Y from "yjs";
+import { randomUUID } from "node:crypto";
 import { Awareness } from "y-protocols/awareness";
 import {
   DIRECTORY_SUFFIX,
@@ -45,13 +46,14 @@ import {
   githubReference,
 } from "@uberblick/schema";
 import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
-import type { Block, CardPart, DocMeta, InlineRun } from "@uberblick/schema";
+import type { Block, CardPart, DocMeta, InlineRun, UpdateOriginMetadata, UpdateSurface } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
 import { collectReplicaSyncState } from "./status.js";
 import type { MirrorStore, UpdateOrigin } from "./store.js";
 import { SettingsResetError, WorkspaceRemovedError } from "./store.js";
 import { HubSync, type SyncWaitResult } from "./sync.js";
+import { readDeviceLogin } from "./device-login.js";
 
 /** Replayed updates are already durable; the update observer must skip them. */
 const LOG_ORIGIN = Symbol("uberblick/log");
@@ -203,6 +205,8 @@ export class Replicas {
   /** Display name published in awareness. Refined once the client identifies. */
   private agentName: string;
 
+  private writeSurface: UpdateSurface = { kind: "cli", name: "ub" };
+
   /** Set on boot and on every hub connect: the next tool call waits for sync. */
   private settleNeeded = true;
 
@@ -239,7 +243,8 @@ export class Replicas {
       if ([DIRECTORY_SUFFIX, SIDEBAR_SUFFIX, SETTINGS_SUFFIX].includes(uuid)) return;
       this.refusedDeletedDocs.add(uuid);
       this.purgeDeletedDocs();
-    }, onSettingsReset: (state, refused) => this.acceptSettingsReset(state, refused) });
+    }, onSettingsReset: (state, refused) => this.acceptSettingsReset(state, refused),
+    readLog: (room, seq) => this.store.readForSync(room, seq) });
 
     // Discovery reads this synced directory, not this process's creations.
     // Attach from boot so stub repair and the first tool's hydration can use it.
@@ -250,6 +255,22 @@ export class Replicas {
     for (const pending of this.store.pendingRooms()) {
       this.adoptRoom(pending.room);
     }
+  }
+
+  setWriteSurface(surface: UpdateSurface): void {
+    this.writeSurface = surface;
+  }
+
+  createUpdateOrigin(surface: UpdateSurface = this.writeSurface): UpdateOriginMetadata {
+    const login = this.config.localWorkspace === true ? null : readDeviceLogin(
+      this.config.hubUrl, this.config.workspaceId,
+      this.config.deviceLogin?.env ?? this.config.authEnv,
+    );
+    return {
+      updateId: randomUUID(),
+      credentialId: login?.status === "ready" ? login.login.credential.record.id : null,
+      surface,
+    };
   }
 
   /** Refuse workspace reads and writes from state the log cannot restore. */
@@ -480,7 +501,8 @@ export class Replicas {
       // then refuses further workspace tools.
       let appendedSeq: number;
       try {
-        appendedSeq = this.store.appendUpdate(room, payload, kind, replica.isSettings ? replica.settingsResetSeq : undefined);
+        appendedSeq = this.store.appendUpdate(room, payload, kind, replica.isSettings ? replica.settingsResetSeq : undefined,
+          kind === "local" ? this.createUpdateOrigin() : undefined);
       } catch (error) {
         if (error instanceof SettingsResetError) {
           this.sync.releaseRoom(room);
@@ -582,6 +604,7 @@ export class Replicas {
       throughSeq = entry.seq;
       applied = true;
     }
+    this.sync.flushLog(replica.room);
     return { applied, throughSeq };
   }
 
@@ -1192,13 +1215,13 @@ export class Replicas {
         continue;
       }
       try {
-        this.store.compact(
+        const compacted = this.store.compact(
           replica.room,
           Y.encodeStateAsUpdate(replica.doc),
           replica.lastSeq,
           replica.isSettings ? replica.settingsResetSeq : undefined,
         );
-        log.debug("compacted log", {
+        if (compacted) log.debug("compacted log", {
           room: replica.room,
           throughSeq: replica.lastSeq,
         });

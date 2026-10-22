@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { fillWorkspaceMainRepository } from "@uberblick/mcp-server";
 import { readDeviceLogin, sameCredential } from "@uberblick/mcp-server/device-login";
@@ -27,7 +28,12 @@ export async function fillMainRepositoryFromOrigin(workspaceId: string, hubUrl: 
     const repository = githubRepository(origin);
     if (repository === null) return;
     if (hubUrl !== null && !await confirmedWorkspaceAdmin(workspaceId, hubUrl)) return;
-    fillWorkspaceMainRepository(workspaceId, repository, databasePath);
+    const login = hubUrl === null ? null : readDeviceLogin(hubUrl, workspaceId);
+    fillWorkspaceMainRepository(workspaceId, repository, databasePath, {
+      updateId: randomUUID(),
+      credentialId: login?.status === "ready" ? login.login.credential.record.id : null,
+      surface: { kind: "cli", name: "ub workspace" },
+    });
   } catch {
     // No checkout, missing git, failed or stalled lookup and unreadable replicas
     // leave this optional setting alone without changing the binding operation.

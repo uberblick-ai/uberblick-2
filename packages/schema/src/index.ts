@@ -253,3 +253,5 @@ export type {
   TagAssignment,
   TagCatalogEntry,
 } from "./types.js";
+export { encodeOriginUpdate, readOriginUpdate, encodeOriginAck, readOriginAck } from "./origin.js";
+export type { UpdateSurface, UpdateOriginMetadata, OriginUpdate, OriginUpdateAck } from "./origin.js";

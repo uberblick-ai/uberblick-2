@@ -34,7 +34,7 @@ async function remote(options: { address?: string; github?: boolean; secret?: st
 
 function connect(hub: Hub, room: string, presented: string, version = SYNC_PROTOCOL_VERSION) {
   const client = createClient({ port: hub.port, room, token: presented,
-    protocolVersion: version, reconnectDelayMs: 60_000 });
+    protocolVersion: version, reconnectDelayMs: 60_000, originUpdates: true });
   clients.push(client);
   return client;
 }

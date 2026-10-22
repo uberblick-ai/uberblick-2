@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createDataDirectory } from "@uberblick/mcp-server/storage";
 import { getWorkspaceName, settingsRoom } from "@uberblick/schema";
+import type { UpdateOriginMetadata } from "@uberblick/schema";
 import * as Y from "yjs";
 import type {
   SQLInputValue,
@@ -59,6 +60,8 @@ export interface SettingsReset {
 export interface LoggedUpdate {
   seq: number;
   payload: Uint8Array;
+  metadata?: UpdateOriginMetadata;
+  remote?: true;
 }
 
 /** Yjs v1 state, compatible with hub persistence and schema replay. */
@@ -199,6 +202,15 @@ CREATE TABLE IF NOT EXISTS updates (
 );
 CREATE INDEX IF NOT EXISTS updates_room_seq ON updates (room, seq);
 
+CREATE TABLE IF NOT EXISTS update_origins (
+  seq INTEGER PRIMARY KEY,
+  metadata TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS prune_update_origin AFTER DELETE ON updates
+BEGIN
+  DELETE FROM update_origins WHERE seq = OLD.seq;
+END;
+
 CREATE TABLE IF NOT EXISTS snapshots (
   room        TEXT PRIMARY KEY,
   state       BLOB NOT NULL,
@@ -217,6 +229,19 @@ CREATE TABLE IF NOT EXISTS pending_rooms (
   room TEXT PRIMARY KEY,
   seq  INTEGER NOT NULL
 );
+
+-- A pre-upgrade peer may still compact. Its snapshot and prune transaction
+-- must fail together until the raw rows have received hub acknowledgement.
+CREATE TRIGGER IF NOT EXISTS preserve_pending_snapshot_insert BEFORE INSERT ON snapshots
+WHEN EXISTS (SELECT 1 FROM pending_rooms WHERE room = NEW.room)
+BEGIN
+  SELECT RAISE(ABORT, 'pending updates must retain their origin');
+END;
+CREATE TRIGGER IF NOT EXISTS preserve_pending_snapshot_update BEFORE UPDATE ON snapshots
+WHEN EXISTS (SELECT 1 FROM pending_rooms WHERE room = NEW.room)
+BEGIN
+  SELECT RAISE(ABORT, 'pending updates must retain their origin');
+END;
 
 CREATE TABLE IF NOT EXISTS doc_index (
   uuid        TEXT PRIMARY KEY,
@@ -509,6 +534,7 @@ export class MirrorStore {
     payload: Uint8Array,
     origin: UpdateOrigin,
     settingsResetSeq?: number,
+    metadata?: UpdateOriginMetadata,
   ) => number;
 
   private readonly compactTx: (
@@ -518,7 +544,7 @@ export class MirrorStore {
     settingsResetSeq?: number,
   ) => boolean;
 
-  private readonly readSinceTx: (room: string, seq: number) => LogSlice;
+  private readonly readSinceTx: (room: string, seq: number, forSync?: boolean) => LogSlice;
 
   private readonly syncSnapshotTx: (
     positions: readonly RoomLogPosition[],
@@ -600,7 +626,7 @@ export class MirrorStore {
         "INSERT INTO updates (room, payload, origin, logged_at) VALUES (?, ?, ?, ?)",
       ),
       after: prepare(
-        "SELECT seq, payload FROM updates WHERE room = ? AND seq > ? ORDER BY seq",
+        "SELECT u.seq, u.payload, u.origin AS log_origin, o.metadata FROM updates u LEFT JOIN update_origins o ON o.seq = u.seq WHERE u.room = ? AND u.seq > ? ORDER BY u.seq",
       ),
       countRoom: prepare(
         "SELECT COUNT(*) AS n FROM updates WHERE room = ?",
@@ -738,7 +764,7 @@ export class MirrorStore {
     // together so even SIGKILL leaves offline work discoverable for pushing.
     this.appendTx = transactional(
       this.db,
-      (room: string, payload: Uint8Array, origin: UpdateOrigin, settingsResetSeq?: number): number => {
+      (room: string, payload: Uint8Array, origin: UpdateOrigin, settingsResetSeq?: number, metadata?: UpdateOriginMetadata): number => {
         if (settingsResetSeq !== undefined && settingsResetSeq !== (this.settingsReset()?.seq ?? 0)) {
           throw new SettingsResetError();
         }
@@ -749,6 +775,10 @@ export class MirrorStore {
           Date.now(),
         );
         const seq = Number(info.lastInsertRowid);
+        if (metadata !== undefined) {
+          this.db.prepare("INSERT INTO update_origins (seq, metadata) VALUES (?, ?)")
+            .run(seq, JSON.stringify(metadata));
+        }
         if (origin === "local") {
           this.statements.markPending.run(room, seq);
         }
@@ -764,6 +794,7 @@ export class MirrorStore {
         if (settingsResetSeq !== undefined && settingsResetSeq !== (this.settingsReset()?.seq ?? 0)) {
           throw new SettingsResetError();
         }
+        if (this.db.prepare("SELECT 1 FROM pending_rooms WHERE room = ?").get(room) !== undefined) return false;
         const written =
           this.statements.putSnapshot.run(room, state, throughSeq, Date.now())
             .changes > 0;
@@ -776,7 +807,7 @@ export class MirrorStore {
     // unseen gap that a reader then advances past.
     this.readSinceTx = transactional(
       this.db,
-      (room: string, seq: number): LogSlice => {
+      (room: string, seq: number, forSync = false): LogSlice => {
         const snapshotSeq = this.snapshotThroughSeq(room);
         const ahead = snapshotSeq !== null && snapshotSeq > seq;
         const stored = ahead ? this.snapshot(room) : null;
@@ -784,7 +815,7 @@ export class MirrorStore {
         const reset = room === settingsRoom(this.workspaceId) ? this.settingsReset() : null;
         return {
           snapshot: stored,
-          updates: this.updatesAfter(room, from),
+          updates: forSync ? this.nextForSync(room, from) : this.updatesAfter(room, from),
           ...(reset === null ? {} : { reset }),
         };
       },
@@ -881,9 +912,10 @@ export class MirrorStore {
     payload: Uint8Array,
     origin: UpdateOrigin,
     settingsResetSeq?: number,
+    metadata?: UpdateOriginMetadata,
   ): number {
     this.assertWorkspacePresent();
-    const seq = this.appendTx(room, payload, origin, settingsResetSeq);
+    const seq = this.appendTx(room, payload, origin, settingsResetSeq, metadata);
     for (const listener of [...this.appendListeners]) {
       try {
         listener();
@@ -985,13 +1017,31 @@ export class MirrorStore {
     return this.readSinceTx(room, seq);
   }
 
+  readForSync(room: string, seq: number): LogSlice {
+    return this.readSinceTx(room, seq, true);
+  }
+
+  private nextForSync(room: string, seq: number): LoggedUpdate[] {
+    const row = this.statements.after.get(room, seq) as {
+      seq: number; payload: Uint8Array; metadata: string | null; log_origin: string;
+    } | undefined;
+    if (row === undefined) return [];
+    return [{ seq: row.seq, payload: row.payload,
+      ...(row.metadata === null ? {} : { metadata: JSON.parse(row.metadata) as UpdateOriginMetadata }),
+      ...(row.log_origin === "remote" ? { remote: true as const } : {}),
+    }];
+  }
+
   /** Log entries for one room after `seq`, in order. */
   updatesAfter(room: string, seq: number): LoggedUpdate[] {
     const rows = this.statements.after.all(room, seq) as {
       seq: number;
       payload: Uint8Array;
+      metadata: string | null;
     }[];
-    return rows.map((row) => ({ seq: row.seq, payload: row.payload }));
+    return rows.map((row) => ({ seq: row.seq, payload: row.payload,
+      ...(row.metadata === null ? {} : { metadata: JSON.parse(row.metadata) as UpdateOriginMetadata }),
+    }));
   }
 
   /** Whether the log holds anything at all for a room. */
