@@ -38,6 +38,7 @@ import { clampToken, importRootSecret, inspectToken } from "@uberblick/schema/to
 import { isLoopbackHost } from "@uberblick/schema/loopback";
 import { prepareDatabaseRelease } from "./database-release.js";
 import { OriginUpdates, type UpdateAuthor } from "./update-attribution.js";
+import { RevisionReads } from "./revision-reads.js";
 import type { UpdateOriginMetadata } from "@uberblick/schema";
 
 /**
@@ -85,6 +86,7 @@ export interface HubExtension {
   stop(): Promise<void>;
   assertCurrent?(connection: Connection<CredentialContext>, room: string): void;
   resolveAuthor?(context: CredentialContext, origin: UpdateOriginMetadata | null): UpdateAuthor | null;
+  revisionUsername?(principalId: string): string | null;
 }
 
 function createOriginUpdates(deletedRooms: DeletedRooms, extension: HubExtension | undefined, requireMetadata: boolean): OriginUpdates {
@@ -97,6 +99,20 @@ function createOriginUpdates(deletedRooms: DeletedRooms, extension: HubExtension
       }
     },
     resolveAuthor(context, origin) { return extension?.resolveAuthor?.(context, origin) ?? null; },
+  });
+}
+
+function createRevisionReads(database: HubDatabase, deletedRooms: DeletedRooms, extension: HubExtension | undefined): RevisionReads {
+  return new RevisionReads({
+    database,
+    assertCurrent(connection, room) {
+      deletedRooms.requireRoom(room, connection);
+      if (!("principalId" in connection.context) || extension?.assertCurrent === undefined) {
+        throw new Error("revision access requires current credential authority");
+      }
+      extension.assertCurrent(connection as Connection<CredentialContext>, room);
+    },
+    username(principalId) { return extension?.revisionUsername?.(principalId) ?? null; },
   });
 }
 
@@ -520,7 +536,7 @@ export async function createHub(config: HubConfig, options: {
       database: databasePath,
       error: String(error),
     });
-  });
+  }, { revisions: deviceCredentials });
 
   /** Releasing the handle is never the reason a shutdown fails; it is logged. */
   const closeDatabase = (): void => {
@@ -576,7 +592,7 @@ export async function createHub(config: HubConfig, options: {
     ...(config.maxDebounce === undefined
       ? {}
       : { maxDebounce: config.maxDebounce }),
-    extensions: [database, ...(extension?.extensions ?? []), originUpdates],
+    extensions: [database, ...(extension?.extensions ?? []), originUpdates, createRevisionReads(database, deletedRooms, extension)],
 
     /**
      * Stamp the direct peer before losing the socket. Never throw: Hocuspocus
