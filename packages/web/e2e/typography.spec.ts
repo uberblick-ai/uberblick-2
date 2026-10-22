@@ -19,7 +19,8 @@ async function expectScale(page: Page, surface: string): Promise<void> {
   const readings = await page.evaluate((excluded) => {
     const result: Array<{ where: string; size: number }> = [];
     for (const element of document.body.querySelectorAll("*")) {
-      if (element.closest(`${excluded}, script, style, .ub-avatar-agent-badge`) !== null) continue;
+      // Inline code sits a fixed ratio below the step around it; the code check below owns it.
+      if (element.closest(`${excluded}, script, style, .ub-avatar-agent-badge, .ub-inline-code`) !== null) continue;
       const style = getComputedStyle(element);
       const bounds = element.getBoundingClientRect();
       if (bounds.width === 0 || bounds.height === 0 || style.visibility !== "visible") continue;
@@ -88,7 +89,7 @@ test.describe("document and workspace typography", () => {
       title: "A readable document outline", description: "Typography browser acceptance fixture.",
       tldr: "A sentence at the body step.",
       blocks: [
-        { type: "paragraph", inline: [{ text: "Prose with ", marks: {} }, { text: "inline code", marks: { inlineCode: true } }, { text: " keeps its reading size.", marks: {} }] },
+        { type: "paragraph", inline: [{ text: "Prose with ", marks: {} }, { text: "inline code", marks: { inlineCode: true } }, { text: " sits inside its line.", marks: {} }] },
         ...[1, 2, 3, 4, 5, 6].map((level) => ({ type: "heading", level, inline: [{ text: `Level ${level} with `, marks: {} }, { text: "code", marks: { inlineCode: true } }] })),
         { type: "list-item", text: "A body-sized list item." },
         { type: "table", text: "| UI heading | Other heading |\n| --- | --- |\n| Body cell | A value |" },
@@ -143,7 +144,17 @@ test.describe("document and workspace typography", () => {
     await expectStep(page.locator(".ub-block-caption .ub-block-label").first(), 12, 16);
     await expect(editor(page).locator("p code, .ub-heading code")).toHaveCount(7);
     for (const code of await editor(page).locator("p code, .ub-heading code").all()) {
-      await expect(code).toHaveCSS("font-size", await code.locator("..").evaluate((node) => getComputedStyle(node).fontSize));
+      const fit = await code.evaluate((node) => {
+        const own = getComputedStyle(node);
+        const around = getComputedStyle(node.parentElement as Element);
+        return {
+          ratio: Number.parseFloat(own.fontSize) / Number.parseFloat(around.fontSize),
+          height: node.getBoundingClientRect().height,
+          leading: Number.parseFloat(around.lineHeight),
+        };
+      });
+      expect(fit.ratio).toBeCloseTo(0.85, 2);
+      expect(fit.height).toBeLessThanOrEqual(fit.leading);
     }
     const measure = await page.locator(".ub-document-pane > .ub-column").evaluate((column) => {
       const style = getComputedStyle(column);
