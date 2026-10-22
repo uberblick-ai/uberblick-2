@@ -78,62 +78,32 @@ export const toolHelpDetails = {
     "`uuid`, the rooms already `completed`, the `failed` room, `rolledBack: false`, and a stage-aware " +
     "`recovery` line — the earlier rooms stay durable, and recovery never risks creating the decision twice.",
   get_doc:
-    "Read a document's metadata — including `description` and the person-facing `tldr`, each null when nobody " +
-    "has written one, with tldr always null for decisions, which have no TL;DR — its blocks and its annotation threads. " +
-    "A thread's `blockId` names the block containing its `range`: its recorded block while that block carries " +
-    "its mark, otherwise the first marked visible block in document order. With no mark anywhere, `range` is " +
-    "null and `blockId` keeps the recorded id. A regular page with a deliberate TL;DR removal " +
-    "returns `tldr: null` and `tldrOptOut: true`; content writes give no TL;DR hints. Opt back in through the " +
-    "web's Add TL;DR, or set_metadata with `tldr_opt_in: true` and a non-null `tldr`. Summary text takes " +
-    "precedence over the mark, including after concurrent or older-client writes. Unmarked pages and " +
-    "decision records omit `tldrOptOut`. Lifecycle documents include `kind` and their " +
-    "compatible `status`; ordinary documents omit both. When structured data exists, `data` lists collection " +
-    "names and record counts and names `get_data` for deliberate reads. It contains no schemas or record " +
-    "values; documents without data omit it.\n\n" +
-    "`createdAt` is the known creation time in epoch milliseconds on the creating replica's clock; it is omitted when unknown. " +
-    "Every document returns a page-level `rev`, identical to the web status row's full revision of its ordered block content. Metadata and comments do not affect it. " +
-    "Regular documents return `code_check`: the latest comparison per repository, or [] when never checked. " +
-    "Each entry has repository (owner/name), commit, checked_at (writer's UTC recording time) and result: " +
-    "matches means agreement, ahead means intentionally undelivered behavior, drift means unintended " +
-    "disagreement. Each entry may also carry `rev`, the page revision the comparison read, and `paths`, the repo-relative files or folders looked at. Paths are hints, not a complete dependency list; an absent rev means the compared text is unknown. Earlier entries and entries rewritten by older clients can omit either field. Decision records omit code_check. Content edits and other metadata writes leave these " +
-    "entries unchanged; they never appear in blocks or Markdown export.\n\n" +
-    "Regular-page `decisions` resolve live topics without opening decision rooms: related topics first, " +
-    "then other topics found in backlinks, marked `relation: \"related\"` or `relation: \"linked\"`. Any " +
-    "record can establish either relation, including superseded, rejected or withdrawn history. Each group " +
-    "is oldest-topic-first, deduplicated, with archived topics omitted; indexed links can lag content. " +
-    "Decision-record metadata returns `discussion` as the connected RFC UUID or null. Every decision " +
-    "directory entry, including page decisions, predecessors, successors, inForce, pending and conflicts, " +
-    "caches it: null means no reference, absent means unknown until stub repair. The discussion is a " +
-    "derived outbound edge in effective links, separately from curated links and recorded answer " +
-    "attribution. The backlinks tool on the RFC lists its records; reading the RFC returns their topic marked " +
-    "linked unless it is also the topic's related page. Renaming or archiving the RFC preserves each " +
-    "reference, and an archived RFC remains readable. Decision entries include a cached answerPreview: " +
-    "the first answer paragraph/list as plain " +
-    "text, list items joined by `; `, whitespace collapsed, at most 300 characters with `…` when cut. " +
-    "It is null without a paragraph or list, or absent when the cache is unknown. For decision answers, " +
-    "see [Decision records](uberblick://help/decisions). " +
-    "Recorded `answer: {who, when, where}` is attribution, not the answer content.\n\n" +
-    "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
-    "For a table, `text` is canonical GFM with cell formatting as inline markdown, literal punctuation and " +
-    "pipes escaped, and every row padded to the widest row; `rev` includes that formatting. Card text is " +
-    "canonical container content with inline Markdown prose parts and repeated `button: [Text](destination)` " +
-    "lines after footer in authored order. Each button has nonempty plain text and an https URL or exactly " +
-    "claude://code/new, claude-cli://open or codex://new, alone or followed by ?query. Optional style outline/filled " +
-    "and color neutral/blue/green/violet default to outline neutral; output puts style before color and omits " +
-    "the defaults. Its rev includes every button's text, destination, appearance and order, and prose formatting. Card thread " +
-    "ranges name their anchored part. Figma text is canonical :::figma content without delimiters: url, " +
-    "optional plain title and height, a blank line and inline-Markdown caption. URL normalization keeps " +
-    "only path kind, key/id, name and node-id, starting-point-node-id and version-id on https://www.figma.com. " +
-    "Its formatting-sensitive rev includes the caption, and thread ranges use part caption with offsets in " +
-    "caption text. The read-only figma field returns kind (frame, file, prototype, board, slides or community " +
-    "file), file and optional percent-decoded fileName with dashes read as spaces, plus optional node in " +
-    "colon form. See markdown for accepted paths and container validation. For other blocks " +
-    "`text` is plain text and `rev` ignores marks. A prose block that carries inline references to other " +
-    "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
-    "link_range speak in, and absent where there are none. Table cell links count toward backlinks but do not " +
-    "have block-level `doc_links` ranges.\n\n" +
-    "Reading eligible guidance with get_doc counts toward this process’s briefing. This best-effort " +
-    "bookkeeping never fails the read or writes usage to a room or update log.",
+    "`get_doc` reads one document by UUID: its metadata, blocks and comment threads. Read a document before editing it; its blocks carry the ids and revisions an edit asserts.\n" +
+    "\n" +
+    "## Read, then edit\n" +
+    "\n" +
+    "```text\n" +
+    "get_doc({uuid: \"<document-uuid>\"})\n" +
+    "→ blocks: [{id: \"<block-id>\", type: \"paragraph\", text: \"Review on Friday.\", rev: \"<rev>\"}], …\n" +
+    "\n" +
+    "edit_block({uuid: \"<document-uuid>\", block_id: \"<block-id>\",\n" +
+    "  old_text: \"Review on Friday.\", new_text: \"Review on Monday.\", rev: \"<rev>\"})\n" +
+    "```\n" +
+    "\n" +
+    "Copy the returned text and rev into the edit. A block's rev checks this replica's current text at call time; it is not a lock. The page-level rev covers the whole text and matches the “rev …” the web shows below the title; code checks record it.\n" +
+    "\n" +
+    "## What comes back\n" +
+    "\n" +
+    "- Metadata: `title`, `description` and `tldr` (null when unwritten), `tags`, `links` and, when known, `createdAt`: the creation time in epoch milliseconds on the creating replica's clock. A regular page whose TL;DR a person removed on purpose returns `tldrOptOut: true`; set_metadata explains opting back in.\n" +
+    "- Blocks with `id`, `type`, `text` and `rev`. Prose text is plain; tables return GFM, and cards and embeds return their container content; see markdown. Prose that links other documents carries `doc_links` ranges.\n" +
+    "- Comment threads with their anchors, for annotate to reply to, resolve or move. A thread's `blockId` names the block holding its `range`; with no anchor left, `range` is null.\n" +
+    "- `code_check` on regular pages: the latest comparison per repository, or [] when never checked.\n" +
+    "- Decision context: a regular page lists the topics it owns (related) and the topics that link to it (linked); a decision record returns its status, discussion, predecessors, successors and the topic's resolution. It is context, not permission to act; see decisions.\n" +
+    "- `data`, when the document has structured data: collection names and record counts. Read records with get_data.\n" +
+    "\n" +
+    "## Constraints\n" +
+    "\n" +
+    "Archived and decided documents stay readable. A permanently deleted UUID refuses with doc_deleted. A missing or unavailable document refuses with recovery guidance, never an empty document.",
   get_data:
     "Read structured data deliberately. Without `collection`, return `data: null` for none, or an area " +
     "summary of collection names, record counts, validity and invalid-record counts, canonical UTF-8 bytes, " +
