@@ -237,6 +237,7 @@ export interface Harness {
   /** Remove the browser account's hub role while its devices and memberships stay. */
   removeCurrentHubAdmin(): void;
   changeCurrentWorkspaceRole(role: "member" | "admin"): void;
+  changeOtherMemberUsername(username: string): string;
   /** Where the browser goes. This run's real `ub open` address. */
   readonly appUrl: string;
   /** The address the latest `ub open` start printed; its launch secret is unused after a restart. */
@@ -661,6 +662,11 @@ export async function startHarness(options: {
         if (principals === undefined || memberships === undefined) throw new Error("Workspace role fixture is missing");
         memberships.changeRole({ workspaceId: workspaceUuid,
           principalId: principals.identify("1234", "browser-person").id, role });
+      },
+      changeOtherMemberUsername(username) {
+        const { principals } = hub ?? {};
+        if (principals === undefined) throw new Error("Workspace member fixture is missing");
+        return principals.identify("5678", username).id;
       },
       ...(secondHubUrl === undefined ? {} : { secondHubUrl }),
       hubText(room, secondary = false) {

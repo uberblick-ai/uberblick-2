@@ -121,6 +121,33 @@ describe("ub open: Devices identity projection", () => {
 });
 
 describe("ub open: live Access bridge", () => {
+  it("lists and manages a member with malformed stored login text", async () => {
+    const { app, hub, login, other, post, origin, github } = await rig();
+    const githubUsername = '<img src=x onerror=alert(1)>\n\u001b\u007f\u009b';
+    hub.principals!.identify(other.identity.githubAccountId, githubUsername);
+    const stored = { principalId: other.identity.id, githubAccountId: other.identity.githubAccountId,
+      githubUsername, role: "admin" };
+    try {
+      const listed = await post({ operation: "list-members", workspaceId: WORKSPACE });
+      expect(listed).toEqual({ code: 200, body: { status: "ok", hub: origin, members: expect.arrayContaining([
+        stored,
+        { principalId: login.identity.id, githubAccountId: login.identity.githubAccountId,
+          githubUsername: login.identity.githubUsername, role: "admin" },
+      ]) } });
+      expect(listed.body.members).toHaveLength(2);
+      expect((await post({ operation: "change-role", workspaceId: WORKSPACE, principalId: other.identity.id, role: "member" })).body.status)
+        .toBe("ok");
+      expect((await post({ operation: "list-members", workspaceId: WORKSPACE })).body.members)
+        .toContainEqual({ ...stored, role: "member" });
+      expect((await post({ operation: "remove-member", workspaceId: WORKSPACE, principalId: other.identity.id })).body.status)
+        .toBe("ok");
+      expect((await post({ operation: "list-members", workspaceId: WORKSPACE })).body.members)
+        .toEqual([{ principalId: login.identity.id, githubAccountId: login.identity.githubAccountId,
+          githubUsername: login.identity.githubUsername, role: "admin" }]);
+      expect(github).not.toHaveBeenCalled();
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
   it("protects the stored-login read and keeps it independent of membership, hub availability and replica preparation", async () => {
     const { app, box, hub, login, headers, origin } = await rig(null, []);
     const read = async () => {

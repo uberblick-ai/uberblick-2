@@ -3,7 +3,7 @@ import { isGithubAccountId, isGithubUsername } from "@uberblick/schema/github-id
 import { ensureDeviceLogin, readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 import { parseWorkspaceId } from "@uberblick/schema";
-import { ManagementResponseError, manageRequest } from "@uberblick/mcp-server/management-client";
+import { ManagementResponseError, manageRequest, sanitizeManagementReply } from "@uberblick/mcp-server/management-client";
 import type { ManagementAction } from "@uberblick/mcp-server/management-client";
 import { requireBinding, resolveConfig } from "@uberblick/mcp-server/project-config";
 import { type CommandArgs, usageError } from "./command.js";
@@ -86,21 +86,11 @@ interface Member {
 class MemberRefusal extends Error {}
 
 function isRole(value: unknown): value is Role { return value === "admin" || value === "member"; }
-function object(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-function member(value: unknown): Member {
-  if (!object(value) || typeof value.principalId !== "string" || value.principalId.length === 0 ||
-    typeof value.githubUsername !== "string" || value.githubUsername.length === 0 ||
-    !isGithubAccountId(value.githubAccountId) || !isRole(value.role)) {
-    throw new MemberRefusal("hub returned an invalid member response; update the hub and retry");
-  }
-  return { principalId: value.principalId, githubUsername: value.githubUsername,
-    githubAccountId: value.githubAccountId, role: value.role };
-}
 function describe(value: Pick<Member, "githubUsername" | "githubAccountId">): string {
   // Stored logins can be stale or contain terminal controls; they are display data.
-  return `${JSON.stringify(value.githubUsername)} (GitHub account ${value.githubAccountId})`;
+  const quoted = JSON.stringify(value.githubUsername).replace(/[\u007f-\u009f]/g,
+    char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+  return `${quoted} (GitHub account ${value.githubAccountId})`;
 }
 function already(value: Member, io: Io): void {
   io.out(`already a member: ${describe(value)} as ${value.role}; use \`ub workspace member role ${value.githubAccountId} <admin|member>\` to change the role\n`);
@@ -152,6 +142,9 @@ export async function workspaceMemberCommand(command: "add" | "list" | "role" | 
         login = current.login;
         reply = await manageRequest(origin, action, login);
       }
+      if (reply.status === 200 && (action.operation === "list-members" || action.operation === "grant-member")) {
+        reply = sanitizeManagementReply(action, reply, login);
+      }
       if (reply.status === 200 && ["ok", "already-member"].includes(String(reply.body.status))) return reply.body;
       const reasons: Record<string, [number, string]> = {
         "sign-in-required": [401, `sign-in is required; run \`ub auth login ${origin}\``],
@@ -172,8 +165,7 @@ export async function workspaceMemberCommand(command: "add" | "list" | "role" | 
     };
     const members = async (): Promise<Member[]> => {
       const body = await request({ operation: "list-members", workspaceId });
-      if (body.status !== "ok" || !Array.isArray(body.members)) throw new MemberRefusal("hub returned an invalid member list; update the hub and retry");
-      return body.members.map(member);
+      return body.members as Member[];
     };
     if (command === "list") {
       const rows = (await members()).map(({ githubUsername, githubAccountId, role }) => ({ githubUsername, githubAccountId, role }));
@@ -204,8 +196,7 @@ export async function workspaceMemberCommand(command: "add" | "list" | "role" | 
         if (!/^(y|yes)$/i.test(answer.trim())) { io.out("cancelled; nothing was granted\n"); return 0; }
       }
       const result = await request({ operation: "grant-member", workspaceId, githubAccountId: account.githubAccountId, role });
-      const added = member(result.member);
-      if (added.githubAccountId !== account.githubAccountId) throw new MemberRefusal("hub returned a different account after the grant; check the member list");
+      const added = result.member as Member;
       if (result.status === "already-member") already(added, io);
       else io.out(`added ${describe(added)} as ${added.role}\nAccess is discovered on sign-in or credential renewal; select the workspace explicitly with \`ub workspace use ${origin}/${workspaceId}\`.\n`);
       return 0;

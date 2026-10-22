@@ -347,14 +347,34 @@ describe("current member matching and mutations", () => {
     expect(actions(remote, "remove-member")).toEqual([]);
   });
 
-  it("quotes stored logins as display data and explains the last-admin refusal", async () => {
+  it("keeps malformed stored logins visible, escaped and manageable by account ID", async () => {
     const remote = await administrator();
-    const display = "changed\nlogin\u001b[31m";
-    member(remote, ACCOUNT, display);
+    const display = 'changed/"login"\\\n\u001b[31m\u007f\u0080\u009f';
+    const quoted = '"changed/\\"login\\"\\\\\\n\\u001b[31m\\u007f\\u0080\\u009f"';
+    const target = member(remote, ACCOUNT, display);
     const listed = await runInProcess(["workspace", "member", "list"], remote.box);
     expect(listed.status, listed.output).toBe(0);
-    expect(listed.stdout).toContain(JSON.stringify(display));
-    expect(listed.stdout.includes(display), "stored login cannot inject terminal formatting").toBe(false);
+    expect(listed.stdout).toContain(`${quoted} (GitHub account ${ACCOUNT}) | member`);
+    expect(listed.stdout).toContain(`"${USERNAME}" (GitHub account 1234) | admin`);
+    const json = await runInProcess(["workspace", "member", "list", "--json"], remote.box);
+    expect(json.status, json.output).toBe(0);
+    expect(JSON.parse(json.stdout).members).toContainEqual({ githubUsername: display, githubAccountId: ACCOUNT, role: "member" });
+    const changed = await runInProcess(["workspace", "member", "role", ACCOUNT, "admin"], remote.box);
+    expect(changed.status, changed.output).toBe(0);
+    expect(remote.hub.memberships!.roleFor(WORKSPACE, target.id)).toBe("admin");
+    const removed = await runInProcess(["workspace", "member", "remove", ACCOUNT], remote.box);
+    expect(removed.status, removed.output).toBe(0);
+    expect(remote.hub.memberships!.roleFor(WORKSPACE, target.id)).toBeNull();
+    for (const run of [listed, changed, removed]) {
+      expect(run.stdout).toContain(`${quoted} (GitHub account ${ACCOUNT})`);
+      expect(run.output).not.toContain("\u001b");
+      expect(run.output).not.toMatch(/[\u007f-\u009f]/);
+      publicOutput(run, remote);
+    }
+  });
+
+  it("explains the last-admin refusal", async () => {
+    const remote = await administrator();
     for (const args of [["role", "1234", "member"], ["remove", "1234"]]) {
       const run = await runInProcess(["workspace", "member", ...args], remote.box);
       expect(run.status, run.output).toBe(1);
@@ -362,6 +382,56 @@ describe("current member matching and mutations", () => {
       publicOutput(run, remote);
     }
     expect(remote.hub.memberships!.roleFor(WORKSPACE, savedLogin(remote.box, remote.origin).identity.id)).toBe("admin");
+  });
+});
+
+describe("shared member reply validation", () => {
+  it.each(["list-members", "grant-member"] as const)("refuses invalid %s rows without printing private fields", async operation => {
+    const remote = await administrator();
+    const key = savedLogin(remote.box, remote.origin).credential.key;
+    const row = { principalId: randomUUID(), githubAccountId: ACCOUNT, githubUsername: LOGIN, role: "member" };
+    for (const patch of [{ principalId: "invalid" }, { githubAccountId: "0" }, { role: "owner" },
+      { githubUsername: "" }, { githubUsername: null }, { githubUsername: `stored-${key}` }]) {
+      remote.controls.transform = (path, status, result) => {
+        if (path === "/auth/manage" && operation === "grant-member" && Array.isArray(result.members)) {
+          return { status, result: { status: "ok", members: [] } };
+        }
+        if (path !== "/auth/manage" || remote.requests.at(-1)?.body.operation !== operation) return { status, result };
+        return { status: 200, result: { status: "ok", ...(operation === "list-members"
+          ? { members: [{ ...row, ...patch }] } : { member: { ...row, ...patch } }), token: key } };
+      };
+      const run = await runInProcess(["workspace", "member", ...(operation === "list-members" ? ["list"] : ["add", LOGIN, "--yes"])], remote.box);
+      expect(run.status, run.output).toBe(1);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("invalid member-management response");
+      publicOutput(run, remote);
+    }
+  });
+
+  it("refuses duplicate principals before selecting a member or displaying a partial list", async () => {
+    const remote = await administrator();
+    const target = member(remote);
+    remote.controls.transform = (path, status, result) => path === "/auth/manage" && Array.isArray(result.members)
+      ? { status, result: { ...result, members: [...result.members, { principalId: target.id, githubAccountId: "6789", githubUsername: "another", role: "admin" }] } }
+      : { status, result };
+    for (const args of [["list"], ["role", ACCOUNT, "admin"], ["remove", ACCOUNT]]) {
+      const run = await runInProcess(["workspace", "member", ...args], remote.box);
+      expect(run.status, run.output).toBe(1);
+      expect(run.stdout).toBe("");
+      publicOutput(run, remote);
+    }
+    expect(actions(remote, "change-role")).toEqual([]);
+    expect(actions(remote, "remove-member")).toEqual([]);
+  });
+
+  it("quotes and escapes stored display data in a grant reply", async () => {
+    const remote = await administrator();
+    remote.hub.principals!.identify(ACCOUNT, "stored/login\u007f\u009f");
+    const run = await runInProcess(["workspace", "member", "add", LOGIN, "--yes"], remote.box);
+    expect(run.status, run.output).toBe(0);
+    expect(run.stdout).toContain(`"stored/login\\u007f\\u009f" (GitHub account ${ACCOUNT})`);
+    expect(run.output).not.toMatch(/[\u007f-\u009f]/);
+    publicOutput(run, remote);
   });
 });
 

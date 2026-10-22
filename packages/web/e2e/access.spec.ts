@@ -126,6 +126,46 @@ test("confirm a GitHub account, manage membership, and revoke only your devices"
   await expect(page.getByRole("button", { name: "Add as member", exact: true })).toHaveCount(0);
 });
 
+test("stored member logins render as text and remain manageable by principal", async ({ browser }) => {
+  const username = 'private/provider <img src=x onerror="alert(1)"> & "login"';
+  const principalId = harness().changeOtherMemberUsername(username);
+  const page = await openApp(browser, `/${harness().workspace}/settings/members`);
+  const members = page.getByRole("table", { name: "Members", exact: true });
+  await expect(members.getByRole("rowheader")).toHaveCount(2);
+  await expect(members.getByRole("rowheader").filter({ hasText: "browser-person" })).toBeVisible();
+  const storedAccount = members.getByRole("rowheader", { name: username, exact: true });
+  await expect(storedAccount).toBeVisible();
+  expect(await storedAccount.textContent()).toBe(username);
+  await expect(storedAccount.locator("*")).toHaveCount(0);
+
+  const role = page.getByLabel(`Role for ${username}`, { exact: true });
+  const changed = page.waitForRequest((request) => request.url().endsWith("/api/access") &&
+    request.method() === "POST" && request.postDataJSON().operation === "change-role");
+  await role.selectOption("member");
+  expect((await changed).postDataJSON()).toEqual({
+    operation: "change-role", workspaceId: harness().workspaceUuid, principalId, role: "member",
+  });
+  await expect(roleToast(page)).toHaveAttribute("data-type", "success");
+  await expect(role).toHaveValue("member");
+  await page.reload();
+  await expect(members.getByRole("rowheader")).toHaveCount(2);
+  await expect(role).toHaveValue("member");
+
+  await page.getByRole("button", { name: `Remove ${username}`, exact: true }).click();
+  const confirm = page.getByRole("alertdialog", { name: `Remove ${username}?`, exact: true });
+  await expect(confirm.getByRole("heading")).toHaveText(`Remove ${username}?`);
+  await expect(confirm.locator("img")).toHaveCount(0);
+  const removed = page.waitForRequest((request) => request.url().endsWith("/api/access") &&
+    request.method() === "POST" && request.postDataJSON().operation === "remove-member");
+  await confirm.getByRole("button", { name: "Remove member", exact: true }).click();
+  expect((await removed).postDataJSON()).toEqual({
+    operation: "remove-member", workspaceId: harness().workspaceUuid, principalId,
+  });
+  await expect(storedAccount).toHaveCount(0);
+  await expect(members.getByRole("rowheader")).toHaveCount(1);
+  await expect(members.getByRole("rowheader").filter({ hasText: "browser-person" })).toBeVisible();
+});
+
 test("a lost hub refuses a role change and keeps member management unavailable on reload until authority returns", async ({ browser }) => {
   const page = await openApp(browser, `/${harness().workspace}/settings/members`);
   await expect(page.getByRole("table", { name: "Members", exact: true })).toBeVisible();
