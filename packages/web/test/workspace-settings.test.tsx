@@ -11,6 +11,7 @@ import {
   getWorkspaceMainRepository,
   setWorkspaceMainRepository,
   setWorkspaceName,
+  setTagCatalogDescription,
   deleteTagCatalogEntry,
   restoreDirectoryEntry,
   settingsRoom,
@@ -422,7 +423,7 @@ it("waits for server state, seeds once and keeps deleted examples absent offline
   const room = statusRoom({ ...SYNCED, connected: false, synced: false, hasReceivedServerState: false, writable: false }, settingsRoom(WORKSPACE.uuid));
   const host = await mountTags(room.connection);
   expect(host.textContent).toContain("Waiting for the tag catalog");
-  expect(within(host).queryByLabelText("Create a tag")).toBeNull();
+  expect(within(host).queryByLabelText("Name")).toBeNull();
   room.update({ connected: true, synced: true, hasReceivedServerState: true, writable: true });
   expect(listTagCatalog(room.connection.ydoc).map((entry) => entry.name)).toEqual(EXAMPLE_TAGS.map((entry) => entry.name));
   act(() => { for (const entry of listTagCatalog(room.connection.ydoc)) deleteTagCatalogEntry(room.connection.ydoc, entry.id); });
@@ -430,7 +431,8 @@ it("waits for server state, seeds once and keeps deleted examples absent offline
   expect(within(host).queryByText("Retired")).toBeNull();
   room.update({ connected: false, synced: false, writable: false });
   expect(host.textContent).toContain("Tag changes are unavailable");
-  expect(within(host).getByRole<HTMLInputElement>("textbox", { name: "Create a tag" }).disabled).toBe(true);
+  expect(within(host).getByRole<HTMLInputElement>("textbox", { name: "Name" }).disabled).toBe(true);
+  expect(within(host).getByRole<HTMLInputElement>("textbox", { name: "Description (optional)" }).disabled).toBe(true);
   room.update({ connected: true, synced: true, writable: true });
   expect(listTagCatalog(room.connection.ydoc)).toEqual([]);
 });
@@ -439,7 +441,7 @@ it("lets an admin curate an unseeded hub catalog without creating example tags",
   const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
   const host = await mountTags(room.connection, false);
   expect(listTagCatalog(room.connection.ydoc)).toEqual([]);
-  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Create a tag" });
+  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Name" });
   expect(input.disabled).toBe(false);
   act(() => typeInto(input, "product"));
   act(() => within(host).getByRole<HTMLButtonElement>("button", { name: "Create" }).click());
@@ -447,27 +449,34 @@ it("lets an admin curate an unseeded hub catalog without creating example tags",
   room.connection.ydoc.destroy();
 });
 
-it("folds tag drafts, validates unique names, and converges lifecycle changes with a peer", async () => {
+it("preserves invalid tag drafts, creates descriptions and converges lifecycle changes with a peer", async () => {
   const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
   const peer = peerOf(room.connection.ydoc);
   const host = await mountTags(room.connection);
-  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Create a tag" });
+  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Name" });
+  const description = within(host).getByRole<HTMLInputElement>("textbox", { name: "Description (optional)" });
   const submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Create" });
 
-  expect(within(host).getByText(
+  expect(within(host).getByRole("heading", { level: 2, name: "New tag" })).toBeTruthy();
+  expect(within(host).getByText("A short description tells people and agents when to use it.")).toBeTruthy();
+  expect(within(host).queryByText(
     "Letters and numbers, separated by hyphens; saved in lowercase; 30 characters maximum.",
-  )).toBeTruthy();
-  const initial = listTagCatalog(peer);
+  )).toBeNull();
+  const table = within(host).getByRole("table", { name: "Tags" });
+  expect(within(table).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual(["Name", "Description", "Actions"]);
+  const initial = Y.encodeStateAsUpdate(peer);
   for (const draft of ["iOS app", "ios--app"]) {
     act(() => {
       typeInto(input, draft);
+      typeInto(description, "  iOS documents  ");
       submit.click();
     });
     expect(within(host).getByRole("alert").textContent).toBe(
       "Use 1–30 letters or numbers, separated by single hyphens.",
     );
     expect(input.value).toBe(draft);
-    expect(listTagCatalog(peer)).toEqual(initial);
+    expect(description.value).toBe("  iOS documents  ");
+    expect(Y.encodeStateAsUpdate(peer)).toEqual(initial);
   }
 
   act(() => typeInto(input, "iOS"));
@@ -475,29 +484,45 @@ it("folds tag drafts, validates unique names, and converges lifecycle changes wi
   expect(within(host).queryByRole("alert")).toBeNull();
   act(() => submit.click());
   const created = listTagCatalog(peer).find((entry) => entry.name === "ios");
-  expect(created).toMatchObject({ name: "ios" });
+  expect(created).toMatchObject({ name: "ios", description: "iOS documents" });
   expect(input.value).toBe("");
+  expect(description.value).toBe("");
   expect(toast.success).toHaveBeenLastCalledWith("Created “ios”.", { id: "workspace-settings" });
   expect(host.textContent).not.toContain("Created “ios”.");
 
+  const beforeDuplicate = Y.encodeStateAsUpdate(peer);
   act(() => {
     typeInto(input, "iOS");
+    typeInto(description, "Keep this draft");
     submit.click();
   });
   expect(within(host).getByRole("alert").textContent).toBe(
     "“ios” is already a tag.",
   );
   expect(input.value).toBe("iOS");
+  expect(description.value).toBe("Keep this draft");
+  expect(Y.encodeStateAsUpdate(peer)).toEqual(beforeDuplicate);
   expect(listTagCatalog(peer).filter((entry) => entry.name === "ios")).toHaveLength(1);
   expect(toast.success).toHaveBeenCalledTimes(1);
 
-  act(() => typeInto(input, "  Billing-V2 "));
+  act(() => {
+    typeInto(input, "  Billing-V2 ");
+    typeInto(description, "d".repeat(301));
+  });
   expect(input.value).toBe("  Billing-V2 ");
   expect(within(host).queryByRole("alert")).toBeNull();
   act(() => submit.click());
-  expect(listTagCatalog(peer).find((entry) => entry.name === "billing-v2"))
-    .toMatchObject({ name: "billing-v2" });
+  expect(within(host).getByRole("alert").textContent).toContain("300");
+  expect(input.value).toBe("  Billing-V2 ");
+  expect(description.value).toBe("d".repeat(301));
+  expect(Y.encodeStateAsUpdate(peer)).toEqual(beforeDuplicate);
+  act(() => typeInto(description, "   "));
+  act(() => submit.click());
+  const blankDescription = listTagCatalog(peer).find((entry) => entry.name === "billing-v2");
+  expect(blankDescription).toMatchObject({ name: "billing-v2" });
+  expect(blankDescription).not.toHaveProperty("description");
   expect(input.value).toBe("");
+  expect(description.value).toBe("");
   expect(toast.success).toHaveBeenLastCalledWith("Created “billing-v2”.", { id: "workspace-settings" });
 
   const trigger = within(host).getByRole<HTMLButtonElement>("button", { name: /^Delete\s*ios$/ });
@@ -515,13 +540,126 @@ it("folds tag drafts, validates unique names, and converges lifecycle changes wi
   const recreated = listTagCatalog(peer).find((entry) => entry.name === "ios");
   expect(recreated?.id).not.toBe(created?.id);
   expect(input.value).toBe("");
-  act(() => createTagCatalogEntry(peer, "zeta"));
-  expect(host.textContent).toContain("zeta");
+  let remoteId = "";
+  act(() => { remoteId = createTagCatalogEntry(peer, "zeta", undefined, "From a peer").id; });
+  const remoteRow = within(table).getByRole("row", { name: /zeta/ });
+  expect(within(remoteRow).getByRole("cell", { name: "From a peer" })).toBeTruthy();
+  act(() => setTagCatalogDescription(peer, remoteId, "Changed by a peer"));
+  expect(within(remoteRow).getByRole("cell", { name: "Changed by a peer" })).toBeTruthy();
 });
 
 function activate(control: HTMLButtonElement): void {
   act(() => { control.focus(); control.click(); });
 }
+
+it("prefills, replaces and clears a tag description, while Cancel saves nothing", async () => {
+  const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  const entry = createTagCatalogEntry(room.connection.ydoc, "product", undefined, "Current meaning");
+  const peer = peerOf(room.connection.ydoc);
+  const host = await mountTags(room.connection, false);
+  const openEdit = (): HTMLElement => {
+    activate(within(host).getByRole<HTMLButtonElement>("button", { name: "Edit product" }));
+    return screen.getByRole("dialog", { name: "Edit “product”" });
+  };
+  let dialog = openEdit();
+  let input = within(dialog).getByRole<HTMLInputElement>("textbox", { name: "Description" });
+  expect(input.value).toBe("Current meaning");
+  act(() => typeInto(input, "  New meaning  "));
+  activate(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Save" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(listTagCatalog(peer)).toEqual([{ ...entry, description: "New meaning" }]);
+  expect(within(host).getByRole("cell", { name: "New meaning" })).toBeTruthy();
+
+  dialog = openEdit();
+  input = within(dialog).getByRole<HTMLInputElement>("textbox", { name: "Description" });
+  expect(input.value).toBe("New meaning");
+  const beforeCancel = Y.encodeStateAsUpdate(peer);
+  act(() => typeInto(input, "Unsaved meaning"));
+  activate(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Cancel" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(Y.encodeStateAsUpdate(peer)).toEqual(beforeCancel);
+
+  dialog = openEdit();
+  input = within(dialog).getByRole<HTMLInputElement>("textbox", { name: "Description" });
+  expect(input.value).toBe("New meaning");
+  act(() => typeInto(input, "   "));
+  activate(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Save" }));
+  expect(listTagCatalog(peer)).toEqual([{ id: entry.id, name: "product" }]);
+  expect(within(host).getByRole("cell", { name: "No description" })).toBeTruthy();
+});
+
+it("keeps invalid edit drafts in the dialog without changing the catalog", async () => {
+  const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  createTagCatalogEntry(room.connection.ydoc, "product", undefined, "Current meaning");
+  const host = await mountTags(room.connection, false);
+  activate(within(host).getByRole<HTMLButtonElement>("button", { name: "Edit product" }));
+  const dialog = screen.getByRole("dialog", { name: "Edit “product”" });
+  const input = within(dialog).getByRole<HTMLInputElement>("textbox", { name: "Description" });
+  const before = Y.encodeStateAsUpdate(room.connection.ydoc);
+  act(() => typeInto(input, "d".repeat(301)));
+  activate(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Save" }));
+  expect(within(dialog).getByRole("alert").textContent).toContain("300");
+  expect(input.value).toBe("d".repeat(301));
+  expect(screen.getByRole("dialog", { name: "Edit “product”" })).toBe(dialog);
+  expect(Y.encodeStateAsUpdate(room.connection.ydoc)).toEqual(before);
+  expect(toast.success).not.toHaveBeenCalled();
+});
+
+it("refuses an edit after a peer deletes the tag without resurrecting it or writing", async () => {
+  const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  const entry = createTagCatalogEntry(room.connection.ydoc, "product", undefined, "Current meaning");
+  const peer = peerOf(room.connection.ydoc);
+  const host = await mountTags(room.connection, false);
+  activate(within(host).getByRole<HTMLButtonElement>("button", { name: "Edit product" }));
+  const dialog = screen.getByRole("dialog", { name: "Edit “product”" });
+  const input = within(dialog).getByRole<HTMLInputElement>("textbox", { name: "Description" });
+  act(() => typeInto(input, "Unsaved meaning"));
+  act(() => deleteTagCatalogEntry(peer, entry.id));
+  const before = Y.encodeStateAsUpdate(peer);
+  activate(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Save" }));
+  expect(within(dialog).getByRole("alert").textContent).toBe("This tag no longer exists.");
+  expect(input.value).toBe("Unsaved meaning");
+  expect(Y.encodeStateAsUpdate(peer)).toEqual(before);
+  expect(listTagCatalog(peer)).toEqual([]);
+  expect(toast.success).not.toHaveBeenCalled();
+});
+
+it("rechecks writability before creating a tag and keeps both drafts", async () => {
+  const room = statusRoom({ ...SYNCED }, settingsRoom(WORKSPACE.uuid));
+  const host = await mountTags(room.connection, false);
+  const name = within(host).getByRole<HTMLInputElement>("textbox", { name: "Name" });
+  const description = within(host).getByRole<HTMLInputElement>("textbox", { name: "Description (optional)" });
+  act(() => { typeInto(name, "product"); typeInto(description, "A draft meaning"); });
+  const before = Y.encodeStateAsUpdate(room.connection.ydoc);
+  room.connection.status.writable = false;
+  act(() => name.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(within(host).getByRole("alert").textContent).toBe("Reconnect before changing the tag catalog.");
+  expect(name.value).toBe("product");
+  expect(description.value).toBe("A draft meaning");
+  expect(Y.encodeStateAsUpdate(room.connection.ydoc)).toEqual(before);
+  room.update({ writable: false });
+  expect(within(host).getByRole<HTMLButtonElement>("button", { name: "Create" }).disabled).toBe(true);
+  expect(host.textContent).toContain("Tag changes are unavailable");
+});
+
+it("rechecks writability when saving a description and disables Save when notified", async () => {
+  const room = statusRoom({ ...SYNCED }, settingsRoom(WORKSPACE.uuid));
+  createTagCatalogEntry(room.connection.ydoc, "product", undefined, "Current meaning");
+  const host = await mountTags(room.connection, false);
+  activate(within(host).getByRole<HTMLButtonElement>("button", { name: "Edit product" }));
+  const dialog = screen.getByRole("dialog", { name: "Edit “product”" });
+  const input = within(dialog).getByRole<HTMLInputElement>("textbox", { name: "Description" });
+  act(() => typeInto(input, "Unsaved meaning"));
+  const before = Y.encodeStateAsUpdate(room.connection.ydoc);
+  room.connection.status.writable = false;
+  act(() => input.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(within(dialog).getByRole("alert").textContent).toBe("Reconnect before changing the tag catalog.");
+  expect(input.value).toBe("Unsaved meaning");
+  expect(Y.encodeStateAsUpdate(room.connection.ydoc)).toEqual(before);
+  room.update({ writable: false });
+  expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Save" }).disabled).toBe(true);
+  expect(host.textContent).toContain("Tag changes are unavailable");
+});
 
 it("rechecks writability when confirming deletion", async () => {
   const room = statusRoom({ ...SYNCED }, settingsRoom(WORKSPACE.uuid));
@@ -531,6 +669,11 @@ it("rechecks writability when confirming deletion", async () => {
   room.connection.status.writable = false;
   activate(within(dialog).getByRole<HTMLButtonElement>("button", { name: "Delete" }));
   expect(listTagCatalog(room.connection.ydoc).some((entry) => entry.name === "auth")).toBe(true);
+  room.update({ writable: true });
+  activate(within(host).getByRole<HTMLButtonElement>("button", { name: /^Delete\s*auth$/ }));
+  const unavailableDialog = screen.getByRole("alertdialog", { name: "Delete “auth”?" });
+  room.update({ writable: false });
+  expect(within(unavailableDialog).getByRole<HTMLButtonElement>("button", { name: "Delete" }).disabled).toBe(true);
 });
 
 it("leaves focus untouched when a peer changes the catalog", async () => {
@@ -688,7 +831,7 @@ it.each(["input", "submit"])("preserves the focused %s when name or tag submissi
 
   mounted?.unmount();
   host = await mountTags(settings.connection);
-  input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Create a tag" });
+  input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Name" });
   submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Create" });
   act(() => {
     typeInto(input, "product");
@@ -703,7 +846,7 @@ it.each(["input", "submit"])("preserves the focused %s when name or tag submissi
 it("keeps tag reconnect refusal inline and clears it when submission later succeeds", async () => {
   const settings = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
   const host = await mountTags(settings.connection);
-  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Create a tag" });
+  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Name" });
   act(() => typeInto(input, "product"));
   settings.update({ writable: false, connected: false, synced: false });
   act(() => input.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));

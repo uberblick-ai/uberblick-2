@@ -97,7 +97,7 @@ async function ensureExampleCatalog(page: Page): Promise<void> {
   );
   await expect(page.getByRole("heading", { name: "Tags", level: 1 })).toBeVisible();
   await expect(
-    page.locator("[data-tag-list]").getByRole("listitem"),
+    page.locator("[data-tag-list] tbody tr"),
   ).toHaveCount(EXAMPLE_TAGS.length);
   await page.locator(".ub-settings-back").click();
   await expect(page).toHaveURL(
@@ -1787,7 +1787,7 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
   });
   expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(touch);
   const floor = touch ? 44 : 24;
-  await expect(page.locator("[data-tag-list]").getByRole("listitem")).toHaveCount(EXAMPLE_TAGS.length);
+  await expect(page.locator("[data-tag-list] tbody tr")).toHaveCount(EXAMPLE_TAGS.length);
   await page.goto(new URL(`/${harness().workspace}`, page.url()).href);
   await expect(page.locator(".ub-docs")).toBeVisible();
   const showSidebar = page.getByRole("button", { name: "Show document list", exact: true });
@@ -2246,7 +2246,7 @@ for (const scheme of ["light", "dark"] as const) {
       readySelector: "[data-settings-page]",
     });
     expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(touch);
-    await expect(page.locator("[data-tag-list]").getByRole("listitem")).toHaveCount(EXAMPLE_TAGS.length);
+    await expect(page.locator("[data-tag-list] tbody tr")).toHaveCount(EXAMPLE_TAGS.length);
     await page.goto(new URL(`/${harness().workspace}`, page.url()).href);
     await expect(page.locator(".ub-docs")).toBeVisible();
     if (touch) await page.getByRole("button", { name: "Show document list", exact: true }).click();
@@ -2430,7 +2430,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
     new URL(`/${harness().workspace}/settings/tags`, page.url()).href,
   );
   for (const name of added) {
-    await page.getByLabel("Create a tag").fill(name);
+    await page.getByLabel("Name", { exact: true }).fill(name);
     await page.getByRole("button", { name: "Create", exact: true }).click();
     await expect(page.getByRole("button", { name: `Delete ${name}` })).toBeVisible();
   }
@@ -2487,7 +2487,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   await page.goto(
     new URL(`/${harness().workspace}/settings/tags`, page.url()).href,
   );
-  await page.getByLabel("Create a tag").fill(longest);
+  await page.getByLabel("Name", { exact: true }).fill(longest);
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page.getByRole("button", { name: `Delete ${longest}` })).toBeVisible();
   // On its own, because one name is the case: with the seeded short ones beside
@@ -2540,7 +2540,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
     await expect(page.getByRole("button", { name: `Delete ${name}` })).toHaveCount(0);
   }
   await expect(
-    page.locator("[data-tag-list]").getByRole("listitem"),
+    page.locator("[data-tag-list] tbody tr"),
   ).toHaveCount(EXAMPLE_TAGS.length);
 });
 
