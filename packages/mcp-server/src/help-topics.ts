@@ -112,10 +112,9 @@ A topic is the question; it keeps its identity while its answer changes. The fir
 
 ## Writing the answer
 
-- Lead with the choice in one plain sentence naming the chosen option, without hedging such as "should consider". Give the reason in one clause or sentence.
-- Keep the whole answer to 60 words or fewer, in one to three answer blocks: paragraphs, code blocks, tables or lists (adjacent list items count as one). Other block types refuse.
-- Short is not vague: keep the concrete terms needed to apply the answer.
-- Put alternatives, extended rationale and process in a linked RFC, and product detail on the owning regular page. Do not restate the topic or write a specification.
+- State the decision itself in one plain sentence naming the chosen option, without hedging such as "should consider" and without reasoning. Reasoning, alternatives and process go in a linked RFC; product detail goes on the owning regular page.
+- Keep it very short; that matters more than the block count. Aim for 60 words of prose or fewer; this is editorial guidance, not a validated limit. MCP accepts at most three answer blocks: paragraphs, code blocks (a short ablauf diagram can show the decision), tables or lists (adjacent list items count as one). Other block types refuse.
+- Short is not vague: keep the concrete terms needed to apply the decision. Do not restate the topic or write a specification.
 - Decisions have no TL;DR, and a decided record holds no structured data.
 
 ## Status changes
