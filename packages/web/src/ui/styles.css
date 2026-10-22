@@ -97,6 +97,9 @@
   /* Warning text needs darker light-mode ink than the fill/stroke accent. */
   --status-warning-ink: light-dark(oklch(0.48 0.1 75), var(--status-warning));
 
+  --revision-added-background: light-dark(oklch(0.92 0.04 240), oklch(0.3 0.05 240));
+  --revision-removed-background: light-dark(oklch(0.93 0.035 305), oklch(0.3 0.045 305));
+
   --archived-background: light-dark(oklch(0.97 0.015 75), oklch(0.23 0.015 75));
   --archived-icon: light-dark(oklch(0.52 0.07 75), oklch(0.7 0.07 75));
 
@@ -207,6 +210,43 @@
   /* Grayscale smoothing keeps the 400 and 500 stems visually distinct. */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+.ub-history-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block: 0.75rem 1rem;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+[data-revision-change="added"] {
+  color: inherit;
+  background: var(--revision-added-background);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 0.2em;
+}
+
+[data-revision-change="removed"] {
+  color: inherit;
+  background: var(--revision-removed-background);
+  text-decoration: line-through;
+}
+
+.ub-revision-fields {
+  display: block;
+  color: var(--muted-foreground);
+  font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
+  margin-block: 0.35rem;
+}
+
+.ub-revision-block-removed {
+  border-inline-start: 2px solid var(--muted-foreground);
+  padding-inline-start: 0.5rem;
 }
 
 /*

@@ -1,7 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ServingSyncStatus, UberblickMcpEngine } from "@uberblick/mcp-server";
+import { getDocumentRevision, listDocumentRevisions, RevisionClientError, type ServingSyncStatus, type UberblickMcpEngine } from "@uberblick/mcp-server";
+import { isDocId } from "@uberblick/schema";
 import { SYNC_PROTOCOL_VERSION, readAuthEnvelope } from "@uberblick/schema/protocol";
 import { clampToken, importRootSecret, verifyToken } from "@uberblick/schema/token";
+import * as Y from "yjs";
 import { readAccessAction, requestAccess, type AccessBinding } from "./open-access.js";
 import { requestAccount, requestDeviceLogin } from "./open-account.js";
 import { serveBundleRequest } from "./open-bundle.js";
@@ -11,6 +13,7 @@ import { BrowserReplicaUnavailable, type BrowserReplicas, type ServedWorkspace }
 
 const API_PREFIX = "/api/";
 const SEARCH_PATH = "/api/search";
+const REVISIONS_PATH = "/api/revisions";
 const STATUS_PATH = "/api/status";
 const ACCESS_PATH = "/api/access";
 const ACCOUNT_PATH = "/api/account";
@@ -105,6 +108,36 @@ interface ApiRequestContext {
 interface BoundRequestContext extends Omit<ApiRequestContext, "target"> {
   expectedHost: string;
   root: string;
+}
+
+async function serveRevisions(
+  engine: UberblickMcpEngine,
+  target: URL,
+  reply: (status: number, body: object) => void,
+): Promise<void> {
+  const uuid = target.searchParams.get("uuid");
+  if (uuid === null || !isDocId(uuid)) {
+    reply(400, { error: "invalid_document" });
+    return;
+  }
+  const revision = target.searchParams.get("revision");
+  if (revision !== null && (revision.length === 0 || revision.length > 256)) {
+    reply(400, { error: "invalid_revision" });
+    return;
+  }
+  try {
+    if (revision === null) {
+      reply(200, { revisions: await listDocumentRevisions(engine.replicas, uuid) });
+    } else {
+      const snapshot = await getDocumentRevision(engine.replicas, uuid, revision);
+      try {
+        reply(200, { state: Buffer.from(Y.encodeStateAsUpdate(snapshot)).toString("base64") });
+      } finally { snapshot.destroy(); }
+    }
+  } catch (error) {
+    if (!(error instanceof RevisionClientError)) throw error;
+    reply(503, { error: "history_unavailable", reason: error.code });
+  }
 }
 
 async function serveApiRequest(context: ApiRequestContext): Promise<void> {
@@ -214,6 +247,10 @@ async function serveApiRequest(context: ApiRequestContext): Promise<void> {
     }
     return;
   }
+  if (target.pathname === REVISIONS_PATH) {
+    await serveRevisions(engine, target, reply);
+    return;
+  }
   if (target.pathname !== SEARCH_PATH) {
     apiResponse(request, response, 404, { error: "not_found" });
     return;
@@ -256,4 +293,3 @@ export function serveBoundRequest(context: BoundRequestContext): void {
     }
   });
 }
-

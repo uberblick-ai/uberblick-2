@@ -10,7 +10,7 @@ export function ShellThreads({ shell }: { shell: AppShell }) {
   const { threads, focusedThread, threadsOpen, onFocusThread, setThreadsOpen, restoreThreadsFocus } = shell.threads;
   return <>
     {/* Every open document keeps its threads column, before the first comment too. */}
-    {doc !== null && !deleted && (
+    {doc !== null && !deleted && !shell.history.active && (
       <div
         className="ub-document-rail flex min-h-0 w-[var(--document-rail-width)] flex-none flex-col border-l border-border me-[var(--pane-trailing-space)] max-xl:absolute max-xl:inset-x-0 max-xl:top-0 max-xl:w-auto max-xl:border-0 max-xl:me-0 max-xl:pointer-events-none"
       >

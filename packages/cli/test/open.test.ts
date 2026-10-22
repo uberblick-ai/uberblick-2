@@ -218,6 +218,7 @@ describe("ub open", () => {
       for (const sample of refused) {
         const paths = [
           `api/search?q=nothing${sample.suffix ?? ""}`,
+          `api/revisions?uuid=7a819902-f86e-45d1-84d3-58d8f979a503${sample.suffix ?? ""}`,
           `api/status${sample.suffix?.replace(/^&/, "?") ?? ""}`,
         ];
         for (const path of paths) {

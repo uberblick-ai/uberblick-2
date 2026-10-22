@@ -4,6 +4,7 @@ import type { HubEndpoint } from "../../config.js";
 import { randomIdentity } from "../../collab/identity.js";
 import { createAccountClient } from "../../shell/account.js";
 import { createDocumentSearchClient } from "../../shell/document-search.js";
+import { createDocumentRevisionsClient } from "../../shell/document-revisions.js";
 import { useHubEndpoint, useIdentity, useLocalSessionMissing, useSetting } from "../hooks.js";
 import { parseRoute } from "../route.js";
 import { useServingAccount } from "../status/serving-account.js";
@@ -66,6 +67,12 @@ export function useShellEnvironment(path: string) {
   );
   const account = useServingAccount(accountClient);
   const hubAdministration = useHubAdministration(workspaceUuid, serving, identity.name, path);
+  const historyAvailable = hubAdministration.authority !== null && hubAdministration.authority.status !== "local-only";
+  const documentRevisions = useMemo(
+    () => serving === null || serving.remoteHubUrl === null || workspaceUuid === null || !historyAvailable
+      ? null : createDocumentRevisionsClient(workspaceUuid, identity.name),
+    [historyAvailable, identity.name, serving, workspaceUuid],
+  );
   const settingsAccess = useSettingsAccess(workspaceUuid, serving, identity.name, path,
     hubReady && !remoteSignIn, startupServing === null);
   // Startup configuration may name an implicit loopback hub for a local-only
@@ -84,6 +91,6 @@ export function useShellEnvironment(path: string) {
   const listing = route.kind === "all" || route.kind === "list";
   return { path, hubReady, defaultIdentity, identity, configured, startupServing, defaultWorkspace,
     route, workspace, workspaceUuid, serving, remoteSignIn, sessionMissing, roomReady, endpoint,
-    statusEndpoint, documentSearch, account, hubAdministration, settingsAccess, workspaceLocation, settings, listing };
+    statusEndpoint, documentSearch, documentRevisions, account, hubAdministration, settingsAccess, workspaceLocation, settings, listing };
 }
 export type ShellEnvironment = ReturnType<typeof useShellEnvironment>;

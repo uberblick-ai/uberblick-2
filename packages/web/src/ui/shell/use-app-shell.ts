@@ -11,6 +11,7 @@ import { useThreadsRail } from "./threads.js";
 import { useDocumentStubRepair, useShellReadings, useSyncDetails } from "./readings.js";
 import { useShellNavigation } from "./navigation.js";
 import { useCreateDocument } from "./create-document.js";
+import { useDocumentHistory } from "../document/document-history.js";
 
 export function useAppShell() {
   const [path, navigate, documentList, onDocumentListStateChange] = useRoutePath<DocumentListState>();
@@ -18,6 +19,7 @@ export function useAppShell() {
   const layout = useShellLayout(environment.settings);
   const sync = useSyncDetails(environment.route.kind);
   const rooms = useShellRooms(environment);
+  const history = useDocumentHistory(environment.documentRevisions, rooms.selected, path);
   const alter = useAlterDecision({ ...rooms, ...environment, navigate });
   const pins = usePinToggles(rooms);
   const archive = useArchive({ ...rooms, ...environment, navigate });
@@ -27,7 +29,7 @@ export function useAppShell() {
   const onCreate = useCreateDocument({ ...rooms, ...environment, ...navigation });
   useDocumentStubRepair(rooms);
   const documentListState = documentList ?? INITIAL_DOCUMENT_LIST_STATE;
-  return { environment, layout, sync, rooms, alter, pins, archive, threads, readings,
+  return { environment, layout, sync, rooms, history, alter, pins, archive, threads, readings,
     navigation, onCreate, navigate, documentListState, onDocumentListStateChange };
 }
 export type AppShell = ReturnType<typeof useAppShell>;

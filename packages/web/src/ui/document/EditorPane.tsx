@@ -894,6 +894,8 @@ export function EditorPane({
   copyPath,
   decisionView = false,
   displayTitle,
+  historyControl,
+  historyActive = false,
 }: {
   connection: RoomConnection;
   /** The workspace as the address spells it — see {@link DocMetaLine}. */
@@ -942,6 +944,8 @@ export function EditorPane({
   copyPath?: string;
   /** A known decision route stays read-only while its room metadata catches up. */
   decisionView?: boolean;
+  historyControl?: ReactNode;
+  historyActive?: boolean | undefined;
 }): ReactElement {
   const pane = useRef<HTMLElement | null>(null);
   const [tldrEditorRoom, setTldrEditorRoom] = useState<string | null>(null);
@@ -965,7 +969,7 @@ export function EditorPane({
   // after mounting, so read this exact connection on the first frame too.
   const meta = observedMeta ?? readRoomMeta(connection);
   const decision = decisionView || meta?.kind === "decision";
-  const contentReadOnly = archived || decision;
+  const contentReadOnly = archived || decision || historyActive;
   const foreign = useForeignBlocks(connection);
   const { writable } = useRoomStatus(connection);
   const openThreads = threads.filter((thread) => !thread.resolved).length;
@@ -1043,6 +1047,7 @@ export function EditorPane({
           revision={revision}
           codeChecks={meta?.code_check}
         />
+        {historyControl}
         {beforeAnswer}
         <div className={answerClassName}>
           {!decision && <TldrCallout
@@ -1052,9 +1057,9 @@ export function EditorPane({
             canCleanupTags={canCleanupTags}
             tldr={meta?.tldr ?? null}
             editing={editingTldr}
-            archived={archived}
+            archived={archived || historyActive}
             decision={decision}
-            writable={writable}
+            writable={writable && !historyActive}
             onEditingChange={(editing) =>
               setTldrEditorRoom(editing ? connection.room : null)
             }
@@ -1075,7 +1080,7 @@ export function EditorPane({
               catalogConnection={catalogConnection}
               canCleanupTags={canCleanupTags}
               author={author}
-              archived={archived}
+              archived={archived || historyActive}
               contentReadOnly={contentReadOnly}
               docLinks={docLinks}
               onSelectThread={onSelectThread}
