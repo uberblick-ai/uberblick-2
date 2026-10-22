@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { Editor } from "@tiptap/core";
 import { compareRevisions, getMeta } from "@uberblick/schema";
@@ -20,14 +20,30 @@ export function revisionLabel(entry: RevisionEntry): string {
 }
 
 export function HistoryControls({ history }: { history: DocumentHistory }): ReactElement | null {
-  if (!history.available) return null;
   const { selection, entries, busy, error, entry } = history;
-  return <fieldset aria-label="Document history" className="ub-history-controls ub-type-ui">
-    <Button variant="secondary" size="sm" onClick={history.back}
+  const group = useRef<HTMLFieldSetElement | null>(null);
+  const back = useRef<HTMLButtonElement | null>(null);
+  const forward = useRef<HTMLButtonElement | null>(null);
+  const now = useRef<HTMLButtonElement | null>(null);
+  const focus = useRef<"back" | "forward" | null>(selection === null ? null : "back");
+  useLayoutEffect(() => {
+    const fieldset = group.current;
+    if (busy || focus.current === null || fieldset === null || fieldset.closest("[inert]")) return;
+    const requested = selection !== null && focus.current === "forward" ? forward.current : back.current;
+    focus.current = null;
+    const active = fieldset.ownerDocument.activeElement;
+    if (active !== fieldset.ownerDocument.body && !fieldset.contains(active)) return;
+    // Native disabled buttons cannot retain focus at either history boundary.
+    const fallback = back.current?.disabled ? forward.current?.disabled ? now.current : forward.current : back.current;
+    (requested?.disabled ? fallback : requested)?.focus({ preventScroll: true });
+  }, [busy, selection]);
+  if (!history.available) return null;
+  return <fieldset ref={group} aria-label="Document history" className="ub-history-controls ub-type-ui">
+    <Button ref={back} variant="secondary" size="sm" onClick={() => { focus.current = "back"; history.back(); }}
       disabled={busy || entries === null || entries.length === 0 || (selection !== null && selection.index >= entries.length - 1)}>Back</Button>
     {selection !== null && <>
-      <Button variant="secondary" size="sm" onClick={history.forward} disabled={busy || selection.index === 0}>Forward</Button>
-      <Button variant="secondary" size="sm" onClick={history.now}>Back to now</Button>
+      <Button ref={forward} variant="secondary" size="sm" onClick={() => { focus.current = "forward"; history.forward(); }} disabled={busy || selection.index === 0}>Forward</Button>
+      <Button ref={now} variant="secondary" size="sm" onClick={history.now}>Back to now</Button>
     </>}
     <span role="status">{error ?? (busy ? "Loading history…" : entry !== null ? revisionLabel(entry)
       : entries?.length === 0 ? "No revisions yet" : "Document history")}</span>

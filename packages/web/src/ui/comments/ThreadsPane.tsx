@@ -177,6 +177,7 @@ export function ThreadsPane({
   onFocus,
   narrow = false,
   open = false,
+  hidden = false,
   onOpenChange,
   onCloseAutoFocus,
 }: {
@@ -196,6 +197,8 @@ export function ThreadsPane({
   onFocus: (threadId: string) => void;
   narrow?: boolean;
   open?: boolean;
+  /** Keep reply drafts while hiding the live document, including its sheet. */
+  hidden?: boolean;
   onOpenChange?: (open: boolean) => void;
   onCloseAutoFocus?: (event: Event) => void;
 }): ReactElement | null {
@@ -374,7 +377,7 @@ export function ThreadsPane({
     return (
       <>
         {highlights}
-        <Sheet open={open} onOpenChange={(shown) => onOpenChange?.(shown)}>
+        <Sheet open={open && !hidden} onOpenChange={(shown) => onOpenChange?.(shown)}>
           <SheetContent
             id="ub-rail"
             className="ub-rail ub-rail-open ub-type-ui"
@@ -389,7 +392,10 @@ export function ThreadsPane({
                 focusThreadCard(focused.id);
               }
             }}
-            onCloseAutoFocus={onCloseAutoFocus}
+            onCloseAutoFocus={(event) => {
+              if (hidden) event.preventDefault();
+              else onCloseAutoFocus?.(event);
+            }}
             onEscapeKeyDown={(event) => {
               // Radix receives Escape in capture, before CommentForm's handler.
               // Cancelling a visible reply is one gesture, leaving the sheet open.

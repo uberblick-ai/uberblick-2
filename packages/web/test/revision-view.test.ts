@@ -4,9 +4,10 @@ import {
   appendBlock, applyDocData, createAnnotation, deleteBlock, editBlock, getBlock, getBlocksFragment,
 } from "@uberblick/schema";
 import { parseWireframe } from "@uberblick/wireframe";
+import { AllSelection } from "@tiptap/pm/state";
 import { createRevisionEditor, revisionViewModel } from "../src/editor/revision-view.js";
 import { findForeignBlocks } from "../src/editor/palette.js";
-import { uberblickSchema } from "../src/editor/create-editor.js";
+import { createUberblickEditor, uberblickSchema } from "../src/editor/create-editor.js";
 
 vi.mock("@uberblick/wireframe", async (importOriginal) => {
   const original = await importOriginal<typeof import("@uberblick/wireframe")>();
@@ -80,6 +81,63 @@ describe("the detached revision view", () => {
       expect(Y.encodeStateAsUpdate(doc)).toEqual(state);
       expect(view.element.querySelector("[data-revision-change]")).toBeNull();
     } finally { view.destroy(); doc.destroy(); }
+  });
+
+  it("copies removed words into synced content without turning revision styling into authored strikethrough", () => {
+    const before = new Y.Doc();
+    const id = appendBlock(before, { type: "paragraph", text: "Keep old words." });
+    const paragraph = getBlocksFragment(before).get(0) as Y.XmlElement;
+    (paragraph.firstChild as Y.XmlText).format(5, 3, { bold: {} });
+    const after = clone(before);
+    editBlock(after, id, "Keep old words.", "Keep new words.");
+    const view = mount(before, after);
+    const live = new Y.Doc();
+    appendBlock(live, { type: "paragraph", text: "Live " });
+    const editor = createUberblickEditor({ element: document.createElement("div"), fragment: getBlocksFragment(live) });
+    try {
+      view.editor.commands.setTextSelection({ from: 6, to: 9 });
+      const copied = view.editor.view.serializeForClipboard(view.editor.state.selection.content());
+      expect(copied.text).toBe("old");
+      editor.commands.setTextSelection(6);
+      expect(editor.view.pasteHTML(copied.dom.innerHTML, new Event("paste") as ClipboardEvent)).toBe(true);
+      const text = (getBlocksFragment(live).get(0) as Y.XmlElement).firstChild as Y.XmlText;
+      expect(text.toDelta()).toEqual([{ insert: "Live " }, { insert: "old", attributes: { bold: {} } }]);
+      expect(findForeignBlocks(getBlocksFragment(live))).toEqual([]);
+    } finally { editor.destroy(); view.destroy(); before.destroy(); after.destroy(); live.destroy(); }
+  });
+
+  it("copies whole changed blocks with fresh live identities and only their authored formatting", () => {
+    const before = new Y.Doc();
+    const id = appendBlock(before, { type: "paragraph", text: "Old" });
+    appendBlock(before, { type: "table", text: "| Header |\n| --- |\n| Removed cell |" });
+    const paragraph = getBlocksFragment(before).get(0) as Y.XmlElement;
+    (paragraph.firstChild as Y.XmlText).format(0, 3, { strike: {} });
+    const after = clone(before);
+    editBlock(after, id, "Old", "New");
+    getBlocksFragment(after).delete(1, 1);
+    const view = mount(before, after);
+    const live = new Y.Doc();
+    const editor = createUberblickEditor({ element: document.createElement("div"), fragment: getBlocksFragment(live) });
+    try {
+      view.editor.view.dispatch(view.editor.state.tr.setSelection(new AllSelection(view.editor.state.doc)));
+      const copied = view.editor.view.serializeForClipboard(view.editor.state.selection.content());
+      editor.view.dispatch(editor.state.tr.setSelection(new AllSelection(editor.state.doc)));
+      expect(editor.view.pasteHTML(copied.dom.innerHTML, new Event("paste") as ClipboardEvent)).toBe(true);
+      const fragment = getBlocksFragment(live);
+      const ids = fragment.toArray().map((block) => (block as Y.XmlElement).getAttribute("id"));
+      expect(ids.every((id) => typeof id === "string" && /^[0-9a-f-]{36}$/.test(id))).toBe(true);
+      expect(new Set(ids).size).toBe(ids.length);
+      const text = (fragment.get(0) as Y.XmlElement).firstChild as Y.XmlText;
+      expect(text.toDelta()).toEqual([{ insert: "Old", attributes: { strike: {} } }, { insert: "New" }]);
+      expect(fragment.toString()).toContain("Removed cell");
+      let struck = "";
+      editor.state.doc.descendants((node) => {
+        if (node.isText && node.marks.some((mark) => mark.type.name === "strike")) struck += node.text;
+      });
+      expect(struck).toBe("Old");
+      expect(fragment.toString()).not.toContain("revision-");
+      expect(findForeignBlocks(fragment)).toEqual([]);
+    } finally { editor.destroy(); view.destroy(); before.destroy(); after.destroy(); live.destroy(); }
   });
 
   it("leaves the synced editor schema and foreign-mark gate closed to revision marks", () => {

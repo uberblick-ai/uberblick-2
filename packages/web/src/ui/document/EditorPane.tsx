@@ -640,6 +640,7 @@ const BoundEditor = memo(function BoundEditor({
   canCleanupTags,
   author,
   archived,
+  historyActive = false,
   contentReadOnly,
   docLinks,
   onSelectThread,
@@ -650,6 +651,7 @@ const BoundEditor = memo(function BoundEditor({
   author: string;
   /** Archived documents also withhold comments. */
   archived: boolean;
+  historyActive?: boolean;
   /** Title, decision line and blocks cannot change; comments may stay open. */
   contentReadOnly: boolean;
   /** See {@link EditorPane}. Must be referentially stable — it binds the editor. */
@@ -803,13 +805,13 @@ const BoundEditor = memo(function BoundEditor({
   useLayoutEffect(() => {
     if (editor === null || editor.isDestroyed) return;
     editor.setEditable(!contentReadOnly && !isDecision(connection) && writable);
-    if (!archived && writable) {
+    if (!archived && !historyActive && writable) {
       // A repair suppressed while the link was gone gets another plugin pass
       // as soon as the admitted room is writable again. Automatic block-id
       // maintenance remains independent of decision content permissions.
       editor.view.dispatch(editor.state.tr.setMeta("uberblick:writable", true));
     }
-  }, [editor, connection, archived, contentReadOnly, writable]);
+  }, [editor, connection, archived, contentReadOnly, historyActive, writable]);
 
   return (
     <>
@@ -853,6 +855,7 @@ const BoundEditor = memo(function BoundEditor({
         {editor !== null && !archived && writable && (
           <CommentComposer
             editor={editor}
+            hidden={historyActive}
             contentReadOnly={contentReadOnly}
             ydoc={connection.ydoc}
             catalogConnection={catalogConnection}
@@ -1081,7 +1084,8 @@ export function EditorPane({
               catalogConnection={catalogConnection}
               canCleanupTags={canCleanupTags}
               author={author}
-              archived={archived || historyActive}
+              archived={archived}
+              historyActive={historyActive}
               contentReadOnly={contentReadOnly}
               docLinks={docLinks}
               onSelectThread={onSelectThread}

@@ -170,9 +170,10 @@ test.describe("document history through ub open", () => {
       root.editor.commands.setTextSelection({ from, to: from + (element.textContent?.length ?? 0) });
       const clipboard = new DataTransfer();
       root.dispatchEvent(new ClipboardEvent("copy", { clipboardData: clipboard, bubbles: true, cancelable: true }));
-      return clipboard.getData("text/plain");
+      return { text: clipboard.getData("text/plain"), html: clipboard.getData("text/html") };
     });
-    expect(copied).toBe("amber");
+    expect(copied.text).toBe("amber");
+    expect(copied.html).not.toMatch(/ub-revision-|data-revision-change|<s[\s>]/);
     await expect(page.locator('[data-slot="selection-composer"]')).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Document actions", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Insert block below", includeHidden: true })).toHaveCount(0);
@@ -213,10 +214,101 @@ test.describe("document history through ub open", () => {
       .toContain("Live collaborator: The blue fox stays.");
     await expect(live.locator("[data-revision-change]")).toHaveCount(0);
     await expect.poll(() => harness().hubText(room)).toContain("Live collaborator: The blue fox stays.");
+    await selectPositions(live, await live.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.content.size - 1));
+    await live.evaluate((element, copied) => {
+      const clipboard = new DataTransfer();
+      clipboard.setData("text/plain", copied.text);
+      clipboard.setData("text/html", copied.html);
+      element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true }));
+    }, copied);
+    await expect(live).toContainText("amber");
+    await expect(editor(peer)).toContainText("amber");
+    await expect(live.locator("s, del, strike, [data-revision-change]")).toHaveCount(0);
+    await expect(editor(peer).locator("s, del, strike, [data-revision-change]")).toHaveCount(0);
+    await expect.poll(() => harness().hubText(room)).toContain("amber");
     await page.reload();
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
     await expect(historicalEditor(page)).toHaveCount(0);
     await expect(editor(page).locator("[data-revision-change]")).toHaveCount(0);
+  });
+
+  test("keyboard history navigation retains control focus and moves to an available control at either boundary", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const title = docTitle("Keyboard revision navigation");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 3_000, endedAt: null },
+      { id: "middle", author: null, startedAt: 2_000, endedAt: 3_000 },
+      { id: "earliest", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], {
+      latest: savedState(uuid, title, "Latest content."),
+      middle: savedState(uuid, title, "Middle content."),
+      earliest: savedState(uuid, title, "Earliest content."),
+    });
+    await activateControl(history(page).getByRole("button", { name: "Refresh history", exact: true }));
+    const back = history(page).getByRole("button", { name: "Back", exact: true });
+    const forward = history(page).getByRole("button", { name: "Forward", exact: true });
+    await expect(back).toBeEnabled();
+    await back.focus();
+    await page.keyboard.press("Enter");
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(back).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(historicalEditor(page)).toContainText("Middle content.");
+    await expect(back).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(historicalEditor(page)).toHaveText("Earliest content.");
+    await expect(back).toBeDisabled();
+    await expect(forward).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(historicalEditor(page)).toContainText("Middle content.");
+    await expect(forward).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(forward).toBeDisabled();
+    await expect(back).toBeFocused();
+    await history(page).getByRole("button", { name: "Back to now", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(historicalEditor(page)).toHaveCount(0);
+    await expect(back).toBeFocused();
+  });
+
+  test("opening history preserves unsent comment and reply drafts", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const title = docTitle("Retained discussion drafts");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [{ id: "earlier", author: null, startedAt: 1_000, endedAt: null }], {
+      earlier: savedState(uuid, title, "Historical text without comments."),
+    });
+    await activateControl(history(page).getByRole("button", { name: "Refresh history", exact: true }));
+    await activateControl(editor(page));
+    await page.keyboard.type("First comment target. Another comment target.");
+    await selectPositions(editor(page), 1, 6);
+    await activateControl(page.getByRole("button", { name: "Comment", exact: true }));
+    await page.getByPlaceholder(/Comment as/).fill("A saved comment.");
+    await page.keyboard.press("Enter");
+    const sheet = page.getByRole("dialog", { name: "Threads", exact: true });
+    await expect(page.getByRole("region", { name: "Threads", exact: true })).toContainText("A saved comment.");
+    await activateControl(page.getByRole("button", { name: "Reply", exact: true }));
+    await page.getByPlaceholder("Reply…").fill("An unsent reply.");
+    if (await sheet.isVisible()) await activateControl(sheet.getByRole("button", { name: "Close threads", exact: true }));
+    await selectPositions(editor(page), 23, 30);
+    await activateControl(page.getByRole("button", { name: "Comment", exact: true }));
+    const comment = page.getByPlaceholder(/Comment as/);
+    await comment.fill("An unsent comment.");
+    await history(page).getByRole("button", { name: "Back", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(historicalEditor(page)).toHaveText("Historical text without comments.");
+    await expect(comment).toBeHidden();
+    await expect(page.getByRole("region", { name: "Threads", exact: true })).toHaveCount(0);
+    await expect(sheet).toBeHidden();
+    await activateControl(history(page).getByRole("button", { name: "Back to now", exact: true }));
+    await expect(comment).toHaveValue("An unsent comment.");
+    await expect(comment).toBeVisible();
+    await activateControl(page.locator('[data-slot="selection-composer"]').getByRole("button", { name: "Cancel", exact: true }));
+    const toggle = page.locator(".ub-threads-toggle");
+    if (await toggle.isVisible()) await activateControl(toggle);
+    await expect(page.getByPlaceholder("Reply…")).toHaveValue("An unsent reply.");
   });
 
   test("returning to now preserves an offline draft and history labels expose unknown attribution", async ({ browser }) => {

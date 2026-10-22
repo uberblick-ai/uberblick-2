@@ -1,7 +1,7 @@
 /** Revision presentation is a ProseMirror projection with no Yjs binding. */
 import { Editor, Extension, Mark, Node as TiptapNode, getSchema } from "@tiptap/core";
 import type { Extensions, JSONContent } from "@tiptap/core";
-import { Fragment } from "@tiptap/pm/model";
+import { Fragment, Slice } from "@tiptap/pm/model";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { AllSelection, Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
@@ -236,6 +236,18 @@ export function revisionViewModel(before: Y.Doc | null, after: Y.Doc): RevisionV
   return { content, comparison, blocks };
 }
 
+function copiedContent(content: Fragment): Fragment {
+  const nodes: PMNode[] = [];
+  content.forEach((node) => {
+    const marks = node.marks.filter((mark) => mark.type.name !== "removed" && mark.type.name !== "revisionAdded");
+    nodes.push(node.isText ? node.mark(marks) : node.type.create(
+      { ...node.attrs, ...("id" in node.attrs ? { id: null } : {}) },
+      copiedContent(node.content), marks,
+    ));
+  });
+  return Fragment.fromArray(nodes);
+}
+
 function revisionPresentation(blocks: readonly RevisionBlockDetails[]): Extension {
   return Extension.create({
     name: "revisionPresentation",
@@ -244,6 +256,7 @@ function revisionPresentation(blocks: readonly RevisionBlockDetails[]): Extensio
       return [new Plugin({
         filterTransaction: (transaction) => !transaction.docChanged,
         props: {
+          transformCopied: (slice) => new Slice(copiedContent(slice.content), slice.openStart, slice.openEnd),
           decorations(state) {
             const decorations: Decoration[] = [];
             state.doc.forEach((node, pos, index) => {
