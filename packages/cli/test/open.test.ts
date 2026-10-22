@@ -54,6 +54,7 @@ import {
   freePort,
   get,
   getWithHost,
+  holdDefaultHub,
   open,
   openFails,
   rebind,
@@ -91,6 +92,7 @@ describe("ub open", () => {
     { source: "environment", hubUrl: FIRST_REMOTE },
     { source: "id-only", hubUrl: null },
   ])("remembers a first $source binding with hub $hubUrl after serving", async ({ source, hubUrl }) => {
+    if (hubUrl === null) await holdDefaultHub();
     const box = source === "project"
       ? sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl } })
       : unboundSandbox();
@@ -420,6 +422,7 @@ describe("ub open", () => {
   });
 
   it.each(["project", "environment"])("serves one enforcing policy on HTML for a %s binding", async source => {
+    await holdDefaultHub();
     const box = source === "project"
       ? sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } })
       : unboundSandbox({ credentials: { signingSecret: SECRET } });
@@ -701,6 +704,7 @@ describe("ub open", () => {
 });
 
 it("opens a newly created local workspace in the browser without login or promotion", async () => {
+  await holdDefaultHub();
   const box = unboundSandbox();
   const created = await runUbAsync(["workspace", "create", "Local browser"], box);
   expect(created.status, created.output).toBe(0);

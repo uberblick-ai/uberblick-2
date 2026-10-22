@@ -1050,7 +1050,7 @@ describe("ub workspace use <link>", () => {
   it("moves an archived document room and restores it from a fresh replica", async () => {
     const local = sandbox();
     // Fresh-client verification reads several rooms; allow healthy CI scheduling
-    // beyond the ordinary fixtures' 2 s ceiling.
+    // beyond the ordinary refusal fixtures' 400 ms ceiling.
     const transferWaits = { UB_TEST_MAX_WAIT_MS: "5000" };
     const archived = await withMcp(
       local,
