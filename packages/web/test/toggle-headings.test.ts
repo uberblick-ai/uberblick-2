@@ -196,8 +196,15 @@ it("moves text, node and cell selections out of a collapsed section and skips hi
     expect(editor.state.selection.head).toBe(blockPosition(editor, next) + 1);
     editor.commands.setTextSelection(blockPosition(editor, body) + 1);
     expect(editor.state.selection.head).toBe(headingEnd);
+    editor.commands.setTextSelection(blockPosition(editor, next) + 1);
+    editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, blockPosition(editor, table))));
+    expect(editor.state.selection.anchor).toBe(headingEnd);
+    expect(editor.state.selection.head).toBe(headingEnd);
     editor.view.dispatch(editor.state.tr.delete(blockPosition(editor, next), editor.state.doc.content.size));
     editor.commands.setTextSelection(blockPosition(editor, body) + 1);
+    expect(editor.state.selection.head).toBe(headingEnd);
+    editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, blockPosition(editor, table))));
+    expect(editor.state.selection.anchor).toBe(headingEnd);
     expect(editor.state.selection.head).toBe(headingEnd);
   } finally { editor.destroy(); ydoc.destroy(); }
 });

@@ -70,10 +70,13 @@ export function revealFoldedTarget(target: HTMLElement): void {
 }
 
 function visibleSelection(state: EditorState, pos: number, direction: number): Selection {
+  const near = Selection.near(state.doc.resolve(pos), direction);
   const fold = folds.getState(state);
-  if (fold === undefined) return Selection.near(state.doc.resolve(pos), direction);
-  const hidden = containing(fold, pos)[0];
-  if (hidden === undefined) return Selection.near(state.doc.resolve(pos), direction);
+  if (fold === undefined) return near;
+  // A node selection can end at the document boundary, where near() searches
+  // backward into its folded last block rather than finding visible content.
+  const hidden = containing(fold, pos)[0] ?? containing(fold, near.head)[0];
+  if (hidden === undefined) return near;
   if (direction > 0 && hidden.to < state.doc.content.size) {
     return Selection.near(state.doc.resolve(hidden.to), 1);
   }
