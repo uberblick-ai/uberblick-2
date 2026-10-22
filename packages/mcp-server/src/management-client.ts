@@ -66,9 +66,11 @@ export function sanitizeHubVersion(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length > 64) return undefined;
   return /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(value)?.[0] === value ? value : undefined;
 }
-function member(value: unknown): Record<string, unknown> {
+function member(value: unknown, login?: StoredHubLogin): Record<string, unknown> {
   if (!object(value) || !isUuid(value.principalId) || !isGithubAccountId(value.githubAccountId) ||
-      !isGithubUsername(value.githubUsername) || (value.role !== "member" && value.role !== "admin")) {
+      typeof value.githubUsername !== "string" || value.githubUsername.length === 0 ||
+      (login !== undefined && value.githubUsername.includes(login.credential.key)) ||
+      (value.role !== "member" && value.role !== "admin")) {
     throw new ManagementResponseError();
   }
   return { principalId: value.principalId, githubAccountId: value.githubAccountId,
@@ -168,7 +170,7 @@ export function sanitizeManagementReply(
       break;
     case "grant-member":
       if (status === 200 && (state === "ok" || state === "already-member")) {
-        const resolved = member(body.member);
+        const resolved = member(body.member, login);
         if (resolved.githubAccountId !== action.githubAccountId) throw new ManagementResponseError();
         return result({ status: state, member: resolved });
       }
@@ -180,7 +182,7 @@ export function sanitizeManagementReply(
       break;
     case "list-members":
       if (status === 200 && state === "ok" && Array.isArray(body.members)) {
-        const members = body.members.map(member);
+        const members = body.members.map(value => member(value, login));
         if (new Set(members.map(row => row.principalId)).size !== members.length) throw new ManagementResponseError();
         return result({ status: state, members });
       }

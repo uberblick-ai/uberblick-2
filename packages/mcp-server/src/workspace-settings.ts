@@ -11,6 +11,7 @@ import {
   setWorkspaceName,
   settingsRoom,
   validateWorkspaceName,
+  type UpdateOriginMetadata,
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import type { McpConfig } from "./config.js";
@@ -28,6 +29,7 @@ export function storeWorkspaceName(config: McpConfig, name: string): void {
     publishOwnPresence: false,
   });
   const { replicas } = workspace;
+  replicas.setWriteSurface({ kind: "cli", name: "ub workspace" });
   try {
     setWorkspaceName(replicas.settings().doc, validated);
     replicas.assertHealthy();
@@ -41,6 +43,7 @@ export function fillWorkspaceMainRepository(
   workspaceId: string,
   repository: string,
   databasePath?: string,
+  origin?: UpdateOriginMetadata,
 ): void {
   const normalized = githubRepository(repository);
   if (normalized === null) return;
@@ -52,7 +55,7 @@ export function fillWorkspaceMainRepository(
     address.searchParams.set("mode", "rw");
     const db = new DatabaseSync(address.href);
     try {
-      fillExistingSettings(db, doc, uuid, normalized);
+      fillExistingSettings(db, doc, uuid, normalized, origin);
     } finally {
       try {
         if (db.isTransaction) db.exec("ROLLBACK");
@@ -67,7 +70,7 @@ export function fillWorkspaceMainRepository(
   }
 }
 
-function fillExistingSettings(db: DatabaseSync, doc: Y.Doc, workspaceId: string, repository: string): void {
+function fillExistingSettings(db: DatabaseSync, doc: Y.Doc, workspaceId: string, repository: string, origin?: UpdateOriginMetadata): void {
   // Serialize the unset check and append with peers, and give a busy writer no wait.
   db.exec("BEGIN IMMEDIATE");
   const recorded = db.prepare("SELECT value FROM meta WHERE key = 'workspace'").get();
@@ -87,6 +90,9 @@ function fillExistingSettings(db: DatabaseSync, doc: Y.Doc, workspaceId: string,
   const result = db.prepare(
     "INSERT INTO updates (room, payload, origin, logged_at) VALUES (?, ?, 'local', ?)",
   ).run(room, Y.encodeStateAsUpdate(doc, vector), Date.now());
+  if (origin !== undefined && db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'update_origins'").get() !== undefined) {
+    db.prepare("INSERT INTO update_origins (seq, metadata) VALUES (?, ?)").run(result.lastInsertRowid, JSON.stringify(origin));
+  }
   db.prepare(
     "INSERT INTO pending_rooms (room, seq) VALUES (?, ?) " +
     "ON CONFLICT (room) DO UPDATE SET seq = MAX(pending_rooms.seq, excluded.seq)",

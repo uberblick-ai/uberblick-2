@@ -320,6 +320,7 @@ export async function importSeedDir(
 ): Promise<{ results: SeedImport[]; hub: string; sidebar: boolean }> {
   const workspace = openWorkspaceReplicas(config);
   const { replicas } = workspace;
+  replicas.setWriteSurface({ kind: "cli", name: "ub workspace" });
   try {
     const docs = readSeedDocs(dir);
     if (starter !== null) {

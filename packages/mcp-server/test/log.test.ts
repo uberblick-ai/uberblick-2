@@ -133,8 +133,10 @@ describe("the update log", () => {
         text = next;
       }
 
-      // One more tool call so the settle that follows the last write runs.
-      await rig.ok("sync_status", {});
+      const replica = rig.instance.replicas.replica(uuid);
+      rig.instance.replicas.refresh();
+      rig.instance.store.clearPending(replica.room, replica.lastSeq);
+      rig.instance.replicas.refresh();
 
       const room = `${WORKSPACE}/${uuid}`;
       const snapshot = rig.instance.store.snapshot(room);

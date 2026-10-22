@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { MessageType } from "@hocuspocus/provider";
 import {
   appendBlock, applyDocData, createAnnotation, getBlocks, getMeta,
-  initDoc, isDirectoryEntryDeleted, listAnnotations, readDocData, setTitle,
+  encodeOriginAck, initDoc, isDirectoryEntryDeleted, listAnnotations, readDocData, readOriginUpdate, setTitle,
 } from "@uberblick/schema";
 import { afterEach, expect, it } from "vitest";
 import { writeSyncStep1, writeSyncStep2, writeUpdate } from "y-protocols/sync";
@@ -91,7 +91,15 @@ async function endpoint() {
     message(socket, message) {
       const data = message.uint8Array();
       const decoder = decoding.createDecoder(data);
-      received.get(socket)!.push({ room: decoding.readVarString(decoder), type: decoding.readVarUint(decoder) });
+      const room = decoding.readVarString(decoder);
+      const type = decoding.readVarUint(decoder);
+      received.get(socket)!.push({ room, type });
+      if (type === MessageType.Stateless) {
+        const update = readOriginUpdate(decoding.readVarString(decoder));
+        if (update !== null) socket.send(frame(room, MessageType.Stateless, encoder => {
+          encoding.writeVarString(encoder, encodeOriginAck(update.updateId, true));
+        }));
+      }
     },
     pong(socket) { pongs.get(socket)?.(); pongs.delete(socket); },
   } });
@@ -115,6 +123,10 @@ async function endpoint() {
       await waitUntil("the authenticated room's sync handshake", () =>
         received.get(socket)!.some(value => value.room === room && value.type === MessageType.Sync),
       );
+      const empty = new Y.Doc();
+      try {
+        socket.send(frame(room, MessageType.Sync, encoder => writeSyncStep1(encoder, empty)));
+      } finally { empty.destroy(); }
     },
     refused(socket: WireSocket, room: string) {
       socket.send(frame(room, MessageType.Auth, encoder => {
@@ -148,6 +160,8 @@ function seed(workspace: WorkspaceReplicaSet, title = "Retained offline title") 
     collection: "private", schema: { version: 1, schema: { type: "object", properties: { secret: { type: "string" } }, additionalProperties: false } },
     upsert: [{ id: "one", value: { secret: "local data" } }],
   }]);
+  workspace.replicas.refresh();
+  workspace.store.clearPending(replica.room, replica.lastSeq);
   workspace.store.compact(replica.room, Y.encodeStateAsUpdate(replica.doc), replica.lastSeq);
   setTitle(replica.doc, `${title} with pending edit`);
   return { uuid, replica, state: Y.encodeStateAsUpdate(replica.doc) };

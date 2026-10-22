@@ -75,6 +75,7 @@ export async function createMcpEngine(
     publishOwnPresence: options.serving !== true,
   });
   const { store, replicas } = workspace;
+  replicas.setWriteSurface({ kind: "cli", name: "ub open" });
   try {
     await seedTagCatalogOnce(replicas);
   } catch (error) {

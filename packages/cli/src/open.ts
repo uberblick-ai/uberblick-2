@@ -502,7 +502,9 @@ async function startBrowserServer(startup: BrowserStartup) {
     },
     takeSettingsResetNotice: (room, seq) => engineForRoom(room).store.takeSettingsResetNotice(seq),
     appendUpdate: (room, payload, settingsResetSeq) => {
-      engineForRoom(room).store.appendUpdate(room, payload, "local", settingsResetSeq);
+      const engine = engineForRoom(room);
+      engine.store.appendUpdate(room, payload, "local", settingsResetSeq,
+        engine.replicas.createUpdateOrigin({ kind: "browser", name: "browser" }));
     },
     awarenessForRoom: (room) => {
       const engine = engineForRoom(room);

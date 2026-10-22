@@ -29,6 +29,7 @@ it("purges authority, pending and source indexes and retires the in-memory room"
   appendBlock(replica.doc, { type: "paragraph", text: "sensitive body" });
   setLinks(replica.doc, [target]);
   await replicas.settle();
+  store.clearPending(replica.room, replica.lastSeq);
   store.compact(replica.room, Y.encodeStateAsUpdate(replica.doc), replica.lastSeq);
   setTitle(replica.doc, "Confidential updated");
   expect(store.snapshot(replica.room)).not.toBeNull();
@@ -57,13 +58,15 @@ it("purges rows reintroduced by an older process without replaying or repairing 
   const state = Y.encodeStateAsUpdate(oldDoc);
   const room = roomForDoc(replicas.config.workspaceId, uuid);
   deleteDirectoryEntry(replicas.directory().doc, uuid);
-  store.appendUpdate(room, state, "local");
-  store.compact(room, state, 1);
+  const firstSeq = store.appendUpdate(room, state, "local");
+  store.clearPending(room, firstSeq);
+  store.compact(room, state, firstSeq);
   store.indexDoc({ uuid, title: "Offline return", tags: [], description: "", links: [], body: "secret" }, 1);
   getDirectoryMap(replicas.directory().doc).set(uuid, { uuid, title: "Offline return" });
   // Repeat after the directory event's purge: no further directory update is needed.
-  store.appendUpdate(room, state, "local");
-  store.compact(room, state, 1);
+  const secondSeq = store.appendUpdate(room, state, "local");
+  store.clearPending(room, secondSeq);
+  store.compact(room, state, secondSeq);
   store.indexDoc({ uuid, title: "Offline return", tags: [], description: "", links: [], body: "secret" }, 1);
   expect(store.hasRoom(room)).toBe(true);
   replicas.refresh();
