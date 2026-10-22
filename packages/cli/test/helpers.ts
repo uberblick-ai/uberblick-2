@@ -209,13 +209,15 @@ function createSandbox(parent: string, files: SandboxFiles): Sandbox {
   //
   // A ceiling, never a floor: it shortens waits and lengthens nothing.
   //
-  // The 400 ms ceiling bounds ordinary loopback waits. Tests needing longer
-  // waits pass their own ceiling through `extraEnv`.
+  // The 2 s ceiling bounds ordinary loopback waits. It leaves healthy replies
+  // room on a loaded CI runner, where a live hub or device list answered after
+  // 400 ms read as absent. Tests needing longer waits pass their own ceiling
+  // through `extraEnv`.
   //
   // The suites' *own* clients — the hubs they start, the replicas they verify
   // with — import `resolveMcpConfig` straight from `@uberblick/mcp-server` and
   // keep the full budgets. This ceiling is for the `ub` under test.
-  env.UB_TEST_MAX_WAIT_MS = "400";
+  env.UB_TEST_MAX_WAIT_MS = "2000";
   // HOME too: it is where the XDG defaults point, so a test that forgets to set
   // XDG_CONFIG_HOME must still not read the developer's real configuration.
   env.HOME = root;
@@ -232,7 +234,7 @@ function createSandbox(parent: string, files: SandboxFiles): Sandbox {
  * that cannot come. Commands probing `ws://localhost:1234` each wait the full
  * ceiling above. A ceiling
  * near zero reaches the same honest "no hub" answer at once. Only for suites
- * where no test starts a hub: a real one on loopback needs the 400 ms.
+ * where no test starts a hub: a real one on loopback needs the full ceiling.
  */
 export function hubless<T extends Sandbox>(box: T): T {
   box.env.UB_TEST_MAX_WAIT_MS = "25";
