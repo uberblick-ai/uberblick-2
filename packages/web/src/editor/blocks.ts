@@ -4,7 +4,7 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
 import { ySyncPluginKey, yUndoPluginKey } from "y-prosemirror";
-import { TABLE_CELL_MARKS } from "@uberblick/schema";
+import { INLINE_PART_MARKS } from "@uberblick/schema";
 
 /** The top-level block carrying `id`, with its current position. */
 export function findBlockById(
@@ -72,11 +72,11 @@ export function blockShapeGuard(
   });
 }
 
-const PART_MARKS = new Set<string>(TABLE_CELL_MARKS);
+const PART_MARKS = new Set<string>(INLINE_PART_MARKS);
 
 /**
  * Whether a table cell, card part or Figma caption holds what the schema
- * stores: one paragraph without an id, of text carrying table-cell marks only.
+ * stores: one paragraph without an id, of text carrying inline-part marks only.
  */
 export function isPlainPart(part: ProseMirrorNode): boolean {
   const paragraph = part.firstChild;

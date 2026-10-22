@@ -687,7 +687,7 @@ describe("ub mcp install cursor", () => {
     expect(run.stdout).toBe("");
     expect(run.stderr).toBe(
       'ub mcp install: unknown client "cursor" — expected one of claude, codex. ' +
-        "Add --print for the snippet to paste into any other client\n",
+        `Add --print for the snippet to paste into any other client\n\n${INSTALL_HELP}`,
     );
     // Whichever stub is invoked, all share the same recording destination.
     expect(existsSync(claude.record)).toBe(false);

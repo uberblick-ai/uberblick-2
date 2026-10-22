@@ -7,8 +7,15 @@ import { defaultPresenceName, resolveClientConfig } from "../src/config.js";
 import { useHubEndpoint, useIdentity, useRoom, useSetting } from "../src/ui/hooks.js";
 import { setSetting } from "../src/settings.js";
 
-vi.mock("../src/config.js", () => ({ defaultPresenceName: vi.fn(), resolveClientConfig: vi.fn() }));
-vi.mock("../src/collab/rooms.js", () => ({ acquireRoom: vi.fn() }));
+vi.mock("../src/config.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/config.js")>(),
+  defaultPresenceName: vi.fn(),
+  resolveClientConfig: vi.fn(),
+}));
+vi.mock("../src/collab/rooms.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/collab/rooms.js")>(),
+  acquireRoom: vi.fn(),
+}));
 
 const ROOM = "00000000-0000-4000-8000-000000000001/_directory";
 const IDENTITY = { name: "synthetic", color: "#006699" };

@@ -12,6 +12,7 @@ import { tableCellTexts, tableRows } from "./table.js";
 import { CARD_PARTS, cardPartTexts } from "./card.js";
 import type { CardPart } from "./card.js";
 import { figmaCaptionTexts } from "./figma.js";
+import { structuredInlineParts } from "./inline-parts.js";
 import { COMMENT_MARK, isCommentMark } from "./types.js";
 import type {
   Annotation,
@@ -93,18 +94,12 @@ function annotationTexts(element: Y.XmlElement): Array<{
   column?: number;
   part?: CardPart | "caption";
 }> {
-  if (element.nodeName === "figma") {
-    return [{ texts: figmaCaptionTexts(element), part: "caption" }];
+  if (element.nodeName === "table" || element.nodeName === "card" || element.nodeName === "figma") {
+    return structuredInlineParts(element).map((part) => part.kind === "table"
+      ? { texts: part.texts, row: part.row, column: part.column }
+      : { texts: part.texts, part: part.part });
   }
-  if (element.nodeName === "card") {
-    return CARD_PARTS.map((part) => ({ texts: cardPartTexts(element, part), part }));
-  }
-  if (element.nodeName !== "table") {
-    return element.firstChild instanceof Y.XmlText ? [{ texts: [element.firstChild] }] : [];
-  }
-  return tableRows(element).flatMap((cells, row) =>
-    cells.map((cell, column) => ({ texts: tableCellTexts(cell), row, column })),
-  );
+  return element.firstChild instanceof Y.XmlText ? [{ texts: [element.firstChild] }] : [];
 }
 
 /**

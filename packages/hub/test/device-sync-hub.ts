@@ -149,14 +149,14 @@ export async function startDeviceSyncHub(options: {
       if (memberships.roleFor(workspaceId, memberId) === null) memberships.grant({ workspaceId, principalId: memberId, role: "member" });
     },
     removeMembership(workspaceId: string, memberId = principalId): void {
-      memberships.remove({ workspaceId, principalId: memberId, actorPrincipalId: adminId });
+      memberships.remove({ workspaceId, principalId: memberId });
     },
     changeRole(workspaceId: string, role: "admin" | "member", memberId = principalId): void {
-      memberships.changeRole({ workspaceId, principalId: memberId, actorPrincipalId: adminId, role });
+      memberships.changeRole({ workspaceId, principalId: memberId, role });
     },
     revoke(credentialId: string): void { credentials.revoke(credentialId); },
     setWorkspaceStatus(workspaceId: string, status: "active" | "suspended"): void {
-      admins.setWorkspaceStatus(adminId, workspaceId, status);
+      admins.setWorkspaceStatus(workspaceId, status);
     },
     setRenewalReply(reply: DeviceSyncRenewalReply | null): void { renewalReply = reply; },
     setRenewalDelay(ms: number): void { renewalDelayMs = ms; },

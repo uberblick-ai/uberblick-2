@@ -84,7 +84,8 @@ function room(name: string): RoomConnection {
   return connection;
 }
 
-vi.mock("../src/collab/rooms.js", () => ({
+vi.mock("../src/collab/rooms.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/collab/rooms.js")>(),
   acquireRoom: (name: string) => {
     acquired.push(name);
     return { connection: room(name), release: () => { released.push(name); } };
@@ -1038,7 +1039,7 @@ describe("decision topic navigation and history", () => {
       topic={resolveDecisionTopics(directory())[0]!} selected={FIRST} linkedRecord={null}
       explicit={false} navigate={() => {}} directoryConnection={room(directoryRoom(WORKSPACE))}
       connection={room(roomForDoc(WORKSPACE, FIRST))} segment={WORKSPACE} presence={[]}
-      author="Reader" archived={false} docLinks={null} onRestore={null} onSelectThread={() => {}}
+      author="Reader" archived={false} docLinks={null} actions={{ onRestore: null }} onSelectThread={() => {}}
     />)).container;
     expect(answer(host).textContent).toContain("An answer.");
     expect(host.querySelector(".ub-decision-rfc")).toBeNull();

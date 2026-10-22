@@ -65,7 +65,7 @@ test("a refused settings edit rebuilds the browser room and reports the discarde
   }
 });
 
-test("settings refused without an open tab report once after a serving restart", async ({ browser }) => {
+test("settings refusals report after a serving restart and again in the same open tab", async ({ browser }) => {
   const page = await openApp(browser, `/${harness().workspace}/settings`);
   const name = page.getByRole("textbox", { name: "Name", exact: true });
   const repository = page.getByRole("textbox", { name: "Main repository", exact: true });
@@ -97,20 +97,42 @@ test("settings refused without an open tab report once after a serving restart",
     await expect.poll(() => harness().localSettingsReset()?.seq ?? 0).toBeGreaterThan(initialResetSeq);
     await harness().restartOpen({ authenticated: true });
 
-    const later = await openApp(browser, `/${harness().workspace}/settings`);
+    // Keep a cached admin view while the hub enforces the current member role.
+    const later = await openApp(browser, `/${harness().workspace}/settings`, {
+      beforeNavigate: async (opening) => {
+        await opening.route("**/api/access", (route) => {
+          const action = route.request().postDataJSON() as { operation: string };
+          return action.operation === "own-role"
+            ? route.fulfill({ json: { status: "ok", role: "admin", hub: harness().hubUrl } }) : route.continue();
+        });
+      },
+    });
     const refusal = later.getByText(/refused changes to workspace name, main repository/i);
-    await expect(later.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
+    const laterRepository = later.getByRole("textbox", { name: "Main repository", exact: true });
+    await expect(laterRepository).toBeEnabled();
     await expect(refusal).toHaveCount(1);
     await expect.poll(() => harness().hubWorkspaceSettings()).toEqual(originalHub);
+
+    await laterRepository.fill("Owner/RefusedAgain");
+    await later.getByRole("button", { name: "Save main repository", exact: true }).click();
+    await expect(laterRepository).toHaveValue(originalRepository);
+    const secondRefusal = later.getByText(/refused changes to main repository/i);
+    await expect(secondRefusal).toHaveCount(1);
+    await expect(refusal).toHaveCount(0);
+    await expect.poll(() => harness().hubWorkspaceSettings()).toEqual(originalHub);
+
+    await later.unroute("**/api/access");
     await later.reload();
     await expect(later.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
     await expect(refusal).toHaveCount(0);
+    await expect(secondRefusal).toHaveCount(0);
 
     harness().changeCurrentWorkspaceRole("admin");
     await later.goto(new URL(`/${harness().workspace}/settings`, harness().appUrl).href);
     await expect(later.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(originalName);
     await expect(later.getByRole("textbox", { name: "Main repository", exact: true })).toHaveValue(originalRepository);
     await expect(refusal).toHaveCount(0);
+    await expect(secondRefusal).toHaveCount(0);
   } finally {
     await harness().startHub();
     harness().changeCurrentWorkspaceRole("admin");

@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseArgs } from "node:util";
 import { ensureDeviceLogin, readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import type { StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { assertHubTransport, authenticationOrigin, normalizeRemoteUrl } from "@uberblick/mcp-server/remote-url";
@@ -11,7 +10,7 @@ import { isUuid, parseWorkspaceId } from "@uberblick/schema";
 import { ManagementResponseError, manageRequest } from "@uberblick/mcp-server/management-client";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 import { requireBinding, resolveConfig, writeHubAdmission } from "@uberblick/mcp-server/project-config";
-import { takeHelp } from "./help.js";
+import { type CommandArgs, usageError } from "./command.js";
 import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
 import { type Io, shellArgument } from "./io.js";
 import { resolveProjectBinding, writeProjectBinding } from "@uberblick/mcp-server/project-binding";
@@ -92,19 +91,15 @@ async function reserve(origin: string, workspaceId: string, attemptId: string, l
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
-export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<number> {
-  if (takeHelp(argv, io, WORKSPACE_PROMOTE_HELP)) return 0;
+export async function promoteWorkspaceCommand({ positionals }: CommandArgs<Record<string, never>>, io: Io): Promise<number> {
   let endpoint: string;
   let hub: string;
   try {
-    const { positionals } = parseArgs({ args: argv, options: {}, allowPositionals: true });
-    if (positionals.length !== 1) throw new Error("expected exactly one hub");
     hub = positionals[0] ?? "";
     endpoint = normalizeRemoteUrl(hub);
     assertHubTransport(hub);
   } catch (error) {
-    io.err(`ub workspace promote: ${error instanceof Error ? error.message : "invalid hub"}\n`);
-    return 2;
+    usageError(error instanceof Error ? error.message : "invalid hub");
   }
   let canResume = false;
   const interrupted = new AbortController();

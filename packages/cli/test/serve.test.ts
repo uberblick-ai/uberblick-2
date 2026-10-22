@@ -14,6 +14,8 @@ import { closeSync, constants, existsSync, openSync, readFileSync, readdirSync, 
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { defaultWorkspaceDatabasePath } from "@uberblick/mcp-server";
+import { MirrorStore } from "../../mcp-server/src/store.js";
 import { afterAll, describe, expect, it } from "vitest";
 import { readWorkspaceHub, ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 import { DEAD_HUB_URL, UB_BIN, WAIT_TIMEOUT_MS, removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
@@ -180,23 +182,25 @@ describe("ub mcp serve", () => {
     expect(existsSync(join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`))).toBe(false);
   });
 
-  it.each([null, DEAD_HUB_URL])("serves a manual workspace override alone using its recorded hub %s", async (hubUrl) => {
+  it.each([undefined, null, DEAD_HUB_URL])("serves a manual workspace override alone with initial hub record %s", async (hubUrl) => {
     const selected = "8f21c604-3b7d-4a15-9c62-0d5e8b3f7a29";
     const box = sandbox({
       projectBinding: { workspaceId: WORKSPACE, hubUrl: null },
-      credentials: hubUrl === null ? undefined : { signingSecret: "cli-manual-override-secret" },
+      credentials: hubUrl == null ? undefined : { signingSecret: "cli-manual-override-secret" },
     });
-    await ensureWorkspaceBinding({ workspaceId: selected, hubUrl }, box.env);
+    if (hubUrl === undefined) new MirrorStore(defaultWorkspaceDatabasePath(selected, box.env), selected).close();
+    else await ensureWorkspaceBinding({ workspaceId: selected, hubUrl }, box.env);
+    expect(readWorkspaceHub(selected, box.env)).toBe(hubUrl);
     const session = await connect(box, { UB_WORKSPACE_ID: selected });
     try {
       const result = await session.client.callTool({ name: "sync_status", arguments: {} });
       const content = result.content as { text: string }[];
       const status = JSON.parse(content[0]!.text);
       expect(status.workspace).toBe(selected);
-      expect(status.hub.url).toBe(hubUrl);
+      expect(status.hub.url).toBe(hubUrl ?? null);
       expect(status.database).toMatch(new RegExp(`${selected}\\.sqlite$`));
       expect(existsSync(join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`))).toBe(false);
-      expect(readWorkspaceHub(selected, box.env)).toBe(hubUrl);
+      expect(readWorkspaceHub(selected, box.env)).toBe(hubUrl ?? null);
     } finally { await session.close(); }
   });
 

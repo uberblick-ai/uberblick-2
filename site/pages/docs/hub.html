@@ -45,6 +45,7 @@ sh bin/remote-compose.sh up --detach">Copy</button></div><pre><span class="p">$<
 
   <section class="q" id="kamal"><h2>With Kamal</h2>
   <p>We use it with <a href="https://kamal-deploy.org">Kamal</a>: the hub runs as an accessory next to the app.</p>
+  <p>If you replace the <code>web</code> image's Caddyfile with your own, keep <code>admin 127.0.0.1:2019</code> in its global options and <code>import /etc/caddy/uberblick-csp.caddy</code> in the route that serves the app. <a href="https://github.com/uberblick-ai/uberblick-2/blob/main/REMOTE.md">REMOTE.md</a> explains why.</p>
   </section>
 
   <section class="q" id="operate"><h2>Keep it running</h2>

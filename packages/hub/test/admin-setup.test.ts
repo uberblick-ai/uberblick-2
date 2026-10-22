@@ -333,7 +333,7 @@ describe("host-only first-admin setup", () => {
     const results = [await first.client.next(), await second.client.next()];
     expect(results.map((result) => result.status).sort()).toEqual(["complete", "workspace-has-membership"]);
     const winner = results.find((result) => result.status === "complete") as unknown as SetupGrant;
-    expect(testRig.memberships.listMembers(WORKSPACE, winner.identity.id)).toEqual([
+    expect(testRig.memberships.listMembers(WORKSPACE)).toEqual([
       { workspaceId: WORKSPACE, principalId: winner.identity.id, role: "admin" },
     ]);
     expect(rows(testRig).principals).toHaveLength(1);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
-import { PaneNotice } from "./EditorPane.js";
+import { PaneNotice } from "../document/EditorPane.js";
 import { BrowserHubSignIn } from "./BrowserHubSignIn.js";
 
 export const CLAIM_STATE_POLL_MS = 15_000;

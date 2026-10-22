@@ -919,7 +919,7 @@ test("the open document owns the remaining chrome and its one sync-details handl
   const path = new URL(page.url()).pathname;
   await sync.click();
   await expect(
-    page.getByRole("dialog", { name: "Sync and presence" }),
+    page.getByRole("dialog", { name: "Sync details" }),
   ).toBeVisible();
   expect(new URL(page.url()).pathname).toBe(path);
   await page.keyboard.press("Escape");
@@ -1001,20 +1001,18 @@ test("document actions stay reachable, close with the route, and archive into Re
   }
   await expect(page.locator(".ub-doc-meta")).not.toContainText(/uuid |rev /);
   await expect(page.locator(".ub-doc-meta")).not.toContainText("Copy link");
-  const layout = await page.evaluate(() => {
+  // The shell fills the viewport; the document pane may cap at its reading measure.
+  await expect.poll(() => page.evaluate(() => {
       const body = document.querySelector<HTMLElement>(".ub-body");
       const pane = document.querySelector<HTMLElement>(".ub-pane");
       if (body === null || pane === null) throw new Error("e2e: no document pane");
       return {
         viewport: innerWidth,
         body: [body.clientWidth, body.scrollWidth],
-        pane: [pane.clientWidth, pane.scrollWidth],
+        paneFits: pane.clientWidth > 0 && pane.clientWidth <= innerWidth,
+        paneOverflow: pane.scrollWidth - pane.clientWidth,
       };
-    });
-  for (const [client, scroll] of [layout.body, layout.pane]) {
-    expect(client).toBe(layout.viewport);
-    expect(scroll).toBeLessThanOrEqual(client ?? 0);
-  }
+    })).toEqual({ viewport: 810, body: [810, 810], paneFits: true, paneOverflow: 0 });
 
   await copyLink.click();
   await expect(copyNotice(page, "Link copied")).toBeVisible();
@@ -1704,7 +1702,7 @@ for (const scheme of ["light"] as const) {
     }
     await page.setViewportSize(viewport);
     await page.locator(".ub-status-sync").click();
-    const sync = page.getByRole("dialog", { name: "Sync and presence" });
+    const sync = page.getByRole("dialog", { name: "Sync details" });
     await expect(sync).toBeVisible();
     for (const fact of await sync.locator(".ub-sync-fact").all()) {
       const identifier = ["Hub", "Room"].includes(await fact.locator("dt").innerText());
@@ -2237,9 +2235,7 @@ for (const scheme of ["light"] as const) {
   });
 }
 for (const scheme of ["light", "dark"] as const) {
-  test.fixme(`document tags occupy only their control, leaving blank header space inert — ${scheme} @webkit`, {
-    annotation: { type: "issue", description: "https://github.com/uberblick-ai/uberblick-2/issues/2003" },
-  }, async ({ browser }, info) => {
+  test(`document tags occupy only their control, leaving blank header space inert — ${scheme} @webkit`, async ({ browser }, info) => {
     const touch = info.project.name === "webkit-ipad";
     const page = await openApp(browser, `/${harness().workspace}/settings/tags`, {
       upstream: true,
@@ -2272,7 +2268,7 @@ for (const scheme of ["light", "dark"] as const) {
       if (touch) await control.tap();
       else await control.click();
     };
-    const blankSpace = async (): Promise<{ x: number; y: number }> => {
+    const blankSpace = async (): Promise<void> => {
       const geometry = await trigger.evaluate((control) => {
         const row = control.closest(".ub-doc-meta");
         const actions = row?.querySelector(".ub-document-controls");
@@ -2287,7 +2283,7 @@ for (const scheme of ["light", "dark"] as const) {
         const y = box.top + box.height / 2;
         const minimum = matchMedia("(any-pointer: coarse)").matches ? 44 : 24;
         return {
-          x, y, width: box.width, height: box.height, minimum,
+          x, y, rowLeft: rowBox.left, rowTop: rowBox.top, width: box.width, height: box.height, minimum,
           trailing: box.right - visibleBox.right,
           chevronGap: chevron === null ? 0 : visibleBox.left - (control.querySelector(".ub-tag")?.getBoundingClientRect().right ?? 0),
           gap: actionBox.left - box.right,
@@ -2308,12 +2304,14 @@ for (const scheme of ["light", "dark"] as const) {
       expect(geometry.actionInset).toBeCloseTo(0, 1);
       expect(geometry.takesBlank).toBe(false);
       expect(geometry.controlsTakeBlank).toBe(false);
-      if (touch) await page.touchscreen.tap(geometry.x, geometry.y);
-      else await page.mouse.click(geometry.x, geometry.y);
+      // Locator input waits for stable layout before interacting with the
+      // newly mounted popover's deferred outside-pointer listener.
+      const position = { x: geometry.x - geometry.rowLeft, y: geometry.y - geometry.rowTop };
+      if (touch) await page.locator(".ub-doc-meta").tap({ position });
+      else await page.locator(".ub-doc-meta").click({ position });
       await expect(page.locator(".ub-tag-picker-panel")).toHaveCount(0);
       await expect(page.getByRole("menu")).toHaveCount(0);
       await expect(copyNotice(page, "Link copied")).toHaveCount(0);
-      return { x: geometry.x, y: geometry.y };
     };
     await blankSpace();
     // Both native activation keys keep the same focus entry and Escape return.
@@ -2339,13 +2337,11 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(trigger.locator(".ub-tag-chevron")).toHaveAttribute("aria-hidden", "true");
     expect(await page.locator(".ub-title").boundingBox()).toEqual(titleBefore);
     expect((await page.locator(".ub-doc-meta").boundingBox())?.height).toBe(rowBefore?.height);
-    const blank = await blankSpace();
+    await blankSpace();
     await activate(trigger);
     await expect(page.locator(".ub-tag-picker-panel")).toBeVisible();
     await expect(page.getByRole("option").first()).toBeFocused();
-    if (touch) await page.touchscreen.tap(blank.x, blank.y);
-    else await page.mouse.click(blank.x, blank.y);
-    await expect(page.locator(".ub-tag-picker-panel")).toHaveCount(0);
+    await blankSpace();
   });
 }
 
@@ -2656,9 +2652,8 @@ function activeHoverRules(control: Locator): Promise<string[]> {
 }
 
 for (const scheme of ["light", "dark"] as const) {
-  test.fixme(`links, kind badges and reversible document actions use neutral ink — ${scheme}`, {
+  test(`links, kind badges and reversible document actions use neutral ink — ${scheme}`, {
     tag: "@webkit",
-    annotation: { type: "issue", description: "https://github.com/uberblick-ai/uberblick-2/issues/2003" },
   }, async ({ browser }, info) => {
     const touch = info.project.use.hasTouch === true;
     const page = await openApp(browser, "/", {
@@ -2767,6 +2762,7 @@ for (const scheme of ["light", "dark"] as const) {
       await expect(unpin).toBeFocused();
       await checkActions();
       await page.keyboard.press("ArrowDown");
+      await expect(archive).toBeFocused();
       await page.keyboard.press("Enter");
       const confirmation = page.getByRole("alertdialog");
       await expect(confirmation).toContainText("The topic and all its records leave the decision list and search. You can restore it later.");
@@ -3268,7 +3264,6 @@ test("terminal caption controls keep AA contrast on the appearance-aware tint", 
 
 /** Touch paths for information also available on hover. */
 const LONG_NAME = "Alexandria Montgomery · Engineering collaboration session on the production workspace";
-const UNBROKEN_NAME = "Collaborator".repeat(12);
 
 for (const [device, width, hasTouch] of [
   ["iPad", 810, true],
@@ -3335,38 +3330,14 @@ for (const [device, width, hasTouch] of [
       const sync = page.locator(".ub-status-sync");
       if (hasTouch) await sync.tap();
       else { await sync.focus(); await page.keyboard.press("Enter"); }
-      const panel = page.getByRole("dialog", { name: "Sync and presence" });
+      const panel = page.getByRole("dialog", { name: "Sync details" });
       await expect(panel).toBeVisible();
       await expect(panel.locator("dt", { hasText: "Last updated" }).locator("..").locator("time")).toHaveText(exact ?? "");
       await expect(panel.locator("time")).toHaveAttribute("datetime", stamp ?? "");
-      const checkName = async (name: string): Promise<void> => {
-        const text = panel.locator(".ub-presence-name");
-        await expect(text).toHaveText(name);
-        const layout = await text.evaluate((element) => {
-          const nameBox = element.getBoundingClientRect();
-          const panel = element.closest('[role="dialog"]');
-          if (panel === null) throw new Error("name has no panel");
-          const panelBox = panel.getBoundingClientRect();
-          const range = document.createRange();
-          range.selectNodeContents(element);
-          const blockBox = element.nextElementSibling?.getBoundingClientRect();
-          return {
-            fits: element.scrollWidth <= element.clientWidth + 1,
-            wraps: range.getClientRects().length > 1,
-            inside: nameBox.right <= panelBox.right && (blockBox === undefined || blockBox.right <= panelBox.right),
-          };
-        });
-        expect(layout).toEqual({ fits: true, wraps: true, inside: true });
-      };
-      await checkName(LONG_NAME);
-      await expect(panel.getByText("block 29", { exact: true })).toBeVisible();
-      // The same panel is also the full-name path when there is no caret to reveal.
-      provider.setAwarenessField("cursor", null);
-      provider.setAwarenessField("user", { name: UNBROKEN_NAME, color: "#0675c9" });
-      await checkName(UNBROKEN_NAME);
-      await expect(panel.getByText("block 29", { exact: true })).toHaveCount(0);
-      // The popover stays contained at each device width, including a reduced
-      // available height where its unchanged facts and names need to scroll.
+      await expect(panel.getByRole("heading", { name: "Present now", exact: true })).toHaveCount(0);
+      await expect(panel.getByText(LONG_NAME, { exact: true })).toHaveCount(0);
+      await expect(peer).toHaveAccessibleName(/Alexandria Montgomery.*agent.*29/);
+      // Sync facts stay contained at each supported width and reduced height.
       for (const height of [900, 430]) {
         await page.setViewportSize({ width, height });
         await expect.poll(async () => {
@@ -3375,11 +3346,6 @@ for (const [device, width, hasTouch] of [
             box.x + box.width <= width && box.y + box.height <= height;
         }).toBe(true);
       }
-      await expect.poll(() => panel.evaluate((element) =>
-        element.scrollHeight > element.clientHeight,
-      )).toBe(true);
-      await panel.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-      expect(await panel.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
     } finally {
       provider.destroy();
       doc.destroy();

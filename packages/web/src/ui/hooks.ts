@@ -26,7 +26,7 @@ import {
   readSidebar,
 } from "@uberblick/schema";
 import type { DirectoryEntry, DocMeta, SidebarGroup } from "@uberblick/schema";
-import { acquireRoom } from "../collab/rooms.js";
+import { acquireRoom, BLANK_ROOM_STATUS } from "../collab/rooms.js";
 import type { RoomConnection, RoomStatus } from "../collab/rooms.js";
 import { resolveClientConfig } from "../config.js";
 import { localSession, localSessionMissing, subscribeLocalSession } from "../collab/local-session.js";
@@ -101,19 +101,6 @@ export function useRoom(
   return connection !== null && connection.room === room ? connection : null;
 }
 
-const OFFLINE: RoomStatus = {
-  connected: false,
-  synced: false,
-  hasReceivedServerState: false,
-  hasAnswered: false,
-  writable: false,
-  storeRefused: false,
-  unsyncedChanges: 0,
-  protocolMismatch: null,
-  authFailed: false,
-  tokenMissing: false,
-};
-
 /** A status snapshot and the exact connection that supplied it. */
 interface RoomStatusReading {
   connection: RoomConnection;
@@ -122,7 +109,7 @@ interface RoomStatusReading {
 
 /**
  * Use the current connection's seed before subscribing, and pair later
- * snapshots with their source. Directory consumers use OFFLINE without a
+ * snapshots with their source. Directory consumers use the blank status without a
  * connection; document surfaces suppress it until their room has a reading.
  */
 export function useRoomStatus(connection: RoomConnection | null): RoomStatus {
@@ -131,7 +118,7 @@ export function useRoomStatus(connection: RoomConnection | null): RoomStatus {
     if (connection === null) return;
     return connection.onStatusChange((status) => setReading({ connection, status }));
   }, [connection]);
-  if (connection === null) return OFFLINE;
+  if (connection === null) return BLANK_ROOM_STATUS;
   return reading?.connection === connection ? reading.status : connection.status;
 }
 

@@ -1,20 +1,6 @@
 import {
-  AnnotationCellError,
-  AnnotationRangeError,
-  BlockNotFoundError,
-  ConflictingLinkMarksError,
   DataError,
-  InvalidDocumentLifecycleError,
-  InvalidTableError,
-  InvalidCardError,
-  InvalidFigmaError,
-  InvalidListAttributesError,
-  InvalidTableMappingError,
-  InvalidTagAssignmentError,
-  InlineLinkRangeError,
-  OldTextMismatchError,
-  StaleBlockError,
-  TableMappingRequiredError,
+  SchemaError,
 } from "@uberblick/schema";
 import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
@@ -496,37 +482,14 @@ export function toFailure(tool: FailedTool, error: unknown): ToolFailure {
   if (error instanceof ServerShuttingDownError) {
     return stamped(tool, { error: "server_shutting_down", message: error.message });
   }
-  if (error instanceof DataError) {
+  if (error instanceof SchemaError || error instanceof DataError) {
     return stamped(tool, {
       error: error.code,
       message: error.message,
       ...error.details,
-    });
-  }
-  if (error instanceof TableMappingRequiredError) {
-    return stamped(tool, { error: "table_mapping_required", message: error.message });
-  }
-  if (error instanceof InvalidTableMappingError) {
-    return stamped(tool, { error: "invalid_table_mapping", message: error.message });
-  }
-  if (error instanceof InvalidListAttributesError) {
-    return stamped(tool, { error: "invalid_list_attributes", message: error.message });
-  }
-  if (error instanceof InvalidTableError) {
-    return stamped(tool, { error: "invalid_table", message: error.message });
-  }
-  if (error instanceof InvalidCardError) {
-    return stamped(tool, { error: "invalid_card", message: error.message });
-  }
-  if (error instanceof InvalidFigmaError) {
-    return stamped(tool, { error: "invalid_figma", message: error.message });
-  }
-  if (error instanceof AnnotationCellError) {
-    return stamped(tool, {
-      error: "annotation_cell",
-      message: error.message,
-      blockId: error.blockId,
-      reason: error.reason,
+      ...(error instanceof SchemaError && error.code === "invalid_tag_assignment" && tool.name === "set_metadata"
+        ? { field: "tags" }
+        : {}),
     });
   }
   if (error instanceof PersistenceError) {
@@ -535,83 +498,6 @@ export function toFailure(tool: FailedTool, error: unknown): ToolFailure {
       error: "persistence_failed",
       message: PERSISTENCE_ERROR_MESSAGE,
       room: error.room,
-    });
-  }
-  if (error instanceof StaleBlockError) {
-    // Carry current text and rev so callers can correct assertions without a read.
-    return stamped(tool, {
-      error: "stale_block",
-      message: error.message,
-      blockId: error.blockId,
-      expectedText: error.expectedText ?? null,
-      expectedRev: error.expectedRev ?? null,
-      currentText: error.currentText,
-      currentRev: error.currentRev,
-      retry: "re-read nothing: call again with currentRev, against currentText",
-    });
-  }
-  if (error instanceof OldTextMismatchError) {
-    return stamped(tool, {
-      error: "old_text_mismatch",
-      message: error.message,
-      blockId: error.blockId,
-      expectedText: error.expectedText,
-      expectedRev: error.expectedRev,
-      currentText: error.currentText,
-      currentRev: error.currentRev,
-      retry: "correct old_text, re-diff against currentText, and call again with currentRev",
-    });
-  }
-  if (error instanceof BlockNotFoundError) {
-    return stamped(tool, {
-      error: "block_not_found",
-      message: error.message,
-      blockId: error.blockId,
-    });
-  }
-  // Range refusals share a code and reason; mark conflicts retain both targets.
-  if (error instanceof InlineLinkRangeError) {
-    return stamped(tool, {
-      error: "inline_link_range",
-      message: error.message,
-      reason: error.reason,
-      blockId: error.blockId,
-      blockType: error.blockType ?? null,
-    });
-  }
-  if (error instanceof ConflictingLinkMarksError) {
-    return stamped(tool, {
-      error: "inline_link_range",
-      message: error.message,
-      reason: "overlap",
-      href: error.href,
-      docId: error.docId,
-    });
-  }
-  if (error instanceof AnnotationRangeError) {
-    return stamped(tool, {
-      error: "annotation_range",
-      message: error.message,
-      reason: error.reason,
-      blockId: error.blockId,
-      conflictingThreadId: error.conflictingThreadId ?? null,
-    });
-  }
-  if (error instanceof InvalidDocumentLifecycleError) {
-    return stamped(tool, {
-      error: "invalid_document_lifecycle",
-      message: error.message,
-      kind: error.kind,
-      status: error.status,
-    });
-  }
-  if (error instanceof InvalidTagAssignmentError) {
-    return stamped(tool, {
-      error: "invalid_tag_assignment",
-      message: error.message,
-      unknown: error.unknown,
-      retired: error.retired,
-      ...(tool.name === "set_metadata" ? { field: "tags" } : {}),
     });
   }
   if (error instanceof ToolError) {

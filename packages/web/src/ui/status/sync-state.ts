@@ -1,5 +1,6 @@
 /** Immediate page attributes, independent of the status line's presentation. */
 import type { RoomConnection, RoomStatus } from "../../collab/rooms.js";
+import { refused } from "../../collab/rooms.js";
 import { rawSyncState } from "./calm.js";
 
 export type SettleState = "pending" | "acknowledged" | "offline";
@@ -17,7 +18,7 @@ interface SharedObservation {
 const observations = new WeakMap<RoomConnection, SharedObservation>();
 
 function localState(status: RoomStatus): SettleState {
-  if (status.authFailed || status.tokenMissing || status.storeRefused || status.protocolMismatch !== null) return "offline";
+  if (refused(status)) return "offline";
   const raw = rawSyncState(status);
   if (raw !== "offline" && !status.writable) return "pending";
   return raw === "synced" ? "acknowledged" : raw === "offline" ? "offline" : "pending";

@@ -5,7 +5,7 @@ import {
   decisionAnswerShapeFailure,
   decisionApprovalFingerprint,
   decisionTopicTitle,
-  documentDirectoryFields,
+  documentStubFields,
   getBlocks,
   getBlocksFragment,
   getBlocksWithInline,
@@ -25,7 +25,7 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { AwarenessUser } from "./identity.js";
-import { acquireRoom } from "./rooms.js";
+import { acquireRoom, refused } from "./rooms.js";
 import type { RoomConnection } from "./rooms.js";
 
 /** The caller owns this isolated draft and destroys it when the editor closes. */
@@ -128,8 +128,7 @@ function destinationState(destinations: Destination[], directory: Y.Doc): Refusa
   let ready = true;
   for (const { uuid, handle } of destinations) {
     const { status, ydoc } = handle.connection;
-    if (status.storeRefused || status.protocolMismatch !== null || status.authFailed ||
-      status.tokenMissing || status.deleted) return refuse("destination_unwritable");
+    if (refused(status)) return refuse("destination_unwritable");
     if (!status.writable || !status.synced) { ready = false; continue; }
     if (getMeta(ydoc).uuid !== "" || getBlocksFragment(ydoc).length > 0 ||
       getDirectoryEntry(directory, uuid) !== null || isDirectoryEntryDeleted(directory, uuid)) {
@@ -140,13 +139,8 @@ function destinationState(destinations: Destination[], directory: Y.Doc): Refusa
 }
 
 function stageDocument(doc: Y.Doc, now: number) {
-  const meta = getMeta(doc);
   return { update: Y.encodeStateAsUpdate(doc), stub: {
-    uuid: meta.uuid, title: meta.title, tags: meta.tags,
-    ...(meta.description == null ? {} : { description: meta.description }),
-    ...(meta.kind === undefined ? {} : { kind: meta.kind }),
-    ...(meta.status === undefined ? {} : { status: meta.status }),
-    ...documentDirectoryFields(doc), createdAt: now, updatedAt: now,
+    ...documentStubFields(doc), createdAt: now, updatedAt: now,
   } };
 }
 

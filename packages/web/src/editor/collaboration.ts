@@ -77,7 +77,7 @@ function isAttributedAgentCursor(
 /**
  * Retain departed agent cursors locally; never publish retained state, hold a
  * transport open or write it to the document. Reload starts empty. The title
- * cluster shares this view; connection counts and Present now use real states.
+ * cluster shares this view; connection counts use real states.
  * Expiry emits change; other events pass through. Implement only the members
  * used by the cursor plugin and title presence reader.
  */

@@ -60,6 +60,7 @@ export interface ResolvedConfig {
   shadowed: ShadowedLayer[];
   /** Everything questionable about the configuration. For stderr, never stdout. */
   warnings: string[];
+  credentialExposure: SigningSecretExposureError | null;
 }
 
 /** Recovery rotates a possibly leaked secret rather than trusting it again. */
@@ -68,7 +69,16 @@ export function exposedSigningSecretRemedy(path: string): string {
     "and run `ub auth login` again if the file held hub logins";
 }
 
-export class SigningSecretExposureError extends Error {}
+export class SigningSecretExposureError extends Error {
+  constructor(readonly path: string, readonly permissions: string) {
+    super(`refusing ${path}: mode ${permissions} lets other users read the hub signing secret, ` +
+      `so its secret may have leaked — ${exposedSigningSecretRemedy(path)}`);
+  }
+}
+
+export class BindingResolutionError extends Error {
+  constructor(message: string, readonly reason: "invalid" | "missing" = "invalid") { super(message); }
+}
 
 /** CLI and MCP use the same storage layout. */
 function configDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -247,23 +257,18 @@ function warnAboutMisplacedSecret(
 }
 
 /** Exposure refusal applies to the file, not an explicit environment signing secret. */
-function credentialsAreExposed(path: string, warnings: string[]): boolean {
+function credentialsExposure(path: string): SigningSecretExposureError | null {
   let mode: number;
   try {
     mode = statSync(path).mode;
   } catch {
-    return false;
+    return null;
   }
   const permissions = mode & 0o777;
   if ((permissions & 0o077) === 0) {
-    return false;
+    return null;
   }
-  warnings.push(
-    `refusing ${path}: mode ${permissions.toString(8).padStart(4, "0")} lets ` +
-      "other users read the hub signing secret, so its secret may have leaked — " +
-      exposedSigningSecretRemedy(path),
-  );
-  return true;
+  return new SigningSecretExposureError(path, permissions.toString(8).padStart(4, "0"));
 }
 
 /**
@@ -277,17 +282,20 @@ export function readCredentials(env: NodeJS.ProcessEnv = process.env): {
   signingSecret: string | null;
   /** True when the file exists and other users can read it. */
   exposed: boolean;
+  exposure: SigningSecretExposureError | null;
   warnings: string[];
 } {
   const warnings: string[] = [];
   const path = credentialsPath(env);
-  const exposed = credentialsAreExposed(path, warnings);
+  const exposure = credentialsExposure(path);
+  if (exposure !== null) warnings.push(exposure.message);
   const raw = readJsonObject(path, warnings);
   return {
     path,
     raw,
     signingSecret: stringField(raw, SIGNING_SECRET_KEY, path, warnings),
-    exposed,
+    exposed: exposure !== null,
+    exposure,
     warnings,
   };
 }
@@ -301,7 +309,12 @@ export interface ResolveOptions {
 
 export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   const env = options.env ?? process.env;
-  const selection = resolveProjectBinding(options);
+  let selection: ReturnType<typeof resolveProjectBinding>;
+  try {
+    selection = resolveProjectBinding(options);
+  } catch (error) {
+    throw new BindingResolutionError(message(error));
+  }
   const storage = resolveStorage({ env });
   const warnings: string[] = [];
   const shadowed: ShadowedLayer[] = [];
@@ -391,6 +404,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
     storage,
     shadowed,
     warnings,
+    credentialExposure: credentials.exposure,
   };
 }
 
@@ -438,8 +452,8 @@ export function claimSigningSecret(
 
   // Adopt the secret already published for this machine.
   const existing = readCredentials(env);
-  if (existing.exposed) {
-    throw new SigningSecretExposureError(existing.warnings[0]);
+  if (existing.exposure !== null) {
+    throw existing.exposure;
   }
   if (existing.signingSecret !== null) {
     return existing.signingSecret;
@@ -468,8 +482,8 @@ export function ensureLocalSigningSecret(env: NodeJS.ProcessEnv = process.env): 
   const fromEnv = trimmed(env.HUB_AUTH_TOKEN);
   if (fromEnv !== null) return { secret: fromEnv, created: false, path };
   const credentials = readCredentials(env);
-  if (credentials.exposed) {
-    throw new SigningSecretExposureError(credentials.warnings[0]);
+  if (credentials.exposure !== null) {
+    throw credentials.exposure;
   }
   if (credentials.signingSecret !== null) {
     return { secret: credentials.signingSecret, created: false, path };

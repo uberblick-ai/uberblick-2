@@ -16,8 +16,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startDeviceSyncHub } from "../../hub/test/device-sync-hub.js";
 import * as budget from "../src/budget.js";
 import type { Check, DoctorReport } from "../src/doctor.js";
-import { doctorCommand, doctorReport, renderDoctor } from "../src/doctor.js";
-import * as open from "../src/open.js";
+import { doctorReport, renderDoctor } from "../src/doctor.js";
+import { runCli } from "../src/cli.js";
+import * as open from "../src/open-ports.js";
 import * as probes from "../src/probes.js";
 import { ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 import type { Run, Sandbox } from "./helpers.js";
@@ -311,7 +312,7 @@ describe("ub doctor", () => {
   it.each([
     { description: "lone UB_HUB_URL", env: { UB_HUB_URL: DEAD_HUB_URL }, variable: "UB_HUB_URL" },
     { description: "empty UB_HUB_URL", env: { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "" }, variable: "UB_HUB_URL" },
-    { description: "no recorded hub", env: { UB_WORKSPACE_ID: WORKSPACE }, variable: "UB_WORKSPACE_ID" },
+    { description: "no replica or recorded hub", env: { UB_WORKSPACE_ID: WORKSPACE }, variable: "UB_WORKSPACE_ID" },
     { description: "legacy WORKSPACE_ID", env: { WORKSPACE_ID: WORKSPACE }, variable: "WORKSPACE_ID" },
     { description: "malformed UB_WORKSPACE_ID", env: { UB_WORKSPACE_ID: SECRET, UB_HUB_URL: "local" }, variable: "UB_WORKSPACE_ID" },
   ])("names the variable at fault for $description in one line", async ({ env, variable }) => {
@@ -321,6 +322,12 @@ describe("ub doctor", () => {
     expect(workspace.reason).toContain(variable);
     expect(workspace.reason).not.toContain(SECRET);
     expect(workspace.reason).not.toBe("no .uberblick.json here or in any parent directory");
+    if (env.UB_WORKSPACE_ID === WORKSPACE && env.UB_HUB_URL === undefined) {
+      expect(workspace.reason).toContain("neither a copy nor a hub record for UB_WORKSPACE_ID");
+      expect(workspace.reason).toContain("UB_HUB_URL");
+      expect(workspace.reason).toContain("ub workspace use <link>");
+      expect(workspace.reason).not.toContain("\n");
+    }
   });
 
   it.each(["unreadable", "refused"] as const)("separates a device credential file's %s reason and fix", async kind => {
@@ -755,7 +762,7 @@ describe("ub doctor", () => {
     vi.stubEnv("CODEX_HOME", join(homeOf(box), ".codex"));
     vi.spyOn(process, "cwd").mockReturnValue(box.cwd);
     let output = "";
-    expect(await doctorCommand(["--json"], { out: text => { output += text; }, err: () => {} })).toBe(1);
+    expect(await runCli(["doctor", "--json"], { out: text => { output += text; }, err: () => {} })).toBe(1);
     expect(JSON.parse(output)).toEqual(report);
   });
 

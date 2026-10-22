@@ -102,7 +102,7 @@ describe("signed-in credentials on composed admission", () => {
     rig.memberships.grant({ workspaceId: OTHER_WORKSPACE, principalId: principal.id, role: "member" });
     const admins = new HubAdminRegistry(rig.database);
     admins.grant("hub-admin");
-    admins.setWorkspaceStatus("hub-admin", WORKSPACE, "suspended");
+    admins.setWorkspaceStatus(WORKSPACE, "suspended");
     const before = membershipSnapshot(rig.database);
     const signedIn = await rig.completeSignIn();
     expect(signedIn.credential.record.workspaces).toEqual([OTHER_WORKSPACE]);

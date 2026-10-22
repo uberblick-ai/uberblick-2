@@ -43,7 +43,8 @@ const OFFLINE: RoomStatus = {
 };
 
 /** Rooms open instantly and never talk to anything. */
-vi.mock("../src/collab/rooms.js", () => ({
+vi.mock("../src/collab/rooms.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/collab/rooms.js")>(),
   acquireRoom: (room: string) => ({
     connection: {
       room,

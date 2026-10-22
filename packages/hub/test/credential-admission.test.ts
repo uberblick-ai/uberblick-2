@@ -123,9 +123,9 @@ async function endAccess(rig: Awaited<ReturnType<typeof startServer>>, kind: Acc
   if (kind === "revocation") {
     rig.registry.revoke(credential.record.id);
   } else if (kind === "membership removal") {
-    rig.memberships.remove({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: credential.record.principalId });
+    rig.memberships.remove({ workspaceId: WORKSPACE, principalId: credential.record.principalId });
   } else if (kind === "suspension") {
-    rig.hubAdmins.setWorkspaceStatus("hub-admin", WORKSPACE, "suspended");
+    rig.hubAdmins.setWorkspaceStatus(WORKSPACE, "suspended");
   } else if (kind === "expiry") {
     await waitUntil("the credential deadline to fence and close its rooms", () => {
       const record = rig.registry.get(credential.record.id);
@@ -271,7 +271,7 @@ describe("credential admission on a composed server", () => {
 
   it("gives admins and members equal document access while demotion immediately ends management authority from every device", async () => {
     const rig = await startServer();
-    rig.memberships.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "person", role: "admin" });
+    rig.memberships.changeRole({ workspaceId: WORKSPACE, principalId: "person", role: "admin" });
     const room = testRoom();
     const laptop = issue(rig.registry, "laptop");
     const phone = issue(rig.registry, "phone");
@@ -279,12 +279,11 @@ describe("credential admission on a composed server", () => {
     const clients = await Promise.all([laptop, phone, peer].map(async (credential) =>
       connect({ port: rig.port, room, token: await credentialToken(credential) })));
     await waitFor("both roles and all devices to sync", Promise.all(clients.map((client) => client.synced)));
-    rig.memberships.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "person", principalId: "person", role: "member" });
+    rig.memberships.changeRole({ workspaceId: WORKSPACE, principalId: "person", role: "member" });
     expect(rig.hocuspocus.documents.get(room)?.getConnectionsCount()).toBe(3);
     for (const connection of rig.hocuspocus.documents.get(room)!.getConnections()) {
       if (connection.context.principalId === "person") {
         expect(() => rig.memberships.requireAdmin(WORKSPACE, connection.context.principalId)).toThrow();
-        expect(() => rig.memberships.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: connection.context.principalId, principalId: "person", role: "admin" })).toThrow();
       }
     }
     for (const [index, client] of clients.entries()) {
@@ -476,7 +475,7 @@ describe("credential admission on a composed server", () => {
 
   it("cannot create, promote or restore memberships by syncing membership-shaped content or claiming an admin identity", async () => {
     const rig = await startServer();
-    rig.memberships.remove({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "person" });
+    rig.memberships.remove({ workspaceId: WORKSPACE, principalId: "person" });
     const removed = issue(rig.registry, "removed");
     const outsider = issue(rig.registry, "outsider", [WORKSPACE], "outsider");
     const peer = issue(rig.registry, "peer", [WORKSPACE], "observer");
@@ -589,7 +588,7 @@ describe("credential admission on a composed server", () => {
         await held.opened;
       },
     });
-    rig.memberships.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "person", role: "admin" });
+    rig.memberships.changeRole({ workspaceId: WORKSPACE, principalId: "person", role: "admin" });
     const laptop = issue(rig.registry, "laptop");
     const peer = issue(rig.registry, "peer", [WORKSPACE], "admin");
     victimId = laptop.record.id;
@@ -617,7 +616,7 @@ describe("credential admission on a composed server", () => {
       await waitFor("the authorized settings frame to pause", entered.opened);
       for (let index = 0; index < 4; index += 1) setWorkspaceName(sender.doc, `Queued rename ${index}`);
       await waitFor("settings updates to queue behind the paused frame", queued);
-      rig.memberships.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "person", role: "member" });
+      rig.memberships.changeRole({ workspaceId: WORKSPACE, principalId: "person", role: "member" });
       expect(victimConnection.readOnly).toBe(true);
       held.open();
       await waitFor("the held and queued settings frames to finish", victimConnection.waitForPendingMessages());
@@ -724,7 +723,7 @@ describe("credential admission on a composed server", () => {
         serverDocument.off("update", onUpdate);
         let activeObserver = observer;
         if (accessEnd === "suspension") {
-          rig.hubAdmins.setWorkspaceStatus("hub-admin", WORKSPACE, "active");
+          rig.hubAdmins.setWorkspaceStatus(WORKSPACE, "active");
           activeObserver = connect({ port: rig.port, room, token: await credentialToken(phone) });
           await waitFor("the restored workspace to admit the same device", activeObserver.synced);
         }
@@ -781,7 +780,7 @@ describe("credential admission on a composed server", () => {
           "close:device-credential-refused",
           "authenticationFailed:device-credential-refused",
         ]);
-        if (accessEnd === "suspension") rig.hubAdmins.setWorkspaceStatus("hub-admin", WORKSPACE, "active");
+        if (accessEnd === "suspension") rig.hubAdmins.setWorkspaceStatus(WORKSPACE, "active");
         const observer = connect({ port: rig.port, room, token: await credentialToken(phone) });
         await waitFor("the unaffected device to open the refused room", observer.synced);
         expect(observer.text.toString()).toBe("");
@@ -814,7 +813,7 @@ describe("credential admission on a composed server", () => {
     expect(rig.hubAdmins.isSuspended(WORKSPACE)).toBe(false);
     const memberships = rig.database.connection.prepare("SELECT * FROM hub_memberships ORDER BY workspace_id, principal_id").all();
     const closedConnections = rooms.filter(room => room !== rooms[1]).flatMap(room => rig.hocuspocus.documents.get(room!)!.getConnections());
-    rig.hubAdmins.setWorkspaceStatus("hub-admin", WORKSPACE, "suspended");
+    rig.hubAdmins.setWorkspaceStatus(WORKSPACE, "suspended");
     expect(closedConnections.every(connection => !connection.context.authorization.active && connection.readOnly)).toBe(true);
     expect(rig.hocuspocus.documents.get(rooms[0]!)!.getConnectionsCount()).toBe(0);
     expect(rig.hocuspocus.documents.get(rooms[2]!)!.getConnectionsCount()).toBe(0);
@@ -832,7 +831,7 @@ describe("credential admission on a composed server", () => {
       const refused = connect({ port: rig.port, room: rooms[0]!, token: await credentialToken(credential) });
       expect(await waitFor("every member to be refused while suspended", refused.denied)).toBe("device-credential-refused");
     }
-    rig.hubAdmins.setWorkspaceStatus("hub-admin", WORKSPACE, "active");
+    rig.hubAdmins.setWorkspaceStatus(WORKSPACE, "active");
     const restored = connect({ port: rig.port, room: rooms[0]!, token: await credentialToken(laptop), document: first.doc });
     await waitFor("the same device to resume without signing in", restored.synced);
     await waitUntil("the local edit to arrive after restore", () =>
@@ -863,7 +862,7 @@ describe("credential admission on a composed server", () => {
     ];
     const closed: string[] = [];
     for (const connection of removedConnections) connection.onClose(() => { closed.push(connection.context.deviceId); });
-    expect(rig.memberships.remove({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "person" })).toBe(true);
+    expect(rig.memberships.remove({ workspaceId: WORKSPACE, principalId: "person" })).toBe(true);
     expect(closed.sort()).toEqual(["laptop", "phone"]);
     expect(removedConnections.every((connection) => !connection.context.authorization.active && connection.readOnly)).toBe(true);
     expect(rig.hocuspocus.documents.get(firstRoom)?.getConnections().map((connection) => connection.context.principalId)).toEqual(["observer"]);

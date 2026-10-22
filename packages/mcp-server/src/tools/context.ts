@@ -297,46 +297,37 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
       return { text: title === "" ? docId : title, marks };
     });
 
-  /** Check newly written targets; surviving cells may already hold unresolved links. */
-  const validateTableTargets = (source: string, previous?: string, mapping?: TableMapping): void => {
-    const table = parseTableInput(source);
-    const oldTable = previous === undefined ? undefined : parseTableInput(previous);
-    const oldCells = oldTable === undefined ? [] : [oldTable.header, ...oldTable.rows];
-    for (const [row, cells] of [table.header, ...table.rows].entries()) {
-      for (const [column, cell] of cells.entries()) {
+  /** Existing targets are exempt only within the same surviving inline part. */
+  const validateBlockTargets = (type: BlockInput["type"], source: string, previous?: string, mapping?: TableMapping): void => {
+    let parts: { text: string; oldText: string | undefined }[];
+    let parse = parseInline;
+    if (type === "table") {
+      const table = parseTableInput(source);
+      const oldTable = previous === undefined ? undefined : parseTableInput(previous);
+      const oldCells = oldTable === undefined ? [] : [oldTable.header, ...oldTable.rows];
+      parse = parseTableCell;
+      parts = [table.header, ...table.rows].flatMap((cells, row) => cells.map((text, column) => {
         const oldRow = mapping === undefined ? row : mapping.rows[row];
         const oldColumn = mapping === undefined ? column : mapping.columns[column];
-        const oldCell = oldRow == null || oldColumn == null ? undefined : oldCells[oldRow]?.[oldColumn];
-        if (oldCell === cell) continue;
-        const oldTargets = new Set(parseTableCell(oldCell ?? "").map(run => run.marks.docLink));
-        for (const run of parseTableCell(cell)) {
-          if (run.marks.docLink !== undefined && !oldTargets.has(run.marks.docLink)) linkTitle(run.marks.docLink);
-        }
-      }
+        return { text, oldText: oldRow == null || oldColumn == null ? undefined : oldCells[oldRow]?.[oldColumn] };
+      }));
+    } else if (type === "card") {
+      const card = parseCardInput(source);
+      const oldCard = previous === undefined ? undefined : parseCardInput(previous, false);
+      parts = CARD_PARTS.map(part => ({ text: card[part], oldText: oldCard?.[part] }));
+    } else if (type === "figma") {
+      const figma = parseFigmaInput(source);
+      const oldFigma = previous === undefined ? undefined : parseFigmaInput(previous);
+      parts = [{ text: figma.caption, oldText: oldFigma?.caption }];
+    } else {
+      return;
     }
-  };
-
-  /** Existing targets in a part survive even when this replica no longer knows them. */
-  const validateCardTargets = (source: string, previous?: string): void => {
-    const card = parseCardInput(source);
-    const oldCard = previous === undefined ? undefined : parseCardInput(previous, false);
-    for (const part of CARD_PARTS) {
-      if (card[part] === oldCard?.[part]) continue;
-      const oldTargets = new Set(parseInline(oldCard?.[part] ?? "").map(run => run.marks.docLink));
-      for (const run of parseInline(card[part])) {
+    for (const { text, oldText } of parts) {
+      if (text === oldText) continue;
+      const oldTargets = new Set(parse(oldText ?? "").map(run => run.marks.docLink));
+      for (const run of parse(text)) {
         if (run.marks.docLink !== undefined && !oldTargets.has(run.marks.docLink)) linkTitle(run.marks.docLink);
       }
-    }
-  };
-
-  /** New caption links must resolve locally; existing targets survive header edits. */
-  const validateFigmaTargets = (source: string, previous?: string): void => {
-    const figma = parseFigmaInput(source);
-    const oldFigma = previous === undefined ? undefined : parseFigmaInput(previous);
-    if (figma.caption === oldFigma?.caption) return;
-    const oldTargets = new Set(parseInline(oldFigma?.caption ?? "").map(run => run.marks.docLink));
-    for (const run of parseInline(figma.caption)) {
-      if (run.marks.docLink !== undefined && !oldTargets.has(run.marks.docLink)) linkTitle(run.marks.docLink);
     }
   };
 
@@ -348,9 +339,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     block: z.infer<typeof blockInputSchema>,
   ): BlockInput => {
     // A bad later seed must not leave earlier blocks or metadata behind.
-    if (block.type === "table") validateTableTargets(block.text ?? "");
-    if (block.type === "card") validateCardTargets(block.text ?? "");
-    if (block.type === "figma") validateFigmaTargets(block.text ?? "");
+    validateBlockTargets(block.type, block.text ?? "");
     return toBlockInput(
       block,
       isProseBlockType(block.type) ? resolveInline(block.inline) : undefined,
@@ -477,9 +466,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     topicJson,
     decisionReadJson,
     annotationJson,
-    validateTableTargets,
-    validateCardTargets,
-    validateFigmaTargets,
+    validateBlockTargets,
     contentDurability,
     titleFor,
     linkTitle,

@@ -78,9 +78,10 @@ With the person present, record their actual choice through `create_doc` or
 RFC-connected open record with `set_status`; unanswered topics stay `open`,
 with a recommendation only when authorized. A successor takes effect only
 after recorded human approval. Reject and withdraw through MCP under the
-existing recorded-answer rules; the web remains a place to read and comment.
-Link the record from the intake instead of copying its reasoning; it grants
-no queue authority.
+existing recorded-answer rules. For product behavior, read the live Decision
+records page discovered by purpose under
+[AGENTS.md](../../AGENTS.md#read-for-the-action). Link the record from the intake
+instead of copying its reasoning; it grants no queue authority.
 
 ## Create a small intake
 

@@ -9,7 +9,8 @@ import { useWorkspaceNames, workspaceLabel } from "../src/ui/workspace-names.js"
 import type { Workspace } from "../src/ui/route.js";
 
 const held = vi.hoisted(() => ({ rooms: new Map<string, unknown>(), acquire: vi.fn(), release: vi.fn() }));
-vi.mock("../src/collab/rooms.js", () => ({
+vi.mock("../src/collab/rooms.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/collab/rooms.js")>(),
   acquireRoom: (...args: unknown[]) => {
     held.acquire(...args);
     return { connection: held.rooms.get(args[0] as string), release: held.release };

@@ -125,8 +125,13 @@ describe("workspace creation and promotion", () => {
     expect(readWorkspaceHub(previous.workspaceId, box.env)).toBe(previous.hubUrl);
     expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBeNull();
     expect(existsSync(join(box.dataHome, "uberblick", `${previous.workspaceId}.sqlite`))).toBe(false);
-    expect(result.stdout).toContain(`Previous workspace ${previous.workspaceId} (${previous.hubUrl})`);
-    expect(result.stdout).toContain(`Switch back: ub workspace use ${previous.workspaceId}\n`);
+    expect(result.stdout).toBe(
+      `created    Second (${selected(box).workspaceId}, local)\n` +
+      `wrote      ${join(box.cwd, ".uberblick.json")}\n` +
+      `previous   ${previous.workspaceId} (https://old.example.test)\n` +
+      `switch back with: ub workspace use ${previous.workspaceId}\n` +
+      "open it with: ub open\n",
+    );
     const switched = await runInProcess(["workspace", "use", previous.workspaceId], box);
     expect(switched.status, switched.output).toBe(0);
     expect(selected(box)).toEqual(previous);
@@ -376,7 +381,7 @@ describe("workspace creation and promotion", () => {
     hub.memberships!.grant({ workspaceId: selected(box).workspaceId, principalId: login.identity.id, role: "admin" });
     const before = accessRows(hub);
     const binding = bindingBytes(box);
-    hub.hubAdmins!.setWorkspaceStatus(login.identity.id, selected(box).workspaceId, "suspended");
+    hub.hubAdmins!.setWorkspaceStatus(selected(box).workspaceId, "suspended");
     const suspended = await runInProcess(["workspace", "promote", endpoint], box);
     expect(suspended.status, suspended.output).toBe(1);
     expect(suspended.stderr).toContain("workspace is suspended on this hub");
@@ -385,7 +390,7 @@ describe("workspace creation and promotion", () => {
     expect(suspended.stderr).toContain("local workspace remains usable");
     expect(bindingBytes(box)).toBe(binding);
     expect(accessRows(hub)).toEqual(before);
-    hub.hubAdmins!.setWorkspaceStatus(login.identity.id, selected(box).workspaceId, "active");
+    hub.hubAdmins!.setWorkspaceStatus(selected(box).workspaceId, "active");
     const conflict = await runInProcess(["workspace", "promote", endpoint], box);
     expect(conflict.status, conflict.output).toBe(1);
     expect(conflict.stderr).toContain("already holds this workspace UUID");
@@ -430,7 +435,7 @@ describe("workspace creation and promotion", () => {
     const attemptPath = readdirSync(join(box.configHome, "uberblick"))
       .find(name => name.startsWith(".workspace-promotion-") && name.endsWith(".json"))!;
     const attempt = readFileSync(join(box.configHome, "uberblick", attemptPath));
-    hub.hubAdmins!.setWorkspaceStatus(other.id, selected(box).workspaceId, "suspended");
+    hub.hubAdmins!.setWorkspaceStatus(selected(box).workspaceId, "suspended");
     const suspended = await runInProcess(["workspace", "promote", endpoint], box);
     expect(suspended.status, suspended.output).toBe(1);
     expect(suspended.stderr).toContain("workspace is suspended on this hub");
@@ -438,7 +443,7 @@ describe("workspace creation and promotion", () => {
     expect(accessRows(hub)).toEqual(before);
     expect(bindingBytes(box)).toBe(binding);
     expect(readFileSync(join(box.configHome, "uberblick", attemptPath))).toEqual(attempt);
-    hub.hubAdmins!.setWorkspaceStatus(other.id, selected(box).workspaceId, "active");
+    hub.hubAdmins!.setWorkspaceStatus(selected(box).workspaceId, "active");
     const retried = await runInProcess(["workspace", "promote", endpoint], box, { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(retried.status, retried.output).toBe(0);
     expect(accessRows(hub)).toEqual(before);

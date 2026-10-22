@@ -15,6 +15,7 @@ import {
   createAnnotation,
   deleteBlock,
   editBlock,
+  figmaCaptionTexts,
   findBlockElement,
   getBlock,
   getBlockInline,
@@ -25,8 +26,7 @@ import {
   insertBlock,
   listAnnotations,
   resolveAnnotationRange,
-  seedNewCardParts,
-  seedNewTableCells,
+  seedNewInlineParts,
   tableCellTexts,
   tableRows,
 } from "../src/index.js";
@@ -370,7 +370,6 @@ function emptyPart(name: string): Y.XmlElement {
 const WEB_CONTAINERS = [
   {
     name: "table cell",
-    seed: seedNewTableCells,
     parts: 2,
     build: (): Y.XmlElement => {
       const header = new Y.XmlElement("tableRow");
@@ -385,7 +384,6 @@ const WEB_CONTAINERS = [
   },
   {
     name: "card part",
-    seed: seedNewCardParts,
     parts: CARD_PARTS.length,
     build: (): Y.XmlElement => {
       const card = new Y.XmlElement("card");
@@ -394,16 +392,26 @@ const WEB_CONTAINERS = [
     },
     texts: (card: Y.XmlElement) => CARD_PARTS.flatMap((part) => cardPartTexts(card, part)),
   },
+  {
+    name: "Figma caption",
+    parts: 1,
+    build: (): Y.XmlElement => {
+      const figma = new Y.XmlElement("figma");
+      figma.insert(0, [emptyPart("figmaCaption")]);
+      return figma;
+    },
+    texts: figmaCaptionTexts,
+  },
 ];
 
 describe("web-created container text", () => {
   // Unseeded, two replicas' first keystrokes into one empty part each create a
   // text, and consolidating those texts can lose later writes.
-  it.each(WEB_CONTAINERS)("seeds each empty $name in its creating transaction, never a received one", ({ seed, parts, build, texts }) => {
+  it.each(WEB_CONTAINERS)("seeds each empty $name in its creating transaction, never a received one", ({ parts, build, texts }) => {
     const web = new Y.Doc();
     const peer = new Y.Doc();
-    web.on("beforeObserverCalls", seed);
-    peer.on("beforeObserverCalls", seed);
+    web.on("beforeObserverCalls", seedNewInlineParts);
+    peer.on("beforeObserverCalls", seedNewInlineParts);
     web.transact(() => getBlocksFragment(web).insert(0, [build()]));
     Y.applyUpdate(peer, Y.encodeStateAsUpdate(web));
     const first = getBlocksFragment(web).get(0) as Y.XmlElement;
@@ -420,8 +428,13 @@ describe("web-created container text", () => {
     const sender = new Y.Doc();
     getBlocksFragment(sender).insert(0, [build()]);
     const receiver = new Y.Doc();
-    receiver.on("beforeObserverCalls", seed);
+    receiver.on("beforeObserverCalls", seedNewInlineParts);
     Y.applyUpdate(receiver, Y.encodeStateAsUpdate(sender));
     expect(texts(getBlocksFragment(receiver).get(0) as Y.XmlElement)).toEqual([]);
+    receiver.getMap("meta").set("title", "Unrelated local edit");
+    expect(texts(getBlocksFragment(receiver).get(0) as Y.XmlElement)).toEqual([]);
+    sender.on("beforeObserverCalls", seedNewInlineParts);
+    sender.getMap("meta").set("title", "Later creator edit");
+    expect(texts(getBlocksFragment(sender).get(0) as Y.XmlElement)).toEqual([]);
   });
 });

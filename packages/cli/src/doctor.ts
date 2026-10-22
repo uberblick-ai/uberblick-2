@@ -5,7 +5,6 @@ import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, relative, resolve, sep } from "node:path";
-import { parseArgs } from "node:util";
 import {
   CLOCK_SKEW_SECONDS,
   REQUEST_PROOF_LIFETIME_SECONDS,
@@ -18,13 +17,13 @@ import { displayUsername } from "./auth.js";
 import { resolveMcpConfig } from "./budget.js";
 import type { ResolvedConfig } from "@uberblick/mcp-server/project-config";
 import { readCredentials, resolveConfig } from "@uberblick/mcp-server/project-config";
-import { takeHelp } from "./help.js";
+import type { CommandArgs } from "./command.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { errorMessage } from "./strings.js";
 import type { DoctorEntry, TargetFile, TargetName } from "./mcp-config.js";
 import { TARGETS, claudeDoctorEntries, doctorEntry, targetFile } from "./mcp-config.js";
-import { DEFAULT_WEB_PORT, WEB_HOST, whoHoldsPort, whyNotStartable } from "./open.js";
+import { DEFAULT_WEB_PORT, WEB_HOST, whoHoldsPort, whyNotStartable } from "./open-ports.js";
 import { findProjectConfig, resolveProjectBinding } from "@uberblick/mcp-server/project-binding";
 import type { Endpoint, HubProbe } from "./probes.js";
 import {
@@ -82,7 +81,7 @@ function bindingRefusal(error: unknown, env: NodeJS.ProcessEnv, cwd: string): st
     try { parseWorkspaceId(env.UB_WORKSPACE_ID); }
     catch { return "UB_WORKSPACE_ID is not a valid workspace id"; }
     if (env.UB_HUB_URL !== undefined && !env.UB_HUB_URL.trim()) return "UB_HUB_URL must not be empty";
-    if (reason.startsWith("This machine has no hub record")) return "this computer has no hub record for UB_WORKSPACE_ID and no UB_HUB_URL";
+    if (reason.startsWith("This machine has neither a copy nor a hub record")) return "this computer has neither a copy nor a hub record for UB_WORKSPACE_ID; add UB_HUB_URL or fetch with ub workspace use <link>";
     return /UB_WORKSPACE_ID|UB_HUB_URL/.test(reason) ? reason : `UB_HUB_URL: ${reason}`;
   }
   if (env.WORKSPACE_ID?.trim() || env.HUB_URL?.trim()) return "legacy WORKSPACE_ID / HUB_URL variables are no longer supported";
@@ -692,23 +691,10 @@ options:
 `;
 
 export async function doctorCommand(
-  argv: string[],
+  { values }: CommandArgs<typeof DOCTOR_OPTIONS>,
   io: Io = processIo,
 ): Promise<number> {
-  if (takeHelp(argv, io, DOCTOR_HELP)) return 0;
-
-  let json = false;
-  try {
-    json =
-      parseArgs({
-        args: argv,
-        options: DOCTOR_OPTIONS,
-        allowPositionals: false,
-      }).values.json === true;
-  } catch (error) {
-    io.err(`ub doctor: ${errorMessage(error)}\n`);
-    return 2;
-  }
+  const json = values.json === true;
 
   const { report, warnings } = await doctorReport();
   for (const warning of warnings) {

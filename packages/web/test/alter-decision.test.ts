@@ -80,7 +80,8 @@ function update(held: HeldRoom, patch: Partial<RoomStatus>): void {
   for (const listener of held.listeners) listener(held.connection.status);
 }
 
-vi.mock("../src/collab/rooms.js", () => ({
+vi.mock("../src/collab/rooms.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/collab/rooms.js")>(),
   acquireRoom: (name: string) => {
     const held = room(name);
     acquired.push(held);

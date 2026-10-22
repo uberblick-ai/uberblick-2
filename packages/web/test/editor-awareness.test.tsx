@@ -111,8 +111,8 @@ describe("the bound editor's awareness reading", () => {
     let presence: ReturnType<typeof hooks.usePresence> = [];
     function Shell() {
       presence = hooks.usePresence(connection);
-      return <EditorPane connection={connection} segment={WORKSPACE} presence={presence}
-        author="Reader" archived={false} docLinks={null} onRestore={null}
+      return <EditorPane connection={connection} segment={WORKSPACE} presence={presence} syncReading={{}}
+        author="Reader" archived={false} docLinks={null} actions={{ onRestore: null }}
         onSelectThread={selectThread} />;
     }
     const host = mount(<Shell />);
@@ -144,7 +144,7 @@ describe("the bound editor's awareness reading", () => {
     publish(awareness, peer, { user: { name: "Peer", color: "#345678" } });
     const composerRenders = vi.spyOn(composer, "CommentComposer");
     mount(<EditorPane connection={connection} segment={WORKSPACE} presence={[]}
-      author="Reader" archived={false} docLinks={null} onRestore={null}
+      author="Reader" archived={false} docLinks={null} actions={{ onRestore: null }}
       onSelectThread={selectThread} />);
     const names = (): string[] | undefined => composerRenders.mock.lastCall?.[0].mentions;
     expect(names()).toEqual(["Peer"]);

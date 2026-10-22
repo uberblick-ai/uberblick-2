@@ -59,6 +59,7 @@ import { PeerCluster } from "../status/PeerCluster.js";
 import { SyncDot } from "../status/SyncDot.js";
 import { useDocumentSyncActivity } from "../status/document-sync-activity.js";
 import { DocMetaLine } from "./DocChrome.js";
+import type { DocumentActionProps } from "./DocChrome.js";
 import { threadIdFromActivation, threadIdFromTarget } from "../comments/threads.js";
 import type { SelectThread, ThreadView } from "../comments/threads.js";
 
@@ -100,13 +101,9 @@ export function PaneNotice({
  * directory tombstone stands.
  */
 function ArchivedBanner({
-  onRestore,
-  focusRestore,
-  onRestoreFocused,
+  actions: { onRestore = null, focusRestore = false, onRestoreFocused },
 }: {
-  onRestore: (() => void) | null;
-  focusRestore: boolean;
-  onRestoreFocused?: (() => void) | undefined;
+  actions: DocumentActionProps;
 }): ReactElement {
   const restore = useRef<HTMLButtonElement | null>(null);
   useLayoutEffect(() => {
@@ -305,37 +302,8 @@ function TldrCallout({
   );
 }
 
-/** The quiet edit row retains explicit refusals and truthful durability warnings. */
-export function StatusLine({
-  connection,
-  presence,
-  lastUpdated,
-  onLastUpdatedChange,
-  endpoint = null,
-  hubAcked,
-  rawHubAcked,
-  sampledAt,
-  notSharedReason = null,
-  syncDetails = false,
-  onActivatePresence,
-  documentLayout = false,
-  statusLink,
-  revision = null,
-  codeChecks = [],
-}: {
-  connection: RoomConnection;
-  /**
-   * Reuse the shell title roster, including agents with retained named
-   * cursors; Sync details uses live presence. A second subscription would
-   * repeat awareness and fragment work on every keystroke.
-   */
-  presence: readonly RemotePresence[];
-  /** The selected directory stub's edit-freshness hint, not a sync state. */
-  lastUpdated?: number | undefined;
-  /** Report the displayed stamp so the details panel mirrors this segment. */
-  onLastUpdatedChange?:
-    | ((room: string, value: number | undefined) => void)
-    | undefined;
+/** The document-local sync reading, shared by waiting and hydrated headers. */
+export interface DocumentSyncReading {
   /** The hub this reading describes, null while configuration is resolving. */
   endpoint?: HubEndpoint | null;
   /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
@@ -345,6 +313,37 @@ export function StatusLine({
   notSharedReason?: NotSharedReason | null;
   /** Compose the reading as a trigger within the shell's sync Popover. */
   syncDetails?: boolean;
+}
+
+/** The quiet edit row retains explicit refusals and truthful durability warnings. */
+export function StatusLine({
+  connection,
+  presence,
+  lastUpdated,
+  syncReading: {
+    endpoint = null,
+    hubAcked,
+    rawHubAcked,
+    sampledAt,
+    notSharedReason = null,
+    syncDetails = false,
+  } = {},
+  onActivatePresence,
+  documentLayout = false,
+  statusLink,
+  revision = null,
+  codeChecks = [],
+}: {
+  connection: RoomConnection;
+  /**
+   * Reuse the shell title roster, including agents with retained named
+   * cursors. A second subscription would repeat awareness and fragment work
+   * on every keystroke.
+   */
+  presence: readonly RemotePresence[];
+  /** The selected directory stub's edit-freshness hint, not a sync state. */
+  lastUpdated?: number | undefined;
+  syncReading?: DocumentSyncReading;
   /** Reveal one currently resolvable remote caret without following it. */
   onActivatePresence?: ((session: RemotePresence) => void) | undefined;
   /** Reserve the capped presence width beside hydrated prose. */
@@ -414,26 +413,17 @@ export function StatusLine({
         </time>
       </span>
     );
-  const shownUpdatedAt = formattedUpdatedAt === null ? undefined : lastUpdated;
   const codeNote = codeChecks.some((check) => check.result === "drift")
     ? "Differs from code"
-    : revision !== null && codeChecks.some((check) => check.rev !== undefined && check.rev !== revision)
-      ? "Edited since code check"
-      : null;
-  // Report the displayed timestamp before paint, paired with its room
-  // including cleanup. The separately mounted details panel must not restart
-  // its settle window or invent an omitted stamp.
-  useLayoutEffect(() => {
-    onLastUpdatedChange?.(connection.room, shownUpdatedAt);
-    return () => onLastUpdatedChange?.(connection.room, undefined);
-  }, [connection.room, onLastUpdatedChange, shownUpdatedAt]);
+    : null;
 
   // Refusals retain their compact word; recovery stays in notices and details.
   return (
     <div ref={syncAttributes} data-sync-room={connection.room} className="ub-status min-w-0 ub-type-small text-[var(--muted-foreground)] py-[0.35rem] border-b border-[var(--border)] mb-3">
       <div className="ub-status-row">
         {hasHub && <SyncDot key={connection.room} offline={offline} error={refusal !== null || unsaved} confirmed={confirmed}
-          lastConfirmedAt={activity.lastConfirmedAt} pulse={activity.pulse} syncDetails={syncDetails} />}
+          lastConfirmedAt={activity.lastConfirmedAt} pulse={activity.pulse} syncDetails={syncDetails}
+          codeChecks={isDecision(connection) ? [] : codeChecks} />}
         <div className="ub-status-left">
           {updatedReading}
           {codeNote !== null && <>
@@ -791,30 +781,15 @@ export function EditorPane({
   catalogConnection = null,
   archived,
   updatedAt,
-  onLastUpdatedChange,
-  pinned = false,
-  onTogglePin = null,
-  onArchive = null,
+  actions = {},
   isDecisionTopic = false,
   actionTitle,
-  showArchiveRecord = false,
-  onArchiveRecord = null,
-  archiveRecordUnavailable = null,
-  onArchiveConfirmationFocusChange,
-  focusRestore = false,
-  onRestoreFocused,
   docLinks,
-  onRestore,
   onSelectThread,
-  endpoint = null,
-  hubAcked,
-  rawHubAcked,
-  sampledAt,
-  notSharedReason = null,
+  syncReading = {},
   threads = [],
   threadsOpen = false,
   onToggleThreads,
-  syncDetails = false,
   header,
   beforeAnswer,
   afterAnswer,
@@ -824,7 +799,7 @@ export function EditorPane({
   decisionView = false,
   displayTitle,
 }: {
-  connection: RoomConnection | null;
+  connection: RoomConnection;
   /** The workspace as the address spells it — see {@link DocMetaLine}. */
   segment: string;
   /** This room's presence reading, passed through to {@link StatusLine}. */
@@ -840,43 +815,24 @@ export function EditorPane({
   archived: boolean;
   /** The selected directory stub's edit-freshness hint. */
   updatedAt?: number | undefined;
-  onLastUpdatedChange?:
-    | ((room: string, value: number | undefined) => void)
-    | undefined;
-  pinned?: boolean;
-  onTogglePin?: (() => void) | null;
-  onArchive?: (() => void) | null;
+  actions?: DocumentActionProps;
   isDecisionTopic?: boolean;
   actionTitle?: string | undefined;
-  showArchiveRecord?: boolean;
-  onArchiveRecord?: (() => void) | null;
-  archiveRecordUnavailable?: string | null;
-  onArchiveConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
-  focusRestore?: boolean;
-  onRestoreFocused?: (() => void) | undefined;
   /**
    * References use the current workspace address, directory titles and
    * navigation callback; null means no workspace. Keep the object stable
    * because it is a binding dependency.
    */
   docLinks: DocLinkContext | null;
-  /** Lift the tombstone. */
-  onRestore: (() => void) | null;
   /**
    * Notify the rail of a clicked highlight or newly created thread. Keep this
    * callback stable because it is a binding dependency.
    */
   onSelectThread: SelectThread;
-  endpoint?: HubEndpoint | null;
-  /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
-  hubAcked?: boolean | null | undefined;
-  rawHubAcked?: boolean | null | undefined;
-  sampledAt?: number | null | undefined;
-  notSharedReason?: NotSharedReason | null;
+  syncReading?: DocumentSyncReading;
   threads?: readonly ThreadView[];
   threadsOpen?: boolean;
   onToggleThreads?: (() => void) | undefined;
-  syncDetails?: boolean;
   /** Topic pages supply their shared title. */
   header?: ReactNode;
   displayTitle?: string;
@@ -909,25 +865,17 @@ export function EditorPane({
   const revision = useDocRev(connection);
   // RoutePane admits only hydrated documents. Its child subscription starts
   // after mounting, so read this exact connection on the first frame too.
-  const meta = observedMeta ?? (connection === null ? null : readRoomMeta(connection));
+  const meta = observedMeta ?? readRoomMeta(connection);
   const decision = decisionView || meta?.kind === "decision";
   const contentReadOnly = archived || decision;
   const foreign = useForeignBlocks(connection);
   const { writable } = useRoomStatus(connection);
   const openThreads = threads.filter((thread) => !thread.resolved).length;
-  const editingTldr = meta?.kind !== "decision" && meta?.tldrOptOut !== true && connection?.room === tldrEditorRoom;
+  const editingTldr = meta?.kind !== "decision" && meta?.tldrOptOut !== true && connection.room === tldrEditorRoom;
 
   useEffect(() => {
     if (meta?.tldrOptOut === true) setTldrEditorRoom(null);
   }, [meta?.tldrOptOut]);
-
-  if (connection === null) {
-    return (
-      <PaneNotice>
-        <p className="ub-muted">Pick a document, or create one.</p>
-      </PaneNotice>
-    );
-  }
 
   // The shared page pane anchors the column beside the sibling rail;
   // document controls use `ub-document-pane` to find their scroll container.
@@ -946,11 +894,7 @@ export function EditorPane({
       )}
       <div className="ub-column">
         {archived && (
-          <ArchivedBanner
-            onRestore={onRestore}
-            focusRestore={focusRestore}
-            onRestoreFocused={onRestoreFocused}
-          />
+          <ArchivedBanner actions={actions} />
         )}
         {/* Keep document kind, tags and revision above the title. */}
         <DocMetaLine
@@ -963,14 +907,8 @@ export function EditorPane({
           readOnly={!writable}
           contentReadOnly={decision}
           copyPath={copyPath}
-          pinned={pinned}
-          onTogglePin={onTogglePin}
-          onArchive={onArchive}
+          actions={actions}
           isDecisionTopic={isDecisionTopic}
-          showArchiveRecord={showArchiveRecord}
-          onArchiveRecord={onArchiveRecord}
-          archiveRecordUnavailable={archiveRecordUnavailable}
-          onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
           hasTldr={meta?.tldr != null}
           onEditTldr={() => {
             if (!canWriteContent(connection, contentReadOnly)) return;
@@ -1000,13 +938,7 @@ export function EditorPane({
           documentLayout
           presence={presence}
           lastUpdated={updatedAt}
-          onLastUpdatedChange={onLastUpdatedChange}
-          endpoint={endpoint}
-          hubAcked={hubAcked}
-          rawHubAcked={rawHubAcked}
-          sampledAt={sampledAt}
-          notSharedReason={notSharedReason}
-          syncDetails={syncDetails}
+          syncReading={syncReading}
           onActivatePresence={revealPresence}
           statusLink={statusLink}
           revision={revision}

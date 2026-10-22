@@ -1,17 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseArgs } from "node:util";
 import { defaultWorkspaceDatabasePath, storeWorkspaceName } from "@uberblick/mcp-server";
 import { validateWorkspaceName } from "@uberblick/schema";
 import { ensureLocalSigningSecret, SigningSecretExposureError } from "@uberblick/mcp-server/project-config";
 import { resolveMcpConfig } from "./budget.js";
-import { takeHelp } from "./help.js";
+import { type CommandArgs, usageError } from "./command.js";
 import { acquireInitLock, seedLockPath } from "@uberblick/mcp-server/init-lock";
 import type { Io } from "./io.js";
 import { PROJECT_CONFIG_FILE, type ProjectBinding, findProjectConfig, resolveProjectBinding, writeProjectBinding } from "@uberblick/mcp-server/project-binding";
 import { seedStarterDocs } from "./starter.js";
 import { fillMainRepositoryFromOrigin } from "./workspace-main-repository.js";
+import { useBindingLines } from "./workspace-use-output.js";
 
 export const WORKSPACE_CREATE_HELP = `usage: ub workspace create <name>
 
@@ -30,22 +30,19 @@ export function reportEnvironmentBinding(io: Io): void {
   }
 }
 
-export async function createWorkspaceCommand(argv: string[], io: Io): Promise<number> {
-  if (takeHelp(argv, io, WORKSPACE_CREATE_HELP)) return 0;
+export async function createWorkspaceCommand({ positionals }: CommandArgs<Record<string, never>>, io: Io): Promise<number> {
   let name: string;
   try {
-    const { positionals } = parseArgs({ args: argv, options: {}, allowPositionals: true });
-    if (positionals.length !== 1) throw new Error("expected exactly one workspace name");
     name = validateWorkspaceName(positionals[0] ?? "");
   } catch (error) {
-    io.err(`ub workspace create: ${error instanceof Error ? error.message : "invalid name"}\n`);
-    return 2;
+    usageError(error instanceof Error ? error.message : "invalid name");
   }
   const uuid = randomUUID();
   const binding: ProjectBinding = { workspaceId: uuid, hubUrl: null };
   // Always create in this directory, never overwrite an ancestor project's binding.
   const path = join(process.cwd(), PROJECT_CONFIG_FILE);
   let previous: ProjectBinding | null = null;
+  let output = "";
   try {
     const lock = await acquireInitLock(process.env, { command: "ub workspace create" });
     try {
@@ -75,12 +72,9 @@ export async function createWorkspaceCommand(argv: string[], io: Io): Promise<nu
         await fillMainRepositoryFromOrigin(uuid, null, config.databasePath);
       } finally { seedLock.release(); }
       writeProjectBinding(binding, { path });
+      output = `${useBindingLines(binding, previous, path, "created")}open it with: ub open\n`;
     } finally { lock.release(); }
-    io.out(`Created ${name} (${uuid}), local-only.\nSelected in ${path}.\nRun \`ub open\` to open it.\n`);
-    if (previous !== null) {
-      io.out(`Previous workspace ${previous.workspaceId} (${previous.hubUrl ?? "local"}) and its documents remain unchanged.\n` +
-        `Switch back: ub workspace use ${previous.workspaceId}\n`);
-    }
+    io.out(output);
     reportEnvironmentBinding(io);
     return 0;
   } catch (error) {

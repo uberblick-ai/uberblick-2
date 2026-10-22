@@ -40,7 +40,7 @@ function fixture(status = LIVE, ydoc = legacyDoc()) {
   onTestCleanup(() => ydoc.destroy());
   const selectThread = () => {};
   const { container: host } = render(<EditorPane connection={connection} segment={WORKSPACE} presence={[]}
-    author="Reader" archived={false} docLinks={null} onRestore={null} onSelectThread={selectThread} />);
+    author="Reader" archived={false} docLinks={null} actions={{ onRestore: null }} onSelectThread={selectThread} />);
   return { host, ydoc, connection, status(patch: Partial<RoomStatus>) {
     act(() => { Object.assign(connection.status, patch); for (const listener of listeners) listener(connection.status); });
   } };

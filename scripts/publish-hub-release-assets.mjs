@@ -9,6 +9,9 @@ import { assertImage, assertRemoteTag, getImage, imageRefs, run, versionForTag }
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPOSITORY = "uberblick-ai/uberblick-2";
 const TAG = /^hub-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+// Four 30-second downloads plus backoff cost at most 155 seconds per asset,
+// leaving room for uploads and other work within the job's 15-minute timeout.
+const ASSET_RETRY_DELAYS = [5_000, 10_000, 20_000];
 
 function fail(message) {
   throw new Error(`publish-hub-release-assets: ${message}`);
@@ -32,8 +35,23 @@ async function assertAsset(asset, name, bytes, tag, services) {
   if (asset.browser_download_url !== assetUrl(tag, name) || asset.size !== bytes.length) {
     fail(`${name} disagrees with this release; refusing to replace it`);
   }
-  const published = await services.downloadAsset(asset.browser_download_url);
+  let published = await services.downloadAsset(asset.browser_download_url);
+  for (const delay of ASSET_RETRY_DELAYS) {
+    if (published !== null) break;
+    await services.wait(delay);
+    published = await services.downloadAsset(asset.browser_download_url);
+  }
+  if (published === null) {
+    fail(`${name} anonymous asset download still returned 404 after ${ASSET_RETRY_DELAYS.length + 1} attempts`);
+  }
   if (!bytes.equals(published)) fail(`${name} differs from this commit; refusing to replace it`);
+}
+
+export async function downloadAsset(url) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+  if (response.status === 404) return null;
+  if (!response.ok) fail(`anonymous asset download returned ${response.status}`);
+  return Buffer.from(await response.arrayBuffer());
 }
 
 /** Only native runner tools run with repository write permission. The image
@@ -122,11 +140,8 @@ function productionServices() {
       if (release !== null) release.assets = await list(`/releases/${release.id}/assets`);
       return release;
     },
-    downloadAsset: async (url) => {
-      const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-      if (!response.ok) fail(`anonymous asset download returned ${response.status}`);
-      return Buffer.from(await response.arrayBuffer());
-    },
+    downloadAsset,
+    wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     createRelease: (tag, sha) => request("/releases", { method: "POST", body: {
       tag_name: tag, target_commitish: sha, name: tag, draft: false, prerelease: false,
       generate_release_notes: false, make_latest: "false",

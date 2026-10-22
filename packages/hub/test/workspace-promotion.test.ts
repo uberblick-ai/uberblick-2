@@ -35,7 +35,7 @@ it("persists receipts through restart without touching default workspace or clai
     const registry = new MembershipRegistry(reopened);
     const resumed = new WorkspacePromotions(reopened, registry, () => true);
     expect(resumed.reserve(workspace, attempt, principal)).toBe("resumed");
-    expect(registry.listMembers(workspace, principal)).toHaveLength(1);
+    expect(registry.listMembers(workspace)).toHaveLength(1);
   } finally { reopened.close(); }
 });
 
@@ -75,7 +75,7 @@ it("suspension blocks a new reservation and the committed receipt, then restores
   const workspaceId = randomUUID();
   const attemptId = randomUUID();
   expect(promotions.reserve(workspaceId, attemptId, "owner")).toBe("created");
-  registry.setWorkspaceStatus("backup", workspaceId, "suspended");
+  registry.setWorkspaceStatus(workspaceId, "suspended");
   const before = database.connection.prepare("SELECT * FROM hub_workspace_promotions").all();
   registry.remove("backup", "owner");
   expect(promotions.reserve(workspaceId, attemptId, "owner")).toBe("workspace-suspended");
@@ -90,7 +90,7 @@ it("suspension blocks a new reservation and the committed receipt, then restores
     const restored = new HubAdminRegistry(reopened);
     const resumed = new WorkspacePromotions(reopened, new MembershipRegistry(reopened), () => false, restored);
     expect(resumed.reserve(workspaceId, attemptId, "owner")).toBe("workspace-suspended");
-    restored.setWorkspaceStatus("backup", workspaceId, "active");
+    restored.setWorkspaceStatus(workspaceId, "active");
     expect(resumed.reserve(workspaceId, attemptId, "owner")).toBe("resumed");
     expect(reopened.connection.prepare("SELECT * FROM hub_workspace_promotions").all()).toEqual(before);
   } finally { reopened.close(); }
@@ -114,8 +114,8 @@ it("refuses callers without hub administration or their own target receipt befor
     const before = database.connection.prepare("SELECT * FROM hub_workspace_promotions").all();
     const membersBefore = database.connection.prepare("SELECT * FROM hub_memberships").all();
     for (const status of ["active", "suspended"] as const) {
-      registry.setWorkspaceStatus("backup", workspaceId, status);
-      registry.setWorkspaceStatus("backup", otherWorkspaceId, status);
+      registry.setWorkspaceStatus(workspaceId, status);
+      registry.setWorkspaceStatus(otherWorkspaceId, status);
       expect(promotions.reserve(workspaceId, attemptId, "outsider")).toBe("hub-admin-required");
       expect(promotions.reserve(otherWorkspaceId, attemptId, "outsider")).toBe("hub-admin-required");
       expect(promotions.reserve(otherWorkspaceId, attemptId, "owner")).toBe("hub-admin-required");

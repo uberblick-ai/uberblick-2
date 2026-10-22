@@ -79,9 +79,12 @@ export {
 export { listNumbers } from "./lists.js";
 export type { ListMarkerInput } from "./lists.js";
 
+export { INLINE_PART_MARKS, plainXmlText, seedNewInlineParts, structuredInlineParts } from "./inline-parts.js";
+export type { StructuredInlinePart } from "./inline-parts.js";
+
 export {
   TABLE_CELL_MARKS,
-  isSupportedTable, isSupportedColumnWidth, parseGfmTable, parseTableInput, parseTableCell, plainXmlText,
+  isSupportedTable, isSupportedColumnWidth, parseGfmTable, parseTableInput, parseTableCell,
   seedNewTableCells, tableCellText, tableCellTexts, tableRows, tableText, writeGfmTable,
 } from "./table.js";
 export type { GfmTable, TableMapping } from "./table.js";
@@ -156,16 +159,19 @@ export {
   decisionTopicArchived,
   directoryStubDiffers,
   documentDirectoryFields,
+  documentStubFields,
   getDirectoryEntry,
   getDirectoryMap,
   isDirectoryEntryArchived,
   isDirectoryEntryDeleted,
   listDeletedDirectoryUuids,
   listDirectory,
+  repairDirectoryStub,
   restoreDirectoryEntry,
   tombstoneDecisionRecord,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
+  UPDATED_AT_COARSENESS_MS,
 } from "./directory.js";
 
 export {
@@ -197,6 +203,7 @@ export {
   InvalidListAttributesError,
   InvalidWorkspaceIdError,
   OldTextMismatchError,
+  SchemaError,
   StaleBlockError,
   InvalidTableError,
   InvalidCardError,

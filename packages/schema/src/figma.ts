@@ -1,12 +1,13 @@
 import * as Y from "yjs";
 import { escapeContainerLines } from "./card.js";
 import { InvalidFigmaError } from "./errors.js";
+import { parseContainerHeader } from "./container-header.js";
 import { spliceInlineText } from "./inline-edit.js";
-import { applyInlineRuns, assertInlineWritable, inlinePlainText, readInlineRuns, readsAsMark } from "./marks.js";
+import { buildInlinePart, ensureInlinePartText, inlinePartElement, inlinePartTexts, isSupportedInlinePart, plainXmlText, seedNewInlinePartsOfKind } from "./inline-parts.js";
+import { applyInlineRuns, assertInlineWritable, inlinePlainText, readInlineRuns } from "./marks.js";
 import { parseInline, renderInline } from "./markdown.js";
 import { normalizeFigmaLink } from "./providers/figma.js";
 import type { FigmaFields } from "./providers/figma.js";
-import { plainXmlText, TABLE_CELL_MARKS } from "./table.js";
 import type { InlineRun } from "./types.js";
 
 export interface FigmaText { url: string; title?: string; height?: number; caption: string }
@@ -25,20 +26,13 @@ export function parseFigmaHeight(source: string): number {
 }
 
 export function parseFigmaInput(source: string): FigmaText {
-  const lines = source.replace(/\r\n?/g, "\n").split("\n");
   const values: Partial<Record<"url" | "title" | "height", string>> = {};
-  let captionStart = lines.length;
-  for (const [index, line] of lines.entries()) {
-    if (line.trim() === "") {
-      captionStart = index + 1;
-      break;
-    }
-    const match = /^(url|title|height): ?(.*)$/s.exec(line);
-    if (match === null) throw new InvalidFigmaError("Header lines must use url:, title: or height:");
-    const key = match[1] as "url" | "title" | "height";
-    if (values[key] !== undefined) throw new InvalidFigmaError(`Duplicate header key: ${key}`);
-    values[key] = match[2] ?? "";
-  }
+  const { body } = parseContainerHeader(source, {
+    keys: ["url", "title", "height"] as const,
+    invalidHeader: "Header lines must use url:, title: or height:",
+    error: (message) => new InvalidFigmaError(message),
+    accept: (key, value) => { values[key] = value; },
+  });
   if (values.url === undefined) throw new InvalidFigmaError("A url header is required");
   const { url } = normalizeFigmaLink(values.url);
   const height = values.height === undefined ? undefined : parseFigmaHeight(values.height);
@@ -46,7 +40,7 @@ export function parseFigmaInput(source: string): FigmaText {
     url,
     ...(values.title === undefined || values.title === "" ? {} : { title: values.title }),
     ...(height === undefined ? {} : { height }),
-    caption: lines.slice(captionStart).join("\n"),
+    caption: body,
   };
 }
 
@@ -60,15 +54,11 @@ export function writeFigmaText(parts: Readonly<FigmaText>): string {
 }
 
 export function figmaCaptionElement(element: Y.XmlElement): Y.XmlElement | null {
-  return element.toArray().find((node): node is Y.XmlElement =>
-    node instanceof Y.XmlElement && node.nodeName === "figmaCaption",
-  ) ?? null;
+  return inlinePartElement(element, "figmaCaption");
 }
 
 export function figmaCaptionTexts(element: Y.XmlElement): Y.XmlText[] {
-  const paragraph = figmaCaptionElement(element)?.firstChild;
-  if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== "paragraph") return [];
-  return paragraph.toArray().filter((text): text is Y.XmlText => text instanceof Y.XmlText);
+  return inlinePartTexts(figmaCaptionElement(element));
 }
 
 export function figmaInline(element: Y.XmlElement): FigmaInline {
@@ -110,43 +100,21 @@ export function isSupportedFigma(element: Y.XmlElement): boolean {
   }
   const caption = element.firstChild;
   if (!(caption instanceof Y.XmlElement) || caption.nodeName !== "figmaCaption" ||
-    Object.keys(caption.getAttributes()).length !== 0 || caption.length !== 1) return false;
-  const paragraph = caption.firstChild;
-  if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== "paragraph" ||
-    Object.keys(paragraph.getAttributes()).length !== 0 || paragraph.length > 1) return false;
-  return paragraph.toArray().every((text) => text instanceof Y.XmlText &&
-    (text.toDelta() as Array<{ insert?: unknown; attributes?: Record<string, unknown> }>).every((op) =>
-      typeof op.insert === "string" && Object.entries(op.attributes ?? {}).every(([key, value]) =>
-        (TABLE_CELL_MARKS as readonly string[]).includes(key) && readsAsMark(key, value),
-      ),
-    ),
-  );
+    Object.keys(caption.getAttributes()).length !== 0) return false;
+  return isSupportedInlinePart(caption, true);
 }
 
 /** Seed the caption text before its first concurrent writers. */
 export function buildFigmaElement(id: string): Y.XmlElement {
   const element = new Y.XmlElement("figma");
   element.setAttribute("id", id);
-  const caption = new Y.XmlElement("figmaCaption");
-  const paragraph = new Y.XmlElement("paragraph");
-  paragraph.insert(0, [new Y.XmlText()]);
-  caption.insert(0, [paragraph]);
-  element.insert(0, [caption]);
+  element.insert(0, [buildInlinePart("figmaCaption")]);
   return element;
 }
 
 /** Seed a newly created caption before its first concurrent writers. */
 export function seedNewFigmaCaptions(transaction: Y.Transaction): void {
-  if (!transaction.local) return;
-  const doc = transaction.doc;
-  const start = transaction.beforeState.get(doc.clientID) ?? 0;
-  for (const figma of doc.getXmlFragment("blocks").toArray()) {
-    if (!(figma instanceof Y.XmlElement) || figma.nodeName !== "figma") continue;
-    const paragraph = figmaCaptionElement(figma)?.firstChild;
-    if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== "paragraph" || paragraph.length !== 0) continue;
-    const id = Y.createRelativePositionFromTypeIndex(paragraph, 0).type;
-    if (id?.client === doc.clientID && id.clock >= start) paragraph.insert(0, [new Y.XmlText()]);
-  }
+  seedNewInlinePartsOfKind(transaction, "figma");
 }
 
 export function writeFigmaInline(element: Y.XmlElement, parts: Readonly<FigmaText>): void {
@@ -166,10 +134,8 @@ export function editFigma(element: Y.XmlElement, before: Readonly<FigmaText>, af
   if (before.caption !== after.caption) {
     if (plainXmlText(text ?? null) !== inlinePlainText(oldRuns)) throw new InvalidFigmaError("Stored caption text does not match its projection");
     if (text === undefined) {
-      const paragraph = figmaCaptionElement(element)?.firstChild;
-      if (!(paragraph instanceof Y.XmlElement)) throw new InvalidFigmaError("Stored caption is missing");
-      text = new Y.XmlText();
-      paragraph.insert(0, [text]);
+      text = ensureInlinePartText(figmaCaptionElement(element)) ?? undefined;
+      if (text === undefined) throw new InvalidFigmaError("Stored caption is missing");
     }
     spliceInlineText(text, oldRuns, newRuns);
   }

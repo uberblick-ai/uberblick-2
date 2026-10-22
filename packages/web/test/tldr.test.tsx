@@ -94,7 +94,7 @@ async function mountPane(
       author="reader"
       archived={archived}
       docLinks={null}
-      onRestore={() => {}}
+      actions={{ onRestore: () => {} }}
       onSelectThread={() => {}}
     />,
   );
@@ -487,7 +487,7 @@ describe("the document TL;DR", () => {
         author="reader"
         archived={true}
         docLinks={null}
-        onRestore={() => {}}
+        actions={{ onRestore: () => {} }}
         onSelectThread={() => {}}
       />,
     );

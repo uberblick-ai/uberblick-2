@@ -895,7 +895,9 @@ textarea.ub-title {
   }
 }
 @media (any-pointer: coarse) {
-  .ub-actions-trigger { width: 44px; }
+  /* WebKit can give the right edge back to the pane after a viewport resize.
+     Reserve one extra pixel so the live target still spans at least 44px. */
+  .ub-actions-trigger { width: 45px; }
 }
 
 .ub-tool {
@@ -2647,6 +2649,15 @@ h6.ub-heading {
 }
 
 .ub-status-sync { cursor: pointer; }
+.ub-status-sync--code {
+  width: 44px;
+  column-gap: 4px;
+}
+.ub-sync-code-mark {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: var(--type-caption-size);
+}
 .ub-status-sync:focus-visible,
 .ub-doc-rev:focus-visible {
   outline: 2px solid var(--ring);

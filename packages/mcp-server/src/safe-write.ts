@@ -143,20 +143,24 @@ export function publishStaged(
 export function publishOwnerOnly(
   path: string,
   contents: string,
-  /** The command named in a refusal — whichever one the user actually ran. */
-  command = "ub open",
+  /** The command named in a refusal; omitted callers use a neutral retry hint. */
+  command?: string,
 ): void {
   const target = classify(path);
   if (target.kind === "refused") {
+    const retry = command === undefined
+      ? "run the same command again"
+      : `run \`${command}\` again`;
     throw new Error(
       `refusing to write ${path}: ${target.because} — this file must be a ` +
-        `regular file you own. Move it aside and run \`${command}\` again`,
+        `regular file you own. Move it aside and ${retry}`,
     );
   }
   const staged = writeTempBeside(path, contents);
   if (!publishStaged(staged, path, target.kind)) {
+    const writer = command === undefined ? "this command" : `\`${command}\``;
     throw new Error(
-      `${path} appeared while \`${command}\` was writing it. Run it again`,
+      `${path} appeared while ${writer} was writing it. Run it again`,
     );
   }
 }

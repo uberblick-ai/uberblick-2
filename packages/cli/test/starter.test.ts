@@ -353,7 +353,7 @@ it("seeds two complete new workspaces when creates race", async () => {
     runUbAsync(["workspace", "create", "Second"], race),
   ]);
   expect(runs.map(run => run.status), runs.map(run => run.output).join("\n")).toEqual([0, 0]);
-  const ids = runs.map(run => run.stdout.match(/\(([0-9a-f-]{36})\)/)?.[1]);
+  const ids = runs.map(run => run.stdout.match(/^created\s+.*\(([0-9a-f-]{36}), local\)$/m)?.[1]);
   expect(new Set(ids).size).toBe(2);
   for (const id of ids) {
     expect(id).toBeDefined();

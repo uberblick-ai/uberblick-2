@@ -94,7 +94,7 @@ describe("external link URL safety", () => {
             author="tester"
             archived={archived}
             docLinks={null}
-            onRestore={() => {}}
+            actions={{ onRestore: () => {} }}
             onSelectThread={selected}
           />,
         );

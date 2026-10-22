@@ -1,7 +1,8 @@
 import * as Y from "yjs";
 import { InvalidTableError, InvalidTableMappingError, TableMappingRequiredError } from "./errors.js";
-import { applyInlineRuns, assertInlineWritable, inlinePlainText, readInlineRuns, readsAsMark } from "./marks.js";
+import { applyInlineRuns, assertInlineWritable, inlinePlainText, readInlineRuns } from "./marks.js";
 import { spliceInlineText } from "./inline-edit.js";
+import { buildInlinePart, ensureInlinePartText, inlinePartTexts, isSupportedInlinePart, plainXmlText, seedNewInlinePartsOfKind, tableRows } from "./inline-parts.js";
 import { parseInline, renderInline } from "./markdown.js";
 import type { InlineRun } from "./types.js";
 
@@ -92,38 +93,19 @@ function startsNonTableBlock(line: string): boolean {
     /^<[A-Za-z][A-Za-z\d-]*(?:[ \t]+[A-Za-z_:][\w.:-]*(?:[ \t]*=[ \t]*(?:"[^"]*"|'[^']*'|[^ \t"'=<>`]+))?)*[ \t]*\/?>[ \t]*$/.test(text);
 }
 
-/** The same inline formatting vocabulary as prose, plus annotation anchors. */
-export const TABLE_CELL_MARKS = ["bold", "italic", "strike", "inlineCode", "link", "docLink", "comment"] as const;
+export { INLINE_PART_MARKS as TABLE_CELL_MARKS, plainXmlText, tableRows } from "./inline-parts.js";
 
 export function parseTableCell(source: string): InlineRun[] {
   return parseInline(source, true);
 }
 
-/** Direct row cells. Readers retain uneven rows produced by concurrent edits. */
-export function tableRows(element: Y.XmlElement): Y.XmlElement[][] {
-  return element.toArray().filter((node): node is Y.XmlElement =>
-    node instanceof Y.XmlElement && node.nodeName === "tableRow",
-  ).map((row) => row.toArray().filter((cell): cell is Y.XmlElement =>
-    cell instanceof Y.XmlElement && (cell.nodeName === "tableCell" || cell.nodeName === "tableHeader"),
-  ));
-}
-
 /** First writes into an empty paragraph can concurrently create several texts. */
 export function tableCellTexts(cell: Y.XmlElement): Y.XmlText[] {
-  const paragraph = cell.firstChild;
-  if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== "paragraph") return [];
-  return paragraph.toArray().filter((text): text is Y.XmlText => text instanceof Y.XmlText);
+  return inlinePartTexts(cell);
 }
 
 export function tableCellText(cell: Y.XmlElement): Y.XmlText | null {
   return tableCellTexts(cell)[0] ?? null;
-}
-
-/** Read plain text without rendering XmlText's formatting as XML tags. */
-export function plainXmlText(text: Y.XmlText | null): string {
-  return text === null ? "" : (text.toDelta() as Array<{ insert?: unknown }>).map((op) =>
-    typeof op.insert === "string" ? op.insert : "",
-  ).join("");
 }
 
 function escapeTableText(text: string): string {
@@ -159,32 +141,19 @@ export function isSupportedTable(element: Y.XmlElement): boolean {
     return row.toArray().every((cell) => {
       if (!(cell instanceof Y.XmlElement) || cell.nodeName !== (index === 0 ? "tableHeader" : "tableCell")) return false;
       const attrs = cell.getAttributes() as Record<string, unknown>;
-      if (Object.keys(attrs).some((key) => !["colspan", "rowspan", "colwidth"].includes(key)) || attrs.colspan !== 1 || attrs.rowspan !== 1 || !isSupportedColumnWidth(attrs.colwidth) || cell.length !== 1) return false;
-      const paragraph = cell.firstChild;
-      if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== "paragraph" || Object.keys(paragraph.getAttributes()).length !== 0 || paragraph.length > 1) return false;
-      return paragraph.toArray().every((text) => text instanceof Y.XmlText &&
-        (text.toDelta() as Array<{ insert?: unknown; attributes?: Record<string, unknown> }>).every((op) =>
-        typeof op.insert === "string" && !/[\r\n]/.test(op.insert) && Object.entries(op.attributes ?? {}).every(([key, value]) =>
-          (TABLE_CELL_MARKS as readonly string[]).includes(key) && readsAsMark(key, value),
-        ),
-        ),
-      );
+      if (Object.keys(attrs).some((key) => !["colspan", "rowspan", "colwidth"].includes(key)) || attrs.colspan !== 1 || attrs.rowspan !== 1 || !isSupportedColumnWidth(attrs.colwidth)) return false;
+      return isSupportedInlinePart(cell, false);
     });
   });
 }
 
 export function buildTableCell(text: string, header: boolean): Y.XmlElement {
-  const cell = new Y.XmlElement(header ? "tableHeader" : "tableCell");
+  const cell = buildInlinePart(header ? "tableHeader" : "tableCell", text);
   // y-prosemirror writes native ProseMirror attribute values, not strings.
   const attrs = cell as unknown as { setAttribute(name: string, value: unknown): void };
   attrs.setAttribute("colspan", 1);
   attrs.setAttribute("rowspan", 1);
   // ProseMirror's colwidth default is null. y-prosemirror omits null attrs.
-  const paragraph = new Y.XmlElement("paragraph");
-  // Seed empty cells before their first writers; consolidation of concurrently
-  // inserted texts can lose later writes.
-  paragraph.insert(0, [new Y.XmlText(text)]);
-  cell.insert(0, [paragraph]);
   return cell;
 }
 
@@ -203,19 +172,7 @@ export function buildTableElement(id: string, table: GfmTable): Y.XmlElement {
 
 /** Seed cells created by TableKit in the same local transaction as their row. */
 export function seedNewTableCells(transaction: Y.Transaction): void {
-  if (!transaction.local) return;
-  const doc = transaction.doc;
-  const start = transaction.beforeState.get(doc.clientID) ?? 0;
-  for (const table of doc.getXmlFragment("blocks").toArray()) {
-    if (!(table instanceof Y.XmlElement) || table.nodeName !== "table") continue;
-    for (const cell of tableRows(table).flat()) {
-      const paragraph = cell.firstChild;
-      if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== "paragraph" || paragraph.length !== 0) continue;
-      const id = Y.createRelativePositionFromTypeIndex(paragraph, 0).type;
-      // Only the creator seeds the cell; received empty cells would race again.
-      if (id?.client === doc.clientID && id.clock >= start) paragraph.insert(0, [new Y.XmlText()]);
-    }
-  }
+  seedNewInlinePartsOfKind(transaction, "table");
 }
 
 /**
@@ -223,12 +180,7 @@ export function seedNewTableCells(transaction: Y.Transaction): void {
  * unexpressible marks, comments and trimmed edge whitespace elsewhere.
  */
 function spliceTableCell(cell: Y.XmlElement, before: string, after: string): void {
-  let text = tableCellText(cell);
-  if (text === null) {
-    const paragraph = cell.firstChild as Y.XmlElement;
-    paragraph.insert(0, [new Y.XmlText()]);
-    text = tableCellText(cell);
-  }
+  const text = ensureInlinePartText(cell);
   if (text === null) throw new InvalidTableError();
   const oldRuns = parseTableCell(before);
   const newRuns = parseTableCell(after);

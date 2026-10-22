@@ -199,7 +199,7 @@ for (const scheme of ["light", "dark"] as const) {
         await trigger.focus();
         await trigger.press("Space");
       }
-      await expect(page.getByRole("dialog", { name: "Sync and presence", exact: true })).toBeVisible();
+      await expect(page.getByRole("dialog", { name: "Sync details", exact: true })).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(trigger).toBeFocused();
     }

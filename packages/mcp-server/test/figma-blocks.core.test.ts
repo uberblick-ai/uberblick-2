@@ -189,6 +189,28 @@ describe("Figma blocks through MCP", () => {
     expect((await rig.ok("backlinks", { uuid: target.uuid })).backlinks).toEqual([]);
   });
 
+  it("keeps an unresolved caption target editable through label, formatting and header changes", async () => {
+    const rig = await localRig();
+    const created = await rig.ok("create_doc", { title: "Existing caption target", description: "An existing caption link need not resolve locally.",
+      blocks: [{ type: "figma", text: SOURCE }] });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const id = created.blocks[0].id;
+    const text = captionText(doc, id);
+    const unknown = randomUUID();
+    text.format(0, text.length, { docLink: { docId: unknown } });
+    const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
+    const source = SOURCE.replace("Keep the caption.", `[**Renamed**](${unknown})`);
+    const edited = await rig.ok("edit_block", { uuid: created.uuid, block_id: id,
+      old_text: read.text, new_text: source, rev: read.rev });
+    expect(edited.block.text).toBe(source);
+    expect(captionText(doc, id)).toBe(text);
+    expect(captionRuns(doc, id)).toEqual([{ text: "Renamed", marks: { bold: true, docLink: unknown } }]);
+    const changedHeader = source.replace("title: Payment, mobile", "title: New title");
+    expect((await rig.ok("edit_block", { uuid: created.uuid, block_id: id,
+      old_text: edited.block.text, new_text: changedHeader, rev: edited.block.rev })).block.text).toBe(changedHeader);
+    expect(captionText(doc, id)).toBe(text);
+  });
+
   it("refuses MCP anchors and link ranges while preserving existing thread replies and resolution", async () => {
     const rig = await localRig();
     const target = await rig.ok("create_doc", { title: "Figma range target", description: "A known target for a refused range." });

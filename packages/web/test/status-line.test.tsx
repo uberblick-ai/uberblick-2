@@ -9,7 +9,7 @@ import { SyncDot } from "../src/ui/status/SyncDot.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { NotSharedReason } from "../src/shell/document-search.js";
 import { toast } from "sonner";
-import { appendBlock, docRev, getMeta, initDoc, setCodeCheck } from "@uberblick/schema";
+import { appendBlock, docRev, getMeta, initDoc, setCodeCheck, setKind } from "@uberblick/schema";
 import type { CodeCheck } from "@uberblick/schema";
 import { useDocMeta, useDocRev } from "../src/ui/hooks.js";
 
@@ -64,8 +64,71 @@ it.each(["offline", "error"] as const)("retires activity interrupted by %s witho
   expect(dot()?.classList.contains("ub-sync-dot--pulse")).toBe(false);
 });
 
+describe("the old code-check mark", () => {
+  const day = 24 * 60 * 60 * 1_000;
+  const check = (days: number, repository = "owner/project"): CodeCheck => ({
+    repository, commit: "a".repeat(40), result: "matches",
+    checked_at: new Date(Date.now() - days * day).toISOString(),
+  });
+  const tree = (codeChecks: readonly CodeCheck[], patch: Partial<Parameters<typeof SyncDot>[0]> = {}) => <Popover><SyncDot
+    offline={false} error={false} confirmed lastConfirmedAt={Date.now()} pulse={0} syncDetails
+    codeChecks={codeChecks} {...patch} /></Popover>;
+
+  it("crosses the strict fourteen-day boundary on the clock and clears immediately for a new check", () => {
+    const checks = [check(14)];
+    const view = render(tree(checks));
+    const button = () => within(view.container).getByRole("button");
+    const mark = () => view.container.querySelector(".ub-sync-code-mark");
+    expect(mark()).toBeNull();
+    expect(button().classList.contains("ub-status-sync--code")).toBe(false);
+    expect(button().getAttribute("aria-label")).toBe("Synced with hub just now");
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(mark()?.textContent).toBe("</>");
+    expect(button().getAttribute("aria-label")).toBe("Synced with hub 1 minute ago · code check 14 days old");
+    expect(button().getAttribute("title")).toBe(button().getAttribute("aria-label"));
+    act(() => { vi.setSystemTime(Date.now() + day); vi.advanceTimersByTime(60_000); });
+    expect(button().getAttribute("aria-label")).toMatch(/ · code check 15 days old$/);
+    view.rerender(tree([check(0)]));
+    expect(mark()).toBeNull();
+    expect(button().classList.contains("ub-status-sync--code")).toBe(false);
+    expect(button().getAttribute("aria-label")).toBe("Synced with hub just now");
+    view.rerender(tree([]));
+    expect(mark()).toBeNull();
+    expect(button().classList.contains("ub-status-sync--code")).toBe(false);
+  });
+
+  it("adds the oldest whole-day age to each sync reading without changing dot state or pulse", () => {
+    const checks = [check(3), check(20.9, "owner/oldest"), check(17, "owner/another")];
+    const view = render(tree(checks));
+    const button = () => within(view.container).getByRole("button");
+    const dot = () => view.container.querySelector(".ub-sync-dot");
+    expect(button().getAttribute("aria-label")).toBe("Synced with hub just now · code check 20 days old");
+    expect(dot()?.getAttribute("data-state")).toBe("resting");
+    expect(dot()?.getAttribute("data-pulse")).toBe("0");
+    view.rerender(tree(checks, { confirmed: false, error: true, pulse: 1 }));
+    expect(button().getAttribute("aria-label")).toBe("Sync details · code check 20 days old");
+    expect(dot()?.getAttribute("data-state")).toBe("error");
+    expect(dot()?.classList.contains("ub-sync-dot--pulse")).toBe(false);
+    view.rerender(tree(checks, { confirmed: false, offline: true, pulse: 1 }));
+    expect(button().getAttribute("aria-label")).toMatch(/^Offline since \d\d:\d\d · code check 20 days old$/);
+    expect(dot()?.getAttribute("data-state")).toBe("offline");
+    expect(dot()?.classList.contains("ub-sync-dot--pulse")).toBe(false);
+    expect(document.querySelector(".ub-sync-announcement")?.textContent).toBe("Offline. Changes are saved on this device.");
+  });
+
+  it("never marks a decision record even if checks are supplied", () => {
+    const current = fixture();
+    initDoc(current.connection.ydoc, { uuid: "9f3c1a2b-0000-4000-8000-0123456789ab", title: "Decision" });
+    setKind(current.connection.ydoc, "decision");
+    const view = render(<Popover><StatusLine connection={current.connection} presence={[]}
+      syncReading={{ endpoint: { url: "wss://hub.example/ws", source: "document" }, hubAcked: true, syncDetails: true }} codeChecks={[check(20)]} /></Popover>);
+    expect(view.container.querySelector(".ub-sync-code-mark")).toBeNull();
+    expect(within(view.container).getByRole("button").getAttribute("aria-label")).not.toContain("code check");
+  });
+});
+
 describe("the edited row", () => {
-  it("uses revision equality immediately, while check-only writes leave the note absent", () => {
+  it("keeps code-check edit details out of the status row, including after a live edit", () => {
     const current = fixture();
     initDoc(current.connection.ydoc, { uuid: "9f3c1a2b-0000-4000-8000-0123456789ab", title: "Checked page" });
     appendBlock(current.connection.ydoc, { type: "paragraph", text: "Compared text" });
@@ -84,8 +147,8 @@ describe("the edited row", () => {
     expect(docRev(current.connection.ydoc)).toBe(checkedRevision);
     expect(note()).toBeUndefined();
     act(() => { appendBlock(current.connection.ydoc, { type: "paragraph", text: "Immediate edit" }); });
-    expect(note()).toBe("Edited since code check");
-    expect(view.container.querySelector(".ub-status-left")?.textContent).toBe("Edited just now · Edited since code check · 1 decision");
+    expect(note()).toBeUndefined();
+    expect(view.container.querySelector(".ub-status-left")?.textContent).toBe("Edited just now · 1 decision");
     record();
     expect(note()).toBeUndefined();
     expect(getMeta(current.connection.ydoc).code_check?.[0]?.rev).toBe(docRev(current.connection.ydoc));
@@ -95,7 +158,7 @@ describe("the edited row", () => {
     [[], null],
     [[{ result: "matches" }], null],
     [[{ result: "ahead", rev: "current" }], null],
-    [[{ result: "matches", rev: "old" }, { result: "ahead", rev: "current" }], "Edited since code check"],
+    [[{ result: "matches", rev: "old" }, { result: "ahead", rev: "current" }], null],
     [[{ result: "ahead", rev: "old" }, { result: "drift", rev: "current" }], "Differs from code"],
     [[{ result: "drift" }, { result: "matches", rev: "old" }], "Differs from code"],
   ] as const)("reduces repository checks %j to a single attention note", (entries, expected) => {
@@ -161,8 +224,8 @@ describe("hub status", () => {
   function mount(hubAcked: boolean | null | undefined, patch: Partial<RoomStatus> = {}, reason: NotSharedReason | null = null, endpoint = "wss://hub.example/ws") {
     const current = fixture(patch);
     const tree = (ack: boolean | null | undefined) => <Popover><StatusLine connection={current.connection}
-      presence={[]} endpoint={{ url: endpoint, source: "document" }} hubAcked={ack}
-      notSharedReason={reason} lastUpdated={Date.now()} syncDetails /></Popover>;
+      presence={[]} syncReading={{ endpoint: { url: endpoint, source: "document" }, hubAcked: ack,
+        notSharedReason: reason, syncDetails: true }} lastUpdated={Date.now()} /></Popover>;
     const view = render(tree(hubAcked));
     settle();
     return { ...view, current, ack(value: boolean | null) { view.rerender(tree(value)); } };

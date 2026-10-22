@@ -2,13 +2,8 @@
 /**
  * `updatedAt` on the directory stub, written by a web client.
  *
- * What this suite defends is the bargain, the same one
- * `packages/mcp-server/test/timestamps.core.test.ts` defends for the server: the
- * directory is broadcast to every client in the workspace, so a stamp per
- * keystroke would turn one person typing into traffic for everyone. The
- * contract is "at most one bump per window, immediately on a title or tag
- * change, and never for merely opening or receiving a document". Concurrent
- * authored stamps resolve to the greater number in the shared schema layer.
+ * The shared schema suite defends the repair and stamp rules. This suite
+ * defends the web's attachment, local-versus-peer authorship and write gate.
  *
  * Every assertion is read off a **peer** replica of the `_directory` room, and
  * the volume assertions count the updates that actually crossed to it. What
@@ -26,27 +21,19 @@ import {
   appendBlock,
   addComment,
   createAnnotation,
-  deleteDirectoryEntry,
-  editBlock,
   getDirectoryEntry,
   getDirectoryMap,
   initDoc,
-  isDirectoryEntryDeleted,
-  resolveAnnotationRange,
   setAnnotationResolved,
   setDescription,
   setKind,
   setStatus,
-  setTags,
   setTitle,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
-} from "@uberblick/schema";
-import type { DirectoryEntry } from "@uberblick/schema";
-import {
   UPDATED_AT_COARSENESS_MS,
-  watchDocumentStub,
-} from "../src/collab/directory-stub.js";
+} from "@uberblick/schema";
+import { watchDocumentStub } from "../src/collab/directory-stub.js";
 
 /** Midnight of a day that is not now, so a real clock could never pass for it. */
 const T0 = Date.UTC(2031, 0, 1, 0, 0, 0);
@@ -62,71 +49,12 @@ function peerOf(local: Y.Doc): Y.Doc {
   return peer;
 }
 
-interface Rig {
-  /** The document this client has open. */
-  doc: Y.Doc;
-  /** Another client's copy of the directory — what the workspace sees. */
-  peer: Y.Doc;
-  /** Directory updates that have reached the peer since the watcher attached. */
-  crossed: () => number;
-  stop: () => void;
-}
-
-/**
- * A client with `title` open, whose stub the workspace already carries, stamped
- * at T0 — the steady state every question here is asked from.
- */
-function open(title: string, options: { stub?: string } = {}): Rig {
-  const doc = new Y.Doc();
-  initDoc(doc, { uuid: UUID, title });
-  const directory = new Y.Doc();
-  upsertDirectoryEntry(directory, {
-    uuid: UUID,
-    title: options.stub ?? title,
-    openThreadCount: 0,
-    code_check: [],
-    createdAt: T0,
-    updatedAt: T0,
-  });
-  const peer = peerOf(directory);
-  let crossed = 0;
-  peer.on("update", () => {
-    crossed += 1;
-  });
-  return {
-    doc,
-    peer,
-    crossed: () => crossed,
-    stop: watchDocumentStub(doc, directory, UUID),
-  };
-}
-
-function stub(rig: Rig): DirectoryEntry {
-  const entry = getDirectoryEntry(rig.peer, UUID);
-  if (entry === null) throw new Error(`no directory entry for ${UUID}`);
-  return entry;
-}
-
-/** One keystroke's worth of writing, through the same schema op the editor uses. */
-function type(rig: Rig, id: string, before: string, after: string): void {
-  editBlock(rig.doc, id, before, after);
-}
-
-const rigs: Rig[] = [];
-
-function rig(...args: Parameters<typeof open>): Rig {
-  const created = open(...args);
-  rigs.push(created);
-  return created;
-}
-
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(T0);
 });
 
 afterEach(() => {
-  for (const created of rigs.splice(0)) created.stop();
   vi.useRealTimers();
 });
 
@@ -151,88 +79,6 @@ describe("directory stamps from the web", () => {
       document.destroy();
       directory.destroy();
     }
-  });
-
-  it.each([false, true])("never repairs a permanently deleted document, including decisions: %s", (decision) => {
-    const document = new Y.Doc();
-    const directory = new Y.Doc();
-    initDoc(document, { uuid: UUID, title: "Private" });
-    if (decision) setKind(document, "decision");
-    deleteDirectoryEntry(directory, UUID);
-    const before = Y.encodeStateAsUpdate(directory);
-    const stop = watchDocumentStub(document, directory, UUID);
-    try {
-      setTitle(document, "Late rename");
-      setTags(document, ["late"]);
-      appendBlock(document, { type: "paragraph", text: "Late edit" });
-      expect(isDirectoryEntryDeleted(directory, UUID)).toBe(true);
-      expect(getDirectoryMap(directory).has(UUID)).toBe(false);
-      expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
-    } finally {
-      stop();
-      document.destroy();
-      directory.destroy();
-    }
-  });
-
-  it("preserves a decision's tombstone while repairing its stub", () => {
-    const doc = new Y.Doc();
-    initDoc(doc, { uuid: UUID, title: "Lease duration" });
-    setKind(doc, "decision");
-    const directory = new Y.Doc();
-    upsertDirectoryEntry(directory, {
-      uuid: UUID, title: "Stale", kind: "decision",
-      createdAt: T0, updatedAt: T0,
-    });
-    tombstoneDirectoryEntry(directory, UUID);
-    const peer = peerOf(directory);
-    const stop = watchDocumentStub(doc, directory, UUID);
-    try {
-      expect(getDirectoryEntry(peer, UUID)).toMatchObject({
-        title: "Lease duration", deleted: true,
-      });
-      setTitle(doc, "Short lease");
-      expect(getDirectoryEntry(peer, UUID)).toMatchObject({
-        title: "Short lease", deleted: true,
-      });
-    } finally {
-      stop();
-    }
-  });
-
-  it("counts open threads independently of replies and anchors, and stamps count changes immediately", () => {
-    const client = rig("Comments");
-    const block = appendBlock(client.doc, { type: "paragraph", text: "prose" });
-    expect(stub(client).openThreadCount).toBe(0);
-
-    vi.setSystemTime(T0 + 1_000);
-    const thread = createAnnotation(client.doc, block, 0, 5, "Author", "A comment");
-    expect(stub(client)).toMatchObject({
-      openThreadCount: 1, updatedAt: T0 + 1_000,
-    });
-    expect(client.crossed()).toBe(1);
-
-    vi.setSystemTime(T0 + 2_000);
-    addComment(client.doc, thread.id, "Reviewer", "A reply");
-    type(client, block, "prose", "");
-    expect(resolveAnnotationRange(client.doc, thread.id)).toBeNull();
-    expect(stub(client)).toMatchObject({
-      openThreadCount: 1, updatedAt: T0 + 1_000,
-    });
-    expect(client.crossed()).toBe(1);
-
-    vi.setSystemTime(T0 + 3_000);
-    setAnnotationResolved(client.doc, thread.id, true);
-    expect(stub(client)).toMatchObject({
-      openThreadCount: 0, updatedAt: T0 + 3_000,
-    });
-
-    vi.setSystemTime(T0 + 4_000);
-    setAnnotationResolved(client.doc, thread.id, false);
-    expect(stub(client)).toMatchObject({
-      openThreadCount: 1, updatedAt: T0 + 4_000,
-    });
-    expect(client.crossed()).toBe(3);
   });
 
   it("backfills known counts on attach and hydration, then repairs peer thread changes without stamping", () => {
@@ -385,43 +231,6 @@ describe("directory stamps from the web", () => {
     stop();
   });
 
-  it("bumps updatedAt at most once per window under a typing burst", () => {
-    const client = rig("Burst");
-    vi.setSystemTime(T0 + 500);
-    const block = appendBlock(client.doc, { type: "paragraph", text: "" });
-    // A block appended inside the stamped window is still inside it: no write.
-    expect(client.crossed()).toBe(0);
-
-    // Twenty edits spread over twenty seconds — a plausible minute of someone
-    // writing — all inside the first window.
-    let text = "";
-    for (let index = 0; index < 20; index += 1) {
-      vi.setSystemTime(T0 + 1_000 + index * 1_000);
-      const next = `${text}x`;
-      type(client, block, text, next);
-      text = next;
-    }
-    expect(stub(client).updatedAt).toBe(T0);
-    // The point of the coarseness: the whole burst cost the workspace nothing.
-    expect(client.crossed()).toBe(0);
-
-    // The first edit past the window stamps, and one more inside the new window
-    // does not.
-    vi.setSystemTime(T0 + WINDOW);
-    type(client, block, text, `${text}y`);
-    text = `${text}y`;
-    expect(stub(client).updatedAt).toBe(T0 + WINDOW);
-    expect(client.crossed()).toBe(1);
-
-    vi.setSystemTime(T0 + WINDOW + 1_000);
-    type(client, block, text, `${text}z`);
-    expect(stub(client).updatedAt).toBe(T0 + WINDOW);
-    expect(client.crossed()).toBe(1);
-
-    // Created-at is a fact about the document, not a moving stamp.
-    expect(stub(client).createdAt).toBe(T0);
-  });
-
   it("bumps nothing when a document is opened, hydrated or edited elsewhere", () => {
     // The shape of an open: the room's Y.Doc is empty when the watcher attaches
     // and the content arrives afterwards from the server.
@@ -460,42 +269,6 @@ describe("directory stamps from the web", () => {
     });
     expect(crossed).toBe(0);
     stop();
-  });
-
-  it("bumps updatedAt immediately on a title change", () => {
-    const client = rig("Before");
-
-    vi.setSystemTime(T0 + 1_000);
-    setTitle(client.doc, "After");
-    expect(stub(client)).toMatchObject({
-      title: "After",
-      createdAt: T0,
-      updatedAt: T0 + 1_000,
-    });
-  });
-
-  it("bumps updatedAt immediately on a tag change", () => {
-    const client = rig("Retagged");
-
-    vi.setSystemTime(T0 + 1_000);
-    setTags(client.doc, ["reference"]);
-    expect(stub(client)).toMatchObject({
-      tags: ["reference"],
-      updatedAt: T0 + 1_000,
-    });
-  });
-
-  it("bumps updatedAt immediately on an authored description change", () => {
-    const client = rig("Described");
-
-    vi.setSystemTime(T0 + 1_000);
-    setDescription(client.doc, "New description");
-    expect(stub(client)).toMatchObject({
-      description: "New description",
-      createdAt: T0,
-      updatedAt: T0 + 1_000,
-    });
-    expect(client.crossed()).toBe(1);
   });
 
   it("repairs description alone on attach and arrived updates without stamping", () => {
@@ -548,86 +321,6 @@ describe("directory stamps from the web", () => {
     stop();
   });
 
-  it("backfills createdAt on attach and preserves it through later repairs", () => {
-    const doc = new Y.Doc();
-    initDoc(doc, { uuid: UUID, title: "Legacy" });
-    const directory = new Y.Doc();
-    upsertDirectoryEntry(directory, {
-      uuid: UUID,
-      title: "Legacy",
-      updatedAt: T0,
-    });
-    const peer = peerOf(directory);
-    let crossed = 0;
-    peer.on("update", () => {
-      crossed += 1;
-    });
-
-    vi.setSystemTime(T0 + WINDOW * 3);
-    const stop = watchDocumentStub(doc, directory, UUID);
-    expect(getDirectoryEntry(peer, UUID)).toMatchObject({
-      createdAt: T0 + WINDOW * 3,
-      updatedAt: T0,
-    });
-    expect(crossed).toBe(1);
-
-    vi.setSystemTime(T0 + WINDOW * 4);
-    const remote = peerOf(doc);
-    setTitle(remote, "Arrived title");
-    expect(getDirectoryEntry(peer, UUID)).toMatchObject({
-      title: "Arrived title",
-      createdAt: T0 + WINDOW * 3,
-      updatedAt: T0,
-    });
-    setTitle(doc, "Authored title");
-    expect(getDirectoryEntry(peer, UUID)).toMatchObject({
-      title: "Authored title",
-      createdAt: T0 + WINDOW * 3,
-      updatedAt: T0 + WINDOW * 4,
-    });
-    expect(crossed).toBe(3);
-    stop();
-  });
-
-  it("does not backfill a tombstone missing createdAt", () => {
-    const doc = new Y.Doc();
-    initDoc(doc, { uuid: UUID, title: "Archived" });
-    const block = appendBlock(doc, { type: "paragraph", text: "still open" });
-    createAnnotation(doc, block, 0, 10, "Author", "Unresolved before archive");
-    const directory = new Y.Doc();
-    upsertDirectoryEntry(directory, { uuid: UUID, title: "Archived" });
-    tombstoneDirectoryEntry(directory, UUID);
-    const peer = peerOf(directory);
-    let crossed = 0;
-    peer.on("update", () => {
-      crossed += 1;
-    });
-    const stop = watchDocumentStub(doc, directory, UUID);
-    setDescription(doc, "Authored after archive");
-    expect(getDirectoryEntry(peer, UUID)).toEqual({
-      uuid: UUID,
-      title: "Archived",
-      tags: [],
-      deleted: true,
-    });
-    expect(crossed).toBe(0);
-    stop();
-  });
-
-  it("repairs a stub that disagrees with the document on connect, without stamping", () => {
-    // `meta.title` in the document is authoritative and the stub is a cache, so
-    // opening the document republishes the title — but catching a cache up is
-    // not the document changing, and must not claim it changed now.
-    vi.setSystemTime(T0 + WINDOW * 3);
-    const client = rig("Authoritative", { stub: "Stale" });
-
-    expect(stub(client)).toMatchObject({
-      title: "Authoritative",
-      createdAt: T0,
-      updatedAt: T0,
-    });
-  });
-
   it("repairs and clears lifecycle metadata on attach and later remote updates", () => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: UUID, title: "Lifecycle" });
@@ -660,59 +353,4 @@ describe("directory stamps from the web", () => {
     stop();
   });
 
-  it("leaves a tombstone alone, however far the stub has drifted (#81)", () => {
-    // The web repairs stubs from the document it has open, exactly as the MCP
-    // replica does — and a tombstone stops both. Archiving is a directory write
-    // that no document update may undo, so a rename arriving under an open pane
-    // must not republish the entry and revive what someone archived.
-    const client = rig("Retired protocol");
-    const before = client.crossed();
-    tombstoneDirectoryEntry(client.peer, UUID);
-
-    vi.setSystemTime(T0 + WINDOW * 2);
-    setTitle(client.doc, "Renamed after the archive");
-    const block = appendBlock(client.doc, { type: "paragraph", text: "" });
-    type(client, block, "", "and edited too");
-
-    // Still archived, still under the title it was archived with: the repair
-    // stood down rather than writing either half back.
-    expect(stub(client)).toMatchObject({
-      title: "Retired protocol",
-      deleted: true,
-    });
-    // And it wrote nothing at all — the tombstone is the only update that
-    // crossed since.
-    expect(client.crossed()).toBe(before + 1);
-  });
-
-  it("stands down for a window another replica has already stamped", () => {
-    // The stamp read back is whatever the *directory* holds, not what this
-    // client last wrote — so a window paid for by the MCP replica suppresses
-    // this client's write too, and two writers on one document cost the
-    // workspace one bump per window between them rather than one each.
-    const client = rig("Shared");
-    const block = appendBlock(client.doc, { type: "paragraph", text: "" });
-
-    // The other replica edits the same document from its side and stamps; the
-    // stamp reaches this client over the directory room like any other update.
-    vi.setSystemTime(T0 + WINDOW);
-    upsertDirectoryEntry(client.peer, {
-      uuid: UUID,
-      title: "Shared",
-      updatedAt: T0 + WINDOW,
-    });
-    const afterTheirStamp = client.crossed();
-
-    // A local edit a full window past this client's own last stamp, but inside
-    // theirs: nothing to say, so nothing is written.
-    vi.setSystemTime(T0 + WINDOW + 1_000);
-    type(client, block, "", "x");
-    expect(stub(client).updatedAt).toBe(T0 + WINDOW);
-    expect(client.crossed()).toBe(afterTheirStamp);
-
-    // The next window is this client's to stamp again.
-    vi.setSystemTime(T0 + WINDOW * 2);
-    type(client, block, "x", "xy");
-    expect(stub(client).updatedAt).toBe(T0 + WINDOW * 2);
-  });
 });

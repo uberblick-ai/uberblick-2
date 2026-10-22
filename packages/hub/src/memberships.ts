@@ -11,13 +11,8 @@ export interface MembershipRecord {
   role: MembershipRole;
 }
 
-export interface ChangeMembershipRoleRequest extends MembershipRecord {
-  actorPrincipalId: string;
-}
-
 export interface RemoveMembershipRequest {
   workspaceId: string;
-  actorPrincipalId: string;
   principalId: string;
 }
 
@@ -126,10 +121,9 @@ export class MembershipRegistry {
     return { workspaceId: record.workspaceId, principalId: record.principalId, role };
   }
 
-  /** Check current authority and insert without an intervening asynchronous step. */
-  grantMember(request: ChangeMembershipRoleRequest): MembershipRecord {
-    this.requireAdmin(request.workspaceId, request.actorPrincipalId);
-    return this.grant({ workspaceId: request.workspaceId, principalId: request.principalId, role: request.role });
+  /** Trusted callers only, under the same rules as grant. */
+  grantMember(request: MembershipRecord): MembershipRecord {
+    return this.grant(request);
   }
 
   /** Internal first-admin guard: even a non-admin membership prevents setup. */
@@ -161,8 +155,7 @@ export class MembershipRegistry {
     return role;
   }
 
-  listMembers(workspaceId: string, actorPrincipalId: string): MembershipRecord[] {
-    this.requireAdmin(workspaceId, actorPrincipalId);
+  listMembers(workspaceId: string): MembershipRecord[] {
     return this.selectMembers.all({ workspaceId }).map((row) => ({
       workspaceId,
       principalId: row.principal_id as string,
@@ -170,10 +163,9 @@ export class MembershipRegistry {
     }));
   }
 
-  changeRole(request: ChangeMembershipRoleRequest): void {
+  changeRole(request: MembershipRecord): void {
     validateIdentity(request.workspaceId, request.principalId);
     validateRole(request.role);
-    this.requireAdmin(request.workspaceId, request.actorPrincipalId);
     const previousRole = this.roleFor(request.workspaceId, request.principalId);
     if (previousRole === null) throw new MembershipRefusal("member-not-found");
     if (request.role !== "admin") this.protectLastAdmin(request.workspaceId, previousRole);
@@ -202,7 +194,6 @@ export class MembershipRegistry {
    */
   remove(request: RemoveMembershipRequest): boolean {
     validateIdentity(request.workspaceId, request.principalId);
-    this.requireAdmin(request.workspaceId, request.actorPrincipalId);
     const previousRole = this.roleFor(request.workspaceId, request.principalId);
     this.protectLastAdmin(request.workspaceId, previousRole);
     const changed = this.deleteMember.run({

@@ -8,12 +8,14 @@
 
 import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { generateKeyPairSync } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveMcpConfig, } from "../src/config.js";
 import { bridgeConfig } from "../src/remote.js";
+import { acquireInitLock } from "../src/init-lock.js";
+import { userConfigPath, writeUserConfig } from "../src/project-config.js";
 
 const WORKSPACE = "9c1f0b4a-6d27-4e83-9b5a-1f2e3d4c5b6a";
 const DATA_HOME = "/tmp/uberblick-config-test";
@@ -54,5 +56,46 @@ describe("resolveMcpConfig", () => {
       expect(sameOrigin.deviceLogin).toBeDefined();
       expect(sameOrigin.authSecret).toBeNull();
     } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+});
+
+describe("configuration retry hints", () => {
+  it.each([undefined, "ub workspace use example"])("keeps lock recovery suitable for the caller (%s)", async (command) => {
+    const directory = mkdtempSync(join(tmpdir(), "config-retry-lock-"));
+    const testEnv = { XDG_CONFIG_HOME: directory };
+    const holder = await acquireInitLock(testEnv);
+    const options = command === undefined ? { waitMs: 0 } : { waitMs: 0, command };
+    try {
+      await expect(acquireInitLock(testEnv, options)).rejects.toThrow(
+        command === undefined
+          ? "run the same command again"
+          : "run `ub workspace use example` again",
+      );
+      await expect(acquireInitLock(testEnv, options)).rejects.toThrow(
+        `remove it: rm -- '${holder.path}'`,
+      );
+    } finally {
+      holder.release();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("gives the shared config writer a neutral retry and preserves the move-aside remedy", () => {
+    const directory = mkdtempSync(join(tmpdir(), "config-retry-write-"));
+    const testEnv = { XDG_CONFIG_HOME: directory };
+    try {
+      const path = writeUserConfig({ displayName: "Before" }, testEnv);
+      const target = join(directory, "protected-config.json");
+      const contents = readFileSync(path, "utf8");
+      writeFileSync(target, contents);
+      rmSync(path);
+      symlinkSync(target, userConfigPath(testEnv));
+      expect(() => writeUserConfig({ displayName: "After" }, testEnv)).toThrow(
+        "Move it aside and run the same command again",
+      );
+      expect(readFileSync(target, "utf8")).toBe(contents);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
