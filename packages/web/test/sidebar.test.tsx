@@ -23,6 +23,8 @@ import type { ReactNode } from "react";
 import * as Y from "yjs";
 import {
   createGroup,
+  createAnnotation,
+  deleteDirectoryEntry,
   directoryRoom,
   initDoc,
   appendBlock,
@@ -65,6 +67,7 @@ const LIVE: RoomStatus = {
 let roomStatus: RoomStatus = LIVE;
 
 const rooms = new Map<string, RoomConnection>();
+const acquiredRooms: string[] = [];
 const statusListeners = new Map<string, Set<(next: RoomStatus) => void>>();
 
 function room(name: string): RoomConnection {
@@ -89,7 +92,10 @@ function room(name: string): RoomConnection {
 
 vi.mock("../src/collab/rooms.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("../src/collab/rooms.js")>(),
-  acquireRoom: (name: string) => ({ connection: room(name), release: () => {} }),
+  acquireRoom: (name: string) => {
+    acquiredRooms.push(name);
+    return { connection: room(name), release: () => {} };
+  },
   mintHubAuthMessage: async () => "local-browser-bearer",
 }));
 
@@ -144,6 +150,7 @@ beforeEach(() => {
 afterEach(() => {
   mounted = null;
   rooms.clear();
+  acquiredRooms.length = 0;
   statusListeners.clear();
   roomStatus = LIVE;
   vi.restoreAllMocks();
@@ -654,6 +661,79 @@ describe("the sidebar is the _sidebar document", () => {
       "Untitled",
       unknown,
     ]);
+  });
+
+  it("hides a deleted pin from another client while preserving archived and unresolved pins", async () => {
+    const directory = seedDirectory();
+    tombstoneDirectoryEntry(directory, ONE);
+    tombstoneDirectoryEntry(directory, TWO);
+    const directoryPeer = peerOf(directory);
+    const sidebar = sidebarDoc();
+    const reading = createGroup(sidebar, "Reading");
+    const unknown = "3a9d5c17-0e64-4b28-8f31-6d2a7c40b9e5";
+    pinDoc(sidebar, reading, ONE);
+    pinDoc(sidebar, reading, TWO);
+    pinDoc(sidebar, reading, unknown);
+    const sidebarPeer = peerOf(sidebar);
+    const host = await openApp(`/${WORKSPACE}`);
+    expect(rowTitles(host, 0)).toEqual(["Overviewarchived", "Editingarchived", unknown.slice(0, 8)]);
+
+    act(() => deleteDirectoryEntry(directoryPeer, ONE));
+
+    expect(rowTitles(host, 0)).toEqual(["Editingarchived", unknown.slice(0, 8)]);
+    expect(stored(sidebarPeer)).toEqual([["Reading", [ONE, TWO, unknown]]]);
+  });
+});
+
+describe("a permanently deleted document address", () => {
+  it("shows only the deleted notice without acquiring the document or title room", async () => {
+    const directory = seedDirectory();
+    tombstoneDirectoryEntry(directory, ONE);
+    deleteDirectoryEntry(directory, ONE);
+    const host = await openApp(`/${WORKSPACE}/${ONE}`);
+
+    expect(host.querySelector(".ub-document-pane")?.textContent).toBe("This document was deleted.");
+    expect(acquiredRooms).not.toContain(roomForDoc(WORKSPACE, ONE));
+    expect(host.querySelector(".ub-document-pane button")).toBeNull();
+    expect(within(host).queryByRole("textbox", { name: "Document content" })).toBeNull();
+    expect(within(host).queryByLabelText("Threads")).toBeNull();
+  });
+
+  it.each(["directory mark", "hub refusal"])("retires the open document and threads on a %s", async (evidence) => {
+    const directory = seedDirectory();
+    const doc = room(roomForDoc(WORKSPACE, ONE));
+    initDoc(doc.ydoc, { uuid: ONE, title: "Overview" });
+    const block = appendBlock(doc.ydoc, { type: "paragraph", text: "Content that must disappear" });
+    createAnnotation(doc.ydoc, block, 0, 7, "Reader", "Comment that must disappear");
+    tombstoneDirectoryEntry(directory, ONE);
+    const host = await openApp(`/${WORKSPACE}/${ONE}`);
+    expect(within(host).getByRole("textbox", { name: "Document content" }).textContent)
+      .toContain("Content that must disappear");
+    expect(within(host).queryByLabelText("Threads")).not.toBeNull();
+
+    act(() => {
+      if (evidence === "directory mark") deleteDirectoryEntry(directory, ONE);
+      else {
+        doc.status = { ...doc.status, deleted: true, writable: false };
+        for (const listener of statusListeners.get(doc.room) ?? []) listener(doc.status);
+      }
+    });
+
+    expect(host.querySelector(".ub-document-pane")?.textContent).toBe("This document was deleted.");
+    expect(host.querySelector(".ub-document-pane button")).toBeNull();
+    expect(within(host).queryByRole("textbox", { name: "Document content" })).toBeNull();
+    expect(within(host).queryByLabelText("Threads")).toBeNull();
+    expect(host.textContent).not.toContain("Content that must disappear");
+    expect(host.textContent).not.toContain("Comment that must disappear");
+  });
+
+  it("keeps waiting when an address is only absent from the directory", async () => {
+    seedDirectory();
+    const unknown = "3a9d5c17-0e64-4b28-8f31-6d2a7c40b9e5";
+    const host = await openApp(`/${WORKSPACE}/${unknown}`);
+    expect(host.querySelector(".ub-document-pane")?.textContent).toContain("Waiting for sync.");
+    expect(host.textContent).not.toContain("This document was deleted.");
+    expect(acquiredRooms).toContain(roomForDoc(WORKSPACE, unknown));
   });
 });
 

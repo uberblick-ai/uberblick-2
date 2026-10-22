@@ -12,8 +12,8 @@
  * 2. **The shorthand borrows a label once.** `[<uuid>]` takes the title the
  *    directory advertises at that moment, as *text*; a target the directory
  *    cannot name contributes its uuid, so nothing is ever written label-less.
- * 3. **Availability is re-read, never stored.** Unresolved and archived are two
- *    different things, both re-evaluated when the directory changes, over the
+ * 3. **Availability is re-read, never stored.** Unresolved, archived and deleted
+ *    are different things, re-evaluated when the directory changes, over the
  *    directory room alone.
  * 4. **One gesture, one action.** A click on a reference follows it; a click on
  *    the comment highlight around it opens the thread; a modified click is the
@@ -32,6 +32,7 @@ import { within } from "@testing-library/react";
 import * as Y from "yjs";
 import {
   appendBlock,
+  deleteDirectoryEntry,
   getBlocks,
   getBlocksFragment,
   getMeta,
@@ -161,6 +162,14 @@ describe("making a reference", () => {
       const anchor = within(element).getByRole("columnheader", { name: "see the hub today" }).querySelector("a.ub-doclink");
       expect(anchor?.getAttribute("href")).toBe(`/${WORKSPACE}/${TARGET}`);
       expect(anchor?.getAttribute("data-doc-link-state")).toBe("resolved");
+      const stored = Y.encodeStateVector(ydoc);
+      tombstoneDirectoryEntry(directory, TARGET);
+      deleteDirectoryEntry(directory, TARGET);
+      expect(anchor?.getAttribute("data-doc-link-state")).toBe("deleted");
+      expect(anchor?.getAttribute("href")).toBeNull();
+      expect(anchor?.getAttribute("title")).toBe("This document was deleted.");
+      expect(anchor?.textContent).toBe("the hub");
+      expect(Y.encodeStateVector(ydoc)).toEqual(stored);
     } finally { editor.destroy(); ydoc.destroy(); directory.destroy(); }
   });
 
@@ -405,6 +414,30 @@ describe("what a reference says about its target", () => {
       editor.destroy();
     }
   });
+
+  it("uses only a deletion mark to disable a reference without rewriting it", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: DOC, title: "References" });
+    appendBlock(ydoc, { type: "paragraph", inline: [{ text: "the hub", marks: { docLink: TARGET } }] });
+    const { directory, context } = directoryWith([{ uuid: TARGET, title: "The hub" }]);
+    const { editor, element } = mountEditor(ydoc, { docLinks: context });
+    try {
+      const stored = Y.encodeStateVector(ydoc);
+      const anchor = element.querySelector("a.ub-doclink");
+      tombstoneDirectoryEntry(directory, TARGET);
+      deleteDirectoryEntry(directory, TARGET);
+      expect(anchor?.getAttribute("data-doc-link-state")).toBe("deleted");
+      expect(anchor?.getAttribute("title")).toBe("This document was deleted.");
+      expect(anchor?.getAttribute("href")).toBeNull();
+      expect(anchor?.getAttribute("aria-disabled")).toBe("true");
+      expect(anchor?.textContent).toBe("the hub");
+      expect(context.lookup(UNKNOWN).state).toBe("unresolved");
+      expect(context.candidates()).toEqual([]);
+      expect(element.querySelector("a.ub-doclink")).toBe(anchor);
+      expect(Y.encodeStateVector(ydoc)).toEqual(stored);
+      expect(delta(ydoc)).toEqual([{ insert: "the hub", attributes: { docLink: { docId: TARGET } } }]);
+    } finally { editor.destroy(); ydoc.destroy(); directory.destroy(); }
+  });
 });
 
 const LIVE: RoomStatus = {
@@ -481,6 +514,35 @@ describe("an unwritable document room", () => {
 });
 
 describe("following a reference", () => {
+  it.each(["paragraph", "table"] as const)("never activates a deleted %s reference by pointer or keyboard", async (type) => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: DOC, title: "References" });
+    if (type === "paragraph") {
+      appendBlock(ydoc, { type, inline: [{ text: "the hub", marks: { docLink: TARGET } }] });
+    } else {
+      appendBlock(ydoc, { type, text: `| [the hub](${TARGET}) |\n| --- |` });
+    }
+    const { directory, context, opened } = directoryWith([{ uuid: TARGET, title: "The hub" }]);
+    const { container: host } = await renderSettled(<EditorPane
+      connection={connectionFor(ydoc)} segment={WORKSPACE} presence={[]} author="tester"
+      archived={false} docLinks={context} actions={{ onRestore: () => {} }} onSelectThread={() => {}}
+    />);
+    const anchor = host.querySelector<HTMLAnchorElement>("a.ub-doclink");
+    expect(anchor?.getAttribute("href")).toBe(`/${WORKSPACE}/${TARGET}`);
+    await act(async () => { tombstoneDirectoryEntry(directory, TARGET); deleteDirectoryEntry(directory, TARGET); });
+    expect(anchor?.getAttribute("href")).toBeNull();
+    expect(anchor?.tabIndex).toBe(-1);
+    for (const init of [{}, { metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { button: 1 }]) {
+      await act(async () => anchor?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ...init })));
+    }
+    await act(async () => anchor?.dispatchEvent(new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 })));
+    for (const key of ["Enter", " "]) {
+      await act(async () => anchor?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key })));
+    }
+    expect(opened).toEqual([]);
+    expect(anchor?.textContent).toBe("the hub");
+  });
+
   /**
    * The overlap is the point. A `comment` highlight and a `docLink` can cover
    * the same words, and both are read by delegation on the same host element —

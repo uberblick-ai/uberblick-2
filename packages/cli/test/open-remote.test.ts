@@ -585,6 +585,13 @@ describe("ub open: sharing through the upstream hub", () => {
       try {
         expect(stored.prepare("SELECT COUNT(*) AS count FROM pending_rooms").get()?.count)
           .toBeGreaterThan(0);
+        const origins = stored.prepare(
+          "SELECT o.metadata FROM update_origins o JOIN updates u ON u.seq = o.seq WHERE u.room = ? ORDER BY u.seq",
+        ).all(roomForDoc(WORKSPACE, created.uuid)).map(row => JSON.parse(String(row.metadata)));
+        expect(origins).toEqual(expect.arrayContaining([
+          expect.objectContaining({ surface: { kind: "browser", name: "browser" } }),
+          expect.objectContaining({ surface: { kind: "mcp", name: "ub-open-store-test" } }),
+        ]));
       } finally { stored.close(); }
 
 

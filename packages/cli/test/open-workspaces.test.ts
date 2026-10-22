@@ -15,7 +15,7 @@ import { localBrowserKey } from "../src/browser-key.js";
 import { probePort } from "../src/probes.js";
 import { readWorkspaceHub, ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 import { pointAt, runUbAsync, waitUntil, type Sandbox } from "./helpers.js";
-import { authMessage, bearer, cleanUp, configured, FIRST_REMOTE, freePort, get, hubs, open, openFails,
+import { authMessage, bearer, cleanUp, configured, FIRST_REMOTE, freePort, get, holdDefaultHub, hubs, open, openFails,
   openStore, SECRET, WORKSPACE, type Running } from "./open-fixtures.js";
 
 // Sorts before WORKSPACE: the startup binding must nevertheless remain first.
@@ -269,6 +269,7 @@ describe("ub open: this machine's workspaces", () => {
   });
 
   it("offers an unrecorded replica as local before it has a project binding", async () => {
+    await holdDefaultHub();
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
     await seed(box, SECOND, "Older replica");

@@ -147,6 +147,11 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     this.check(connection, documentName);
   };
 
+  /** Reuse current authority immediately before a stateless update is applied. */
+  assertCurrent(connection: Connection<CredentialContext>, room: string): void {
+    this.check(connection, room);
+  }
+
   onDestroy = async (): Promise<void> => {
     this.unsubscribe();
     for (const timer of this.expiryTimers.values()) clearTimeout(timer);

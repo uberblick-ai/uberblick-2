@@ -92,7 +92,7 @@ function textOf(element: Y.XmlElement): Y.XmlText | null {
  * losers on every replica. Empty-id elements remain visible and unrepairable,
  * since missing identity cannot justify silently dropping foreign content.
  */
-function partitionById(fragment: Y.XmlFragment): {
+export function partitionById(fragment: Y.XmlFragment): {
   /** The visible element for each id, in document order. */
   visible: Y.XmlElement[];
   /** Fragment indexes of the shadowed duplicates, ascending. */
@@ -185,7 +185,7 @@ function indentOf(element: Y.XmlElement): ListIndent {
   return Number.isNaN(parsed) ? 0 : normalizeIndent(parsed);
 }
 
-function toBlock(element: Y.XmlElement): Block {
+export function toBlock(element: Y.XmlElement): Block {
   // Prose rev excludes marks; structured prose projections include inline formatting.
   const type = elementType(element);
   const id = element.getAttribute("id") ?? "";

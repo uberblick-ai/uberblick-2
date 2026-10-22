@@ -74,7 +74,7 @@ async function roomToken(issued: IssuedCredential, workspace = WORKSPACE) {
 }
 
 function connect(hub: Hub, room: string, presented: string) {
-  const client = createClient({ port: hub.port, room, token: presented, reconnectDelayMs: 60_000 });
+  const client = createClient({ port: hub.port, room, token: presented, reconnectDelayMs: 60_000, originUpdates: true });
   clients.push(client);
   return client;
 }

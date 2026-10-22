@@ -61,6 +61,7 @@ export type DocumentActionProps = {
   focusRestore?: boolean;
   onRestoreFocused?: (() => void) | undefined;
   onRestore?: (() => void) | null;
+  onDelete?: (() => void) | null;
 };
 
 function titleOf(meta: DocMeta): string {

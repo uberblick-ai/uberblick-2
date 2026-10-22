@@ -10,6 +10,7 @@ import {
   createAnnotation,
   createGroup,
   decisionDirectoryFields,
+  deleteDirectoryEntry,
   directoryRoom,
   getBlocks,
   getDirectoryEntry,
@@ -921,6 +922,7 @@ describe("decision topic navigation and history", () => {
     const host = archivedView.container;
     expect(answer(host).textContent).toContain("Keep the original answer.");
     expect(host.querySelector(".ub-archived-banner")).not.toBeNull();
+    expect(within(host).queryByRole("button", { name: "Delete…" })).toBeNull();
     expect(host.querySelector(".ub-thread-actions")).toBeNull();
     expect(timeline(host).querySelector(`li[data-record="${FIRST}"]`)).toBeNull();
     const clipboard = copiedUrls();
@@ -973,9 +975,11 @@ describe("decision topic navigation and history", () => {
     expect(new URL(clipboard.mock.calls[0]?.[0] as string).pathname).toBe(decisionRecordPath(WORKSPACE, FIRST, REJECTED));
     await act(async () => tombstoneDirectoryEntry(directory(), CURRENT));
     expect(host.querySelector(".ub-archived-banner")).not.toBeNull();
+    expect(within(host).queryByRole("button", { name: "Delete…" })).toBeNull();
     await act(async () => within(host).getByRole("button", { name: "Restore" }).click());
     expect(resolveDecisionTopics(directory())[0]?.archived).toBe(false);
     expect(host.querySelector(".ub-archived-banner")).not.toBeNull();
+    expect(within(host).queryByRole("button", { name: "Delete…" })).toBeNull();
     expect(timeline(host).querySelector(`li[data-record="${REJECTED}"]`)).toBeNull();
     await act(async () => restoreDirectoryEntry(directory(), REJECTED));
     expect(host.querySelector(".ub-archived-banner")).toBeNull();
@@ -1043,6 +1047,31 @@ describe("decision topic navigation and history", () => {
     />)).container;
     expect(answer(host).textContent).toContain("An answer.");
     expect(host.querySelector(".ub-decision-rfc")).toBeNull();
+  });
+
+  it("makes deleted discussion references inert in the answer and history", async () => {
+    regular(RFC, "Deleted discussion");
+    record(FIRST, "Topic with discussion", "decided", "An answer.", { discussion: RFC });
+    const host = (await open()).container;
+    await act(async () => { tombstoneDirectoryEntry(directory(), RFC); deleteDirectoryEntry(directory(), RFC); });
+    const references = host.querySelectorAll<HTMLAnchorElement>('.ub-doclink[data-doc-link-state="deleted"]');
+    expect(references).toHaveLength(2);
+    const path = window.location.pathname;
+    for (const reference of references) {
+      expect(reference.getAttribute("title")).toBe("This document was deleted.");
+      expect(reference.getAttribute("href")).toBeNull();
+      expect(reference.getAttribute("aria-disabled")).toBe("true");
+      expect(reference.tabIndex).toBe(-1);
+      await act(async () => fireEvent.click(reference));
+      await act(async () => fireEvent.click(reference, { metaKey: true }));
+      await act(async () => fireEvent.click(reference, { ctrlKey: true }));
+      await act(async () => fireEvent.click(reference, { button: 1 }));
+      await act(async () => fireEvent.keyDown(reference, { key: "Enter" }));
+    }
+    expect(window.location.pathname).toBe(path);
+    expect(acquired).not.toContain(roomForDoc(WORKSPACE, RFC));
+    expect(getMeta(room(roomForDoc(WORKSPACE, FIRST)).ydoc).discussion).toBe(RFC);
+    expect(getDirectoryEntry(directory(), FIRST)?.discussion).toBe(RFC);
   });
 });
 

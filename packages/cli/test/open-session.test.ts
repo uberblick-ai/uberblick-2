@@ -13,7 +13,7 @@ import { wrapToken } from "@uberblick/schema/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { localBrowserKey } from "../src/browser-key.js";
 import { LAUNCH_LIFETIME_MS, LaunchSecret } from "../src/open-session.js";
-import { WORKSPACE, authMessage, cleanUp, configured, freePort, get, open } from "./open-fixtures.js";
+import { WORKSPACE, authMessage, cleanUp, configured, freePort, get, holdDefaultHub, open } from "./open-fixtures.js";
 
 afterEach(cleanUp);
 
@@ -35,6 +35,7 @@ function client(url: string) {
 
 describe("ub open browser sessions", () => {
   it("serves no key without a session and trades the printed launch secret exactly once", async () => {
+    await holdDefaultHub();
     const { box, env } = configured();
     const app = await open(box, ["--port", String(await freePort())], env);
     try {
@@ -91,6 +92,7 @@ describe("ub open browser sessions", () => {
   });
 
   it("keeps a session across a restart, which prints a new launch secret", async () => {
+    await holdDefaultHub();
     const { box, env } = configured();
     const port = await freePort();
     const first = await open(box, ["--port", String(port)], env);

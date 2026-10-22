@@ -31,6 +31,8 @@ export interface RoutePaneProps {
   catalogConnection?: RoomConnection | null;
   /** Whether the directory tombstones this document — see useArchived. */
   archived: boolean;
+  /** Positive permanent deletion evidence from the directory or room refusal. */
+  deleted?: boolean;
   /** The selected directory stub's edit-freshness hint, when it has one. */
   updatedAt?: number | undefined;
   /** What an inline document reference resolves against — see EditorPane. */
@@ -179,7 +181,7 @@ export function RoutePane(props: RoutePaneProps): ReactElement {
   const { route } = props;
   // Hooks precede early returns so route changes retain one room-status subscription.
   const { hasAnswered, deleted } = useRoomStatus(props.connection);
-  if (deleted) return <PaneNotice documentLayout>{null}</PaneNotice>;
+  if (deleted || props.deleted) return <PaneNotice documentLayout><p className="ub-notice">This document was deleted.</p></PaneNotice>;
   if (route.kind === "no-workspace") return <NoWorkspaceNotice route={route} configured={props.configured ?? true} />;
   if (route.kind === "invalid") {
     return (

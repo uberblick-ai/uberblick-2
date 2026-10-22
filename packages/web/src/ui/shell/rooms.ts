@@ -24,7 +24,9 @@ function resolveSelection(route: Route, topics: DecisionTopicResolution[], direc
 }
 
 function resolveTitle(route: Route, topic: DecisionTopicResolution | null, directory: RoomConnection | null) {
+  if (directory === null) return null;
   const routedTitleUuid = route.kind === "decision" ? route.topic : route.kind === "doc" ? route.uuid : null;
+  if (directory !== null && routedTitleUuid !== null && isDirectoryEntryDeleted(directory.ydoc, routedTitleUuid)) return null;
   const routedTitleEntry = directory === null || routedTitleUuid === null ? null : getDirectoryEntry(directory.ydoc, routedTitleUuid);
   const titleUuid = topic?.topic ?? (routedTitleEntry === null || routedTitleEntry.kind === "decision" ? routedTitleUuid : null);
   return titleUuid;
@@ -80,7 +82,9 @@ export function useShellRooms({ roomReady, workspace, defaultIdentity, route, se
       migrateRetiredTagCatalogEntries(catalog.ydoc);
     }
   }, [serving, catalog, catalogStatus.writable, catalogStatus.hasReceivedServerState]);
+  const deleted = docStatus.deleted === true || (directory !== null && routedSelection !== null &&
+    isDirectoryEntryDeleted(directory.ydoc, routedSelection));
   return { directory, allEntries, topics, topic, selected, routedSelection, doc, topicTitleRoom,
-    sidebar, catalog, directoryStatus, docStatus, sidebarStatus };
+    sidebar, catalog, directoryStatus, docStatus, sidebarStatus, deleted };
 }
 export type ShellRooms = ReturnType<typeof useShellRooms>;

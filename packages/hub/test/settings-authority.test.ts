@@ -13,6 +13,7 @@ import {
   setWorkspaceMainRepository,
   setWorkspaceName,
   settingsRoom,
+  readOriginAck,
 } from "@uberblick/schema";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { importCredentialKey, mintToken, type RequestAction, type TokenScope } from "@uberblick/schema/token";
@@ -62,12 +63,15 @@ async function open(hub: TeamHub, issued: IssuedCredential, doc?: Y.Doc, room = 
   const token = await mintToken(await importCredentialKey(issued.keyBytes), { typ: "room", sub: issued.record.principalId,
     workspace: WORKSPACE, scope, kid: issued.record.id, lifetimeSeconds: 60 });
   const client = createClient({ port: hub.port, room, token, reconnectDelayMs: 60_000,
-    ...(doc === undefined ? {} : { doc }) });
+    ...(doc === undefined ? {} : { doc }), originUpdates: true });
   clients.push(client);
   let refusals = 0;
   client.provider.on("message", ({ message }: onMessageParameters) => {
     message.readVarString();
     if (message.readVarUint() === MessageType.SyncStatus && message.readVarUint() === 0) refusals += 1;
+  });
+  client.provider.on("stateless", ({ payload }: { payload: string }) => {
+    if (readOriginAck(payload)?.applied === false) refusals += 1;
   });
   await client.synced;
   return Object.assign(client, { getRefusals: () => refusals });

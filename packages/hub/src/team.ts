@@ -17,6 +17,7 @@ import { PrincipalRegistry } from "./principals.js";
 import { isEphemeralDatabase } from "./persistence.js";
 import { createHub, type Hub, type HubExtensionContext, type HubExtension } from "./server.js";
 import { validateGithubClientId, type TeamHubConfig } from "./team-config.js";
+import { resolveUpdateAuthor } from "./update-attribution.js";
 
 export interface TeamHub extends Hub {
   /** Hub-internal authorities; never exposed through a public route. */
@@ -77,6 +78,10 @@ function createTeamExtension(
     extensions: admission === undefined ? [] : [admission],
     admissionConfigured: admission !== undefined,
     signInConfigured: signIn !== undefined,
+    assertCurrent(connection, room) { admission?.assertCurrent(connection, room); },
+    resolveAuthor(credentialContext, origin) {
+      return credentials === undefined ? null : resolveUpdateAuthor(credentialContext, credentials, origin);
+    },
     async handleRequest(request, response) {
       if (handleHubClaimState(claims, signIn !== undefined, request, response)) return true;
       if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response, workspaceNames)) return true;

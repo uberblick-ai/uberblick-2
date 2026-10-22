@@ -453,6 +453,7 @@ function readCorpus(replicas: Replicas): Corpus {
 export async function syncWorkspace(config: McpConfig): Promise<Corpus> {
   const workspace = openWorkspaceReplicas(config);
   const { replicas } = workspace;
+  replicas.setWriteSurface({ kind: "cli", name: "ub workspace" });
   try {
     await replicas.settle();
     // Carry archived content too: a tombstone alone cannot restore blocks and

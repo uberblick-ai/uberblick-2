@@ -22,6 +22,7 @@ import { inlineIconAnchorLabel } from "../inline-icons.js";
 import {
   decisionTopicArchived,
   isDirectoryEntryArchived,
+  isDirectoryEntryDeleted,
   canonicalDocumentUuid,
   getDirectoryEntry,
   listDirectory,
@@ -30,12 +31,12 @@ import {
 /**
  * A missing directory entry is unresolved, because synchronization may be late.
  */
-type DocLinkState = "resolved" | "unresolved" | "archived";
+type DocLinkState = "resolved" | "unresolved" | "archived" | "deleted";
 
 interface DocLinkTarget {
   state: DocLinkState;
   /**
-   * Null for unknown, archived or untitled targets; callers must fall back to the
+   * Null for unknown, archived, deleted or untitled targets; callers fall back to the
    * UUID so a link never has an empty label.
    */
   title: string | null;
@@ -60,7 +61,7 @@ export interface DocLinkContext {
   lookup(docId: string): DocLinkTarget;
   /**
    * Read current title-ordered candidates from the local directory, excluding
-   * archived entries. This must work offline without hydrating target rooms.
+   * archived and deleted entries. This works offline without hydrating target rooms.
    */
   candidates(): DocLinkCandidate[];
   /** Directory changes, so an open document can restyle itself. */
@@ -82,6 +83,9 @@ export function createDocLinkContext(options: {
     href,
     open,
     lookup(docId: string): DocLinkTarget {
+      if (directory !== null && isDirectoryEntryDeleted(directory, docId)) {
+        return { state: "deleted", title: null };
+      }
       const entry = directory === null ? null : getDirectoryEntry(directory, docId);
       if (entry === null) return { state: "unresolved", title: null };
       const topicAddress = entry.kind === "decision" && docId === (entry.topic ?? entry.uuid);
@@ -188,6 +192,7 @@ const STATE_TITLE: Record<DocLinkState, string | null> = {
     "This document has not reached this page's directory yet — the link " +
     "opens it as soon as it arrives.",
   archived: "This document is archived. The link opens it read-only.",
+  deleted: "This document was deleted.",
 };
 
 /**
@@ -202,8 +207,16 @@ function paintDocLink(
   anchor.className = DOC_LINK_CLASS;
   anchor.setAttribute("data-doc-id", docId);
   anchor.setAttribute(DOC_LINK_STATE_ATTRIBUTE, state);
-  // A derived href preserves native modified clicks and the status-bar address.
-  anchor.setAttribute("href", context.href(docId));
+  if (state === "deleted") {
+    anchor.removeAttribute("href");
+    anchor.setAttribute("aria-disabled", "true");
+    anchor.tabIndex = -1;
+  } else {
+    // A derived href preserves native modified clicks and the status-bar address.
+    anchor.setAttribute("href", context.href(docId));
+    anchor.removeAttribute("aria-disabled");
+    if (anchor.getAttribute("aria-hidden") !== "true") anchor.removeAttribute("tabindex");
+  }
   const explanation = STATE_TITLE[state];
   if (explanation === null) anchor.removeAttribute("title");
   else anchor.setAttribute("title", explanation);
@@ -222,11 +235,11 @@ function docLinkMarkViews(context: DocLinkContext): Plugin {
       else anchor.removeAttribute("aria-label");
       if (label === "") {
         anchor.setAttribute("aria-hidden", "true");
-        anchor.tabIndex = -1;
       } else {
         anchor.removeAttribute("aria-hidden");
-        anchor.removeAttribute("tabindex");
       }
+      if (label === "" || anchor.getAttribute(DOC_LINK_STATE_ATTRIBUTE) === "deleted") anchor.tabIndex = -1;
+      else anchor.removeAttribute("tabindex");
     }
   };
   return new Plugin({

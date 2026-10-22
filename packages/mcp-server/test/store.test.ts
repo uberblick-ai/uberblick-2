@@ -81,6 +81,125 @@ afterEach(() => {
   removeTempDirs();
 });
 
+it("refuses an older peer's snapshot and prune transaction while authored rows are pending", () => {
+  const path = tempDatabasePath();
+  const opened = store(path);
+  const room = `${WORKSPACE}/pending-origin`;
+  const doc = new Y.Doc();
+  const peer = new DatabaseSync(path);
+  try {
+    doc.getText("text").insert(0, "already acknowledged");
+    const first = opened.appendUpdate(room, Y.encodeStateAsUpdate(doc), "remote");
+    expect(opened.compact(room, Y.encodeStateAsUpdate(doc), first)).toBe(true);
+    const before = Y.encodeStateVector(doc);
+    doc.getText("text").insert(doc.getText("text").length, " and offline");
+    const metadata = {
+      updateId: "pending-update", credentialId: "writing-credential",
+      surface: { kind: "mcp", name: "Test client" },
+    };
+    const pending = opened.appendUpdate(room, Y.encodeStateAsUpdate(doc, before), "local", undefined, metadata);
+    expect(opened.compact(room, Y.encodeStateAsUpdate(doc), pending)).toBe(false);
+
+    peer.exec("BEGIN");
+    expect(() => {
+      peer.prepare("INSERT INTO snapshots (room, state, through_seq, updated_at) VALUES (?, ?, ?, ?) " +
+        "ON CONFLICT (room) DO UPDATE SET state = excluded.state, through_seq = excluded.through_seq, " +
+        "updated_at = excluded.updated_at WHERE snapshots.through_seq < excluded.through_seq")
+        .run(room, Y.encodeStateAsUpdate(doc), pending, Date.now());
+      peer.prepare("DELETE FROM updates WHERE room = ? AND seq <= ?").run(room, pending);
+    }).toThrow(/pending updates must retain their origin/);
+    peer.exec("ROLLBACK");
+    expect(opened.readSince(room, 0).snapshot?.throughSeq).toBe(first);
+    expect(opened.readSince(room, first).updates).toEqual([
+      { seq: pending, payload: Y.encodeStateAsUpdate(doc, before), metadata },
+    ]);
+    expect(opened.pendingRooms()).toEqual([{ room, seq: pending }]);
+  } finally {
+    if (peer.isTransaction) peer.exec("ROLLBACK");
+    peer.close();
+    doc.destroy();
+  }
+});
+
+describe("the acknowledged sync prefix", () => {
+  it("survives restart without merging pending changes or rewriting their bytes and metadata", () => {
+    const databasePath = tempDatabasePath();
+    const opened = store(databasePath);
+    const room = `${WORKSPACE}/partial-acknowledgement`;
+    const source = new Y.Doc();
+    const acknowledged = new Y.Doc();
+    try {
+      const text = source.getText("text");
+      text.insert(0, "stored snapshot");
+      const base = opened.appendUpdate(room, Y.encodeStateAsUpdate(source), "remote");
+      expect(opened.compact(room, Y.encodeStateAsUpdate(source), base)).toBe(true);
+      let before = Y.encodeStateVector(source);
+      text.insert(text.length, " and acknowledged");
+      const accepted = opened.appendUpdate(room, Y.encodeStateAsUpdate(source, before), "local", undefined, {
+        updateId: "accepted-update", credentialId: "first-credential", surface: { kind: "browser", name: "browser" },
+      });
+      before = Y.encodeStateVector(source);
+      source.transact(() => { text.delete(0, text.length); text.insert(0, "pending replacement"); });
+      const payload = Y.encodeStateAsUpdate(source, before);
+      const metadata = {
+        updateId: "still-pending", credentialId: "second-credential", surface: { kind: "mcp", name: "Test client" },
+      };
+      const pending = opened.appendUpdate(room, payload, "local", undefined, metadata);
+      const rows = opened.updatesAfter(room, 0);
+      opened.acknowledgeSync(room, accepted);
+      opened.close();
+
+      const reopened = store(databasePath);
+      const slice = reopened.readForSync(room, 0);
+      expect(slice.snapshot?.throughSeq).toBe(accepted);
+      expect(slice.updates).toEqual([{ seq: pending, payload, metadata }]);
+      Y.applyUpdate(acknowledged, slice.snapshot?.state as Uint8Array);
+      expect(acknowledged.getText("text").toString()).toBe("stored snapshot and acknowledged");
+      Y.applyUpdate(acknowledged, slice.updates[0]?.payload as Uint8Array);
+      expect(acknowledged.getText("text").toString()).toBe("pending replacement");
+      expect(reopened.updatesAfter(room, 0)).toEqual(rows);
+      expect(reopened.pendingRooms()).toEqual([{ room, seq: pending }]);
+      expect(reopened.compact(room, Y.encodeStateAsUpdate(source), pending)).toBe(false);
+    } finally { source.destroy(); acknowledged.destroy(); }
+  });
+
+  it("keeps the newest peer acknowledgement while leaving later peer writes pending", () => {
+    const databasePath = tempDatabasePath();
+    const slow = store(databasePath);
+    const fast = store(databasePath);
+    const room = `${WORKSPACE}/peer-acknowledgement`;
+    const source = new Y.Doc();
+    const prefix = new Y.Doc();
+    try {
+      const rows = ["first", "second", "third", "pending"].map((name, index) => {
+        const before = Y.encodeStateVector(source);
+        source.getMap("values").set(name, index);
+        const payload = Y.encodeStateAsUpdate(source, before);
+        const metadata = {
+          updateId: name, credentialId: "credential", surface: { kind: "mcp", name: "Test client" },
+        };
+        const seq = (index % 2 === 0 ? slow : fast).appendUpdate(room, payload, "local", undefined, metadata);
+        return { seq, payload, metadata };
+      });
+      slow.acknowledgeSync(room, rows[0]!.seq);
+      fast.acknowledgeSync(room, rows[2]!.seq);
+      slow.acknowledgeSync(room, rows[1]!.seq);
+      slow.clearPending(room, rows[2]!.seq);
+      const slice = slow.readForSync(room, 0);
+      expect(slice.snapshot?.throughSeq).toBe(rows[2]!.seq);
+      expect(fast.readForSync(room, 0)).toEqual(slice);
+      expect(slice.updates).toEqual([rows[3]]);
+      Y.applyUpdate(prefix, slice.snapshot?.state as Uint8Array);
+      expect(Object.fromEntries(prefix.getMap("values"))).toEqual({ first: 0, second: 1, third: 2 });
+      expect(fast.updatesAfter(room, 0)).toEqual(rows);
+      expect(fast.pendingRooms()).toEqual([{ room, seq: rows[3]!.seq }]);
+      slow.close();
+      fast.close();
+      expect(store(databasePath).readForSync(room, 0)).toEqual(slice);
+    } finally { source.destroy(); prefix.destroy(); }
+  });
+});
+
 it("re-purges peer index rows without scanning unrelated FTS content for absent copies", () => {
   const opened = store(tempDatabasePath());
   const room = `${WORKSPACE}/deleted`;

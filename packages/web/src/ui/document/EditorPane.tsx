@@ -64,6 +64,17 @@ import { DocMetaLine } from "./DocChrome.js";
 import type { DocumentActionProps } from "./DocChrome.js";
 import { threadIdFromActivation, threadIdFromTarget } from "../comments/threads.js";
 import type { SelectThread, ThreadView } from "../comments/threads.js";
+import { Button } from "../shadcn/button.js";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../shadcn/alert-dialog.js";
 
 /** Read the document itself, including before its React subscription answers. */
 function isDecision(connection: RoomConnection): boolean {
@@ -98,14 +109,17 @@ export function PaneNotice({
 }
 
 /**
- * Archived content stays rendered, scrollable and copyable. Restore is the
- * only write action; title, editor and comments remain read-only while the
- * directory tombstone stands.
+ * Archived content stays rendered, scrollable and copyable. Lifecycle actions
+ * write the directory; title, editor and comments remain read-only.
  */
 function ArchivedBanner({
-  actions: { onRestore = null, focusRestore = false, onRestoreFocused },
+  actions: { onRestore = null, onDelete = null, focusRestore = false, onRestoreFocused },
+  title,
+  decision,
 }: {
   actions: DocumentActionProps;
+  title: string;
+  decision: boolean;
 }): ReactElement {
   const restore = useRef<HTMLButtonElement | null>(null);
   useLayoutEffect(() => {
@@ -114,23 +128,67 @@ function ArchivedBanner({
     onRestoreFocused?.();
   }, [focusRestore, onRestoreFocused]);
   return (
-    <p className="ub-archived-banner mb-3 flex flex-wrap items-baseline gap-2 rounded-(--radius) border border-(--status-warning) bg-(--status-warning-subtle) px-3 py-[0.6rem] text-(--foreground)">
+    <div className="ub-archived-banner mb-3 flex flex-wrap items-center gap-2 rounded-(--radius) border border-(--border) bg-(--archived-background) px-3 py-[0.6rem] text-(--foreground)">
+      <svg aria-hidden="true" className="size-4 shrink-0 text-(--archived-icon)" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 9h16v11H4zM3 4h18v5H3zM10 13h4" />
+      </svg>
       <span><strong className="font-medium">Archived.</strong> Read-only and hidden from the document list.</span>
-      <button
+      <Button
         ref={restore}
         type="button"
-        className="ml-auto cursor-pointer rounded-(--radius-sm) border border-(--border) bg-(--secondary) px-[0.45rem] py-[0.15rem] font-[inherit] ub-type-caption text-(--secondary-foreground)"
+        variant="secondary"
+        size="sm"
+        className="ml-auto"
         disabled={onRestore === null}
         onClick={() => onRestore?.()}
       >
         {onRestore === null ? "Restore unavailable" : "Restore"}
-      </button>
+      </Button>
+      {!decision && (
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <button
+              type="button"
+              className="min-h-6 min-w-6 cursor-pointer rounded-(--radius-sm) bg-transparent px-2 py-1 ub-type-ui text-(--destructive-ink) disabled:opacity-50"
+              disabled={onDelete === null}
+              aria-describedby={onDelete === null ? "ub-delete-unavailable" : undefined}
+            >Delete…</button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogTitle>{`Delete "${title}"?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {onDelete === null
+                ? "Delete is unavailable while the directory is not ready to write. Nothing has been deleted."
+                : "It will be gone for everyone, with its comments and history. Links to it will show it was deleted. This can't be undone."}
+            </AlertDialogDescription>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                disabled={onDelete === null}
+                onClick={(event) => {
+                  if (onDelete === null) {
+                    event.preventDefault();
+                    return;
+                  }
+                  onDelete();
+                }}
+              >Delete</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
       {onRestore === null && (
         <span className="ub-restore-unavailable basis-full ub-type-small">
           Restore is unavailable while the directory is not ready to write.
         </span>
       )}
-    </p>
+      {!decision && onDelete === null && (
+        <span id="ub-delete-unavailable" className="basis-full ub-type-small">
+          Delete is unavailable while the directory is not ready to write.
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -652,6 +710,10 @@ const BoundEditor = memo(function BoundEditor({
     const activate = (event: MouseEvent): void => {
       const docId = docLinkFromTarget(event.target);
       if (docId !== null) {
+        if (docLinks?.lookup(docId).state === "deleted") {
+          event.preventDefault();
+          return;
+        }
         // A modifier or a middle button is the browser's business — the anchor
         // carries a real address, so cmd-click still opens a tab. Everything
         // else navigates in-app, which is what keeps Back working.
@@ -689,6 +751,13 @@ const BoundEditor = memo(function BoundEditor({
       // contenteditable, outside the anchor.
       const docId = docLinkFromTarget(event.target);
       if (docId !== null) {
+        if (docLinks?.lookup(docId).state === "deleted") {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+          return;
+        }
         if (event.key !== "Enter" || docLinks === null) return;
         event.preventDefault();
         event.stopPropagation();
@@ -919,7 +988,7 @@ export function EditorPane({
       )}
       <div className="ub-column">
         {archived && (
-          <ArchivedBanner actions={actions} />
+          <ArchivedBanner actions={actions} title={meta?.title || "Untitled"} decision={decision} />
         )}
         {/* Keep document kind, tags and revision above the title. */}
         <DocMetaLine
