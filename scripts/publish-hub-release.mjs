@@ -29,11 +29,16 @@ export function platformImageRef(ref, platform) {
   return `${ref}-${platform.split("/")[1]}`;
 }
 
+function baselineVariant(platform, variant) {
+  const variants = platform === "linux/arm64" ? ["", "8", "v8", "v8.0"] : ["", "v1"];
+  return PLATFORMS.includes(platform) && variants.includes(variant ?? "");
+}
+
 export function assertImage(image, input, platform) {
   const labels = image.Config?.Labels ?? {};
   const release = image.release ?? {};
   const refs = imageRefs(versionForTag(input.tag));
-  if (!PLATFORMS.includes(platform) || `${image.Os}/${image.Architecture}` !== platform ||
+  if (!baselineVariant(platform, image.Variant) || `${image.Os}/${image.Architecture}` !== platform ||
       labels["org.opencontainers.image.version"] !== versionForTag(input.tag) ||
       labels["org.opencontainers.image.revision"] !== input.headSha ||
       labels["io.uberblick.sync-protocol-version"] !== String(input.protocolVersion) ||
@@ -59,8 +64,8 @@ export function platformDigests(index) {
     const platform = `${entry.platform?.os}/${entry.platform?.architecture}`;
     if (platform === "unknown/unknown" &&
         entry.annotations?.["vnd.docker.reference.type"] === "attestation-manifest") continue;
-    if (!PLATFORMS.includes(platform) || platforms[platform] || !/^sha256:[0-9a-f]{64}$/.test(entry.digest)) {
-      fail(`published index has an unsupported or duplicate platform: ${platform}`);
+    if (!baselineVariant(platform, entry.platform?.variant) || platforms[platform] || !/^sha256:[0-9a-f]{64}$/.test(entry.digest)) {
+      fail(`published index has an unsupported or duplicate platform: ${platform}/${entry.platform?.variant ?? ""}`);
     }
     platforms[platform] = entry.digest;
   }

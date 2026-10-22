@@ -240,6 +240,8 @@ for (const ref of Object.values(refs)) {
     ['linux/amd64', 'linux/arm64'], `${ref} must publish exactly both runnable platforms`);
   for (const architecture of ['amd64', 'arm64']) {
     const entry = entries.find(entry => entry.platform.architecture === architecture);
+    const variants = architecture === 'arm64' ? ['', '8', 'v8', 'v8.0'] : ['', 'v1'];
+    assert.ok(variants.includes(entry.platform.variant ?? ''), 'The index must support baseline hosts');
     assert.match(entry.digest, /^sha256:[0-9a-f]{64}$/);
     const pinned = `${ref.slice(0, ref.lastIndexOf(':'))}@${entry.digest}`;
     const platform = `linux/${architecture}`;
@@ -247,6 +249,7 @@ for (const ref of Object.values(refs)) {
     const [image] = JSON.parse(docker(['image', 'inspect', pinned]));
     assert.equal(image.Os, 'linux');
     assert.equal(image.Architecture, architecture);
+    assert.ok(variants.includes(image.Variant ?? ''), 'The image must support baseline hosts');
     assert.ok(image.RepoDigests?.includes(pinned));
     docker(['create', '--platform', platform, '--name', extract, '--entrypoint', '/bin/true', pinned]);
     try {
@@ -316,6 +319,8 @@ its two image references equal the pulled versioned refs. Require both images'
 values and `io.uberblick.sync-protocol-version` to match `release.json` on each
 platform. Require exactly `linux/amd64` and `linux/arm64` runnable entries in
 each published index; ignore `unknown/unknown` entries marked `attestation-manifest`.
+Require baseline amd64/v1 and arm64/v8 variants (including their implicit forms),
+so a direct digest pull cannot conceal an index that excludes supported hosts.
 Extract metadata from each digest's own container without executing it, then
 launch the native platform. Matching registry digests and anonymous pulls
 establish registry copies; mismatched identity fails the smoke check before startup. A denied

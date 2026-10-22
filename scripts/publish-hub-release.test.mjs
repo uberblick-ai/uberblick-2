@@ -196,7 +196,8 @@ test("each platform requires matching OS, architecture, labels and embedded rele
     assert.doesNotThrow(() => assertImage(image(platform), input(), platform));
     const good = image(platform);
     for (const bad of [{ ...good, Architecture: platform === "linux/arm64" ? "amd64" : "arm64" },
-      { ...good, Os: "windows" }, { ...good, Config: { Labels: {} } },
+      { ...good, Os: "windows" }, { ...good, Variant: platform === "linux/arm64" ? "v9" : "v3" },
+      { ...good, Config: { Labels: {} } },
       { ...good, release: { ...good.release, version: "1.2.4" } },
       { ...good, release: { ...good.release, sourceCommit: "b".repeat(40) } },
       { ...good, release: { ...good.release, syncProtocolVersion: 2 } },
@@ -249,6 +250,12 @@ test("published platform digests come from one complete index and tolerate only 
   const expected = Object.fromEntries(PLATFORMS.map((platform, position) =>
     [platform, `sha256:${String(position + 1).repeat(64)}`]));
   assert.deepEqual(platformDigests(valid), expected);
+  for (const variant of ["8", "v8", "v8.0"]) {
+    const explicit = index();
+    explicit.manifests[0].platform.variant = "v1";
+    explicit.manifests[1].platform.variant = variant;
+    assert.deepEqual(platformDigests(explicit), expected);
+  }
   assert.deepEqual(platformDigests({ ...valid, mediaType: "application/vnd.docker.distribution.manifest.list.v2+json" }), expected);
   valid.manifests.push({ digest: `sha256:${"3".repeat(64)}`, platform: { os: "unknown", architecture: "unknown" },
     annotations: { "vnd.docker.reference.type": "attestation-manifest",
@@ -263,6 +270,12 @@ test("published platform digests come from one complete index and tolerate only 
     { ...index(), manifests: [...index().manifests, { digest: `sha256:${"3".repeat(64)}`,
       platform: { os: "unknown", architecture: "unknown" } }] },
   ]) assert.throws(() => platformDigests(invalid), /platform|index|manifest/);
+  for (const [position, variant] of [[0, "v3"], [1, "v9"]]) {
+    const narrowed = index();
+    narrowed.manifests[position].platform.variant = variant;
+    assert.throws(() => platformDigests(narrowed), /unsupported/,
+      "a digest pull must not hide an index variant that excludes baseline hosts");
+  }
 });
 
 test("the registry adapter pulls each platform digest and reads metadata without running images, cleaning up even invalid JSON", () => {
