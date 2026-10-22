@@ -35,6 +35,7 @@ export function EmojiMenu({ editor, host }: {
       const current = live.current;
       if (current === null) {
         if (!opensEmojiSession(transaction, trigger)) return;
+        setHighlight({ query: trigger.query, index: 0, keyboard: false });
         publish(trigger);
         void loadEmojiData().then(() => {
           if (disposed) return;

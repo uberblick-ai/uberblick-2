@@ -125,6 +125,10 @@ describe("emoji and icon picking", () => {
     mounted.press("ArrowDown");
     expect(mounted.press("Tab").defaultPrevented).toBe(true);
     expect(getBlocks(ydoc)[0]?.text).toBe("😄");
+    await type(mounted.editor, " :smi");
+    expect(screen.getByRole("option", { name: "smiley" }).getAttribute("aria-selected")).toBe("true");
+    mounted.press("Enter");
+    expect(getBlocks(ydoc)[0]?.text).toBe("😄 😃");
   });
 
   it("clicks the Claude mark in a cell, preserving the shortcode through sync, reload and undo", async () => {

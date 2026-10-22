@@ -94,12 +94,16 @@ test("real typing ranks names and keywords, keyboard picks replace text, and und
   await page.keyboard.press("Tab");
   await expect(paragraph).toHaveText("Thanks 😃 😄");
   await expect(editor(page)).toBeFocused();
+  await page.keyboard.type(" :smi");
+  await expect(menu(page).getByRole("option", { name: "smiley", exact: true })).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Enter");
+  await expect(paragraph).toHaveText("Thanks 😃 😄 😃");
   await page.keyboard.type(" :hap");
   await expect(menu(page).getByRole("option", { name: "smiley", exact: true })).toBeVisible();
   await menu(page).getByRole("option", { name: "smiley", exact: true }).click();
-  await expect(paragraph).toHaveText("Thanks 😃 😄 😃");
+  await expect(paragraph).toHaveText("Thanks 😃 😄 😃 😃");
   await expect.poll(async () => (await session.call<StoredDoc>("get_doc", { uuid: created.uuid })).blocks[0]?.text)
-    .toBe("Thanks 😃 😄 😃");
+    .toBe("Thanks 😃 😄 😃 😃");
 });
 
 test("existing, pasted and remote queries stay closed, and dismissal lasts until a fresh trigger", async ({ browser }) => {
