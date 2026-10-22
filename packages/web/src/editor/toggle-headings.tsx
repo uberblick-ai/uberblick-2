@@ -209,7 +209,7 @@ export const ToggleHeadings = Extension.create({
         },
       },
       appendTransaction(transactions, oldState, state) {
-        if (!transactions.some((tr) => tr.selectionSet)) return null;
+        if (!transactions.some((tr) => tr.selectionSet || tr.docChanged)) return null;
         const fold = folds.getState(state);
         if (fold === undefined) return null;
         const { head, anchor } = state.selection;

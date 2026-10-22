@@ -209,6 +209,37 @@ it("moves text, node and cell selections out of a collapsed section and skips hi
   } finally { editor.destroy(); ydoc.destroy(); }
 });
 
+it("moves the caret out when a local heading-level edit folds its current block", async () => {
+  const ydoc = documentFixture();
+  appendBlock(ydoc, { type: "heading", level: 2, text: "> Parent" });
+  appendBlock(ydoc, { type: "paragraph", text: "Folded body" });
+  const boundary = appendBlock(ydoc, { type: "heading", level: 2, text: "Boundary" });
+  appendBlock(ydoc, { type: "paragraph", text: "Boundary body" });
+  const { editor, element } = mountEditor(ydoc);
+  try {
+    await waitFor(() => expect(within(element).getByRole("button", { name: "Expand Parent" }).getAttribute("aria-expanded")).toBe("false"));
+    expect(isFolded(element, boundary)).toBe(false);
+    const at = blockPosition(editor, boundary);
+    editor.commands.setTextSelection(at + 3);
+    const expectedBlocks = getBlocks(ydoc).map((block) => block.id === boundary ? { ...block, level: 3 } : block);
+    const change = editor.state.tr.setNodeAttribute(at, "level", "3");
+    expect(change.docChanged).toBe(true);
+    expect(change.selectionSet).toBe(false);
+    const expectedDocument = change.doc.toJSON();
+    let writes = 0;
+    ydoc.on("update", () => { writes += 1; });
+    editor.view.dispatch(change);
+
+    expect(isFolded(element, boundary)).toBe(true);
+    const headingEnd = editor.state.doc.child(0).nodeSize - 1;
+    expect(editor.state.selection.head).toBe(headingEnd);
+    expect(editor.state.selection.anchor).toBe(headingEnd);
+    expect(editor.state.doc.toJSON()).toEqual(expectedDocument);
+    expect(getBlocks(ydoc)).toEqual(expectedBlocks);
+    expect(writes).toBe(1);
+  } finally { editor.destroy(); ydoc.destroy(); }
+});
+
 it("starts a remotely created toggle collapsed without additional document writes", async () => {
   const ydoc = documentFixture();
   const heading = appendBlock(ydoc, { type: "heading", level: 2, text: "Help" });
