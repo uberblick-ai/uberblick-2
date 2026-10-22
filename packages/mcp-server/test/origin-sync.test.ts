@@ -1,30 +1,70 @@
 /** Device-authenticated delivery preserves authorship independently of the relay. */
 import { randomUUID } from "node:crypto";
+import { connect, createServer, type Socket } from "node:net";
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
-import { encodeOriginUpdate, roomForDoc, type UpdateOriginMetadata } from "@uberblick/schema";
+import { encodeOriginUpdate, readOriginUpdate, roomForDoc, type UpdateOriginMetadata } from "@uberblick/schema";
 import { wrapToken } from "@uberblick/schema/protocol";
 import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import { writeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { HubConnection } from "../src/hub-connection.js";
 import { renewDeviceCredential } from "../src/device-login.js";
 import { openWorkspaceReplicas } from "../src/workspace-replicas.js";
 import { MirrorStore } from "../src/store.js";
-import type { McpConfig } from "../src/config.js";
+import { resolveMcpConfig, type McpConfig } from "../src/config.js";
 import { cleanupTestResources, LIVE_HUB_SETTLE, startServer, tempDatabasePath, tempDir, testConfig, waitUntil, WORKSPACE } from "./helpers.js";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 
 type DeviceHub = Awaited<ReturnType<typeof startDeviceSyncHub>>;
 const clients: Array<() => unknown> = [];
+const proxies: Array<() => Promise<void>> = [];
 const hubs: DeviceHub[] = [];
 
 afterEach(async () => {
   await cleanupTestResources({
     clients: clients.splice(0),
+    peers: proxies.splice(0),
     hubs: hubs.splice(0).map(hub => () => hub.close()),
   });
 });
+
+async function delayedHub(fixture: DeviceHub): Promise<{ url: string; origin: string }> {
+  const sockets = new Set<Socket>();
+  const delays = new Set<ReturnType<typeof setTimeout>>();
+  let closed = false;
+  const server = createServer(downstream => {
+    const upstream = connect(fixture.port, "127.0.0.1");
+    for (const [source, destination] of [[downstream, upstream], [upstream, downstream]] as const) {
+      sockets.add(source);
+      source.setNoDelay();
+      source.on("error", () => destination.destroy());
+      source.on("close", () => { sockets.delete(source); destination.destroy(); });
+      source.on("data", chunk => {
+        if (closed) return;
+        const delay = setTimeout(() => {
+          delays.delete(delay);
+          if (!destination.destroyed) destination.write(chunk);
+        }, 20);
+        delays.add(delay);
+      });
+    }
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => { server.off("error", reject); resolve(); });
+  });
+  proxies.push(async () => {
+    closed = true;
+    for (const delay of delays) clearTimeout(delay);
+    delays.clear();
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("delayed hub did not listen on TCP");
+  return { url: `ws://127.0.0.1:${address.port}`, origin: `http://127.0.0.1:${address.port}` };
+}
 
 async function hub(): Promise<DeviceHub> {
   const fixture = await startDeviceSyncHub({ directory: tempDir() });
@@ -73,6 +113,108 @@ function workspace(config: McpConfig, surface: { kind: string; name: string }) {
 }
 
 describe("per-update origin on the authenticated wire", () => {
+  it("delivers a fresh short-lived writer within the default budget after 200 acknowledged rows at 40 ms RTT", async () => {
+    const fixture = await hub();
+    const login = fixture.issue({ workspaces: [WORKSPACE] });
+    const env = { XDG_CONFIG_HOME: tempDir() };
+    await writeHubLogin(fixture.origin, login, env);
+    const initial = workspace(remoteConfig(fixture, env), { kind: "mcp", name: "Claude Code" });
+    const uuid = randomUUID();
+    const room = roomForDoc(WORKSPACE, uuid);
+    const replica = initial.replicas.replica(uuid);
+    for (let index = 0; index < 200; index += 1) replica.doc.getMap("values").set(`acknowledged-${index}`, index);
+    expect(await initial.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+    expect(initial.store.pendingRooms()).toEqual([]);
+    expect(initial.store.updateCount(room)).toBe(200);
+    const databasePath = initial.store.databasePath;
+    const acknowledgedIds = new Set(initial.store.updatesAfter(room, 0).map(row => row.metadata?.updateId));
+    await initial.close();
+
+    const proxy = await delayedHub(fixture);
+    await writeHubLogin(proxy.origin, login, env);
+    const config = {
+      ...resolveMcpConfig({ ...env, WORKSPACE_ID: WORKSPACE, HUB_URL: proxy.url, UBERBLICK_DB: databasePath }),
+      deviceLogin: { env },
+    };
+    const send = vi.spyOn(HocuspocusProvider.prototype, "sendStateless");
+    try {
+      const writer = workspace(config, { kind: "cli", name: "ub data" });
+      await writer.replicas.settle();
+      writer.replicas.replica(uuid).doc.getMap("values").set("new", "short-lived writer");
+      expect(await writer.replicas.waitForSettled({ rooms: [room] })).toMatchObject({ caughtUp: true });
+      expect(fixture.readRoom(room, doc => doc.getMap("values").get("new"))).toBe("short-lived writer");
+      const sentIds = send.mock.calls.map(([payload]) => readOriginUpdate(payload)?.updateId);
+      expect(sentIds.some(id => acknowledgedIds.has(id))).toBe(false);
+      expect(writer.store.pendingRooms()).toEqual([]);
+      await writer.close();
+    } finally { send.mockRestore(); }
+  });
+
+  it("delivers a burst of exact authored rows within the default budget at 40 ms RTT", async () => {
+    const fixture = await hub();
+    const proxy = await delayedHub(fixture);
+    const login = fixture.issue({ workspaces: [WORKSPACE] });
+    const env = { XDG_CONFIG_HOME: tempDir() };
+    await writeHubLogin(proxy.origin, login, env);
+    const config = {
+      ...resolveMcpConfig({ ...env, WORKSPACE_ID: WORKSPACE, HUB_URL: proxy.url, UBERBLICK_DB: tempDatabasePath() }),
+      deviceLogin: { env },
+    };
+    const writer = workspace(config, { kind: "browser", name: "browser" });
+    const uuid = randomUUID();
+    const room = roomForDoc(WORKSPACE, uuid);
+    const replica = writer.replicas.replica(uuid);
+    expect(await writer.replicas.waitForSettled({ rooms: [room] })).toMatchObject({ caughtUp: true });
+    for (let index = 0; index < 200; index += 1) replica.doc.getMap("values").set(`burst-${index}`, index);
+    const rows = writer.store.updatesAfter(room, 0);
+    expect(rows).toHaveLength(200);
+    expect(await writer.replicas.waitForSettled({ rooms: [room] })).toMatchObject({ caughtUp: true });
+    expect(fixture.readRoom(room, doc => doc.getMap("values").size)).toBe(200);
+    expect(fixture.changes.filter(change => change.room === room).map(change => change.attribution?.updateId))
+      .toEqual(rows.map(row => row.metadata?.updateId));
+    expect(fixture.changes.filter(change => change.room === room).every(change =>
+      change.attribution?.author?.principalId === login.identity.id &&
+      change.attribution.author.surface.kind === "browser")).toBe(true);
+  });
+
+  it("repairs a missing acknowledged prefix and cached remote tail before replaying pending authored rows", async () => {
+    const firstHub = await hub();
+    const firstLogin = firstHub.issue({ workspaces: [WORKSPACE] });
+    const env = { XDG_CONFIG_HOME: tempDir() };
+    await writeHubLogin(firstHub.origin, firstLogin, env);
+    const initial = workspace(remoteConfig(firstHub, env), { kind: "mcp", name: "Claude Code" });
+    const uuid = randomUUID();
+    const room = roomForDoc(WORKSPACE, uuid);
+    initial.replicas.replica(uuid).doc.getText("text").insert(0, "acknowledged");
+    expect(await initial.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+    const databasePath = initial.store.databasePath;
+    await initial.close();
+
+    const cached = new MirrorStore(databasePath, WORKSPACE);
+    const remote = new Y.Doc();
+    try {
+      remote.getMap("values").set("downloaded", "cached remote tail");
+      cached.appendUpdate(room, Y.encodeStateAsUpdate(remote), "remote");
+    } finally { cached.close(); remote.destroy(); }
+
+    const replacementHub = await hub();
+    replacementHub.grant(WORKSPACE, firstLogin.identity.id);
+    const replacementLogin = replacementHub.issue({ workspaces: [WORKSPACE], principalId: firstLogin.identity.id });
+    await writeHubLogin(replacementHub.origin, replacementLogin, env);
+    const writer = workspace(remoteConfig(replacementHub, env, databasePath), { kind: "cli", name: "ub data" });
+    writer.replicas.replica(uuid).doc.getText("text").insert(12, " then pending");
+    const pendingId = writer.store.updatesAfter(room, 0).at(-1)?.metadata?.updateId;
+    expect(pendingId).toBeDefined();
+    expect(await writer.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+    expect(replacementHub.readRoom(room, doc => doc.getText("text").toString())).toBe("acknowledged then pending");
+    expect(replacementHub.readRoom(room, doc => doc.getMap("values").get("downloaded"))).toBe("cached remote tail");
+    const changes = replacementHub.changes.filter(change => change.room === room);
+    expect(changes[0]?.attribution?.author).toBeNull();
+    expect(changes.find(change => change.attribution?.updateId === pendingId)?.attribution?.author).toEqual({
+      principalId: replacementLogin.identity.id, surface: { kind: "cli", name: "ub data" },
+    });
+  });
+
   it.each(["revocation", "membership removal"] as const)("refuses a queued stateless update when %s ends current access", async kind => {
     const fixture = await hub();
     const login = fixture.issue({ workspaces: [WORKSPACE] });

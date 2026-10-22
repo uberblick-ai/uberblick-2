@@ -230,6 +230,11 @@ CREATE TABLE IF NOT EXISTS pending_rooms (
   seq  INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS sync_acknowledgements (
+  room TEXT PRIMARY KEY,
+  through_seq INTEGER NOT NULL
+);
+
 -- A pre-upgrade peer may still compact. Its snapshot and prune transaction
 -- must fail together until the raw rows have received hub acknowledgement.
 CREATE TRIGGER IF NOT EXISTS preserve_pending_snapshot_insert BEFORE INSERT ON snapshots
@@ -810,7 +815,22 @@ export class MirrorStore {
       (room: string, seq: number, forSync = false): LogSlice => {
         const snapshotSeq = this.snapshotThroughSeq(room);
         const ahead = snapshotSeq !== null && snapshotSeq > seq;
-        const stored = ahead ? this.snapshot(room) : null;
+        let stored = ahead ? this.snapshot(room) : null;
+        if (forSync && seq === 0) {
+          // Acknowledgement permits merging this prefix, but is not durable hub
+          // storage. Reconcile its state again without replaying each old row.
+          const pending = this.db.prepare("SELECT 1 FROM pending_rooms WHERE room = ?").get(room);
+          const acknowledged = pending === undefined
+            ? this.db.prepare("SELECT MAX(seq) AS seq FROM updates WHERE room = ?").get(room)?.seq
+            : this.db.prepare("SELECT through_seq AS seq FROM sync_acknowledgements WHERE room = ?").get(room)?.seq;
+          const throughSeq = Math.max(Number(acknowledged ?? 0), stored?.throughSeq ?? 0);
+          if (throughSeq > 0) {
+            const rows = this.db.prepare("SELECT payload FROM updates WHERE room = ? AND seq > ? AND seq <= ? ORDER BY seq")
+              .all(room, stored?.throughSeq ?? 0, throughSeq) as { payload: Uint8Array }[];
+            const updates = [...(stored === null ? [] : [stored.state]), ...rows.map(row => row.payload)];
+            if (updates.length > 0) stored = { state: Y.mergeUpdates(updates), throughSeq };
+          }
+        }
         const from = stored?.throughSeq ?? seq;
         const reset = room === settingsRoom(this.workspaceId) ? this.settingsReset() : null;
         return {
@@ -956,6 +976,7 @@ export class MirrorStore {
       this.db.prepare("DELETE FROM updates WHERE room = ?").run(room);
       this.db.prepare("DELETE FROM snapshots WHERE room = ?").run(room);
       this.db.prepare("DELETE FROM pending_rooms WHERE room = ?").run(room);
+      this.db.prepare("DELETE FROM sync_acknowledgements WHERE room = ?").run(room);
       const info = this.statements.append.run(room, state, "remote", Date.now());
       const seq = Number(info.lastInsertRowid);
       this.statements.putSnapshot.run(room, state, seq, Date.now());
@@ -1017,8 +1038,17 @@ export class MirrorStore {
     return this.readSinceTx(room, seq);
   }
 
+  /** Merge only the acknowledged prefix on admission; leave pending rows exact. */
   readForSync(room: string, seq: number): LogSlice {
     return this.readSinceTx(room, seq, true);
+  }
+
+  /** Persist only a contiguous prefix accepted by this hub connection. */
+  acknowledgeSync(room: string, throughSeq: number): void {
+    this.assertWorkspacePresent();
+    this.db.prepare("INSERT INTO sync_acknowledgements (room, through_seq) VALUES (?, ?) " +
+      "ON CONFLICT (room) DO UPDATE SET through_seq = MAX(sync_acknowledgements.through_seq, excluded.through_seq)")
+      .run(room, throughSeq);
   }
 
   private nextForSync(room: string, seq: number): LoggedUpdate[] {
@@ -1144,6 +1174,7 @@ export class MirrorStore {
     this.pruneOrphanFragments();
     const tables = [
       ["updates", "room", room], ["snapshots", "room", room],
+      ["sync_acknowledgements", "room", room],
       ["pending_rooms", "room", room], ["doc_index", "uuid", uuid],
       ["doc_index_seq", "uuid", uuid], ["doc_tags", "uuid", uuid],
       ["doc_links", "source", uuid], ["decision_github_refs", "source", uuid],
@@ -1163,6 +1194,7 @@ export class MirrorStore {
       this.statements.dropDoc.run(uuid);
       this.statements.dropIndexSeq.run(uuid);
       this.db.prepare("DELETE FROM updates WHERE room = ?").run(room);
+      this.db.prepare("DELETE FROM sync_acknowledgements WHERE room = ?").run(room);
       this.db.prepare("DELETE FROM snapshots WHERE room = ?").run(room);
       this.db.prepare("DELETE FROM pending_rooms WHERE room = ?").run(room);
     })();

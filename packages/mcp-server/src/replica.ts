@@ -244,7 +244,8 @@ export class Replicas {
       this.refusedDeletedDocs.add(uuid);
       this.purgeDeletedDocs();
     }, onSettingsReset: (state, refused) => this.acceptSettingsReset(state, refused),
-    readLog: (room, seq) => this.store.readForSync(room, seq) });
+    readLog: (room, seq) => this.store.readForSync(room, seq),
+    acknowledgeLog: (room, seq) => this.store.acknowledgeSync(room, seq) });
 
     // Discovery reads this synced directory, not this process's creations.
     // Attach from boot so stub repair and the first tool's hydration can use it.
