@@ -168,7 +168,7 @@ const block = blockSchema(false);
 const readBlocks = z.array(blockSchema(true)).describe("Visible document blocks in stored order.");
 const annotation = z.object({
   id: z.string(),
-  blockId: z.string(),
+  blockId: z.string().describe("Block containing range; the recorded block id when range is null."),
   comments: z.array(z.object({ author: z.string(), text: z.string(), createdAt: z.string() }).strict()),
   resolved: z.boolean().optional(),
   range: z.object({
@@ -178,7 +178,7 @@ const annotation = z.object({
     start: count,
     end: count,
     collapsed: z.boolean(),
-  }).strict().nullable().describe("Current anchored range, or null after the marked span was deleted."),
+  }).strict().nullable().describe("Current anchored range in blockId, or null when no visible block carries the thread's mark."),
 }).strict();
 const collectionCount = z.object({ name: z.string(), recordCount: count }).strict();
 const dataIssue = z.object({

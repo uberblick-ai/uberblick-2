@@ -1,30 +1,23 @@
 /**
  * Derive the rail from annotations and surviving marks across every block.
- * Splits can move a range out of its recorded block; quote its first anchor
- * in document order.
+ * Splits can move a range out of its recorded block; schema resolves the
+ * surviving anchor for every read surface.
  */
 
-import * as Y from "yjs";
+import type * as Y from "yjs";
 import {
-  COMMENT_MARK,
   CARD_PARTS,
-  cardPartTexts,
-  figmaCaptionTexts,
   getAnnotationsMap,
   getBlocks,
   getBlocksFragment,
   listAnnotations,
-  plainXmlText,
-  readsAsMark,
-  tableCellTexts,
-  tableRows,
+  resolveAnnotationAnchors,
 } from "@uberblick/schema";
 import type {
   AnnotationComment,
+  AnnotationAnchor,
   Block,
   BlockType,
-  CardPart,
-  CommentMark,
 } from "@uberblick/schema";
 import { formatTimestamp } from "../timestamps.js";
 
@@ -145,95 +138,9 @@ export function focusThread(
   };
 }
 
-interface Anchor {
-  blockId: string;
-  start: number;
-  end: number;
-  row?: number;
-  column?: number;
-  part?: CardPart | "caption";
-  text: string;
-}
-
-/**
- * The thread a delta op's attributes anchor to, or null. `readsAsMark` is the
- * schema package's own definition of a usable `comment` mark, so what counts as
- * an anchor is decided in one place.
- */
-function threadIdOf(attributes: unknown): string | null {
-  if (typeof attributes !== "object" || attributes === null) return null;
-  const value = (attributes as Record<string, unknown>)[COMMENT_MARK];
-  return readsAsMark(COMMENT_MARK, value) ? (value as CommentMark).threadId : null;
-}
-
-/**
- * Walk the fragment once per reading, avoiding per-block quadratic annotation
- * lookups. First marked run wins. Respect first-ID visibility and skip
- * shadowed duplicates or unidentified elements.
- */
-function anchorsByThread(ydoc: Y.Doc): Map<string, Anchor> {
-  const found = new Map<string, Anchor>();
-  const claimed = new Set<string>();
-  for (const child of getBlocksFragment(ydoc).toArray()) {
-    if (!(child instanceof Y.XmlElement)) continue;
-    const blockId = child.getAttribute("id") ?? "";
-    if (blockId === "" || claimed.has(blockId)) continue;
-    claimed.add(blockId);
-    const read = (texts: Y.XmlText[], coordinates: { row: number; column: number } | { part: CardPart | "caption" } | undefined): void => {
-      const plain = texts.map(plainXmlText).join("");
-      // Adjacent ops carrying the same thread are one run, even across texts
-      // left by concurrent first writes into a cell paragraph.
-      let openId: string | null = null;
-      let start = 0;
-      let end = 0;
-      const close = (): void => {
-        if (openId !== null && !found.has(openId)) {
-          found.set(openId, { blockId, start, end, ...coordinates, text: plain });
-        }
-        openId = null;
-      };
-      let index = 0;
-      for (const op of texts.flatMap((text) => text.toDelta()) as Array<{
-        insert?: unknown;
-        attributes?: unknown;
-      }>) {
-        const length =
-          typeof op.insert === "string" ? op.insert.length : op.insert === undefined ? 0 : 1;
-        if (length === 0) continue;
-        const threadId = threadIdOf(op.attributes);
-        if (threadId !== null && threadId === openId) {
-          end = index + length;
-        } else {
-          close();
-          if (threadId !== null) {
-            openId = threadId;
-            start = index;
-            end = index + length;
-          }
-        }
-        index += length;
-      }
-      close();
-    };
-    if (child.nodeName === "table") {
-      for (const [row, cells] of tableRows(child).entries()) {
-        for (const [column, cell] of cells.entries()) read(tableCellTexts(cell), { row, column });
-      }
-    } else if (child.nodeName === "card") {
-      for (const part of CARD_PARTS) read(cardPartTexts(child, part), { part });
-    } else if (child.nodeName === "figma") {
-      read(figmaCaptionTexts(child), { part: "caption" });
-    } else {
-      const text = child.firstChild;
-      if (text instanceof Y.XmlText) read([text], undefined);
-    }
-  }
-  return found;
-}
-
-function excerptOf(anchor: Anchor | null): string {
+function excerptOf(anchor: AnnotationAnchor | null): string {
   if (anchor === null) return "";
-  const quoted = anchor.text.slice(anchor.start, anchor.end);
+  const quoted = anchor.text;
   return quoted.length > EXCERPT_MAX
     ? `${quoted.slice(0, EXCERPT_MAX)}…`
     : quoted;
@@ -262,7 +169,7 @@ export function threadsFromDoc(ydoc: Y.Doc): ThreadView[] {
   const blocks = getBlocks(ydoc);
   const byId = new Map(blocks.map((block) => [block.id, block] as const));
   const order = new Map(blocks.map((block, index) => [block.id, index] as const));
-  const anchors = anchorsByThread(ydoc);
+  const anchors = resolveAnnotationAnchors(ydoc);
 
   const views: ThreadView[] = listAnnotations(ydoc).map((annotation) => {
     const anchor = anchors.get(annotation.id) ?? null;
@@ -284,13 +191,14 @@ export function threadsFromDoc(ydoc: Y.Doc): ThreadView[] {
 
   const position = (view: ThreadView): [number, number, number, number] => {
     const anchor = anchors.get(view.id);
+    const range = anchor?.range;
     // A thread whose block is gone entirely sorts last, not first.
     const index = order.get(anchor?.blockId ?? view.blockId) ?? Number.MAX_SAFE_INTEGER;
     // Use -1 for orphan offsets so UUID order cannot tie them with a live
     // anchor at offset zero.
-    const partOrder = anchor?.part === undefined ? anchor?.row ?? -1
-      : anchor.part === "caption" ? 0 : CARD_PARTS.indexOf(anchor.part);
-    return [index, partOrder, anchor?.column ?? -1, anchor?.start ?? -1];
+    const partOrder = range?.part === undefined ? range?.row ?? -1
+      : range.part === "caption" ? 0 : CARD_PARTS.indexOf(range.part);
+    return [index, partOrder, range?.column ?? -1, range?.start ?? -1];
   };
   return views.sort((a, b) => {
     const [blockA, rowA, columnA, startA] = position(a);

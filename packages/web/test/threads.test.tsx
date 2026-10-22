@@ -25,6 +25,7 @@ import * as Y from "yjs";
 import {
   addComment,
   appendBlock,
+  COMMENT_MARK,
   createAnnotation,
   deleteBlock,
   editBlock,
@@ -229,6 +230,86 @@ describe("a thread over a marked range becomes a card", () => {
       second.id,
       later.id,
     ]);
+  });
+
+  it("keeps the recorded anchor ahead of pasted marks, then follows the first surviving block", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "pasted-thread", title: "Pasted anchor" });
+    const earlier = appendBlock(ydoc, { type: "paragraph", text: "Pasted words" });
+    const middle = appendBlock(ydoc, { type: "paragraph", text: "Middle words" });
+    const recorded = appendBlock(ydoc, { type: "paragraph", text: "Recorded words" });
+    const thread = createAnnotation(ydoc, recorded, 0, 8, "Reader", "Original conversation");
+    const other = createAnnotation(ydoc, middle, 0, 6, "Reader", "Middle conversation");
+    const fragment = getBlocksFragment(ydoc);
+    const pastedText = (fragment.get(0) as Y.XmlElement).firstChild as Y.XmlText;
+    const recordedText = (fragment.get(2) as Y.XmlElement).firstChild as Y.XmlText;
+    pastedText.format(0, 6, { [COMMENT_MARK]: { threadId: thread.id } });
+    expect(threadsFromDoc(ydoc).map(({ id, excerpt, anchorBlockId }) => [id, excerpt, anchorBlockId])).toEqual([
+      [other.id, "Middle", middle], [thread.id, "Recorded", recorded],
+    ]);
+
+    recordedText.format(0, 8, { [COMMENT_MARK]: null });
+    expect(threadsFromDoc(ydoc).map(({ id, excerpt, anchorBlockId }) => [id, excerpt, anchorBlockId])).toEqual([
+      [thread.id, "Pasted", earlier], [other.id, "Middle", middle],
+    ]);
+    expect(getAnnotation(ydoc, thread.id)?.blockId).toBe(recorded);
+    pastedText.format(0, 6, { [COMMENT_MARK]: null });
+    expect(threadsFromDoc(ydoc).find(({ id }) => id === thread.id)).toMatchObject({
+      blockId: recorded, anchorBlockId: null, orphaned: true, excerpt: "", blockRef: "Paragraph 3",
+    });
+    ydoc.destroy();
+  });
+
+  it("quotes the first-to-last marked span with embeds occupying their offset positions", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "span-thread", title: "Span excerpts" });
+    const id = appendBlock(ydoc, { type: "paragraph", text: "alpha gap omega" });
+    const thread = createAnnotation(ydoc, id, 0, 5, "Reader", "Separated marks");
+    const text = (getBlocksFragment(ydoc).get(0) as Y.XmlElement).firstChild as Y.XmlText;
+    text.format(10, 5, { [COMMENT_MARK]: { threadId: thread.id } });
+    text.insertEmbed(6, { kind: "gap" }, {});
+    text.insertEmbed(0, { kind: "prefix" }, {});
+    expect(threadsFromDoc(ydoc)[0]).toMatchObject({ excerpt: "alpha \uFFFCgap omega", orphaned: false });
+    ydoc.destroy();
+  });
+
+  it("follows text moved into a different table's first marked cell", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "moved-cell-thread", title: "Moved cells" });
+    const recorded = appendBlock(ydoc, { type: "table", text: "| Header |\n| --- |\n| Original |" });
+    const destination = appendBlock(ydoc, { type: "table", text: "| First | Second |\n| --- | --- |\n| Last | Body |" });
+    const thread = createAnnotation(ydoc, recorded, 0, 8, "Reader", "Moved cell", { row: 1, column: 0 });
+    const fragment = getBlocksFragment(ydoc);
+    const originalCell = tableCellText(tableRows(fragment.get(0) as Y.XmlElement)[1]![0]!)!;
+    const cells = tableRows(fragment.get(1) as Y.XmlElement);
+    const mark = { [COMMENT_MARK]: { threadId: thread.id } };
+    tableCellText(cells[0]![1]!)!.format(0, 6, mark);
+    tableCellText(cells[1]![0]!)!.format(0, 4, mark);
+    originalCell.delete(0, originalCell.length);
+    expect(threadsFromDoc(ydoc)[0]).toMatchObject({
+      blockId: recorded, anchorBlockId: destination, blockRef: "Table 2", excerpt: "Second", orphaned: false,
+    });
+    ydoc.destroy();
+  });
+
+  it("keeps an Enter-split thread beside its new block without changing its record", () => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "split-thread", title: "Split paragraph" });
+    const recorded = appendBlock(ydoc, { type: "paragraph", text: "Hello brave world" });
+    const thread = createAnnotation(ydoc, recorded, 6, 11, "Reader", "Surviving split");
+    const { editor } = mountEditor(ydoc);
+    try {
+      editor.commands.setTextSelection(7);
+      editor.commands.keyboardShortcut("Enter");
+      const blocks = getBlocks(ydoc);
+      expect(blocks.map(({ text }) => text)).toEqual(["Hello ", "brave world"]);
+      expect(blocks[1]!.id).not.toBe(recorded);
+      expect(threadsFromDoc(ydoc)[0]).toMatchObject({
+        id: thread.id, blockId: recorded, anchorBlockId: blocks[1]!.id,
+        blockRef: "Paragraph 2", excerpt: "brave", orphaned: false,
+      });
+      expect(getAnnotation(ydoc, thread.id)?.blockId).toBe(recorded);
+    } finally { editor.destroy(); ydoc.destroy(); }
   });
 });
 

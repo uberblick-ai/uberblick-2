@@ -72,9 +72,11 @@ export {
   listAnnotationRanges,
   listAnnotations,
   moveAnnotation,
+  resolveAnnotationAnchors,
   resolveAnnotationRange,
   setAnnotationResolved,
 } from "./annotations.js";
+export type { AnnotationAnchor } from "./annotations.js";
 
 export { listNumbers } from "./lists.js";
 export type { ListMarkerInput } from "./lists.js";

@@ -1,5 +1,9 @@
-import { createAnnotation, deleteBlock, listAnnotationRanges } from "@uberblick/schema";
+import {
+  cardPartTexts, createAnnotation, deleteBlock, figmaCaptionTexts,
+  findBlockElement, getAnnotation, listAnnotationRanges, tableCellText, tableRows,
+} from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
+import { blockText } from "../src/replica.js";
 import { cleanupTestResources, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
@@ -28,6 +32,34 @@ async function fixture(firstText = "Old context") {
 }
 
 describe("moving annotation anchors through MCP", () => {
+  it.each(["paragraph", "table", "card", "figma"] as const)(
+    "reads and replies to marks surviving in another %s block without changing the recorded block", async (type) => {
+      const { rig, doc, threadId } = await fixture();
+      const ydoc = rig.instance.replicas.replica(doc.uuid).doc;
+      const recordedId = doc.blocks[0].id;
+      const targetId = doc.blocks[type === "paragraph" ? 1 : type === "table" ? 2 : type === "card" ? 3 : 4].id;
+      const element = findBlockElement(ydoc, targetId)!;
+      const target = type === "table" ? tableCellText(tableRows(element)[1]![0]!)!
+        : type === "card" ? cardPartTexts(element, "body")[0]!
+        : type === "figma" ? figmaCaptionTexts(element)[0]! : blockText(ydoc, targetId)!;
+      const range = { start: 1, end: 4, collapsed: false,
+        ...(type === "table" ? { row: 1, column: 0 } : {}),
+        ...(type === "card" ? { part: "body" } : type === "figma" ? { part: "caption" } : {}),
+      };
+      target.format(1, 3, { comment: { threadId } });
+
+      expect((await rig.ok("get_doc", { uuid: doc.uuid })).annotations[0]).toMatchObject({
+        blockId: recordedId, range: { start: 0, end: 3, collapsed: false },
+      });
+      blockText(ydoc, recordedId)!.format(0, 3, { comment: null });
+      const expected = { id: threadId, blockId: targetId, range };
+      expect((await rig.ok("get_doc", { uuid: doc.uuid })).annotations[0]).toMatchObject(expected);
+      const reply = await rig.ok("annotate", { uuid: doc.uuid, thread_id: threadId, text: "Reply at surviving text" });
+      expect(reply.annotation).toMatchObject(expected);
+      expect(getAnnotation(ydoc, threadId)?.blockId).toBe(recordedId);
+    },
+  );
+
   it("moves onto the full replacement timeout after a partial-anchor edit, then permits deleting the source", async () => {
     const sentence = "The client retries after an 8s timeout.";
     const { rig, doc, threadId } = await fixture(sentence);

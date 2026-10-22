@@ -79,7 +79,10 @@ export const toolHelpDetails = {
     "`recovery` line — the earlier rooms stay durable, and recovery never risks creating the decision twice.",
   get_doc:
     "Read a document's metadata — including `description` and the person-facing `tldr`, each null when nobody " +
-    "has written one, with tldr always null for decisions, which have no TL;DR — its blocks and its annotation threads. A regular page with a deliberate TL;DR removal " +
+    "has written one, with tldr always null for decisions, which have no TL;DR — its blocks and its annotation threads. " +
+    "A thread's `blockId` names the block containing its `range`: its recorded block while that block carries " +
+    "its mark, otherwise the first marked visible block in document order. With no mark anywhere, `range` is " +
+    "null and `blockId` keeps the recorded id. A regular page with a deliberate TL;DR removal " +
     "returns `tldr: null` and `tldrOptOut: true`; content writes give no TL;DR hints. Opt back in through the " +
     "web's Add TL;DR, or set_metadata with `tldr_opt_in: true` and a non-null `tldr`. Summary text takes " +
     "precedence over the mark, including after concurrent or older-client writes. Unmarked pages and " +
@@ -558,7 +561,9 @@ export const toolHelpDetails = {
     "thread's anchor, supply `thread_id` together with a complete target range. In one document update, " +
     "the move removes every old comment mark for that thread in every block, marks the new range, changes " +
     "its recorded blockId and appends `text` as a reply. It preserves the id, earlier replies and resolution, " +
-    "and works on already orphaned threads. The answer and get_doc report the new blockId and range.\n\n" +
+    "and works on already orphaned threads. In every answer, as in get_doc, `blockId` names the block containing " +
+    "the resolved range: the recorded block while marked, otherwise the first marked visible block in document " +
+    "order. An orphan keeps its recorded blockId and has a null range.\n\n" +
     "For a table, supply `row` and `column`: zero-based GFM projection indices with the header as row 0, the " +
     "same indices as `table_mapping`. `start` and `end` count the cell's displayed characters, without inline " +
     "Markdown syntax or escapes, including stored cell-edge whitespace. Canonical GFM `text` preserves that " +
