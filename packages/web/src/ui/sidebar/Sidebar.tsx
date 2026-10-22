@@ -907,13 +907,12 @@ function PinLabel({
   uuid: string;
   entry: DirectoryEntry | undefined;
 }): ReactNode {
-  if (entry === undefined) return <span className="ub-muted">{uuid.slice(0, 8)}</span>;
+  if (entry === undefined) return <span className="ub-pin-title ub-muted">{uuid.slice(0, 8)}</span>;
   const title = entry.title === "" ? <em>Untitled</em> : entry.title;
-  if (entry.deleted !== true) return title;
   return (
     <>
-      {title}
-      <span className="ub-muted">{" \u00b7 archived"}</span>
+      <span className="ub-pin-title">{title}</span>
+      {entry.deleted === true && <span className="ub-badge ub-archived">archived</span>}
     </>
   );
 }
