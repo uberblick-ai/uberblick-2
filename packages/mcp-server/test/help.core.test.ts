@@ -33,7 +33,7 @@ it("documents the closed version-1 data vocabulary and demonstrates a schema the
   expect(() => validateCollectionSchema(JSON.parse(example!))).not.toThrow();
 });
 
-it("documents inline icon names, literal fallback, source preservation and card labels", async () => {
+it("documents inline icon names, source preservation, card labels and literal MCP emoji names", async () => {
   const rig = await local();
   const { text } = await rig.ok("get_help", { topic: "markdown" });
   for (const name of Object.keys(INLINE_ICONS)) expect(text).toContain(`\`:${name}:\``);
@@ -41,6 +41,8 @@ it("documents inline icon names, literal fallback, source preservation and card 
     "`:name:`", "lowercase kebab case", "`:rocket:`", "literal, unchanged text",
     "code, terminal and chart source never render icons", "Markdown import/export keep the literal",
     "button: [:claude: Discuss with Claude](claude://code/new?prompt=Review)",
+    "Write emoji as characters", "MCP never converts `:name:` to emoji",
+    "`:smiley:` and `:rocket:` remain literal",
   ]) expect(text, rule).toContain(rule);
 });
 

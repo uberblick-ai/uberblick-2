@@ -14,6 +14,7 @@ import type { DocLinkContext } from "../../editor/doc-links.js";
 import { DECISION_ANSWER_MENU_ENTRIES } from "../../editor/block-menu.js";
 import { BlockMenu } from "../editor-controls/BlockMenu.js";
 import { MentionMenu } from "../editor-controls/MentionMenu.js";
+import { EmojiMenu } from "../editor-controls/EmojiMenu.js";
 import { CodeLanguageControl } from "../editor-controls/CodeLanguageControl.js";
 import { TableControls } from "../editor-controls/TableControls.js";
 import { EditorControlsHost, editorControlsOwnEscape } from "../editor-controls/EditorControlsHost.js";
@@ -89,6 +90,7 @@ function AnswerEditor({ draft, readOnly = false, session, docLinks, displayName,
         <BlockMenu editor={editor} host={frame} entries={DECISION_ANSWER_MENU_ENTRIES} />
         <TableControls editor={editor} host={frame} />
         <MentionMenu editor={editor} host={frame} docLinks={docLinks} openDocId={parseRoom(session.source.room).uuid} />
+        <EmojiMenu editor={editor} host={frame} />
         <CommentComposer editor={editor} ydoc={draft} author={displayName} mentions={[]} host={frame}
           onCreated={() => {}} formattingOnly />
       </>}

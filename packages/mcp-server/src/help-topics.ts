@@ -182,6 +182,8 @@ Write \`:name:\` to show a curated icon in the web app. Available names are ${Ob
 
 Unknown names such as \`:rocket:\` stay literal, unchanged text, as do \`10:30:15\` and \`note:this:\`. Inline code and code, terminal and chart source never render icons; use inline code to show a known name literally. Stored text, MCP reads and writes, search, decision approval and Markdown import/export keep the literal \`:name:\` source. This is presentation only, without an icon node or mark; MCP does not validate icon names.
 
+Write emoji as characters, such as 😃 or 🚀. MCP never converts \`:name:\` to emoji: \`:smiley:\` and \`:rocket:\` remain literal in writes, reads and Markdown import/export. The web editor's typed emoji conversion does not apply to MCP or imported Markdown.
+
 ## Cards
 
 A card holds prose in four parts: optional label, required title, optional body and optional footer, plus any number of link buttons. Its container opens with a line exactly \`:::card\` and closes with a line exactly \`:::\`; separate adjacent cards with blank lines. This is a Markdown container, distinct from literal code, terminal and chart source fences.

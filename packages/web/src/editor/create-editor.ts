@@ -18,6 +18,7 @@ import type { DocLinkContext } from "./doc-links.js";
 import { ExternalLinks } from "./external-links.js";
 import { GitHubLinks } from "./github-links.js";
 import { InlineIcons } from "./inline-icons.js";
+import { EmojiTyping } from "./emoji-menu.js";
 import { ToggleHeadings } from "./toggle-headings.js";
 import { BlockInputRules } from "./input-rules.js";
 import { ListBlocks } from "./list-keys.js";
@@ -110,6 +111,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     ExternalLinks,
     GitHubLinks.configure({ settings: options.workspaceSettings ?? null }),
     InlineIcons,
+    EmojiTyping,
     ToggleHeadings,
     // Read resolved state from annotations rather than duplicating it in marks.
     CommentAnchors.configure({ ydoc: options.fragment.doc }),

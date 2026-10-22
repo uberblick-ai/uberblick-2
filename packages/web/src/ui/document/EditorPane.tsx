@@ -45,6 +45,7 @@ import { CodeLanguageControl } from "../editor-controls/CodeLanguageControl.js";
 import { CardButtonControls } from "../editor-controls/CardButtonControls.js";
 import { TableControls } from "../editor-controls/TableControls.js";
 import { MentionMenu } from "../editor-controls/MentionMenu.js";
+import { EmojiMenu } from "../editor-controls/EmojiMenu.js";
 import {
   readRoomMeta,
   useDocMeta,
@@ -835,6 +836,9 @@ const BoundEditor = memo(function BoundEditor({
         )}
         {editor !== null && !contentReadOnly && writable && (
           <TableControls editor={editor} host={frame} />
+        )}
+        {editor !== null && !contentReadOnly && writable && (
+          <EmojiMenu editor={editor} host={frame} />
         )}
         {editor !== null && !contentReadOnly && writable && (
           <MentionMenu

@@ -17,6 +17,7 @@ export function useCaretMenuIds(active: number): {
 export interface CaretMenuOption {
   id: string;
   label: string;
+  glyph?: ReactNode;
   group?: string;
   hint?: string | null | undefined;
 }
@@ -175,6 +176,7 @@ export function CaretMenu({
                 onMouseMove={() => highlightAt(index)}
                 onClick={() => choose(index)}
               >
+                {option.glyph}
                 <span className="min-w-0 flex-1">{option.label}</span>
                 {option.hint && <span className="ub-type-small text-(--muted-foreground)">{option.hint}</span>}
               </button>
