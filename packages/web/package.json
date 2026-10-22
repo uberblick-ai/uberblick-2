@@ -36,6 +36,7 @@
     "@uberblick/schema": "workspace:*",
     "@uberblick/wireframe": "^0.3.0",
     "chart.js": "4.5.1",
+    "gemoji": "8.1.0",
     "lowlight": "^3.3.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
