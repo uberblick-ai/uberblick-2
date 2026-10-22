@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
+import { getDirectoryEntry, getDirectoryMap, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { removeTempDirs, startServer, testConfig } from "./core-helpers.js";
@@ -90,5 +90,62 @@ describe("decision context on page reads", () => {
     expect(readFirst.successors.find((entry: any) => entry.uuid === conflictB.uuid)).toMatchObject({ answerPreview: null });
     expect(rig.instance.replicas.hydrated(conflictA.uuid)).toBe(false);
     expect(rig.instance.replicas.hydrated(conflictB.uuid)).toBe(false);
+  });
+
+  it.each([
+    { label: "known", stamp: 1_792_608_973_213, iso: "2026-10-21T18:56:13.213Z" },
+    { label: "unknown", stamp: undefined, iso: undefined },
+    { label: "beyond the latest Date", stamp: 8_640_000_000_000_001, iso: undefined },
+    { label: "before the earliest Date", stamp: -8_640_000_000_000_001, iso: undefined },
+  ])("serializes $label timestamps throughout decision context without changing directory values", async ({ stamp, iso }) => {
+    const rig = await localRig();
+    const page = await rig.ok("create_doc", { title: "Owning page", description: "Page context." });
+    const first = await rig.ok("create_doc", { title: "Forked topic", description: "Decision history.", kind: "decision", related: page.uuid });
+    const next = await rig.ok("create_doc", { description: "Pending answer.", kind: "decision", supersedes: first.uuid });
+    const conflictA = stub(rig, { status: "decided", topic: first.uuid, supersedes: first.uuid });
+    const conflictB = stub(rig, { status: "decided", topic: first.uuid, supersedes: first.uuid });
+    const inForce = stub(rig, { status: "decided", governs: page.uuid });
+    for (const document of [page, first, next]) await rig.ok("get_doc", { uuid: document.uuid });
+    const directoryDoc = rig.instance.replicas.directory().doc;
+    const directory = getDirectoryMap(directoryDoc);
+    const records = [first, next, conflictA, conflictB, inForce];
+    directoryDoc.getMap("updatedAt").clear();
+    for (const record of records) {
+      const { createdAt: _createdAt, updatedAt: _updatedAt, ...fields } = directory.get(record.uuid) as Record<string, unknown>;
+      directory.set(record.uuid, { ...fields, ...(stamp === undefined ? {} : { createdAt: stamp, updatedAt: stamp }) });
+    }
+    const before = records.map(record => getDirectoryEntry(directoryDoc, record.uuid));
+
+    const pageRead = await rig.ok("get_doc", { uuid: page.uuid });
+    const firstRead = await rig.ok("get_doc", { uuid: first.uuid });
+    const nextRead = await rig.ok("get_doc", { uuid: next.uuid });
+    expect(pageRead.decisions).toHaveLength(2);
+    expect(pageRead.decisions.find((topic: any) => topic.topic === inForce.uuid).inForce.uuid).toBe(inForce.uuid);
+    expect(nextRead.predecessors).toHaveLength(1);
+    expect(firstRead.successors).toHaveLength(3);
+    expect(nextRead.resolution.pending).toHaveLength(1);
+    expect(nextRead.resolution.conflicts).toHaveLength(2);
+
+    const entries = [
+      ...pageRead.decisions.flatMap((topic: any) => [topic, ...(topic.inForce === null ? [] : [topic.inForce]), ...topic.pending, ...topic.conflicts]),
+      ...firstRead.successors, ...nextRead.predecessors,
+      nextRead.resolution, ...nextRead.resolution.pending, ...nextRead.resolution.conflicts,
+    ];
+    for (const entry of entries) {
+      if (iso === undefined) {
+        expect(entry).not.toHaveProperty("createdAt");
+        expect(entry).not.toHaveProperty("updatedAt");
+      } else {
+        expect(entry).toMatchObject({ createdAt: iso, updatedAt: iso });
+      }
+    }
+    for (const include_superseded of [false, true]) {
+      const listed = await rig.ok("list_docs", { kind: "decision", include_superseded });
+      for (const entry of listed.docs) {
+        if (iso === undefined) expect(entry).not.toHaveProperty("updatedAt");
+        else expect(entry.updatedAt).toBe(iso);
+      }
+    }
+    expect(records.map(record => getDirectoryEntry(directoryDoc, record.uuid))).toEqual(before);
   });
 });

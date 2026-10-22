@@ -1,5 +1,6 @@
 import { decisionTopicTitle, docRev, getDirectoryEntry, getMeta, listAnnotations, readDecisions, resolveAnnotationAnchors, resolveDecisionTopics, summarizeDocData } from "@uberblick/schema";
 import { strictInput } from "../inputs.js";
+import { isoTimestamp } from "../timestamps.js";
 import { uuidArg } from "./schemas.js";
 import { READ, operation } from "./operation.js";
 
@@ -12,7 +13,7 @@ export const getDocOperation = operation(READ, inputSchema, (context, { uuid }, 
   const meta = getMeta(replica.doc, replica.id);
   const collections = summarizeDocData(replica.doc);
   const directory = replicas.directory().doc;
-  const createdAt = getDirectoryEntry(directory, uuid)?.createdAt;
+  const createdAt = isoTimestamp(getDirectoryEntry(directory, uuid)?.createdAt);
   const related = readDecisions(replica.doc, directory, replica.id);
   const relatedTopics = new Set(related.map(topic => topic.topic));
   const backlinks = meta.kind === "decision" ? new Set<string>() :

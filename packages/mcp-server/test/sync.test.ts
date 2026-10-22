@@ -584,7 +584,7 @@ describe("hub sync", () => {
       blocks: [{ type: "paragraph", text: "written by the agent" }],
     });
     const stamped = (await rig.ok("list_docs", {})).docs[0].updatedAt;
-    expect(stamped).toEqual(expect.any(Number));
+    expect(stamped).toEqual(expect.any(String));
     expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
 
     const other = await peer(running.port, `${WORKSPACE}/${created.uuid}`);

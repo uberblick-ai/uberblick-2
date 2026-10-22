@@ -62,6 +62,16 @@ it("lists every concept and registered tool once, with the same Markdown through
   }
 });
 
+it.each(["get_doc", "list_docs"])("describes %s timestamps as ISO 8601 UTC", async (topic) => {
+  const rig = await local();
+  const { text } = await rig.ok("get_help", { topic });
+  expect(text).toContain("ISO 8601 UTC");
+  expect(text).toContain("2026-10-21T18:36:13.213Z");
+  expect(text).not.toContain("epoch milliseconds");
+  const tool = (await rig.client.listTools()).tools.find(({ name }) => name === topic);
+  expect(tool?.description).toContain("ISO 8601 UTC");
+});
+
 it("points Markdown authors to Ablauf help and requires checking edits in the web editor", () => {
   const help = new HelpCatalog();
   const markdown = help.read("markdown").text;

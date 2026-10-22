@@ -84,7 +84,7 @@ describe("the update log", () => {
           ],
           description: "A test document.",
           pinned: false,
-          updatedAt: expect.any(Number),
+          updatedAt: expect.any(String),
           openThreadCount: 0,
         },
       ]);

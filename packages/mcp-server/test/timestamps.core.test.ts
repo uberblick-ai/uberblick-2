@@ -85,30 +85,64 @@ afterAll(() => {
 });
 
 describe("directory timestamps", () => {
-  it("keeps discovery slim and returns the stored creation stamp through get_doc", async () => {
+  it.each([
+    { stamp: 0, iso: "1970-01-01T00:00:00.000Z" },
+    { stamp: T0 + 213, iso: "2031-01-01T00:00:00.213Z" },
+  ])("returns timestamp $stamp as ISO UTC while keeping numeric directory stamps", async ({ stamp, iso }) => {
     const rig = await localRig();
+    vi.setSystemTime(stamp);
     const doc = await rig.ok("create_doc", { title: "Stamped", description: "A test document." });
 
-    expect(stub(rig, doc.uuid)).toMatchObject({ createdAt: T0, updatedAt: T0 });
+    expect(stub(rig, doc.uuid)).toMatchObject({ createdAt: stamp, updatedAt: stamp });
     const listed = await rig.ok("list_docs");
     const entry = listed.docs.find((row: any) => row.uuid === doc.uuid);
-    expect(entry.updatedAt).toBe(T0);
+    expect(entry.updatedAt).toBe(iso);
     expect(entry).not.toHaveProperty("createdAt");
     const read = await rig.ok("get_doc", { uuid: entry.uuid });
-    expect(read.createdAt).toBe(stub(rig, doc.uuid).createdAt);
+    expect(read.createdAt).toBe(iso);
+    expect(stub(rig, doc.uuid)).toMatchObject({ createdAt: stamp, updatedAt: stamp });
   });
 
-  it("omits an unknown creation stamp from get_doc without inventing one", async () => {
+  it.each([
+    { stamp: undefined, label: "unknown" },
+    { stamp: 8_640_000_000_000_001, label: "beyond the latest Date" },
+    { stamp: -8_640_000_000_000_001, label: "before the earliest Date" },
+  ])("omits a stamp $label without changing storage or failing the read", async ({ stamp }) => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", { title: "Legacy", description: "A test document." });
     await rig.ok("get_doc", { uuid: doc.uuid });
-    const directory = getDirectoryMap(rig.instance.replicas.directory().doc);
-    const { createdAt: _createdAt, ...legacy } = directory.get(doc.uuid) as Record<string, unknown>;
-    directory.set(doc.uuid, legacy);
+    const directoryDoc = rig.instance.replicas.directory().doc;
+    const directory = getDirectoryMap(directoryDoc);
+    const { createdAt: _createdAt, updatedAt: _updatedAt, ...legacy } = directory.get(doc.uuid) as Record<string, unknown>;
+    directoryDoc.getMap("updatedAt").clear();
+    directory.set(doc.uuid, { ...legacy, ...(stamp === undefined ? {} : { createdAt: stamp, updatedAt: stamp }) });
 
+    const listed = await rig.ok("list_docs");
+    expect(listed.docs.find((row: any) => row.uuid === doc.uuid)).not.toHaveProperty("updatedAt");
     const read = await rig.ok("get_doc", { uuid: doc.uuid });
     expect(read).not.toHaveProperty("createdAt");
-    expect(stub(rig, doc.uuid)).not.toHaveProperty("createdAt");
+    if (stamp === undefined) {
+      expect(stub(rig, doc.uuid)).not.toHaveProperty("createdAt");
+      expect(stub(rig, doc.uuid)).not.toHaveProperty("updatedAt");
+    } else {
+      expect(stub(rig, doc.uuid)).toMatchObject({ createdAt: stamp, updatedAt: stamp });
+    }
+  });
+
+  it("preserves title ordering when timestamp order differs", async () => {
+    const rig = await localRig();
+    const zulu = await rig.ok("create_doc", { title: "Zulu", description: "A test document." });
+    vi.setSystemTime(T0 + 213);
+    const alpha = await rig.ok("create_doc", { title: "Alpha", description: "A test document." });
+    vi.setSystemTime(T0 + 1_234);
+    const middle = await rig.ok("create_doc", { title: "Middle", description: "A test document." });
+
+    const listed = await rig.ok("list_docs");
+    expect(listed.docs.map((row: any) => [row.uuid, row.updatedAt])).toEqual([
+      [alpha.uuid, "2031-01-01T00:00:00.213Z"],
+      [middle.uuid, "2031-01-01T00:00:01.234Z"],
+      [zulu.uuid, "2031-01-01T00:00:00.000Z"],
+    ]);
   });
 
   it("bumps updatedAt at most once per window under a burst of edits", async () => {

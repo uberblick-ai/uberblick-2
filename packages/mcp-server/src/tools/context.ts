@@ -45,6 +45,7 @@ import type { Replica, Replicas } from "../replica.js";
 import type { ServerWork } from "../server-work.js";
 import { HelpCatalog } from "../help.js";
 import { activeTagCatalog } from "../tag-catalog.js";
+import { isoTimestamp } from "../timestamps.js";
 import { TLDR_AFTER_CONTENT_CHANGE } from "./descriptions.js";
 import type { DecisionAnswer, blockInputSchema, inlineArg } from "./schemas.js";
 
@@ -236,9 +237,13 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
 
   /** Normalize directory descriptions and resolve tags through the settings catalog. */
   const decisionEntryJson = (entry: DirectoryEntry, title: string, archived: boolean) => {
-    const { recordArchived: _recordArchived, ...fields } = entry;
+    const { recordArchived: _recordArchived, createdAt: storedCreatedAt, updatedAt: storedUpdatedAt, ...fields } = entry;
+    const createdAt = isoTimestamp(storedCreatedAt);
+    const updatedAt = isoTimestamp(storedUpdatedAt);
     return {
       ...fields, title, tags: readDirectoryTags(entry, tagCatalog()),
+      ...(createdAt === undefined ? {} : { createdAt }),
+      ...(updatedAt === undefined ? {} : { updatedAt }),
       ...(entry.kind === "decision" ? { deleted: archived || entry.recordArchived === true } : {}),
       description: entry.description ?? null,
     };

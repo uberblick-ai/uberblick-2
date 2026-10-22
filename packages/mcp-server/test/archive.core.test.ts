@@ -214,7 +214,7 @@ describe("archive_doc", () => {
       openThreadCount: 0,
       // Stamped at creation and carried through the tombstone — see
       // timestamps.test.ts for what they mean.
-      updatedAt: expect.any(Number),
+      updatedAt: expect.any(String),
     });
     expect(directoryStub(rig.instance, doc.uuid)).toMatchObject({ createdAt: expect.any(Number), code_check: [] });
 
@@ -569,7 +569,7 @@ describe("restore_doc", () => {
       ],
       description: "A test document.",
       pinned: false,
-      updatedAt: expect.any(Number),
+      updatedAt: expect.any(String),
       openThreadCount: 0,
     });
     expect(directoryStub(rig.instance, doc.uuid)).toMatchObject({ createdAt: expect.any(Number), code_check: [] });
@@ -676,7 +676,7 @@ describe("restore_doc", () => {
       ],
       description: "A test document.",
       pinned: false,
-      updatedAt: expect.any(Number),
+      updatedAt: expect.any(String),
       openThreadCount: 0,
     });
     expect(directoryStub(rig.instance, doc.uuid)).toMatchObject({ createdAt: expect.any(Number), code_check: [] });

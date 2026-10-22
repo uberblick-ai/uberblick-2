@@ -322,7 +322,7 @@
       ],
       "additionalProperties": false
     },
-    "description": "Read live metadata, blocks with edit-assertion rev hashes, comment threads and decision context. Data lists collections/counts; use get_data for records. Use get_revision for a historical state. Eligible guidance reads count toward this process's briefing.\n\nHelp: get_doc, edit_doc, workspaces, tool-contracts, decisions, markdown, data.",
+    "description": "Read live metadata, blocks with edit-assertion rev hashes, comment threads and decision context. Creation time createdAt and decision entries' createdAt/updatedAt are ISO 8601 UTC strings when known and representable. Data lists collections/counts; use get_data for records. Use get_revision for a historical state. Eligible guidance reads count toward this process's briefing.\n\nHelp: get_doc, edit_doc, workspaces, tool-contracts, decisions, markdown, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -601,7 +601,7 @@
       },
       "additionalProperties": false
     },
-    "description": "List documents from synced directory stubs without opening rooms: uuid, title, tags, description, updatedAt, openThreadCount (absent means unknown) and pinned. Unfiltered omits decisions; kind/status/tag/has_open_threads predicates include them. A decision topic row shows the record in force, else pending, else first, with status, topic, discussion, answerPreview and inForce/pending/conflicts UUIDs. include_superseded returns one row per record; include_deleted admits archived rows (deleted: true). Filters combine; unknown tags refuse; has_open_threads accepts only true. get_doc reads code checks, threads and lifecycle details.\n\nHelp: list_docs, workspaces, tool-contracts, decisions.",
+    "description": "List documents from synced directory stubs without opening rooms: uuid, title, tags, description, updatedAt (ISO 8601 UTC when known and representable), openThreadCount (absent means unknown) and pinned. Unfiltered omits decisions; kind/status/tag/has_open_threads predicates include them. A decision topic row shows the record in force, else pending, else first, with status, topic, discussion, answerPreview and inForce/pending/conflicts UUIDs. include_superseded returns one row per record; include_deleted admits archived rows (deleted: true). Filters combine; unknown tags refuse; has_open_threads accepts only true. get_doc reads code checks, threads and lifecycle details.\n\nHelp: list_docs, workspaces, tool-contracts, decisions.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
