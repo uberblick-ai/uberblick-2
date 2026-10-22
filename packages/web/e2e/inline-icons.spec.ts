@@ -127,9 +127,9 @@ test("closing colon renders immediately, strict interior editing reveals source 
   const page = await open(browser, created.uuid, info.project.use.hasTouch === true);
   await placeCaret(page);
   await page.keyboard.type(":claude");
-  await expect(page.locator(".ub-inline-icon")).toHaveCount(0);
+  await expect(editor(page).locator(".ub-inline-icon")).toHaveCount(0);
   await page.keyboard.type(":");
-  const icon = page.locator('.ub-inline-icon[data-icon="claude"]');
+  const icon = editor(page).locator('.ub-inline-icon[data-icon="claude"]');
   await expect(icon).toBeVisible();
   await page.keyboard.press("ArrowLeft");
   await expect(icon).toHaveCount(0);
