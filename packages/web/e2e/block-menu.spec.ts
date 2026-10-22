@@ -133,8 +133,9 @@ test("the pointer can walk from the prose onto the gutter + and press it", async
   page,
 }) => {
   await page.setViewportSize({ width: 1395, height: 720 });
+  await page.clock.install();
   await openDoc(page, "reach me");
-  await page.keyboard.type(" reach me".repeat(50));
+  await page.keyboard.insertText(" reach me".repeat(50));
   // Scale the document to the fractional geometry a 125% browser zoom adds.
   await page.evaluate(() => {
     document.documentElement.style.zoom = "125%";
@@ -142,6 +143,12 @@ test("the pointer can walk from the prose onto the gutter + and press it", async
 
   const button = page.getByRole("button", { name: "Insert block below", includeHidden: true });
   const block = blocks(page).first();
+  await waitForAcknowledged(page, { path: "upstream" });
+  // Raw acknowledgement can precede the calmed notice. Hold presentation
+  // timers through caret placement and selection so the status cannot reflow.
+  await page.clock.pauseAt(new Date(Date.now() + 100));
+  const offlineNotice = page.locator(".ub-status-offline");
+  const offlineNoticeCount = await offlineNotice.count();
   const selectionProse = await block.boundingBox();
   if (selectionProse === null) throw new Error("e2e: the first block has no box");
   const selectionLineHeight = await block.evaluate((element) =>
@@ -161,6 +168,9 @@ test("the pointer can walk from the prose onto the gutter + and press it", async
   expect(await page.evaluate(() => window.getSelection()?.toString().length ?? 0)).toBeGreaterThan(
     0,
   );
+  expect(await offlineNotice.count()).toBe(offlineNoticeCount);
+  expect(await block.boundingBox()).toEqual(selectionProse);
+  await page.clock.resume();
 
   // The offline notice clears after acknowledgement and can move the prose.
   // Read the walk's geometry only once the status line has settled.
