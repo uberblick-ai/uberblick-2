@@ -23,7 +23,7 @@ node --expose-gc --import tsx spike/memory.mts 200 3   # docs per workspace, wor
 | Agent name | shared: after two sessions every cursor is labelled `client-b` |
 | Start per replica set | 31 to 53 ms for an empty workspace |
 | Memory per replica set | about 5 to 6 MB RSS with 50 documents of 8 paragraphs; 10 to 17 MB with 200 |
-| Cold mirror, 200 documents on the hub | all listed and searchable 0.54 s after start |
+| Cold mirror, 200 documents on the hub | all listed 0.54 s after start (search ran afterwards; hub and gateway shared one process, so memory is indicative only) |
 
 ## Answers
 
@@ -48,9 +48,9 @@ node --expose-gc --import tsx spike/memory.mts 200 3   # docs per workspace, wor
    authorization server (PKCE, client registration) and signs people in with
    its existing GitHub flow. Not prototyped.
 5. **Guidance gate.** Works per session as is. Stateful Streamable HTTP
-   sessions keep the ten-minute lease; a client that reconnects reads the
-   guidance again. A stateless deployment would key the lease on the grant.
-6. **Routing and read-only.** Caddy routes `/mcp` and the OAuth metadata
-   paths next to `/ws` and `/auth/*`. A read-only grant registers only tools
+   sessions keep the ten-minute lease; a new MCP session reads the guidance
+   again. A stateless deployment would key the lease on the grant.
+6. **Routing and read-only.** Proposed: Caddy routes `/mcp` and the OAuth
+   metadata paths next to `/ws` and `/auth/*` (today it routes only those two). A read-only grant registers only tools
    whose table entry does not write; the per-session server makes that a
    filter at registration.
