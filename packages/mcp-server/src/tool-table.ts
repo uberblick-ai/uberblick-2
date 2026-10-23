@@ -668,12 +668,10 @@ export const tools: readonly Tool[] = [
     name: "unpin_doc",
     title: "Unpin a document",
     description:
-      "Remove a document from the sidebar, wherever it sits; the document itself is untouched. archive_doc " +
-      "hides a document or topic; delete_doc permanently deletes an archived regular document, or an archived " +
-      "topic with topic: true. One decision record cannot be deleted on its own yet.\n\n" +
-      "An unpin beats a concurrent move on another replica, so a dragged document does not reappear. It takes " +
-      "no group: a document has at most one pin. `unpinned` is false when the document was not pinned. A group " +
-      "left empty stays until sidebar_group deletes it; `groupHint` names that call.",
+      "Unpin without changing the document. archive_doc hides documents or topics; delete_doc permanently deletes " +
+      "archived documents or whole topics with topic: true. One decision record cannot be deleted on its own yet. Unpin " +
+      "beats concurrent moves; no group is needed because each document has at most one pin. unpinned:false " +
+      "means none existed. Empty groups remain; groupHint names sidebar_group to delete them.",
     input: unpinDocInput,
     operation: unpinDocOperation,
     // Removes a pin; repeating reports unpinned: false.

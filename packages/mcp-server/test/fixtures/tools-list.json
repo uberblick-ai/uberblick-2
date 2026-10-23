@@ -1729,7 +1729,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Remove a document from the sidebar, wherever it sits; the document itself is untouched. archive_doc hides a document or topic; delete_doc permanently deletes an archived regular document, or an archived topic with topic: true. One decision record cannot be deleted on its own yet.\n\nAn unpin beats a concurrent move on another replica, so a dragged document does not reappear. It takes no group: a document has at most one pin. `unpinned` is false when the document was not pinned. A group left empty stays until sidebar_group deletes it; `groupHint` names that call.\n\nHelp: unpin_doc, workspaces, tool-contracts.",
+    "description": "Unpin without changing the document. archive_doc hides documents or topics; delete_doc permanently deletes archived documents or whole topics with topic: true. One decision record cannot be deleted on its own yet. Unpin beats concurrent moves; no group is needed because each document has at most one pin. unpinned:false means none existed. Empty groups remain; groupHint names sidebar_group to delete them.\n\nHelp: unpin_doc, workspaces, tool-contracts.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
