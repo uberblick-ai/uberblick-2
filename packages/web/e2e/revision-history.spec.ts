@@ -258,6 +258,11 @@ test.describe("document history through ub open", () => {
       await expect(side.locator("p").filter({ hasText: "An unchanged paragraph." }).locator("[data-revision-change]")).toHaveCount(0);
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await activateControl(history(page).getByRole("button", { name: "Next revision", exact: true }));
+    await expect(historicalEditor(page)).toHaveCount(0);
+    await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeFocused();
+    await previous(page);
+    await expect(historicalEditor(page)).toBeVisible();
     await previous(page);
     const renaming = history(page).getByRole("textbox", { name: "Revision name", exact: true });
     await activateControl(history(page).getByRole("button", { name: "Rename revision", exact: true }));
@@ -688,6 +693,26 @@ test.describe("document history through ub open", () => {
     await page.mouse.move(900, 400);
     await page.mouse.wheel(0, 300);
     await expect.poll(() => page.locator(".ub-revision-pane").evaluate(element => element.scrollTop)).toBeGreaterThan(100);
+  });
+
+  test("Back to now in the history drawer closes it and returns focus to the live history control", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    await page.setViewportSize({ width: 1024, height: 768 });
+    const title = docTitle("History drawer return");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [{ id: "latest", author: null, startedAt: 1_000, endedAt: null }], {
+      latest: savedState(uuid, title, "Historical content."),
+    });
+    await previous(page);
+    await expect(historicalEditor(page)).toHaveText("Historical content.");
+    expect(await showHistoryList(page)).toBe(true);
+    const drawer = page.getByRole("dialog", { name: "Sidebar", exact: true });
+    await expect(drawer).toBeVisible();
+    await activateControl(historyList(page).getByRole("button", { name: "Back to now", exact: true }));
+    await expect(drawer).toBeHidden();
+    await expect(historicalEditor(page)).toHaveCount(0);
+    await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeFocused();
+    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   });
 
   test("opening history preserves unsent comment and reply drafts", { tag: "@webkit" }, async ({ browser }) => {
