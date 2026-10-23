@@ -272,7 +272,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     act(() => pinDoc(sidebar, createGroup(sidebar, "Reading"), UUID));
     expect(restoreButton(host)?.getAttribute("data-variant")).toBe("secondary");
     act(() => within(host).getByRole("button", { name: "Delete…" }).click());
-    const dialog = screen.getByRole("alertdialog", { name: 'Delete "Retired draft"?' });
+    const dialog = screen.getByRole("alertdialog", { name: 'Delete “Retired draft”?' });
     expect(dialog.textContent).toContain("It will be gone for everyone, with its comments and history. Links to it will show it was deleted. This can't be undone.");
     expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" }));
     act(() => within(dialog).getByRole("button", { name: "Cancel" }).click());

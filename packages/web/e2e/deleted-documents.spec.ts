@@ -121,7 +121,7 @@ for (const { touch, appearance } of [
     await expect(banner.getByRole("button", { name: "Restore", exact: true })).toBeFocused();
     await calmBanner(page, touch);
     const trigger = banner.getByRole("button", { name: "Delete…", exact: true });
-    const dialog = page.getByRole("alertdialog", { name: `Delete "${title}"?`, exact: true });
+    const dialog = page.getByRole("alertdialog", { name: `Delete “${title}”?`, exact: true });
     await activateControl(trigger, { touch });
     await expect(dialog).toContainText("It will be gone for everyone, with its comments and history. Links to it will show it was deleted. This can't be undone.");
     await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
@@ -188,7 +188,7 @@ for (const { touch, appearance } of [
         await expect(trigger).toBeVisible();
       }
       await calmBanner(page, touch);
-      const dialog = page.getByRole("alertdialog", { name: `Delete topic "${title}"?`, exact: true });
+      const dialog = page.getByRole("alertdialog", { name: `Delete topic “${title}”?`, exact: true });
       await activateControl(trigger, { touch });
       await expect(dialog).toContainText("The topic and all its records will be deleted for everyone, with their comments and history.");
       await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();

@@ -587,7 +587,7 @@ export const toolHelpDetails = {
     "Deleted UUIDs never appear in discovery, search or sidebar results, including include_deleted listings. " +
     "Reads, writes and newly added references refuse with doc_deleted. Other documents keep their stored links. " +
     "The result reports uuid, title, records listing every deleted UUID, deleted: true and independent directory/sidebar durability. " +
-    "Protocol 4 requires a matching hub and client. Freed SQLite pages and earlier backups are not overwritten.",
+    "The hub, clients and web app must use the same sync protocol. Freed SQLite pages and earlier backups are not overwritten.",
   restore_doc:
     "Remove one archive layer. In an archived decision topic this restores the topic and the records archived " +
     "with it, leaving records archived individually beforehand unchanged. In a live topic it restores the " +

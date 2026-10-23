@@ -158,7 +158,7 @@ function ArchivedBanner({
             >{decision ? "Delete topic…" : "Delete…"}</button>
           </AlertDialogTrigger>
           <AlertDialogContent>
-            <AlertDialogTitle>{decision ? `Delete topic "${title}"?` : `Delete "${title}"?`}</AlertDialogTitle>
+            <AlertDialogTitle>{decision ? `Delete topic “${title}”?` : `Delete “${title}”?`}</AlertDialogTitle>
             <AlertDialogDescription>
               {onDelete === null
                 ? "Delete is unavailable while the directory is not ready to write. Nothing has been deleted."

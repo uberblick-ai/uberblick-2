@@ -1029,7 +1029,7 @@ describe("decision topic navigation and history", () => {
       pinDoc(sidebar, group, REJECTED);
     });
     await act(async () => within(host).getByRole("button", { name: "Delete topic…" }).click());
-    const dialog = screen.getByRole("alertdialog", { name: 'Delete topic "Original title"?' });
+    const dialog = screen.getByRole("alertdialog", { name: 'Delete topic “Original title”?' });
     expect(dialog.textContent).toContain("The topic and all its records will be deleted for everyone, with their comments and history.");
     expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" }));
     await act(async () => within(dialog).getByRole("button", { name: "Cancel" }).click());
