@@ -86,10 +86,6 @@ description = "Build the web client into packages/web/dist (no secret in the bun
 depends = ["install"]
 run = "pnpm --filter @uberblick/web build"
 
-[tasks.site]
-description = "Build uberblick.ai into site/out (standard-library Python; see site/README.md)"
-run = "python3 site/build.py"
-
 [tasks.build-install-payload]
 description = "Build a versioned, checkout-free CLI and web archive"
 usage = 'arg "<version>" help="Release version, for example 0.1.0"'

@@ -9,6 +9,10 @@ agents' work in one place, with links and a sidebar to keep useful material
 close. Documents live on your computer first. A hub can sync them to other
 computers and workspace members.
 
+The website, [uberblick.ai](https://uberblick.ai), is built from
+[uberblick-ai/uberblick.ai](https://github.com/uberblick-ai/uberblick.ai); it
+reads this repository's `CHANGELOG.md` and newest release tag at build time.
+
 ## Install
 
 On Apple Silicon macOS or Linux x86_64, install
