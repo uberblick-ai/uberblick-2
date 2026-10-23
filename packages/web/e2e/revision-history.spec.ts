@@ -441,7 +441,7 @@ test.describe("document history through ub open", () => {
     const list = historyList(page);
     await expect(list.getByRole("listitem")).toHaveCount(3);
     await expect(list.locator('[aria-current="true"]')).toHaveCount(1);
-    await expect(list.locator('[aria-current="true"]')).toContainText("in progress");
+    await expect(list.locator('[aria-current="true"]')).toContainText("Current version");
     const reviewed = list.getByRole("button", { name: /Reviewed after the auth rewrite/ });
     const name = list.locator(".ub-history-name > span:last-child");
     expect(await name.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
@@ -551,7 +551,7 @@ test.describe("document history through ub open", () => {
       await expect(editor(page)).toContainText("Unsynced draft: Shared current content.");
       await previous(page);
       await expect(history(page)).toContainText("Ben via Claude Code, from ");
-      await expect(history(page)).toContainText("in progress");
+      await expect(history(page)).toContainText("current version");
       await previous(page);
       await expect(historicalEditor(page)).toHaveText("Earlier content.");
       await expect(history(page)).toContainText("Unknown author, unknown start to ");

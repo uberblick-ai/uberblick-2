@@ -96,7 +96,7 @@ function RevisionStatus({ history, writable }: { history: DocumentHistory; writa
       <ClockIcon />
       <span className="sr-only">{revisionLabel(entry)}</span>
       <span className="ub-history-author" aria-hidden="true">{label}</span>
-      <span className="ub-history-when" aria-hidden="true">{entry.endedAt === null ? "· in progress" : time === null ? "" : <>· <time dateTime={time.dateTime} title={time.title}>{time.label}</time></>}</span>
+      <span className="ub-history-when" aria-hidden="true">{selection.index === 0 && "· current version "}{time !== null && <>· <time dateTime={time.dateTime} title={time.title}>{time.label}</time></>}</span>
       {compared?.name != null && <span className="ub-history-compared">· compared with “{compared.name.text}”</span>}
     </span>
     <span role="status" className="ub-history-state">{error ?? (busy ? "Loading…" : "")}</span>

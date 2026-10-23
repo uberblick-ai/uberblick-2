@@ -69,7 +69,8 @@ describe("history sidebar", () => {
     expect(screen.getByText("Auth plan · 6 revisions")).toBeTruthy();
     const rows = screen.getAllByRole("listitem");
     expect(rows).toHaveLength(6);
-    expect(within(rows[0]!).getByText("in progress")).toBeTruthy();
+    expect(rows[0]!.textContent).toContain("Current version");
+    expect(rows[1]!.textContent).not.toContain("Current version");
     const selected = within(rows[2]!).getAllByRole("button")[0]!;
     expect(selected.getAttribute("aria-current")).toBe("true");
     expect(screen.getAllByRole("button").filter(button => button.getAttribute("aria-current") === "true")).toHaveLength(1);
