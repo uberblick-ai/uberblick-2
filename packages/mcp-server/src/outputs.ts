@@ -269,14 +269,14 @@ const revisionAuthor = z.object({
 const revisionName = z.object({
   text: z.string(),
   namer: revisionAuthor.describe("Account and surface that named the revision; separate from its author."),
-  namedAt: z.number().describe("Naming time in epoch milliseconds; renaming preserves this time."),
+  namedAt: z.string().describe("Naming time as an ISO 8601 UTC string; renaming preserves this time."),
   canManage: z.boolean().describe("Whether this account may rename or remove this name."),
 }).strict().nullable();
 const revisionEntry = z.object({
   id: revisionId,
   author: revisionAuthor.describe("Verified GitHub account and surface, or null when unknown."),
-  startedAt: z.number().nullable().describe("Start in epoch milliseconds; null only for content predating history."),
-  endedAt: z.number().nullable().describe("End in epoch milliseconds; null means this revision is still open."),
+  startedAt: z.string().nullable().describe("Start as an ISO 8601 UTC string; null only for content predating history."),
+  endedAt: z.string().nullable().describe("End as an ISO 8601 UTC string; null means this revision is still open."),
   name: revisionName.describe("The revision's name, namer and time, or null when unnamed."),
 }).strict();
 

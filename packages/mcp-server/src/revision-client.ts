@@ -50,8 +50,24 @@ export interface RevisionReadOptions {
 function room(replicas: Replicas, uuid: string): string {
   if (!isDocId(uuid)) throw new TypeError("A canonical document UUID is required.");
   if (replicas.config.localWorkspace === true) throw new RevisionClientError("local-only");
-  if (replicas.isDeleted(uuid)) throw new RevisionClientError("deleted");
+  if (replicas.isDeleted(uuid)) throw new RevisionClientError("deleted", { uuid });
   return replicas.replica(uuid).room;
+}
+
+async function requestRevisions(
+  replicas: Replicas,
+  uuid: string,
+  operation: Omit<RevisionRequest, "requestId">,
+  options: RevisionReadOptions,
+) {
+  try {
+    return await replicas.sync.requestRevisions(room(replicas, uuid), operation, options.timeoutMs);
+  } catch (error) {
+    if (error instanceof RevisionClientError && error.code === "deleted") {
+      throw new RevisionClientError("deleted", { ...error.details, uuid });
+    }
+    throw error;
+  }
 }
 
 /** Read the hub's history, including archived documents, without using local snapshots. */
@@ -60,10 +76,11 @@ export async function listDocumentRevisions(
   uuid: string,
   options: RevisionReadOptions = {},
 ): Promise<RevisionEntry[]> {
-  const response = await replicas.sync.requestRevisions(room(replicas, uuid), {
+  const response = await requestRevisions(replicas, uuid, {
     operation: "list", ...(options.includeNames === true ? { includeNames: true } : {}),
-  }, options.timeoutMs);
-  if (!response.ok) throw new RevisionClientError(response.error === "unavailable" ? "unreachable" : response.error);
+  }, options);
+  if (!response.ok) throw new RevisionClientError(response.error === "unavailable" ? "unreachable" : response.error,
+    response.error === "deleted" ? { uuid } : {});
   if (!("revisions" in response)) throw new RevisionClientError("unsupported");
   return response.revisions;
 }
@@ -75,13 +92,13 @@ export async function mutateDocumentRevision(
   mutation: Omit<RevisionRequest, "requestId">,
   options: RevisionReadOptions = {},
 ): Promise<RevisionEntry> {
-  const response = await replicas.sync.requestRevisions(room(replicas, uuid), mutation, options.timeoutMs);
+  const response = await requestRevisions(replicas, uuid, mutation, options);
   if (!response.ok) {
     if (response.error === "unavailable") {
       throw new RevisionClientError("naming-outcome-unknown", { applied: null, reason: "unreachable" });
     }
     throw new RevisionClientError(response.error,
-      "name" in response ? { existingName: response.name } : {});
+      { ...(response.error === "deleted" ? { uuid } : {}), ...("name" in response ? { existingName: response.name } : {}) });
   }
   if (!("revision" in response) || response.revision.name === undefined) {
     throw new RevisionClientError("naming-outcome-unknown", { applied: null, reason: "unsupported" });
@@ -101,8 +118,9 @@ export async function getDocumentRevision(
   revisionId: string,
   options: RevisionReadOptions = {},
 ): Promise<Y.Doc> {
-  const response = await replicas.sync.requestRevisions(room(replicas, uuid), { operation: "get", revisionId }, options.timeoutMs);
-  if (!response.ok) throw new RevisionClientError(response.error === "unavailable" ? "unreachable" : response.error);
+  const response = await requestRevisions(replicas, uuid, { operation: "get", revisionId }, options);
+  if (!response.ok) throw new RevisionClientError(response.error === "unavailable" ? "unreachable" : response.error,
+    response.error === "deleted" ? { uuid } : {});
   if (!("state" in response)) throw new RevisionClientError("unsupported");
   const snapshot = new Y.Doc();
   try {

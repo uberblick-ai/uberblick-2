@@ -158,9 +158,10 @@ export const toolHelpDetails = {
     "unavailable history is a failure, never an empty list.\n\n" +
     "Each entry has `id`, `author`, `startedAt`, `endedAt` and `name`. A name is null or " +
     "`{text, namer, namedAt, canManage}`; its namer has the same account/surface shape as author. " +
-    "`namedAt` is epoch milliseconds and `canManage` identifies whether this account may manage the name in the web. The author is " +
+    "`canManage` identifies whether this account may manage the name in the web. The author is " +
     "`{githubUsername, surface: {kind, name}}`, using the author's current GitHub username, or null when unknown. " +
-    "Times are epoch milliseconds: null `startedAt` means an unknown start for content from before history began, " +
+    "`startedAt`, `endedAt` and `name.namedAt` are ISO 8601 UTC strings, such as `2026-10-21T18:36:13.213Z`: " +
+    "null `startedAt` means an unknown start for content from before history began, " +
     "and null `endedAt` means the revision is still open.\n\n" +
     "Pass an entry's `id` as `revision` to get_revision or get_data. It is a hub revision ID, distinct from " +
     "get_doc's page and block `rev` content hashes. Writing tools do not accept revision IDs. " +
