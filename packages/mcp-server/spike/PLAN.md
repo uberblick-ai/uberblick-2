@@ -199,42 +199,42 @@ MCP client ─HTTPS─> Caddy ─/mcp/*, /.well-known/oauth-protected-resource/*
 - Website guide "Connect an agent without installing anything", published
   after the client acceptance run.
 
-## Issue breakdown (v0.5.4: Hub as MCP host)
+## Issue breakdown (milestone v0.5.4: Hub as MCP host, #2186 to #2206)
 
-1. Corpus page "MCP: hosted endpoint".
-2. Split `createMcpServer` into a per-grant runtime and a per-session server,
+1. (#2186) Corpus page "MCP: hosted endpoint".
+2. (#2187) Split `createMcpServer` into a per-grant runtime and a per-session server,
    with an injected credential provider and agent name.
-3. MCP host transport and sessions: Streamable HTTP at `/mcp/<workspace-id>`,
+3. (#2188) MCP host transport and sessions: Streamable HTTP at `/mcp/<workspace-id>`,
    session bound to grant, Origin policy, drain before close.
-4. MCP host capacity: idle eviction, unsynced-runtime retention, per-grant,
+4. (#2189) MCP host capacity: idle eviction, unsynced-runtime retention, per-grant,
    per-principal and global limits.
-5. Packaging: builder entry, image, `mcp` service, socket and data volumes,
+5. (#2190) Packaging: builder entry, image, `mcp` service, socket and data volumes,
    Caddy routes, readiness check, `HUB_PUBLIC_URL`.
-6. Discovery: protected resource metadata, AS metadata, 401 challenge.
-7. Client ID Metadata Documents with the connection-level SSRF guard.
-8. Dynamic client registration.
-9. Authorization transaction: authorize validation, pending authorizations,
+6. (#2191) Discovery: protected resource metadata, AS metadata, 401 challenge.
+7. (#2192) Client ID Metadata Documents with the connection-level SSRF guard.
+8. (#2193) Dynamic client registration.
+9. (#2194) Authorization transaction: authorize validation, pending authorizations,
    consent API with principal id, grant creation.
-10. Consent page `/connect` on the browser sign-in.
-11. Token endpoint: code exchange with PKCE, resource binding, code reuse
+10. (#2195) Consent page `/connect` on the browser sign-in.
+11. (#2196) Token endpoint: code exchange with PKCE, resource binding, code reuse
     revocation.
-12. Refresh token families: rotation, lineage, reuse detection, narrowing.
-13. Hosted credential ceiling: grant, workspace and scope enforced at
+12. (#2197) Refresh token families: rotation, lineage, reuse detection, narrowing.
+13. (#2198) Hosted credential ceiling: grant, workspace and scope enforced at
     issuance, renewal and admission; issuance by grant id.
-14. Grant lifecycle: device list rows from consent, revocation cascade,
+14. (#2199) Grant lifecycle: device list rows from consent, revocation cascade,
     renewal versus revocation events.
-15. MCP host key storage and recovery: file layout, crash-safe renewal, key
+15. (#2200) MCP host key storage and recovery: file layout, crash-safe renewal, key
     loss, backup and restore.
-16. Hub to MCP host socket: introspection without positive caching, fail
+16. (#2201) Hub to MCP host socket: introspection without positive caching, fail
     closed, stream rechecks.
-17. Scope enforcement per request: read-only tool list, dispatch and
+17. (#2202) Scope enforcement per request: read-only tool list, dispatch and
     pre-mutation checks, `insufficient_scope`.
-18. Protocol and security tests (failure cases), grown with 6 to 17.
-19. Client acceptance on a staging hub: Claude, ChatGPT, Codex, Cursor
+18. (#2203) Protocol and security tests (failure cases), grown with 6 to 17.
+19. (#2204) Client acceptance on a staging hub: Claude, ChatGPT, Codex, Cursor
     (connect, refresh, reconnect, revoke).
-20. Capacity measurement with the MCP host in its own process: large
+20. (#2205) Capacity measurement with the MCP host in its own process: large
     histories, concurrent grants, reconnect storms.
-21. Website guide and operator notes.
+21. (#2206) Website guide and operator notes.
 
 Order: 1, 2, 6 and 13 can start now. 3 after 2; 4 and 5 after 3. 7 to 12 in
 sequence after 6. 14 after 9 and 13; 15 and 16 after 14; 17 after 3 and 16.
