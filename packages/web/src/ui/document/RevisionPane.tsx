@@ -5,8 +5,9 @@ import { getMeta } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import type * as Y from "yjs";
 import { createRevisionEditor } from "../../editor/revision-view.js";
-import { createRevisionSplit } from "../../editor/revision-split.js";
+import { alignRevisionSides, createRevisionSplit } from "../../editor/revision-split.js";
 import type { RevisionRow } from "../../editor/revision-split.js";
+import { revealFoldedTarget } from "../../editor/toggle-headings.js";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import { toast } from "sonner";
 import { writeToClipboard } from "../../editor/source-chrome.js";
@@ -171,18 +172,19 @@ function changeStarts(rows: readonly RevisionRow[]): number[] {
  * Stacked previous and next change, level with the line under the title. They
  * scroll the pane so a change sits just below the sticky header.
  */
-function ChangeNavigation({ pane, header, side, rows }: {
+function ChangeNavigation({ pane, header, before, after, rows }: {
   pane: { current: HTMLElement | null }; header: { current: HTMLElement | null };
-  side: HTMLElement; rows: readonly RevisionRow[];
+  before: Editor; after: Editor; rows: readonly RevisionRow[];
 }): ReactElement {
+  const side = after.view.dom;
   const starts = useMemo(() => changeStarts(rows), [rows]);
   const [state, setState] = useState({ previous: false, next: false });
-  const targets = useCallback((): { top: number; element: HTMLElement }[] => {
+  const targets = useCallback((): { row: number; top: number }[] => {
     const line = header.current?.getBoundingClientRect().bottom ?? 0;
     return starts.flatMap((row) => {
       const element = side.querySelector<HTMLElement>(`:scope > .ub-revision-row-start[data-row="${row}"]`);
       // Relative to where a change lands: 0 is the current change.
-      return element === null ? [] : [{ top: element.getBoundingClientRect().top - line - CHANGE_OFFSET, element }];
+      return element === null ? [] : [{ row, top: element.getBoundingClientRect().top - line - CHANGE_OFFSET }];
     });
   }, [header, side, starts]);
   useEffect(() => {
@@ -209,8 +211,18 @@ function ChangeNavigation({ pane, header, side, rows }: {
     const list = targets();
     const target = direction > 0 ? list.find((entry) => entry.top > CHANGE_SLACK) : list.findLast((entry) => entry.top < -2);
     if (target === undefined) return;
+    // A change can span several rows under different nested toggle headings.
+    for (let row = target.row; rows[row]?.changed; row += 1) {
+      for (const editor of [before, after]) {
+        const start = editor.view.dom.querySelector<HTMLElement>(`:scope > .ub-revision-row-start[data-row="${row}"]`);
+        if (start !== null) revealFoldedTarget(start);
+      }
+    }
+    alignRevisionSides(before.view, after.view);
+    const revealed = targets().find((entry) => entry.row === target.row);
+    if (revealed === undefined) return;
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-    scroller.scrollBy({ top: target.top, behavior: reduce ? "auto" : "smooth" });
+    scroller.scrollBy({ top: revealed.top, behavior: reduce ? "auto" : "smooth" });
   };
   return <fieldset className="ub-change-nav" aria-label="Changes">
     <button type="button" className="ub-history-icon" aria-label="Previous change" title="Previous change" disabled={!state.previous} onClick={() => go(-1)}><UpIcon /></button>
@@ -269,6 +281,8 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   const entry = entries?.[selection.index];
   const predecessor = selection.comparedWith ?? entries?.[selection.index + 1];
   const total = entries?.length ?? 0;
+  const before = editors.find((entry) => entry.side === "before")?.editor;
+  const after = editors.find((entry) => entry.side === "after")?.editor;
   return <section ref={pane} className={`ub-pane ub-page-pane ub-document-pane ub-revision-pane${split ? " ub-revision-split-pane" : ""}`}>
     <div className="ub-column">
       {/* Stays in view while the comparison scrolls; revisions keep no tags. */}
@@ -283,8 +297,8 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
           <span id={restoreReason} className="sr-only">Restore is not available yet</span>
         </div>
         <RevisionStatus history={history} writable={writable} />
-        {split && afterHost.current !== null && rows.length > 0 && <ChangeNavigation pane={pane} header={header}
-          side={afterHost.current.querySelector<HTMLElement>(".ProseMirror") ?? afterHost.current} rows={rows} />}
+        {split && before !== undefined && after !== undefined && rows.length > 0 && <ChangeNavigation pane={pane} header={header}
+          before={before} after={after} rows={rows} />}
       </header>
       {failed === selection && <p role="status">This client cannot display this revision. Update the client and try again.</p>}
       {split ? <div className="ub-revision-split">

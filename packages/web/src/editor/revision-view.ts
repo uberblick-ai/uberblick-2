@@ -58,7 +58,7 @@ const Fold = TiptapNode.create({
   group: "block",
   atom: true,
   selectable: false,
-  addAttributes: () => ({ run: { default: 0 }, count: { default: 0 }, headings: { default: "" } }),
+  addAttributes: () => ({ run: { default: 0 }, count: { default: 0 }, headings: { default: "" }, headingLevel: { default: null } }),
   parseHTML: () => [],
   renderHTML: ({ node }) => ["div", { class: "ub-revision-fold" }, ["button", {
     type: "button", class: "ub-revision-fold-button", "data-fold": String(node.attrs.run),

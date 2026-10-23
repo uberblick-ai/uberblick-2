@@ -157,10 +157,11 @@ export function unchangedRuns(rows: readonly Pick<RevisionRow, "changed">[]): { 
   return runs.filter((run) => run.end > run.start);
 }
 
-function foldNode(run: number, count: number, headings: string): PMNode {
+function foldNode(run: number, count: number, headings: string, nodes: readonly PMNode[]): PMNode {
   const type = revisionSchema.nodes.revisionFold;
   if (type === undefined) throw new Error("Revision fold is missing");
-  return type.create({ run, count, headings });
+  const levels = nodes.filter((node) => node.type.name === "heading").map((node) => Number(node.attrs.level));
+  return type.create({ run, count, headings, headingLevel: levels.length === 0 ? null : Math.min(...levels) });
 }
 
 /** One comparison entry as a row and the block each side shows for it. */
@@ -225,8 +226,8 @@ function foldRows(rows: readonly RevisionRow[], left: readonly PMNode[], right: 
     const headings = rows.slice(current.start, current.end + 1).flatMap((entry) => entry.heading === undefined ? [] : [entry.heading]).join(", ");
     shown.rows.push({ kind: "folded", changed: false, fold: { run: current.start, count },
       before: { labels: [], filler: false }, after: { labels: [], filler: false } });
-    shown.left.push(foldNode(current.start, count, headings));
-    shown.right.push(foldNode(current.start, count, headings));
+    shown.left.push(foldNode(current.start, count, headings, left.slice(current.start, current.end + 1)));
+    shown.right.push(foldNode(current.start, count, headings, right.slice(current.start, current.end + 1)));
     index = current.end;
     run += 1;
   }
