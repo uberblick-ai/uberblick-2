@@ -284,7 +284,7 @@ export const tools: readonly Tool[] = [
       "decision records. Optional tag accepts one catalog id or current name (case ignored), or a list: any listed tag " +
       "matches and more listed tags boost relevance; unknown tags refuse. Every hit includes kind and canonical " +
       "tags; decision hits include current record state, including superseded and conflict. No hits does not " +
-      "prove the index is empty or the replica complete.",
+      "prove the index is empty or the replica complete. If a needed page is missing, ask whether to create it.",
     input: searchInput,
     operation: searchOperation,
     example: { query: "release checklist", kind: "regular", tag: ["mcp", "cli"], limit: 10 },
