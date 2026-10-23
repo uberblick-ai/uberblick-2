@@ -549,11 +549,13 @@ test.describe("document history through ub open", () => {
     await previous(page);
     await expect(historicalEditor(page)).toContainText("Latest content.");
     await expect(history(page)).not.toContainText("renamed from");
+    await expect(history(page).locator(".ub-history-when")).toHaveText("· current version");
     const drawer = await showHistoryList(page);
     const list = historyList(page);
     await expect(list.getByRole("listitem")).toHaveCount(3);
     await expect(list.locator('[aria-current="true"]')).toHaveCount(1);
-    await expect(list.locator('[aria-current="true"]')).toContainText("in progress");
+    await expect(list.locator('[aria-current="true"]')).toContainText("Current version");
+    await expect(list.locator('[aria-current="true"] time')).toHaveCount(0);
     const reviewed = list.getByRole("button", { name: /Reviewed after the auth rewrite/ });
     const name = list.locator(".ub-history-name > span:last-child");
     expect(await name.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
@@ -565,6 +567,7 @@ test.describe("document history through ub open", () => {
     await expect(reviewed).toBeFocused();
     await closeHistoryList(page, drawer);
     await expect(history(page)).toContainText("2 of 3");
+    await expect(history(page).locator(".ub-history-when")).not.toContainText("current version");
     // This revision changed the title: the header shows it as it was, the row and the entry say so.
     await expect(page.locator(".ub-revision-title")).toHaveText(title);
     await expect(history(page).locator(".ub-history-renamed s")).toHaveText("Kickoff notes");
@@ -583,6 +586,7 @@ test.describe("document history through ub open", () => {
     assertNoViolations(scan.violations);
     await activateControl(list.getByRole("button", { name: "Named", exact: true }));
     await expect(list.getByRole("listitem")).toHaveCount(1);
+    await expect(list).not.toContainText("Current version");
     await activateControl(list.getByRole("button", { name: "All", exact: true }));
     await activateControl(list.getByRole("button", { name: /Earlier content/ }));
     await expect(historicalEditor(page)).toHaveText("Earliest content.");
@@ -1025,7 +1029,7 @@ test.describe("document history through ub open", () => {
     const uuid = await newDocument(page, docTitle("Rename back attribution"));
     const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
     await serveHistory(page, [
-      { id: "latest", title: "Alpha", author: person, startedAt: 3_000, endedAt: null },
+      { id: "latest", title: "Alpha", author: person, startedAt: 3_000, endedAt: 4_000 },
       { id: "middle", title: "Beta", author: person, startedAt: 2_000, endedAt: 3_000 },
       { id: "baseline", title: "Alpha", author: person, startedAt: 1_000, endedAt: 2_000,
         name: { text: "Kickoff", namer: person, namedAt: 2_000, canManage: true } },
@@ -1037,6 +1041,8 @@ test.describe("document history through ub open", () => {
     await previous(page);
     await expect(historicalEditor(page)).toContainText("Latest content.");
     await expect(history(page).locator(".ub-history-renamed s")).toHaveText("Beta");
+    await expect(history(page).locator(".ub-history-when")).toContainText("· current version");
+    await expect(history(page).locator(".ub-history-when time")).toHaveAttribute("datetime", new Date(4_000).toISOString());
     const drawer = await showHistoryList(page);
     const since = historyList(page).getByRole("button", { name: "Changes since this name", exact: true });
     await activateControl(since);
@@ -1045,6 +1051,8 @@ test.describe("document history through ub open", () => {
     await expect(historicalEditor(page)).toContainText("Latest content.");
     await expect(history(page)).toContainText("compared with “Kickoff”");
     await expect(history(page).locator(".ub-history-renamed s")).toHaveText("Beta");
+    await expect(history(page).locator(".ub-history-when")).toContainText("· current version");
+    await expect(history(page).locator(".ub-history-when time")).toHaveAttribute("datetime", new Date(4_000).toISOString());
   });
 
   test("opening history preserves unsent comment and reply drafts", { tag: "@webkit" }, async ({ browser }) => {
@@ -1107,7 +1115,7 @@ test.describe("document history through ub open", () => {
       await expect(editor(page)).toContainText("Unsynced draft: Shared current content.");
       await previous(page);
       await expect(history(page)).toContainText("Ben via Claude Code, from ");
-      await expect(history(page)).toContainText("in progress");
+      await expect(history(page)).toContainText("current version");
       await previous(page);
       await expect(historicalEditor(page)).toHaveText("Earlier content.");
       await expect(history(page)).toContainText("Unknown author, unknown start to ");

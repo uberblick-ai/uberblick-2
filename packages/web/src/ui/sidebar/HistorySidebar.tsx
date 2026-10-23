@@ -82,7 +82,9 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
               {group.items.map(({ entry, index }) => {
                 const author = revisionAuthor(entry, index === entries.length - 1);
                 const time = revisionTime(entry);
-                const when = entry.endedAt === null ? "in progress" : time === null ? null : formatTimestamp(time, now);
+                // The newest entry is what the live document shows, even while its revision is still open.
+                const latest = index === 0;
+                const when = entry.endedAt === null || time === null ? null : formatTimestamp(time, now);
                 const name = entry.name?.text;
                 const current = index === selected;
                 const renamed = renamedFrom(entries, history.titles, index) !== null;
@@ -101,10 +103,11 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
                         <span className={`min-w-0 truncate ${name === undefined ? "ub-type-ui font-medium text-sidebar-foreground" : "ub-type-caption text-(--sidebar-muted-foreground)"}`}>
                           {author.name}{author.surface !== "" && <span className="font-normal text-(--sidebar-muted-foreground)"> {author.surface}</span>}
                         </span>
-                        {(when !== null || renamed) && (
+                        {(latest || when !== null || renamed) && (
                           <span className="ub-type-caption text-(--sidebar-muted-foreground)">
-                            {when === null ? null : typeof when === "string" ? when : <time dateTime={when.dateTime} title={when.title}>{when.label}</time>}
-                            {renamed && <span className="ub-history-renamed-tag">{when === null ? "renamed" : " · renamed"}</span>}
+                            {latest && "Current version"}{latest && when !== null && " · "}
+                            {when !== null && <time dateTime={when.dateTime} title={when.title}>{when.label}</time>}
+                            {renamed && <span className="ub-history-renamed-tag">{latest || when !== null ? " · renamed" : "renamed"}</span>}
                           </span>
                         )}
                       </span>
