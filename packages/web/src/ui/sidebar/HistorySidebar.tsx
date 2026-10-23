@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 import type { ReactElement } from "react";
+import { renamedFrom } from "../document/document-history.js";
 import type { DocumentHistory } from "../document/document-history.js";
 import { revisionAuthor, revisionGroups, revisionTime } from "../document/revision-list.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
@@ -52,6 +53,11 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
             ))}
           </fieldset>
         </div>
+        <label className="ub-history-collapse flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 cursor-pointer items-center justify-between gap-2 px-2 ub-type-caption text-(--sidebar-muted-foreground)">
+          Collapse unchanged
+          <input type="checkbox" role="switch" className="ub-history-switch" checked={history.collapseUnchanged} aria-checked={history.collapseUnchanged}
+            onChange={(event) => history.setCollapseUnchanged(event.currentTarget.checked)} />
+        </label>
       </SidebarHeader>
       <SidebarScrollContent className="pb-2 [&>*]:shrink-0">
         {history.error !== null && (
@@ -81,6 +87,7 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
                 const when = entry.endedAt === null || time === null ? null : formatTimestamp(time, now);
                 const name = entry.name?.text;
                 const current = index === selected;
+                const renamed = renamedFrom(entries, history.titles, index) !== null;
                 return (
                   <li key={entry.id}>
                     <button type="button" className={ROW_CLASSES} aria-current={current ? "true" : undefined}
@@ -96,10 +103,11 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
                         <span className={`min-w-0 truncate ${name === undefined ? "ub-type-ui font-medium text-sidebar-foreground" : "ub-type-caption text-(--sidebar-muted-foreground)"}`}>
                           {author.name}{author.surface !== "" && <span className="font-normal text-(--sidebar-muted-foreground)"> {author.surface}</span>}
                         </span>
-                        {(latest || when !== null) && (
+                        {(latest || when !== null || renamed) && (
                           <span className="ub-type-caption text-(--sidebar-muted-foreground)">
                             {latest && "Current version"}{latest && when !== null && " · "}
                             {when !== null && <time dateTime={when.dateTime} title={when.title}>{when.label}</time>}
+                            {renamed && <span className="ub-history-renamed-tag">{latest || when !== null ? " · renamed" : "renamed"}</span>}
                           </span>
                         )}
                       </span>
