@@ -12,6 +12,7 @@ import type { RevisionBlockComparison, RevisionComparison, TextSpan } from "@ube
 import { yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
 import type * as Y from "yjs";
 import { AblaufBlocks } from "./ablauf.js";
+import { JsonTreeBlocks } from "./json-tree.js";
 import { CardBlocks } from "./card.js";
 import { ChartBlocks, chartBlockView } from "./chart.js";
 import { DocLinks } from "./doc-links.js";
@@ -263,7 +264,7 @@ function revisionPresentation(blocks: readonly RevisionBlockDetails[]): Extensio
               const block = blocks[index];
               if (!block) return;
               const classes = [`ub-revision-block-${block.kind}`];
-              if (block.showSource) classes.push("ub-revision-source-changed", "ub-ablauf-editing", "ub-wireframe-editing", "ub-terminal-editing", "ub-chart-editing");
+              if (block.showSource) classes.push("ub-revision-source-changed", "ub-ablauf-editing", "ub-json-tree-editing", "ub-wireframe-editing", "ub-terminal-editing", "ub-chart-editing");
               decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: classes.join(" "), "data-revision-block": block.kind }));
               const labels = [
                 ...(block.kind === "added" ? ["Added block"] : block.kind === "removed" ? ["Removed block"] : []),
@@ -301,7 +302,7 @@ export function createRevisionEditor(options: CreateRevisionEditorOptions): Edit
     element: options.element,
     extensions: [
       ...revisionPalette(options.after, options.before), revisionPresentation(model.blocks),
-      CodeHighlighting, ListBlocks, CardBlocks, TerminalBlocks, ChartBlocks, WireframeBlocks, AblaufBlocks,
+      CodeHighlighting, ListBlocks, CardBlocks, TerminalBlocks, ChartBlocks, WireframeBlocks, AblaufBlocks, JsonTreeBlocks,
       DocLinks.configure({ context: options.docLinks ?? null }), ExternalLinks,
       GitHubLinks.configure({ settings: options.workspaceSettings ?? null }), InlineIcons, ToggleHeadings,
     ],
