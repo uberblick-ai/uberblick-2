@@ -89,15 +89,18 @@ function savedState(uuid: string, title: string, text: string): string {
   }
 }
 
-async function serveHistory(page: Page, revisions: RevisionEntry[], states: Record<string, string>): Promise<void> {
+async function serveHistory(page: Page, revisions: RevisionEntry[], states: Record<string, string>): Promise<string[]> {
+  const snapshotReads: string[] = [];
   await page.route("**/api/revisions?**", async route => {
     const revision = new URL(route.request().url()).searchParams.get("revision");
+    if (revision !== null) snapshotReads.push(revision);
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(revision === null ? { revisions } : { state: states[revision] }),
     });
   });
+  return snapshotReads;
 }
 
 function dataHistory(uuid: string, title: string): Record<string, string> {
@@ -443,10 +446,10 @@ test.describe("document history through ub open", () => {
     const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
     const now = Date.now();
     await serveHistory(page, [
-      { id: "latest", author: { githubUsername: "Ben", surface: { kind: "mcp", name: "Claude Code" } }, startedAt: now - 60_000, endedAt: null },
-      { id: "reviewed", author: person, startedAt: now - 3_600_000, endedAt: now - 3_000_000,
+      { id: "latest", title, author: { githubUsername: "Ben", surface: { kind: "mcp", name: "Claude Code" } }, startedAt: now - 60_000, endedAt: null },
+      { id: "reviewed", title, author: person, startedAt: now - 3_600_000, endedAt: now - 3_000_000,
         name: { text: "Reviewed after the auth rewrite with a name long enough to be cut", namer: person, namedAt: now - 3_000_000, canManage: true } },
-      { id: "earliest", author: null, startedAt: null, endedAt: now - 7_200_000 },
+      { id: "earliest", title: "Kickoff notes", author: null, startedAt: null, endedAt: now - 7_200_000 },
     ], {
       latest: savedState(uuid, title, "Latest content."),
       reviewed: savedState(uuid, title, "Reviewed content."),
@@ -522,10 +525,10 @@ test.describe("document history through ub open", () => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
     const uuid = await newDocument(page, docTitle("Rename attribution"));
     const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
-    await serveHistory(page, [
-      { id: "latest", author: { ...person, githubUsername: "Latest author" }, startedAt: 3_000, endedAt: null },
-      { id: "middle", author: { ...person, githubUsername: "Middle author" }, startedAt: 2_000, endedAt: 3_000 },
-      { id: "baseline", author: person, startedAt: 1_000, endedAt: 2_000,
+    const snapshotReads = await serveHistory(page, [
+      { id: "latest", title: "Beta", author: { ...person, githubUsername: "Latest author" }, startedAt: 3_000, endedAt: null },
+      { id: "middle", title: "Beta", author: { ...person, githubUsername: "Middle author" }, startedAt: 2_000, endedAt: 3_000 },
+      { id: "baseline", title: "Alpha", author: person, startedAt: 1_000, endedAt: 2_000,
         name: { text: "Kickoff", namer: person, namedAt: 2_000, canManage: true } },
     ], {
       latest: savedState(uuid, "Beta", "Latest content."),
@@ -539,6 +542,7 @@ test.describe("document history through ub open", () => {
     const list = historyList(page);
     const middle = list.getByRole("button", { name: /Middle author/ });
     await expect(middle).toContainText("renamed");
+    expect(snapshotReads).toEqual(["latest", "middle"]);
     await expect(list.getByRole("button", { name: /Latest author/ })).not.toContainText("renamed");
     await activateControl(middle);
     await expect(historicalEditor(page)).toContainText("Middle content.");
@@ -556,14 +560,49 @@ test.describe("document history through ub open", () => {
     await expect(middle).toContainText("renamed");
   });
 
+  test("an older hub's title-less list keeps history available without markers or background snapshot reads", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const uuid = await newDocument(page, docTitle("Legacy revision titles"));
+    const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
+    const snapshotReads = await serveHistory(page, [
+      { id: "latest", author: { ...person, githubUsername: "Latest author" }, startedAt: 3_000, endedAt: null },
+      { id: "middle", author: { ...person, githubUsername: "Middle author" }, startedAt: 2_000, endedAt: 3_000 },
+      { id: "baseline", author: person, startedAt: 1_000, endedAt: 2_000,
+        name: { text: "Kickoff", namer: person, namedAt: 2_000, canManage: true } },
+    ], {
+      latest: savedState(uuid, "Alpha", "Latest content."),
+      middle: savedState(uuid, "Beta", "Middle content."),
+      baseline: savedState(uuid, "Alpha", "Baseline content."),
+    });
+    await previous(page);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    let drawer = await showHistoryList(page);
+    expect(snapshotReads).toEqual(["latest", "middle"]);
+    await expect(historyList(page).locator(".ub-history-renamed-tag")).toHaveCount(0);
+    await activateControl(historyList(page).getByRole("button", { name: /Middle author/ }));
+    await expect(historicalEditor(page)).toContainText("Middle content.");
+    await closeHistoryList(page, drawer);
+    await expect(history(page)).not.toContainText("renamed from");
+    drawer = await showHistoryList(page);
+    await activateControl(historyList(page).getByRole("button", { name: "Changes since this name", exact: true }));
+    await closeHistoryList(page, drawer);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(history(page)).toContainText("compared with “Kickoff”");
+    await expect(history(page)).not.toContainText("renamed from");
+    await expect(history(page)).not.toContainText("unavailable");
+    await showHistoryList(page);
+    await expect(historyList(page).locator(".ub-history-renamed-tag")).toHaveCount(0);
+    expect(snapshotReads).toEqual(["latest", "middle", "baseline", "latest", "baseline"]);
+  });
+
   test("a named comparison attributes a rename back to the immediate predecessor", async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
     const uuid = await newDocument(page, docTitle("Rename back attribution"));
     const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
     await serveHistory(page, [
-      { id: "latest", author: person, startedAt: 3_000, endedAt: null },
-      { id: "middle", author: person, startedAt: 2_000, endedAt: 3_000 },
-      { id: "baseline", author: person, startedAt: 1_000, endedAt: 2_000,
+      { id: "latest", title: "Alpha", author: person, startedAt: 3_000, endedAt: null },
+      { id: "middle", title: "Beta", author: person, startedAt: 2_000, endedAt: 3_000 },
+      { id: "baseline", title: "Alpha", author: person, startedAt: 1_000, endedAt: 2_000,
         name: { text: "Kickoff", namer: person, namedAt: 2_000, canManage: true } },
     ], {
       latest: savedState(uuid, "Alpha", "Latest content."),

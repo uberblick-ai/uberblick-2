@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type * as Y from "yjs";
-import { getMeta } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import { DocumentHistoryError } from "../../shell/document-revisions.js";
 import type { DocumentRevisionsClient } from "../../shell/document-revisions.js";
@@ -13,7 +12,7 @@ interface HistoryState {
   active: boolean;
   busy: boolean;
   error: string | null;
-  /** Title history survives replacement of the comparison's detached documents. */
+  /** Only the opted-in list supplies markers, including when snapshots are cached. */
   titles: Readonly<Record<string, string>>;
 }
 interface Session {
@@ -40,8 +39,8 @@ function targetIndex(target: Target, selection: Selection | null, entries: reado
   return "index" in target ? target.index : (selection?.index ?? 0) + target.step;
 }
 
-function knownTitles(documents: Map<string, Y.Doc>): Record<string, string> {
-  return Object.fromEntries([...documents].map(([id, doc]) => [id, getMeta(doc).title]));
+function listedTitles(entries: readonly RevisionEntry[]): Record<string, string> {
+  return Object.fromEntries(entries.flatMap(entry => entry.title === undefined ? [] : [[entry.id, entry.title]]));
 }
 
 /** Rename attribution always follows adjacent revisions, including named comparisons. */
@@ -51,11 +50,11 @@ export function renamedFrom(entries: readonly RevisionEntry[], titles: Readonly<
   return title === undefined || previous === undefined || title === previous ? null : previous;
 }
 
-function replaceEntries(owner: Session, entries: RevisionEntry[]): Pick<HistoryState, "entries" | "selection"> {
+function replaceEntries(owner: Session, entries: RevisionEntry[]): Pick<HistoryState, "entries" | "selection" | "titles"> {
   const selection = owner.state.selection;
   const id = selection === null ? undefined : owner.state.entries?.[selection.index]?.id;
   const index = entries.findIndex(entry => entry.id === id);
-  return { entries, selection: selection === null || index < 0 ? null : index === selection.index ? selection : { ...selection, index } };
+  return { entries, titles: listedTitles(entries), selection: selection === null || index < 0 ? null : index === selection.index ? selection : { ...selection, index } };
 }
 
 function resolvedTarget(target: Target, entries: readonly RevisionEntry[], index: number): Target {
@@ -87,7 +86,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
     current.current = session;
     setView({ session, state: initial });
     void client.list(uuid, controller.signal).then(
-      (entries) => update(session, { entries, busy: false }),
+      (entries) => update(session, { entries, titles: listedTitles(entries), busy: false }),
       (error: unknown) => fail(session, error),
     );
     return () => {
@@ -98,31 +97,6 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
   }, [client, uuid, path, update, fail]);
   const session = view?.session;
   const state = view !== null && session?.client === client && session.uuid === uuid && session.path === path && current.current === session ? view.state : initial;
-  useEffect(() => {
-    const entries = state.entries;
-    if (session === undefined || !state.active || state.busy || state.error !== null || state.selection === null || entries === null) return;
-    const controller = new AbortController();
-    const signal = AbortSignal.any([session.signal, controller.signal]);
-    const operation = session.operation;
-    // The list has no titles. Read missing ones without keeping whole snapshots
-    // or delaying the selected comparison; only one extra request runs at a time.
-    void (async () => {
-      try {
-        for (const entry of entries) {
-          if (signal.aborted || session.operation !== operation) return;
-          if (Object.hasOwn(session.state.titles, entry.id)) continue;
-          const doc = await session.client.get(session.uuid, entry.id, signal);
-          try {
-            if (signal.aborted || session.operation !== operation) return;
-            update(session, { titles: { ...session.state.titles, [entry.id]: getMeta(doc).title } });
-          } finally { doc.destroy(); }
-        }
-      } catch (error) {
-        if (!signal.aborted && session.operation === operation) update(session, { error: error instanceof DocumentHistoryError ? error.message : new DocumentHistoryError("unreachable").message });
-      }
-    })();
-    return () => controller.abort();
-  }, [session, state.active, state.busy, state.error, state.selection, state.entries, update]);
   const get = async (owner: Session, id: string, operation: number, documents = owner.documents): Promise<Y.Doc> => {
     const cached = documents.get(id);
     if (cached !== undefined) return cached;
@@ -155,7 +129,6 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
       if (owner.operation !== operation) return;
       if (selection === null) {
         if (fresh === null) destroyDocuments(owner.documents);
-        update(owner, { titles: {} });
       }
       const index = targetIndex(target, selection, entries);
       if ("id" in target && index < 0) throw new DocumentHistoryError("revision-not-found");
@@ -171,7 +144,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
         adopted = true;
       }
       owner.retryTarget = null;
-      update(owner, { entries, selection: next, busy: false, titles: { ...owner.state.titles, ...knownTitles(owner.documents) } });
+      update(owner, { entries, selection: next, busy: false, titles: listedTitles(entries) });
     } catch (error) { if (owner.operation === operation) fail(owner, error); }
     finally { if (fresh !== null && !adopted) destroyDocuments(fresh); }
   };
@@ -185,7 +158,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
       if (owner.operation !== operation) return;
       const entries = owner.state.entries ?? [];
       const existing = entries.some(entry => entry.id === revision.id);
-      const next = existing ? entries.map(entry => entry.id === revision.id ? revision : entry) : [revision, ...entries];
+      const next = existing ? entries.map(entry => entry.id === revision.id ? { ...entry, ...revision } : entry) : [revision, ...entries];
       const replacement = replaceEntries(owner, next);
       const selection = replacement.selection;
       update(owner, { busy: false, ...replacement,

@@ -45,6 +45,7 @@ export interface RevisionReadOptions {
   /** One bound covering room admission and the revision reply. Defaults to 5 seconds. */
   timeoutMs?: number;
   includeNames?: boolean;
+  includeTitles?: boolean;
 }
 
 function room(replicas: Replicas, uuid: string): string {
@@ -78,6 +79,7 @@ export async function listDocumentRevisions(
 ): Promise<RevisionEntry[]> {
   const response = await requestRevisions(replicas, uuid, {
     operation: "list", ...(options.includeNames === true ? { includeNames: true } : {}),
+    ...(options.includeTitles === true ? { includeTitles: true } : {}),
   }, options);
   if (!response.ok) throw new RevisionClientError(response.error === "unavailable" ? "unreachable" : response.error,
     response.error === "deleted" ? { uuid } : {});

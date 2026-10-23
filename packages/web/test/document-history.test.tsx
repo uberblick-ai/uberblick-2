@@ -8,9 +8,9 @@ import { renamedFrom, useDocumentHistory, type DocumentHistory } from "../src/ui
 const UUID = "9f3c1a2b-0000-4000-8000-0123456789ab";
 const OTHER_UUID = "4a9939be-2778-442f-9278-e1517ef88335";
 const entries: RevisionEntry[] = [
-  { id: "newest", author: { githubUsername: "ben", surface: { kind: "mcp", name: "Claude Code" } }, startedAt: 100, endedAt: null },
-  { id: "middle", author: { githubUsername: "ben", surface: { kind: "browser", name: "Browser" } }, startedAt: 50, endedAt: 100 },
-  { id: "earliest", author: null, startedAt: null, endedAt: 50 },
+  { id: "newest", title: "newest", author: { githubUsername: "ben", surface: { kind: "mcp", name: "Claude Code" } }, startedAt: 100, endedAt: null },
+  { id: "middle", title: "middle", author: { githubUsername: "ben", surface: { kind: "browser", name: "Browser" } }, startedAt: 50, endedAt: 100 },
+  { id: "earliest", title: "earliest", author: null, startedAt: null, endedAt: 50 },
 ];
 const documents: Y.Doc[] = [];
 afterEach(() => { for (const doc of documents.splice(0)) if (!doc.isDestroyed) doc.destroy(); });
@@ -378,12 +378,14 @@ describe("document history navigation", () => {
 
   it("loads sidebar rename information before visiting entries and retains it across named comparisons", async () => {
     const api = client(async (_uuid, id) => document(id === "earliest" ? "Alpha" : "Beta"));
-    const baseline = { ...entries[2]!, name: { text: "Kickoff", namer: null, namedAt: 50, canManage: false } };
-    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, baseline]);
+    const baseline = { ...entries[2]!, title: "Alpha", name: { text: "Kickoff", namer: null, namedAt: 50, canManage: false } };
+    vi.mocked(api.list).mockResolvedValue([{ ...entries[0]!, title: "Beta" }, { ...entries[1]!, title: "Beta" }, baseline]);
     const fix = mount(api);
     await act(async () => {});
     expect(api.get).not.toHaveBeenCalled();
+    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 1)).toBe("Alpha");
     await act(async () => fix.reading().back());
+    expect(api.get).toHaveBeenCalledTimes(2);
     expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 1)).toBe("Alpha");
     expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 0)).toBeNull();
     await act(async () => fix.reading().open(1));
@@ -394,39 +396,61 @@ describe("document history navigation", () => {
     expect(documents.every(doc => doc.isDestroyed)).toBe(true);
   });
 
-  it("cancels title-only reads on leaving history and destroys late answers without adopting them", async () => {
-    const pending = deferred<Y.Doc>();
-    const api = client(async (_uuid, id) => id === "earliest" ? pending.promise : document(id));
+  it.each([true, false])("reads only the selected comparison in a 200-revision history, with list titles: %s", async includeTitles => {
+    const revisions = Array.from({ length: 200 }, (_, index) => ({
+      id: `revision-${index}`, author: null, startedAt: index, endedAt: index,
+      ...(includeTitles ? { title: index % 2 === 0 ? "Alpha" : "Beta" } : {}),
+    }));
+    const api = client();
+    vi.mocked(api.list).mockResolvedValue(revisions);
     const fix = mount(api);
     await act(async () => {});
+    expect(api.get).not.toHaveBeenCalled();
     await act(async () => fix.reading().back());
-    const signal = vi.mocked(api.get).mock.calls.find(call => call[1] === "earliest")![2];
-    expect(fix.reading().busy).toBe(false);
+    expect(vi.mocked(api.get).mock.calls.map(call => call[1])).toEqual(["revision-0", "revision-1"]);
+    expect(renamedFrom(revisions, fix.reading().titles, 150)).toBe(includeTitles ? "Beta" : null);
+    expect(fix.reading().error).toBeNull();
     await act(async () => fix.reading().now());
-    expect(signal.aborted).toBe(true);
-    const late = document("Late title");
-    await act(async () => pending.resolve(late));
-    expect(late.isDestroyed).toBe(true);
-    expect(fix.reading().titles.earliest).toBeUndefined();
+    await act(async () => fix.reading().back());
+    expect(vi.mocked(api.get).mock.calls.map(call => call[1])).toEqual(["revision-0", "revision-1", "revision-0", "revision-1"]);
+    if (!includeTitles) expect(fix.reading().titles).toEqual({});
     expect(fix.reading().error).toBeNull();
   });
 
-  it("reports a title read failure without discarding the comparison and retries the missing information", async () => {
-    let unavailable = true;
+  it("keeps history available when list titles are missing and never falls back to snapshot scans", async () => {
     const api = client(async (_uuid, id) => {
-      if (id === "earliest" && unavailable) throw new DocumentHistoryError("unreachable");
+      if (id === "earliest") throw new DocumentHistoryError("unreachable");
       return document(id);
     });
+    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, {
+      id: "earliest", author: null, startedAt: null, endedAt: 50,
+    }]);
     const fix = mount(api);
     await act(async () => {});
     await act(async () => fix.reading().back());
     const selected = fix.reading().selection;
-    expect(fix.reading().error).toMatch(/cannot be reached/);
-    expect(selected!.after.isDestroyed).toBe(false);
-    unavailable = false;
-    await act(async () => fix.reading().retry());
-    expect(fix.reading().selection).toBe(selected);
-    expect(fix.reading().titles.earliest).toBe("earliest");
+    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 1)).toBeNull();
     expect(fix.reading().error).toBeNull();
+    expect(selected!.after.isDestroyed).toBe(false);
+    await act(async () => fix.reading().refresh());
+    expect(fix.reading().selection).toBe(selected);
+    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(fix.reading().titles.earliest).toBeUndefined();
+    expect(fix.reading().error).toBeNull();
+  });
+
+  it("keeps list titles through a metadata-only name mutation and replaces them on a fresh list", async () => {
+    const api = client();
+    const fix = mount(api);
+    await act(async () => {});
+    const named: RevisionEntry = { id: "middle", author: entries[1]!.author, startedAt: 50, endedAt: 100,
+      name: { text: "Reviewed", namer: null, namedAt: 100, canManage: true } };
+    vi.mocked(api.rename).mockResolvedValue(named);
+    await act(async () => fix.reading().rename("middle", "Reviewed"));
+    expect(fix.reading().titles.middle).toBe("middle");
+    vi.mocked(api.list).mockResolvedValue([named]);
+    await act(async () => fix.reading().refresh());
+    expect(fix.reading().titles).toEqual({});
   });
 });
