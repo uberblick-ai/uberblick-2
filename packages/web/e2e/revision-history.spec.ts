@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
-import { appendBlock, applyDocData, initDoc, snapshotRevision } from "@uberblick/schema";
+import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, initDoc, insertBlock, snapshotRevision } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import { activateControl, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
@@ -12,8 +12,14 @@ function history(page: Page): Locator {
   return page.getByRole("group", { name: "Document history", exact: true });
 }
 
+/** The selected revision: the right side of a side-by-side comparison, or the single column. */
 function historicalEditor(page: Page): Locator {
-  return page.locator(".ub-revision-pane .ProseMirror");
+  return page.locator('.ub-revision-pane .ProseMirror:not([aria-label="Before this revision"])');
+}
+
+/** Where removals show: the left side of a side-by-side comparison, or the single column. */
+function earlierSide(page: Page): Locator {
+  return page.locator('.ub-revision-pane .ProseMirror:not([aria-label="This revision"])');
 }
 
 function historyList(page: Page): Locator {
@@ -83,6 +89,28 @@ async function serveHistory(page: Page, revisions: RevisionEntry[], states: Reco
       body: JSON.stringify(revision === null ? { revisions } : { state: states[revision] }),
     });
   });
+}
+
+/** Two states with a word change, a wrapped removal, an addition, a table row and an unchanged block. */
+function splitHistory(uuid: string, title: string): Record<string, string> {
+  const document = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title });
+    const heading = appendBlock(document, { type: "heading", level: 2, text: "Rollout plan" });
+    const fox = appendBlock(document, { type: "paragraph", text: "The amber fox stays." });
+    const gone = appendBlock(document, { type: "paragraph", text: "A paragraph that goes away, long enough to wrap across several lines in one half of the side-by-side comparison, so the opposite filler has to grow with it." });
+    const table = appendBlock(document, { type: "table", text: "| Day | Latency |\n| --- | --- |\n| Mon | 10 |" });
+    appendBlock(document, { type: "paragraph", text: "An unchanged closing paragraph." });
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    editBlock(document, fox, "The amber fox stays.", "The blue fox stays.");
+    deleteBlock(document, gone);
+    insertBlock(document, heading, { type: "paragraph", text: "An added note." });
+    const rows = getBlock(document, table)?.text ?? "";
+    editBlock(document, table, rows, rows.replace("10", "12"));
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+  }
 }
 
 function dataHistory(uuid: string, title: string): Record<string, string> {
@@ -187,8 +215,10 @@ test.describe("document history through ub open", () => {
     const view = historicalEditor(page);
     await expect(history(page)).toContainText("compared with “Reviewed after auth rewrite”");
     await expect(view.locator('[data-revision-change="added"]')).toHaveText(["blue", "current", "latest"]);
-    await expect(view.locator('[data-revision-change="removed"]')).toHaveText(["amber", "outdated", "oldest"]);
-    await expect(view.locator("p").filter({ hasText: "An unchanged paragraph." }).locator("[data-revision-change]")).toHaveCount(0);
+    await expect(earlierSide(page).locator('[data-revision-change="removed"]')).toHaveText(["amber", "outdated", "oldest"]);
+    for (const side of [view, earlierSide(page)]) {
+      await expect(side.locator("p").filter({ hasText: "An unchanged paragraph." }).locator("[data-revision-change]")).toHaveCount(0);
+    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     if (browserName === "webkit") await page.keyboard.press("Escape");
     await previous(page);
@@ -281,10 +311,11 @@ test.describe("document history through ub open", () => {
     await expect(history(page)).toContainText(/from /);
     await expect(page).toHaveURL(new URL(path, harness().appUrl).href);
     await expect(view.locator('[data-revision-change="added"]')).toContainText("blue");
-    const removed = view.locator('[data-revision-change="removed"]').filter({ hasText: "amber" });
+    const earlier = earlierSide(page);
+    const removed = earlier.locator('[data-revision-change="removed"]').filter({ hasText: "amber" });
     await expect(removed).toHaveText("amber");
-    await expect(view).toContainText("A removed paragraph.");
-    await expect(view.locator('[data-revision-change="removed"]').filter({ hasText: "A removed paragraph." })).toBeVisible();
+    await expect(earlier).toContainText("A removed paragraph.");
+    await expect(earlier.locator('[data-revision-change="removed"]').filter({ hasText: "A removed paragraph." })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     if (browserName === "webkit") {
       for (const name of ["Previous revision", "Next revision", "Back to now"]) {
@@ -317,13 +348,15 @@ test.describe("document history through ub open", () => {
     await expect(page.getByRole("button", { name: "Document actions", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Insert block below", includeHidden: true })).toHaveCount(0);
     await expect(page.getByRole("region", { name: "Threads", exact: true })).toHaveCount(0);
-    await expect(view.locator("[data-comment-thread]")).toHaveCount(0);
+    await expect(page.locator(".ub-revision-pane [data-comment-thread]")).toHaveCount(0);
 
-    const before = await view.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON());
+    const snapshot = () => page.locator(".ub-revision-pane .ProseMirror").evaluateAll(elements =>
+      elements.map(element => (element as HTMLElement & { editor: Editor }).editor.getJSON()));
+    const before = await snapshot();
     await activateControl(removed);
     await page.keyboard.type("typed mutation");
     await page.keyboard.press("ControlOrMeta+b");
-    await view.evaluate(element => {
+    await earlier.evaluate(element => {
       const transfer = new DataTransfer();
       transfer.setData("text/plain", "pasted or dropped mutation");
       element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: transfer, bubbles: true, cancelable: true }));
@@ -331,7 +364,7 @@ test.describe("document history through ub open", () => {
       const mounted = element as HTMLElement & { editor: Editor };
       mounted.editor.view.dispatch(mounted.editor.state.tr.insertText("command mutation", 1));
     });
-    expect(await view.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON())).toEqual(before);
+    expect(await snapshot()).toEqual(before);
     await expect(editor(peer)).toContainText("The blue fox stays.");
     await expect(editor(peer)).not.toContainText("mutation");
 
@@ -477,6 +510,79 @@ test.describe("document history through ub open", () => {
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   });
 
+  test("side by side, rows line up, selections stay on one side and copies keep authored content", async ({ browser }, info) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 900 } } });
+    const title = docTitle("Side by side rows");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: { githubUsername: "Ben", surface: { kind: "mcp", name: "Claude Code" } }, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: { githubUsername: "browser-person", surface: { kind: "browser", name: "Browser" } }, startedAt: 1_000, endedAt: 2_000 },
+    ], splitHistory(uuid, title));
+    await previous(page);
+    const split = page.locator(".ub-revision-split");
+    await expect(split).toBeVisible();
+    await expect(split).toContainText("Before · browser-person");
+    await expect(split).toContainText("After · Ben");
+    const before = earlierSide(page);
+    const after = historicalEditor(page);
+    await expect(after.locator('[data-revision-change="added"]').filter({ hasText: "blue" })).toHaveText("blue");
+    await expect(before.locator('[data-revision-change="removed"]').filter({ hasText: "amber" })).toHaveText("amber");
+    await expect(after).not.toContainText("amber");
+    await expect(before).not.toContainText("An added note.");
+    await expect(before.locator(".ub-revision-row-filler")).toHaveCount(1);
+    await expect(after.locator(".ub-revision-row-filler")).toHaveCount(1);
+    // Every row, and the end of both documents, starts at the same height on both sides.
+    const aligned = () => page.evaluate(() => {
+      const sides = [...document.querySelectorAll<HTMLElement>(".ub-revision-split .ProseMirror")];
+      const rows = sides.map(side => [...side.querySelectorAll<HTMLElement>(":scope > .ub-revision-row-start")]
+        .map(start => start.getBoundingClientRect().top).concat(side.getBoundingClientRect().bottom));
+      const [left = [], right = []] = rows;
+      return left.length === right.length && left.every((top, index) => Math.abs(top - (right[index] ?? Number.NaN)) <= 1);
+    });
+    await expect.poll(aligned).toBe(true);
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      const screenshot = info.outputPath(`split-${scheme}.png`);
+      await page.screenshot({ path: screenshot });
+      await info.attach(`split-${scheme}`, { path: screenshot, contentType: "image/png" });
+    }
+    await page.emulateMedia({ colorScheme: "light" });
+    // A block that grows late, like a drawing that finishes loading, realigns both sides.
+    await before.locator(":scope > .ub-revision-row").first().evaluate(element => { element.style.paddingBottom = "80px"; });
+    await expect.poll(aligned).toBe(true);
+    // A selection made on one side holds only that side's content.
+    const copied = await after.evaluate(element => {
+      const mounted = element as HTMLElement & { editor: Editor };
+      mounted.editor.commands.selectAll();
+      const clipboard = new DataTransfer();
+      element.dispatchEvent(new ClipboardEvent("copy", { clipboardData: clipboard, bubbles: true, cancelable: true }));
+      return { text: clipboard.getData("text/plain"), html: clipboard.getData("text/html") };
+    });
+    expect(copied.text).toContain("The blue fox stays.");
+    expect(copied.text).toContain("An added note.");
+    expect(copied.text).not.toContain("amber");
+    expect(copied.text).not.toContain("goes away");
+    expect(copied.html).not.toMatch(/ub-revision-|data-revision-change|revision-filler|data-id="revision-/);
+    // Without room for two readable columns, the single-column comparison returns.
+    await page.setViewportSize({ width: 860, height: 900 });
+    await expect(split).toHaveCount(0);
+    await expect(page.getByLabel("Document revision", { exact: true })).toContainText("The amberblue fox stays.");
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(split).toBeVisible();
+    await backToNow(page);
+    const live = editor(page);
+    await selectPositions(live, await live.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.content.size - 1));
+    await live.evaluate((element, copied) => {
+      const clipboard = new DataTransfer();
+      clipboard.setData("text/plain", copied.text);
+      clipboard.setData("text/html", copied.html);
+      element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true }));
+    }, copied);
+    await expect(live).toContainText("An added note.");
+    await expect(live.getByRole("heading", { name: "Rollout plan" })).toHaveCount(1);
+    await expect(live.locator("[data-revision-change], .ub-revision-filler")).toHaveCount(0);
+  });
+
   test("opening history preserves unsent comment and reply drafts", { tag: "@webkit" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
     const title = docTitle("Retained discussion drafts");
@@ -578,6 +684,13 @@ test.describe("document history through ub open", () => {
     const chart = view.locator(".ub-chart").filter({ has: page.getByRole("img", { name: "Historical latency", exact: true }) });
     await expect(chart).toHaveAttribute("data-draw-state", "success");
     await expect(chart.locator(".ub-chart-description")).toContainText("Latest values: Latency: 100 ms.");
+    if (await page.locator(".ub-revision-split").isVisible()) {
+      // Side by side, the predecessor draws its own numbers with the same mapping.
+      const earlier = earlierSide(page);
+      await expect(earlier.getByRole("table", { name: "Historical measurements", exact: true }).locator("tbody tr")).toHaveText(["2026-10-2010 ms", "2026-10-2120 ms"]);
+      await expect(earlier.locator(".ub-chart").filter({ has: page.getByRole("img", { name: "Historical latency", exact: true }) })
+        .locator(".ub-chart-description")).toContainText("Latest values: Latency: 20 ms.");
+    }
     await previous(page);
     await expect(table.locator("tbody tr")).toHaveText(["2026-10-2010 ms", "2026-10-2120 ms"]);
     await expect(chart).toHaveAttribute("data-draw-state", "success");

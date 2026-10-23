@@ -97,8 +97,14 @@
   /* Warning text needs darker light-mode ink than the fill/stroke accent. */
   --status-warning-ink: light-dark(oklch(0.48 0.1 75), var(--status-warning));
 
-  --revision-added-background: light-dark(oklch(0.92 0.04 240), oklch(0.3 0.05 240));
-  --revision-removed-background: light-dark(oklch(0.93 0.035 305), oklch(0.3 0.045 305));
+  /* Light green and red read as additions and removals, not as sync or errors. */
+  --revision-added-background: light-dark(oklch(0.89 0.07 150), oklch(0.36 0.07 150));
+  --revision-removed-background: light-dark(oklch(0.9 0.055 25), oklch(0.36 0.07 25));
+  --revision-added-row: light-dark(oklch(0.96 0.03 150), oklch(0.235 0.035 150));
+  --revision-removed-row: light-dark(oklch(0.96 0.022 25), oklch(0.235 0.035 25));
+  --revision-added-ink: light-dark(oklch(0.45 0.12 150), oklch(0.78 0.12 150));
+  --revision-removed-ink: light-dark(oklch(0.5 0.16 25), oklch(0.78 0.11 25));
+  --revision-filler: light-dark(oklch(0.93 0.005 75), oklch(0.2 0.005 65));
 
   --archived-background: light-dark(oklch(0.97 0.015 75), oklch(0.23 0.015 75));
   --archived-icon: light-dark(oklch(0.52 0.07 75), oklch(0.7 0.07 75));
@@ -273,7 +279,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ub-revision-restore[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
+.ub-revision-restore[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
 .ub-history-renamed s { color: var(--muted-foreground); }
 
 /* The revision's status row: who and when, position, and which revision. */
@@ -416,6 +422,55 @@
   font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
   margin-block: 0.35rem;
 }
+
+.ub-revision-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 2.25rem;
+  align-items: start;
+}
+.ub-revision-side { min-width: 0; }
+.ub-revision-side-label {
+  margin: 0 0 0.5rem;
+  color: var(--muted-foreground);
+  font: 500 var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
+}
+.ub-revision-side .ProseMirror > .ub-revision-row { position: relative; }
+.ub-revision-side-before .ProseMirror > :is(.ub-revision-row-removed, .ub-revision-row-changed) {
+  background: var(--revision-removed-row);
+  box-shadow: -0.5rem 0 0 var(--revision-removed-row), 0.5rem 0 0 var(--revision-removed-row);
+}
+.ub-revision-side-after .ProseMirror > :is(.ub-revision-row-added, .ub-revision-row-changed) {
+  background: var(--revision-added-row);
+  box-shadow: -0.5rem 0 0 var(--revision-added-row), 0.5rem 0 0 var(--revision-added-row);
+}
+/* A narrow gutter mark: − removed, + added, ~ changed. */
+.ub-revision-side .ProseMirror > .ub-revision-row:not([data-revision-mark=""])::before {
+  content: attr(data-revision-mark);
+  position: absolute;
+  inset-inline-start: calc(-1 * var(--block-gutter) + 0.1rem);
+  top: 0.15em;
+  font: 600 var(--type-caption-size)/1.4 var(--font-mono);
+  pointer-events: none;
+}
+.ub-revision-side-before .ProseMirror > .ub-revision-row::before { color: var(--revision-removed-ink); }
+.ub-revision-side-after .ProseMirror > .ub-revision-row::before { color: var(--revision-added-ink); }
+.ub-revision-filler { height: 0; }
+/* Rows never share a collapsed margin, so each side's spacing is its own and
+   the aligner's padding moves exactly what it measures. */
+.ub-revision-side .ProseMirror > .ub-revision-row { margin-bottom: 0; }
+.ub-revision-side .ProseMirror > .ub-revision-row-start:first-child + .ub-revision-row { margin-top: 0; }
+.ub-revision-row-start,
+.ub-revision-row-end { padding-top: 0.1px; }
+.ub-revision-row-start > .ub-revision-fields { margin-block: 0.35rem; }
+.ub-revision-row-end { pointer-events: none; }
+.ub-revision-row-end.ub-revision-row-filler {
+  background: repeating-linear-gradient(135deg, var(--revision-filler) 0 6px, transparent 6px 12px);
+  border-radius: var(--radius-sm);
+}
+/* Drawings show their whole state on each side, without in-drawing marks. */
+.ub-revision-side [data-revision-change] { text-decoration: none; }
+.ub-revision-side :is(.ub-ablauf, .ub-wireframe, .ub-chart, .ub-terminal) [data-revision-change] { background: none; }
 
 .ub-revision-block-removed {
   border-inline-start: 2px solid var(--muted-foreground);
@@ -823,6 +878,14 @@ body {
 
 .ub-page-pane > .ub-column {
   margin-inline: 0;
+}
+
+/* Side by side, the comparison takes its own width, up to about 1200px. */
+.ub-revision-split-pane {
+  flex: 1 1 calc(var(--pane-document-inset) + 1200px);
+}
+.ub-revision-split-pane > .ub-column {
+  max-width: 1200px;
 }
 
 .ub-tag {

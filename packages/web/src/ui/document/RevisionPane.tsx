@@ -5,6 +5,7 @@ import { getMeta } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import type * as Y from "yjs";
 import { createRevisionEditor } from "../../editor/revision-view.js";
+import { createRevisionSplit } from "../../editor/revision-split.js";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import { toast } from "sonner";
 import { writeToClipboard } from "../../editor/source-chrome.js";
@@ -135,29 +136,68 @@ function HistoryState({ history }: { history: DocumentHistory }): ReactElement {
   </div>;
 }
 
+/** Below this much room beside the sidebar, two columns are too narrow to read. */
+const SPLIT_MIN_WIDTH = 900;
+
+/** The width the pane may take, which its own width cannot tell while it is narrow. */
+function useAvailableWidth(target: { current: HTMLElement | null }, active: boolean): number | null {
+  const [width, setWidth] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const container = target.current?.parentElement;
+    if (!active || container == null) return;
+    const measure = (): void => setWidth(container.getBoundingClientRect().width);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [target, active]);
+  return width;
+}
+
+function authorName(entry: RevisionEntry | undefined, earliest: boolean): string {
+  return entry === undefined ? "Unknown author" : revisionAuthor(entry, earliest).name;
+}
+
 export function RevisionPane({ history, docLinks, workspaceSettings, writable = false }: {
   history: DocumentHistory; docLinks: DocLinkContext | null; workspaceSettings: Y.Doc | null; writable?: boolean;
 }): ReactElement | null {
+  const pane = useRef<HTMLElement | null>(null);
   const host = useRef<HTMLDivElement | null>(null);
+  const beforeHost = useRef<HTMLDivElement | null>(null);
+  const afterHost = useRef<HTMLDivElement | null>(null);
   const [failed, setFailed] = useState<DocumentHistory["selection"]>(null);
-  const [editor, setEditor] = useState<Editor | null>(null);
+  const [editors, setEditors] = useState<{ side: string; editor: Editor }[]>([]);
   const restoreReason = useId();
-  const { selection } = history;
+  const { selection, entries } = history;
   const title = selection === null ? "" : getMeta(selection.after).title;
+  const available = useAvailableWidth(pane, history.active);
+  // The earliest revision has nothing to compare; narrow panes keep one column.
+  const split = selection?.before != null && available !== null && available >= SPLIT_MIN_WIDTH;
   useEffect(() => {
-    if (host.current === null || selection === null) return;
+    if (selection === null) return;
     try {
+      if (split && selection.before !== null && beforeHost.current !== null && afterHost.current !== null) {
+        const view = createRevisionSplit({ beforeElement: beforeHost.current, afterElement: afterHost.current,
+          before: selection.before, after: selection.after, docLinks, workspaceSettings });
+        setEditors([{ side: "before", editor: view.before }, { side: "after", editor: view.after }]);
+        return () => { setEditors([]); view.destroy(); };
+      }
+      if (host.current === null) return;
       const editor = createRevisionEditor({ element: host.current, before: selection.before, after: selection.after, docLinks, workspaceSettings });
       editor.setOptions({ editorProps: { attributes: { "aria-label": "Document revision" } } });
-      setEditor(editor);
-      return () => { setEditor(null); editor.destroy(); };
+      setEditors([{ side: "single", editor }]);
+      return () => { setEditors([]); editor.destroy(); };
     } catch { setFailed(selection); }
-  }, [selection, docLinks, workspaceSettings]);
+  }, [selection, split, docLinks, workspaceSettings]);
   if (!history.active) return null;
-  if (selection === null) return <section className="ub-pane ub-page-pane ub-document-pane ub-revision-pane">
+  if (selection === null) return <section ref={pane} className="ub-pane ub-page-pane ub-document-pane ub-revision-pane">
     <div className="ub-column"><HistoryState history={history} /></div>
   </section>;
-  return <section className="ub-pane ub-page-pane ub-document-pane ub-revision-pane">
+  const entry = entries?.[selection.index];
+  const predecessor = selection.comparedWith ?? entries?.[selection.index + 1];
+  const total = entries?.length ?? 0;
+  return <section ref={pane} className={`ub-pane ub-page-pane ub-document-pane ub-revision-pane${split ? " ub-revision-split-pane" : ""}`}>
     <div className="ub-column">
       {/* Stays in view while the comparison scrolls; revisions keep no tags. */}
       <header className="ub-revision-header">
@@ -173,10 +213,17 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
         <RevisionStatus history={history} writable={writable} />
       </header>
       {failed === selection && <p role="status">This client cannot display this revision. Update the client and try again.</p>}
-      <div className="ub-editor-frame ub-revision-view">
-        <div className="ub-editor" ref={host} />
-        {editor !== null && <CardButtonControls editor={editor} canWrite={() => false} />}
-      </div>
+      {split ? <div className="ub-revision-split">
+        <div className="ub-revision-side ub-revision-side-before">
+          <p className="ub-revision-side-label">Before · {authorName(predecessor, selection.index + 2 >= total)}</p>
+          <div className="ub-editor-frame ub-revision-view"><div className="ub-editor" ref={beforeHost} /></div>
+        </div>
+        <div className="ub-revision-side ub-revision-side-after">
+          <p className="ub-revision-side-label">After · {authorName(entry, selection.index + 1 >= total)}</p>
+          <div className="ub-editor-frame ub-revision-view"><div className="ub-editor" ref={afterHost} /></div>
+        </div>
+      </div> : <div className="ub-editor-frame ub-revision-view"><div className="ub-editor" ref={host} /></div>}
+      {editors.map(({ side, editor }) => <CardButtonControls key={side} editor={editor} canWrite={() => false} />)}
     </div>
   </section>;
 }
