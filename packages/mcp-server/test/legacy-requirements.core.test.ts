@@ -70,10 +70,10 @@ describe("stored requirement documents", () => {
       title: "New topic", description: "Former requirements qualify as regular targets.",
       kind: "decision", related: page.uuid, discussion: page.uuid,
     });
-    expect(decision).toMatchObject({ governs: page.uuid, discussion: page.uuid });
+    expect(decision).toMatchObject({ related: [page.uuid], discussion: page.uuid });
     await rig.ok("set_metadata", { uuid: page.uuid, title: "Renamed proposal", tags: ["rfc"] });
     const edited = await rig.ok("edit_block", {
-      uuid: page.uuid, block_id: page.blocks[0].id, old_text: page.blocks[0].text,
+      uuid: page.uuid, block_id: page.blocks[0].id, old_text: "Existing answer.",
       new_text: "Edited answer.", rev: page.blocks[0].rev,
     });
     await rig.ok("annotate", { uuid: page.uuid, block_id: edited.block.id, start: 0, end: 6, text: "New comment." });

@@ -11,7 +11,7 @@
 import { randomUUID } from "node:crypto";
 import { upsertDirectoryEntry } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { removeTempDirs, startServer, testConfig } from "./core-helpers.js";
+import { readBlocks, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
@@ -111,8 +111,9 @@ describe("inline document references", () => {
         },
       ],
     });
-    expect(created.blocks[0].text).toBe("See The Hub for details");
-    expect(created.blocks[0].doc_links).toEqual([
+    const [written] = await readBlocks(rig, created.uuid, created.blocks);
+    expect(written.text).toBe("See The Hub for details");
+    expect(written.doc_links).toEqual([
       { start: 4, end: 11, docId: target.uuid },
     ]);
 
@@ -153,8 +154,9 @@ describe("inline document references", () => {
     // Upper-cased in, canonical out — of the resolution, the write and the
     // answer alike. A second spelling would be a second document to everything
     // that compares ids, starting with the room name.
-    expect(source.blocks[1].text).toBe("Hub");
-    expect(source.blocks[1].doc_links).toEqual([
+    const cited = (await readBlocks(rig, source.uuid, source.blocks))[1];
+    expect(cited.text).toBe("Hub");
+    expect(cited.doc_links).toEqual([
       { start: 0, end: 3, docId: target.uuid },
     ]);
 
@@ -250,7 +252,7 @@ describe("inline document references", () => {
       description: DESCRIPTION,
       blocks: [{ type: "paragraph", text: "See the hub docs" }],
     });
-    const block = doc.blocks[0];
+    const [block] = await readBlocks(rig, doc.uuid, doc.blocks);
     const unknown = randomUUID();
 
     const refusedInsert = await rig.call("insert_block", {

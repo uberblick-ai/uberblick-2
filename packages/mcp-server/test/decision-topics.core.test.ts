@@ -45,9 +45,11 @@ describe("decision topics through directory stubs", () => {
     ] as const;
     const records = (await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs;
     for (const [record, related] of expected) {
-      expect(record).toMatchObject({ governs: related[0], related });
-      expect(await rig.ok("get_doc", { uuid: record.uuid })).toMatchObject({ governs: related[0], related });
-      expect(records.find((row: any) => row.uuid === record.uuid)).toMatchObject({ governs: related[0], related });
+      // The stored scalar view stays out of answers: `related` names every page.
+      for (const answer of [record, await rig.ok("get_doc", { uuid: record.uuid }), records.find((row: any) => row.uuid === record.uuid)]) {
+        expect(answer).toMatchObject({ related });
+        expect(answer).not.toHaveProperty("governs");
+      }
       const before = Y.encodeStateAsUpdate(rig.instance.replicas.replica(record.uuid).doc);
       expect((await rig.call("set_metadata", { uuid: record.uuid, related: [third.uuid] })).payload.error).toBe("schema_validation");
       expect(Y.encodeStateAsUpdate(rig.instance.replicas.replica(record.uuid).doc)).toEqual(before);
@@ -113,7 +115,7 @@ describe("decision topics through directory stubs", () => {
     const first = await decision(rig, { related: page.uuid });
     // Released records hold only the scalar relation in their document room.
     getMetaMap(rig.instance.replicas.replica(first.uuid).doc).delete("related");
-    expect(await rig.ok("get_doc", { uuid: first.uuid })).toMatchObject({ governs: page.uuid, related: [page.uuid] });
+    expect(await rig.ok("get_doc", { uuid: first.uuid })).toMatchObject({ related: [page.uuid] });
     const next = await decision(rig, { supersedes: first.uuid });
     expect(next.related).toEqual([page.uuid]);
     const otherPage = await rig.ok("create_doc", { title: "Other page", description: "A regular owning page." });
@@ -165,7 +167,7 @@ describe("decision topics through directory stubs", () => {
     const read = await rig.ok("get_doc", { uuid: a.uuid });
     expect(read.successors.map((record: any) => [record.uuid, record.status]).sort()).toEqual([[b, "rejected"], [c, "decided"]].sort());
     expect(read.resolution.inForce).toBeNull();
-    expect(read.resolution.conflicts.map((record: any) => record.uuid).sort()).toEqual([c, d].sort());
+    expect([...read.resolution.conflicts].sort()).toEqual([c, d].sort());
     expect((await rig.ok("get_doc", { uuid: page.uuid })).decisions).toMatchObject([{ topic: a.uuid, inForce: null }]);
     const exported = (await rig.ok("export_markdown", { uuid: page.uuid })).markdown;
     expect(exported).toContain(c);
@@ -223,7 +225,7 @@ describe("decision topics through directory stubs", () => {
     expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ uuid: b.uuid, inForce: b.uuid }]);
     expect(getDirectoryEntry(rig.instance.replicas.directory().doc, b.uuid)).not.toHaveProperty("tldr");
     expect((await rig.ok("list_docs", { kind: "decision" })).docs[0]).not.toHaveProperty("deleted");
-    expect((await rig.ok("get_doc", { uuid: b.uuid })).resolution.inForce).toMatchObject({ uuid: b.uuid, deleted: false });
+    expect((await rig.ok("get_doc", { uuid: b.uuid })).resolution).toMatchObject({ inForce: b.uuid, archived: false });
     rawDeleted(rig, a.uuid, true);
     rawDeleted(rig, b.uuid, false);
     expect((await rig.ok("get_sidebar")).groups[0].docs).toEqual([
@@ -234,7 +236,7 @@ describe("decision topics through directory stubs", () => {
     expect((await rig.ok("get_doc", { uuid: page.uuid })).decisions).toEqual([]);
     expect((await rig.ok("search", { query: "constraints" })).hits).toEqual([]);
     expect((await rig.call("set_metadata", { uuid: b.uuid, title: "Refused" })).payload.error).toBe("doc_archived");
-    expect((await rig.ok("get_doc", { uuid: b.uuid })).resolution).toMatchObject({ inForce: { uuid: b.uuid }, archived: true });
+    expect((await rig.ok("get_doc", { uuid: b.uuid })).resolution).toMatchObject({ inForce: b.uuid, archived: true });
     const restored = await rig.ok("restore_doc", { uuid: b.uuid });
     expect(restored.records.sort()).toEqual([a.uuid, b.uuid].sort());
     expect(restored.rooms.map((room: any) => room.purpose)).toEqual(["directory"]);

@@ -41,7 +41,6 @@ describe.each([
       blocks: [{ type: "chart", text: mapping }],
     });
     const { uuid } = created;
-    expect(created.blocks[0]).toMatchObject({ type: "chart", text: mapping });
     await rig.ok("update_data", { uuid, operations: [{
       collection: "observations", schema: { version: 1, schema: { type: "object" } },
       upsert: [{ id: "row-a", value: { day: "2026-10-08", count: 7, secret: "DATA_SENTINEL" } }],
@@ -57,7 +56,6 @@ describe.each([
     const edited = await rig.ok("edit_block", {
       uuid, block_id: read.blocks[0].id, old_text: mapping, new_text: next, rev: read.blocks[0].rev,
     });
-    expect(edited.block).toMatchObject({ type: "chart", text: next });
     const current = await rig.ok("get_doc", { uuid });
     expect(current.blocks).toMatchObject([
       { id: inserted.blocks[0].id, type: "chart", text: "{ incomplete" },

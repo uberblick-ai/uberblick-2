@@ -31,9 +31,7 @@ export const toolHelpDetails = {
     "without `kind` is refused before a document is created. A decision " +
     "may pass `related` as one UUID or a non-empty list of UUIDs of live, locally readable regular pages. " +
     "Every target is validated; a refusal names the offending UUID and a decision target refuses with " +
-    "related_not_regular_document. The set is fixed at creation. Existing `governs` values stay related " +
-    "pages without migration; `governs` still returns one page for compatibility, while `related` returns " +
-    "the whole set. Any other " +
+    "related_not_regular_document. The set is fixed at creation and answers return it as `related`. Any other " +
     "use of `related` is refused before a UUID is allocated or a room is written. A decision may also pass " +
     "`supersedes`, the UUID of a hydrated decision in a live topic it replaces. The reference is immutable, " +
     "and its predecessor's topic is copied forward; a successor without related inherits its whole set. " +
@@ -94,7 +92,7 @@ export const toolHelpDetails = {
     "names and record counts and names `get_data` for deliberate reads. It contains no schemas or record " +
     "values; documents without data omit it.\n\n" +
     "`createdAt` is the creation time as an ISO 8601 UTC string on the creating replica's clock, " +
-    "like `2026-10-21T18:36:13.213Z`. Decision directory entries return `createdAt` and `updatedAt` in the same format. " +
+    "like `2026-10-21T18:36:13.213Z`. Predecessor and successor entries return `createdAt` and `updatedAt` in the same format; topic rows return `updatedAt`. " +
     "These stamps are omitted when unknown or unrepresentable as a date. " +
     "Every document returns a page-level `rev`, identical to the web status row's full revision of its ordered block content. Metadata and comments do not affect it. " +
     "Regular documents return `code_check`: the latest comparison per repository, or [] when never checked. " +
@@ -105,9 +103,12 @@ export const toolHelpDetails = {
     "Regular-page `decisions` resolve live topics without opening decision rooms: related topics first, " +
     "then other topics found in backlinks, marked `relation: \"related\"` or `relation: \"linked\"`. Any " +
     "record can establish either relation, including superseded, rejected or withdrawn history. Each group " +
-    "is oldest-topic-first, deduplicated, with archived topics omitted; indexed links can lag content. " +
+    "is oldest-topic-first, deduplicated, with archived topics omitted; indexed links can lag content. Each " +
+    "topic is one row in list_docs' topic-row shape: the record in force, else pending, else first, naming the " +
+    "topic's records by UUID in `inForce`, `pending` and `conflicts`. A decision record's `resolution` names its " +
+    "topic's records the same way, with `archived`; get_doc any listed UUID for that record. " +
     "Decision-record metadata returns `discussion` as the connected RFC UUID or null. Every decision " +
-    "directory entry, including page decisions, predecessors, successors, inForce, pending and conflicts, " +
+    "row and directory entry, including page decisions, predecessors and successors, " +
     "caches it: null means no reference, absent means unknown until stub repair. The discussion is a " +
     "derived outbound edge in effective links, separately from curated links and recorded answer " +
     "attribution. The backlinks tool on the RFC lists its records; reading the RFC returns their topic marked " +
@@ -299,8 +300,8 @@ export const toolHelpDetails = {
     "its style and depth in place, together with a text edit or alone. To re-indent without changing text, " +
     "pass the same read text as `old_text` and `new_text`, the read `rev`, and the new `indent`. " +
     "Omitted list fields keep their existing values. The same old_text/rev assertions guard both text " +
-    "and attribute changes in one write; failures change neither. The result returns the new list fields " +
-    "and rev. Attribute-only changes keep the block id, text, inline formatting and comment threads, " +
+    "and attribute changes in one write; failures change neither. The result returns the block's id and new " +
+    "rev; get_doc reads the stored fields. Attribute-only changes keep the block id, text, inline formatting and comment threads, " +
     "and concurrent text edits from another replica survive the merge. These fields refuse on any " +
     "other block type; they do not convert blocks or move an item.\n\n" +
     "Marks anchor to positions in the block's text, not to the words they cover, and this tool writes text " +
@@ -530,7 +531,7 @@ export const toolHelpDetails = {
     "Links replace the curated UUID array and update backlinks. A newly added target unknown to this " +
     "replica's directory produces `doclink_target_not_known_locally` with `field: \"links\"`; archived " +
     "targets are accepted and an existing curated target can be retained unchanged. Passing get_doc's " +
-    "effective links back stores derived governs, supersedes and discussion UUIDs in the curated array too; " +
+    "effective links back stores derived related-page, supersedes and discussion UUIDs in the curated array too; " +
     "get_doc " +
     "deduplicates the resulting edges. Empty arrays clear existing tags or curated links.\n\n" +
     "An open decision accepts `discussion` as a live, locally readable regular document UUID, " +

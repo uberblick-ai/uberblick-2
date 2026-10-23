@@ -6,7 +6,7 @@ import { FAILURE_INSTRUCTIONS } from "../src/failures.js";
 import { HelpCatalog } from "../src/help.js";
 import { log } from "../src/log.js";
 import { INTERNAL_RESOURCE_ERROR_MESSAGE } from "../src/resource-adapter.js";
-import { FailingStore, removeTempDirs, startServer, TEST_SECRET, testConfig, toolNamed } from "./helpers.js";
+import { FailingStore, TEST_SECRET, readBlocks, removeTempDirs, startServer, testConfig, toolNamed } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
 const concepts = ["orientation", "edit_doc", "decisions", "workspaces", "markdown", "ablauf", "data", "tools", "tool-contracts"];
@@ -170,18 +170,17 @@ it("creates and re-indents list items using the published help examples", async 
   const inserted = await rig.ok("insert_block", {
     ...jsonSection(insertHelp.text, "Example"), uuid: created.uuid, after_block_id: seed.id,
   });
-  expect(inserted.blocks[0]).toMatchObject({ type: "list-item", list: "ordered", indent: 2 });
+  const [insertedRead] = await readBlocks(rig, created.uuid, inserted.blocks);
+  expect(insertedRead).toMatchObject({ type: "list-item", list: "ordered", indent: 2 });
 
   const editHelp = await rig.ok("get_help", { topic: "edit_block" });
   const edited = await rig.ok("edit_block", {
     ...jsonSection(editHelp.text, "Example"), uuid: created.uuid,
     block_id: inserted.blocks[0].id, rev: inserted.blocks[0].rev,
   });
-  expect(edited.block).toMatchObject({
-    id: inserted.blocks[0].id, text: inserted.blocks[0].text, list: "ordered", indent: 1,
-  });
+  expect(edited.block).toEqual({ id: inserted.blocks[0].id, rev: expect.any(String) });
   expect(edited.block.rev).not.toBe(inserted.blocks[0].rev);
-  expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual([seed, edited.block]);
+  expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual([seed, { ...insertedRead, indent: 1, rev: edited.block.rev }]);
 });
 
 it("advertises the server identity and instructions in initialize", async () => {
