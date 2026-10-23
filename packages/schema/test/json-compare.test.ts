@@ -109,6 +109,14 @@ describe("jsonComparisonRows", () => {
     expect(opened.some((row) => row.type === "run")).toBe(false);
   });
 
+  it("keeps a moved but unchanged item folded when unchanged parts collapse", () => {
+    const root = compared(AGENTS(["a", "b"]), AGENTS(["b", "a"]));
+    const open = jsonComparisonOpenPaths(root, true);
+    const moved = root.children.flatMap((child) => child.children).filter((child) => child.movedFrom !== undefined);
+    expect(moved).toHaveLength(1);
+    expect(open.has(moved[0]?.path ?? "")).toBe(false);
+  });
+
   it("opens breadth-first within the row budget when unchanged content is shown", () => {
     const root = compared(JSON.stringify({ a: { b: [1, 2, 3] }, c: Array.from({ length: 30 }, (_, index) => index) }), "{}");
     expect([...jsonComparisonOpenPaths(root, false)].sort()).toEqual(["", ".a", ".a.b"]);

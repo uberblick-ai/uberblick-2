@@ -306,8 +306,9 @@ function foldable(node: JsonCompareNode): boolean {
 export function jsonComparisonOpenPaths(root: JsonCompareNode, collapseUnchanged: boolean, budget = JSON_COMPARE_FIRST_VIEW_ROWS): Set<string> {
   const open = new Set<string>();
   if (collapseUnchanged) {
+    // A container opens when something inside it changed; a moved but unchanged item stays folded.
     const visit = (node: JsonCompareNode): void => {
-      if (!foldable(node) || !node.changedWithin) return;
+      if (!foldable(node) || !node.children.some((child) => child.changedWithin)) return;
       open.add(node.path);
       node.children.forEach(visit);
     };
