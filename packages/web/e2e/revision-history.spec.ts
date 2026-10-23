@@ -89,15 +89,18 @@ function savedState(uuid: string, title: string, text: string): string {
   }
 }
 
-async function serveHistory(page: Page, revisions: RevisionEntry[], states: Record<string, string>): Promise<void> {
+async function serveHistory(page: Page, revisions: RevisionEntry[], states: Record<string, string>): Promise<string[]> {
+  const snapshotReads: string[] = [];
   await page.route("**/api/revisions?**", async route => {
     const revision = new URL(route.request().url()).searchParams.get("revision");
+    if (revision !== null) snapshotReads.push(revision);
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(revision === null ? { revisions } : { state: states[revision] }),
     });
   });
+  return snapshotReads;
 }
 
 function dataHistory(uuid: string, title: string): Record<string, string> {
@@ -150,19 +153,29 @@ test.describe("document history through ub open", () => {
     await page.keyboard.type("An unchanged paragraph.");
     await expect.poll(() => harness().hubText(room)).toContain("An unchanged paragraph.");
     const trigger = history(page).getByRole("button", { name: "Name current revision", exact: true });
+    const input = history(page).getByRole("textbox", { name: "Revision name", exact: true });
+    // Escape settles the field; the blur that follows saves nothing.
     await trigger.focus();
     await page.keyboard.press("Enter");
-    const naming = page.getByRole("dialog", { name: "Name current revision", exact: true });
-    const input = naming.getByRole("textbox", { name: "Revision name", exact: true });
     await expect(input).toBeFocused();
+    await input.fill("Discarded name");
+    await page.keyboard.press("Escape");
+    await expect(input).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await page.keyboard.press("Tab");
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue("");
     await input.fill("Reviewed after auth rewrite");
     const screenshotName = browserName === "webkit" ? "naming-ipad-dark" : "naming-desktop-light";
     const screenshot = info.outputPath(`${screenshotName}.png`);
     await page.screenshot({ path: screenshot });
     await info.attach(screenshotName, { path: screenshot, contentType: "image/png" });
     await page.keyboard.press("Enter");
-    await expect(naming).toBeHidden();
+    await expect(input).toHaveCount(0);
     await expect(trigger).toBeFocused();
+    await expect(page.getByText("Revision named", { exact: true })).toBeVisible();
     await previous(page);
     await expect(history(page)).toContainText("“Reviewed after auth rewrite”, named by browser-person in the browser at ");
     await expect(history(page).locator(".ub-history-who .sr-only")).not.toContainText("from ");
@@ -201,15 +214,18 @@ test.describe("document history through ub open", () => {
     await previous(page);
     await expect(historicalEditor(page)).toBeVisible();
     await previous(page);
+    const renaming = history(page).getByRole("textbox", { name: "Revision name", exact: true });
     await activateControl(history(page).getByRole("button", { name: "Rename revision", exact: true }));
-    const renaming = page.getByRole("dialog", { name: "Rename revision", exact: true });
-    await renaming.getByRole("textbox", { name: "Revision name", exact: true }).fill("Reviewed baseline");
-    await activateControl(renaming.getByRole("button", { name: "Rename", exact: true }));
-    await expect(renaming).toBeHidden();
+    await expect(renaming).toHaveValue("Reviewed after auth rewrite");
+    await renaming.fill("Reviewed baseline");
+    await renaming.press("Enter");
+    await expect(renaming).toHaveCount(0);
     await expect(history(page)).toContainText("“Reviewed baseline”, named by browser-person in the browser at ");
+    // Saving an empty name removes it.
     await activateControl(history(page).getByRole("button", { name: "Rename revision", exact: true }));
-    await activateControl(renaming.getByRole("button", { name: "Remove name", exact: true }));
-    await expect(renaming).toBeHidden();
+    await renaming.fill("");
+    await renaming.press("Enter");
+    await expect(renaming).toHaveCount(0);
     await expect(view).toContainText("The amber fox stays.");
     await expect(history(page)).not.toContainText("Reviewed baseline");
     await expect(since).toHaveCount(0);
@@ -228,14 +244,18 @@ test.describe("document history through ub open", () => {
     await expect.poll(() => editor(peer).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.textContent))
       .toBe("Reviewed current content.");
     await activateControl(history(page).getByRole("button", { name: "Name current revision", exact: true }));
-    const naming = page.getByRole("dialog", { name: "Name current revision", exact: true });
-    await naming.getByRole("textbox", { name: "Revision name", exact: true }).fill("Reviewed");
+    const naming = history(page).getByRole("textbox", { name: "Revision name", exact: true });
+    await naming.fill("Reviewed");
     await selectPositions(editor(peer), 1);
     await peer.keyboard.type("Later collaborator change: ");
     await expect.poll(() => harness().hubText(`${harness().workspaceUuid}/${uuid}`)).toContain("Later collaborator change:");
-    await activateControl(naming.getByRole("button", { name: "Name revision", exact: true }));
-    await expect(naming.getByRole("alert")).toContainText("review the current content");
-    await activateControl(naming.getByRole("button", { name: "Cancel", exact: true }));
+    // The field named the state it opened on; the refusal keeps the typed text.
+    await naming.press("Enter");
+    await expect(history(page).getByRole("alert")).toContainText("review the current content");
+    await expect(naming).toHaveValue("Reviewed");
+    await expect(naming).toBeEnabled();
+    await naming.press("Escape");
+    await expect(naming).toHaveCount(0);
     await previous(page);
     await expect(historicalEditor(page)).toBeVisible();
     await expect(historyList(page).getByRole("button", { name: "Changes since this name", exact: true })).toHaveCount(0);
@@ -426,17 +446,18 @@ test.describe("document history through ub open", () => {
     const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
     const now = Date.now();
     await serveHistory(page, [
-      { id: "latest", author: { githubUsername: "Ben", surface: { kind: "mcp", name: "Claude Code" } }, startedAt: now - 60_000, endedAt: null },
-      { id: "reviewed", author: person, startedAt: now - 3_600_000, endedAt: now - 3_000_000,
+      { id: "latest", title, author: { githubUsername: "Ben", surface: { kind: "mcp", name: "Claude Code" } }, startedAt: now - 60_000, endedAt: null },
+      { id: "reviewed", title, author: person, startedAt: now - 3_600_000, endedAt: now - 3_000_000,
         name: { text: "Reviewed after the auth rewrite with a name long enough to be cut", namer: person, namedAt: now - 3_000_000, canManage: true } },
-      { id: "earliest", author: null, startedAt: null, endedAt: now - 7_200_000 },
+      { id: "earliest", title: "Kickoff notes", author: null, startedAt: null, endedAt: now - 7_200_000 },
     ], {
       latest: savedState(uuid, title, "Latest content."),
       reviewed: savedState(uuid, title, "Reviewed content."),
-      earliest: savedState(uuid, title, "Earliest content."),
+      earliest: savedState(uuid, "Kickoff notes", "Earliest content."),
     });
     await previous(page);
     await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(history(page)).not.toContainText("renamed from");
     const drawer = await showHistoryList(page);
     const list = historyList(page);
     await expect(list.getByRole("listitem")).toHaveCount(3);
@@ -453,7 +474,16 @@ test.describe("document history through ub open", () => {
     await expect(reviewed).toBeFocused();
     await closeHistoryList(page, drawer);
     await expect(history(page)).toContainText("2 of 3");
+    // This revision changed the title: the header shows it as it was, the row and the entry say so.
+    await expect(page.locator(".ub-revision-title")).toHaveText(title);
+    await expect(history(page).locator(".ub-history-renamed s")).toHaveText("Kickoff notes");
+    const restore = page.getByRole("button", { name: "Restore this version", exact: true });
+    await expect(restore).toHaveAttribute("aria-disabled", "true");
+    await expect(restore).toHaveAccessibleDescription("Restore is not available yet");
+    await expect(page.locator(".ub-revision-header")).toHaveCSS("position", "sticky");
     await showHistoryList(page);
+    await expect(reviewed).toContainText("renamed");
+    await expect(list.getByRole("button", { name: /Ben via Claude Code/ })).not.toContainText("renamed");
     const screenshotName = browserName === "webkit" ? "history-list-ipad-dark" : "history-list-desktop-light";
     const screenshot = info.outputPath(`${screenshotName}.png`);
     await page.screenshot({ path: screenshot });
@@ -489,6 +519,107 @@ test.describe("document history through ub open", () => {
     await expect(historicalEditor(page)).toHaveCount(0);
     await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeFocused();
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+  });
+
+  test("rename markers are available before visiting and survive a named comparison without misattributing the rename", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const uuid = await newDocument(page, docTitle("Rename attribution"));
+    const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
+    const snapshotReads = await serveHistory(page, [
+      { id: "latest", title: "Beta", author: { ...person, githubUsername: "Latest author" }, startedAt: 3_000, endedAt: null },
+      { id: "middle", title: "Beta", author: { ...person, githubUsername: "Middle author" }, startedAt: 2_000, endedAt: 3_000 },
+      { id: "baseline", title: "Alpha", author: person, startedAt: 1_000, endedAt: 2_000,
+        name: { text: "Kickoff", namer: person, namedAt: 2_000, canManage: true } },
+    ], {
+      latest: savedState(uuid, "Beta", "Latest content."),
+      middle: savedState(uuid, "Beta", "Middle content."),
+      baseline: savedState(uuid, "Alpha", "Baseline content."),
+    });
+    await previous(page);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(history(page)).not.toContainText("renamed from");
+    let drawer = await showHistoryList(page);
+    const list = historyList(page);
+    const middle = list.getByRole("button", { name: /Middle author/ });
+    await expect(middle).toContainText("renamed");
+    expect(snapshotReads).toEqual(["latest", "middle"]);
+    await expect(list.getByRole("button", { name: /Latest author/ })).not.toContainText("renamed");
+    await activateControl(middle);
+    await expect(historicalEditor(page)).toContainText("Middle content.");
+    await closeHistoryList(page, drawer);
+    await expect(history(page).locator(".ub-history-renamed s")).toHaveText("Alpha");
+    drawer = await showHistoryList(page);
+    const since = list.getByRole("button", { name: "Changes since this name", exact: true });
+    await activateControl(since);
+    await expect(since).toHaveAttribute("aria-current", "true");
+    await closeHistoryList(page, drawer);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(history(page)).toContainText("compared with “Kickoff”");
+    await expect(history(page)).not.toContainText("renamed from");
+    await showHistoryList(page);
+    await expect(middle).toContainText("renamed");
+  });
+
+  test("an older hub's title-less list keeps history available without markers or background snapshot reads", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const uuid = await newDocument(page, docTitle("Legacy revision titles"));
+    const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
+    const snapshotReads = await serveHistory(page, [
+      { id: "latest", author: { ...person, githubUsername: "Latest author" }, startedAt: 3_000, endedAt: null },
+      { id: "middle", author: { ...person, githubUsername: "Middle author" }, startedAt: 2_000, endedAt: 3_000 },
+      { id: "baseline", author: person, startedAt: 1_000, endedAt: 2_000,
+        name: { text: "Kickoff", namer: person, namedAt: 2_000, canManage: true } },
+    ], {
+      latest: savedState(uuid, "Alpha", "Latest content."),
+      middle: savedState(uuid, "Beta", "Middle content."),
+      baseline: savedState(uuid, "Alpha", "Baseline content."),
+    });
+    await previous(page);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    let drawer = await showHistoryList(page);
+    expect(snapshotReads).toEqual(["latest", "middle"]);
+    await expect(historyList(page).locator(".ub-history-renamed-tag")).toHaveCount(0);
+    await activateControl(historyList(page).getByRole("button", { name: /Middle author/ }));
+    await expect(historicalEditor(page)).toContainText("Middle content.");
+    await closeHistoryList(page, drawer);
+    await expect(history(page)).not.toContainText("renamed from");
+    drawer = await showHistoryList(page);
+    await activateControl(historyList(page).getByRole("button", { name: "Changes since this name", exact: true }));
+    await closeHistoryList(page, drawer);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(history(page)).toContainText("compared with “Kickoff”");
+    await expect(history(page)).not.toContainText("renamed from");
+    await expect(history(page)).not.toContainText("unavailable");
+    await showHistoryList(page);
+    await expect(historyList(page).locator(".ub-history-renamed-tag")).toHaveCount(0);
+    expect(snapshotReads).toEqual(["latest", "middle", "baseline", "latest", "baseline"]);
+  });
+
+  test("a named comparison attributes a rename back to the immediate predecessor", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const uuid = await newDocument(page, docTitle("Rename back attribution"));
+    const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
+    await serveHistory(page, [
+      { id: "latest", title: "Alpha", author: person, startedAt: 3_000, endedAt: null },
+      { id: "middle", title: "Beta", author: person, startedAt: 2_000, endedAt: 3_000 },
+      { id: "baseline", title: "Alpha", author: person, startedAt: 1_000, endedAt: 2_000,
+        name: { text: "Kickoff", namer: person, namedAt: 2_000, canManage: true } },
+    ], {
+      latest: savedState(uuid, "Alpha", "Latest content."),
+      middle: savedState(uuid, "Beta", "Middle content."),
+      baseline: savedState(uuid, "Alpha", "Baseline content."),
+    });
+    await previous(page);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(history(page).locator(".ub-history-renamed s")).toHaveText("Beta");
+    const drawer = await showHistoryList(page);
+    const since = historyList(page).getByRole("button", { name: "Changes since this name", exact: true });
+    await activateControl(since);
+    await expect(since).toHaveAttribute("aria-current", "true");
+    await closeHistoryList(page, drawer);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(history(page)).toContainText("compared with “Kickoff”");
+    await expect(history(page).locator(".ub-history-renamed s")).toHaveText("Beta");
   });
 
   test("opening history preserves unsent comment and reply drafts", { tag: "@webkit" }, async ({ browser }) => {

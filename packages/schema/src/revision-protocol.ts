@@ -6,6 +6,8 @@ export interface RevisionEntry {
   endedAt: number | null;
   /** Only sent in response to a list request that opts in to names. */
   name?: RevisionName | null;
+  /** Only sent when requested in a list and the stored snapshot title can be read. */
+  title?: string;
 }
 
 export interface RevisionName {
@@ -20,6 +22,7 @@ export interface RevisionRequest {
   operation: "list" | "get" | "name" | "rename" | "remove-name";
   revisionId?: string;
   includeNames?: true;
+  includeTitles?: true;
   name?: string;
   checksum?: string;
   surface?: { kind: string; name: string };
@@ -60,7 +63,9 @@ export function readRevisionRequest(raw: string): RevisionRequest | null {
   const value = json(raw);
   if (value?.type !== REQUEST || !identifier(value.requestId)) return null;
   const requestId = value.requestId;
-  if (value.operation === "list") return { requestId, operation: "list", ...(value.includeNames === true ? { includeNames: true } : {}) };
+  if (value.operation === "list") return { requestId, operation: "list",
+    ...(value.includeNames === true ? { includeNames: true } : {}),
+    ...(value.includeTitles === true ? { includeTitles: true } : {}) };
   if ((value.operation === "get" || value.operation === "remove-name") && identifier(value.revisionId)) {
     return { requestId, operation: value.operation, revisionId: value.revisionId };
   }
@@ -108,7 +113,8 @@ function timestamp(value: unknown): value is number | null {
 
 function entry(value: unknown): value is RevisionEntry {
   if (!object(value) || !identifier(value.id) || !timestamp(value.startedAt) || !timestamp(value.endedAt)) return false;
-  return author(value.author) && (value.name === undefined || value.name === null || revisionName(value.name));
+  return author(value.author) && (value.name === undefined || value.name === null || revisionName(value.name)) &&
+    (value.title === undefined || typeof value.title === "string");
 }
 
 function author(value: unknown): boolean {

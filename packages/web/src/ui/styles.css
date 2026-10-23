@@ -244,10 +244,42 @@
   .ub-history-icon { width: 44px; height: 44px; }
 }
 
+/* The revision view's compact header stays above the scrolling comparison. */
+.ub-revision-header {
+  position: sticky;
+  top: -0.75rem;
+  z-index: 3;
+  margin-top: -0.75rem;
+  padding-top: 0.75rem;
+  background: var(--page-ground);
+  background-attachment: fixed;
+}
+.ub-revision-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+.ub-revision-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0.2rem 0;
+  font-family: var(--font-display);
+  font-size: var(--type-h2-size);
+  font-weight: 500;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ub-revision-restore[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
+.ub-history-renamed s { color: var(--muted-foreground); }
+
 /* The revision's status row: who and when, position, and which revision. */
 .ub-history-controls {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   column-gap: 0.6rem;
   row-gap: 0.25rem;
@@ -261,21 +293,49 @@
 .ub-history-who {
   display: inline-flex;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  margin-inline-end: auto;
   align-items: center;
   gap: 0.4rem;
   white-space: nowrap;
   overflow: hidden;
 }
 .ub-history-author,
+.ub-history-renamed,
 .ub-history-compared { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ub-history-author { color: var(--foreground); font-weight: 500; }
-.ub-history-when { flex: none; }
+.ub-history-when,
+.ub-history-who > svg { flex: none; }
 .ub-history-state:empty { display: none; }
 .ub-history-position { font-family: var(--font-mono); font-size: var(--type-caption-size); white-space: nowrap; }
 .ub-history-tag { flex: none; color: var(--brand-ink); }
 .ub-history-name-trigger .ub-history-tag { color: currentColor; }
 .ub-history-name-trigger[data-named] { color: var(--brand-ink); opacity: 1; }
+/* Naming happens in place, in a field the width of a short name. */
+.ub-history-naming {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  color: var(--brand-ink);
+}
+.ub-history-name-field {
+  width: 14rem;
+  max-width: 50vw;
+  min-height: 26px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  padding: 0.1rem 0.4rem;
+  color: var(--foreground);
+  font: inherit;
+}
+.ub-history-name-field:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ub-history-name-field:disabled { opacity: 0.6; }
+.ub-history-name-error { color: var(--destructive); }
+@media (any-pointer: coarse) {
+  .ub-history-name-field { min-height: 44px; }
+}
 .ub-history-rev {
   flex: none;
   min-width: 0;
@@ -290,7 +350,7 @@
 }
 .ub-history-named {
   display: inline-flex;
-  max-width: 14rem;
+  max-width: 11rem;
   /* Sits with its tag, as one name. */
   margin-inline-start: -0.35rem;
   color: var(--foreground);
@@ -300,6 +360,10 @@
 .ub-history-named > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* The sidebar holds Back to now; narrow layouts keep it beside the revision. */
 .ub-history-now { display: none; }
+/* Narrow screens wrap the row rather than hide who made the revision. */
+@media (max-width: 767px) {
+  .ub-history-controls { flex-wrap: wrap; }
+}
 [data-sidebar-collapsed="true"] .ub-history-now { display: inline-flex; }
 @media (width < 80rem) {
   .ub-history-now { display: inline-flex; }

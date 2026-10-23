@@ -30,7 +30,7 @@ const entries: RevisionEntry[] = [
 
 function fakeHistory(overrides: Partial<DocumentHistory> = {}): DocumentHistory {
   return {
-    entries, selection: null, busy: false, error: null, available: true, active: true, entry: null,
+    entries, selection: null, busy: false, error: null, titles: {}, available: true, active: true, entry: null,
     back: vi.fn(), forward: vi.fn(), open: vi.fn(), sinceLastNamed: vi.fn(), sinceNamed: vi.fn(),
     name: vi.fn(), rename: vi.fn(), removeName: vi.fn(), now: vi.fn(), retry: vi.fn(), refresh: vi.fn(),
     ...overrides,

@@ -1,79 +1,123 @@
-import { useId, useState } from "react";
-import type { ReactElement } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import type { KeyboardEvent, ReactElement } from "react";
 import type * as Y from "yjs";
 import { validRevisionName } from "@uberblick/schema";
 import { toast } from "sonner";
 import { documentRevisionChecksum } from "../../shell/document-revisions.js";
-import { Button } from "../shadcn/button.js";
-import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "../shadcn/dialog.js";
-import { Input } from "../shadcn/input.js";
 import type { DocumentHistory } from "./document-history.js";
 import { TagIcon } from "./history-icons.js";
 
-/** A quiet tag icon opens naming beside the revision it names. */
+const INVALID = "Use a name of 1 to 100 characters on one line.";
+
+/** What the open field writes to, fixed when it opens. */
+type Target = { kind: "name"; checksum: Promise<string | Error> } | { kind: "rename"; revisionId: string; original: string };
+
+/**
+ * A quiet tag icon opens a one-line field in place. Each opening ends exactly
+ * once: Enter submits, Escape cancels, and blur submits only a changed,
+ * non-empty value that neither of those already settled.
+ */
 export function RevisionNameControls({ history, liveDocument, writable }: {
   history: DocumentHistory; liveDocument: Y.Doc | null; writable: boolean;
 }): ReactElement | null {
-  const [open, setOpen] = useState(false);
+  const [target, setTarget] = useState<Target | null>(null);
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
-  const [checksum, setChecksum] = useState<Promise<string | Error> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const settled = useRef(false);
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const field = useRef<HTMLInputElement | null>(null);
+  const refocus = useRef(false);
   const id = useId();
   const entry = history.entry;
   const naming = history.selection === null;
-  const manageable = entry?.name?.canManage === true;
-  if (!writable || (naming ? liveDocument === null : !manageable)) return null;
-  const perform = async (remove: boolean): Promise<void> => {
-    if (pending || history.busy || !writable) return;
+  const allowed = writable && (naming ? liveDocument !== null : entry?.name?.canManage === true);
+  const stillTargeted = target === null || (target.kind === "name" ? naming : entry?.id === target.revisionId);
+  // Authority or the revision can change while the field is open; it then closes unsaved.
+  useEffect(() => {
+    if (target !== null && (!allowed || !stillTargeted)) { settled.current = true; setTarget(null); setPending(false); }
+  }, [allowed, stillTargeted, target]);
+  useEffect(() => { if (target !== null && !pending) field.current?.focus(); }, [target, pending]);
+  // The trigger returns in the same render that closes the field.
+  useLayoutEffect(() => {
+    if (target !== null || !refocus.current) return;
+    refocus.current = false;
+    trigger.current?.focus({ preventScroll: true });
+  });
+  if (!allowed && target === null) return null;
+  const close = (focusTrigger: boolean): void => {
+    settled.current = true;
+    setTarget(null);
+    setError(null);
+    refocus.current = focusTrigger;
+  };
+  const open = (): void => {
+    settled.current = false;
+    setError(null);
+    if (naming && liveDocument !== null) {
+      setDraft("");
+      // This is the live document behind this control, before later room
+      // updates or the local server's replica can change the reviewed state.
+      setTarget({ kind: "name", checksum: documentRevisionChecksum(liveDocument)
+        .catch(() => new Error("Couldn't read this document's state. Review it and try again.")) });
+    } else if (entry?.name != null) {
+      setDraft(entry.name.text);
+      setTarget({ kind: "rename", revisionId: entry.id, original: entry.name.text });
+    }
+  };
+  const submit = async (): Promise<void> => {
+    if (target === null || pending || history.busy) return;
+    const text = draft.trim();
+    const remove = target.kind === "rename" && text === "";
+    if (target.kind === "rename" && text === target.original) { close(true); return; }
+    if (!remove && !validRevisionName(text)) { setError(INVALID); return; }
+    settled.current = true;
     setPending(true);
     setError(null);
     try {
-      if (!remove && !validRevisionName(draft)) throw new Error("Use a name of 1 to 100 characters on one line.");
-      if (remove && entry !== null) await history.removeName(entry.id);
-      else if (!naming && entry !== null) await history.rename(entry.id, draft);
-      else {
-        const captured = await checksum;
-        if (captured === null || captured instanceof Error) throw captured ?? new Error("Review this document and try naming it again.");
-        await history.name(draft, captured);
+      if (target.kind === "rename") {
+        if (remove) await history.removeName(target.revisionId);
+        else await history.rename(target.revisionId, text);
+      } else {
+        const checksum = await target.checksum;
+        if (checksum instanceof Error) throw checksum;
+        await history.name(text, checksum);
       }
-      setOpen(false);
-      toast.success(remove ? "Revision name removed" : naming ? "Revision named" : "Revision name updated");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Couldn't change this revision name. Try again.";
+      close(true);
+      toast.success(remove ? "Revision name removed" : target.kind === "name" ? "Revision named" : "Revision name updated");
+    } catch (failure) {
+      const message = failure instanceof Error ? failure.message : "Couldn't change this revision name. Try again.";
+      // The typed text stays; the person can retry, edit or press Escape.
+      settled.current = false;
       setError(message);
       toast.error(message);
     } finally { setPending(false); }
   };
-  return <Dialog open={open} onOpenChange={setOpen}>
-    <DialogTrigger asChild>
-      <button type="button" className="ub-history-icon ub-history-name-trigger" disabled={history.busy} data-named={naming ? undefined : ""}
-        aria-label={naming ? "Name current revision" : "Rename revision"} title={naming ? "Name this revision" : "Rename this revision"} onClick={() => {
-        setDraft(naming ? "" : entry?.name?.text ?? "");
-        setError(null);
-        // This is the live document behind this control, before later room
-        // updates or the local server's replica can change the reviewed state.
-        setChecksum(naming && liveDocument !== null ? documentRevisionChecksum(liveDocument)
-          .catch(() => new Error("Couldn't read this document's state. Review it and try again.")) : null);
-      }}><TagIcon /></button>
-    </DialogTrigger>
-    <DialogContent className="p-6" aria-describedby={undefined}>
-      <form className="flex flex-col gap-4" onSubmit={event => { event.preventDefault(); void perform(false); }}>
-        <DialogTitle className="m-0 ub-type-h2 font-semibold">{naming ? "Name current revision" : "Rename revision"}</DialogTitle>
-        <div className="flex flex-col gap-2">
-          <label htmlFor={id} className="font-medium">Revision name</label>
-          <Input id={id} value={draft} required disabled={pending}
-            aria-invalid={error !== null} aria-describedby={error === null ? undefined : `${id}-error`}
-            onChange={event => { setDraft(event.currentTarget.value); setError(null); }} />
-          {error !== null && <p id={`${id}-error`} role="alert" className="m-0 ub-type-ui text-destructive">{error}</p>}
-        </div>
-        <div className="flex flex-wrap justify-end gap-2">
-          {!naming && <Button type="button" variant="secondary" className="mr-auto" disabled={pending || history.busy}
-            onClick={() => void perform(true)}>Remove name</Button>}
-          <Button type="button" variant="secondary" className="bg-transparent" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button type="submit" disabled={pending || history.busy}>{naming ? "Name revision" : "Rename"}</Button>
-        </div>
-      </form>
-    </DialogContent>
-  </Dialog>;
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(true); return; }
+    // Enter that confirms an IME composition is not a submission.
+    if (event.key !== "Enter" || event.nativeEvent.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    void submit();
+  };
+  const onBlur = (): void => {
+    if (settled.current || pending || target === null) return;
+    const text = draft.trim();
+    if (text === "" || (target.kind === "rename" && text === target.original)) close(false);
+    else void submit();
+  };
+  if (target !== null) {
+    const label = target.kind === "name" ? "Name current revision" : "Rename revision";
+    return <span className="ub-history-naming">
+      <TagIcon />
+      <input ref={field} className="ub-history-name-field" value={draft} disabled={pending} maxLength={100}
+        aria-label="Revision name" title={label} placeholder={target.kind === "name" ? "Name this revision" : "Empty removes the name"}
+        aria-invalid={error !== null} aria-describedby={error === null ? undefined : `${id}-error`}
+        onChange={event => { setDraft(event.currentTarget.value); setError(null); }} onKeyDown={onKeyDown} onBlur={onBlur} />
+      {error !== null && <span id={`${id}-error`} role="alert" className="ub-history-name-error">{error}</span>}
+    </span>;
+  }
+  return <button ref={trigger} type="button" className="ub-history-icon ub-history-name-trigger" disabled={history.busy}
+    data-named={naming ? undefined : ""} aria-label={naming ? "Name current revision" : "Rename revision"}
+    title={naming ? "Name this revision" : "Rename this revision"} onClick={open}><TagIcon /></button>;
 }

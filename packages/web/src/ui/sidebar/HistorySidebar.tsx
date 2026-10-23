@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 import type { ReactElement } from "react";
+import { renamedFrom } from "../document/document-history.js";
 import type { DocumentHistory } from "../document/document-history.js";
 import { revisionAuthor, revisionGroups, revisionTime } from "../document/revision-list.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
@@ -79,6 +80,7 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
                 const when = entry.endedAt === null ? "in progress" : time === null ? null : formatTimestamp(time, now);
                 const name = entry.name?.text;
                 const current = index === selected;
+                const renamed = renamedFrom(entries, history.titles, index) !== null;
                 return (
                   <li key={entry.id}>
                     <button type="button" className={ROW_CLASSES} aria-current={current ? "true" : undefined}
@@ -94,9 +96,10 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
                         <span className={`min-w-0 truncate ${name === undefined ? "ub-type-ui font-medium text-sidebar-foreground" : "ub-type-caption text-(--sidebar-muted-foreground)"}`}>
                           {author.name}{author.surface !== "" && <span className="font-normal text-(--sidebar-muted-foreground)"> {author.surface}</span>}
                         </span>
-                        {when !== null && (
+                        {(when !== null || renamed) && (
                           <span className="ub-type-caption text-(--sidebar-muted-foreground)">
-                            {typeof when === "string" ? when : <time dateTime={when.dateTime} title={when.title}>{when.label}</time>}
+                            {when === null ? null : typeof when === "string" ? when : <time dateTime={when.dateTime} title={when.title}>{when.label}</time>}
+                            {renamed && <span className="ub-history-renamed-tag">{when === null ? "renamed" : " · renamed"}</span>}
                           </span>
                         )}
                       </span>
