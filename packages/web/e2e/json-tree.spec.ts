@@ -76,3 +76,42 @@ test("an MCP-authored tree folds by keyboard, and Edit and Done format the store
   await expect(row(page, ".limits")).toHaveAttribute("aria-expanded", "false");
   await expectMcp(() => codeText(session, uuid), (text) => { expect(text).toBe(FORMATTED); });
 });
+
+test("Expand opens a full-screen viewer whose search opens folded matches and follows remote edits", async ({ browser }) => {
+  const session = writer();
+  const source = JSON.stringify({ agents: [{ id: "implementer", labels: ["needs-review"] }, { id: "reviewer", labels: [] }], review: true,
+    filler: Array.from({ length: 30 }, (_, index) => ({ index })) });
+  const uuid = await treeDoc(session, "JSON tree viewer", source);
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
+  await page.locator(".ub-json-tree").hover();
+  await page.getByRole("button", { name: "Expand JSON tree", exact: true }).click();
+  const viewer = page.getByRole("dialog", { name: "JSON tree", exact: true });
+  await expect(viewer).toBeVisible();
+
+  const search = viewer.getByRole("searchbox", { name: "Search keys and values" });
+  const close = viewer.getByRole("button", { name: "Close JSON viewer", exact: true });
+  expect((await search.boundingBox())?.height).toBe((await close.boundingBox())?.height);
+  await viewer.getByRole("button", { name: "Collapse all", exact: true }).click();
+  await expect(viewer.locator('.ub-json-row[data-path=".agents"]')).toHaveAttribute("aria-expanded", "false");
+  await search.fill("review");
+  await expect(viewer.locator(".ub-json-tree-count")).toHaveText("1 of 3");
+  await expect(viewer.locator(".ub-json-match-current")).toHaveText("review");
+  await expect(viewer.locator('.ub-json-row[data-path=".agents[0].labels"]')).toHaveAttribute("aria-expanded", "true");
+  await search.press("Enter");
+  await expect(viewer.locator(".ub-json-tree-count")).toHaveText("2 of 3");
+  await search.press("Shift+Enter");
+  await search.press("Shift+Enter");
+  await expect(viewer.locator(".ub-json-tree-count")).toHaveText("3 of 3");
+
+  const block = await session.call<{ blocks: { id: string; type: string; text: string; rev: string }[] }>("get_doc", { uuid });
+  const code = block.blocks.find((entry) => entry.type === "code");
+  if (code === undefined) throw new Error("e2e: JSON tree block is missing");
+  await session.call("edit_block", { uuid, block_id: code.id, rev: code.rev, old_text: code.text, new_text: code.text.replace('"reviewer"', '"second reviewer"') });
+  await expect(viewer.getByText('"second reviewer"')).toBeVisible();
+  await expect(viewer.locator(".ub-json-tree-count")).toContainText("of 3");
+  await expect(search).toHaveValue("review");
+
+  await page.keyboard.press("Escape");
+  await expect(viewer).toBeHidden();
+  await expect(page.locator('.ub-json-tree [role="treeitem"][tabindex="0"]')).toBeFocused();
+});
