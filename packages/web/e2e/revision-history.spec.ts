@@ -1030,8 +1030,10 @@ test.describe("document history through ub open", () => {
     await expect.poll(async () => (await rulerGeometry(page)).scrollTop).toBe(0);
     // A drawing or image that loads late grows its row, and the marks follow it.
     const firstMark = (await rulerGeometry(page)).marks[0]?.height ?? 0;
-    await historicalEditor(page).locator(".ub-revision-row").first().evaluate((element) => { (element as HTMLElement).style.paddingBottom = "400px"; });
+    // A stylesheet changes layout without asking ProseMirror to repair a DOM mutation.
+    const growth = await page.addStyleTag({ content: ".ub-revision-side-after .ProseMirror > .ub-revision-row-start:first-child + .ub-revision-row { padding-bottom: 400px; }" });
     await expect.poll(async () => (await rulerGeometry(page)).marks[0]?.height ?? 0).toBeGreaterThan(firstMark + 20);
+    await growth.evaluate((element) => element.remove());
     // A taller window gives a taller ruler, still ending above the pane's edge.
     await page.setViewportSize({ width: 1440, height: 820 });
     await expect.poll(async () => { const now = await rulerGeometry(page); return Math.abs(now.paneBottom - 12 - now.bottom); }).toBeLessThan(1.5);
@@ -1136,8 +1138,7 @@ test.describe("document history through ub open", () => {
   });
 
   test("Back to now in the history drawer closes it and returns focus to the live history control", { tag: "@webkit" }, async ({ browser }) => {
-    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
-    await page.setViewportSize({ width: 1024, height: 768 });
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1024, height: 768 } } });
     const title = docTitle("History drawer return");
     const uuid = await newDocument(page, title);
     await serveHistory(page, [{ id: "latest", author: null, startedAt: 1_000, endedAt: null }], {
