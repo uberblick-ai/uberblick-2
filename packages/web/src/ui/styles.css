@@ -279,7 +279,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ub-revision-restore[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.ub-revision-restore[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
 .ub-history-renamed s { color: var(--muted-foreground); }
 
 /* The revision's status row: who and when, position, and which revision. */

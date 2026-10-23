@@ -284,7 +284,7 @@ describe("historical reads through the MCP boundary", () => {
     const { rig, uuid } = fixture;
     const entries = [
       {
-        id: "named-revision", futureField: "entry",
+        id: "named-revision", title: "Historical title", futureField: "entry",
         author: { githubUsername: "author", futureField: "author",
           surface: { kind: "web", name: "Browser", futureField: "author surface" } },
         startedAt: 0, endedAt: 100,
@@ -308,10 +308,16 @@ describe("historical reads through the MCP boundary", () => {
       { id: "unnamed-revision", author: null, startedAt: null, endedAt: "1970-01-01T00:00:00.000Z", name: null },
       { id: "legacy-revision", author: null, startedAt: null, endedAt: "1970-01-01T00:00:00.000Z", name: null },
     ];
-    fixture.reply((request, send) => send(request.operation === "list"
-      ? { requestId: request.requestId, ok: true, revisions: entries }
-      : { requestId: request.requestId, ok: true,
-        revision: request.name === "Named state" ? entries[0]! : entries[1]! }));
+    fixture.reply((request, send) => {
+      if (request.operation === "list") {
+        expect(request).toMatchObject({ includeNames: true });
+        expect(request).not.toHaveProperty("includeTitles");
+      }
+      send(request.operation === "list"
+        ? { requestId: request.requestId, ok: true, revisions: entries }
+        : { requestId: request.requestId, ok: true,
+          revision: request.name === "Named state" ? entries[0]! : entries[1]! });
+    });
     expect(await rig.ok("list_revisions", { uuid })).toEqual({ uuid, revisions: expected });
     for (const entry of expected.slice(0, 2)) {
       const named = await rig.ok("name_revision", { uuid, name: entry.name!.text });

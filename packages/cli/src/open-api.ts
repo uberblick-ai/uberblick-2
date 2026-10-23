@@ -128,7 +128,7 @@ async function serveRevisions(
   }
   try {
     if (revision === null) {
-      reply(200, { revisions: await listDocumentRevisions(engine.replicas, uuid, { includeNames: true }) });
+      reply(200, { revisions: await listDocumentRevisions(engine.replicas, uuid, { includeNames: true, includeTitles: true }) });
     } else {
       const snapshot = await getDocumentRevision(engine.replicas, uuid, revision);
       try {
