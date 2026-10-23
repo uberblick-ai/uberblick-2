@@ -319,6 +319,10 @@ describe("hub sync", () => {
 
     const offline = await rig.ok("sync_status", {});
     expect(offline.hub).toEqual(toolHub);
+    expect(offline.caughtUp).toBe(false);
+    expect(await rig.ok("list_docs", {})).toMatchObject({
+      complete: false, directoryHint: expect.stringContaining("sync_status"),
+    });
     // A retry can spend the short grace pending under load. Either reading
     // stays available internally after MCP projected out the evidence.
     expect(rig.instance.replicas.sync.state().cause).toMatch(/^(refused|timeout)$/);
@@ -350,6 +354,10 @@ describe("hub sync", () => {
     const synced = await rig.ok("sync_status", {});
     expect(synced.hub.status).toBe("connected");
     expect(synced.pendingRooms).toEqual([]);
+    expect(synced.caughtUp).toBe(true);
+    const listed = await rig.ok("list_docs", {});
+    expect(listed.complete).toBe(true);
+    expect(listed).not.toHaveProperty("directoryHint");
   });
 
   it("lets a fresh replica enumerate and search a corpus it has never seen", async () => {

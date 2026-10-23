@@ -25,6 +25,8 @@ export interface SyncStatus {
   workspace: string;
   database: string;
   hub: HubState;
+  /** The one summary: nothing is waiting to reach, or arrive from, the hub. */
+  caughtUp: boolean;
   /** Rooms holding local changes the hub has not acknowledged. Counts ROOMS. */
   unsyncedChanges: number;
   pendingRooms: PendingRoom[];
@@ -144,6 +146,7 @@ export async function collectSyncStatus(
     workspace: replicas.config.workspaceId,
     database: replicas.store.databasePath,
     hub: replicas.hubState(),
+    caughtUp: local ? replicas.persistenceError() === null : collectReplicaSyncState(replicas).caughtUp,
     unsyncedChanges: pending.length,
     pendingRooms: pending,
     lastSync: local ? null : replicas.readLastSync(),

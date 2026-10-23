@@ -50,14 +50,11 @@ export function activeTagCatalog(catalog: Y.Doc): TagCatalogEntry[] {
 }
 
 /**
- * With sync disabled, the local catalog is complete. Otherwise require the
- * settings handshake and acknowledgement; a pending seed conservatively reads
- * incomplete. Catalog reads settle first.
+ * A hub workspace's catalog needs the settings handshake and acknowledgement;
+ * a pending seed conservatively reads incomplete. Catalog reads settle first.
  */
 export function tagCatalogComplete(replicas: Replicas): boolean {
-  return (
-    !replicas.sync.enabled || replicas.isRoomQuiet(replicas.settings().room)
-  );
+  return replicas.roomComplete(replicas.settings().room);
 }
 
 /**

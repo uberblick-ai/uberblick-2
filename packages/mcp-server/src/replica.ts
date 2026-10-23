@@ -1315,6 +1315,16 @@ export class Replicas {
   }
 
   /**
+   * Whether this replica holds everything known of a room. Every replica on
+   * this computer shares one update log, so a local workspace's rooms are
+   * complete once replayed; a hub workspace's need the hub's delivery and
+   * acknowledgement. With sync disabled the local copy is all there is.
+   */
+  roomComplete(room: string): boolean {
+    return !this.sync.enabled || this.config.localWorkspace === true || this.isRoomQuiet(room);
+  }
+
+  /**
    * The hub reading agents receive. A local workspace's hub runs only while
    * `ub open` does, so its absence is the normal state rather than an outage.
    * `ub open` itself reads `sync.state()` to supervise the hub it starts.

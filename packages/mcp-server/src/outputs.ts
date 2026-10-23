@@ -288,7 +288,7 @@ export const outputSchemas = {
   list_tags: z.object({
     workspace: z.string(),
     complete: z.boolean(),
-    catalogHint: z.string().optional().describe("Why the catalog may be incomplete; present only when complete is false."),
+    catalogHint: z.string().optional().describe("Why tags may be missing; present only when complete is false."),
     tags,
     hub,
   }).strict(),
@@ -351,6 +351,8 @@ export const outputSchemas = {
   }).strict(),
   list_docs: z.object({
     workspace: z.string(),
+    complete: z.boolean().describe("Whether the hub has delivered the whole document directory to this replica."),
+    directoryHint: z.string().optional().describe("Why documents may be missing; present only when complete is false."),
     docs: z.array(z.union([listEntry, listDecision])),
     hub,
   }).strict(),
@@ -429,6 +431,7 @@ export const outputSchemas = {
     workspace: z.string(),
     database: z.string(),
     hub,
+    caughtUp: z.boolean().describe("Nothing is waiting to reach or arrive from the hub; check this before reporting work as delivered."),
     unsyncedChanges: count.describe("Number of rooms with local changes not acknowledged by the hub."),
     pendingRooms: z.array(z.object({ room: z.string(), seq: count }).strict()),
     lastSync: z.string().nullable(),
