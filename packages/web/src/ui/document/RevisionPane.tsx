@@ -4,6 +4,7 @@ import type { Editor } from "@tiptap/core";
 import { getMeta } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import type * as Y from "yjs";
+import { jsonChangeStarts, openFoldedChange, spanningComparison } from "../../editor/json-compare-panel.js";
 import { createRevisionEditor } from "../../editor/revision-view.js";
 import { createRevisionSplit } from "../../editor/revision-split.js";
 import type { RevisionRow } from "../../editor/revision-split.js";
@@ -165,9 +166,13 @@ const CHANGE_OFFSET = 8;
 /** A change within about two lines below its landing place, like the first one under the column labels, is the current one. */
 const CHANGE_SLACK = 64;
 
-/** Each run of consecutive changed rows is one change to step to. */
+function spanned(row: RevisionRow | undefined): boolean {
+  return row?.after.spanned === true;
+}
+
+/** Each run of consecutive changed rows is one change to step to; a JSON comparison brings its own. */
 function changeStarts(rows: readonly RevisionRow[]): number[] {
-  return rows.flatMap((row, index) => row.changed && !rows[index - 1]?.changed ? [index] : []);
+  return rows.flatMap((row, index) => row.changed && (!rows[index - 1]?.changed || spanned(row) || spanned(rows[index - 1])) ? [index] : []);
 }
 
 /**
@@ -184,10 +189,14 @@ function ChangeNavigation({ pane, header, side, rows }: {
     const line = header.current?.getBoundingClientRect().bottom ?? 0;
     return starts.flatMap((row) => {
       const element = side.querySelector<HTMLElement>(`:scope > .ub-revision-row-start[data-row="${row}"]`);
+      if (element === null) return [];
+      // A JSON comparison is stepped through change by change.
+      const block = spanned(rows[row]) ? spanningComparison(element) : null;
+      const inner = block === null ? [] : jsonChangeStarts(block);
       // Relative to where a change lands: 0 is the current change.
-      return element === null ? [] : [{ top: element.getBoundingClientRect().top - line - CHANGE_OFFSET, element }];
+      return (inner.length > 0 ? inner : [element]).map((each) => ({ top: each.getBoundingClientRect().top - line - CHANGE_OFFSET, element: each }));
     });
-  }, [header, side, starts]);
+  }, [header, side, starts, rows]);
   useEffect(() => {
     const scroller = pane.current;
     if (scroller === null) return;
@@ -204,7 +213,13 @@ function ChangeNavigation({ pane, header, side, rows }: {
     scroller.addEventListener("scroll", measure, { passive: true });
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(side);
-    return () => { cancelAnimationFrame(frame); scroller.removeEventListener("scroll", measure); observer?.disconnect(); };
+    side.addEventListener("ub-json-compare-render", measure);
+    return () => {
+      cancelAnimationFrame(frame);
+      scroller.removeEventListener("scroll", measure);
+      side.removeEventListener("ub-json-compare-render", measure);
+      observer?.disconnect();
+    };
   }, [pane, side, targets]);
   const go = (direction: -1 | 1): void => {
     const scroller = pane.current;
@@ -212,6 +227,8 @@ function ChangeNavigation({ pane, header, side, rows }: {
     const list = targets();
     const target = direction > 0 ? list.find((entry) => entry.top > CHANGE_SLACK) : list.findLast((entry) => entry.top < -2);
     if (target === undefined) return;
+    // A change folded inside a JSON comparison opens when navigation reaches it.
+    openFoldedChange(target.element);
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
     scroller.scrollBy({ top: target.top, behavior: reduce ? "auto" : "smooth" });
   };

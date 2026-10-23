@@ -45,10 +45,9 @@ function scalarClass(node: JsonSourceNode): string {
   return node.kind === "boolean" || node.kind === "null" ? "ub-json-literal" : "ub-json-punct";
 }
 
-/** Text with every case-insensitive occurrence of `query` marked. */
-function marked(className: string, text: string, query: string, current: boolean): HTMLSpanElement {
-  const element = span(className, "");
-  if (query === "") { element.textContent = text; return element; }
+/** Append text with every case-insensitive occurrence of a lowercase `query` marked. */
+export function appendMatches(element: HTMLElement, text: string, query: string, current: boolean): void {
+  if (query === "") { element.append(text); return; }
   const lower = text.toLowerCase();
   let at = 0;
   for (let found = lower.indexOf(query); found !== -1; found = lower.indexOf(query, found + query.length)) {
@@ -60,6 +59,12 @@ function marked(className: string, text: string, query: string, current: boolean
     at = found + query.length;
   }
   if (at < text.length) element.append(text.slice(at));
+}
+
+/** Text with every case-insensitive occurrence of `query` marked. */
+function marked(className: string, text: string, query: string, current: boolean): HTMLSpanElement {
+  const element = span(className, "");
+  appendMatches(element, text, query, current);
   return element;
 }
 

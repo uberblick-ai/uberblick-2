@@ -183,6 +183,27 @@ function jsonHistory(uuid: string, title: string): Record<string, string> {
   }
 }
 
+/** A long json-tree block with a change at each end and one inside a nested object in the middle, then a changed paragraph. */
+function longJsonHistory(uuid: string, title: string): Record<string, string> {
+  const document = new Y.Doc();
+  const keys = (from: number) => Object.fromEntries(Array.from({ length: 15 }, (_, index) => [`k${String(from + index).padStart(2, "0")}`, `value ${from + index}`]));
+  const settings = (first: string, deep: number, last: number) => JSON.stringify({
+    first, ...keys(1), nested: { deep: { level: deep, label: "steady" }, other: "steady" }, ...keys(16), last,
+  }, null, 2);
+  try {
+    initDoc(document, { uuid, title });
+    appendBlock(document, { type: "paragraph", text: "The planner's long settings." });
+    const block = appendBlock(document, { type: "code", language: "json-tree", text: settings("draft", 1, 1) });
+    const closing = appendBlock(document, { type: "paragraph", text: "The closing paragraph stays." });
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    editBlock(document, block, settings("draft", 1, 1), settings("final", 2, 2));
+    editBlock(document, closing, "The closing paragraph stays.", "The closing paragraph changed.");
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+  }
+}
+
 /** A change near the top, a long unchanged middle with headings, and a change near the end. */
 function foldHistory(uuid: string, title: string): Record<string, string> {
   const document = new Y.Doc();
@@ -747,6 +768,88 @@ test.describe("document history through ub open", () => {
       const [left, right] = [...row.children].map((cell) => cell.getBoundingClientRect().top);
       return Math.abs((left ?? 0) - (right ?? 0)) <= 1;
     }))).toBe(true);
+  });
+
+  test("changes inside a json-tree comparison get their own ruler marks and change steps, and open full screen", async ({ browser }, info) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 640 } } });
+    const title = docTitle("Long JSON comparison");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], longJsonHistory(uuid, title));
+    await previous(page);
+    const compare = page.locator(".ub-json-compare");
+    await expect(compare).toBeVisible();
+    await expect.poll(() => runningMotion(page)).toBe(0);
+    const changeMarks = async () => (await rulerGeometry(page)).marks.filter((mark) => mark.kind !== "same" && mark.kind !== "fold");
+    // One ruler mark per changed row inside the block, plus the changed paragraph.
+    const innerChanges = () => compare.locator(".ub-json-compare-row[data-change]").count();
+    await expect.poll(async () => (await changeMarks()).length).toBe(await innerChanges() + 1);
+    // Showing unchanged keys spreads the block; the marks follow, and the nested change is folded away.
+    await compare.getByRole("switch", { name: "Collapse unchanged" }).uncheck();
+    await expect(compare.locator('.ub-json-compare-row[data-path=".nested"]')).toHaveAttribute("data-folded", "true");
+    await expect.poll(async () => (await changeMarks()).length).toBe(await innerChanges() + 1);
+    const marks = await changeMarks();
+    expect((marks.at(-1)?.top ?? 0) - (marks[0]?.top ?? 0)).toBeGreaterThan(100);
+    // Next change visits each change inside the block, opening the folded one, then the paragraph after it.
+    const nextChange = page.getByRole("button", { name: "Next change", exact: true });
+    const pane = page.locator(".ub-revision-pane");
+    // Instant scrolling, so the buttons settle after each step.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const settled = () => page.evaluate(() => new Promise((resolve) => { requestAnimationFrame(() => requestAnimationFrame(resolve)); }));
+    let steps = 0;
+    for (; steps < 8 && await nextChange.isEnabled(); steps += 1) {
+      const before = await pane.evaluate((element) => element.scrollTop);
+      await activateControl(nextChange);
+      await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeGreaterThan(before);
+      await settled();
+      if (steps === 0) {
+        const screenshot = info.outputPath("json-ruler.png");
+        await page.screenshot({ path: screenshot });
+        await info.attach("json-ruler", { path: screenshot, contentType: "image/png" });
+      }
+    }
+    // The nested change in the middle, then the end; the first change is already current.
+    expect(steps).toBeGreaterThanOrEqual(2);
+    await expect(nextChange).toBeDisabled();
+    await expect(compare.locator('.ub-json-compare-row[data-path=".nested.deep.level"]')).toBeVisible();
+    await expect(compare.locator(".ub-json-compare-row[data-folded]")).toHaveCount(0);
+    await expect.poll(() => pane.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThan(2);
+    // Full screen shows the same rows, searches both panes, and steps between changes.
+    const rows = await compare.locator(".ub-json-compare-row").count();
+    await compare.getByRole("button", { name: "Expand JSON comparison" }).click();
+    const dialog = page.getByRole("dialog", { name: "JSON comparison" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator(".ub-json-compare-row")).toHaveCount(rows);
+    await expect(dialog.getByRole("switch", { name: "Collapse unchanged" })).not.toBeChecked();
+    await expect(dialog.getByRole("button", { name: "Previous change" })).toBeDisabled();
+    await dialog.getByRole("button", { name: "Next change" }).click();
+    await expect.poll(() => dialog.locator(".ub-json-compare-viewer-body").evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await dialog.getByRole("searchbox", { name: "Search keys and values" }).fill("value 2");
+    await expect(dialog.locator(".ub-json-tree-count")).toHaveText("1 of 11");
+    await expect(dialog.locator(".ub-json-compare-before mark.ub-json-match")).toHaveCount(11);
+    await expect(dialog.locator(".ub-json-compare-after mark.ub-json-match")).toHaveCount(11);
+    await expect(dialog.locator("mark.ub-json-match-current")).toHaveCount(2);
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      // Buttons ease into the new scheme.
+      await page.evaluate(() => Promise.all(document.getAnimations().map((animation) => animation.finished)));
+      const screenshot = info.outputPath(`json-compare-viewer-${scheme}.png`);
+      await page.screenshot({ path: screenshot });
+      await info.attach(`json-compare-viewer-${scheme}`, { path: screenshot, contentType: "image/png" });
+    }
+    await page.emulateMedia({ colorScheme: "light" });
+    // Search opens what holds a match, there and back in the block.
+    await dialog.getByRole("switch", { name: "Collapse unchanged" }).check();
+    await dialog.getByRole("searchbox", { name: "Search keys and values" }).fill("steady");
+    await expect(dialog.locator(".ub-json-tree-count")).toHaveText("1 of 2");
+    await expect(dialog.locator(".ub-json-compare-after mark.ub-json-match-current")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(compare.getByRole("button", { name: "Expand JSON comparison" })).toBeFocused();
+    await expect(compare.getByRole("switch", { name: "Collapse unchanged" })).toBeChecked();
+    await expect(compare.locator('.ub-json-compare-row[data-path=".nested.deep.label"]')).toBeVisible();
   });
 
   test("unchanged runs fold on both sides, open on demand, and changes are one step apart", async ({ browser }, info) => {
