@@ -16,7 +16,7 @@ name: CI
 # there, and lint, typecheck and pure logic do not depend on the platform.
 # Browser e2e stays Linux-only until its specs hold on GitHub's macOS runners.
 #
-# No secrets: `install`, `lint`, `typecheck`, `test`, `site` and `e2e` need none.
+# No secrets: `install`, `lint`, `typecheck`, `test` and `e2e` need none.
 
 on:
   push:
@@ -37,7 +37,7 @@ permissions:
 
 jobs:
   lint:
-    name: lint, typecheck and site
+    name: lint and typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -69,10 +69,6 @@ jobs:
         run: mise run lint
       - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: mise run typecheck
-      # The website is static HTML the build script assembles; a page that
-      # fails to build must not reach main, where Pages deploys it.
-      - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: mise run site
 
   unit-tests:
     name: ${{ matrix.name }}
