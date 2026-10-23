@@ -543,8 +543,9 @@ describe("the pending watermark", () => {
     seeded.close();
 
     // The marker attaches the room, hydration replays it, and the stub is
-    // repaired from the document itself.
-    const rig = await startServer(testConfig({ databasePath }));
+    // repaired from the document itself. A local workspace lists no pending
+    // rooms, so observe a hub workspace's marker.
+    const rig = await startServer({ ...testConfig({ databasePath }), localWorkspace: false });
     rigs.push(rig);
     const status = await rig.ok("sync_status", {});
     expect(

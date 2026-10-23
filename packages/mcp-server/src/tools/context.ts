@@ -117,7 +117,7 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
       {
         ...(doclink ? { docId: uuid } : { uuid }),
         inDirectory: false,
-        hub: replicas.sync.state(),
+        hub: replicas.hubState(),
       },
     );
   };
@@ -148,7 +148,7 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
       replicas.touch(replica);
       return replica;
     }
-    const hub = replicas.sync.state();
+    const hub = replicas.hubState();
     throw new ToolError(
       "doc_not_hydrated",
       `Document ${uuid} is known but its room has not synced to this replica yet`,
@@ -408,7 +408,7 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
     return {
       applied: true,
       synced: replicas.isRoomQuiet(replica.room),
-      hub: replicas.sync.state(),
+      hub: replicas.hubState(),
       ...descriptionGap(replica),
       ...tagGap(replica),
     };
@@ -438,7 +438,7 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
       applied: true,
       synced: detail.every((entry) => entry.synced),
       rooms: detail,
-      hub: replicas.sync.state(),
+      hub: replicas.hubState(),
       ...descriptionGap(primary),
       ...tagGap(primary),
     };

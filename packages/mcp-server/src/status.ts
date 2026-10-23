@@ -128,23 +128,26 @@ export function collectServingSyncStatus(
 
 /**
  * Diagnostics must still settle and answer after persistence has failed.
+ * CLI status reads this too. A local workspace has no hub waiting for its
+ * changes: `ub open` syncs them as it starts, so nothing counts as pending.
  */
 export async function collectSyncStatus(
   replicas: Replicas,
 ): Promise<SyncStatus> {
   await replicas.settle({ requireHealthy: false });
-  const pending = replicas.store.pendingRooms();
+  const local = replicas.config.localWorkspace === true;
+  const pending = local ? [] : replicas.store.pendingRooms();
 
   return {
     session: replicas.config.sessionId,
     agent: replicas.name,
     workspace: replicas.config.workspaceId,
     database: replicas.store.databasePath,
-    hub: replicas.sync.state(),
+    hub: replicas.hubState(),
     unsyncedChanges: pending.length,
     pendingRooms: pending,
-    lastSync: replicas.readLastSync(),
-    inFlightUpdates: replicas.sync.unsyncedChanges(),
+    lastSync: local ? null : replicas.readLastSync(),
+    inFlightUpdates: local ? 0 : replicas.sync.unsyncedChanges(),
     rooms: replicas.attachedReplicas().map((replica) => ({
       room: replica.room,
       appliedSeq: replica.lastSeq,

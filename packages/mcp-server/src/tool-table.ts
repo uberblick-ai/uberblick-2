@@ -610,7 +610,7 @@ export const tools: readonly Tool[] = [
     title: "Sync status",
     description:
       "Inspect local replica state, pending rooms and hub connection/acknowledgements. hub.status distinguishes " +
-      "disabled, retryable hub-down, auth-failed requiring action, and update-required protocol mismatch. " +
+      "local, disabled, retryable hub-down, auth-failed requiring action, and update-required protocol mismatch. " +
       "hub.recoveryClass, authRecovery and reason explain recovery; protocolVersion and hubProtocolVersion " +
       "identify the incompatible side. Tools still work locally. unsyncedChanges counts durable pending rooms; " +
       "inFlightUpdates counts provider sync messages on the current connection, resetting on reconnect. " +

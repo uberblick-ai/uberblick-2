@@ -410,6 +410,13 @@ export function hydrationRecovery(hubStatus: string): {
           `${stub}The hub is unreachable and this replica is reconnecting on its own, so the same call succeeds ` +
           "once it is back. Call again in a moment; sync_status says whether it has returned.",
       };
+    case "local":
+      return {
+        recoveryClass: "manual",
+        recovery:
+          `${stub}This local workspace's hub runs only while \`ub open\` does, so the room arrives once someone ` +
+          "runs it. Retrying before then cannot help.",
+      };
     default:
       return {
         recoveryClass: "retry",

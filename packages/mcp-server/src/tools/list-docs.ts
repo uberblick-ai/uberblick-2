@@ -87,6 +87,6 @@ export const listDocsOperation = operation(READ, inputSchema, (context, { tag, k
           } : {}),
         };
       }),
-    hub: replicas.sync.state(),
+    hub: replicas.hubState(),
   };
 });

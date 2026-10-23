@@ -30,7 +30,7 @@ const decisionAuthority = {
 };
 
 const hub = z.object({
-  status: z.enum(["disabled", "connecting", "connected", "hub-down", "auth-failed", "update-required", "quarantined"]),
+  status: z.enum(["disabled", "connecting", "connected", "hub-down", "auth-failed", "update-required", "quarantined", "local"]),
   url: z.string().nullable().describe("Configured hub endpoint; null when synchronization is disabled."),
   reason: z.string().optional(),
   recoveryClass: z.enum(["retry", "manual"]).optional(),
@@ -288,6 +288,7 @@ export const outputSchemas = {
   list_tags: z.object({
     workspace: z.string(),
     complete: z.boolean(),
+    catalogHint: z.string().optional().describe("Why the catalog may be incomplete; present only when complete is false."),
     tags,
     hub,
   }).strict(),

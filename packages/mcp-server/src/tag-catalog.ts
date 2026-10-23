@@ -72,7 +72,7 @@ function refuseTagValues(
     unknown,
     ...(tagCatalogComplete(replicas)
       ? {}
-      : incompleteCatalogRecovery(replicas.sync.state().status)),
+      : incompleteCatalogRecovery(replicas.hubState().status)),
   });
 }
 

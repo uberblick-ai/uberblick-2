@@ -662,7 +662,8 @@ export const toolHelpDetails = {
     "What this replica holds and what the hub has acknowledged.\n\n" +
     "`hub.status` distinguishes `hub-down`, a retryable connection or renewal failure, from `auth-failed`, an " +
     "authentication problem that needs human action. `disabled` means sync is disabled, so this server is " +
-    "local-only. Every reading carries `hub.recoveryClass`: `retry` means a missing room can still arrive as " +
+    "local-only. `local` means a local workspace whose hub runs only while `ub open` does: changes are saved " +
+    "on this computer, nothing needs retrying, and `ub open` syncs them as it starts. Every reading carries `hub.recoveryClass`: `retry` means a missing room can still arrive as " +
     "the connection recovers; `manual` means a person must act before sync can resume. This also applies to " +
     "shared-secret readings. `hub.authRecovery`, when present on `auth-failed`, distinguishes " +
     "`sign-in-required`, `no-workspace-access`, `credential-store` and `renewal-unavailable`; `hub.reason` " +
@@ -675,7 +676,8 @@ export const toolHelpDetails = {
     "ROOMS, not updates: the rooms holding local changes the hub has not acknowledged, the ones " +
     "`pendingRooms` names. It is read from the durable pending set, so it survives a restart and is non-zero " +
     "in local-only mode: work that never left this machine is unsynced, whether or not a connection was ever " +
-    "attempted. `inFlightUpdates` counts provider SYNC MESSAGES awaiting acknowledgement on the current " +
+    "attempted. A local workspace reports no pending rooms, `inFlightUpdates` 0 and `lastSync` null, as `ub " +
+    "status` does. `inFlightUpdates` counts provider SYNC MESSAGES awaiting acknowledgement on the current " +
     "connection, which is not a count of Yjs updates: the provider merges a batch of updates into one " +
     "message, counts a message before it goes out, and resets the backlog to the single sync-handshake " +
     "message on every reconnect — so it can read 1 for a whole document's worth of unsent work. It is in " +

@@ -165,11 +165,12 @@ describe("the short status report", () => {
     expect(renderStatus(reading)).not.toMatch(/rooms|local log|selection|recovery|failures|uuid/);
   });
 
-  it.each([null, "2026-10-05T19:58:12Z"])("prints the local report regardless of stored sync time %s", (lastSync) => {
+  // A local workspace's zero pending count and null sync time come from collectSyncStatus.
+  it("prints the local report", () => {
     const reading = report({
       binding: { workspaceId: WORKSPACE, hubUrl: null },
       hubVersion: "1.2.3",
-      lastSync, unsyncedChanges: 5,
+      lastSync: null, unsyncedChanges: 0,
     });
     expect(renderStatus(reading, ORIGIN, "My Workspace")).toBe(
       `workspace   My Workspace (${WORKSPACE})\n` +

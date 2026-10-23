@@ -43,7 +43,12 @@ export type HubStatus =
   | "hub-down"
   | "auth-failed"
   | "update-required"
-  | "quarantined";
+  | "quarantined"
+  | "local";
+
+export const LOCAL_HUB_REASON =
+  "Local workspace: changes are saved on this computer, so nothing needs retrying. " +
+  "They reach the web editor when `ub open` runs.";
 
 export interface HubState {
   status: HubStatus;
