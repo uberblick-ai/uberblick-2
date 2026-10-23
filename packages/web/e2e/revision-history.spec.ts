@@ -189,11 +189,11 @@ function linkedHistory(uuid: string, title: string, target: string, deleted: str
   }
 }
 
-/** Animations still running in the revision view: none once motion has settled. */
+/** Animations still running in either document view: none once motion has settled. */
 function runningMotion(page: Page): Promise<number> {
   return page.evaluate(() => document.getAnimations().filter((animation) => {
     const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
-    return animation.playState === "running" && target instanceof Element && target.closest(".ub-revision-pane") !== null;
+    return animation.playState === "running" && target instanceof Element && target.closest(".ub-document-pane") !== null;
   }).length);
 }
 
@@ -451,8 +451,9 @@ test.describe("document history through ub open", () => {
       for (const name of ["Previous revision", "Next revision", "Back to now"]) {
         const box = await history(page).getByRole("button", { name, exact: true }).boundingBox();
         if (box === null) throw new Error(`history control ${name} has no touch target`);
-        expect(box.height).toBeGreaterThanOrEqual(44);
-        expect(box.width).toBeGreaterThanOrEqual(44);
+        // WebKit's transformed bounding boxes can round a 44px target just below 44.
+        expect(box.height).toBeGreaterThanOrEqual(44 - 0.01);
+        expect(box.width).toBeGreaterThanOrEqual(44 - 0.01);
         expect(box.x).toBeGreaterThanOrEqual(0);
         expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
       }
@@ -1056,7 +1057,7 @@ test.describe("document history through ub open", () => {
     await expect(page.locator(".ub-revision-ghost")).toHaveCount(0);
   });
 
-  test("the revision header grows out of the live header, slides between titles, and never holds up leaving", async ({ browser }) => {
+  test("the revision header morphs both ways, slides between titles, and never holds up leaving", { tag: "@webkit" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1280, height: 800 } } });
     const title = docTitle("A long plan title that wraps onto a second line in the live document view");
     const uuid = await newDocument(page, title);
@@ -1099,7 +1100,10 @@ test.describe("document history through ub open", () => {
       Element.prototype.animate = function (this: Element, keyframes, options) {
         const first = Array.isArray(keyframes) ? keyframes[0] : undefined;
         if (this.matches(".ub-revision-split, .ub-revision-pane .ub-revision-view")) steps.push(String(first?.transform ?? ""));
-        return animate.call(this, keyframes, options);
+        const animation = animate.call(this, keyframes, options);
+        // Freeze the returning live layout to check its start and immediate usability.
+        if (this.closest(".ub-document-pane:not(.ub-revision-pane)") !== null) { animation.pause(); animation.currentTime = 0; }
+        return animation;
       };
     });
     const steps = () => page.evaluate(() => (window as unknown as { revisionSteps: string[] }).revisionSteps);
@@ -1113,18 +1117,53 @@ test.describe("document history through ub open", () => {
     await expect(heading).toHaveText(title);
     await expect.poll(steps).toEqual(["translateX(-40px)", "translateX(40px)"]);
     await expect.poll(() => runningMotion(page)).toBe(0);
-    // Leaving while the header is still arriving is immediate and leaves nothing running.
+    const from = await page.locator(".ub-revision-header").evaluate(element => {
+      const heading = element.querySelector<HTMLElement>(".ub-revision-title");
+      const title = heading?.getBoundingClientRect();
+      const status = element.querySelector(".ub-history-controls")?.getBoundingClientRect();
+      return { title: { top: title?.top, left: title?.left }, status: status?.top,
+        size: heading == null ? 0 : Number.parseFloat(getComputedStyle(heading).fontSize) * (title?.height ?? 0) / heading.offsetHeight };
+    });
     await backToNow(page);
     await expect(editor(page)).toBeVisible();
+    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    await expect(page.locator(".ub-revision-pane")).toHaveCount(0);
+    await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeFocused();
+    const returning = await live.evaluate(element => {
+      const title = element.querySelector<HTMLElement>(".ub-title");
+      const rect = title?.getBoundingClientRect();
+      const status = element.querySelector(".ub-status")?.getBoundingClientRect();
+      return { title: { top: rect?.top ?? 0, left: rect?.left ?? 0 }, status: status?.top ?? 0,
+        size: title === null ? 0 : Number.parseFloat(getComputedStyle(title).fontSize) * (rect?.height ?? 0) / title.offsetHeight,
+        paused: element.getAnimations({ subtree: true }).filter(animation => animation.playState === "paused").length };
+    });
+    expect(returning.paused).toBeGreaterThan(0);
+    expect(Math.abs(returning.title.top - (from.title.top ?? 0))).toBeLessThan(2);
+    expect(Math.abs(returning.title.left - (from.title.left ?? 0))).toBeLessThan(2);
+    expect(Math.abs(returning.size - from.size)).toBeLessThan(1);
+    expect(Math.abs(returning.status - (from.status ?? 0))).toBeLessThan(2);
+    await live.evaluate(element => { for (const animation of element.getAnimations({ subtree: true })) animation.finish(); });
+    const landed = await live.locator(".ub-title").boundingBox();
+    expect(Math.abs((landed?.y ?? 0) - start.top)).toBeLessThan(2);
+    expect(Math.abs((landed?.x ?? 0) - start.left)).toBeLessThan(2);
+    expect(Math.abs((landed?.height ?? 0) - start.height)).toBeLessThan(2);
+    expect(await live.evaluate(element => element.scrollTop)).toBe(24);
+    // Leaving during arrival and reopening during the reverse never delays navigation.
     await history(page).getByRole("button", { name: "Previous revision", exact: true }).click();
     await backToNow(page);
     await expect(editor(page)).toBeVisible();
+    await history(page).getByRole("button", { name: "Previous revision", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".ub-revision-pane")).toBeVisible();
+    expect(await live.evaluate(element => element.getAnimations({ subtree: true }).length)).toBe(0);
+    await backToNow(page);
+    await live.evaluate(element => { for (const animation of element.getAnimations({ subtree: true })) animation.finish(); });
     await expect(page.locator(".ub-revision-pane")).toHaveCount(0);
     expect(await page.evaluate(() => document.getAnimations().filter((animation) =>
       animation.effect instanceof KeyframeEffect && animation.effect.target instanceof Element && !animation.effect.target.isConnected && animation.playState === "running").length)).toBe(0);
   });
 
-  test("with reduced motion, history arrives, steps and folds without animating", async ({ browser }) => {
+  test("with reduced motion, history arrives, steps and folds without animating", { tag: "@webkit" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 640 }, reducedMotion: "reduce" } });
     const title = docTitle("Still comparison");
     const uuid = await newDocument(page, title);
@@ -1139,6 +1178,10 @@ test.describe("document history through ub open", () => {
     await expect(historicalEditor(page)).toContainText("Background paragraph 2");
     expect(await runningMotion(page)).toBe(0);
     await expect(page.locator(".ub-revision-ghost")).toHaveCount(0);
+    await backToNow(page);
+    await expect(editor(page)).toBeVisible();
+    await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeFocused();
+    expect(await runningMotion(page)).toBe(0);
   });
 
   test("Back to now in the history drawer closes it and returns focus to the live history control", { tag: "@webkit" }, async ({ browser }) => {

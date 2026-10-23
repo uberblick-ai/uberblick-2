@@ -13,6 +13,7 @@ import { useDocumentStubRepair, useShellReadings, useSyncDetails } from "./readi
 import { useShellNavigation } from "./navigation.js";
 import { useCreateDocument } from "./create-document.js";
 import { useDocumentHistory } from "../document/document-history.js";
+import { rememberRevisionHeader } from "../document/revision-motion.js";
 
 export function useAppShell() {
   const [path, navigate, documentList, onDocumentListStateChange] = useRoutePath<DocumentListState>();
@@ -31,7 +32,8 @@ export function useAppShell() {
   const onCreate = useCreateDocument({ ...rooms, ...environment, ...navigation });
   useDocumentStubRepair(rooms);
   const documentListState = documentList ?? INITIAL_DOCUMENT_LIST_STATE;
-  return { environment, layout, sync, rooms, history, historyBack, alter, pins, archive, threads, readings,
+  const displayedHistory = { ...history, now: () => { rememberRevisionHeader(historyBack.current); history.now(); } };
+  return { environment, layout, sync, rooms, history: displayedHistory, historyBack, alter, pins, archive, threads, readings,
     navigation, onCreate, navigate, documentListState, onDocumentListStateChange };
 }
 export type AppShell = ReturnType<typeof useAppShell>;

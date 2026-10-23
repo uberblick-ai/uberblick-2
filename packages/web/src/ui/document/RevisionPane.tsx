@@ -21,7 +21,7 @@ import { ClockIcon, DownIcon, NextIcon, PreviousIcon, TagIcon, UpIcon } from "./
 import { revisionAuthor, revisionTime } from "./revision-list.js";
 import { RevisionNameControls } from "./RevisionNameControls.js";
 import { RevisionRuler } from "./RevisionRuler.js";
-import { animateRows, morphFromLive, reducedMotion, rememberLiveHeader, revealRevision, snapshotRows, takeLiveHeader } from "./revision-motion.js";
+import { animateRows, morphFromLive, morphToLive, reducedMotion, rememberLiveHeader, revealRevision, snapshotRows, takeLiveHeader } from "./revision-motion.js";
 import type { HeaderMorph, RowSnapshot } from "./revision-motion.js";
 import { handleDocLinkClick } from "./doc-link-click.js";
 
@@ -45,8 +45,10 @@ function useFocusOnReturn(target: { current: HTMLElement | null }, active: boole
     was.current = active;
     const element = target.current;
     if (!returned || element === null || element.closest("[inert]")) return;
+    const stop = morphToLive(element);
     const focused = element.ownerDocument.activeElement;
     if (focused === null || focused === element.ownerDocument.body) element.focus({ preventScroll: true });
+    return stop;
   }, [target, active]);
 }
 

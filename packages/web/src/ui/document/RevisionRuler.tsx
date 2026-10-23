@@ -14,7 +14,7 @@ interface RulerLayout {
   /** The track, relative to the header it hangs from. */
   top: number;
   height: number;
-  marks: { kind: MarkKind; top: number; height: number }[];
+  marks: { key: string; kind: MarkKind; top: number; height: number }[];
   /** The part of the comparison in view. */
   view: { top: number; height: number };
 }
@@ -53,11 +53,12 @@ function measure(scroller: HTMLElement, header: HTMLElement, side: HTMLElement, 
   const height = Math.max(40, scroller.clientHeight - headerBottom - gap - RULER_INSET);
   // A comparison shorter than the track keeps its own scale instead of stretching.
   const scale = height / Math.max(span, height);
-  const marks = starts.map((_, index) => {
+  const marks = starts.flatMap((_, index) => {
     const top = tops[index] ?? 0;
     const next = tops[index + 1] ?? end;
     const row = rows[index];
-    return { kind: row === undefined ? "same" as const : markKind(row), top: (top - base) * scale, height: Math.max(0, next - top) * scale };
+    if (row === undefined) return [];
+    return [{ key: `${row.kind}-${row.at}`, kind: markKind(row), top: (top - base) * scale, height: Math.max(0, next - top) * scale }];
   });
   const viewTop = Math.min(span, Math.max(0, scroller.scrollTop + headerBottom - base));
   const viewBottom = Math.min(span, Math.max(viewTop, scroller.scrollTop + scroller.clientHeight - base));
@@ -97,7 +98,7 @@ export function RevisionRuler({ pane, header, side, rows }: {
       if (next === null) return null;
       const rounded: RulerLayout = {
         top: round(next.top), height: round(next.height),
-        marks: next.marks.map((mark) => ({ kind: mark.kind, top: round(mark.top), height: round(mark.height) })),
+        marks: next.marks.map((mark) => ({ key: mark.key, kind: mark.kind, top: round(mark.top), height: round(mark.height) })),
         view: { top: round(next.view.top), height: round(next.view.height) },
       };
       return JSON.stringify(rounded) === JSON.stringify(current) ? current : rounded;
@@ -150,9 +151,8 @@ export function RevisionRuler({ pane, header, side, rows }: {
   return <div ref={track} className="ub-revision-ruler" aria-hidden="true" data-testid="revision-ruler"
     style={{ top: layout.top, height: layout.height }}
     onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={end} onPointerCancel={end}>
-    {layout.marks.map((mark, index) => mark.height <= 0 ? null
-      // biome-ignore lint/suspicious/noArrayIndexKey: Marks are positions in the shown rows, which carry no other identity.
-      : <span key={index} className="ub-revision-ruler-mark" data-mark={mark.kind}
+    {layout.marks.map((mark) => mark.height <= 0 ? null
+      : <span key={mark.key} className="ub-revision-ruler-mark" data-mark={mark.kind}
         style={{ top: mark.top, height: Math.max(MARK_MIN[mark.kind], mark.height - 1.5) }} />)}
     <span className="ub-revision-ruler-view" style={{ top: layout.view.top, height: layout.view.height }} />
   </div>;
