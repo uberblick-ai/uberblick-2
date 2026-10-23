@@ -81,7 +81,7 @@ function property(entry: ts.ObjectLiteralExpression, name: string): ts.Expressio
   return found.initializer;
 }
 
-it("every registered tool is guarded and only hub reads wait after opening settle", () => {
+it("every registered tool is guarded and only hub revision requests wait after opening settle", () => {
   const root = join(PACKAGE_ROOT, "src");
   const sources = (readdirSync(root, { recursive: true }) as string[])
     .filter((path) => path.endsWith(".ts"))
@@ -130,12 +130,13 @@ it("every registered tool is guarded and only hub reads wait after opening settl
     if (name === "sync_status") {
       // This read delegates its opening settle to the shared status helper.
       expectOpeningWait(operation.handler, operation.source, /^collectSyncStatus\(context\.replicas\)$/);
-    } else if (["list_revisions", "get_revision", "get_data"].includes(name)) {
-      expect(tools.find(tool => tool.name === name)?.writes).toBeNull();
+    } else if (["list_revisions", "get_revision", "get_data", "name_revision"].includes(name)) {
+      expect(tools.find(tool => tool.name === name)?.writes).toBe(name === "name_revision" ? "document" : null);
       const waits = awaits(operation.handler);
       expect(waits).toHaveLength(1);
       expect(waits[0]!.expression.getText(operation.source)).toMatch(
-        name === "list_revisions" ? /^listDocumentRevisions\(/ : /^getDocumentRevision\(/,
+        name === "name_revision" ? /^mutateDocumentRevision\(/
+          : name === "list_revisions" ? /^listDocumentRevisions\(/ : /^getDocumentRevision\(/,
       );
     } else {
       expectSynchronousBody(operation.handler);

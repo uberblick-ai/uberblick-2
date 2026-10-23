@@ -493,6 +493,11 @@ Failures are marked \`isError: true\` and omit structuredContent, so success-sch
 | \`revisions_forbidden\` | Ask a workspace maintainer to grant read access before repeating the read. |
 | \`revisions_unsupported\` | Ask the hub operator to update to a version that serves automatic revisions. |
 | \`revision_not_found\` | List this document's revisions again and select an ID belonging to it. |
+| \`revision_stale_state\` | Synchronize and read the current state before naming it. |
+| \`revision_invalid_name\` | Supply 1 to 100 characters on one line. |
+| \`revision_already_named\` | Read existingName; its namer can rename or remove it in the web. |
+| \`revision_not_namer\` | Ask the naming account to manage the name in the web. |
+| \`revision_naming_outcome_unknown\` | A sent request may have applied. Read list_revisions before retrying; applied is null. |
 
 An empty history is returned only when the hub confirms it has no revisions. Archived documents remain readable.
 
@@ -500,7 +505,7 @@ Unknown help topics through get_help are manual refusals and name all valid topi
 
 ## Write durability and synced
 
-Successful writes report \`applied\`, \`synced\` and \`hub\`. Applied means this server's local update log holds the write. Hub describes the connection, not remote storage. Calls touching multiple rooms report each room independently; aggregate synced is true only when every touched room is acknowledged. There is no rollback or cross-room remote atomicity.
+Successful writes report \`applied\`, \`synced\` and \`hub\`. Applied means this server's local update log holds the write. Hub describes the connection, not remote storage. Calls touching multiple rooms report each room independently; aggregate synced is true only when every touched room is acknowledged. There is no rollback or cross-room remote atomicity. The hub-only \`name_revision\` operation is separate: applied means the hub applied its revision-store transaction and synced means it acknowledged that transaction; no local document log is written. A sent naming request whose reply is lost reports \`applied: null\` and \`synced: false\`; check list_revisions before retrying.
 
 \`synced: true\` means the hub acknowledged this update: it is in the hub's memory, and a healthy hub has scheduled the write on its store debounce — by default 2s after the last change to the document, 10s at the outside. It does NOT mean the hub has stored it: the write is still ahead of the hub's disk, and the store itself can fail. A hub that dies abruptly inside that window (SIGKILL, a crash, power loss) loses its volatile copy of the update. That is recoverable rather than fatal: \`applied: true\` is the durable half — this server's append-only update log holds the write before the tool returns and re-sends it on reconnect — so losing it for good takes the crash plus no replica holding that update ever coming back.
 

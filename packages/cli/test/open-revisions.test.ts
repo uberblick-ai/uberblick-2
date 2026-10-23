@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { silentLogger } from "@uberblick/hub";
 import { createTeamHub } from "@uberblick/hub/team";
@@ -6,7 +7,7 @@ import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import {
   appendBlock, encodeRevisionResponseFrames, getBlocks, getMeta, initDoc,
-  readRevisionRequest, roomForDoc, type RevisionEntry, type RevisionResponse,
+  readRevisionRequest, roomForDoc, snapshotRevision, type RevisionEntry, type RevisionResponse,
 } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
@@ -56,7 +57,7 @@ describe("ub open automatic revisions", () => {
       expect(await empty.json()).toEqual({ revisions: [] });
       expect(empty.headers.get("cache-control")).toBe("no-store");
       expect(empty.headers.get("access-control-allow-origin")).toBeNull();
-      expect((await fetch(path, { method: "POST", headers })).status).toBe(405);
+      expect((await fetch(path, { method: "POST", headers })).status).toBe(403);
       for (const query of ["", "?uuid=not-a-document"]) {
         const invalid = await fetch(`${app.url}api/revisions${query}`, { headers });
         expect(invalid.status).toBe(400);
@@ -86,6 +87,33 @@ describe("ub open automatic revisions", () => {
       expect(getBlocks(snapshot)).toMatchObject([{ text: "Historical text" }]);
       expect(snapshot.getMap("data").get('["record","sales","first"]')).toEqual({ amount: 42 });
       snapshot.getMap("meta").set("title", "Detached change");
+      expect(getMeta(document).title).toBe("Historical title");
+
+      const mutationHeaders = { ...headers, origin: app.url.slice(0, -1), "content-type": "application/json" };
+      const nameRequest = { uuid, operation: "name", name: "Reviewed in the browser",
+        expectedHash: createHash("sha256").update(snapshotRevision(document).checksum).digest("hex") };
+      expect((await fetch(path, { method: "POST", headers: mutationHeaders,
+        body: JSON.stringify({ ...nameRequest, surface: { kind: "mcp", name: "forged" } }) })).status).toBe(400);
+      const stale = await fetch(path, { method: "POST", headers: mutationHeaders,
+        body: JSON.stringify({ ...nameRequest, expectedHash: "0".repeat(64) }) });
+      expect(stale.status).toBe(409);
+      expect(await stale.json()).toMatchObject({ reason: "stale-state" });
+      const named = await fetch(path, { method: "POST", headers: mutationHeaders, body: JSON.stringify(nameRequest) });
+      expect(named.status).toBe(200);
+      const { revision: namedRevision } = await named.json() as { revision: RevisionEntry };
+      expect(namedRevision).toMatchObject({ id: revisions[0]!.id, author: revisions[0]!.author, endedAt: expect.any(Number),
+        name: { text: "Reviewed in the browser", namer: { githubUsername: "revision-person", surface: { kind: "browser" } },
+          namedAt: expect.any(Number), canManage: true } });
+      expect(namedRevision.endedAt).toBe(namedRevision.name!.namedAt);
+      const duplicate = await fetch(path, { method: "POST", headers: mutationHeaders, body: JSON.stringify(nameRequest) });
+      expect(await duplicate.json()).toMatchObject({ reason: "already-named", existingName: { text: "Reviewed in the browser" } });
+      const renamed = await fetch(path, { method: "POST", headers: mutationHeaders,
+        body: JSON.stringify({ uuid, operation: "rename", revisionId: namedRevision.id, name: "Review accepted" }) });
+      expect(await renamed.json()).toMatchObject({ revision: { name: { text: "Review accepted", namedAt: namedRevision.name!.namedAt } } });
+      const removed = await fetch(path, { method: "POST", headers: mutationHeaders,
+        body: JSON.stringify({ uuid, operation: "remove_name", revisionId: namedRevision.id }) });
+      expect(await removed.json()).toMatchObject({ revision: { id: namedRevision.id, author: namedRevision.author,
+        startedAt: namedRevision.startedAt, endedAt: namedRevision.endedAt, name: null } });
       expect(getMeta(document).title).toBe("Historical title");
 
       const connection = hub.hocuspocus.documents.get(roomForDoc(WORKSPACE, uuid))?.getConnections()[0];

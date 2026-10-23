@@ -246,6 +246,26 @@ const RECOVERIES: Record<string, Recovery> = {
     recoveryClass: "manual",
     guidance: "Ask the hub operator to update the hub to a version that serves automatic document revisions, then read revisions again.",
   },
+  revision_stale_state: {
+    recoveryClass: "reread",
+    guidance: "Wait for synchronization, read the current document with get_doc, then name the state the person intends to review. Nothing was named.",
+  },
+  revision_invalid_name: {
+    recoveryClass: "manual",
+    guidance: "Supply a name containing 1 to 100 characters on one line. Nothing was named.",
+  },
+  revision_already_named: {
+    recoveryClass: "manual",
+    guidance: "This state already has existingName. Its namer may rename or remove that name in the web; naming it again changes nothing.",
+  },
+  revision_not_namer: {
+    recoveryClass: "manual",
+    guidance: "Ask the account that named this revision to rename or remove it in the web. Nothing changed.",
+  },
+  revision_naming_outcome_unknown: {
+    recoveryClass: "reread",
+    guidance: "Call list_revisions to check whether the hub applied the name before trying again. A missing reply does not establish that nothing changed; reason distinguishes a silent admitted hub from a lost connection.",
+  },
   revision_not_found: {
     recoveryClass: "reread",
     guidance: "Call list_revisions for this document's uuid, then choose one of its revision IDs. A revision from another document cannot be read here.",
@@ -453,6 +473,12 @@ const REVISION_FAILURE_CODES: Record<RevisionClientFailure, string> = {
   deleted: "doc_deleted",
   "revision-not-found": "revision_not_found",
   unsupported: "revisions_unsupported",
+  "stale-state": "revision_stale_state",
+  "invalid-name": "revision_invalid_name",
+  "already-named": "revision_already_named",
+  "not-namer": "revision_not_namer",
+  archived: "doc_archived",
+  "naming-outcome-unknown": "revision_naming_outcome_unknown",
 };
 
 /**
@@ -470,7 +496,8 @@ export const FAILURE_INSTRUCTIONS =
   "of the write: `applied` (everything it meant to write is durable in this server's update log), `partial` (only " +
   "some of it is — `completed` names the rooms that are) and `synced`; `applied: false, partial: false` means " +
   "nothing changed locally, and nothing is ever rolled back — a partial write is finished by following `recovery`. " +
-  "A failure of a reading tool carries none of those three: there was no write to report on. `internal_error` is " +
+  "A failure of a reading tool carries none of those three: there was no write to report on. The hub-only " +
+  "name_revision reports applied: null when a sent request has no acknowledged outcome; read list_revisions before retrying. `internal_error` is " +
   "the one code with no class and no detail — an unmapped crash cannot honestly say what it did — and arguments " +
   "that do not match a tool's input schema never reach the tool at all: the MCP layer rejects them with its own " +
   "plain-text validation error, and nothing durable changes.";
@@ -523,7 +550,11 @@ export function toFailure(tool: FailedTool, error: unknown): ToolFailure {
     return stamped(tool, { error: "server_shutting_down", message: error.message });
   }
   if (error instanceof RevisionClientError) {
-    return stamped(tool, { error: REVISION_FAILURE_CODES[error.code], message: error.message });
+    return stamped(tool, { error: REVISION_FAILURE_CODES[error.code], message: error.message, ...error.details,
+      ...(tool.name === "name_revision" && error.code === "forbidden"
+        ? { recovery: "Ask a workspace maintainer to grant write access before naming this document. Nothing was named." }
+        : {}),
+    });
   }
   if (error instanceof SchemaError || error instanceof DataError) {
     return stamped(tool, {

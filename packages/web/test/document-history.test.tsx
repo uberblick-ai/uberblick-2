@@ -30,7 +30,7 @@ function deferred<T>() {
 }
 
 function client(read: DocumentRevisionsClient["get"] = async (_uuid, id) => document(id)): DocumentRevisionsClient {
-  return { list: vi.fn(async () => entries), get: vi.fn(read) };
+  return { list: vi.fn(async () => entries), get: vi.fn(read), name: vi.fn(), rename: vi.fn(), removeName: vi.fn() };
 }
 
 function mount(api: DocumentRevisionsClient | null, uuid: string | null = UUID, path = "/document/one"): {
@@ -50,6 +50,72 @@ function mount(api: DocumentRevisionsClient | null, uuid: string | null = UUID, 
 }
 
 describe("document history navigation", () => {
+  it("compares the newest revision with the most recent named state, skipping intervening revisions", async () => {
+    const api = client();
+    const named: RevisionEntry = { ...entries[2]!, name: {
+      text: "Reviewed", namer: { githubUsername: "ben", surface: { kind: "browser", name: "Browser" } }, namedAt: 50, canManage: true,
+    } };
+    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, named]);
+    const fix = mount(api);
+    await act(async () => {});
+    await act(async () => fix.reading().sinceLastNamed());
+    expect(getMeta(fix.reading().selection!.after).title).toBe("newest");
+    expect(getMeta(fix.reading().selection!.before!).title).toBe("earliest");
+    expect(fix.reading().selection!.comparedWith).toEqual(named);
+    expect(api.get).toHaveBeenCalledTimes(2);
+    await act(async () => fix.reading().back());
+    expect(fix.reading().selection?.comparedWith).toBeUndefined();
+    expect(fix.reading().entry?.id).toBe("middle");
+  });
+
+  it("keeps the displayed revision alive when a named comparison disappears or cannot be read", async () => {
+    const api = client();
+    const fix = mount(api);
+    await act(async () => {});
+    await act(async () => fix.reading().back());
+    const original = fix.reading().selection;
+    await act(async () => fix.reading().sinceLastNamed());
+    expect(fix.reading().selection).toBe(original);
+    expect(original?.after.isDestroyed).toBe(false);
+    expect(original?.before?.isDestroyed).toBe(false);
+    const named: RevisionEntry = { ...entries[2]!, name: {
+      text: "Reviewed", namer: null, namedAt: 50, canManage: false,
+    } };
+    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, named]);
+    const newer = document("Refreshed newest");
+    vi.mocked(api.get).mockResolvedValueOnce(newer).mockRejectedValueOnce(new DocumentHistoryError("unreachable"));
+    await act(async () => fix.reading().sinceLastNamed());
+    expect(newer.isDestroyed).toBe(true);
+    expect(fix.reading().selection).toBe(original);
+    expect(original?.after.isDestroyed).toBe(false);
+  });
+
+  it("updates naming metadata without discarding the selected document and preserves it when a write is refused", async () => {
+    const api = client();
+    const named: RevisionEntry = { ...entries[0]!, endedAt: 120, name: {
+      text: "Reviewed", namer: { githubUsername: "ben", surface: { kind: "browser", name: "Browser" } }, namedAt: 120, canManage: true,
+    } };
+    vi.mocked(api.name).mockResolvedValue(named);
+    vi.mocked(api.rename).mockRejectedValue(new DocumentHistoryError("not-namer"));
+    vi.mocked(api.removeName).mockResolvedValue({ ...named, name: null });
+    const fix = mount(api);
+    await act(async () => {});
+    await act(async () => fix.reading().name("Reviewed", "checksum"));
+    expect(api.name).toHaveBeenCalledWith(UUID, "Reviewed", "checksum", expect.any(AbortSignal));
+    expect(fix.reading().entries?.[0]).toEqual(named);
+    vi.mocked(api.list).mockResolvedValue([named, ...entries.slice(1)]);
+    await act(async () => fix.reading().back());
+    const snapshot = fix.reading().selection?.after;
+    await act(async () => {
+      await expect(fix.reading().rename(named.id, "Other")).rejects.toThrow(/Only the person/);
+    });
+    expect(fix.reading().entry).toEqual(named);
+    expect(fix.reading().busy).toBe(false);
+    await act(async () => fix.reading().removeName(named.id));
+    expect(fix.reading().entry?.name).toBeNull();
+    expect(fix.reading().selection?.after).toBe(snapshot);
+  });
+
   it("steps newest first with the predecessor for each comparison and clears earliest changes", async () => {
     const api = client();
     const fix = mount(api);
