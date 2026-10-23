@@ -137,9 +137,7 @@ export const toolHelpDetails = {
     "`text` is plain text and `rev` ignores marks. A prose block that carries inline references to other " +
     "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
     "link_range speak in, and absent where there are none. Table cell links count toward backlinks but do not " +
-    "have block-level `doc_links` ranges.\n\n" +
-    "Reading eligible guidance with get_doc counts toward this process’s briefing. This best-effort " +
-    "bookkeeping never fails the read or writes usage to a room or update log.",
+    "have block-level `doc_links` ranges.",
   list_revisions:
     "List a known document's automatic revisions from the hub, newest first, including an archived document. " +
     "The whole list is returned without paging. An empty list means the hub confirmed there are no revisions; " +
