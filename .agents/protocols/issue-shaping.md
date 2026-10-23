@@ -58,18 +58,18 @@ only for shared RFCs, resumption by UUID or intakes from an RFC.
 
 ## Record durable choices
 
-Consult bundled `get_help({topic: "lifecycle"})` for the initial-record
+Consult bundled `get_help({topic: "decisions"})` for the initial-record
 threshold and short answer guidance, and
 [delivery policy](delivery-policy.md#decision-records) for repository authority.
 Qualifying choices need decision records, not just issue text. Discover relevant
-decision records and any governing lifecycle guidance by purpose under
+decision records and any governing decision guidance by purpose under
 [AGENTS.md](../../AGENTS.md#read-for-the-action); use installed MCP schemas for calls.
 The meaning/destination authorization above applies; publishing an RFC creates
 no record on its own. When the person wants a topic for a shaped choice, follow
 [the explicit RFC connection](rfc-resumption.md#connect-a-decision-topic): an
 `open` first record uses `related` and `discussion`, and an `open` reconsideration
 uses `supersedes` and `discussion`. Never create an RFC automatically or tag the
-related page. Keep the record terse under bundled lifecycle help; elaborate
+related page. Keep the record terse under bundled decisions help; elaborate
 rationale in the connected RFC without repeating it in the record. Guidance
 belongs on the related page (delivery drafts it through `Corpus update`).
 

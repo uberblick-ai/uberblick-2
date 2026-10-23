@@ -30,7 +30,7 @@ Priority or decision record on its own.
 
 When the human wants a decision topic for a shaped choice, apply
 [shaping's recorded-choice rules](issue-shaping.md#record-durable-choices) and
-read bundled `get_help({topic: "lifecycle"})` for the initial-record threshold,
+read bundled `get_help({topic: "decisions"})` for the initial-record threshold,
 topic/answer definitions and short answer guidance. Create or reuse the RFC
 deliberately first; connecting a topic never creates an RFC or tags or edits the related page.
 
