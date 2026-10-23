@@ -2,11 +2,12 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
-import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, initDoc, insertBlock, snapshotRevision } from "@uberblick/schema";
+import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, initDoc, insertBlock, snapshotRevision } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import { activateControl, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
 import { assertNoViolations, WCAG_TAGS } from "./accessibility-assertions.js";
+import { setPointerSelection } from "./native-selection.js";
 
 function history(page: Page): Locator {
   return page.getByRole("group", { name: "Document history", exact: true });
@@ -95,15 +96,18 @@ function savedState(uuid: string, title: string, text: string): string {
   }
 }
 
-async function serveHistory(page: Page, revisions: RevisionEntry[], states: Record<string, string>): Promise<void> {
+async function serveHistory(page: Page, revisions: RevisionEntry[], states: Record<string, string>): Promise<string[]> {
+  const snapshotReads: string[] = [];
   await page.route("**/api/revisions?**", async route => {
     const revision = new URL(route.request().url()).searchParams.get("revision");
+    if (revision !== null) snapshotReads.push(revision);
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(revision === null ? { revisions } : { state: states[revision] }),
     });
   });
+  return snapshotReads;
 }
 
 /** Two states with a word change, a wrapped removal, an addition, a table row and an unchanged block. */
@@ -113,6 +117,7 @@ function splitHistory(uuid: string, title: string): Record<string, string> {
     initDoc(document, { uuid, title });
     const heading = appendBlock(document, { type: "heading", level: 2, text: "Rollout plan" });
     const fox = appendBlock(document, { type: "paragraph", text: "The amber fox stays." });
+    ((getBlocksFragment(document).get(1) as Y.XmlElement).firstChild as Y.XmlText).format(0, 3, { bold: {} });
     const gone = appendBlock(document, { type: "paragraph", text: "A paragraph that goes away, long enough to wrap across several lines in one half of the side-by-side comparison, so the opposite filler has to grow with it." });
     const table = appendBlock(document, { type: "table", text: "| Day | Latency |\n| --- | --- |\n| Mon | 10 |" });
     appendBlock(document, { type: "paragraph", text: "An unchanged closing paragraph." });
@@ -145,6 +150,36 @@ function foldHistory(uuid: string, title: string): Record<string, string> {
     const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
     editBlock(document, first, "The opening line changes.", "The opening line changed.");
     editBlock(document, last, "The closing line changes.", "The closing line changed.");
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+  }
+}
+
+function linkedHistory(uuid: string, title: string, target: string, deleted: string): Record<string, string> {
+  const document = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title });
+    appendBlock(document, { type: "paragraph", inline: [
+      { text: "Read ", marks: {} },
+      { text: "the linked document", marks: { docLink: target } },
+      { text: ".", marks: {} },
+    ] });
+    appendBlock(document, { type: "paragraph", inline: [
+      { text: "Read ", marks: {} },
+      { text: "the external page", marks: { link: "https://example.invalid/history-link" } },
+      { text: ".", marks: {} },
+    ] });
+    appendBlock(document, { type: "paragraph", inline: [
+      { text: "Read ", marks: {} },
+      { text: "the deleted document", marks: { docLink: deleted } },
+      { text: ".", marks: {} },
+    ] });
+    appendBlock(document, { type: "list-item", text: "A historical list item." });
+    appendBlock(document, { type: "table", text: "| Status |\n| --- |\n| Ready |" });
+    const paragraph = appendBlock(document, { type: "paragraph", text: "Earlier wording." });
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    editBlock(document, paragraph, "Earlier wording.", "Selected wording.");
     return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
   } finally {
     document.destroy();
@@ -348,7 +383,7 @@ test.describe("document history through ub open", () => {
     await expect(editor(peer)).toContainText("The blue fox stays.");
     await previous(page);
     const view = historicalEditor(page);
-    await expect(view).toHaveAttribute("contenteditable", "false");
+    expect(await view.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.isEditable)).toBe(false);
     await expect(history(page)).toContainText("browser-person");
     await expect(history(page)).toContainText(/from /);
     await expect(page).toHaveURL(new URL(path, harness().appUrl).href);
@@ -499,10 +534,10 @@ test.describe("document history through ub open", () => {
     const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
     const now = Date.now();
     await serveHistory(page, [
-      { id: "latest", author: { githubUsername: "Ben", surface: { kind: "mcp", name: "Claude Code" } }, startedAt: now - 60_000, endedAt: null },
-      { id: "reviewed", author: person, startedAt: now - 3_600_000, endedAt: now - 3_000_000,
+      { id: "latest", title, author: { githubUsername: "Ben", surface: { kind: "mcp", name: "Claude Code" } }, startedAt: now - 60_000, endedAt: null },
+      { id: "reviewed", title, author: person, startedAt: now - 3_600_000, endedAt: now - 3_000_000,
         name: { text: "Reviewed after the auth rewrite with a name long enough to be cut", namer: person, namedAt: now - 3_000_000, canManage: true } },
-      { id: "earliest", author: null, startedAt: null, endedAt: now - 7_200_000 },
+      { id: "earliest", title: "Kickoff notes", author: null, startedAt: null, endedAt: now - 7_200_000 },
     ], {
       latest: savedState(uuid, title, "Latest content."),
       reviewed: savedState(uuid, title, "Reviewed content."),
@@ -554,7 +589,7 @@ test.describe("document history through ub open", () => {
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   });
 
-  test("side by side, rows line up, selections stay on one side and copies keep authored content", async ({ browser }, info) => {
+  test("side by side, rows line up, selections stay on one side and copies keep authored content", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 900 } } });
     const title = docTitle("Side by side rows");
     const uuid = await newDocument(page, title);
@@ -594,37 +629,178 @@ test.describe("document history through ub open", () => {
     // A block that grows late, like a drawing that finishes loading, realigns both sides.
     await before.locator(":scope > .ub-revision-row").first().evaluate(element => { element.style.paddingBottom = "80px"; });
     await expect.poll(aligned).toBe(true);
-    // A selection made on one side holds only that side's content.
-    const copied = await after.evaluate(element => {
-      const mounted = element as HTMLElement & { editor: Editor };
-      mounted.editor.commands.selectAll();
-      const clipboard = new DataTransfer();
-      element.dispatchEvent(new ClipboardEvent("copy", { clipboardData: clipboard, bubbles: true, cancelable: true }));
-      return { text: clipboard.getData("text/plain"), html: clipboard.getData("text/html") };
-    });
-    expect(copied.text).toContain("The blue fox stays.");
-    expect(copied.text).toContain("An added note.");
-    expect(copied.text).not.toContain("amber");
-    expect(copied.text).not.toContain("goes away");
-    expect(copied.html).not.toMatch(/ub-revision-|data-revision-change|revision-filler|data-id="revision-/);
+    const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+    if (browserName === "chromium") await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    const copy = async () => {
+      await page.keyboard.press(`${modifier}+c`);
+      // WebKit proves the clipboard through the native paste into the live document below.
+      if (browserName !== "chromium") return null;
+      return page.evaluate(async () => {
+        const items = await navigator.clipboard.read();
+        const item = items[0];
+        if (item === undefined) throw new Error("No copied content");
+        return { text: await (await item.getType("text/plain")).text(), html: await (await item.getType("text/html")).text() };
+      });
+    };
+    for (const [own, other, word, excluded] of [[before, after, "amber", "blue"], [after, before, "blue", "amber"]] as const) {
+      const paragraph = own.locator(":scope > p").filter({ hasText: `The ${word} fox stays.` });
+      const start = await paragraph.boundingBox();
+      const end = await other.locator(":scope > p").filter({ hasText: `The ${excluded} fox stays.` }).boundingBox();
+      if (start === null || end === null) throw new Error("Missing comparison paragraph");
+      // Native pointer selection that leaves its column must keep both endpoints in its host.
+      await page.mouse.move(start.x + 20, start.y + 10);
+      await page.mouse.down();
+      await page.mouse.move(end.x + 90, end.y + 10, { steps: 12 });
+      await page.mouse.up();
+      await expect.poll(() => own.evaluate(element => {
+        const selection = window.getSelection();
+        return { nonempty: selection !== null && !selection.isCollapsed, anchor: element.contains(selection?.anchorNode ?? null), focus: element.contains(selection?.focusNode ?? null) };
+      })).toEqual({ nonempty: true, anchor: true, focus: true });
+      const selected = await own.evaluate(() => window.getSelection()?.toString().trim());
+      const partial = await copy();
+      if (partial !== null) {
+        expect(partial.text.trim()).toBe(selected);
+        expect(partial.text).not.toContain(excluded);
+      }
+      // A normal click and the platform shortcut select this side alone.
+      await setPointerSelection(paragraph, () => paragraph.click());
+      await expect(own).toBeFocused();
+      await page.keyboard.press(`${modifier}+a`);
+      await expect.poll(() => own.evaluate(() => window.getSelection()?.toString())).toContain("Rollout plan");
+      const copied = await copy();
+      if (copied !== null) {
+        expect(copied.text).toContain(`The ${word} fox stays.`);
+        expect(copied.text).not.toContain(excluded);
+        expect(copied.text).not.toMatch(/Before ·|After ·|Back to now/);
+        expect(copied.html).not.toMatch(/ub-revision-|data-revision-change|revision-filler|data-id="revision-/);
+      }
+      // Text input, deletion, formatting, cut and paste cannot change the snapshot.
+      const original = await own.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON());
+      await page.keyboard.type("mutation");
+      await page.keyboard.press("Backspace");
+      await page.keyboard.press("Enter");
+      await page.keyboard.press(`${modifier}+b`);
+      await page.keyboard.press(`${modifier}+x`);
+      await page.keyboard.press(`${modifier}+v`);
+      expect(await own.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON())).toEqual(original);
+      // Paste the real system clipboard into the live document, preserving authored formatting.
+      await setPointerSelection(paragraph, () => paragraph.click());
+      await page.keyboard.press(`${modifier}+a`);
+      await expect.poll(() => own.evaluate(() => window.getSelection()?.toString())).toContain("Rollout plan");
+      await copy();
+      await backToNow(page);
+      const live = editor(page);
+      // Prepare the paste target; the revision-side selections above use native input.
+      await live.evaluate(element => {
+        const mounted = element as HTMLElement & { editor: Editor };
+        mounted.editor.view.focus();
+        mounted.editor.commands.selectAll();
+      });
+      await page.keyboard.press(`${modifier}+v`);
+      await expect(live).toContainText(`The ${word} fox stays.`);
+      await expect(live).not.toContainText(excluded);
+      await expect(live).not.toContainText(/Before ·|After ·|Back to now/);
+      // This Linux WebKit clipboard backend delivers only plain text on native paste.
+      if (browserName === "chromium") {
+        await expect(live.getByRole("heading", { name: "Rollout plan" })).toHaveCount(1);
+        await expect(live.locator("strong").filter({ hasText: "The" })).toHaveCount(1);
+      }
+      await expect(live.locator('[data-revision-change], .ub-revision-filler, [data-id^="revision-"]')).toHaveCount(0);
+      await previous(page);
+      await expect(split).toBeVisible();
+    }
     // Without room for two readable columns, the single-column comparison returns.
     await page.setViewportSize({ width: 860, height: 900 });
     await expect(split).toHaveCount(0);
     await expect(page.getByLabel("Document revision", { exact: true })).toContainText("The amberblue fox stays.");
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect(split).toBeVisible();
-    await backToNow(page);
-    const live = editor(page);
-    await selectPositions(live, await live.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.content.size - 1));
-    await live.evaluate((element, copied) => {
-      const clipboard = new DataTransfer();
-      clipboard.setData("text/plain", copied.text);
-      clipboard.setData("text/html", copied.html);
-      element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true }));
-    }, copied);
-    await expect(live).toContainText("An added note.");
-    await expect(live.getByRole("heading", { name: "Rollout plan" })).toHaveCount(1);
-    await expect(live.locator("[data-revision-change], .ub-revision-filler")).toHaveCount(0);
+  });
+
+  test("each comparison side follows document links by click and Enter, and Tab leaves lists and tables", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 900 } } });
+    const targetTitle = docTitle("Historical link target");
+    const target = await newDocument(page, targetTitle);
+    const deleted = await newDocument(page, docTitle("Deleted historical link target"));
+    await activateControl(page.getByRole("button", { name: "Document actions", exact: true }));
+    await activateControl(page.getByRole("menuitem", { name: "Archive document", exact: true }));
+    await activateControl(page.getByRole("alertdialog").getByRole("button", { name: "Archive", exact: true }));
+    await activateControl(page.locator(".ub-archived-banner").getByRole("button", { name: "Delete…", exact: true }));
+    await activateControl(page.getByRole("alertdialog").getByRole("button", { name: "Delete", exact: true }));
+    await expect(page.locator(".ub-document-pane")).toHaveText("This document was deleted.");
+    const title = docTitle("Historical link source");
+    const uuid = await newDocument(page, title);
+    const sourceAddress = page.url();
+    await page.context().route("https://example.invalid/history-link", route => route.fulfill({
+      contentType: "text/html", body: "<p>Historical external link target</p>",
+    }));
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], linkedHistory(uuid, title, target, deleted));
+    await previous(page);
+    const split = page.locator(".ub-revision-split");
+    await expect(split).toBeVisible();
+    for (const side of [earlierSide(page), historicalEditor(page)]) {
+      const caretInLink = async (label: string): Promise<void> => {
+        const paragraph = side.locator(":scope > p").filter({ hasText: `Read ${label}.` });
+        // Place the caret before the link with a real click, then enter it with the keyboard.
+        await setPointerSelection(paragraph, () => paragraph.click({ position: { x: 2, y: 10 } }));
+        for (let step = 0; step < 6; step += 1) await page.keyboard.press("ArrowRight");
+        await expect.poll(() => paragraph.locator("a").evaluate(element => {
+          const selection = document.getSelection();
+          return selection?.isCollapsed && element.contains(selection.anchorNode);
+        })).toBe(true);
+      };
+      for (const open of ["click", "Enter"] as const) {
+        const link = side.locator(`a.ub-doclink[data-doc-id="${target}"]`);
+        await expect(link).toHaveAttribute("data-doc-id", target);
+        if (open === "click") {
+          await link.click();
+        } else {
+          await caretInLink("the linked document");
+          await page.keyboard.press("Enter");
+        }
+        await expect(page).toHaveURL(new RegExp(`/${harness().workspace}/${target}$`));
+        await expect(page.locator(".ub-title")).toHaveValue(targetTitle);
+        await expect(split).toHaveCount(0);
+        await page.goBack();
+        await expect(page.locator(".ub-title")).toHaveValue(title);
+        await previous(page);
+        await expect(split).toBeVisible();
+      }
+      await caretInLink("the external page");
+      const [popup] = await Promise.all([
+        page.context().waitForEvent("page", { timeout: 5_000 }),
+        page.keyboard.press("Enter"),
+      ]);
+      try {
+        await expect(popup).toHaveURL("https://example.invalid/history-link");
+      } finally {
+        await popup.close();
+        await page.bringToFront();
+      }
+      const deletedLink = side.locator(`a.ub-doclink[data-doc-id="${deleted}"]`);
+      await expect(deletedLink).toHaveAttribute("data-doc-link-state", "deleted");
+      await expect(deletedLink).not.toHaveAttribute("href");
+      await deletedLink.click();
+      await expect(page).toHaveURL(sourceAddress);
+      await expect(split).toBeVisible();
+      await caretInLink("the deleted document");
+      await page.keyboard.press("Enter");
+      await expect(page).toHaveURL(sourceAddress);
+      await expect(split).toBeVisible();
+      const original = await side.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON());
+      for (const block of [side.getByRole("listitem"), side.locator("td").last()]) {
+        for (const key of ["Tab", "Shift+Tab"]) {
+          await setPointerSelection(block, () => block.click());
+          await expect(side).toBeFocused();
+          await page.keyboard.press(key);
+          await expect.poll(() => side.evaluate(element => element.contains(document.activeElement))).toBe(false);
+        }
+      }
+      expect(await side.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON())).toEqual(original);
+    }
   });
 
   test("folding a section boundary keeps the next change and its fold bar visible", async ({ browser }) => {
@@ -755,6 +931,107 @@ test.describe("document history through ub open", () => {
     await expect(historicalEditor(page)).toHaveCount(0);
     await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeFocused();
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+  });
+
+  test("rename markers are available before visiting and survive a named comparison without misattributing the rename", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const uuid = await newDocument(page, docTitle("Rename attribution"));
+    const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
+    const snapshotReads = await serveHistory(page, [
+      { id: "latest", title: "Beta", author: { ...person, githubUsername: "Latest author" }, startedAt: 3_000, endedAt: null },
+      { id: "middle", title: "Beta", author: { ...person, githubUsername: "Middle author" }, startedAt: 2_000, endedAt: 3_000 },
+      { id: "baseline", title: "Alpha", author: person, startedAt: 1_000, endedAt: 2_000,
+        name: { text: "Kickoff", namer: person, namedAt: 2_000, canManage: true } },
+    ], {
+      latest: savedState(uuid, "Beta", "Latest content."),
+      middle: savedState(uuid, "Beta", "Middle content."),
+      baseline: savedState(uuid, "Alpha", "Baseline content."),
+    });
+    await previous(page);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(history(page)).not.toContainText("renamed from");
+    let drawer = await showHistoryList(page);
+    const list = historyList(page);
+    const middle = list.getByRole("button", { name: /Middle author/ });
+    await expect(middle).toContainText("renamed");
+    expect(snapshotReads).toEqual(["latest", "middle"]);
+    await expect(list.getByRole("button", { name: /Latest author/ })).not.toContainText("renamed");
+    await activateControl(middle);
+    await expect(historicalEditor(page)).toContainText("Middle content.");
+    await closeHistoryList(page, drawer);
+    await expect(history(page).locator(".ub-history-renamed s")).toHaveText("Alpha");
+    drawer = await showHistoryList(page);
+    const since = list.getByRole("button", { name: "Changes since this name", exact: true });
+    await activateControl(since);
+    await expect(since).toHaveAttribute("aria-current", "true");
+    await closeHistoryList(page, drawer);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(history(page)).toContainText("compared with “Kickoff”");
+    await expect(history(page)).not.toContainText("renamed from");
+    await showHistoryList(page);
+    await expect(middle).toContainText("renamed");
+  });
+
+  test("an older hub's title-less list keeps history available without markers or background snapshot reads", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const uuid = await newDocument(page, docTitle("Legacy revision titles"));
+    const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
+    const snapshotReads = await serveHistory(page, [
+      { id: "latest", author: { ...person, githubUsername: "Latest author" }, startedAt: 3_000, endedAt: null },
+      { id: "middle", author: { ...person, githubUsername: "Middle author" }, startedAt: 2_000, endedAt: 3_000 },
+      { id: "baseline", author: person, startedAt: 1_000, endedAt: 2_000,
+        name: { text: "Kickoff", namer: person, namedAt: 2_000, canManage: true } },
+    ], {
+      latest: savedState(uuid, "Alpha", "Latest content."),
+      middle: savedState(uuid, "Beta", "Middle content."),
+      baseline: savedState(uuid, "Alpha", "Baseline content."),
+    });
+    await previous(page);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    let drawer = await showHistoryList(page);
+    expect(snapshotReads).toEqual(["latest", "middle"]);
+    await expect(historyList(page).locator(".ub-history-renamed-tag")).toHaveCount(0);
+    await activateControl(historyList(page).getByRole("button", { name: /Middle author/ }));
+    await expect(historicalEditor(page)).toContainText("Middle content.");
+    await closeHistoryList(page, drawer);
+    await expect(history(page)).not.toContainText("renamed from");
+    drawer = await showHistoryList(page);
+    await activateControl(historyList(page).getByRole("button", { name: "Changes since this name", exact: true }));
+    await closeHistoryList(page, drawer);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(history(page)).toContainText("compared with “Kickoff”");
+    await expect(history(page)).not.toContainText("renamed from");
+    await expect(history(page)).not.toContainText("unavailable");
+    await showHistoryList(page);
+    await expect(historyList(page).locator(".ub-history-renamed-tag")).toHaveCount(0);
+    expect(snapshotReads).toEqual(["latest", "middle", "baseline", "latest", "baseline"]);
+  });
+
+  test("a named comparison attributes a rename back to the immediate predecessor", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const uuid = await newDocument(page, docTitle("Rename back attribution"));
+    const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
+    await serveHistory(page, [
+      { id: "latest", title: "Alpha", author: person, startedAt: 3_000, endedAt: null },
+      { id: "middle", title: "Beta", author: person, startedAt: 2_000, endedAt: 3_000 },
+      { id: "baseline", title: "Alpha", author: person, startedAt: 1_000, endedAt: 2_000,
+        name: { text: "Kickoff", namer: person, namedAt: 2_000, canManage: true } },
+    ], {
+      latest: savedState(uuid, "Alpha", "Latest content."),
+      middle: savedState(uuid, "Beta", "Middle content."),
+      baseline: savedState(uuid, "Alpha", "Baseline content."),
+    });
+    await previous(page);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(history(page).locator(".ub-history-renamed s")).toHaveText("Beta");
+    const drawer = await showHistoryList(page);
+    const since = historyList(page).getByRole("button", { name: "Changes since this name", exact: true });
+    await activateControl(since);
+    await expect(since).toHaveAttribute("aria-current", "true");
+    await closeHistoryList(page, drawer);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(history(page)).toContainText("compared with “Kickoff”");
+    await expect(history(page).locator(".ub-history-renamed s")).toHaveText("Beta");
   });
 
   test("opening history preserves unsent comment and reply drafts", { tag: "@webkit" }, async ({ browser }) => {

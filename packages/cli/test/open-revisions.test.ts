@@ -7,7 +7,7 @@ import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import {
   appendBlock, encodeRevisionResponseFrames, getBlocks, getMeta, initDoc,
-  readRevisionRequest, roomForDoc, snapshotRevision, type RevisionEntry, type RevisionResponse,
+  readRevisionRequest, roomForDoc, snapshotRevision, type RevisionEntry, type RevisionRequest, type RevisionResponse,
 } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
@@ -78,7 +78,8 @@ describe("ub open automatic revisions", () => {
       const listed = await fetch(path, { headers });
       const { revisions } = await listed.json() as { revisions: RevisionEntry[] };
       expect(revisions).toHaveLength(1);
-      expect(revisions[0]).toMatchObject({ author: { githubUsername: "revision-person", surface: { kind: "browser" } }, endedAt: null });
+      expect(revisions[0]).toMatchObject({ author: { githubUsername: "revision-person", surface: { kind: "browser" } },
+        endedAt: null, title: "Historical title" });
       const content = await fetch(`${path}&revision=${revisions[0]!.id}`, { headers });
       expect(content.status).toBe(200);
       const { state } = await content.json() as { state: string };
@@ -120,11 +121,24 @@ describe("ub open automatic revisions", () => {
       if (connection === undefined) throw new Error("Missing revision connection");
       const original = connection.callbacks.statelessCallback;
       let error: Extract<RevisionResponse, { ok: false }>["error"] = "unsupported";
+      let listRequest: RevisionRequest | null = null;
+      const legacyEntry = { id: namedRevision.id, author: namedRevision.author, startedAt: namedRevision.startedAt,
+        endedAt: namedRevision.endedAt, name: null };
       connection.onStatelessCallback(async payload => {
         const request = readRevisionRequest(payload.payload);
         if (request === null) { await original(payload); return; }
+        if (request.operation === "list") {
+          listRequest = request;
+          for (const frame of encodeRevisionResponseFrames({ requestId: request.requestId, ok: true,
+            revisions: [legacyEntry] })) connection.sendStateless(frame);
+          return;
+        }
         for (const frame of encodeRevisionResponseFrames({ requestId: request.requestId, ok: false, error })) connection.sendStateless(frame);
       });
+      const legacyList = await fetch(path, { headers });
+      expect(legacyList.status).toBe(200);
+      expect(await legacyList.json()).toEqual({ revisions: [legacyEntry] });
+      expect(listRequest).toMatchObject({ operation: "list", includeNames: true, includeTitles: true });
       for (const [failure, reason] of [["unsupported", "unsupported"], ["forbidden", "forbidden"],
         ["deleted", "deleted"], ["revision-not-found", "revision-not-found"], ["unavailable", "unreachable"]] as const) {
         error = failure;
