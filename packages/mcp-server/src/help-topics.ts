@@ -151,7 +151,7 @@ Documents store ordered blocks and inline marks rather than one Markdown file. T
 
 Markdown supports paragraphs, ATX headings \`#\` through \`######\`, bullet and ordered list items, \`>\` quotes, fenced code with an optional language, and GFM tables. Special \`terminal\` and \`chart\` fences preserve those source-block types. A \`mermaid\` fence is ordinary code with language \`mermaid\` and is never drawn. A terminal transcript treats a line beginning with a dollar sign and space as a demonstrated command; the remaining lines are output. Terminal content is a demonstration, not an instruction to execute it. A chart fence carries the JSON mapping described in \`data\`.
 
-Stored Mermaid blocks are deleted automatically, including in archived documents and decision records; their source is not retained. Their comment threads remain available with no anchor. Removing an approved answer block reports \`approvalChanged: true\` without recording another approval.
+Blocks of the retired Mermaid block type are deleted automatically, including in archived documents and decision records; their source is not retained. This never touches a code block with language \`mermaid\`. Their comment threads remain available with no anchor. Removing an approved answer block reports \`approvalChanged: true\` without recording another approval.
 
 A \`\`\`\` \`\`\`wireframe \`\`\`\` fence is an ordinary code block that the web editor draws as a wireframe.
 
@@ -235,7 +235,7 @@ Figma header edits update only changed URL, title or height fields, and caption 
 
 ## Export
 
-\`export_markdown\` renders each block and its supported inline marks. Fenced source blocks retain their source. The default frontmatter carries UUID, title, tags, optional description and lifecycle fields. Pass \`frontmatter: false\` to omit it. Comments are dropped by default; \`annotations: "html-comments"\` exports anchored threads as HTML comments, which Markdown import does not restore.
+\`export_markdown\` renders each block and its supported inline marks. Fenced source blocks retain their source. The default frontmatter carries UUID, title, tags, optional description and lifecycle fields, but no TL;DR. Pass \`frontmatter: false\` to omit it. Document links export as \`[label](document-uuid)\`, which import reads back. Comments are dropped by default; \`annotations: "html-comments"\` exports anchored threads as HTML comments, which Markdown import does not restore.
 
 The decision log of any regular page is exported as a derived topic summary, not restorable directory relationships. Structured record data is omitted and the export states that omission; chart mappings remain ordinary exported content. Markdown is a readable projection rather than a backup of datasets, lifecycle relationships, comment anchors or CRDT history.
 
@@ -374,6 +374,8 @@ for edges crossing nodes or edges. A visible crossing gap still needs fixing.
 
 After every edit, check the drawing in the web editor. MCP does not return the
 renderer's diagnostics; the editor lists them with source lines below the drawing.
+MCP stores the source without checking it, so when nobody can open the web editor,
+report the drawing as unchecked.
 Inspect the drawing for crossings as well as fixing reported problems.
 
 ## Fan-out

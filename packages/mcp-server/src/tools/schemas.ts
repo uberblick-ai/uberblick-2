@@ -145,7 +145,11 @@ export const listIndentArg = z.number().int().min(0).max(MAX_LIST_INDENT);
 export const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
   text: z.string().optional().describe(
-    "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer at most once, a required nonempty title, any number of button lines, then a blank line and optional prose body. Prose header values are one-line inline Markdown, not YAML; quotes stay literal. Each button has one [Text](destination) link: nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, alone or with ?query. At most one style (outline/filled) and color (neutral/blue/green/violet) may follow in either order; defaults are outline neutral. Invalid buttons, other trailing text, unknown, duplicate prose or non-key headers refuse with invalid_card. Prose parts support code, bold, italic, strike, external and document links. Export orders label, title, footer, then buttons in authored order, writes style before color and omits default words. Empty prose keys are omitted, prose header newlines fold to spaces, and prose lines starting ::: are escaped. Figma takes the content between :::figma and :::; required url, optional literal plain one-line title and whole-pixel height 240–960 (default 480), then a blank line and optional caption with the same inline marks. Keys are lowercase, each at most once. Only https figma.com/www.figma.com links to design, file, proto, board, slides or community/file are accepted, with a key/id and optional name; saving keeps those path parts and node-id, starting-point-node-id and version-id on https://www.figma.com, dropping other query fields and fragments. Invalid content refuses with invalid_figma and writes nothing; figma blocks take figma.com links only; use a plain link for other sites. get_doc returns canonical text and read-only figma kind, file, optional fileName and node. Source blocks remain literal text.",
+    "Block text. Prose blocks take plain text; use `inline` for formatting. Code, terminal and chart take " +
+      "literal source. A table takes exactly one GFM table with inline Markdown in its cells. A card or figma " +
+      "block takes the content between its opening `:::card` or `:::figma` line and the closing `:::`; " +
+      "markdown help gives their keys, buttons and accepted links, and invalid content refuses with " +
+      "invalid_card or invalid_figma before writing.",
   ),
   level: z
     .number()
@@ -157,7 +161,7 @@ export const blockShape = {
   language: z
     .string()
     .optional()
-    .describe("Code language, e.g. \"ts\". Code blocks only."),
+    .describe("Code language, e.g. \"ts\". Code blocks only. Drawings are code blocks too, with language \"ablauf\" or \"wireframe\"."),
   list: listStyleArg.optional().describe("List style. List items only; omitted means bullet."),
   indent: listIndentArg.optional().describe("List depth, an integer from 0 to 3. List items only; omitted means 0."),
   inline: inlineArg,
