@@ -4,7 +4,7 @@ import type { RevisionEntry } from "@uberblick/schema";
 import { DocumentHistoryError } from "../../shell/document-revisions.js";
 import type { DocumentRevisionsClient } from "../../shell/document-revisions.js";
 
-interface Selection { index: number; before: Y.Doc | null; after: Y.Doc }
+interface Selection { index: number; before: Y.Doc | null; after: Y.Doc; comparedWith?: RevisionEntry }
 interface HistoryState {
   entries: RevisionEntry[] | null;
   selection: Selection | null;
@@ -21,6 +21,10 @@ interface Session {
   state: HistoryState;
 }
 const initial: HistoryState = { entries: null, selection: null, busy: true, error: null };
+function destroyDocuments(documents: Map<string, Y.Doc>): void {
+  for (const doc of documents.values()) doc.destroy();
+  documents.clear();
+}
 
 export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid: string | null, path: string) {
   const current = useRef<Session | null>(null);
@@ -53,42 +57,71 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
     return () => {
       controller.abort();
       if (current.current === session) current.current = null;
-      for (const doc of session.documents.values()) doc.destroy();
+      destroyDocuments(session.documents);
     };
   }, [client, uuid, path, update, fail]);
   const session = view?.session;
   const state = view !== null && session?.client === client && session.uuid === uuid && session.path === path && current.current === session ? view.state : initial;
-  const get = async (owner: Session, id: string, operation: number): Promise<Y.Doc> => {
-    const cached = owner.documents.get(id);
+  const get = async (owner: Session, id: string, operation: number, documents = owner.documents): Promise<Y.Doc> => {
+    const cached = documents.get(id);
     if (cached !== undefined) return cached;
     const doc = await owner.client.get(owner.uuid, id, owner.signal);
     if (owner.signal.aborted || owner.operation !== operation) { doc.destroy(); throw new DOMException("Cancelled", "AbortError"); }
-    owner.documents.set(id, doc);
+    documents.set(id, doc);
     return doc;
   };
-  const select = async (direction: -1 | 1): Promise<void> => {
+  const readSelection = async (owner: Session, entries: RevisionEntry[], index: number, operation: number,
+    documents: Map<string, Y.Doc>, comparedWith?: RevisionEntry): Promise<Selection | null> => {
+    const entry = entries[index];
+    if (entry === undefined) return null;
+    const previous = comparedWith ?? entries[index + 1];
+    const after = await get(owner, entry.id, operation, documents);
+    const before = previous === undefined ? null : await get(owner, previous.id, operation, documents);
+    return { index, before, after, ...(comparedWith === undefined ? {} : { comparedWith }) };
+  };
+  const select = async (direction: -1 | 1 | "named"): Promise<void> => {
     const owner = current.current;
     if (owner === null || owner.state.busy) return;
     const operation = ++owner.operation;
+    const fresh = direction === "named" ? new Map<string, Y.Doc>() : null;
+    let adopted = false;
     update(owner, { busy: true, error: null });
     try {
       const selection = owner.state.selection;
-      const entries = selection === null ? await list(owner, operation) : owner.state.entries ?? [];
+      const entries = direction === "named" ? await owner.client.list(owner.uuid, owner.signal)
+        : selection === null ? await list(owner, operation) : owner.state.entries ?? [];
       if (owner.operation !== operation) return;
-      if (selection === null) {
-        for (const doc of owner.documents.values()) doc.destroy();
-        owner.documents.clear();
+      if (selection === null && fresh === null) destroyDocuments(owner.documents);
+      const index = selection === null || direction === "named" ? 0 : selection.index + direction;
+      const previous = direction === "named" ? entries.find(entry => entry.name != null) : undefined;
+      if (direction === "named" && previous === undefined) { update(owner, { busy: false, error: "No named revision is available. Return to now and refresh history." }); return; }
+      const next = await readSelection(owner, entries, index, operation, fresh ?? owner.documents, previous);
+      if (owner.operation !== operation) return;
+      if (next === null) { update(owner, { busy: false }); return; }
+      if (fresh !== null) {
+        destroyDocuments(owner.documents);
+        owner.documents = fresh;
+        adopted = true;
       }
-      const index = selection === null ? 0 : selection.index + direction;
-      const entry = entries[index];
-      if (entry === undefined) { update(owner, { busy: false }); return; }
-      const after = await get(owner, entry.id, operation);
-      if (owner.operation !== operation) return;
-      const previous = entries[index + 1];
-      const before = previous === undefined ? null : await get(owner, previous.id, operation);
-      if (owner.operation !== operation) return;
-      update(owner, { selection: { index, before, after }, busy: false });
+      update(owner, { entries, selection: next, busy: false });
     } catch (error) { if (owner.operation === operation) fail(owner, error); }
+    finally { if (fresh !== null && !adopted) destroyDocuments(fresh); }
+  };
+  const mutate = async (write: (owner: Session) => Promise<RevisionEntry>): Promise<void> => {
+    const owner = current.current;
+    if (owner === null || owner.state.busy) return;
+    const operation = ++owner.operation;
+    update(owner, { busy: true });
+    try {
+      const revision = await write(owner);
+      if (owner.operation !== operation) return;
+      const entries = owner.state.entries ?? [];
+      const existing = entries.some(entry => entry.id === revision.id);
+      const next = existing ? entries.map(entry => entry.id === revision.id ? revision : entry) : [revision, ...entries];
+      const selection = owner.state.selection;
+      update(owner, { busy: false, entries: next,
+        ...(selection?.comparedWith?.id === revision.id ? { selection: revision.name == null ? null : { ...selection, comparedWith: revision } } : {}) });
+    } catch (error) { if (owner.operation === operation) update(owner, { busy: false }); throw error; }
   };
   return {
     ...state,
@@ -97,6 +130,10 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
     entry: state.selection === null ? null : state.entries?.[state.selection.index] ?? null,
     back: () => { void select(1); },
     forward: () => { void select(-1); },
+    sinceLastNamed: () => { void select("named"); },
+    name: (name: string, checksum: string) => mutate(owner => owner.client.name(owner.uuid, name, checksum, owner.signal)),
+    rename: (revisionId: string, name: string) => mutate(owner => owner.client.rename(owner.uuid, revisionId, name, owner.signal)),
+    removeName: (revisionId: string) => mutate(owner => owner.client.removeName(owner.uuid, revisionId, owner.signal)),
     now: () => {
       const owner = current.current;
       if (owner !== null) { owner.operation++; update(owner, { selection: null, error: null, busy: false }); }

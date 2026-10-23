@@ -124,7 +124,7 @@ describe("decision authority through MCP", () => {
     expect((await rig.ok("get_doc", { uuid: left.uuid })).resolution.conflicts).toHaveLength(2);
     await refuse(rig, "set_status", { uuid: first.uuid, status: "rejected", answer, reason: "A superseded answer is history." }, "decision_transition_invalid", first.uuid);
     await rig.ok("set_status", { uuid: right.uuid, status: "rejected", answer, reason: "Prefer the other side of the conflict." });
-    expect((await rig.ok("get_doc", { uuid: left.uuid })).resolution).toMatchObject({ inForce: { uuid: left.uuid }, conflicts: [] });
+    expect((await rig.ok("get_doc", { uuid: left.uuid })).resolution).toMatchObject({ inForce: left.uuid, conflicts: [] });
   });
 
   it("withdraws open records, keeps final records in history, and never reopens a decided record", async () => {
@@ -143,7 +143,7 @@ describe("decision authority through MCP", () => {
       }
     }
     expect((await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs.map((record: any) => record.uuid).sort()).toEqual([first.uuid, withdrawn.uuid, rejected.uuid].sort());
-    expect((await rig.ok("get_doc", { uuid: first.uuid })).resolution).toMatchObject({ inForce: { uuid: first.uuid }, pending: [] });
+    expect((await rig.ok("get_doc", { uuid: first.uuid })).resolution).toMatchObject({ inForce: first.uuid, pending: [] });
     for (const status of ["rejected", "withdrawn"]) {
       await refuse(rig, "create_doc", { title: "No existing proposal", description: "Final states require an existing record.", kind: "decision", status, answer }, "decision_transition_invalid");
     }
@@ -169,7 +169,7 @@ describe("decision authority through MCP", () => {
     await rig.ok("set_metadata", { uuid: record.uuid, title: "Reworded topic" });
     const read = await rig.ok("get_doc", { uuid: record.uuid });
     expect(read).toMatchObject({ title: "Reworded topic", tldr: null, approvalChanged: false, description: "Updated discovery copy." });
-    expect(read.blocks[0].text).toBe(block.text);
+    expect(read.blocks[0]).toMatchObject({ id: block.id, rev: block.rev });
     expect(getDirectoryEntry(rig.instance.replicas.directory().doc, record.uuid)).toMatchObject({ approvalChanged: false, commentCount: 2 });
   });
 
@@ -185,8 +185,7 @@ describe("decision authority through MCP", () => {
       for (let read = 0; read < 2; read++) {
         const result = await rig.ok("get_doc", { uuid: record.uuid });
         expect(result).toMatchObject({ tldr: null, approvalChanged: false });
-        for (const entry of [...result.predecessors, ...result.successors, result.resolution.inForce]) {
-          if (entry === null) continue;
+        for (const entry of [...result.predecessors, ...result.successors]) {
           expect(entry).not.toHaveProperty("tldr");
           expect(entry.answerPreview).toBe(body[0]!.text);
         }

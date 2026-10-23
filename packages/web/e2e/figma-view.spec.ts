@@ -196,7 +196,8 @@ test("Done, fullscreen Close, toolbar and Tab leave a safe Figma focus target th
   const preview = frame.getByRole("button", { name: "Interact with Figma preview", exact: true });
   await expect(frame.locator("iframe").contentFrame().locator("#canvas")).toBeAttached();
   const documentBefore = await editor(page).evaluate((element) => (element as HTMLElement & { editor: Editor }).editor.state.doc.toJSON());
-  const storedBefore = created.blocks.map(({ id, type, text }) => ({ id, type, text }));
+  // create_doc names blocks by id and rev; an unchanged rev means unchanged content.
+  const storedBefore = created.blocks.map(({ id, rev }) => ({ id, rev }));
   for (const entry of ["Done", "Close", "Toolbar", "Tab"] as const) {
     const focused = entry === "Toolbar" ? frame.getByRole("link", { name: "Open in Figma", exact: true }) : preview;
     await editor(page).locator(":scope > p").first().click();
@@ -220,7 +221,7 @@ test("Done, fullscreen Close, toolbar and Tab leave a safe Figma focus target th
       await expect(focused, `${entry}: ${key}`).toBeFocused();
     }
     await expectMcp(() => session.call<StoredDoc>("get_doc", { uuid: created.uuid }), (stored) => {
-      expect(stored.blocks.map(({ id, type, text }) => ({ id, type, text })), entry).toEqual(storedBefore);
+      expect(stored.blocks.map(({ id, rev }) => ({ id, rev })), entry).toEqual(storedBefore);
     });
   }
 });
@@ -242,7 +243,8 @@ test("a stored multiline caption renders its line break below the preview", { ta
 test("caption, local and remote text, undo, fields and theme preserve both clients' viewers; a changed link reloads once", { tag: "@webkit" }, async ({ browser }) => {
   const session = writer();
   const created = await create(session);
-  const id = created.blocks.find((block) => block.type === "figma")?.id;
+  // The default fixture's Figma block is the second one.
+  const id = created.blocks[1]?.id;
   if (id === undefined) throw new Error("e2e: Figma fixture has no id");
   const visits: [string[], string[]] = [[], []];
   const page = await open(browser, created.uuid, visits[0]);
@@ -630,7 +632,8 @@ test("moving adjacent live viewers and undo or redo reloads each affected viewer
 test("new and existing caption comments stay at their Figma block and MCP reads their caption ranges", { tag: "@webkit" }, async ({ browser }) => {
   const session = writer();
   const created = await create(session);
-  const block = created.blocks.find((candidate) => candidate.type === "figma");
+  // The default fixture's Figma block is the second one.
+  const block = created.blocks[1];
   if (block === undefined) throw new Error("e2e: caption comment block is missing");
   const doc = new Y.Doc();
   const secret = await importRootSecret(harness().authSecret);

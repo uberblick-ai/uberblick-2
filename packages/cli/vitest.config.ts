@@ -41,6 +41,7 @@ const osSensitive = [
   "workspace-main-repository",
   "workspace-promotion",
   "workspace-registry",
+  "worktree-launcher",
 ];
 
 export default defineConfig({

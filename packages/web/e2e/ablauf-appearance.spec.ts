@@ -242,7 +242,7 @@ for (const appearance of ["light", "dark"] as const) {
     const text = fence.replaceAll("&quot;", '"').replaceAll("&gt;", ">").replaceAll("&lt;", "<").replaceAll("&amp;", "&");
     const { uuid } = await session.call<{ uuid: string }>("create_doc", {
       title: "Ablauf website example", description: "The real editor block shown on the Markdown reference page.",
-      blocks: [{ type: "paragraph", text: "The guidance lease in one diagram." }, { type: "code", language: "ablauf", text }],
+      blocks: [{ type: "paragraph", text: "Reading, editing and syncing a page in one diagram." }, { type: "code", language: "ablauf", text }],
     });
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
       contextOptions: { viewport: { width: 1440, height: 1200 }, deviceScaleFactor: 2, colorScheme: appearance },

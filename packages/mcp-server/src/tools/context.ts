@@ -39,7 +39,6 @@ import {
   ToolError,
   hydrationRecovery,
 } from "../failures.js";
-import type { GuidanceBriefing } from "../briefing.js";
 import { docLinkRanges } from "../replica.js";
 import type { Replica, Replicas } from "../replica.js";
 import type { ServerWork } from "../server-work.js";
@@ -57,8 +56,8 @@ const DESCRIPTION_NUDGE =
 
 /** The one-line prompt a mutating tool carries when a document has no tags. */
 const TAG_NUDGE =
-  "This document has no tag assignments: call list_tags for the active workspace vocabulary, then call set_metadata " +
-  "with `tags` to assign one or more tags.";
+  "This document has no tags: to add some, call list_tags for the workspace vocabulary, then set_metadata with " +
+  "`tags`; leave it untagged if no tag fits.";
 
 /** The stronger prompt returned when a changed document has no summary yet. */
 const TLDR_MISSING_NUDGE =
@@ -101,9 +100,14 @@ function toBlockInput(
   };
 }
 
-/** Shared per-server helpers; each closure keeps the registering replica and briefing. */
+/** A directory row; a decision topic's row also names its records by UUID. */
+export type TopicRowEntry = DirectoryEntry & {
+  resolution?: { inForce: string | null; pending: string[]; conflicts: string[] };
+};
+
+/** Shared per-server helpers; each closure keeps the registering replicas. */
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
-export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing, work: ServerWork, help = new HelpCatalog()) {
+export function createToolContext(replicas: Replicas, work: ServerWork, help = new HelpCatalog()) {
 
   /** One refusal builder; callers retain their original message and identity field. */
   const notKnownLocally = (
@@ -237,7 +241,8 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
 
   /** Normalize directory descriptions and resolve tags through the settings catalog. */
   const decisionEntryJson = (entry: DirectoryEntry, title: string, archived: boolean) => {
-    const { recordArchived: _recordArchived, createdAt: storedCreatedAt, updatedAt: storedUpdatedAt, ...fields } = entry;
+    // `governs` stays stored for released clients; answers name every page in `related`.
+    const { recordArchived: _recordArchived, governs: _governs, createdAt: storedCreatedAt, updatedAt: storedUpdatedAt, ...fields } = entry;
     const createdAt = isoTimestamp(storedCreatedAt);
     const updatedAt = isoTimestamp(storedUpdatedAt);
     return {
@@ -249,14 +254,44 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     };
   };
 
-  const topicJson = (topic: DecisionTopicResolution) => {
-    const entryJson = (entry: DirectoryEntry) => decisionEntryJson(entry, decisionTopicTitle(topic), topic.archived);
+  /** Name a topic's records by UUID; get_doc on one of them reads its details. */
+  const topicRecordsJson = (topic: DecisionTopicResolution) => ({
+    inForce: topic.inForce?.uuid ?? null,
+    pending: topic.pending.map(entry => entry.uuid),
+    conflicts: topic.conflicts.map(entry => entry.uuid),
+  });
+
+  /** A topic presented by its record in force, else pending, else first record. */
+  const topicRow = (topic: DecisionTopicResolution): TopicRowEntry => ({
+    ...topic.representative,
+    topic: topic.topic,
+    title: decisionTopicTitle(topic),
+    deleted: topic.archived,
+    resolution: topicRecordsJson(topic),
+  });
+
+  /** One row shape for list_docs and a regular page's get_doc decisions. */
+  const directoryRowJson = (entry: TopicRowEntry, pinned?: boolean): Record<string, unknown> => {
+    const updatedAt = isoTimestamp(entry.updatedAt);
     return {
-      topic: topic.topic,
-      inForce: topic.inForce === null ? null : entryJson(topic.inForce),
-      pending: topic.pending.map(entryJson),
-      conflicts: topic.conflicts.map(entryJson),
-      archived: topic.archived,
+      uuid: entry.uuid,
+      title: entry.title,
+      tags: readDirectoryTags(entry, tagCatalog()),
+      // Keep absent descriptions explicit as null.
+      description: entry.description ?? null,
+      ...(updatedAt === undefined ? {} : { updatedAt }),
+      ...(entry.openThreadCount === undefined ? {} : { openThreadCount: entry.openThreadCount }),
+      ...(entry.deleted === true ? { deleted: true as const } : {}),
+      ...(pinned === undefined ? {} : { pinned }),
+      ...(entry.kind === "decision" ? {
+        kind: "decision" as const,
+        status: entry.status,
+        topic: entry.topic,
+        ...(entry.related === undefined ? {} : { related: entry.related }),
+        ...(entry.discussion === undefined ? {} : { discussion: entry.discussion }),
+        ...(entry.answerPreview === undefined ? {} : { answerPreview: entry.answerPreview }),
+        ...entry.resolution,
+      } : {}),
     };
   };
 
@@ -269,7 +304,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
       ...(resolution === null ? {} : { title: decisionTopicTitle(resolution) }),
       predecessors: predecessors.map(entryJson),
       successors: successors.map(entryJson),
-      resolution: resolution === null ? null : { ...entryJson(resolution.representative), ...topicJson(resolution) },
+      resolution: resolution === null ? null : { ...topicRecordsJson(resolution), archived: resolution.archived },
     };
   };
 
@@ -461,7 +496,6 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   return {
     replicas,
     help,
-    briefing,
     work,
     requireStub,
     requireKnownDoc,
@@ -478,7 +512,8 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     tldrReview,
     requireDoc,
     decisionEntryJson,
-    topicJson,
+    topicRow,
+    directoryRowJson,
     decisionReadJson,
     annotationJson,
     validateBlockTargets,

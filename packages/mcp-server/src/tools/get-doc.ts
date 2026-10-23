@@ -1,4 +1,4 @@
-import { decisionTopicTitle, docRev, getDirectoryEntry, getMeta, listAnnotations, readDecisions, resolveAnnotationAnchors, resolveDecisionTopics, summarizeDocData } from "@uberblick/schema";
+import { docRev, getDirectoryEntry, getMeta, listAnnotations, readDecisions, resolveAnnotationAnchors, resolveDecisionTopics, summarizeDocData } from "@uberblick/schema";
 import { strictInput } from "../inputs.js";
 import { isoTimestamp } from "../timestamps.js";
 import { uuidArg } from "./schemas.js";
@@ -7,10 +7,11 @@ import { READ, operation } from "./operation.js";
 export const inputSchema = strictInput({ uuid: uuidArg });
 
 export const getDocOperation = operation(READ, inputSchema, (context, { uuid }, _request) => {
-  const { replicas, requireDoc, decisionAuthorityJson, documentTags, decisionEntryJson, topicJson, decisionReadJson, blocksJson, annotationJson, briefing } = context;
+  const { replicas, requireDoc, decisionAuthorityJson, documentTags, topicRow, directoryRowJson, decisionReadJson, blocksJson, annotationJson } = context;
 
   const replica = requireDoc(uuid);
-  const meta = getMeta(replica.doc, replica.id);
+  // `governs` stays stored for released clients; `related` names every page.
+  const { governs: _governs, ...meta } = getMeta(replica.doc, replica.id);
   const collections = summarizeDocData(replica.doc);
   const directory = replicas.directory().doc;
   const createdAt = isoTimestamp(getDirectoryEntry(directory, uuid)?.createdAt);
@@ -29,8 +30,8 @@ export const getDocOperation = operation(READ, inputSchema, (context, { uuid }, 
     tags: documentTags(replica),
     room: replica.room,
     decisions: [
-      ...related.map(topic => ({ ...decisionEntryJson(topic.representative, decisionTopicTitle(topic), topic.archived), ...topicJson(topic), relation: "related" })),
-      ...linked.map(topic => ({ ...decisionEntryJson(topic.representative, decisionTopicTitle(topic), topic.archived), ...topicJson(topic), relation: "linked" })),
+      ...related.map(topic => ({ ...directoryRowJson(topicRow(topic)), relation: "related" })),
+      ...linked.map(topic => ({ ...directoryRowJson(topicRow(topic)), relation: "linked" })),
     ],
     ...(meta.kind === "decision" ? decisionReadJson(uuid) : {}),
     blocks: blocksJson(replica),
@@ -39,6 +40,5 @@ export const getDocOperation = operation(READ, inputSchema, (context, { uuid }, 
     ),
     ...(collections === null ? {} : { data: { collections, readWith: "get_data" } }),
   };
-  briefing.recordRead(uuid);
   return result;
 });

@@ -6,16 +6,14 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpConfig } from "./config.js";
-import { GuidanceBriefing } from "./briefing.js";
-import { registerGuidanceResources } from "./guidance.js";
 import { registerHelpResources } from "./help-resources.js";
-import { STARTUP_ORIENTATION } from "./help-topics.js";
 import { log } from "./log.js";
 import type { Replicas } from "./replica.js";
 import type { MirrorStore } from "./store.js";
 import { ServerWork } from "./server-work.js";
 import { SHUTDOWN_CLOSE_RESERVE_MS, SHUTDOWN_TIMEOUT_MS } from "./shutdown.js";
 import { seedTagCatalogOnce } from "./tag-catalog.js";
+import { startupInstructions } from "./startup-instructions.js";
 import { registerTools } from "./tools.js";
 import { mcpVersion } from "./version.js";
 import { openWorkspaceReplicas } from "./workspace-replicas.js";
@@ -58,7 +56,6 @@ export function createMcpServer(
   const workspace = openWorkspaceReplicas(config, injectedStore === undefined ? {} : { store: injectedStore });
   const { store, replicas } = workspace;
   replicas.setWriteSurface({ kind: "mcp", name: "unknown MCP client" });
-  const briefing = new GuidanceBriefing(replicas);
   const work = new ServerWork();
 
   const server = new McpServer(
@@ -69,7 +66,7 @@ export function createMcpServer(
       version: mcpVersion(),
     },
     {
-      instructions: STARTUP_ORIENTATION,
+      instructions: startupInstructions(replicas),
     },
   );
 
@@ -79,9 +76,8 @@ export function createMcpServer(
     replicas.setWriteSurface({ kind: "mcp", name: mcpSurfaceName(server.server.getClientVersion()) });
   };
 
-  const help = registerTools(server, replicas, briefing, work);
+  const help = registerTools(server, replicas, work);
   registerHelpResources(server, help, work);
-  registerGuidanceResources(server, replicas, briefing, work);
 
   let closed = false;
   let closing: Promise<void> | null = null;

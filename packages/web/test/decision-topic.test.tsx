@@ -699,9 +699,6 @@ describe("decision topic navigation and history", () => {
       editor.commands.setContent({ type: "doc", content: [
         { type: "paragraph", content: [{ type: "text", text: "A typed replacement answer." }] },
       ] });
-      fireEvent.change(within(dialog).getByRole("textbox", { name: /Why the change/ }), {
-        target: { value: "The old wording no longer fits." },
-      });
     });
     expect(acquired.filter((name) => name === roomForDoc(WORKSPACE, CURRENT))).toHaveLength(2);
     await act(async () => record(NEXT, "Another answer took effect", "decided", "The concurrent answer.", {
@@ -710,7 +707,6 @@ describe("decision topic navigation and history", () => {
     expect(host.querySelector('.ub-decision-history [aria-current="true"]')?.closest("li")?.getAttribute("data-record")).toBe(NEXT);
     expect(screen.getByRole("dialog", { name: "Alter decision" })).toBe(dialog);
     expect(dialog.textContent).toContain("A typed replacement answer.");
-    expect(within(dialog).getByRole("textbox", { name: /Why the change/ })).toHaveProperty("value", "The old wording no longer fits.");
     const beforeDirectory = listDirectory(directory());
     await act(async () => within(dialog).getByRole("button", { name: "Decide" }).click());
     expect(dialog.textContent).toMatch(/no longer|current answer|another answer/i);

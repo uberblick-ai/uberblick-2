@@ -2,6 +2,19 @@
 import { BLOCK_TYPES } from "@uberblick/schema";
 
 export const toolHelpDetails = {
+  list_tags:
+    "The existing workspace tag catalog is returned in deterministic name order. Each entry carries the stable canonical " +
+    "`id` documents store, its current display `name` and its optional `description`. Documents show only existing catalog tags. MCP cannot curate this catalog.\n\n" +
+    "`complete` says whether this is the whole workspace vocabulary. It is false while a configured hub has " +
+    "not delivered the catalog room to this replica: what is listed is then a local copy that may be missing " +
+    "curated entries, and a tag value this replica has never seen is refused rather than assigned. `hub` says " +
+    "where that connection stands.",
+  get_help:
+    "Read bundled, version-matched product help by topic or exact registered tool name. Omit topic to list " +
+    "every topic with its id, title, description and URI. The returned text is the same Markdown as " +
+    "uberblick://help/{topic}. Help is workspace-agnostic and never opens or settles a replica; it remains " +
+    "available offline and while the replica store is quarantined. Unknown topics refuse with " +
+    "unknown_help_topic and list valid topic ids; choose one and retry.",
   create_doc:
     "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
     "search. Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
@@ -31,9 +44,7 @@ export const toolHelpDetails = {
     "without `kind` is refused before a document is created. A decision " +
     "may pass `related` as one UUID or a non-empty list of UUIDs of live, locally readable regular pages. " +
     "Every target is validated; a refusal names the offending UUID and a decision target refuses with " +
-    "related_not_regular_document. The set is fixed at creation. Existing `governs` values stay related " +
-    "pages without migration; `governs` still returns one page for compatibility, while `related` returns " +
-    "the whole set. Any other " +
+    "related_not_regular_document. The set is fixed at creation and answers return it as `related`. Any other " +
     "use of `related` is refused before a UUID is allocated or a room is written. A decision may also pass " +
     "`supersedes`, the UUID of a hydrated decision in a live topic it replaces. The reference is immutable, " +
     "and its predecessor's topic is copied forward; a successor without related inherits its whole set. " +
@@ -94,7 +105,7 @@ export const toolHelpDetails = {
     "names and record counts and names `get_data` for deliberate reads. It contains no schemas or record " +
     "values; documents without data omit it.\n\n" +
     "`createdAt` is the creation time as an ISO 8601 UTC string on the creating replica's clock, " +
-    "like `2026-10-21T18:36:13.213Z`. Decision directory entries return `createdAt` and `updatedAt` in the same format. " +
+    "like `2026-10-21T18:36:13.213Z`. Predecessor and successor entries return `createdAt` and `updatedAt` in the same format; topic rows return `updatedAt`. " +
     "These stamps are omitted when unknown or unrepresentable as a date. " +
     "Every document returns a page-level `rev`, identical to the web status row's full revision of its ordered block content. Metadata and comments do not affect it. " +
     "Regular documents return `code_check`: the latest comparison per repository, or [] when never checked. " +
@@ -105,9 +116,12 @@ export const toolHelpDetails = {
     "Regular-page `decisions` resolve live topics without opening decision rooms: related topics first, " +
     "then other topics found in backlinks, marked `relation: \"related\"` or `relation: \"linked\"`. Any " +
     "record can establish either relation, including superseded, rejected or withdrawn history. Each group " +
-    "is oldest-topic-first, deduplicated, with archived topics omitted; indexed links can lag content. " +
+    "is oldest-topic-first, deduplicated, with archived topics omitted; indexed links can lag content. Each " +
+    "topic is one row in list_docs' topic-row shape: the record in force, else pending, else first, naming the " +
+    "topic's records by UUID in `inForce`, `pending` and `conflicts`. A decision record's `resolution` names its " +
+    "topic's records the same way, with `archived`; get_doc any listed UUID for that record. " +
     "Decision-record metadata returns `discussion` as the connected RFC UUID or null. Every decision " +
-    "directory entry, including page decisions, predecessors, successors, inForce, pending and conflicts, " +
+    "row and directory entry, including page decisions, predecessors and successors, " +
     "caches it: null means no reference, absent means unknown until stub repair. The discussion is a " +
     "derived outbound edge in effective links, separately from curated links and recorded answer " +
     "attribution. The backlinks tool on the RFC lists its records; reading the RFC returns their topic marked " +
@@ -137,14 +151,14 @@ export const toolHelpDetails = {
     "`text` is plain text and `rev` ignores marks. A prose block that carries inline references to other " +
     "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
     "link_range speak in, and absent where there are none. Table cell links count toward backlinks but do not " +
-    "have block-level `doc_links` ranges.\n\n" +
-    "Reading eligible guidance with get_doc counts toward this process’s briefing. This best-effort " +
-    "bookkeeping never fails the read or writes usage to a room or update log.",
+    "have block-level `doc_links` ranges.",
   list_revisions:
     "List a known document's automatic revisions from the hub, newest first, including an archived document. " +
     "The whole list is returned without paging. An empty list means the hub confirmed there are no revisions; " +
     "unavailable history is a failure, never an empty list.\n\n" +
-    "Each entry has `id`, `author`, `startedAt` and `endedAt`. The author is " +
+    "Each entry has `id`, `author`, `startedAt`, `endedAt` and `name`. A name is null or " +
+    "`{text, namer, namedAt, canManage}`; its namer has the same account/surface shape as author. " +
+    "`namedAt` is epoch milliseconds and `canManage` identifies whether this account may manage the name in the web. The author is " +
     "`{githubUsername, surface: {kind, name}}`, using the author's current GitHub username, or null when unknown. " +
     "Times are epoch milliseconds: null `startedAt` means an unknown start for content from before history began, " +
     "and null `endedAt` means the revision is still open.\n\n" +
@@ -152,6 +166,19 @@ export const toolHelpDetails = {
     "get_doc's page and block `rev` content hashes. Writing tools do not accept revision IDs. " +
     "A UUID unknown to this workspace refuses with doc_not_found before contacting the hub; a permanently " +
     "deleted document refuses with doc_deleted. See tool-contracts for hub history failures and recovery.",
+  name_revision:
+    "Call only when a person asks to name the current document state. Supply `uuid` and a `name` of " +
+    "1 to 100 characters on one line. The hub verifies that this client's displayed title, visible blocks " +
+    "and structured data match its current state. Pending local changes or unseen remote content refuse " +
+    "with revision_stale_state; synchronize and reread before naming. Requires write access to a live " +
+    "team-hub document. Naming closes the current stretch without changing its author or document content, " +
+    "and records the naming account, MCP client surface and hub time. An already named state refuses " +
+    "with revision_already_named and existingName. Renaming and removal are available to the namer in the web.\n\n" +
+    "Success returns the named `revision`, `applied: true` and `synced: true`: the hub applied and " +
+    "acknowledged its naming transaction. This hub-only metadata writes no local document log. A known " +
+    "refusal reports applied: false. If a sent request loses its reply, revision_naming_outcome_unknown " +
+    "reports applied: null, partial: false and synced: false. Read list_revisions before retrying; " +
+    "reason unsupported means an admitted hub stayed silent, while unreachable means transport failed.",
   get_revision:
     "Read a known document as it was at the hub revision ID from list_revisions, including an archived document. " +
     "The result returns `uuid`, `revision`, `title`, visible `blocks` and `data`. Blocks use get_doc's shape " +
@@ -301,8 +328,8 @@ export const toolHelpDetails = {
     "its style and depth in place, together with a text edit or alone. To re-indent without changing text, " +
     "pass the same read text as `old_text` and `new_text`, the read `rev`, and the new `indent`. " +
     "Omitted list fields keep their existing values. The same old_text/rev assertions guard both text " +
-    "and attribute changes in one write; failures change neither. The result returns the new list fields " +
-    "and rev. Attribute-only changes keep the block id, text, inline formatting and comment threads, " +
+    "and attribute changes in one write; failures change neither. The result returns the block's id and new " +
+    "rev; get_doc reads the stored fields. Attribute-only changes keep the block id, text, inline formatting and comment threads, " +
     "and concurrent text edits from another replica survive the merge. These fields refuse on any " +
     "other block type; they do not convert blocks or move an item.\n\n" +
     "Marks anchor to positions in the block's text, not to the words they cover, and this tool writes text " +
@@ -532,7 +559,7 @@ export const toolHelpDetails = {
     "Links replace the curated UUID array and update backlinks. A newly added target unknown to this " +
     "replica's directory produces `doclink_target_not_known_locally` with `field: \"links\"`; archived " +
     "targets are accepted and an existing curated target can be retained unchanged. Passing get_doc's " +
-    "effective links back stores derived governs, supersedes and discussion UUIDs in the curated array too; " +
+    "effective links back stores derived related-page, supersedes and discussion UUIDs in the curated array too; " +
     "get_doc " +
     "deduplicates the resulting edges. Empty arrays clear existing tags or curated links.\n\n" +
     "An open decision accepts `discussion` as a live, locally readable regular document UUID, " +

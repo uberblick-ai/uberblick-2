@@ -6,6 +6,7 @@ import {
   parseRoom,
   roomForDoc,
   snapshotRevision,
+  validRevisionName,
 } from "@uberblick/schema";
 import type * as Y from "yjs";
 import { getUpdateAttribution, type UpdateAuthor } from "./update-attribution.js";
@@ -19,6 +20,15 @@ export interface StoredRevision {
   startedAt: number | null;
   endedAt: number | null;
 }
+
+export interface StoredRevisionName {
+  text: string;
+  namer: UpdateAuthor;
+  namedAt: number;
+}
+
+export type NameRevisionResult = { ok: true; id: string }
+  | { ok: false; error: "stale-state" | "invalid-name" | "already-named" | "revision-not-found" | "not-namer"; name?: StoredRevisionName };
 
 interface Snapshot {
   state: Uint8Array;
@@ -95,7 +105,16 @@ export class HubRevisions {
       previous_checksum TEXT NOT NULL,
       data BLOB
     );
-    CREATE TABLE IF NOT EXISTS document_revision_documents (room TEXT PRIMARY KEY NOT NULL)`);
+    CREATE TABLE IF NOT EXISTS document_revision_documents (room TEXT PRIMARY KEY NOT NULL);
+    CREATE TABLE IF NOT EXISTS document_revision_names (
+      revision_id TEXT PRIMARY KEY NOT NULL,
+      room TEXT NOT NULL,
+      text TEXT NOT NULL,
+      principal_id TEXT NOT NULL,
+      surface TEXT NOT NULL,
+      named_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS document_revision_names_room ON document_revision_names(room)`);
   }
 
   observe(room: string, document: Y.Doc): void {
@@ -169,8 +188,79 @@ export class HubRevisions {
     return row?.data instanceof Uint8Array ? row.data : null;
   }
 
+  names(room: string): Map<string, StoredRevisionName> {
+    return new Map(this.db.prepare("SELECT * FROM document_revision_names WHERE room = ?").all(room).map(row => [
+      row.revision_id as string, { text: row.text as string, namedAt: row.named_at as number,
+        namer: { principalId: row.principal_id as string, surface: JSON.parse(row.surface as string) as UpdateAuthor["surface"] } },
+    ]));
+  }
+
+  name(room: string, document: Y.Doc, checksum: string, text: string, namer: UpdateAuthor): NameRevisionResult {
+    if (!validRevisionName(text)) return { ok: false, error: "invalid-name" };
+    const current = snapshot(document);
+    if (current.checksum !== checksum) return { ok: false, error: "stale-state" };
+    return this.writeName(() => {
+      const at = this.now();
+      const head = this.head(room);
+      const last = this.db.prepare("SELECT id, checksum FROM document_revisions WHERE room = ? ORDER BY rowid DESC LIMIT 1").get(room);
+      const id = head?.id ?? (last?.checksum === current.checksum ? last.id as string : randomUUID());
+      const existing = this.names(room).get(id);
+      if (existing !== undefined) return { ok: false, error: "already-named", name: existing };
+      if (head !== undefined) {
+        if (head.checksum !== current.checksum) throw new Error("revision capture does not match current content");
+        // Naming preserves even a reverted stretch, whose automatic head has no bytes.
+        this.insert(room, head.id, head.author, head.started_at, Math.min(at, head.started_at + STRETCH_MS),
+          { ...current, state: head.data ?? current.state });
+        this.db.prepare("DELETE FROM document_revision_heads WHERE room = ?").run(room);
+      } else if (last?.id !== id) {
+        this.insert(room, id, null, null, at, current);
+      }
+      this.db.prepare("INSERT OR IGNORE INTO document_revision_documents (room) VALUES (?)").run(room);
+      this.db.prepare(`INSERT INTO document_revision_names (revision_id, room, text, principal_id, surface, named_at)
+        VALUES (?, ?, ?, ?, ?, ?)`).run(id, room, text, namer.principalId, JSON.stringify(namer.surface), at);
+      return { ok: true, id };
+    });
+  }
+
+  rename(room: string, id: string, text: string, principalId: string): NameRevisionResult {
+    if (!validRevisionName(text)) return { ok: false, error: "invalid-name" };
+    return this.changeName(room, id, principalId, () => {
+      this.db.prepare("UPDATE document_revision_names SET text = ? WHERE room = ? AND revision_id = ?").run(text, room, id);
+    });
+  }
+
+  removeName(room: string, id: string, principalId: string): NameRevisionResult {
+    return this.changeName(room, id, principalId, () => {
+      this.db.prepare("DELETE FROM document_revision_names WHERE room = ? AND revision_id = ?").run(room, id);
+    });
+  }
+
+  private changeName(room: string, id: string, principalId: string, change: () => void): NameRevisionResult {
+    return this.writeName(() => {
+      const name = this.names(room).get(id);
+      if (name === undefined) return { ok: false, error: "revision-not-found" };
+      if (name.namer.principalId !== principalId) return { ok: false, error: "not-namer" };
+      change();
+      return { ok: true, id };
+    });
+  }
+
+  private writeName(operation: () => NameRevisionResult): NameRevisionResult {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = operation();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      this.onStoreFailed(error);
+      throw error;
+    }
+  }
+
   /** Caller owns the transaction that also deletes the document's stored room. */
   purge(room: string): void {
+    this.db.prepare("DELETE FROM document_revision_names WHERE room = ?").run(room);
     this.db.prepare("DELETE FROM document_revisions WHERE room = ?").run(room);
     this.db.prepare("DELETE FROM document_revision_heads WHERE room = ?").run(room);
     this.db.prepare("DELETE FROM document_revision_documents WHERE room = ?").run(room);

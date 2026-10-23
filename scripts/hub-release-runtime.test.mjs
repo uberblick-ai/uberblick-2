@@ -45,6 +45,7 @@ test("web serves public runtime configuration uncached ahead of the SPA fallback
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal Compose expression
 	assert.ok(compose.includes('WEB_WORKSPACES: "${WEB_WORKSPACES:-}"'));
 	assert.ok(!compose.includes("HUB_AUTH_TOKEN:"));
+	assert.doesNotMatch(compose, /^\s*platform:/m, "Compose selects the host platform for both images");
 	assert.ok(readFileSync(join(root, "remote.env.example"), "utf8").includes("WEB_WORKSPACES="));
 });
 

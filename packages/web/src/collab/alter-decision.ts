@@ -53,7 +53,6 @@ interface AlterDecisionInput {
   draft: Y.Doc;
   identity: AwarenessUser;
   mode: "decide" | "rfc";
-  reason: string;
   displayName: string;
   tagCatalog: Y.Doc;
   signal: AbortSignal;
@@ -61,7 +60,7 @@ interface AlterDecisionInput {
 
 type RefusalCode =
   | "decision_answer_empty" | "decision_block_unsupported" | "decision_answer_too_long"
-  | "reason_empty" | "display_name_empty" | "stale_decision"
+  | "display_name_empty" | "stale_decision"
   | "source_unwritable" | "directory_unwritable" | "destination_unwritable"
   | "destination_exists" | "abandoned";
 
@@ -81,8 +80,7 @@ export type AlterDecisionResult = {
 const messages: Record<RefusalCode, string> = {
   decision_answer_empty: "Write a non-blank answer.",
   decision_block_unsupported: "Use only paragraphs, lists, code blocks or tables in the answer.",
-  decision_answer_too_long: "Shorten the answer to at most two blocks; adjacent list items count as one block.",
-  reason_empty: "Give a reason for the decision.",
+  decision_answer_too_long: "Shorten the answer to at most three blocks; adjacent list items count as one block.",
   display_name_empty: "Set a display name before recording the decision.",
   stale_decision: "This record is no longer the answer in force on a live topic. Reopen the current answer.",
   source_unwritable: "Wait for the current answer's room to synchronize and become writable.",
@@ -101,8 +99,7 @@ export function alteredDecisionAnswerProblem(draft: Y.Doc): AnswerProblem | null
     !(block instanceof Y.XmlElement) || !["paragraph", "list-item", "code", "table"].includes(block.nodeName));
   const blockTypes = [...new Set(unsupported.map((block) => block instanceof Y.XmlElement ? block.nodeName : "unknown"))];
   if (unsupported.length > 0) return { code: "decision_block_unsupported", blockTypes };
-  // Reserve the third schema answer block for Decide's reason in either mode.
-  const shape = decisionAnswerShapeFailure([...getBlocks(draft), { type: "paragraph" }]);
+  const shape = decisionAnswerShapeFailure(getBlocks(draft));
   if (shape !== null) return { code: shape, blockTypes };
   const hasText = getBlocksWithInline(draft).some(({ block, table }) =>
     table === undefined ? block.text.trim() !== "" : table.flat(2).some((run) => run.text.trim() !== ""));
@@ -161,7 +158,6 @@ function stageDecision(input: AlterDecisionInput, draft: Y.Doc, uuid: string, rf
     setStatus(record, input.mode === "decide" ? "decided" : "open");
     if (rfc !== undefined) setDiscussion(record, rfc);
     else {
-      appendBlock(record, { type: "paragraph", text: input.reason.trim() });
       const meta = getMetaMap(record);
       meta.set("decidedBy", input.displayName.trim());
       meta.set("decidedAt", new Date(now).toISOString());
@@ -189,8 +185,6 @@ function stageRfc(input: AlterDecisionInput, uuid: string, decision: string, now
       { text: title, marks: { docLink: decision } },
       { text: ".", marks: {} },
     ] });
-    const reason = input.reason.trim();
-    if (reason !== "") appendBlock(discussion, { type: "paragraph", text: reason });
     return stageDocument(discussion, now);
   } finally {
     discussion.destroy();
@@ -202,10 +196,9 @@ function stageRfc(input: AlterDecisionInput, uuid: string, decision: string, now
  * if a room joins later. The commit is synchronous and has no admission waits.
  */
 export async function recordAlteredDecision(request: AlterDecisionInput): Promise<AlterDecisionResult> {
-  const input = { ...request, reason: request.reason.trim(), displayName: request.displayName.trim() };
+  const input = { ...request, displayName: request.displayName.trim() };
   const problem = alteredDecisionAnswerProblem(input.draft);
   if (problem !== null) return refuse(problem.code);
-  if (input.mode === "decide" && input.reason === "") return refuse("reason_empty");
   if (input.mode === "decide" && input.displayName === "") return refuse("display_name_empty");
   const failure = sourceFailure(input);
   if (failure !== null) return failure;

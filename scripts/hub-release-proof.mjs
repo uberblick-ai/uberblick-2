@@ -124,7 +124,7 @@ async function main() {
   const localSettings = `LOOPBACK_PORT=${loopbackPort}\nWEB_WORKSPACES=${WORKSPACE}\n`;
   const environment = { ...process.env, COMPOSE_PROJECT_NAME: project };
   for (const key of ["HUB_URL", "WORKSPACE_ID", "WORKSPACES", "HUB_AUTH_TOKEN", "HUB_GITHUB_CLIENT_ID",
-    "WEB_HUB_URL", "WEB_WORKSPACES", "WEB_HOST", "HTTPS_BIND_IP", "LOOPBACK_PORT", "TAILSCALE_HOST", "TAILSCALE_IP", "COMPOSE_FILE", "COMPOSE_PROFILES"]) delete environment[key];
+    "WEB_HUB_URL", "WEB_WORKSPACES", "WEB_HOST", "HTTPS_BIND_IP", "LOOPBACK_PORT", "TAILSCALE_HOST", "TAILSCALE_IP", "COMPOSE_FILE", "COMPOSE_PROFILES", "DOCKER_DEFAULT_PLATFORM"]) delete environment[key];
   let deployment;
   let candidateDeployment = false;
   let cleanupDeployment;
@@ -132,6 +132,8 @@ async function main() {
   let namedRoute = false;
   const extractionContainers = new Set();
   const imageProtocols = new Map();
+  const nativeArchitecture = (await command("docker", ["version", "--format", "{{.Server.Arch}}"])).stdout.trim();
+  assert.ok(["amd64", "arm64"].includes(nativeArchitecture), `unsupported Docker daemon architecture: ${nativeArchitecture}`);
   const cancel = (signal) => { if (!cleaningUp) { interrupted = signal; stopChild("SIGTERM"); } };
   const onInterrupt = () => cancel("SIGINT");
   const onTerminate = () => cancel("SIGTERM");
@@ -168,16 +170,20 @@ db.close(); console.log(JSON.stringify(result));`;
     mkdirSync(directory);
     const inspection = JSON.parse((await command("docker", ["image", "inspect", hub])).stdout)[0];
     assert.equal(inspection.Os, "linux");
-    assert.equal(inspection.Architecture, "amd64");
+    assert.ok(["amd64", "arm64"].includes(inspection.Architecture));
+    if (index === 1 || nativeArchitecture === "amd64") assert.equal(inspection.Architecture, nativeArchitecture,
+      "the candidate must run on the Docker host's native platform");
+    const platform = `linux/${inspection.Architecture}`;
+    if (inspection.Architecture !== nativeArchitecture) console.log(`Older hub ${version} uses ${platform}; the upgrade target must run natively on linux/${nativeArchitecture}.`);
     const name = `${project}-extract-${index}`;
     extractionContainers.add(name);
-    await command("docker", ["create", "--name", name, "--entrypoint", "/bin/true", hub]);
+    await command("docker", ["create", "--platform", platform, "--name", name, "--entrypoint", "/bin/true", hub]);
     await command("docker", ["cp", `${name}:/release/.`, directory]);
     await command("docker", ["rm", name]);
     extractionContainers.delete(name);
     assert.deepEqual(readdirSync(directory).sort(), ["REMOTE.md", "RELEASING.md", "bin", "docker-compose.yml",
       "release.json", "remote-settings.sh", "remote.env.example", "remote.https.yml", "remote.tailscale.yml"].sort());
-    const operatorCommand = JSON.parse((await command("docker", ["run", "--rm", "--entrypoint", "node", hub, "-e",
+    const operatorCommand = JSON.parse((await command("docker", ["run", "--rm", "--platform", platform, "--entrypoint", "node", hub, "-e",
       'console.log(require("node:fs").existsSync("/usr/local/bin/ub-hub"))'])).stdout);
     assert.ok(operatorCommand, `hub ${version} ships no ub-hub; the proof needs two releases that do`);
     if (index === 1) assert.deepEqual(readdirSync(join(directory, "bin")), ["remote-compose.sh"]);
@@ -188,7 +194,10 @@ db.close(); console.log(JSON.stringify(result));`;
     assert.equal(metadata.images.hub, hub);
     assert.equal(metadata.images.web, `ghcr.io/uberblick-ai/hub-web:${version}`);
     for (const image of Object.values(metadata.images)) {
-      const labels = JSON.parse((await command("docker", ["image", "inspect", image])).stdout)[0].Config.Labels;
+      const imageInspection = JSON.parse((await command("docker", ["image", "inspect", image])).stdout)[0];
+      assert.equal(imageInspection.Os, "linux");
+      assert.equal(imageInspection.Architecture, inspection.Architecture, "both release images use the selected platform");
+      const labels = imageInspection.Config.Labels;
       assert.equal(labels["org.opencontainers.image.version"], version);
       assert.equal(labels["org.opencontainers.image.revision"], metadata.sourceCommit);
       assert.equal(labels["io.uberblick.sync-protocol-version"], String(metadata.syncProtocolVersion));
@@ -337,6 +346,9 @@ db.exec("COMMIT"); db.close();`);
     const before = (await compose(["ps", "--quiet", "hub"])).stdout.trim();
     const olderBackup = readFileSync(join(deployment, "backup.sqlite"));
     deployment = await extract(versions[1], 1);
+    const candidateModel = JSON.parse((await compose(["config", "--format", "json"])).stdout);
+    for (const service of ["hub", "caddy"]) assert.equal(candidateModel.services[service].platform, undefined,
+      "candidate Compose files leave platform selection to Docker");
     const replacedAt = Date.now();
     await compose(["up", "--detach", "--no-build", "--pull", "never", "--force-recreate"]);
     await serving();

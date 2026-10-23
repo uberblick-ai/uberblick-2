@@ -3,7 +3,6 @@ name: uberblick-remote
 services:
   hub:
     image: __HUB_IMAGE__
-    platform: linux/amd64
     environment:
       # Only Caddy reaches the hub; its final forwarded hop identifies clients.
       HUB_RELEASE_PROXY: "1"
@@ -20,7 +19,6 @@ services:
 
   caddy:
     image: __WEB_IMAGE__
-    platform: linux/amd64
     depends_on:
       - hub
     environment:

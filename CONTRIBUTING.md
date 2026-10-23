@@ -206,8 +206,8 @@ checks still protect containment and responsive behavior.
 This repository's `.mcp.json` and `.codex/config.toml` run `ub mcp serve` through
 mise. Codex workers configured in `ub-agents.yaml` receive the same entry as
 runtime overrides. The checkout's `.uberblick.json` selects its workspace;
-these entries carry no credential. `mise run mcp` runs checkout source in the
-foreground for a standalone smoke test.
+these entries carry no credential. `mise run mcp` runs the checkout's CLI entry
+in the foreground for a standalone smoke test.
 
 The web dev server takes `WORKSPACES`, a comma-separated list such as
 `WORKSPACES="uberblick-<uuid>,research-<uuid>"`, for the topbar switcher. Export
@@ -228,6 +228,68 @@ The checkout's `[env] HUB_DB_PATH` in `mise.toml` selects a checkout-local hub
 database, so `mise run hub` does not open a packaged installation's database.
 The [user guide](USER_GUIDE.md#where-your-files-live) owns the general storage
 layout and explicit database overrides.
+
+### Linked worktrees and shared replicas
+
+In a linked Git worktree, checkout `ub` and `uberblick` commands run the primary
+working tree's code by default, including `ub open` and the repository MCP
+entries. The calling directory, project binding, machine hub records and login
+stay in force. Set up the primary working tree with `mise trust` and `mise run
+setup` first; checkout `ub open` also needs its web bundle (`mise run build-web`
+in the primary tree). An unavailable primary entry is an error.
+
+There are no disposable worktree replicas. The primary code uses the existing
+`<uuid>.sqlite` files in `~/.local/share/uberblick/`, or
+`$XDG_DATA_HOME/uberblick/`, honoring explicit database overrides. This keeps
+unsynced edits available to later sessions after a worktree is removed and
+avoids a cold corpus at each agent run. The primary working tree runs its own
+code, regardless of its branch; put schema-changing branches in linked
+worktrees. Released installations keep their usual storage behavior.
+
+To deliberately run a linked worktree's code against those shared replicas,
+create its gitignored `.uberblick-use-shared-replicas` file at that worktree's
+root (`touch .uberblick-use-shared-replicas`) and restart its MCP sessions and
+`ub open`. This opts in every workspace those commands serve, so branch schema
+can reach shared files. Remove the file (`rm .uberblick-use-shared-replicas`)
+and restart to restore primary-code routing. Removing it does not undo schema
+already applied. For branch testing, `mise run test` uses candidate-built CLI
+bundles and `mise run e2e` starts the checkout's own CLI source directly; both
+keep replicas in private test homes. The source-launcher test copies the
+checkout's shim into a private archive-shaped fixture so Git routing cannot
+silently substitute the primary checkout's implementation.
+
+### Rebuilding a replica after an unmerged schema change
+
+Unexpected SQLite errors from released or main code after running a branch may
+come from schema that branch added to the shared replica. Compare its table
+definitions, column order, indexes and triggers in `sqlite_schema`, using a
+read-only SQLite viewer, with `SCHEMA` in
+`packages/mcp-server/src/store.ts` at the intended code revision. Error text
+alone does not establish the cause. The `preserve_pending_snapshot_insert` and
+`preserve_pending_snapshot_update` triggers belong to main: keep them; main
+recreates them on every open.
+
+1. Stop every MCP session, `ub open` and development process using the replica.
+   Locate it using `stored in` from a previous `ub status` report or the layout
+   above, including any `UBERBLICK_DB` override. Before opening it with other
+   code, back up the database and any matching `-wal` and `-shm` files together
+   into a durable directory outside worktrees. Keep that original backup.
+2. Using code compatible with the replica, run `ub status --json`. Verify the
+   workspace ID, `storedIn` and intended non-null `hub`, and require
+   `connection.state` to be `connected` and `pending.count` to be `0`. Keep all
+   other clients stopped through recovery. A compatible linked branch needs the
+   explicit opt-in above to run its own code. If the command fails or pending
+   edits remain, retain the replica and backup: use the compatible branch to
+   sync or extract those edits, or ask a maintainer for recovery help. A
+   local-only workspace, or one without a known hub copy, cannot be rebuilt
+   from the hub; preserve its files.
+3. Only after that check, move the stopped replica and any matching `-wal` and
+   `-shm` files aside together. Leave the machine's hub record, credentials and
+   project binding in place. From current main or released code, run
+   `ub workspace use <hub-url>/<workspace-id>` to fetch and verify a fresh copy,
+   then check `ub status --json` and the recovered content before restarting
+   clients. Keep the old files until recovery is confirmed. Hub acknowledgement
+   does not establish durable hub storage, so the backup remains useful.
 
 ### Test deadlines
 

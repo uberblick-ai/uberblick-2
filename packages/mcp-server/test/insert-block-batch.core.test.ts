@@ -1,7 +1,7 @@
 import { getBlockInline, getBlocks } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
-import { removeTempDirs, startServer, testConfig } from "./core-helpers.js";
+import { readBlocks, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
@@ -85,17 +85,15 @@ describe("atomic insert_block batches", () => {
       blocks: entries,
     });
     expect(result).not.toHaveProperty("block");
-    expect(result.blocks).toHaveLength(entries.length);
-    for (const [index, block] of result.blocks.entries()) {
-      expect(block).toMatchObject({ ...entries[index], id: expect.any(String), rev: expect.any(String) });
-      expect(block.id.length).toBeGreaterThan(0);
-      expect(block.rev.length).toBeGreaterThan(0);
-    }
+    // The answer names the written blocks without replaying their content.
+    expect(result.blocks).toEqual(entries.map(() => ({ id: expect.any(String), rev: expect.any(String) })));
     expect(new Set(result.blocks.map((block: { id: string }) => block.id)).size).toBe(entries.length);
     const expected = position === "anchor"
       ? [original.blocks[0], ...result.blocks, original.blocks[1]]
       : [...result.blocks, ...original.blocks];
-    expect((await rig.ok("get_doc", { uuid: original.uuid })).blocks).toEqual(expected);
+    const read = (await rig.ok("get_doc", { uuid: original.uuid })).blocks;
+    expect(read).toMatchObject(expected);
+    expect(await readBlocks(rig, original.uuid, result.blocks)).toMatchObject(entries);
   });
 
   it("preserves every block kind and field, inline overrides, known links and literal chart source", async () => {
@@ -117,7 +115,7 @@ describe("atomic insert_block batches", () => {
       { type: "card", text: `title: A card\nbutton: [Open](https://example.com) filled blue\n\n[Known](${target.uuid})` },
       { type: "figma", text: `url: ${figmaUrl}\nheight: 560\n\n[Known](${target.uuid})` },
     ] });
-    expect(result.blocks).toMatchObject([
+    expect(await readBlocks(rig, page.uuid, result.blocks)).toMatchObject([
       { type: "heading", text: "Heading", level: 3 },
       { type: "paragraph", text: "Marked Known target" },
       { type: "list-item", text: "Numbered", list: "ordered", indent: 2 },
@@ -206,7 +204,7 @@ describe("atomic insert_block batches", () => {
       uuid: record.uuid, after_block_id: record.blocks[1].id,
       blocks: [{ type: "list-item", text: "Another" }, { type: "list-item", text: "One more" }],
     });
-    expect((await rig.ok("get_doc", { uuid: record.uuid })).blocks).toEqual([
+    expect((await rig.ok("get_doc", { uuid: record.uuid })).blocks).toMatchObject([
       record.blocks[0], record.blocks[1], ...result.blocks, record.blocks[2], record.blocks[3],
     ]);
   });
@@ -239,7 +237,7 @@ describe("atomic insert_block batches", () => {
       });
       expect(updates).toHaveLength(1);
       expect(rig.instance.store.updateCount(replica.room)).toBe(log + 1);
-      expect(getBlocks(peer)).toEqual([page.blocks[0], ...result.blocks]);
+      expect(getBlocks(peer)).toMatchObject([page.blocks[0], ...result.blocks]);
       expect(cursor).toHaveBeenCalledExactlyOnceWith(replica, result.blocks[1].id, "Final".length);
     } finally {
       replica.doc.off("update", replicate);

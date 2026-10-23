@@ -60,7 +60,7 @@ const SECRET = "uberblick-e2e-hub-secret";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(packageRoot, "..", "..");
-const UB = join(repoRoot, "packages", "cli", "bin", "ub.mjs");
+const UB = join(repoRoot, "packages", "cli", "test", "source-ub.mjs");
 
 const OPEN_ATTEMPTS = 5;
 const OPEN_READY_MS = 30_000;
@@ -106,7 +106,7 @@ async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
 
 function openEnvironment(runDir: string, bundleDir: string): NodeJS.ProcessEnv {
   const env = { ...process.env };
-  for (const key of ["HOME", "HUB_AUTH_TOKEN", "HUB_URL", "WORKSPACE_ID", "WORKSPACES", "UB_WORKSPACE_ID", "UB_HUB_URL"]) {
+  for (const key of ["HOME", "HUB_AUTH_TOKEN", "HUB_URL", "WORKSPACE_ID", "WORKSPACES", "UB_WORKSPACE_ID", "UB_HUB_URL", "UBERBLICK_DB"]) {
     delete env[key];
   }
   env.HOME = runDir;

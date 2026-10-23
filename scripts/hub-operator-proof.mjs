@@ -109,7 +109,7 @@ try {
     .match(/export const SYNC_PROTOCOL_VERSION = ([1-9]\d*);/)?.[1];
   assert.ok(protocol, "the commit declares its sync protocol");
   console.log(`Building actual hub image at commit ${sha}`);
-  await docker(["build", "--platform", "linux/amd64", "--file", join(context, "Dockerfile.hub-release"),
+  await docker(["build", "--file", join(context, "Dockerfile.hub-release"),
     "--build-arg", "HUB_RELEASE_VERSION=0.0.1", "--build-arg", `HUB_RELEASE_COMMIT=${sha}`,
     "--build-arg", `HUB_SYNC_PROTOCOL_VERSION=${protocol}`, "--build-arg", "HUB_RELEASE_HUB_IMAGE=ghcr.io/uberblick-ai/hub:0.0.1",
     "--build-arg", "HUB_RELEASE_WEB_IMAGE=ghcr.io/uberblick-ai/hub-web:0.0.1", "--target", "hub", "--tag", tag, context], { timeout: 360_000 });

@@ -1,11 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { createTagCatalogEntry, getMeta, setTags, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
+import { getMeta, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
-import { GuidanceBriefing } from "../src/briefing.js";
 import { startServer, testConfig, toolNamed } from "./core-helpers.js";
 import { INTERNAL_ERROR_MESSAGE, toFailure } from "../src/failures.js";
 import { PersistenceError, Replicas } from "../src/replica.js";
-import { pinDocOperation, unpinDocOperation } from "../src/sidebar-tools.js";
+import { getSidebarOperation, pinDocOperation, unpinDocOperation } from "../src/sidebar-tools.js";
 import { MirrorStore } from "../src/store.js";
 import { ServerWork } from "../src/server-work.js";
 import type { UpdateOrigin } from "../src/store.js";
@@ -41,7 +40,7 @@ function local() {
   const config = testConfig();
   const store = new FailingOperationStore(config.databasePath, workspaceId);
   const replicas = new Replicas(config, store);
-  const context = createToolContext(replicas, new GuidanceBriefing(replicas), new ServerWork());
+  const context = createToolContext(replicas, new ServerWork());
   close.push(async () => {
     replicas.destroy();
     await replicas.sync.waitForDeviceWork();
@@ -77,28 +76,26 @@ afterEach(async () => {
   for (const cleanup of close.splice(0).reverse()) await cleanup();
 });
 
-it("keeps settle, briefing, archive and hydration refusals in that order for direct writes", async () => {
+it("keeps settle before archive and hydration refusals for direct writes", async () => {
   const rig = local();
-  const guide = await document(rig.context, "Read before writing");
   const archived = randomUUID();
   upsertDirectoryEntry(rig.replicas.directory().doc, { uuid: archived, title: "Unhydrated archived fixture", tags: [] });
   tombstoneDirectoryEntry(rig.replicas.directory().doc, archived);
-  const marker = randomUUID();
-  createTagCatalogEntry(rig.replicas.settings().doc, "guidance", marker);
-  setTags(rig.replicas.replica(guide.uuid).doc, [marker]);
   const args = { uuid: archived, title: "Refused title" };
-  const settleFailure = new Error("settle refuses before briefing");
+  const settleFailure = new Error("settle refuses before archive checks");
   vi.spyOn(rig.replicas, "settle").mockRejectedValueOnce(settleFailure);
   await expect(setMetadataOperation(rig.context, args, request)).rejects.toBe(settleFailure);
   expect(await refused("set_metadata", setMetadataOperation(rig.context, args, request))).toMatchObject({
-    isError: true, payload: { error: "guidance_required", applied: false, partial: false, synced: false },
+    isError: true, payload: { error: "doc_archived", uuid: archived, applied: false, partial: false, synced: false },
   });
   const pinned = await pinDocOperation(rig.context, { uuid: archived, group: "Archived" }, request);
-  expect(pinned).toMatchObject({ applied: true, groups: [{ docs: [{ uuid: archived, status: "archived" }] }] });
+  expect(pinned).toMatchObject({ applied: true, group: { name: "Archived" } });
+  expect(await getSidebarOperation(rig.context, {}, request)).toMatchObject({ groups: [{ docs: [{ uuid: archived, status: "archived" }] }] });
   expect(await unpinDocOperation(rig.context, { uuid: randomUUID() }, request)).toMatchObject({ unpinned: false, applied: true });
-  await getDocOperation(rig.context, { uuid: guide.uuid }, request);
-  expect(await refused("set_metadata", setMetadataOperation(rig.context, args, request))).toMatchObject({
-    isError: true, payload: { error: "doc_archived", uuid: archived },
+  const unhydrated = randomUUID();
+  upsertDirectoryEntry(rig.replicas.directory().doc, { uuid: unhydrated, title: "Unhydrated fixture", tags: [] });
+  expect(await refused("set_metadata", setMetadataOperation(rig.context, { uuid: unhydrated, title: "Refused title" }, request))).toMatchObject({
+    isError: true, payload: { error: "doc_not_hydrated", uuid: unhydrated },
   });
 });
 
@@ -138,7 +135,7 @@ it("assembles ordinary and content durability on the operation path", async () =
   expect(metadata).toMatchObject({ applied: true, synced: false, hub: { status: "disabled" } });
   expect(metadata).not.toHaveProperty("tldrHint");
   const content = await editBlockOperation(rig.context, {
-    uuid: created.uuid, block_id: block.id, old_text: block.text, new_text: "Changed content", rev: block.rev,
+    uuid: created.uuid, block_id: block.id, old_text: "first paragraph", new_text: "Changed content", rev: block.rev,
   }, request);
   expect(content).toMatchObject({ applied: true, synced: false, tldr: null, tldrHint: expect.any(String) });
 });

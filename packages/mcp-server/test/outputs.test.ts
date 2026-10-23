@@ -94,6 +94,9 @@ describe("successful MCP output contracts", () => {
       return snapshot;
     });
     await success("list_revisions", { uuid });
+    vi.spyOn(revisionClient, "mutateDocumentRevision").mockResolvedValue({ id: "fixture-revision", author: null,
+      startedAt: null, endedAt: 1, name: { text: "Reviewed", namer: null, namedAt: 1, canManage: true } });
+    await success("name_revision", { uuid, name: "Reviewed" });
     await success("get_revision", { uuid, revision: "fixture-revision" });
     await success("list_docs");
     await success("search", { query: "Output contract" });

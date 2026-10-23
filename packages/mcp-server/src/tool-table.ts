@@ -36,6 +36,7 @@ import { inputSchema as listDocsInput, listDocsOperation } from "./tools/list-do
 import { inputSchema as listTagsInput, listTagsOperation } from "./tools/list-tags.js";
 import { inputSchema as listRevisionsInput, listRevisionsOperation } from "./tools/list-revisions.js";
 import { inputSchema as moveBlockInput, moveBlockOperation } from "./tools/move-block.js";
+import { inputSchema as nameRevisionInput, nameRevisionOperation } from "./tools/name-revision.js";
 import type { Operation, ToolOperation, Writes } from "./tools/operation.js";
 import { inputSchema as restoreDocInput, restoreDocOperation } from "./tools/restore-doc.js";
 import { inputSchema as searchInput, searchOperation } from "./tools/search.js";
@@ -122,16 +123,13 @@ export const tools: readonly Tool[] = [
     name: "list_tags",
     title: "List assignable tags",
     description:
-      "The existing workspace tag catalog, in deterministic name order. Each entry carries the stable canonical " +
-      "`id` documents store, its current display `name` and its optional `description`. Documents show only existing catalog tags. MCP cannot curate this catalog.\n\n" +
-      "`complete` says whether this is the whole workspace vocabulary. It is false while a configured hub has " +
-      "not delivered the catalog room to this replica: what is listed is then a local copy that may be missing " +
-      "curated entries, and a tag value this replica has never seen is refused rather than assigned. `hub` says " +
-      "where that connection stands.",
+      "List existing tag ids, names and descriptions in name order. complete:false means the hub catalog " +
+      "has not arrived. MCP cannot curate tags.",
     input: listTagsInput,
     operation: listTagsOperation,
     example: {},
     related: ["workspaces", "tool-contracts"],
+    details: toolHelpDetails.list_tags,
   }),
   tool({
     name: "create_doc",
@@ -166,8 +164,7 @@ export const tools: readonly Tool[] = [
     description:
       "Read live metadata, blocks with edit-assertion rev hashes, comment threads and decision context. " +
       "Creation time createdAt and decision entries' createdAt/updatedAt are ISO 8601 UTC strings when known and representable. " +
-      "Data lists collections/counts; use get_data for records. Use get_revision for a historical state. " +
-      "Eligible guidance reads count toward this process's briefing.",
+      "Data lists collections/counts; use get_data for records. Use get_revision for a historical state.",
     input: getDocInput,
     operation: getDocOperation,
     example: { uuid },
@@ -178,13 +175,26 @@ export const tools: readonly Tool[] = [
     name: "list_revisions",
     title: "List document revisions",
     description:
-      "List hub revisions newest first, including archived documents. IDs differ from get_doc rev hashes; " +
-      "use them with get_revision or get_data. Empty means hub-confirmed no history.",
+      "List hub revisions newest first, including archived documents, with names, namers and times or null. " +
+      "IDs work with get_revision/get_data. Empty means hub-confirmed no history.",
     input: listRevisionsInput,
     operation: listRevisionsOperation,
     example: { uuid },
     related: documentContracts,
     details: toolHelpDetails.list_revisions,
+  }),
+  tool({
+    name: "name_revision",
+    title: "Name the current document revision",
+    description:
+      "Name the current synchronized state only when a person asks. Requires team-hub write access; " +
+      "closes its stretch. One name per revision; manage it in the web.",
+    input: nameRevisionInput,
+    operation: nameRevisionOperation,
+    hints: { destructive: false, idempotent: true },
+    example: { uuid, name: "Reviewed after auth rewrite" },
+    related: documentContracts,
+    details: toolHelpDetails.name_revision,
   }),
   tool({
     name: "get_revision",
@@ -284,7 +294,7 @@ export const tools: readonly Tool[] = [
       "decision records. Optional tag accepts one catalog id or current name (case ignored), or a list: any listed tag " +
       "matches and more listed tags boost relevance; unknown tags refuse. Every hit includes kind and canonical " +
       "tags; decision hits include current record state, including superseded and conflict. No hits does not " +
-      "prove the index is empty or the replica complete.",
+      "prove the index is empty or the replica complete. If a needed page is missing, ask whether to create it.",
     input: searchInput,
     operation: searchOperation,
     example: { query: "release checklist", kind: "regular", tag: ["mcp", "cli"], limit: 10 },
@@ -658,10 +668,12 @@ export const tools: readonly Tool[] = [
     name: "unpin_doc",
     title: "Unpin a document",
     description:
-      "Remove a sidebar pin without changing the document. archive_doc hides a document or topic; delete_doc " +
-      "permanently deletes an archived regular document, or an archived topic with topic: true. One decision " +
-      "record cannot be deleted on its own yet. An unpin beats a concurrent move. No group is needed because " +
-      "each document has one pin; unpinned is false when none existed.",
+      "Remove a document from the sidebar, wherever it sits; the document itself is untouched. archive_doc " +
+      "hides a document or topic; delete_doc permanently deletes an archived regular document, or an archived " +
+      "topic with topic: true. One decision record cannot be deleted on its own yet.\n\n" +
+      "An unpin beats a concurrent move on another replica, so a dragged document does not reappear. It takes " +
+      "no group: a document has at most one pin. `unpinned` is false when the document was not pinned. A group " +
+      "left empty stays until sidebar_group deletes it; `groupHint` names that call.",
     input: unpinDocInput,
     operation: unpinDocOperation,
     // Removes a pin; repeating reports unpinned: false.
@@ -692,14 +704,12 @@ export const tools: readonly Tool[] = [
     name: "get_help",
     title: "Read product help",
     description:
-      "Read bundled, version-matched product help by topic or exact registered tool name. Omit topic to list " +
-      "every topic with its id, title, description and URI. The returned text is the same Markdown as " +
-      "uberblick://help/{topic}. Help is workspace-agnostic, needs no guidance briefing and never opens or " +
-      "settles a replica; it remains available offline and while the replica store is quarantined. " +
-      "Unknown topics refuse with unknown_help_topic and list valid topic ids; choose one and retry.",
+      "Read version-matched product help by topic/tool name; omit topic for the catalog. " +
+      "Workspace-agnostic; available offline and during quarantine.",
     input: getHelpInput,
     operation: getHelpOperation,
     example: { topic: "get_doc" },
     related: ["orientation", "tools", "tool-contracts"],
+    details: toolHelpDetails.get_help,
   }),
 ];

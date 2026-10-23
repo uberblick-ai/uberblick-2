@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { DIRECTORY_ARCHIVED_RECORDS_KEY, getMetaMap, isDirectoryEntryArchived, isDirectoryEntryDeleted, pinDoc, readSidebar, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
 import * as Y from "yjs";
-import { startServer, testConfig } from "./core-helpers.js";
+import { readBlocks, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
@@ -45,7 +45,7 @@ describe("delete_doc", () => {
     expect((await rig.ok("list_docs", { include_deleted: true })).docs.map((doc: { uuid: string }) => doc.uuid)).not.toContain(target.uuid);
     expect((await rig.ok("search", { query: "glossary" })).hits.map((doc: { uuid: string }) => doc.uuid)).not.toContain(target.uuid);
     const sidebar = replicas.sidebar();
-    const group = (await rig.ok("pin_doc", { uuid: source.uuid, group: "Reference" })).groups[0].id;
+    const group = (await rig.ok("pin_doc", { uuid: source.uuid, group: "Reference" })).group.id;
     pinDoc(sidebar.doc, group, target.uuid);
     expect((await rig.ok("get_sidebar")).groups.flatMap((entry: { docs: unknown[] }) => entry.docs)).not.toEqual(expect.arrayContaining([expect.objectContaining({ uuid: target.uuid })]));
     expect((await rig.ok("unpin_doc", { uuid: target.uuid })).unpinned).toBe(true);
@@ -60,10 +60,10 @@ describe("delete_doc", () => {
     const rig = await local();
     const target = await seed(rig);
     const source = await seed(rig);
+    const [block] = await readBlocks(rig, target.uuid, target.blocks);
     await rig.ok("archive_doc", { uuid: target.uuid });
     await rig.ok("delete_doc", { uuid: target.uuid });
     const uuid = target.uuid;
-    const block = target.blocks[0];
     const calls: [string, Record<string, unknown>][] = [
       ["get_doc", { uuid }], ["get_data", { uuid }], ["export_markdown", { uuid }], ["backlinks", { uuid }],
       ["set_metadata", { uuid, title: "Return" }], ["set_status", { uuid, status: "open" }],

@@ -235,7 +235,7 @@ it("uses nearest binding and environment overrides, rejecting foreign links befo
 it("consumes stdin in the real CLI process and leaves stdout free of input records", () => {
   const box = fixture();
   const input = JSON.stringify([{ collection: "runs", schema, upsert: [{ id: "a", value: { text: "producer-only-value" } }] }]);
-  const bin = fileURLToPath(new URL("../bin/ub.mjs", import.meta.url));
+  const bin = fileURLToPath(new URL("./source-ub.mjs", import.meta.url));
   const run = spawnSync(process.execPath, [bin, "data", "update", UUID, "--file", "-"], {
     cwd: box.cwd, env: box.env, input, encoding: "utf8", timeout: 25_000,
   });

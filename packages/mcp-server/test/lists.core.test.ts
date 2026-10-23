@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { removeTempDirs, startServer } from "./core-helpers.js";
+import { readBlocks, removeTempDirs, startServer } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
@@ -43,13 +43,12 @@ describe("MCP list attributes", () => {
     const rig = await local();
     const input = { type: "list-item", text: "Nested", list: "ordered", indent: 2 };
     const doc = await create(rig, tool === "create_doc" ? { blocks: [input] } : {});
-    const block = tool === "create_doc" ? doc.blocks[0] : tool === "insert_block"
+    const written = tool === "create_doc" ? doc.blocks[0] : tool === "insert_block"
       ? (await rig.ok(tool, { uuid: doc.uuid, blocks: [input] })).blocks[0]
       : (await rig.ok(tool, { uuid: doc.uuid, block_id: doc.blocks[0].id,
-        old_text: doc.blocks[0].text, new_text: input.text, rev: doc.blocks[0].rev,
+        old_text: "Item", new_text: input.text, rev: doc.blocks[0].rev,
         list: input.list, indent: input.indent })).block;
-    expect(block).toMatchObject(input);
-    expect((await rig.ok("get_doc", { uuid: doc.uuid })).blocks).toContainEqual(block);
+    expect((await readBlocks(rig, doc.uuid, [written]))[0]).toMatchObject({ ...input, rev: written.rev });
   });
 
   it.each([
@@ -57,7 +56,7 @@ describe("MCP list attributes", () => {
   ])("refuses invalid list attributes %j on every write before any mutation", async (fields) => {
     const rig = await local();
     const doc = await create(rig);
-    const block = doc.blocks[0];
+    const [block] = await readBlocks(rig, doc.uuid, doc.blocks);
     await refuse(rig, "create_doc", {
       title: "Invalid", description: "Must not be created.",
       blocks: [{ type: "paragraph", text: "Must not be seeded." }, { type: "list-item", text: "Invalid", ...fields }],

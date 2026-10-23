@@ -1,6 +1,5 @@
 /** Built-in product concepts. No workspace content or replica state enters these pages. */
 import { BLOCK_TYPES, DATA_LIMITS, INLINE_ICONS, MAX_DESCRIPTION_LENGTH, MAX_TLDR_LENGTH } from "@uberblick/schema";
-import { GUIDANCE_INSTRUCTIONS } from "./briefing.js";
 import { FAILURE_INSTRUCTIONS } from "./failures.js";
 import { TLDR_AFTER_CONTENT_CHANGE } from "./tools/descriptions.js";
 
@@ -11,7 +10,7 @@ export interface HelpTopic {
   text: string;
 }
 
-/** The same orientation is served in initialize.instructions and its help topic. */
+/** Workspace-independent orientation shared by startup and its help topic. */
 export const STARTUP_ORIENTATION =
   "Uberblick stores this repo's documents and decision records. " +
   "Before you change anything, search the corpus for relevant documents and decisions, then read them with `get_doc`. " +
@@ -38,18 +37,18 @@ Start with \`get_sidebar({})\` for curated entry points, \`list_docs({})\` for d
 
 - \`title\` names the document. MCP creation requires a non-empty title and description; \`set_metadata\` with \`title\` repairs untitled documents.
 - \`description\` is read only by agents and never shown to people. Write whatever best helps an agent find this document with list_docs and search and decide whether to open it: what it covers, how it differs from its neighbours and the terms someone would search for. A keyword list is fine. list_docs, search and backlinks all answer with it, so a good one saves a get_doc and a bad one wastes it. At most ${MAX_DESCRIPTION_LENGTH} characters.
-- \`tldr\` is one or two sentences of plain English for a person opening a regular document, independent of its description. \`set_metadata\` accepts up to ${MAX_TLDR_LENGTH} characters for it, refuses empty or whitespace-only strings, and accepts null to clear it. A person can choose Remove TL;DR from the web's Document actions to clear the summary and mark the page as having none on purpose. Marked pages return \`tldr: null\` and \`tldrOptOut: true\` only in \`get_doc\`, and content writes omit TL;DR hints. A non-null summary on a marked page refuses with \`tldr_opted_out\` and \`field: "tldr"\` unless \`set_metadata\` passes \`tldr_opt_in: true\` in the same call. The flag requires a non-null \`tldr\`; writing it lifts the mark. Null preserves the mark. The web's Add TL;DR lifts it before editing, even if editing is cancelled. Summary text takes precedence over the mark after concurrent or older-client writes. MCP cannot set the mark. Decisions have no TL;DR: they use answer blocks, return \`tldr: null\`, omit it from directory entries and never report the mark. Ordinary stubs, search and Markdown do not carry TL;DR or the mark. ${TLDR_AFTER_CONTENT_CHANGE}
+- \`tldr\` is one or two sentences of plain English for a person opening a regular document, independent of its description. \`set_metadata\` accepts up to ${MAX_TLDR_LENGTH} characters for it, refuses empty or whitespace-only strings, and accepts null to clear it. A person can choose Remove TL;DR from the web's Document actions to clear the summary and mark the page as having none on purpose. Marked pages return \`tldr: null\` and \`tldrOptOut: true\` only in \`get_doc\`, and content writes omit TL;DR hints. A non-null summary on a marked page refuses with \`tldr_opted_out\` and \`field: "tldr"\` unless \`set_metadata\` passes \`tldr_opt_in: true\` in the same call. The flag requires a non-null \`tldr\`; writing it lifts the mark. Null preserves the mark. The web's Add TL;DR lifts it before editing, even if editing is cancelled. Summary text takes precedence over the mark after concurrent or older-client writes. MCP cannot set the mark. Decisions have no TL;DR: they use answer blocks, return \`tldr: null\`, omit it from directory entries and never report the mark. Ordinary stubs, search and Markdown do not carry TL;DR or the mark. Content writes to an unmarked regular page with a TL;DR return \`tldrHint\`: "${TLDR_AFTER_CONTENT_CHANGE}" A create_doc call that supplies \`tldr\` returns none.
 - \`tags\` store stable catalog ids. Call \`list_tags\` before choosing existing ids or names (case ignored); entries include optional descriptions. Document reads show only existing catalog tags. \`set_metadata\` with \`tags\` replaces existing-tag assignments; an empty array clears those assignments. References awaiting their catalog entry stay stored and hidden; confirmed-deleted references are cleaned only during later permitted document writes. MCP cannot curate the catalog. \`list_tags\` reports \`complete: false\` until the catalog arrives from a configured hub, so an unseen selection cannot be assumed invalid in the full workspace.
 - Curated \`links\` are target document UUIDs, replaced by \`set_metadata\` with \`links\`; an empty array clears them. Newly added targets must be known to this replica's directory, archived targets are accepted, and existing curated targets can be retained unchanged. Inline document references also contribute backlinks. Decision-derived links and decision metadata are explained in \`decisions\`.
 - \`code_check\` records a regular page's latest comparison with code per repository. \`set_metadata\` takes one \`{repository, commit, result, rev, paths?}\` entry: \`matches\` means agreement with the commit, \`ahead\` means intentionally undelivered behavior, and \`drift\` means unintended disagreement. \`rev\` must match the page-level revision read with \`get_doc\`, the same value the web status row shows for regular pages and decisions. Missing or stale rev refuses the whole call with \`field: "code_check"\`: read the page again and compare it with code before recording, rather than just resending with a new rev. Optional \`paths\` are hints about repo-relative files/folders looked at, not a complete dependency list; see \`set_metadata\` help for limits. Repository identity ignores case; the writing replica supplies \`checked_at\` in UTC. Only that repository's entry is replaced. \`get_doc\` returns the entries or [], with recorded rev and paths when present; earlier entries and older-client rewrites can omit them, making compared text or paths unknown. list_docs does not return checks. Decisions omit the attribute and refuse writes to it. Content edits and other metadata writes leave it unchanged; blocks and Markdown export never carry it.
 
 \`set_metadata\` accepts any non-empty subset of these fields and leaves unnamed fields untouched. All named fields are validated before any write; a field-specific refusal preserves its error code and names \`field\`. Title and description cannot be cleared. Its successful answer returns the descriptive metadata as get_doc would read it, with shared write durability and no TL;DR review reminder. Open decision records additionally accept \`discussion\`, as explained in \`decisions\`.
 
-Reads return absent description and TL;DR as null. Document writes can return non-blocking hints for a missing description, missing tags or a TL;DR needing review. Decision metadata and the decided-answer lock belong to \`decisions\`, the archive lock to \`archive_doc\`; write durability and the guidance briefing belong to \`tool-contracts\`.
+Reads return absent description and TL;DR as null. Document writes can return non-blocking hints for a missing description, missing tags or a TL;DR needing review. Decision metadata and the decided-answer lock belong to \`decisions\`, the archive lock to \`archive_doc\`; write durability belongs to \`tool-contracts\`.
 
 ## Sidebar organization
 
-The sidebar holds ordered named groups and pinned document UUIDs. Unpinned documents remain discoverable through listings, search, links and backlinks. Every sidebar tool returns the whole sidebar: ordered \`groups\` with \`id\`, \`name\` and ordered \`docs\`, so a caller never has to re-read to see where a change landed. Pinned titles come from directory stubs without opening document rooms. A pin's status is \`ok\`, \`archived\` (the document is tombstoned but still pinned — archive_doc unpins, so this pin outlived the archive), or \`unknown\` (no directory entry at all — a document nothing can resolve, left visible so it can be unpinned).
+The sidebar holds ordered named groups and pinned document UUIDs. Unpinned documents remain discoverable through listings, search, links and backlinks. \`get_sidebar\` and \`sidebar_group\` return the whole sidebar: ordered \`groups\` with \`id\`, \`name\` and ordered \`docs\`. \`pin_doc\` answers with the pin's group and \`unpin_doc\` with whether a pin was removed; unpinning a group's last document leaves the group empty, and the answer's \`groupHint\` names the \`sidebar_group\` delete that removes it. Pinned titles come from directory stubs without opening document rooms. A pin's status is \`ok\`, \`archived\` (the document is tombstoned but still pinned — archive_doc unpins, so this pin outlived the archive), or \`unknown\` (no directory entry at all — a document nothing can resolve, left visible so it can be unpinned).
 
 \`pin_doc\` creates a missing group by name and pins or moves a document; each document has at most one pin. \`index\` chooses its position, omitted means last. \`unpin_doc\` removes the pin without changing the document, and beats a concurrent move. \`sidebar_group\` renames, moves or deletes a group; deleting removes its pins and leaves its documents intact. \`create_doc\` may place a new document in an existing group by the id returned by \`get_sidebar\`; omitting placement creates it unpinned.
 
@@ -413,7 +412,7 @@ A document can own named collections beside its prose. Each collection has one s
 
 For an earlier state, pass \`revision\`, a hub revision ID returned by \`list_revisions\`, to \`get_data\`. It uses the same summary and bounded collection paging from that revision, including for archived documents. Keep the same revision on every page; an open revision can still change between calls. An unavailable revision refuses rather than falling back to live data. \`get_revision\` returns the same area summary beside the revision's title and blocks. Hub revision IDs differ from \`get_doc\`'s page and block \`rev\` content hashes, and writing tools do not accept them.
 
-\`update_data\` takes one validated batch, naming each touched collection once. For each collection it sets \`schema\`, optionally \`replaceRecords\`, then applies \`deleteRecords\` and \`upsert\` whole id/value records. \`deleteCollection: true\` excludes other changes. Every retained record must satisfy the resulting schema before the batch commits in one local transaction. An identical refresh returns \`changed: false\` and emits no update. Keep producer records and human dispositions in separate collections, sharing ids by convention. The decided-answer lock is in \`decisions\` and the archive lock in \`archive_doc\`; briefing and durability are in \`tool-contracts\`.
+\`update_data\` takes one validated batch, naming each touched collection once. For each collection it sets \`schema\`, optionally \`replaceRecords\`, then applies \`deleteRecords\` and \`upsert\` whole id/value records. \`deleteCollection: true\` excludes other changes. Every retained record must satisfy the resulting schema before the batch commits in one local transaction. An identical refresh returns \`changed: false\` and emits no update. Keep producer records and human dispositions in separate collections, sharing ids by convention. The decided-answer lock is in \`decisions\` and the archive lock in \`archive_doc\`; durability is in \`tool-contracts\`.
 
 ## Closed version-1 schema vocabulary
 
@@ -494,6 +493,11 @@ Failures are marked \`isError: true\` and omit structuredContent, so success-sch
 | \`revisions_forbidden\` | Ask a workspace maintainer to grant read access before repeating the read. |
 | \`revisions_unsupported\` | Ask the hub operator to update to a version that serves automatic revisions. |
 | \`revision_not_found\` | List this document's revisions again and select an ID belonging to it. |
+| \`revision_stale_state\` | Synchronize and read the current state before naming it. |
+| \`revision_invalid_name\` | Supply 1 to 100 characters on one line. |
+| \`revision_already_named\` | Read existingName; its namer can rename or remove it in the web. |
+| \`revision_not_namer\` | Ask the naming account to manage the name in the web. |
+| \`revision_naming_outcome_unknown\` | A sent request may have applied. Read list_revisions before retrying; applied is null. |
 
 An empty history is returned only when the hub confirms it has no revisions. Archived documents remain readable.
 
@@ -501,13 +505,9 @@ Unknown help topics through get_help are manual refusals and name all valid topi
 
 ## Write durability and synced
 
-Successful writes report \`applied\`, \`synced\` and \`hub\`. Applied means this server's local update log holds the write. Hub describes the connection, not remote storage. Calls touching multiple rooms report each room independently; aggregate synced is true only when every touched room is acknowledged. There is no rollback or cross-room remote atomicity.
+Successful writes report \`applied\`, \`synced\` and \`hub\`. Applied means this server's local update log holds the write. Hub describes the connection, not remote storage. Calls touching multiple rooms report each room independently; aggregate synced is true only when every touched room is acknowledged. There is no rollback or cross-room remote atomicity. The hub-only \`name_revision\` operation is separate: applied means the hub applied its revision-store transaction and synced means it acknowledged that transaction; no local document log is written. A sent naming request whose reply is lost reports \`applied: null\` and \`synced: false\`; check list_revisions before retrying.
 
 \`synced: true\` means the hub acknowledged this update: it is in the hub's memory, and a healthy hub has scheduled the write on its store debounce — by default 2s after the last change to the document, 10s at the outside. It does NOT mean the hub has stored it: the write is still ahead of the hub's disk, and the store itself can fail. A hub that dies abruptly inside that window (SIGKILL, a crash, power loss) loses its volatile copy of the update. That is recoverable rather than fatal: \`applied: true\` is the durable half — this server's append-only update log holds the write before the tool returns and re-sends it on reconnect — so losing it for good takes the crash plus no replica holding that update ever coming back.
-
-## Guidance briefing
-
-${GUIDANCE_INSTRUCTIONS}
 
 ## Related
 
@@ -566,7 +566,7 @@ export const conceptTopics: readonly HelpTopic[] = [
   {
     id: "tool-contracts",
     title: "Shared tool contracts",
-    description: "Arguments and results, failure recovery, local write durability, synced and the guidance briefing.",
+    description: "Arguments and results, failure recovery, local write durability and synced.",
     text: toolContracts,
   },
 ];
