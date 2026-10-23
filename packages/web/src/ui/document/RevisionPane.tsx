@@ -1,7 +1,7 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { Editor } from "@tiptap/core";
-import { compareRevisions, getMeta } from "@uberblick/schema";
+import { getMeta } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import type * as Y from "yjs";
 import { createRevisionEditor } from "../../editor/revision-view.js";
@@ -90,12 +90,16 @@ function RevisionStatus({ history, writable }: { history: DocumentHistory; writa
   const oldest = selection.index >= total - 1;
   const { label, time } = attribution(entry, oldest, now);
   const compared = selection.comparedWith;
+  const title = getMeta(selection.after).title;
+  const previousTitle = selection.before === null ? null : getMeta(selection.before).title;
+  const renamed = previousTitle !== null && previousTitle !== title ? previousTitle : null;
   return <fieldset ref={group} aria-label="Document history" className="ub-history-controls ub-type-small">
     <span className="ub-history-who" title={revisionLabel(entry)}>
       <ClockIcon />
       <span className="sr-only">{revisionLabel(entry)}</span>
       <span className="ub-history-author" aria-hidden="true">{label}</span>
       <span className="ub-history-when" aria-hidden="true">{entry.endedAt === null ? "· in progress" : time === null ? "" : <>· <time dateTime={time.dateTime} title={time.title}>{time.label}</time></>}</span>
+      {renamed !== null && <span className="ub-history-renamed">· renamed from <s>{renamed || "Untitled"}</s></span>}
       {compared?.name != null && <span className="ub-history-compared">· compared with “{compared.name.text}”</span>}
     </span>
     <span role="status" className="ub-history-state">{error ?? (busy ? "Loading…" : "")}</span>
@@ -137,15 +141,9 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   const host = useRef<HTMLDivElement | null>(null);
   const [failed, setFailed] = useState<DocumentHistory["selection"]>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const restoreReason = useId();
   const { selection } = history;
   const title = selection === null ? "" : getMeta(selection.after).title;
-  const comparison = useMemo(() => selection?.before == null ? null : compareRevisions(selection.before, selection.after), [selection]);
-  let titleOffset = 0;
-  const titleSpans = comparison?.title?.spans.map((span) => {
-    const offset = titleOffset;
-    titleOffset += span.text.length;
-    return span.kind === "unchanged" ? span.text : <span key={`${offset}:${span.kind}`} data-revision-change={span.kind}>{span.text}</span>;
-  });
   useEffect(() => {
     if (host.current === null || selection === null) return;
     try {
@@ -161,8 +159,19 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   </section>;
   return <section className="ub-pane ub-page-pane ub-document-pane ub-revision-pane">
     <div className="ub-column">
-      <h1 className="ub-title">{titleSpans ?? title}</h1>
-      <RevisionStatus history={history} writable={writable} />
+      {/* Stays in view while the comparison scrolls; revisions keep no tags. */}
+      <header className="ub-revision-header">
+        <div className="ub-revision-heading">
+          <h1 className="ub-revision-title">{title || "Untitled"}</h1>
+          {/* Restore lands later; the control shows where it will be. */}
+          <Button variant="secondary" size="sm" aria-disabled="true" aria-describedby={restoreReason}
+            title="Restore is not available yet" className="ub-revision-restore" onClick={(event) => event.preventDefault()}>
+            Restore this version
+          </Button>
+          <span id={restoreReason} className="sr-only">Restore is not available yet</span>
+        </div>
+        <RevisionStatus history={history} writable={writable} />
+      </header>
       {failed === selection && <p role="status">This client cannot display this revision. Update the client and try again.</p>}
       <div className="ub-editor-frame ub-revision-view">
         <div className="ub-editor" ref={host} />

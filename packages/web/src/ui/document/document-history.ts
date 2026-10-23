@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type * as Y from "yjs";
+import { getMeta } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import { DocumentHistoryError } from "../../shell/document-revisions.js";
 import type { DocumentRevisionsClient } from "../../shell/document-revisions.js";
@@ -12,6 +13,8 @@ interface HistoryState {
   active: boolean;
   busy: boolean;
   error: string | null;
+  /** Titles of the revisions read so far; the list itself carries none. */
+  titles: Readonly<Record<string, string>>;
 }
 interface Session {
   client: DocumentRevisionsClient;
@@ -22,7 +25,7 @@ interface Session {
   documents: Map<string, Y.Doc>;
   state: HistoryState;
 }
-const initial: HistoryState = { entries: null, selection: null, active: false, busy: true, error: null };
+const initial: HistoryState = { entries: null, selection: null, active: false, busy: true, error: null, titles: {} };
 type Target = { index: number } | { step: -1 | 1 } | { since: string | null };
 function destroyDocuments(documents: Map<string, Y.Doc>): void {
   for (const doc of documents.values()) doc.destroy();
@@ -33,6 +36,17 @@ function destroyDocuments(documents: Map<string, Y.Doc>): void {
 function targetIndex(target: Target, selection: Selection | null): number {
   if ("since" in target || (selection === null && "step" in target)) return 0;
   return "index" in target ? target.index : (selection?.index ?? 0) + target.step;
+}
+
+function knownTitles(documents: Map<string, Y.Doc>): Record<string, string> {
+  return Object.fromEntries([...documents].map(([id, doc]) => [id, getMeta(doc).title]));
+}
+
+/** The predecessor's title when this revision changed it, once both have been read. */
+export function renamedFrom(entries: readonly RevisionEntry[], titles: Readonly<Record<string, string>>, index: number): string | null {
+  const title = titles[entries[index]?.id ?? ""];
+  const previous = titles[entries[index + 1]?.id ?? ""];
+  return title === undefined || previous === undefined || title === previous ? null : previous;
 }
 
 function namedBaseline(entries: readonly RevisionEntry[], since: string | null): RevisionEntry | undefined {
@@ -105,7 +119,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
       const entries = named ? await owner.client.list(owner.uuid, owner.signal)
         : selection === null ? await list(owner, operation) : owner.state.entries ?? [];
       if (owner.operation !== operation) return;
-      if (selection === null && fresh === null) destroyDocuments(owner.documents);
+      if (selection === null && fresh === null) { destroyDocuments(owner.documents); update(owner, { titles: {} }); }
       const index = targetIndex(target, selection);
       const previous = named ? namedBaseline(entries, target.since) : undefined;
       if (named && previous === undefined) { update(owner, { busy: false, entries, error: "This named revision is no longer available. Try again." }); return; }
@@ -117,7 +131,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
         owner.documents = fresh;
         adopted = true;
       }
-      update(owner, { entries, selection: next, busy: false });
+      update(owner, { entries, selection: next, busy: false, titles: knownTitles(owner.documents) });
     } catch (error) { if (owner.operation === operation) fail(owner, error); }
     finally { if (fresh !== null && !adopted) destroyDocuments(fresh); }
   };
