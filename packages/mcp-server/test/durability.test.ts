@@ -406,6 +406,7 @@ describe("a failed append", () => {
     // Diagnostics still answer, and touch nothing.
     const status = await rig.ok("sync_status", {});
     expect(status.persistence).not.toBeNull();
+    expect(status.caughtUp).toBe(false);
 
     await rig.close();
     rigs.length = 0;

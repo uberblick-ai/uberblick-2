@@ -146,7 +146,9 @@ export async function collectSyncStatus(
     workspace: replicas.config.workspaceId,
     database: replicas.store.databasePath,
     hub: replicas.hubState(),
-    caughtUp: local ? replicas.persistenceError() === null : collectReplicaSyncState(replicas).caughtUp,
+    caughtUp: local
+      ? !replicas.store.isRemoved() && replicas.persistenceError() === null
+      : collectReplicaSyncState(replicas).caughtUp,
     unsyncedChanges: pending.length,
     pendingRooms: pending,
     lastSync: local ? null : replicas.readLastSync(),
