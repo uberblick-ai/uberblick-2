@@ -20,7 +20,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { COMMAND_TREE, MCP_HELP, runCli } from "../src/cli.js";
 import type { Command } from "../src/command.js";
 import { OPEN_HELP } from "../src/open.js";
-import { WORKSPACE_HELP } from "../src/workspace.js";
+import { WORKSPACE_HELP, WORKSPACE_REMOVE_HELP } from "../src/workspace.js";
+import { WORKSPACE_MEMBER_HELP } from "../src/workspace-member.js";
 import type { Run, Sandbox } from "./helpers.js";
 import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox } from "./helpers.js";
 
@@ -74,6 +75,7 @@ type Options = Readonly<
 interface Path {
   /** What a person types after `ub`. */
   argv: string[];
+  canonicalArgv: readonly string[];
   help: string;
   /** The parser surface the help is checked against. */
   options: Options;
@@ -86,23 +88,52 @@ interface Path {
  * deliberately absent: they are not part of this contract, and the test below
  * proves `ub mcp --help` does not advertise them either.
  */
-function humanPaths(entry: Command): Path[] {
+function humanPaths(entry: Command, argv: string[] = [...entry.path]): Path[] {
   if ("hidden" in entry && entry.hidden) return [];
-  const path = { argv: [...entry.path], help: entry.help };
-  if (!("children" in entry)) return [{ ...path, options: entry.options }];
-  return [
-    {
-      ...path,
-      options: {},
-      children: entry.children
-        .filter(child => !("hidden" in child && child.hidden))
-        .map(child => child.path.at(-1) as string),
-    },
-    ...entry.children.flatMap(humanPaths),
+  const spellings = [
+    argv,
+    ...(entry.aliases ?? []).map(alias => [...argv.slice(0, -1), alias]),
   ];
+  return spellings.flatMap(argv => {
+    const path = { argv, canonicalArgv: entry.path, help: entry.help };
+    if (!("children" in entry)) return [{ ...path, options: entry.options }];
+    return [
+      {
+        ...path,
+        options: {},
+        children: entry.children
+          .filter(child => !("hidden" in child && child.hidden))
+          .map(child => child.path.at(-1) as string),
+      },
+      ...entry.children.flatMap(child => humanPaths(child, [...argv, child.path.at(-1) as string])),
+    ];
+  });
 }
 
 const PATHS = humanPaths(COMMAND_TREE);
+
+it("advertises rm on remove's existing catalog row and canonical help", async () => {
+  const group = await dispatch(["workspace", "--help"]);
+  expect(group.stdout).toMatch(/^ {2}remove .+\(alias: rm\)$/m);
+  expect(group.stdout).not.toMatch(/^ {2}rm\b/m);
+  expect(WORKSPACE_REMOVE_HELP).toContain("Alias: rm");
+});
+
+it.each([[], ["--yes"], ["--bogus"], ["one", "two"]].map(args => ({ args })))(
+  "keeps canonical usage errors for rm arguments $args", async ({ args }) => {
+    const canonical = await dispatch(["workspace", "remove", ...args]);
+    expect(canonical.status).toBe(2);
+    expect(canonical.stderr).toMatch(/^ub workspace remove:/);
+    expect(await dispatch(["workspace", "rm", ...args])).toEqual(canonical);
+  },
+);
+
+it("keeps workspace member rm unknown", async () => {
+  const run = await dispatch(["workspace", "member", "rm", "someone"]);
+  expect(run.status).toBe(2);
+  expect(run.stdout).toBe("");
+  expect(run.stderr).toBe(`ub workspace member: unknown command "rm"\n\n${WORKSPACE_MEMBER_HELP}`);
+});
 
 /** Command names and description columns from one contextual catalog. */
 function commandRows(help: string, catalogOnly = false): Array<{ command: string; descriptionColumn: number }> {
@@ -348,7 +379,7 @@ describe("what is not a request for help", () => {
 
   it("refuses unknown options with an error and usage, without writing", async () => {
     for (const path of PATHS.filter(path => path.children === undefined)) {
-      const prefix = ["ub", ...(path.argv[0] === "data" ? ["data"] : path.argv)].join(" ");
+      const prefix = ["ub", ...(path.argv[0] === "data" ? ["data"] : path.canonicalArgv)].join(" ");
       const run = await dispatch([...path.argv, "--bogus"]);
       expect(run.status).toBe(2);
       expect(run.stdout).toBe("");
