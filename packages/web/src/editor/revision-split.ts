@@ -30,7 +30,7 @@ import { ToggleHeadings } from "./toggle-headings.js";
 import { WireframeBlocks } from "./wireframe.js";
 
 export type RevisionSide = "before" | "after";
-export type RevisionRowKind = "unchanged" | "changed" | "added" | "removed";
+export type RevisionRowKind = "unchanged" | "changed" | "added" | "removed" | "folded";
 
 export interface RevisionSideCell {
   /** Captions above the block: what kind of change, fields, data. */
@@ -40,6 +40,10 @@ export interface RevisionSideCell {
 
 export interface RevisionRow {
   kind: RevisionRowKind;
+  /** The heading this row shows, for fold labels. */
+  heading?: string;
+  /** A folded run: the full model's first row and how many rows it hides. */
+  fold?: { run: number; count: number };
   /** Any visible difference: text, fields, rows, cells or data. Folding and change navigation use this. */
   changed: boolean;
   before: RevisionSideCell;
@@ -48,7 +52,10 @@ export interface RevisionRow {
 
 export interface RevisionSplitModel {
   comparison: RevisionComparison;
+  /** The rows shown, with folded runs as single rows. */
   rows: RevisionRow[];
+  /** Every folded or foldable run, by its first row in the full comparison. */
+  runs: number[];
   before: JSONContent;
   after: JSONContent;
 }
@@ -119,7 +126,7 @@ function sideNode(node: PMNode, change: RevisionBlockComparison, side: RevisionS
 
 function identified(node: PMNode, index: number): PMNode {
   // The live editor stays mounted beside these projections; identities never repeat.
-  return node.type.name === "revisionFiller" ? node
+  return node.type.name === "revisionFiller" || node.type.name === "revisionFold" ? node
     : node.type.create({ ...node.attrs, id: `revision-${index}-${node.attrs.id ?? ""}` }, node.content, node.marks);
 }
 
@@ -127,7 +134,60 @@ function document(nodes: PMNode[]): JSONContent {
   return revisionSchema.topNodeType.create(null, Fragment.fromArray(nodes.map(identified))).toJSON() as JSONContent;
 }
 
-export function revisionSplitModel(before: Y.Doc, after: Y.Doc): RevisionSplitModel {
+export interface RevisionFolding {
+  /** Fold unchanged runs at all. */
+  collapse: boolean;
+  /** Runs shown again, by their first row. */
+  expanded: ReadonlySet<number>;
+}
+
+/**
+ * Runs of at least two rows without any change, each more than one row from a
+ * change; the row next to a change stays as context.
+ */
+export function unchangedRuns(rows: readonly Pick<RevisionRow, "changed">[]): { start: number; end: number }[] {
+  const quiet = rows.map((row, index) => !row.changed && !rows[index - 1]?.changed && !rows[index + 1]?.changed);
+  const runs: { start: number; end: number }[] = [];
+  quiet.forEach((value, index) => {
+    if (!value) return;
+    const last = runs.at(-1);
+    if (last?.end === index - 1) last.end = index;
+    else runs.push({ start: index, end: index });
+  });
+  return runs.filter((run) => run.end > run.start);
+}
+
+function foldNode(run: number, count: number, headings: string): PMNode {
+  const type = revisionSchema.nodes.revisionFold;
+  if (type === undefined) throw new Error("Revision fold is missing");
+  return type.create({ run, count, headings });
+}
+
+/** One comparison entry as a row and the block each side shows for it. */
+function splitRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, newNode: PMNode | undefined,
+  comparison: RevisionComparison): { row: RevisionRow; left: PMNode; right: PMNode } {
+  const fields = cellFields(change);
+  const data = (node: PMNode | undefined): string[] => node === undefined ? [] : chartCollections(node, comparison).map((name) => `Data changed: ${name}`);
+  const changedLabel = fields.length > 0 ? [`Changed: ${fields.join(", ")}`] : [];
+  const kind: RevisionRowKind = newNode === undefined ? "removed" : oldNode === undefined ? "added" : change.kind === "unchanged" ? "unchanged" : "changed";
+  const beforeLabels = oldNode === undefined ? [] : [...(kind === "removed" ? ["Removed block"] : changedLabel), ...data(oldNode)];
+  const afterLabels = newNode === undefined ? [] : [...(kind === "added" ? ["Added block"] : changedLabel), ...data(newNode)];
+  const shown = newNode ?? oldNode;
+  return {
+    row: {
+      kind,
+      ...(shown?.type.name === "heading" && shown.textContent !== "" ? { heading: shown.textContent } : {}),
+      changed: kind !== "unchanged" || fields.length > 0 || change.spans.length > 0 || beforeLabels.length > 0 || afterLabels.length > 0,
+      before: { labels: beforeLabels, filler: oldNode === undefined },
+      after: { labels: afterLabels, filler: newNode === undefined },
+    },
+    left: oldNode === undefined ? filler() : kind === "removed" ? markTree(oldNode, "removed") : sideNode(oldNode, change, "before"),
+    right: newNode === undefined ? filler() : kind === "added" ? markTree(newNode, "added") : sideNode(newNode, change, "after"),
+  };
+}
+
+export function revisionSplitModel(before: Y.Doc, after: Y.Doc,
+  folding: RevisionFolding = { collapse: false, expanded: new Set() }): RevisionSplitModel {
   const oldNodes = visibleNodes(before);
   const newNodes = visibleNodes(after);
   const comparison = compareRevisions(before, after);
@@ -138,25 +198,42 @@ export function revisionSplitModel(before: Y.Doc, after: Y.Doc): RevisionSplitMo
     const oldNode = change.beforeIndex === undefined ? undefined : oldNodes[change.beforeIndex];
     const newNode = change.afterIndex === undefined ? undefined : newNodes[change.afterIndex];
     if (oldNode === undefined && newNode === undefined) throw new Error("Revision comparison refers to missing content");
-    const fields = cellFields(change);
-    const data = (node: PMNode | undefined): string[] => node === undefined ? [] : chartCollections(node, comparison).map((name) => `Data changed: ${name}`);
-    const changedLabel = fields.length > 0 ? [`Changed: ${fields.join(", ")}`] : [];
-    const kind: RevisionRowKind = newNode === undefined ? "removed" : oldNode === undefined ? "added" : change.kind === "unchanged" ? "unchanged" : "changed";
-    const beforeLabels = oldNode === undefined ? [] : [...(kind === "removed" ? ["Removed block"] : changedLabel), ...data(oldNode)];
-    const afterLabels = newNode === undefined ? [] : [...(kind === "added" ? ["Added block"] : changedLabel), ...data(newNode)];
-    left.push(oldNode === undefined ? filler() : kind === "removed" ? markTree(oldNode, "removed") : sideNode(oldNode, change, "before"));
-    right.push(newNode === undefined ? filler() : kind === "added" ? markTree(newNode, "added") : sideNode(newNode, change, "after"));
-    rows.push({
-      kind,
-      changed: kind !== "unchanged" || fields.length > 0 || change.spans.length > 0 || beforeLabels.length > 0 || afterLabels.length > 0,
-      before: { labels: beforeLabels, filler: oldNode === undefined },
-      after: { labels: afterLabels, filler: newNode === undefined },
-    });
+    const split = splitRow(change, oldNode, newNode, comparison);
+    rows.push(split.row);
+    left.push(split.left);
+    right.push(split.right);
   }
-  return { comparison, rows, before: document(left), after: document(right) };
+  const runs = unchangedRuns(rows);
+  const shown = folding.collapse ? foldRows(rows, left, right, runs.filter((run) => !folding.expanded.has(run.start)))
+    : { rows, left, right };
+  return { comparison, rows: shown.rows, runs: runs.map((run) => run.start), before: document(shown.left), after: document(shown.right) };
 }
 
-const MARK: Record<RevisionRowKind, string> = { unchanged: "", changed: "~", added: "+", removed: "−" };
+/** Replaces each run with one bar row, the same bar on both sides. */
+function foldRows(rows: readonly RevisionRow[], left: readonly PMNode[], right: readonly PMNode[],
+  runs: readonly { start: number; end: number }[]): { rows: RevisionRow[]; left: PMNode[]; right: PMNode[] } {
+  const shown = { rows: [] as RevisionRow[], left: [] as PMNode[], right: [] as PMNode[] };
+  let run = 0;
+  for (let index = 0; index < rows.length; index += 1) {
+    const current = runs[run];
+    const row = rows[index];
+    const l = left[index];
+    const r = right[index];
+    if (row === undefined || l === undefined || r === undefined) continue;
+    if (current === undefined || index < current.start) { shown.rows.push(row); shown.left.push(l); shown.right.push(r); continue; }
+    const count = current.end - current.start + 1;
+    const headings = rows.slice(current.start, current.end + 1).flatMap((entry) => entry.heading === undefined ? [] : [entry.heading]).join(", ");
+    shown.rows.push({ kind: "folded", changed: false, fold: { run: current.start, count },
+      before: { labels: [], filler: false }, after: { labels: [], filler: false } });
+    shown.left.push(foldNode(current.start, count, headings));
+    shown.right.push(foldNode(current.start, count, headings));
+    index = current.end;
+    run += 1;
+  }
+  return shown;
+}
+
+const MARK: Record<RevisionRowKind, string> = { unchanged: "", changed: "~", added: "+", removed: "−", folded: "" };
 
 /** Row widgets: an end spacer the aligner sizes, and the captions above each block. */
 function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide): Extension {
@@ -174,7 +251,7 @@ function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide): Ext
               const row = rows[index];
               if (row === undefined) return;
               const cell = row[side];
-              const tint = row.kind === "unchanged" ? "unchanged" : row.kind === "changed" ? "changed" : row.kind;
+              const tint = row.kind;
               decorations.push(Decoration.node(pos, pos + node.nodeSize, {
                 class: `ub-revision-row ub-revision-row-${tint}`, "data-revision-row": tint, "data-revision-mark": cell.filler ? "" : MARK[row.kind],
               }));
@@ -301,10 +378,13 @@ export interface CreateRevisionSplitOptions {
   after: Y.Doc;
   docLinks?: DocLinkContext | null;
   workspaceSettings?: Y.Doc | null;
+  folding?: RevisionFolding;
+  /** A fold bar was pressed: show that run again. */
+  onExpand?: (run: number) => void;
 }
 
 export function createRevisionSplit(options: CreateRevisionSplitOptions): RevisionSplit {
-  const model = revisionSplitModel(options.before, options.after);
+  const model = revisionSplitModel(options.before, options.after, options.folding);
   const before = sideEditor(options.beforeElement, model.before, options.before, model.rows, "before", options.docLinks ?? null, options.workspaceSettings ?? null);
   const after = sideEditor(options.afterElement, model.after, options.after, model.rows, "after", options.docLinks ?? null, options.workspaceSettings ?? null);
   let frame = 0;
@@ -317,9 +397,22 @@ export function createRevisionSplit(options: CreateRevisionSplitOptions): Revisi
   for (const view of [before.view, after.view]) {
     view.dom.querySelectorAll(":scope > :not(.ub-revision-row-start, .ub-revision-row-end)").forEach((element) => { observer?.observe(element, { box: "border-box" }); });
   }
+  const expand = (event: MouseEvent): void => {
+    const button = event.target instanceof Element ? event.target.closest<HTMLElement>(".ub-revision-fold-button") : null;
+    if (button === null) return;
+    event.preventDefault();
+    options.onExpand?.(Number(button.dataset.fold));
+  };
+  for (const view of [before.view, after.view]) view.dom.addEventListener("click", expand);
   alignRevisionSides(before.view, after.view);
   return {
     model, before, after, align,
-    destroy: () => { cancelAnimationFrame(frame); observer?.disconnect(); before.destroy(); after.destroy(); },
+    destroy: () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      for (const view of [before.view, after.view]) view.dom.removeEventListener("click", expand);
+      before.destroy();
+      after.destroy();
+    },
   };
 }

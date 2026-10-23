@@ -52,6 +52,11 @@ export function HistorySidebar({ history, title }: {
             ))}
           </fieldset>
         </div>
+        <label className="ub-history-collapse flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 cursor-pointer items-center justify-between gap-2 px-2 ub-type-caption text-(--sidebar-muted-foreground)">
+          Collapse unchanged
+          <input type="checkbox" role="switch" className="ub-history-switch" checked={history.collapseUnchanged} aria-checked={history.collapseUnchanged}
+            onChange={(event) => history.setCollapseUnchanged(event.currentTarget.checked)} />
+        </label>
       </SidebarHeader>
       <SidebarScrollContent className="pb-2 [&>*]:shrink-0">
         {history.error !== null && (

@@ -260,6 +260,9 @@
   background: var(--page-ground);
   background-attachment: fixed;
 }
+/* The line under the title is the header's bottom edge; ↑ ↓ end on it. */
+.ub-revision-header { margin-bottom: 1rem; }
+.ub-revision-header .ub-history-controls { margin-bottom: 0; }
 .ub-revision-heading {
   display: flex;
   align-items: center;
@@ -385,6 +388,36 @@
 }
 
 /* History sidebar entries: a ring avatar, rounded square for agent surfaces. */
+/* A small switch for the sidebar's Collapse unchanged. */
+.ub-history-switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 16px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--sidebar-border);
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.ub-history-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--background);
+  transition: transform 120ms ease;
+}
+.ub-history-switch:checked { background: var(--sidebar-foreground); }
+.ub-history-switch:checked::after { transform: translateX(12px); }
+.ub-history-switch:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .ub-history-switch, .ub-history-switch::after { transition: none; }
+}
 .ub-history-avatar {
   display: inline-grid;
   width: 28px;
@@ -468,6 +501,46 @@
   background: repeating-linear-gradient(135deg, var(--revision-filler) 0 6px, transparent 6px 12px);
   border-radius: var(--radius-sm);
 }
+/* A folded run: one dashed bar on each side, on the same row. */
+.ub-revision-fold { margin-block: 0.5rem; }
+.ub-revision-fold-button {
+  display: block;
+  width: 100%;
+  min-height: 2rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 0.3rem 0.75rem;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ub-revision-fold-button:hover { background: var(--card-accent); color: var(--foreground); }
+.ub-revision-fold-button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+@media (any-pointer: coarse) {
+  .ub-revision-fold-button { min-height: 44px; }
+}
+/* Previous and next change, stacked at the right edge and ending on the line under the title. */
+.ub-change-nav {
+  margin: 0;
+  border: 0;
+  padding: 0;
+  min-width: 0;
+  position: absolute;
+  inset-inline-end: calc(-1 * var(--document-rail-gap) + 0.5rem);
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+@media (max-width: 767px) {
+  .ub-change-nav { position: static; flex-direction: row; }
+}
+
 /* Drawings show their whole state on each side, without in-drawing marks. */
 .ub-revision-side [data-revision-change] { text-decoration: none; }
 .ub-revision-side :is(.ub-ablauf, .ub-wireframe, .ub-chart, .ub-terminal) [data-revision-change] { background: none; }

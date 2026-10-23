@@ -26,7 +26,7 @@ const named: RevisionEntry = { id: "rev-1", author: person, startedAt: 1, endedA
 
 function fakeHistory(overrides: Partial<DocumentHistory> = {}): DocumentHistory {
   return {
-    entries: [named], selection: null, busy: false, error: null, titles: {}, available: true, active: false, entry: null,
+    entries: [named], selection: null, busy: false, error: null, titles: {}, collapseUnchanged: true, setCollapseUnchanged: vi.fn(), available: true, active: false, entry: null,
     name: vi.fn(async () => {}), rename: vi.fn(async () => {}), removeName: vi.fn(async () => {}),
     ...overrides,
   } as unknown as DocumentHistory;

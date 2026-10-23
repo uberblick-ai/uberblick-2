@@ -113,6 +113,29 @@ function splitHistory(uuid: string, title: string): Record<string, string> {
   }
 }
 
+/** A change near the top, a long unchanged middle with headings, and a change near the end. */
+function foldHistory(uuid: string, title: string): Record<string, string> {
+  const document = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title });
+    const first = appendBlock(document, { type: "paragraph", text: "The opening line changes." });
+    for (const section of ["Background", "Approach"]) {
+      appendBlock(document, { type: "heading", level: 2, text: section });
+      for (let index = 1; index <= 5; index += 1) {
+        appendBlock(document, { type: "paragraph", text: `${section} paragraph ${index} stays exactly as it was, long enough to take some room on the page.` });
+      }
+    }
+    const last = appendBlock(document, { type: "paragraph", text: "The closing line changes." });
+    appendBlock(document, { type: "paragraph", text: "A final unchanged line." });
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    editBlock(document, first, "The opening line changes.", "The opening line changed.");
+    editBlock(document, last, "The closing line changes.", "The closing line changed.");
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+  }
+}
+
 function dataHistory(uuid: string, title: string): Record<string, string> {
   const document = new Y.Doc();
   const directory = new Y.Doc();
@@ -581,6 +604,74 @@ test.describe("document history through ub open", () => {
     await expect(live).toContainText("An added note.");
     await expect(live.getByRole("heading", { name: "Rollout plan" })).toHaveCount(1);
     await expect(live.locator("[data-revision-change], .ub-revision-filler")).toHaveCount(0);
+  });
+
+  test("unchanged runs fold on both sides, open on demand, and changes are one step apart", async ({ browser }, info) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 640 } } });
+    const title = docTitle("Folded comparison");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], foldHistory(uuid, title));
+    await previous(page);
+    const after = historicalEditor(page);
+    const before = earlierSide(page);
+    // The heading and the paragraph next to each change stay as context.
+    const bars = page.locator(".ub-revision-fold-button");
+    await expect(bars).toHaveCount(2);
+    await expect(after.locator(".ub-revision-fold-button")).toHaveText("10 unchanged blocks · Approach");
+    await expect(before.locator(".ub-revision-fold-button")).toHaveText("10 unchanged blocks · Approach");
+    await expect(after).not.toContainText("Background paragraph 2");
+    await expect(after).toContainText("Approach paragraph 5");
+    await expect(page.locator(".ub-revision-pane").getByText("Background paragraph 1", { exact: false })).toHaveCount(0);
+    const screenshot = info.outputPath("folded.png");
+    await page.screenshot({ path: screenshot });
+    await info.attach("folded", { path: screenshot, contentType: "image/png" });
+    // Folded, both changes fit on screen: there is nowhere to step to.
+    const previousChange = page.getByRole("button", { name: "Previous change", exact: true });
+    const nextChange = page.getByRole("button", { name: "Next change", exact: true });
+    await expect(previousChange).toBeDisabled();
+    await expect(nextChange).toBeDisabled();
+    // Bars open their run from the keyboard.
+    await after.locator(".ub-revision-fold-button").focus();
+    await page.keyboard.press("Enter");
+    await expect(bars).toHaveCount(0);
+    await expect(after).toContainText("Background paragraph 2");
+    await expect(before).toContainText("Background paragraph 2");
+    // Previous and next change step between the two changes.
+    await expect(previousChange).toBeDisabled();
+    await expect(nextChange).toBeEnabled();
+    await activateControl(nextChange);
+    const closing = after.locator("p").filter({ hasText: "The closing line changed." });
+    // The last change sits near the end, so the pane stops at the bottom with it in view below the header.
+    const pane = page.locator(".ub-revision-pane");
+    await expect.poll(() => pane.evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThan(2);
+    await expect.poll(async () => {
+      const line = await page.locator(".ub-revision-header").evaluate(element => element.getBoundingClientRect().bottom);
+      const start = await closing.evaluate(element => element.getBoundingClientRect().top);
+      return start > line && start < 640;
+    }).toBe(true);
+    await expect(previousChange).toBeEnabled();
+    await expect(nextChange).toBeDisabled();
+    await activateControl(previousChange);
+    await expect.poll(() => page.locator(".ub-revision-pane").evaluate(element => element.scrollTop)).toBeLessThan(40);
+    // The switch turns folding off for this browser, across a reload.
+    if (!await historyList(page).isVisible()) await activateControl(page.getByRole("button", { name: "Show document list", exact: true }));
+    const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged" });
+    await expect(collapse).toBeChecked();
+    await activateControl(collapse);
+    await expect(collapse).not.toBeChecked();
+    await page.reload();
+    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    await previous(page);
+    await expect(historicalEditor(page)).toContainText("Background paragraph 2");
+    await expect(page.locator(".ub-revision-fold-button")).toHaveCount(0);
+    await expect(historyList(page).getByRole("switch", { name: "Collapse unchanged" })).not.toBeChecked();
+    // The pane still scrolls natively.
+    await page.mouse.move(900, 400);
+    await page.mouse.wheel(0, 300);
+    await expect.poll(() => page.locator(".ub-revision-pane").evaluate(element => element.scrollTop)).toBeGreaterThan(100);
   });
 
   test("opening history preserves unsent comment and reply drafts", { tag: "@webkit" }, async ({ browser }) => {
