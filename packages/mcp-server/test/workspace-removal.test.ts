@@ -1,6 +1,4 @@
 import { existsSync, rmSync } from "node:fs";
-import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
-import { createTagCatalogEntry, setTags } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
 import { MirrorStore, WorkspaceRemovedError } from "../src/store.js";
 import type { UpdateOrigin } from "../src/store.js";
@@ -18,38 +16,23 @@ afterEach(async () => {
   });
 });
 
-it.each(["list", "read"] as const)("refuses removed-workspace resource %s without hiding product help", async (first) => {
+it("keeps product help available after workspace removal without opening the replica", async () => {
   const databasePath = tempDatabasePath();
   const rig = await startServer(testConfig({ databasePath }));
   rigs.push(rig);
-  const guide = await rig.ok("create_doc", {
-    title: "Workspace guidance", description: "Removal test.",
-    blocks: [{ type: "paragraph", text: "Read before writing." }],
-  });
-  const marker = "5a7808ea-1c79-4330-af35-3f67f9f38a3b";
-  createTagCatalogEntry(rig.instance.replicas.settings().doc, "guidance", marker);
-  setTags(rig.instance.replicas.replica(guide.uuid).doc, [marker]);
-  const uri = `uberblick://doc/${guide.uuid}`;
-  expect((await rig.client.listResources()).resources).toContainEqual(expect.objectContaining({ uri }));
-  expect((await rig.client.readResource({ uri })).contents[0]).toMatchObject({
-    text: expect.stringContaining("Read before writing."),
-  });
+  const listing = await rig.client.listResources();
   const help = await rig.client.readResource({ uri: "uberblick://help/tool-contracts" });
   const toolHelp = await rig.ok("get_help", { topic: "tool-contracts" });
   const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
 
   removeFiles(databasePath);
-  const list = () => rig.client.listResources();
-  const read = () => rig.client.readResource({ uri });
-  for (const call of [first === "list" ? list : read, list, read]) {
-    await expect(call()).rejects.toMatchObject({
-      code: ErrorCode.InternalError,
-      message: `MCP error ${ErrorCode.InternalError}: ${new WorkspaceRemovedError().message}`,
-      data: undefined,
-    });
-  }
+  const settle = vi.spyOn(rig.instance.replicas, "settle");
+  const refresh = vi.spyOn(rig.instance.replicas, "refresh");
+  expect(await rig.client.listResources()).toEqual(listing);
   expect(await rig.client.readResource({ uri: "uberblick://help/tool-contracts" })).toEqual(help);
   expect(await rig.ok("get_help", { topic: "tool-contracts" })).toEqual(toolHelp);
+  expect(settle).not.toHaveBeenCalled();
+  expect(refresh).not.toHaveBeenCalled();
   expect(stderr.mock.calls.flat().join("\n")).not.toContain("resource call failed");
 });
 

@@ -1,5 +1,4 @@
 import { readDocData } from "@uberblick/schema";
-import { GuidanceBriefing } from "./briefing.js";
 import type { Replicas } from "./replica.js";
 import { ServerWork } from "./server-work.js";
 import { createToolContext } from "./tools/context.js";
@@ -17,15 +16,15 @@ export class WorkspaceDataWriteError extends Error {
 /** Observe a complete detached data area without paging across local states. */
 export async function readWorkspaceData(replicas: Replicas, uuid: string) {
   uuid = uuidArg.parse(uuid);
-  const context = createToolContext(replicas, new GuidanceBriefing(replicas), new ServerWork());
+  const context = createToolContext(replicas, new ServerWork());
   await replicas.settle();
   return readDocData(context.requireDoc(uuid).doc);
 }
 
-/** The CLI data writer has a dedicated briefing exemption; MCP stays gated. */
+/** Validate and optionally preview a complete local data update. */
 export async function updateWorkspaceData(replicas: Replicas, input: unknown, dryRun = false) {
   const args = inputSchema.parse(input);
-  const context = createToolContext(replicas, new GuidanceBriefing(replicas), new ServerWork());
+  const context = createToolContext(replicas, new ServerWork());
   await replicas.settle();
   const replica = context.requireWritableDoc(args.uuid, true);
   const update = prepareDataUpdate(context, args, replica);

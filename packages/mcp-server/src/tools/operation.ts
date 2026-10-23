@@ -21,8 +21,7 @@ export type Operation<Args, Payload extends object = object> = (
 ) => Promise<Payload>;
 
 /**
- * What a call may write. A writing tool's failure says what became of the
- * write, and only document writes require the guidance briefing.
+ * What a call may write. A writing tool's failure says what became of the write.
  */
 export type Writes = "document" | "sidebar" | null;
 
@@ -38,7 +37,7 @@ interface Gates<W extends Writes> {
 /** Workspace reads settle first. */
 export const READ: Gates<null> = { writes: null, settle: true };
 
-/** Writes that manage their own rooms settle, then require the guidance briefing. */
+/** Writes that manage their own rooms settle first. */
 export const DOCUMENT_WRITE: Gates<"document"> = { writes: "document", settle: true };
 
 /**
@@ -50,8 +49,8 @@ export const UNSETTLED_READ: Gates<null> = { writes: null, settle: false };
 const SIDEBAR_WRITE: Gates<"sidebar"> = { writes: "sidebar", settle: true };
 
 /**
- * Callers must parse input; _input only infers Args. Keep settling and briefing
- * here so callers without MCP use the same gates.
+ * Callers must parse input; _input only infers Args. Keep settling here so
+ * callers without MCP use the same gates.
  */
 export function operation<Args, Payload extends object, W extends Writes>(
   gates: Gates<W>,
@@ -60,7 +59,6 @@ export function operation<Args, Payload extends object, W extends Writes>(
 ): ToolOperation<Args, Payload, W> {
   const run = async (context: ToolContext, args: Args, request: OperationRequest): Promise<Payload> => {
     if (gates.settle) await context.replicas.settle();
-    if (gates.writes === "document") context.briefing.require();
     return body(context, args, request);
   };
   return Object.assign(run, { writes: gates.writes });

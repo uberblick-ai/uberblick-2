@@ -1,5 +1,4 @@
 /** Tool operations over a private in-memory store, with no MCP client or transport. */
-import { GuidanceBriefing } from "../src/briefing.js";
 import type { McpConfig } from "../src/config.js";
 import { ServerWork } from "../src/server-work.js";
 import type { MirrorStore } from "../src/store.js";
@@ -35,7 +34,7 @@ export async function startServer(config = testConfig(), store?: MirrorStore): P
   }
   const instance = openWorkspaceReplicas(config, { hubFree: true, ...(store === undefined ? {} : { store }) });
   const work = new ServerWork();
-  const context = createToolContext(instance.replicas, new GuidanceBriefing(instance.replicas), work);
+  const context = createToolContext(instance.replicas, work);
   instance.replicas.setAgentName(CLIENT_NAME);
   await seedTagCatalogOnce(instance.replicas);
 

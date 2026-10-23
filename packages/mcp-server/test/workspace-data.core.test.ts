@@ -61,7 +61,7 @@ afterEach(async () => {
 });
 
 describe("workspace file data operations", () => {
-  it("exempts only the CLI writer and previews without changing document, directory or log", async () => {
+  it("previews without changing document, directory or log and permits writes with unread guidance", async () => {
     const rig = await local();
     const guide = await create(rig, { title: "Guidance" });
     const target = await create(rig);
@@ -72,10 +72,7 @@ describe("workspace file data operations", () => {
     const before = state(rig, target.uuid);
     const args = { uuid: target.uuid, operations };
 
-    expect(await rig.call("update_data", args)).toMatchObject({
-      isError: true, payload: { error: "guidance_required" },
-    });
-    for (const extra of [{ dryRun: true }, { skipBriefing: true }]) {
+    for (const extra of [{ dryRun: true }, { unexpected: true }]) {
       expect(await rig.call("update_data", { ...args, ...extra })).toMatchObject({
         isError: true, payload: { error: "schema_validation" },
       });
@@ -93,11 +90,9 @@ describe("workspace file data operations", () => {
     expect(written).toMatchObject({ changed: true, dryRun: false, synced: false });
     expect(await rig.ok("get_data", { uuid: target.uuid, collection: "observations" }))
       .toMatchObject({ records: [{ id: "row-a", value: { text: "first" } }] });
-    expect(await rig.call("set_metadata", { uuid: target.uuid, title: "Still gated" }))
-      .toMatchObject({ isError: true, payload: { error: "guidance_required" } });
-    expect(await rig.call("update_data", args)).toMatchObject({
-      isError: true, payload: { error: "guidance_required" },
-    });
+    expect(await rig.ok("set_metadata", { uuid: target.uuid, title: "Unread guidance permits writes" }))
+      .toMatchObject({ applied: true });
+    expect(await rig.ok("update_data", args)).toMatchObject({ changed: false, applied: true });
     const saved = state(rig, target.uuid);
     expect(await updateWorkspaceData(rig.instance.replicas, args)).toMatchObject({ changed: false });
     expect(state(rig, target.uuid)).toEqual(saved);

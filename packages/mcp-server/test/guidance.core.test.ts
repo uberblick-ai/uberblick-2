@@ -1,29 +1,19 @@
-
-
+import { randomUUID } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
-import { createTagCatalogEntry, setTags } from "@uberblick/schema";
+import { createTagCatalogEntry, deleteTagCatalogEntry, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
+import { STARTUP_ORIENTATION } from "../src/help-topics.js";
+import { startupInstructions } from "../src/startup-instructions.js";
 import { tools } from "../src/tool-table.js";
-import { removeTempDirs, startServer, testConfig } from "./core-helpers.js";
+import { removeTempDirs, startServer } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
 const marker = "5a7808ea-1c79-4330-af35-3f67f9f38a3b";
-async function local(config = testConfig()): Promise<Rig> {
-  const rig = await startServer(config);
+async function local(): Promise<Rig> {
+  const rig = await startServer();
   rigs.push(rig);
   return rig;
 }
-async function doc(rig: Rig, title: string) {
-  return rig.ok("create_doc", {
-    title, description: "Guidance test fixture.",
-    blocks: [{ type: "paragraph", text: "Read before writing." }],
-  });
-}
-function mark(rig: Rig, ...uuids: string[]) {
-  createTagCatalogEntry(rig.instance.replicas.settings().doc, "guidance", marker);
-  for (const uuid of uuids) setTags(rig.instance.replicas.replica(uuid).doc, [marker]);
-}
-/** Static product help shares resources/list without changing guidance visibility. */
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -31,62 +21,86 @@ afterEach(async () => {
   removeTempDirs();
 });
 
-it("refuses every document mutation before logging, teaches recovery, and leaves reads and navigation usable", async () => {
+it("selects only the ten most recently updated live guidance pointers from local directory stubs", async () => {
   const rig = await local();
-  const first = await doc(rig, "Editorial guidance");
-  const second = await doc(rig, "Tagging guidance");
-  const target = await doc(rig, "Target");
-  await rig.ok("insert_block", {
-    uuid: target.uuid, blocks: [{ type: "paragraph", text: "Another block." }],
-  });
-  const archived = await doc(rig, "Archived target");
-  await rig.ok("archive_doc", { uuid: archived.uuid });
-  const read = await rig.ok("get_doc", { uuid: target.uuid });
-  const block = read.blocks[0];
-  mark(rig, first.uuid, second.uuid);
-  const uuid = target.uuid;
-  const calls: Record<string, Record<string, unknown>> = {
-    create_doc: { title: "Must not exist", description: "Refused creation." },
-    edit_block: { uuid, block_id: block.id, old_text: block.text, new_text: "Changed", rev: block.rev },
-    insert_block: { uuid, blocks: [{ type: "paragraph", text: "Changed" }] },
-    move_block: { uuid, block_ids: [block.id], after_block_id: read.blocks[1].id },
-    delete_block: { uuid, block_id: block.id },
-    set_metadata: { uuid, title: "Changed" }, set_status: { uuid, status: "open" },
-    update_data: { uuid, operations: [] },
-    archive_doc: { uuid: first.uuid }, restore_doc: { uuid: archived.uuid },
-    delete_doc: { uuid: archived.uuid },
-    annotate: { uuid, block_id: block.id, start: 0, end: 4, text: "Comment" },
-    link_range: { uuid, block_id: block.id, start: 0, end: 4, doc_id: first.uuid, rev: block.rev },
-  };
-  expect(Object.keys(calls).sort()).toEqual(tools.filter(({ writes }) => writes === "document").map(({ name }) => name).sort());
-  const size = rig.instance.store.logSize();
-  for (const [name, args] of Object.entries(calls)) {
-    const result = await rig.call(name, args);
-    expect(result, name).toMatchObject({ isError: true, payload: {
-      error: "guidance_required", applied: false, partial: false, synced: false,
-      recoveryClass: "reread", recovery: expect.stringMatching(/get_doc.*retry/),
-      unread: expect.arrayContaining([
-        { uuid: first.uuid, title: "Editorial guidance" }, { uuid: second.uuid, title: "Tagging guidance" },
-      ]),
-    } });
-    expect(rig.instance.store.logSize(), name).toBe(size);
+  const { replicas } = rig.instance;
+  createTagCatalogEntry(replicas.settings().doc, "guidance", marker);
+  const directory = replicas.directory().doc;
+  const documents = Array.from({ length: 12 }, (_, index) => ({
+    uuid: randomUUID(), title: `Guide ${index}`, tags: [marker], updatedAt: 100 + index,
+    description: "Do not inject this description.",
+  }));
+  for (const entry of documents) upsertDirectoryEntry(directory, entry);
+  const archived = randomUUID();
+  upsertDirectoryEntry(directory, { uuid: archived, title: "Archived guide", tags: [marker], updatedAt: 1000 });
+  tombstoneDirectoryEntry(directory, archived);
+  upsertDirectoryEntry(directory, { uuid: randomUUID(), title: "Other page", tags: [], updatedAt: 2000 });
+
+  // Any hydration, refresh or settle would make this lookup depend on more than local stubs.
+  for (const method of ["replica", "refresh", "settle"] as const) {
+    vi.spyOn(replicas, method).mockImplementation(() => { throw new Error(`Unexpected ${method}`); });
   }
-  for (const [name, args] of [
-    ["list_docs", {}], ["list_tags", {}], ["search", { query: "writing" }],
-    ["backlinks", { uuid }], ["export_markdown", { uuid }], ["sync_status", {}], ["get_sidebar", {}],
-    ["find_decisions", { github_ref: "owner/repo#1" }],
-  ] as const) await rig.ok(name, args);
-  await rig.ok("pin_doc", { uuid, group: "Reference" });
-  const sidebar = await rig.ok("get_sidebar");
-  await rig.ok("sidebar_group", { group: sidebar.groups[0].id, action: "rename", name: "Notes" });
-  await rig.ok("unpin_doc", { uuid });
-  const beforeReads = rig.instance.store.logSize();
-  await rig.ok("get_doc", { uuid: first.uuid });
-  expect((await rig.call("set_metadata", calls.set_metadata)).payload.unread).toEqual([
-    { uuid: second.uuid, title: "Tagging guidance" },
-  ]);
-  await rig.ok("get_doc", { uuid: second.uuid });
-  expect(rig.instance.store.logSize()).toBe(beforeReads);
-  expect(await rig.ok("set_metadata", calls.set_metadata)).toMatchObject({ applied: true, tagHint: expect.any(String) });
-  expect((await rig.ok("get_doc", { uuid })).title).toBe("Changed");
+  const pointers = documents.slice(2).reverse().map(({ title, uuid }) => `${title} (\`${uuid}\`)`).join(", ");
+  expect(startupInstructions(replicas)).toBe(`${STARTUP_ORIENTATION}\n\nWorkspace guidance: before your first write, read the pages that apply to your change with \`get_doc\`: ${pointers}.`);
+  for (const method of ["replica", "refresh", "settle"] as const) expect(replicas[method]).not.toHaveBeenCalled();
+});
+
+it("keeps the plain orientation for an empty replica, absent or deleted tag, and archived guidance", async () => {
+  const rig = await local();
+  const { replicas } = rig.instance;
+  expect(startupInstructions(replicas)).toBe(STARTUP_ORIENTATION);
+  const uuid = randomUUID();
+  upsertDirectoryEntry(replicas.directory().doc, { uuid, title: "Guide", tags: [marker] });
+  expect(startupInstructions(replicas)).toBe(STARTUP_ORIENTATION);
+  createTagCatalogEntry(replicas.settings().doc, "guidance", marker);
+  expect(startupInstructions(replicas)).toContain(uuid);
+  deleteTagCatalogEntry(replicas.settings().doc, marker);
+  expect(startupInstructions(replicas)).toBe(STARTUP_ORIENTATION);
+  const replacement = createTagCatalogEntry(replicas.settings().doc, "guidance");
+  upsertDirectoryEntry(replicas.directory().doc, { uuid, title: "Guide", tags: [replacement.id] });
+  tombstoneDirectoryEntry(replicas.directory().doc, uuid);
+  expect(startupInstructions(replicas)).toBe(STARTUP_ORIENTATION);
+});
+
+it("falls back to the plain orientation when local guidance discovery fails", async () => {
+  const rig = await local();
+  const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.spyOn(rig.instance.replicas, "settings").mockImplementation(() => { throw new Error("local catalog unavailable"); });
+  expect(startupInstructions(rig.instance.replicas)).toBe(STARTUP_ORIENTATION);
+  expect(stderr.mock.calls.flat().join("\n")).toContain("could not build the startup guidance pointers");
+});
+
+it("allows every document mutation while guidance remains unread", async () => {
+  const rig = await local();
+  const guide = await rig.ok("create_doc", {
+    title: "Unread guidance", description: "Do not require this read.",
+  });
+  createTagCatalogEntry(rig.instance.replicas.settings().doc, "guidance", marker);
+  await rig.ok("set_metadata", { uuid: guide.uuid, tags: [marker] });
+  const target = await rig.ok("create_doc", {
+    title: "Target", description: "Mutable fixture.", blocks: [
+      { type: "paragraph", text: "First paragraph." }, { type: "paragraph", text: "Second paragraph." },
+    ],
+  });
+  const { uuid } = target;
+  const block = target.blocks[0];
+  const called = new Set(["create_doc", "set_metadata"]);
+  const write = async (name: string, args: Record<string, unknown>) => {
+    expect(await rig.ok(name, args), name).toMatchObject({ applied: true });
+    called.add(name);
+  };
+  await write("link_range", { uuid, block_id: block.id, start: 0, end: 5, doc_id: guide.uuid, rev: block.rev });
+  await write("annotate", { uuid, block_id: target.blocks[1].id, start: 0, end: 6, text: "Comment" });
+  await write("edit_block", { uuid, block_id: block.id, old_text: block.text, new_text: "Changed paragraph.", rev: block.rev });
+  await write("insert_block", { uuid, blocks: [{ type: "paragraph", text: "Third paragraph." }] });
+  await write("move_block", { uuid, block_ids: [block.id], after_block_id: target.blocks[1].id });
+  await write("delete_block", { uuid, block_id: block.id });
+  await write("update_data", { uuid, operations: [{ collection: "notes", schema: { version: 1, schema: { type: "object" } } }] });
+  const decision = await rig.ok("create_doc", { title: "A question", description: "Open proposal.", kind: "decision", status: "open" });
+  await write("set_status", { uuid: decision.uuid, status: "withdrawn" });
+  await write("archive_doc", { uuid });
+  await write("restore_doc", { uuid });
+  await rig.ok("archive_doc", { uuid });
+  await write("delete_doc", { uuid });
+  expect([...called].sort()).toEqual(tools.filter(({ writes }) => writes === "document").map(({ name }) => name).sort());
 });

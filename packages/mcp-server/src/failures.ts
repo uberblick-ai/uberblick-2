@@ -134,10 +134,6 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Correct github_ref to one owner/repo#n reference or an http(s) github.com URL naming /issues/n or /pull/n, then call find_decisions again.",
   },
-  guidance_required: {
-    recoveryClass: "reread",
-    guidance: "Read each unread guidance document with get_doc, then retry the refused tool call.",
-  },
   persistence_failed: {
     recoveryClass: "manual",
     guidance:
@@ -537,7 +533,7 @@ function stamped(
     ...payload,
     ...((tool.name === "insert_block" || tool.name === "move_block") && [
       "block_not_found", "doc_not_found", "doc_not_hydrated", "doc_archived", "doc_deleted",
-      "decision_read_only", "guidance_required", "server_shutting_down",
+      "decision_read_only", "server_shutting_down",
       ...(tool.name === "move_block" ? ["duplicate_block_id", "move_target_in_selection"] : []),
     ].includes(payload.error) && !/nothing was written/i.test(payload.message)
       ? { message: `${payload.message} Nothing was written.` }
