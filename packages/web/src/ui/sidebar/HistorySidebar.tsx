@@ -13,9 +13,10 @@ import { PreviousIcon, TagIcon } from "../document/history-icons.js";
 
 const ROW_CLASSES = "ub-history-entry flex w-full min-w-0 items-center gap-2.5 border-0 bg-transparent px-4 py-2 text-left font-[inherit] text-(--sidebar-row-foreground) cursor-pointer min-h-11 enabled:hover:bg-(--sidebar-accent) aria-[current=true]:bg-(--sidebar-accent) aria-[current=true]:text-sidebar-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-sidebar-ring";
 
-export function HistorySidebar({ history, title }: {
+export function HistorySidebar({ history, title, onNow = history.now }: {
   history: DocumentHistory;
   title: string;
+  onNow?: () => void;
 }): ReactElement {
   const [filter, setFilter] = useState<"all" | "named">("all");
   const now = useTimestampClock();
@@ -29,7 +30,7 @@ export function HistorySidebar({ history, title }: {
         <button
           type="button"
           className="ub-history-back flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 w-full items-center gap-2 rounded-(--radius-sm) border border-transparent bg-transparent px-2 py-1.5 text-left ub-type-ui font-[inherit] text-(--sidebar-row-foreground) cursor-pointer hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
-          onClick={history.now}
+          onClick={onNow}
         >
           <span className="grid size-7 shrink-0 place-items-center [&_svg]:size-4" aria-hidden="true"><PreviousIcon /></span>
           Back to now

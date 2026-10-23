@@ -74,7 +74,7 @@ export function createDocumentRevisionsClient(
         const surface = namer?.surface?.kind === "browser" ? " in the browser"
           : typeof namer?.surface?.name === "string" ? ` via ${namer.surface.name}` : "";
         const by = typeof namer?.githubUsername === "string" ? ` by ${namer.githubUsername}${surface}` : "";
-        throw new Error(`This revision is already named “${body.existingName.text}”${by}. Refresh history to see it.`);
+        throw new Error(`This revision is already named “${body.existingName.text}”${by}. Open history to see it.`);
       }
       throw new DocumentHistoryError(typeof body?.reason === "string" ? body.reason : undefined);
     }

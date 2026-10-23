@@ -13,7 +13,7 @@ export interface ShellLayout {
   hideSidebar: RefObject<HTMLButtonElement | null>;
   restoreSidebar: RefObject<HTMLButtonElement | null>;
   narrowLayout: boolean;
-  closeSidebarDrawer(): void;
+  closeSidebarDrawer(returnFocus?: HTMLElement | null): void;
   collapsed: boolean;
   setCollapsed(next: boolean): void;
   restoreSidebarFocus(event: Event): void;
@@ -48,6 +48,7 @@ export function useShellLayout(settings: boolean): ShellLayout {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const hideSidebar = useRef<HTMLButtonElement | null>(null);
   const restoreSidebar = useRef<HTMLButtonElement | null>(null);
+  const drawerReturnFocus = useRef<HTMLElement | null>(null);
   const focusAfterNarrowing = useRef(false);
   const narrowLayout = useNarrowLayout((narrow) => {
     // Capture focus before switching branches unmounts the docked sidebar.
@@ -61,7 +62,11 @@ export function useShellLayout(settings: boolean): ShellLayout {
     focusAfterNarrowing.current = false;
     restoreSidebar.current?.focus();
   }, [narrowLayout]);
-  const closeSidebarDrawer = useCallback(() => setSidebarOpen(false), []);
+  // Navigation shares this callback with editor links; keep it stable across drawer changes.
+  const closeSidebarDrawer = useCallback((returnFocus: HTMLElement | null = null) => {
+    drawerReturnFocus.current = returnFocus;
+    setSidebarOpen(false);
+  }, []);
   const [collapsed, setCollapsed] = useStoredFlag(SIDEBAR_COLLAPSED_KEY, false);
   const previousCollapsed = useRef(collapsed);
 
@@ -75,7 +80,9 @@ export function useShellLayout(settings: boolean): ShellLayout {
   }, [collapsed, narrowLayout]);
   const restoreSidebarFocus = useCallback((event: Event) => {
     event.preventDefault();
-    (restoreSidebar.current ?? hideSidebar.current)?.focus();
+    const target = drawerReturnFocus.current ?? restoreSidebar.current ?? hideSidebar.current;
+    drawerReturnFocus.current = null;
+    target?.focus();
   }, []);
   const sidebarHidden = narrowLayout ? !sidebarOpen : collapsed;
   const sidebarName = settings ? "sidebar" : "document list";
