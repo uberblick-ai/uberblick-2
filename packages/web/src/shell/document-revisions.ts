@@ -12,9 +12,9 @@ const unavailableMessages = {
   deleted: "History is unavailable: this document was deleted.",
   "revision-not-found": "History is unavailable: this revision no longer exists.",
   unsupported: "History is unavailable: this hub does not serve revisions.",
-  "stale-state": "This document has changed or is not synced. Close this dialog, wait for sync, review the current content and try naming it again.",
+  "stale-state": "This document has changed or is not synced. Wait for sync, review the current content and try naming it again.",
   "invalid-name": "Use a name of 1 to 100 characters on one line.",
-  "already-named": "This revision already has a name. Refresh history to see it.",
+  "already-named": "This revision already has a name. Open history to see it.",
   "not-namer": "Only the person who named this revision can change its name.",
   archived: "Archived documents are read-only. Restore the document before changing revision names.",
 };

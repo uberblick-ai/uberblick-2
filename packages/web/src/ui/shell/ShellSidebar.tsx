@@ -1,4 +1,5 @@
 import { Sidebar } from "../sidebar/Sidebar.js";
+import { HistorySidebar } from "../sidebar/HistorySidebar.js";
 import { SIDEBAR_TOGGLE_CLASSES } from "../shadcn/sidebar.js";
 import type { AppShell } from "./use-app-shell.js";
 
@@ -8,8 +9,9 @@ export function ShellSidebar({ shell }: { shell: AppShell }) {
   const { directory, sidebar } = shell.rooms;
   const { sidebarGroups, sidebarSelection } = shell.pins;
   const { workspaces, workspaceNames, setWorkspaceMenuOpen, onSwitchWorkspace, onSelect, onOpenAll, onOpenSettings, onBackToWorkspace } = shell.navigation;
-  const { servingStatus } = shell.readings;
+  const { servingStatus, meta } = shell.readings;
   const { onCreate } = shell;
+  const historyOpen = shell.history.active && !shell.rooms.deleted;
   return <>
     {(narrowLayout || collapsed) && (
       /* Pane-local and out of flow: restoring the sidebar costs no global
@@ -55,6 +57,7 @@ export function ShellSidebar({ shell }: { shell: AppShell }) {
       hubAdmin={hubAdministration.admin}
       workspaceAdmin={settingsAccess.workspaceAdmin}
       devicesAvailable={settingsAccess.devicesAvailable}
+      historyPane={historyOpen ? <HistorySidebar history={shell.history} title={meta?.title ?? ""} /> : null}
     />
   </>;
 }

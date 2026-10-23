@@ -398,6 +398,7 @@ export function StatusLine({
   statusLink,
   revision = null,
   codeChecks = [],
+  historyNav = null,
 }: {
   connection: RoomConnection;
   /**
@@ -416,6 +417,8 @@ export function StatusLine({
   statusLink?: ReactNode;
   revision?: string | null;
   codeChecks?: readonly CodeCheck[] | undefined;
+  /** History entry beside the revision chip: step back, or name this state. */
+  historyNav?: ReactNode;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const served = hubAcked !== undefined;
@@ -507,6 +510,7 @@ export function StatusLine({
             * readPresence supplies names and resolved caret locations for hover.
          */}
         {reading.detail === null && peerStrip}
+        {historyNav}
         {revision !== null && <button type="button" className="ub-doc-rev" aria-label={`Copy revision ${revision}`} title={`Copy revision ${revision}`}
           onClick={() => { void writeToClipboard(revision).then((ok) => toast[ok ? "success" : "error"](ok ? "Revision copied" : "Couldn't copy the revision. Try again in a browser with clipboard access.", { id: "clipboard" })); }}>
           rev <span className="ub-doc-id">{revision.slice(0, 8)}</span>
@@ -1050,8 +1054,8 @@ export function EditorPane({
           statusLink={statusLink}
           revision={revision}
           codeChecks={meta?.code_check}
+          historyNav={historyControl}
         />
-        {historyControl}
         {beforeAnswer}
         <div className={answerClassName}>
           {!decision && <TldrCallout
