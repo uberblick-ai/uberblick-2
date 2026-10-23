@@ -7,6 +7,7 @@ import type { RevisionEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import { activateControl, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
 import { assertNoViolations, WCAG_TAGS } from "./accessibility-assertions.js";
+import { waitForAcknowledged } from "./settle.js";
 import { setPointerSelection } from "./native-selection.js";
 
 function history(page: Page): Locator {
@@ -56,7 +57,9 @@ async function newDocument(page: Page, title: string): Promise<string> {
   if (!await page.getByRole("button", { name: "+ New page", exact: true }).isVisible()) {
     await activateControl(page.getByRole("button", { name: "Show document list", exact: true }));
   }
-  return await createDoc(page, title);
+  const uuid = await createDoc(page, title);
+  await waitForAcknowledged(page, { path: "relay" });
+  return uuid;
 }
 
 async function selectPositions(view: Locator, from: number, to = from): Promise<void> {
@@ -739,6 +742,9 @@ test.describe("document history through ub open", () => {
       { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
     ], linkedHistory(uuid, title, target, deleted));
     await previous(page);
+    const drawer = await showHistoryList(page);
+    await activateControl(historyList(page).getByRole("switch", { name: "Collapse unchanged" }));
+    await closeHistoryList(page, drawer);
     const split = page.locator(".ub-revision-split");
     await expect(split).toBeVisible();
     for (const side of [earlierSide(page), historicalEditor(page)]) {
