@@ -133,6 +133,36 @@ function splitHistory(uuid: string, title: string): Record<string, string> {
   }
 }
 
+function linkedHistory(uuid: string, title: string, target: string, deleted: string): Record<string, string> {
+  const document = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title });
+    appendBlock(document, { type: "paragraph", inline: [
+      { text: "Read ", marks: {} },
+      { text: "the linked document", marks: { docLink: target } },
+      { text: ".", marks: {} },
+    ] });
+    appendBlock(document, { type: "paragraph", inline: [
+      { text: "Read ", marks: {} },
+      { text: "the external page", marks: { link: "https://example.invalid/history-link" } },
+      { text: ".", marks: {} },
+    ] });
+    appendBlock(document, { type: "paragraph", inline: [
+      { text: "Read ", marks: {} },
+      { text: "the deleted document", marks: { docLink: deleted } },
+      { text: ".", marks: {} },
+    ] });
+    appendBlock(document, { type: "list-item", text: "A historical list item." });
+    appendBlock(document, { type: "table", text: "| Status |\n| --- |\n| Ready |" });
+    const paragraph = appendBlock(document, { type: "paragraph", text: "Earlier wording." });
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    editBlock(document, paragraph, "Earlier wording.", "Selected wording.");
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+  }
+}
+
 function dataHistory(uuid: string, title: string): Record<string, string> {
   const document = new Y.Doc();
   const directory = new Y.Doc();
@@ -662,6 +692,92 @@ test.describe("document history through ub open", () => {
     await expect(page.getByLabel("Document revision", { exact: true })).toContainText("The amberblue fox stays.");
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect(split).toBeVisible();
+  });
+
+  test("each comparison side follows document links by click and Enter, and Tab leaves lists and tables", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 900 } } });
+    const targetTitle = docTitle("Historical link target");
+    const target = await newDocument(page, targetTitle);
+    const deleted = await newDocument(page, docTitle("Deleted historical link target"));
+    await activateControl(page.getByRole("button", { name: "Document actions", exact: true }));
+    await activateControl(page.getByRole("menuitem", { name: "Archive document", exact: true }));
+    await activateControl(page.getByRole("alertdialog").getByRole("button", { name: "Archive", exact: true }));
+    await activateControl(page.locator(".ub-archived-banner").getByRole("button", { name: "Delete…", exact: true }));
+    await activateControl(page.getByRole("alertdialog").getByRole("button", { name: "Delete", exact: true }));
+    await expect(page.locator(".ub-document-pane")).toHaveText("This document was deleted.");
+    const title = docTitle("Historical link source");
+    const uuid = await newDocument(page, title);
+    const sourceAddress = page.url();
+    await page.context().route("https://example.invalid/history-link", route => route.fulfill({
+      contentType: "text/html", body: "<p>Historical external link target</p>",
+    }));
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], linkedHistory(uuid, title, target, deleted));
+    await previous(page);
+    const split = page.locator(".ub-revision-split");
+    await expect(split).toBeVisible();
+    for (const side of [earlierSide(page), historicalEditor(page)]) {
+      const caretInLink = async (label: string): Promise<void> => {
+        const paragraph = side.locator(":scope > p").filter({ hasText: `Read ${label}.` });
+        // Place the caret before the link with a real click, then enter it with the keyboard.
+        await setPointerSelection(paragraph, () => paragraph.click({ position: { x: 2, y: 10 } }));
+        for (let step = 0; step < 6; step += 1) await page.keyboard.press("ArrowRight");
+        await expect.poll(() => paragraph.locator("a").evaluate(element => {
+          const selection = document.getSelection();
+          return selection?.isCollapsed && element.contains(selection.anchorNode);
+        })).toBe(true);
+      };
+      for (const open of ["click", "Enter"] as const) {
+        const link = side.locator(`a.ub-doclink[data-doc-id="${target}"]`);
+        await expect(link).toHaveAttribute("data-doc-id", target);
+        if (open === "click") {
+          await link.click();
+        } else {
+          await caretInLink("the linked document");
+          await page.keyboard.press("Enter");
+        }
+        await expect(page).toHaveURL(new RegExp(`/${harness().workspace}/${target}$`));
+        await expect(page.locator(".ub-title")).toHaveValue(targetTitle);
+        await expect(split).toHaveCount(0);
+        await page.goBack();
+        await expect(page.locator(".ub-title")).toHaveValue(title);
+        await previous(page);
+        await expect(split).toBeVisible();
+      }
+      await caretInLink("the external page");
+      const [popup] = await Promise.all([
+        page.context().waitForEvent("page", { timeout: 5_000 }),
+        page.keyboard.press("Enter"),
+      ]);
+      try {
+        await expect(popup).toHaveURL("https://example.invalid/history-link");
+      } finally {
+        await popup.close();
+        await page.bringToFront();
+      }
+      const deletedLink = side.locator(`a.ub-doclink[data-doc-id="${deleted}"]`);
+      await expect(deletedLink).toHaveAttribute("data-doc-link-state", "deleted");
+      await expect(deletedLink).not.toHaveAttribute("href");
+      await deletedLink.click();
+      await expect(page).toHaveURL(sourceAddress);
+      await expect(split).toBeVisible();
+      await caretInLink("the deleted document");
+      await page.keyboard.press("Enter");
+      await expect(page).toHaveURL(sourceAddress);
+      await expect(split).toBeVisible();
+      const original = await side.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON());
+      for (const block of [side.getByRole("listitem"), side.locator("td").last()]) {
+        for (const key of ["Tab", "Shift+Tab"]) {
+          await setPointerSelection(block, () => block.click());
+          await expect(side).toBeFocused();
+          await page.keyboard.press(key);
+          await expect.poll(() => side.evaluate(element => element.contains(document.activeElement))).toBe(false);
+        }
+      }
+      expect(await side.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON())).toEqual(original);
+    }
   });
 
   test("Back to now in the history drawer closes it and returns focus to the live history control", { tag: "@webkit" }, async ({ browser }) => {

@@ -18,6 +18,7 @@ import { renamedFrom } from "./document-history.js";
 import { ClockIcon, NextIcon, PreviousIcon, TagIcon } from "./history-icons.js";
 import { revisionAuthor, revisionTime } from "./revision-list.js";
 import { RevisionNameControls } from "./RevisionNameControls.js";
+import { handleDocLinkClick } from "./doc-link-click.js";
 
 export function revisionLabel(entry: RevisionEntry): string {
   const author = entry.author === null ? "Unknown author"
@@ -180,8 +181,15 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       if (split && selection.before !== null && beforeHost.current !== null && afterHost.current !== null) {
         const view = createRevisionSplit({ beforeElement: beforeHost.current, afterElement: afterHost.current,
           before: selection.before, after: selection.after, docLinks, workspaceSettings });
+        const sides = [view.before.view.dom, view.after.view.dom];
+        const activate = (event: MouseEvent): void => { handleDocLinkClick(event, docLinks); };
+        for (const side of sides) side.addEventListener("click", activate);
         setEditors([{ side: "before", editor: view.before }, { side: "after", editor: view.after }]);
-        return () => { setEditors([]); view.destroy(); };
+        return () => {
+          for (const side of sides) side.removeEventListener("click", activate);
+          setEditors([]);
+          view.destroy();
+        };
       }
       if (host.current === null) return;
       const editor = createRevisionEditor({ element: host.current, before: selection.before, after: selection.after, docLinks, workspaceSettings });

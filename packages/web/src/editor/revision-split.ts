@@ -11,7 +11,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { AllSelection, Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { EditorView } from "@tiptap/pm/view";
-import { compareRevisions } from "@uberblick/schema";
+import { canonicalDocumentUuid, compareRevisions, isExternalHref } from "@uberblick/schema";
 import type { RevisionBlockComparison, RevisionComparison, TextSpan } from "@uberblick/schema";
 import type * as Y from "yjs";
 import { AblaufBlocks } from "./ablauf.js";
@@ -158,18 +158,38 @@ export function revisionSplitModel(before: Y.Doc, after: Y.Doc): RevisionSplitMo
 
 const MARK: Record<RevisionRowKind, string> = { unchanged: "", changed: "~", added: "+", removed: "−" };
 
-/** Row widgets: an end spacer the aligner sizes, and the captions above each block. */
-function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide): Extension {
+/** Side-scoped interaction and row widgets: captions and the spacers the aligner sizes. */
+function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docLinks: DocLinkContext | null): Extension {
   return Extension.create({
     name: "revisionSide",
     priority: 2000,
     addKeyboardShortcuts() {
-      return { "Mod-a": () => this.editor.commands.selectAll() };
+      return {
+        "Mod-a": () => this.editor.commands.selectAll(),
+        Enter: () => {
+          const { selection } = this.editor.state;
+          if (!selection.empty) return false;
+          const marks = selection.$from.marks();
+          const docId = canonicalDocumentUuid(marks.find((mark) => mark.type.name === "docLink")?.attrs.docId);
+          if (docId !== null && docLinks !== null) {
+            if (docLinks.lookup(docId).state !== "deleted") docLinks.open(docId);
+            return true;
+          }
+          const href = marks.find((mark) => mark.type.name === "link")?.attrs.href;
+          if (!isExternalHref(href)) return false;
+          window.open(href, "_blank", "noopener,noreferrer");
+          return true;
+        },
+      };
     },
     addProseMirrorPlugins() {
       return [new Plugin({
         filterTransaction: (transaction) => !transaction.docChanged,
         props: {
+          handleDOMEvents: {
+            // Handling without preventing default leaves focus navigation to the browser.
+            keydown: (_view, event) => event.key === "Tab",
+          },
           transformCopied: (slice) => new Slice(copiedContent(slice.content), slice.openStart, slice.openEnd),
           decorations(state) {
             const decorations: Decoration[] = [];
@@ -216,7 +236,7 @@ function sideEditor(element: Element, content: JSONContent, data: Y.Doc, rows: r
     element,
     extensions: [
       // Each side binds its charts to its own document; no predecessor override is needed.
-      ...revisionPalette(data), sidePresentation(rows, side),
+      ...revisionPalette(data), sidePresentation(rows, side, docLinks),
       CodeHighlighting, ListBlocks, CardBlocks, TerminalBlocks, ChartBlocks, WireframeBlocks, AblaufBlocks,
       DocLinks.configure({ context: docLinks }), ExternalLinks,
       GitHubLinks.configure({ settings: workspaceSettings }), InlineIcons, ToggleHeadings,
