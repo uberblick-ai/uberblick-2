@@ -2,6 +2,19 @@
 import { BLOCK_TYPES } from "@uberblick/schema";
 
 export const toolHelpDetails = {
+  list_tags:
+    "The existing workspace tag catalog is returned in deterministic name order. Each entry carries the stable canonical " +
+    "`id` documents store, its current display `name` and its optional `description`. Documents show only existing catalog tags. MCP cannot curate this catalog.\n\n" +
+    "`complete` says whether this is the whole workspace vocabulary. It is false while a configured hub has " +
+    "not delivered the catalog room to this replica: what is listed is then a local copy that may be missing " +
+    "curated entries, and a tag value this replica has never seen is refused rather than assigned. `hub` says " +
+    "where that connection stands.",
+  get_help:
+    "Read bundled, version-matched product help by topic or exact registered tool name. Omit topic to list " +
+    "every topic with its id, title, description and URI. The returned text is the same Markdown as " +
+    "uberblick://help/{topic}. Help is workspace-agnostic and never opens or settles a replica; it remains " +
+    "available offline and while the replica store is quarantined. Unknown topics refuse with " +
+    "unknown_help_topic and list valid topic ids; choose one and retry.",
   create_doc:
     "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
     "search. Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
