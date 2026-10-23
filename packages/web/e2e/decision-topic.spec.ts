@@ -103,10 +103,12 @@ function answer(who = "A workspace member") {
 }
 
 async function create(writer: McpSession, title: string | undefined, text: string, fields: Record<string, unknown> = {}): Promise<StoredDoc> {
-  return writer.call<StoredDoc>("create_doc", {
+  const created = await writer.call<StoredDoc>("create_doc", {
     ...(title === undefined ? {} : { title }),
     description: "Browser acceptance fixture.", blocks: [{ type: "paragraph", text }], ...fields,
   });
+  // create_doc names blocks by id and rev; the seeded paragraph stores the text written.
+  return fields.blocks === undefined ? { ...created, blocks: created.blocks.map((block) => ({ ...block, text })) } : created;
 }
 
 async function comment(writer: McpSession, doc: StoredDoc, text: string): Promise<void> {
@@ -599,9 +601,7 @@ for (const { touch, appearance } of [
       { type: "table", text: `| Reference |\n| --- |\n| [table reference](${target.uuid}) |` },
     ] });
     await writer.call("archive_doc", { uuid: target.uuid });
-    const pinned = await writer.call<{ groups: Array<{ id: string; name: string }> }>("pin_doc", { uuid: target.uuid, group: "Archived markers" });
-    const group = pinned.groups.find(group => group.name === "Archived markers");
-    if (group === undefined) throw new Error("e2e: missing archived marker group");
+    const { group } = await writer.call<{ group: { id: string; name: string } }>("pin_doc", { uuid: target.uuid, group: "Archived markers" });
     try {
       const page = await openApp(browser, `/${harness().workspace}/${source.uuid}`, {
         upstream: true,

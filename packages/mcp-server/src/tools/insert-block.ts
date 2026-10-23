@@ -59,7 +59,7 @@ export const insertBlockOperation = documentOperation({ content: true, contentDu
     if (last === undefined) throw new Error("Validated insert batch is empty");
     // Use stored text length: inline runs can replace the supplied text.
     replicas.publishCursor(replica, last.id, last.text.length);
-    return { uuid, blocks: inserted };
+    return { uuid, blocks: inserted.map(({ id, rev }) => ({ id, rev })) };
   } finally {
     draft.destroy();
   }

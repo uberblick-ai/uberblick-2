@@ -111,7 +111,7 @@ test("a public lookup is credential-free, gates the viewer and changes only the 
   await frames.first().getByRole("button", { name: "Done", exact: true }).first().click();
   await proveMcpArrival(page, session, created.uuid, { path: "upstream" });
   await expectMcp(() => session.call<StoredDoc>("get_doc", { uuid: created.uuid }), (doc) => {
-    expect(doc.blocks).toEqual(created.blocks);
+    expect(doc.blocks.map(({ id, rev }) => ({ id, rev }))).toEqual(created.blocks);
   });
   await expectMcp(() => session.call<{ markdown: string }>("export_markdown", { uuid: created.uuid }), (doc) => {
     expect(doc.markdown).not.toContain(title);

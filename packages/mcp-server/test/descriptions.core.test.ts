@@ -247,10 +247,13 @@ describe("a document nobody described", () => {
     expect(inserted.applied).toBe(true);
     expect(inserted.description).toBeNull();
     expect(inserted.descriptionHint).toContain("set_metadata");
+    expect(inserted.tagHint).toBe("This document has no tags: to add some, call list_tags for the workspace vocabulary, " +
+      "then set_metadata with `tags`; leave it untagged if no tag fits.");
 
     // Every mutator, not one — the nudge lives where durability is reported.
     const tagged = await rig.ok("set_metadata", { uuid, tags: ["auth"] });
     expect(tagged.descriptionHint).toContain("set_metadata");
+    expect(tagged).not.toHaveProperty("tagHint");
 
     // And it stops the moment the gap is closed.
     const described = await rig.ok("set_metadata", {
@@ -509,7 +512,7 @@ describe("decision log tools", () => {
     expect(decision).toMatchObject({
       kind: "decision",
       status: "open",
-      governs: page.uuid,
+      related: [page.uuid],
     });
     expect(decision.rooms.map((room: any) => room.purpose)).toEqual([
       "document",
@@ -520,7 +523,7 @@ describe("decision log tools", () => {
 
     const governed = await rig.ok("get_doc", { uuid: page.uuid });
     expect(governed.decisions).toMatchObject([
-      { uuid: decision.uuid, topic: decision.uuid, relation: "related", inForce: null, pending: [{ uuid: decision.uuid }] },
+      { uuid: decision.uuid, topic: decision.uuid, relation: "related", inForce: null, pending: [decision.uuid] },
     ]);
     expect(governed.links).toEqual([]);
     expect((await rig.ok("get_doc", { uuid: decision.uuid })).links).toEqual([page.uuid]);
@@ -557,7 +560,7 @@ describe("decision log tools", () => {
     const earlierRead = await rig.ok("get_doc", { uuid: earlier.uuid });
     expect(earlierRead.blocks).toEqual(before.blocks);
     expect(earlierRead.successors).toMatchObject([{ uuid: successor.uuid, status: "open" }]);
-    expect(earlierRead.resolution).toMatchObject({ inForce: { uuid: earlier.uuid }, pending: [{ uuid: successor.uuid }] });
+    expect(earlierRead.resolution).toMatchObject({ inForce: earlier.uuid, pending: [successor.uuid] });
     expect(
       (await rig.ok("backlinks", { uuid: earlier.uuid })).backlinks,
     ).toEqual([

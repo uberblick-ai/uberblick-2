@@ -4,8 +4,8 @@ import { z } from "zod";
 import { strictInput } from "../inputs.js";
 import { pinnedUuids } from "../sidebar.js";
 import { resolveTagFilter } from "../tag-catalog.js";
-import { isoTimestamp } from "../timestamps.js";
 import { documentKindArg, documentStatusArg } from "./schemas.js";
+import type { TopicRowEntry } from "./context.js";
 import { READ, operation } from "./operation.js";
 
 export const inputSchema = strictInput({
@@ -22,7 +22,7 @@ const DIRECTORY_HINT =
   "sync_status says whether it can still arrive.";
 
 export const listDocsOperation = operation(READ, inputSchema, (context, { tag, kind, status, has_open_threads, include_deleted, include_superseded }, _request) => {
-  const { replicas, tagCatalog } = context;
+  const { replicas, tagCatalog, topicRow, directoryRowJson } = context;
 
   const hasPredicate = tag !== undefined || kind !== undefined || status !== undefined || has_open_threads === true;
   const catalog = tagCatalog();
@@ -50,17 +50,7 @@ export const listDocsOperation = operation(READ, inputSchema, (context, { tag, k
         (tagId === null || live.some(entry => readDirectoryTags(entry, catalog).some(assignment => assignment.id === tagId))) &&
         (has_open_threads !== true || live.some(entry => (entry.openThreadCount ?? 0) > 0));
     })
-      .map(topic => ({
-        ...topic.representative,
-        topic: topic.topic,
-        title: decisionTopicTitle(topic),
-        deleted: topic.archived,
-        resolution: {
-          inForce: topic.inForce?.uuid ?? null,
-          pending: topic.pending.map(entry => entry.uuid),
-          conflicts: topic.conflicts.map(entry => entry.uuid),
-        },
-      }));
+      .map(topicRow);
   // Derived, never stored: the sidebar doc is the one place a pin lives.
   const pinned = pinnedUuids(replicas);
   const complete = replicas.roomComplete(replicas.directory().room);
@@ -70,30 +60,7 @@ export const listDocsOperation = operation(READ, inputSchema, (context, { tag, k
     ...(complete ? {} : { directoryHint: DIRECTORY_HINT }),
     docs: [...documents, ...decisionRows]
       .sort(compareDirectoryEntries)
-      .map((entry: DirectoryEntry & { resolution?: { inForce: string | null; pending: string[]; conflicts: string[] } }) => {
-        const updatedAt = isoTimestamp(entry.updatedAt);
-        return {
-          uuid: entry.uuid,
-          title: entry.title,
-          tags: readDirectoryTags(entry, catalog),
-          // Keep absent descriptions explicit as null.
-          description: entry.description ?? null,
-          ...(updatedAt === undefined ? {} : { updatedAt }),
-          ...(entry.openThreadCount === undefined ? {} : { openThreadCount: entry.openThreadCount }),
-          ...(entry.deleted === true ? { deleted: true as const } : {}),
-          pinned: pinned.has(entry.uuid),
-          ...(entry.kind === "decision" ? {
-            kind: "decision" as const,
-            status: entry.status,
-            topic: entry.topic,
-            ...(entry.governs === undefined ? {} : { governs: entry.governs }),
-            ...(entry.related === undefined ? {} : { related: entry.related }),
-            ...(entry.discussion === undefined ? {} : { discussion: entry.discussion }),
-            ...(entry.answerPreview === undefined ? {} : { answerPreview: entry.answerPreview }),
-            ...entry.resolution,
-          } : {}),
-        };
-      }),
+      .map((entry: TopicRowEntry) => directoryRowJson(entry, pinned.has(entry.uuid))),
     hub: replicas.hubState(),
   };
 });

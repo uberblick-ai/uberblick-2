@@ -12,13 +12,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { AGENT_CLIENT, blockText } from "../src/replica.js";
 import { agentDisplayName } from "../src/server.js";
-import {
-  removeTempDirs,
-  sleep,
-  startServer,
-  testConfig,
-  waitUntil,
-} from "./helpers.js";
+import { readBlocks, removeTempDirs, sleep, startServer, testConfig, waitUntil } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
@@ -186,7 +180,7 @@ describe("agent awareness", () => {
         afterFormatted.replica.doc,
       )?.index,
     ).toBe("a formatted insert".length);
-    expect(formatted.blocks[0].text).toBe("a formatted insert");
+    expect((await readBlocks(rig, doc.uuid, formatted.blocks))[0].text).toBe("a formatted insert");
   });
 
   // Who wrote is half of what a caret says, and the web editor renders whatever

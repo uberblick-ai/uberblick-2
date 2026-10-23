@@ -90,8 +90,7 @@ const directoryEntry = z.object({
   createdAt: z.string().optional().describe("Creation time as an ISO 8601 UTC string on the creating replica's clock. Absent when unknown or unrepresentable."),
   updatedAt: z.string().optional().describe("Approximate edit time as an ISO 8601 UTC string on the authoring replica's clock. Absent when unknown or unrepresentable."),
   ...lifecycle,
-  governs: z.string().optional(),
-  related: z.array(z.string()).optional().describe("All regular page UUIDs this record relates to, fixed at creation; governs is the legacy first-page view."),
+  related: z.array(z.string()).optional().describe("All regular page UUIDs this record relates to, fixed at creation."),
   topic: z.string().optional(),
   supersedes: z.string().optional(),
   answerPreview: z.string().nullable().optional().describe("Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown."),
@@ -104,14 +103,11 @@ const directoryEntry = z.object({
   openThreadCount: count.optional().describe("Cached count of this document's threads whose resolved is not true, including deleted anchors. Absent when unknown; each decision entry, including inForce, pending and conflicts, has its own count."),
   code_check: codeChecks.optional().describe("Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged."),
 }).strict();
-const topicResolution = {
-  topic: z.string().describe("First record's UUID identifying this decision topic."),
-  inForce: directoryEntry.nullable().describe("Record in force, or null when the topic has no answer in force."),
-  pending: z.array(directoryEntry),
-  conflicts: z.array(directoryEntry),
-  archived: z.boolean(),
+const topicRecords = {
+  inForce: z.string().nullable().describe("UUID of the record in force, or null when the topic has no answer in force."),
+  pending: z.array(z.string()).describe("UUIDs of pending records."),
+  conflicts: z.array(z.string()).describe("UUIDs of conflicting decided records."),
 };
-const decisionTopic = directoryEntry.extend(topicResolution).strict();
 const listEntry = z.object({
   uuid,
   title: z.string(),
@@ -125,7 +121,6 @@ const listEntry = z.object({
 const listDecision = listEntry.extend({
   kind: z.literal("decision"),
   status: status.optional(),
-  governs: z.string().optional(),
   related: z.array(z.string()).optional().describe("All regular page UUIDs related to this representative record, or this record in per-record listings."),
   topic: z.string().optional().describe("First record's UUID identifying this decision topic."),
   discussion: discussion.optional().describe("Cached RFC discussion document UUID; null when none, absent when the cache is unknown."),
@@ -133,6 +128,10 @@ const listDecision = listEntry.extend({
   inForce: z.string().nullable().optional().describe("Topic rows: UUID of the record in force, or null."),
   pending: z.array(z.string()).optional().describe("Topic rows: UUIDs of pending records."),
   conflicts: z.array(z.string()).optional().describe("Topic rows: UUIDs of conflicting decided records."),
+}).strict();
+const pageDecision = listDecision.omit({ pinned: true }).extend({
+  ...topicRecords,
+  relation: z.enum(["related", "linked"]).describe("Related page membership takes precedence over an indexed link from any record in the topic."),
 }).strict();
 
 const docLink = z.object({
@@ -165,7 +164,7 @@ function blockSchema(withLinks: boolean, withRev = true) {
     }).strict().optional().describe("Read-only view identity derived from the normalized Figma link; absent when the stored link cannot be normalized.") }).strict(),
   ]);
 }
-const block = blockSchema(false);
+const writtenBlock = z.object({ id: z.string(), rev: blockFields.rev }).strict();
 const readBlocks = z.array(blockSchema(true)).describe("Visible document blocks in stored order.");
 const annotation = z.object({
   id: z.string(),
@@ -301,7 +300,6 @@ export const outputSchemas = {
     description: z.string(),
     tags,
     ...lifecycle,
-    governs: z.string().optional(),
     related: z.array(z.string()).optional().describe("All related regular page UUIDs, fixed at creation."),
     topic: z.string().optional(),
     supersedes: z.string().optional(),
@@ -309,7 +307,7 @@ export const outputSchemas = {
     tldr: tldr.optional(),
     tldrHint: contentReview.tldrHint.optional(),
     ...decisionAuthority,
-    blocks: readBlocks,
+    blocks: z.array(writtenBlock).describe("Created blocks in order; read their content with get_doc."),
     sidebar: z.object({ group: groupIdentity, position: z.number().int() }).strict().optional(),
   }).strict(),
   get_doc: z.object({
@@ -324,7 +322,6 @@ export const outputSchemas = {
     tags,
     links: z.array(z.string()),
     ...lifecycle,
-    governs: z.string().optional(),
     related: z.array(z.string()).optional().describe("All related regular page UUIDs, fixed at creation."),
     topic: z.string().optional(),
     supersedes: z.string().optional(),
@@ -332,12 +329,11 @@ export const outputSchemas = {
     ...decisionAuthority,
     approvalFingerprint: z.string().optional(),
     room: z.string(),
-    decisions: z.array(decisionTopic.extend({
-      relation: z.enum(["related", "linked"]).describe("Related page membership takes precedence over an indexed link from any record in the topic."),
-    }).strict()),
+    decisions: z.array(pageDecision).describe("Decision topics of a regular page, one row each; get_doc a listed UUID for its record."),
     predecessors: z.array(directoryEntry).optional(),
     successors: z.array(directoryEntry).optional(),
-    resolution: decisionTopic.nullable().optional(),
+    resolution: z.object({ ...topicRecords, archived: z.boolean() }).strict().nullable().optional()
+      .describe("This record's topic state by record UUID; null when the topic cannot be resolved."),
     blocks: readBlocks,
     annotations: z.array(annotation),
     data: z.object({ collections: z.array(collectionCount), readWith: z.literal("get_data") }).strict().optional(),
@@ -370,11 +366,11 @@ export const outputSchemas = {
     github_ref: z.string(),
     decisions: z.array(z.object({ uuid, title: z.string(), status: status.nullable() }).strict()),
   }).strict(),
-  edit_block: z.object({ uuid, block: block.nullable(), ...documentDurability, ...contentReview }).strict(),
-  insert_block: z.object({ uuid, blocks: z.array(block).min(1), ...documentDurability, ...contentReview }).strict(),
+  edit_block: z.object({ uuid, block: writtenBlock.nullable(), ...documentDurability, ...contentReview }).strict(),
+  insert_block: z.object({ uuid, blocks: z.array(writtenBlock).min(1), ...documentDurability, ...contentReview }).strict(),
   move_block: z.object({
     uuid,
-    blocks: z.array(z.object({ id: z.string(), rev: z.string() }).strict()).min(1),
+    blocks: z.array(writtenBlock).min(1),
     ...documentDurability,
     ...contentReview,
   }).strict(),
@@ -441,7 +437,12 @@ export const outputSchemas = {
     persistence: z.object({ room: z.string(), message: z.string() }).strict().nullable(),
   }).strict(),
   get_sidebar: z.object({ ...sidebar, hub }).strict(),
-  pin_doc: z.object({ uuid, group: groupIdentity, moved: z.boolean(), ...sidebar, ...durability }).strict(),
-  unpin_doc: z.object({ uuid, unpinned: z.boolean(), ...sidebar, ...durability }).strict(),
+  pin_doc: z.object({ uuid, group: groupIdentity, moved: z.boolean(), ...durability }).strict(),
+  unpin_doc: z.object({
+    uuid,
+    unpinned: z.boolean(),
+    groupHint: z.string().optional().describe("Present when this unpin left its group empty: how to delete the group."),
+    ...durability,
+  }).strict(),
   sidebar_group: z.object({ action: z.enum(["rename", "delete", "move"]), group: groupIdentity, ...sidebar, ...durability }).strict(),
 } satisfies Record<string, z.ZodObject>;

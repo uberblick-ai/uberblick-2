@@ -38,10 +38,12 @@ function answer(who = "Ben (@bk-one)", when = new Date(Date.now() - 5 * 86_400_0
 }
 
 async function create(writer: McpSession, title: string | undefined, text: string, fields: Record<string, unknown> = {}): Promise<StoredDoc> {
-  return writer.call<StoredDoc>("create_doc", {
+  const created = await writer.call<StoredDoc>("create_doc", {
     ...(title === undefined ? {} : { title }),
     description: "Browser acceptance fixture.", blocks: [{ type: "paragraph", text }], ...fields,
   });
+  // create_doc names blocks by id and rev; the seeded paragraph stores the text written.
+  return fields.blocks === undefined ? { ...created, blocks: created.blocks.map((block) => ({ ...block, text })) } : created;
 }
 
 function block(page: Page): Locator {

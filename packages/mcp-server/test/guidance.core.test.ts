@@ -91,7 +91,7 @@ it("allows every document mutation while guidance remains unread", async () => {
   };
   await write("link_range", { uuid, block_id: block.id, start: 0, end: 5, doc_id: guide.uuid, rev: block.rev });
   await write("annotate", { uuid, block_id: target.blocks[1].id, start: 0, end: 6, text: "Comment" });
-  await write("edit_block", { uuid, block_id: block.id, old_text: block.text, new_text: "Changed paragraph.", rev: block.rev });
+  await write("edit_block", { uuid, block_id: block.id, old_text: "First paragraph.", new_text: "Changed paragraph.", rev: block.rev });
   await write("insert_block", { uuid, blocks: [{ type: "paragraph", text: "Third paragraph." }] });
   await write("move_block", { uuid, block_ids: [block.id], after_block_id: target.blocks[1].id });
   await write("delete_block", { uuid, block_id: block.id });
