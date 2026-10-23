@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { INITIAL_DOCUMENT_LIST_STATE } from "../../shell/DocumentList.js";
 import type { DocumentListState } from "../../shell/DocumentList.js";
 import { useRoutePath } from "../route.js";
@@ -20,6 +21,7 @@ export function useAppShell() {
   const sync = useSyncDetails(environment.route.kind);
   const rooms = useShellRooms(environment);
   const history = useDocumentHistory(environment.documentRevisions, rooms.selected, path);
+  const historyBack = useRef<HTMLButtonElement | null>(null);
   const alter = useAlterDecision({ ...rooms, ...environment, navigate });
   const pins = usePinToggles(rooms);
   const archive = useArchive({ ...rooms, ...environment, navigate });
@@ -29,7 +31,7 @@ export function useAppShell() {
   const onCreate = useCreateDocument({ ...rooms, ...environment, ...navigation });
   useDocumentStubRepair(rooms);
   const documentListState = documentList ?? INITIAL_DOCUMENT_LIST_STATE;
-  return { environment, layout, sync, rooms, history, alter, pins, archive, threads, readings,
+  return { environment, layout, sync, rooms, history, historyBack, alter, pins, archive, threads, readings,
     navigation, onCreate, navigate, documentListState, onDocumentListStateChange };
 }
 export type AppShell = ReturnType<typeof useAppShell>;

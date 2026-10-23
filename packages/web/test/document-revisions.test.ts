@@ -66,7 +66,7 @@ describe("document revision reads", () => {
 
   it("identifies an existing name and namer when naming the same state is refused", async () => {
     await expect(client({ reason: "already-named", existingName: { text: "Previously accepted", namer: { githubUsername: "alice" } } }, 409)
-      .api.name(UUID, "Reviewed", "hash", new AbortController().signal)).rejects.toThrow(/Previously accepted.*alice/);
+      .api.name(UUID, "Reviewed", "hash", new AbortController().signal)).rejects.toThrow("This revision is already named “Previously accepted” by alice. Open history to see it.");
   });
 
   it("keeps newest-first metadata and authenticates uncached local requests with the page session", async () => {

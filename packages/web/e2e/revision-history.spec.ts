@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
@@ -5,6 +6,7 @@ import { appendBlock, applyDocData, initDoc, snapshotRevision } from "@uberblick
 import type { RevisionEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import { activateControl, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
+import { assertNoViolations, WCAG_TAGS } from "./accessibility-assertions.js";
 
 function history(page: Page): Locator {
   return page.getByRole("group", { name: "Document history", exact: true });
@@ -12,6 +14,35 @@ function history(page: Page): Locator {
 
 function historicalEditor(page: Page): Locator {
   return page.locator(".ub-revision-pane .ProseMirror");
+}
+
+function historyList(page: Page): Locator {
+  return page.getByRole("navigation", { name: "Revision history", exact: true });
+}
+
+/** On narrow layouts the history list lives in the drawer; true when this opened it. */
+async function showHistoryList(page: Page): Promise<boolean> {
+  if (await historyList(page).isVisible()) return false;
+  await activateControl(page.getByRole("button", { name: "Show document list", exact: true }));
+  await expect(historyList(page)).toBeVisible();
+  return true;
+}
+
+/** The open drawer covers the revision header, as it covers any document. */
+async function closeHistoryList(page: Page, drawer: boolean): Promise<void> {
+  if (!drawer) return;
+  await page.keyboard.press("Escape");
+  await expect(historyList(page)).toBeHidden();
+}
+
+/** The live status line's ‹ opens history; in history it steps to an older revision. */
+async function previous(page: Page): Promise<void> {
+  await activateControl(history(page).getByRole("button", { name: "Previous revision", exact: true }));
+}
+
+async function backToNow(page: Page): Promise<void> {
+  // The sidebar holds it on desktop; the revision's status row keeps it when the sidebar is a drawer.
+  await activateControl(page.getByRole("button", { name: "Back to now", exact: true }).first());
 }
 
 async function newDocument(page: Page, title: string): Promise<string> {
@@ -118,7 +149,7 @@ test.describe("document history through ub open", () => {
     await page.keyboard.press("Enter");
     await page.keyboard.type("An unchanged paragraph.");
     await expect.poll(() => harness().hubText(room)).toContain("An unchanged paragraph.");
-    const trigger = history(page).getByRole("button", { name: "Name current revision…", exact: true });
+    const trigger = history(page).getByRole("button", { name: "Name current revision", exact: true });
     await trigger.focus();
     await page.keyboard.press("Enter");
     const naming = page.getByRole("dialog", { name: "Name current revision", exact: true });
@@ -132,10 +163,10 @@ test.describe("document history through ub open", () => {
     await page.keyboard.press("Enter");
     await expect(naming).toBeHidden();
     await expect(trigger).toBeFocused();
-    await activateControl(history(page).getByRole("button", { name: "Back", exact: true }));
+    await previous(page);
     await expect(history(page)).toContainText("“Reviewed after auth rewrite”, named by browser-person in the browser at ");
-    await expect(history(page).getByRole("status")).not.toContainText("from ");
-    await activateControl(history(page).getByRole("button", { name: "Back to now", exact: true }));
+    await expect(history(page).locator(".ub-history-who .sr-only")).not.toContainText("from ");
+    await backToNow(page);
     for (const [before, after] of [["amber", "blue"], ["outdated", "current"], ["oldest", "latest"]] as const) {
       const positions = await live.evaluate((element, before) => {
         const doc = (element as HTMLElement & { editor: Editor }).editor.state.doc;
@@ -151,27 +182,38 @@ test.describe("document history through ub open", () => {
       await page.keyboard.type(after);
     }
     await expect.poll(() => harness().hubText(room)).toContain("The latest paragraph.");
-    await activateControl(history(page).getByRole("button", { name: "Since last named", exact: true }));
+    await previous(page);
+    await expect(historicalEditor(page)).toBeVisible();
+    const drawer = await showHistoryList(page);
+    const since = historyList(page).getByRole("button", { name: "Changes since this name", exact: true });
+    await activateControl(since);
+    await expect(since).toHaveAttribute("aria-current", "true");
+    await closeHistoryList(page, drawer);
     const view = historicalEditor(page);
-    await expect(history(page)).toContainText("Compared with “Reviewed after auth rewrite”");
+    await expect(history(page)).toContainText("compared with “Reviewed after auth rewrite”");
     await expect(view.locator('[data-revision-change="added"]')).toHaveText(["blue", "current", "latest"]);
     await expect(view.locator('[data-revision-change="removed"]')).toHaveText(["amber", "outdated", "oldest"]);
     await expect(view.locator("p").filter({ hasText: "An unchanged paragraph." }).locator("[data-revision-change]")).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await activateControl(history(page).getByRole("button", { name: "Back", exact: true }));
-    await activateControl(history(page).getByRole("button", { name: "Rename revision…", exact: true }));
+    await activateControl(history(page).getByRole("button", { name: "Next revision", exact: true }));
+    await expect(historicalEditor(page)).toHaveCount(0);
+    await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeFocused();
+    await previous(page);
+    await expect(historicalEditor(page)).toBeVisible();
+    await previous(page);
+    await activateControl(history(page).getByRole("button", { name: "Rename revision", exact: true }));
     const renaming = page.getByRole("dialog", { name: "Rename revision", exact: true });
     await renaming.getByRole("textbox", { name: "Revision name", exact: true }).fill("Reviewed baseline");
     await activateControl(renaming.getByRole("button", { name: "Rename", exact: true }));
     await expect(renaming).toBeHidden();
     await expect(history(page)).toContainText("“Reviewed baseline”, named by browser-person in the browser at ");
-    await activateControl(history(page).getByRole("button", { name: "Rename revision…", exact: true }));
+    await activateControl(history(page).getByRole("button", { name: "Rename revision", exact: true }));
     await activateControl(renaming.getByRole("button", { name: "Remove name", exact: true }));
     await expect(renaming).toBeHidden();
     await expect(view).toContainText("The amber fox stays.");
     await expect(history(page)).not.toContainText("Reviewed baseline");
-    await expect(history(page).getByRole("button", { name: "Since last named", exact: true })).toHaveCount(0);
-    await activateControl(history(page).getByRole("button", { name: "Back to now", exact: true }));
+    await expect(since).toHaveCount(0);
+    await backToNow(page);
     await expect(live).toHaveAttribute("contenteditable", "true");
     await expect(live).toContainText("The blue fox stays.");
   });
@@ -185,7 +227,7 @@ test.describe("document history through ub open", () => {
     const peer = await openApp(browser, new URL(page.url()).pathname, { readySelector: ".ub-editor .ProseMirror" });
     await expect.poll(() => editor(peer).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.textContent))
       .toBe("Reviewed current content.");
-    await activateControl(history(page).getByRole("button", { name: "Name current revision…", exact: true }));
+    await activateControl(history(page).getByRole("button", { name: "Name current revision", exact: true }));
     const naming = page.getByRole("dialog", { name: "Name current revision", exact: true });
     await naming.getByRole("textbox", { name: "Revision name", exact: true }).fill("Reviewed");
     await selectPositions(editor(peer), 1);
@@ -194,8 +236,11 @@ test.describe("document history through ub open", () => {
     await activateControl(naming.getByRole("button", { name: "Name revision", exact: true }));
     await expect(naming.getByRole("alert")).toContainText("review the current content");
     await activateControl(naming.getByRole("button", { name: "Cancel", exact: true }));
-    await activateControl(history(page).getByRole("button", { name: "Refresh history", exact: true }));
-    await expect(history(page).getByRole("button", { name: "Since last named", exact: true })).toHaveCount(0);
+    await previous(page);
+    await expect(historicalEditor(page)).toBeVisible();
+    await expect(historyList(page).getByRole("button", { name: "Changes since this name", exact: true })).toHaveCount(0);
+    await expect(historyList(page).locator(".ub-history-name")).toHaveCount(0);
+    await backToNow(page);
     await expect(editor(page)).toContainText("Later collaborator change:");
   });
 
@@ -231,8 +276,7 @@ test.describe("document history through ub open", () => {
     const path = new URL(page.url()).pathname;
     const peer = await openApp(browser, path, { readySelector: ".ub-editor .ProseMirror" });
     await expect(editor(peer)).toContainText("The blue fox stays.");
-    await activateControl(history(page).getByRole("button", { name: "Refresh history", exact: true }));
-    await activateControl(history(page).getByRole("button", { name: "Back", exact: true }));
+    await previous(page);
     const view = historicalEditor(page);
     await expect(view).toHaveAttribute("contenteditable", "false");
     await expect(history(page)).toContainText("browser-person");
@@ -245,7 +289,7 @@ test.describe("document history through ub open", () => {
     await expect(view.locator('[data-revision-change="removed"]').filter({ hasText: "A removed paragraph." })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     if (browserName === "webkit") {
-      for (const name of ["Back", "Forward", "Back to now"]) {
+      for (const name of ["Previous revision", "Next revision", "Back to now"]) {
         const box = await history(page).getByRole("button", { name, exact: true }).boundingBox();
         if (box === null) throw new Error(`history control ${name} has no touch target`);
         expect(box.height).toBeGreaterThanOrEqual(44);
@@ -293,18 +337,18 @@ test.describe("document history through ub open", () => {
     await expect(editor(peer)).toContainText("The blue fox stays.");
     await expect(editor(peer)).not.toContainText("mutation");
 
-    await activateControl(history(page).getByRole("button", { name: "Back", exact: true }));
+    await previous(page);
     await expect(view).toContainText("The amber fox stays.");
     await expect(view.locator("[data-revision-change]")).toHaveCount(0);
-    await expect(history(page).getByRole("button", { name: "Back", exact: true })).toBeDisabled();
-    await activateControl(history(page).getByRole("button", { name: "Forward", exact: true }));
+    await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeDisabled();
+    await activateControl(history(page).getByRole("button", { name: "Next revision", exact: true }));
     await expect(view.locator('[data-revision-change="added"]')).toContainText("blue");
 
     await selectPositions(editor(peer), 1);
     await peer.keyboard.type("Live collaborator: ");
     await expect(editor(peer)).toContainText("Live collaborator: The blue fox stays.");
     await expect(view).not.toContainText("Live collaborator:");
-    await activateControl(history(page).getByRole("button", { name: "Back to now", exact: true }));
+    await backToNow(page);
     await expect(historicalEditor(page)).toHaveCount(0);
     await expect(live).toHaveAttribute("contenteditable", "true");
     await expect.poll(() => live.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.textContent))
@@ -342,9 +386,8 @@ test.describe("document history through ub open", () => {
       middle: savedState(uuid, title, "Middle content."),
       earliest: savedState(uuid, title, "Earliest content."),
     });
-    await activateControl(history(page).getByRole("button", { name: "Refresh history", exact: true }));
-    const back = history(page).getByRole("button", { name: "Back", exact: true });
-    const forward = history(page).getByRole("button", { name: "Forward", exact: true });
+    const back = history(page).getByRole("button", { name: "Previous revision", exact: true });
+    const forward = history(page).getByRole("button", { name: "Next revision", exact: true });
     await expect(back).toBeEnabled();
     await back.focus();
     await page.keyboard.press("Enter");
@@ -362,12 +405,90 @@ test.describe("document history through ub open", () => {
     await expect(forward).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(historicalEditor(page)).toContainText("Latest content.");
-    await expect(forward).toBeDisabled();
-    await expect(back).toBeFocused();
-    await history(page).getByRole("button", { name: "Back to now", exact: true }).focus();
+    await expect(forward).toBeFocused();
+    // Next from the newest revision returns to the live document and its ‹.
     await page.keyboard.press("Enter");
     await expect(historicalEditor(page)).toHaveCount(0);
     await expect(back).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await page.getByRole("button", { name: "Back to now", exact: true }).first().focus();
+    await page.keyboard.press("Enter");
+    await expect(historicalEditor(page)).toHaveCount(0);
+    await expect(back).toBeFocused();
+  });
+
+  test("the history list opens any revision, filters named ones and passes an accessibility scan", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    await page.emulateMedia({ colorScheme: browserName === "webkit" ? "dark" : "light" });
+    const title = docTitle("Revision list");
+    const uuid = await newDocument(page, title);
+    const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
+    const now = Date.now();
+    await serveHistory(page, [
+      { id: "latest", author: { githubUsername: "Ben", surface: { kind: "mcp", name: "Claude Code" } }, startedAt: now - 60_000, endedAt: null },
+      { id: "reviewed", author: person, startedAt: now - 3_600_000, endedAt: now - 3_000_000,
+        name: { text: "Reviewed after the auth rewrite with a name long enough to be cut", namer: person, namedAt: now - 3_000_000, canManage: true } },
+      { id: "earliest", author: null, startedAt: null, endedAt: now - 7_200_000 },
+    ], {
+      latest: savedState(uuid, title, "Latest content."),
+      reviewed: savedState(uuid, title, "Reviewed content."),
+      earliest: savedState(uuid, title, "Earliest content."),
+    });
+    await previous(page);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    const drawer = await showHistoryList(page);
+    const list = historyList(page);
+    await expect(list.getByRole("listitem")).toHaveCount(3);
+    await expect(list.locator('[aria-current="true"]')).toHaveCount(1);
+    await expect(list.locator('[aria-current="true"]')).toContainText("in progress");
+    const reviewed = list.getByRole("button", { name: /Reviewed after the auth rewrite/ });
+    const name = list.locator(".ub-history-name > span:last-child");
+    expect(await name.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+    await expect(name).toHaveCSS("text-overflow", "ellipsis");
+    await reviewed.focus();
+    await page.keyboard.press("Enter");
+    await expect(historicalEditor(page)).toContainText("Reviewed content.");
+    await expect(reviewed).toHaveAttribute("aria-current", "true");
+    await expect(reviewed).toBeFocused();
+    await closeHistoryList(page, drawer);
+    await expect(history(page)).toContainText("2 of 3");
+    await showHistoryList(page);
+    const screenshotName = browserName === "webkit" ? "history-list-ipad-dark" : "history-list-desktop-light";
+    const screenshot = info.outputPath(`${screenshotName}.png`);
+    await page.screenshot({ path: screenshot });
+    await info.attach(screenshotName, { path: screenshot, contentType: "image/png" });
+    const scan = await new AxeBuilder({ page }).include(".ub-history-sidebar").include(".ub-revision-pane").withTags(WCAG_TAGS).analyze();
+    assertNoViolations(scan.violations);
+    await activateControl(list.getByRole("button", { name: "Named", exact: true }));
+    await expect(list.getByRole("listitem")).toHaveCount(1);
+    await activateControl(list.getByRole("button", { name: "All", exact: true }));
+    await activateControl(list.getByRole("button", { name: /Earlier content/ }));
+    await expect(historicalEditor(page)).toHaveText("Earliest content.");
+    await backToNow(page);
+    await expect(historicalEditor(page)).toHaveCount(0);
+    await expect(list).toBeHidden();
+    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+  });
+
+  test("Back to now in the history drawer closes it and returns focus to the live history control", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    await page.setViewportSize({ width: 1024, height: 768 });
+    const title = docTitle("History drawer return");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [{ id: "latest", author: null, startedAt: 1_000, endedAt: null }], {
+      latest: savedState(uuid, title, "Historical content."),
+    });
+    await previous(page);
+    await expect(historicalEditor(page)).toHaveText("Historical content.");
+    expect(await showHistoryList(page)).toBe(true);
+    const drawer = page.getByRole("dialog", { name: "Sidebar", exact: true });
+    await expect(drawer).toBeVisible();
+    await activateControl(historyList(page).getByRole("button", { name: "Back to now", exact: true }));
+    await expect(drawer).toBeHidden();
+    await expect(historicalEditor(page)).toHaveCount(0);
+    await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeFocused();
+    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   });
 
   test("opening history preserves unsent comment and reply drafts", { tag: "@webkit" }, async ({ browser }) => {
@@ -377,7 +498,6 @@ test.describe("document history through ub open", () => {
     await serveHistory(page, [{ id: "earlier", author: null, startedAt: 1_000, endedAt: null }], {
       earlier: savedState(uuid, title, "Historical text without comments."),
     });
-    await activateControl(history(page).getByRole("button", { name: "Refresh history", exact: true }));
     await activateControl(editor(page));
     await page.keyboard.type("First comment target. Another comment target.");
     await selectPositions(editor(page), 1, 6);
@@ -393,13 +513,13 @@ test.describe("document history through ub open", () => {
     await activateControl(page.getByRole("button", { name: "Comment", exact: true }));
     const comment = page.getByPlaceholder(/Comment as/);
     await comment.fill("An unsent comment.");
-    await history(page).getByRole("button", { name: "Back", exact: true }).focus();
+    await history(page).getByRole("button", { name: "Previous revision", exact: true }).focus();
     await page.keyboard.press("Enter");
     await expect(historicalEditor(page)).toHaveText("Historical text without comments.");
     await expect(comment).toBeHidden();
     await expect(page.getByRole("region", { name: "Threads", exact: true })).toHaveCount(0);
     await expect(sheet).toBeHidden();
-    await activateControl(history(page).getByRole("button", { name: "Back to now", exact: true }));
+    await backToNow(page);
     await expect(comment).toHaveValue("An unsent comment.");
     await expect(comment).toBeVisible();
     await activateControl(page.locator('[data-slot="selection-composer"]').getByRole("button", { name: "Cancel", exact: true }));
@@ -423,19 +543,20 @@ test.describe("document history through ub open", () => {
       agent: savedState(uuid, title, "Earlier agent content."),
       earlier: savedState(uuid, title, "Earlier content."),
     });
-    await activateControl(history(page).getByRole("button", { name: "Refresh history", exact: true }));
-    await expect(history(page).getByRole("button", { name: "Back", exact: true })).toBeEnabled();
+    await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeEnabled();
     await harness().stopHub();
     try {
       await selectPositions(editor(page), 1);
       await page.keyboard.type("Unsynced draft: ");
       await expect(editor(page)).toContainText("Unsynced draft: Shared current content.");
-      await activateControl(history(page).getByRole("button", { name: "Back", exact: true }));
+      await previous(page);
       await expect(history(page)).toContainText("Ben via Claude Code, from ");
-      await activateControl(history(page).getByRole("button", { name: "Back", exact: true }));
+      await expect(history(page)).toContainText("in progress");
+      await previous(page);
       await expect(historicalEditor(page)).toHaveText("Earlier content.");
       await expect(history(page)).toContainText("Unknown author, unknown start to ");
-      await activateControl(history(page).getByRole("button", { name: "Back to now", exact: true }));
+      await expect(history(page)).toContainText("Earlier content");
+      await backToNow(page);
       await expect(editor(page)).toHaveAttribute("contenteditable", "true");
       await expect(editor(page)).toContainText("Unsynced draft: Shared current content.");
     } finally {
@@ -448,10 +569,10 @@ test.describe("document history through ub open", () => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
     await newDocument(page, docTitle("No revisions"));
     await serveHistory(page, [], {});
-    await activateControl(history(page).getByRole("button", { name: "Refresh history", exact: true }));
-    await expect(history(page)).toContainText(/no revisions/i);
-    await expect(history(page).getByRole("button", { name: "Back", exact: true })).toBeDisabled();
+    await previous(page);
+    await expect(page.locator(".ub-revision-pane").getByRole("status")).toHaveText("No revisions yet");
     await expect(historicalEditor(page)).toHaveCount(0);
+    await backToNow(page);
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   });
 
@@ -463,8 +584,7 @@ test.describe("document history through ub open", () => {
       { id: "latest", author: null, startedAt: 2_000, endedAt: null },
       { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
     ], dataHistory(uuid, title));
-    await activateControl(history(page).getByRole("button", { name: "Refresh history", exact: true }));
-    await activateControl(history(page).getByRole("button", { name: "Back", exact: true }));
+    await previous(page);
     const view = historicalEditor(page);
     const table = view.getByRole("table", { name: "Historical measurements", exact: true });
     await expect(table.locator("tbody tr")).toHaveText(["2026-10-2090 ms", "2026-10-21100 ms"]);
@@ -472,12 +592,12 @@ test.describe("document history through ub open", () => {
     const chart = view.locator(".ub-chart").filter({ has: page.getByRole("img", { name: "Historical latency", exact: true }) });
     await expect(chart).toHaveAttribute("data-draw-state", "success");
     await expect(chart.locator(".ub-chart-description")).toContainText("Latest values: Latency: 100 ms.");
-    await activateControl(history(page).getByRole("button", { name: "Back", exact: true }));
+    await previous(page);
     await expect(table.locator("tbody tr")).toHaveText(["2026-10-2010 ms", "2026-10-2120 ms"]);
     await expect(chart).toHaveAttribute("data-draw-state", "success");
     await expect(chart.locator(".ub-chart-description")).toContainText("Latest values: Latency: 20 ms.");
     await expect(view.locator(".ub-revision-fields")).toHaveCount(0);
-    await activateControl(history(page).getByRole("button", { name: "Back to now", exact: true }));
+    await backToNow(page);
     await expect(editor(page).locator(".ub-chart")).toHaveCount(0);
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   });
@@ -488,19 +608,23 @@ test.describe("document history through ub open", () => {
     ["forbidden", "History is unavailable: the hub refused access."],
     ["unsupported", "History is unavailable: this hub does not serve revisions."],
   ] as const) {
-    test(`unavailable history explains ${reason} and can be refreshed`, async ({ browser }) => {
+    test(`unavailable history explains ${reason} and can be retried`, async ({ browser }) => {
       const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
       await page.route("**/api/revisions?**", route => route.fulfill({
         status: 503, contentType: "application/json", body: JSON.stringify({ error: "history_unavailable", reason }),
       }));
       await newDocument(page, docTitle(`Unavailable ${reason}`));
-      await expect(history(page).getByRole("status")).toHaveText(message);
-      await expect(historicalEditor(page)).toHaveCount(0);
       await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+      await previous(page);
+      const state = page.locator(".ub-revision-pane").getByRole("status");
+      await expect(state).toHaveText(message);
+      await expect(historicalEditor(page)).toHaveCount(0);
       await page.unroute("**/api/revisions?**");
       await serveHistory(page, [], {});
-      await activateControl(history(page).getByRole("button", { name: "Refresh history", exact: true }));
-      await expect(history(page).getByRole("status")).toHaveText("No revisions yet");
+      await activateControl(page.locator(".ub-revision-pane").getByRole("button", { name: "Try again", exact: true }));
+      await expect(state).toHaveText("No revisions yet");
+      await backToNow(page);
+      await expect(editor(page)).toHaveAttribute("contenteditable", "true");
     });
   }
 });

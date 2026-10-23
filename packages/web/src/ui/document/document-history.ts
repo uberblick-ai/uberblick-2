@@ -8,6 +8,8 @@ interface Selection { index: number; before: Y.Doc | null; after: Y.Doc; compare
 interface HistoryState {
   entries: RevisionEntry[] | null;
   selection: Selection | null;
+  /** History was asked for: it stays open through loading, failure and an empty list. */
+  active: boolean;
   busy: boolean;
   error: string | null;
 }
@@ -18,12 +20,37 @@ interface Session {
   operation: number;
   signal: AbortSignal;
   documents: Map<string, Y.Doc>;
+  retryTarget: Target | null;
   state: HistoryState;
 }
-const initial: HistoryState = { entries: null, selection: null, busy: true, error: null };
+const initial: HistoryState = { entries: null, selection: null, active: false, busy: true, error: null };
+type Target = { index: number } | { step: -1 | 1 } | { since: string | null } | { id: string };
 function destroyDocuments(documents: Map<string, Y.Doc>): void {
   for (const doc of documents.values()) doc.destroy();
   documents.clear();
+}
+
+/** Entering steps open the newest revision; a comparison always shows the newest. */
+function targetIndex(target: Target, selection: Selection | null, entries: readonly RevisionEntry[]): number {
+  if ("id" in target) return entries.findIndex(entry => entry.id === target.id);
+  if ("since" in target || (selection === null && "step" in target)) return 0;
+  return "index" in target ? target.index : (selection?.index ?? 0) + target.step;
+}
+
+function replaceEntries(owner: Session, entries: RevisionEntry[]): Pick<HistoryState, "entries" | "selection"> {
+  const selection = owner.state.selection;
+  const id = selection === null ? undefined : owner.state.entries?.[selection.index]?.id;
+  const index = entries.findIndex(entry => entry.id === id);
+  return { entries, selection: selection === null || index < 0 ? null : index === selection.index ? selection : { ...selection, index } };
+}
+
+function resolvedTarget(target: Target, entries: readonly RevisionEntry[], index: number): Target {
+  const entry = entries[index];
+  return "since" in target || entry === undefined ? target : { id: entry.id };
+}
+
+function namedBaseline(entries: readonly RevisionEntry[], since: string | null): RevisionEntry | undefined {
+  return entries.find(entry => entry.name != null && (since === null || entry.id === since));
 }
 
 export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid: string | null, path: string) {
@@ -37,17 +64,12 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
   const fail = useCallback((session: Session, error: unknown): void => update(session, {
     busy: false, error: error instanceof DocumentHistoryError ? error.message : new DocumentHistoryError("unreachable").message,
   }), [update]);
-  const list = async (session: Session, operation: number): Promise<RevisionEntry[]> => {
-    const entries = await session.client.list(session.uuid, session.signal);
-    if (session.operation === operation) update(session, { entries });
-    return entries;
-  };
   // Each route visit owns its detached documents and pending requests. The
   // live room never participates in this cache or its teardown.
   useEffect(() => {
     if (client === null || uuid === null) { current.current = null; setView(null); return; }
     const controller = new AbortController();
-    const session: Session = { client, uuid, path, operation: 0, signal: controller.signal, documents: new Map(), state: initial };
+    const session: Session = { client, uuid, path, operation: 0, signal: controller.signal, documents: new Map(), retryTarget: null, state: initial };
     current.current = session;
     setView({ session, state: initial });
     void client.list(uuid, controller.signal).then(
@@ -79,30 +101,34 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
     const before = previous === undefined ? null : await get(owner, previous.id, operation, documents);
     return { index, before, after, ...(comparedWith === undefined ? {} : { comparedWith }) };
   };
-  const select = async (direction: -1 | 1 | "named"): Promise<void> => {
+  const select = async (target: Target, relist = false): Promise<void> => {
     const owner = current.current;
     if (owner === null || owner.state.busy) return;
     const operation = ++owner.operation;
-    const fresh = direction === "named" ? new Map<string, Y.Doc>() : null;
+    const named = "since" in target;
+    const fresh = named ? new Map<string, Y.Doc>() : null;
     let adopted = false;
-    update(owner, { busy: true, error: null });
+    owner.retryTarget = target;
+    update(owner, { busy: true, error: null, active: true });
     try {
       const selection = owner.state.selection;
-      const entries = direction === "named" ? await owner.client.list(owner.uuid, owner.signal)
-        : selection === null ? await list(owner, operation) : owner.state.entries ?? [];
+      const entries = named || relist || selection === null ? await owner.client.list(owner.uuid, owner.signal) : owner.state.entries ?? [];
       if (owner.operation !== operation) return;
       if (selection === null && fresh === null) destroyDocuments(owner.documents);
-      const index = selection === null || direction === "named" ? 0 : selection.index + direction;
-      const previous = direction === "named" ? entries.find(entry => entry.name != null) : undefined;
-      if (direction === "named" && previous === undefined) { update(owner, { busy: false, error: "No named revision is available. Return to now and refresh history." }); return; }
+      const index = targetIndex(target, selection, entries);
+      if ("id" in target && index < 0) throw new DocumentHistoryError("revision-not-found");
+      owner.retryTarget = resolvedTarget(target, entries, index);
+      const previous = named ? namedBaseline(entries, target.since) : undefined;
+      if (named && previous === undefined) { update(owner, { busy: false, ...replaceEntries(owner, entries), error: "This named revision is no longer available. Try again." }); return; }
       const next = await readSelection(owner, entries, index, operation, fresh ?? owner.documents, previous);
       if (owner.operation !== operation) return;
-      if (next === null) { update(owner, { busy: false }); return; }
+      if (next === null) { update(owner, { busy: false, ...replaceEntries(owner, entries) }); return; }
       if (fresh !== null) {
         destroyDocuments(owner.documents);
         owner.documents = fresh;
         adopted = true;
       }
+      owner.retryTarget = null;
       update(owner, { entries, selection: next, busy: false });
     } catch (error) { if (owner.operation === operation) fail(owner, error); }
     finally { if (fresh !== null && !adopted) destroyDocuments(fresh); }
@@ -118,35 +144,46 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
       const entries = owner.state.entries ?? [];
       const existing = entries.some(entry => entry.id === revision.id);
       const next = existing ? entries.map(entry => entry.id === revision.id ? revision : entry) : [revision, ...entries];
-      const selection = owner.state.selection;
-      update(owner, { busy: false, entries: next,
-        ...(selection?.comparedWith?.id === revision.id ? { selection: revision.name == null ? null : { ...selection, comparedWith: revision } } : {}) });
+      const replacement = replaceEntries(owner, next);
+      const selection = replacement.selection;
+      update(owner, { busy: false, ...replacement,
+        ...(selection?.comparedWith?.id === revision.id ? (revision.name == null ? { selection: null, active: false } : { selection: { ...selection, comparedWith: revision } }) : {}) });
     } catch (error) { if (owner.operation === operation) update(owner, { busy: false }); throw error; }
+  };
+  const refresh = (): void => {
+    const owner = current.current;
+    if (owner === null || owner.state.busy) return;
+    const operation = ++owner.operation;
+    update(owner, { busy: true, error: null });
+    void owner.client.list(owner.uuid, owner.signal).then((entries) => {
+      if (owner.operation === operation) update(owner, { busy: false, ...replaceEntries(owner, entries) });
+    }, (error: unknown) => { if (owner.operation === operation) fail(owner, error); });
   };
   return {
     ...state,
     available: client !== null && uuid !== null,
-    active: state.selection !== null,
     entry: state.selection === null ? null : state.entries?.[state.selection.index] ?? null,
-    back: () => { void select(1); },
-    forward: () => { void select(-1); },
-    sinceLastNamed: () => { void select("named"); },
+    back: () => { void select({ step: 1 }); },
+    forward: () => { void select({ step: -1 }); },
+    open: (index: number) => { void select({ index }); },
+    sinceLastNamed: () => { void select({ since: null }); },
+    sinceNamed: (id: string) => { void select({ since: id }); },
     name: (name: string, checksum: string) => mutate(owner => owner.client.name(owner.uuid, name, checksum, owner.signal)),
     rename: (revisionId: string, name: string) => mutate(owner => owner.client.rename(owner.uuid, revisionId, name, owner.signal)),
     removeName: (revisionId: string) => mutate(owner => owner.client.removeName(owner.uuid, revisionId, owner.signal)),
     now: () => {
       const owner = current.current;
-      if (owner !== null) { owner.operation++; update(owner, { selection: null, error: null, busy: false }); }
+      if (owner !== null) { owner.operation++; owner.retryTarget = null; update(owner, { selection: null, active: false, error: null, busy: false }); }
     },
-    refresh: () => {
+    /** A failed read retains its target even when newer revisions arrive. */
+    retry: () => {
       const owner = current.current;
-      if (owner === null || owner.state.busy) return;
-      const operation = ++owner.operation;
-      update(owner, { busy: true, error: null });
-      void list(owner, operation).then(() => {
-        if (owner.operation === operation) update(owner, { busy: false });
-      }, (error: unknown) => { if (owner.operation === operation) fail(owner, error); });
+      if (owner === null) return;
+      if (owner.retryTarget !== null) void select(owner.retryTarget, true);
+      else if (owner.state.selection === null) void select({ index: 0 });
+      else refresh();
     },
+    refresh,
   };
 }
 export type DocumentHistory = ReturnType<typeof useDocumentHistory>;

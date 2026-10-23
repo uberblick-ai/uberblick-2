@@ -8,7 +8,9 @@ import { Button } from "../shadcn/button.js";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "../shadcn/dialog.js";
 import { Input } from "../shadcn/input.js";
 import type { DocumentHistory } from "./document-history.js";
+import { TagIcon } from "./history-icons.js";
 
+/** A quiet tag icon opens naming beside the revision it names. */
 export function RevisionNameControls({ history, liveDocument, writable }: {
   history: DocumentHistory; liveDocument: Y.Doc | null; writable: boolean;
 }): ReactElement | null {
@@ -45,14 +47,15 @@ export function RevisionNameControls({ history, liveDocument, writable }: {
   };
   return <Dialog open={open} onOpenChange={setOpen}>
     <DialogTrigger asChild>
-      <Button variant="secondary" size="sm" disabled={history.busy} onClick={() => {
+      <button type="button" className="ub-history-icon ub-history-name-trigger" disabled={history.busy} data-named={naming ? undefined : ""}
+        aria-label={naming ? "Name current revision" : "Rename revision"} title={naming ? "Name this revision" : "Rename this revision"} onClick={() => {
         setDraft(naming ? "" : entry?.name?.text ?? "");
         setError(null);
         // This is the live document behind this control, before later room
         // updates or the local server's replica can change the reviewed state.
         setChecksum(naming && liveDocument !== null ? documentRevisionChecksum(liveDocument)
           .catch(() => new Error("Couldn't read this document's state. Review it and try again.")) : null);
-      }}>{naming ? "Name current revision…" : "Rename revision…"}</Button>
+      }}><TagIcon /></button>
     </DialogTrigger>
     <DialogContent className="p-6" aria-describedby={undefined}>
       <form className="flex flex-col gap-4" onSubmit={event => { event.preventDefault(); void perform(false); }}>

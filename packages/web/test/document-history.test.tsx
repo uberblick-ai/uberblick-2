@@ -272,4 +272,106 @@ describe("document history navigation", () => {
     await act(async () => {});
     expect(fix.reading()).toMatchObject({ active: false, entries, error: null });
   });
+
+  it("opens any listed revision directly and closes on returning to now", async () => {
+    const fix = mount(client());
+    await act(async () => {});
+    expect(fix.reading().active).toBe(false);
+    await act(async () => fix.reading().open(1));
+    expect(fix.reading()).toMatchObject({ active: true, busy: false, error: null });
+    expect(fix.reading().entry?.id).toBe("middle");
+    expect(getMeta(fix.reading().selection!.before!).title).toBe("earliest");
+    await act(async () => fix.reading().open(2));
+    expect(fix.reading().entry?.id).toBe("earliest");
+    expect(fix.reading().selection?.before).toBeNull();
+    act(() => fix.reading().now());
+    expect(fix.reading()).toMatchObject({ active: false, selection: null });
+  });
+
+  it("stays open on a failed entry so it can be retried in place", async () => {
+    const api = client();
+    vi.mocked(api.get).mockRejectedValueOnce(new DocumentHistoryError("unreachable"));
+    const fix = mount(api);
+    await act(async () => {});
+    await act(async () => fix.reading().back());
+    expect(fix.reading()).toMatchObject({ active: true, selection: null, busy: false });
+    expect(fix.reading().error).toMatch(/cannot be reached/);
+    await act(async () => fix.reading().retry());
+    expect(fix.reading()).toMatchObject({ active: true, error: null });
+    expect(fix.reading().entry?.id).toBe("newest");
+  });
+
+  it.each([
+    { index: 1, prepend: false },
+    { index: 1, prepend: true },
+    { index: 2, prepend: false },
+    { index: 2, prepend: true },
+  ])("retries revision $index after a failed read, with a prepended head: $prepend", async ({ index, prepend }) => {
+    let unavailable = true;
+    const api = client(async (_uuid, id) => {
+      if (id === "earliest" && unavailable) throw new DocumentHistoryError("unreachable");
+      return document(id);
+    });
+    const middle: RevisionEntry = { ...entries[1]!, name: {
+      text: "Reviewed", namer: null, namedAt: 100, canManage: true,
+    } };
+    vi.mocked(api.list).mockResolvedValue([entries[0]!, middle, entries[2]!]);
+    const fix = mount(api);
+    await act(async () => {});
+    await act(async () => fix.reading().open(0));
+    const retained = fix.reading().selection;
+    await act(async () => fix.reading().open(index));
+    expect(fix.reading().error).toMatch(/cannot be reached/);
+    expect(fix.reading().selection).toBe(retained);
+    unavailable = false;
+    const recovered = [entries[0]!, middle, entries[2]!];
+    if (prepend) recovered.unshift({ ...entries[0]!, id: "new-head" });
+    vi.mocked(api.list).mockResolvedValue(recovered);
+    await act(async () => fix.reading().retry());
+    const expected = index === 1 ? middle : entries[2]!;
+    expect(fix.reading()).toMatchObject({ error: null, busy: false, entry: expected });
+    expect(fix.reading().selection?.index).toBe(index + (prepend ? 1 : 0));
+    expect(getMeta(fix.reading().selection!.after).title).toBe(expected.id);
+    if (index === 1) expect(getMeta(fix.reading().selection!.before!).title).toBe("earliest");
+    else expect(fix.reading().selection?.before).toBeNull();
+    for (const state of fix.seen) {
+      if (state.selection !== null) expect(state.entries?.[state.selection.index]?.id).toBe(getMeta(state.selection.after).title);
+    }
+  });
+
+  it("keeps the selected revision identity when a refresh or naming prepends a revision", async () => {
+    const api = client();
+    const fix = mount(api);
+    await act(async () => {});
+    await act(async () => fix.reading().open(1));
+    const snapshot = fix.reading().selection!.after;
+    const head: RevisionEntry = { ...entries[0]!, id: "new-head" };
+    vi.mocked(api.list).mockResolvedValue([head, ...entries]);
+    await act(async () => fix.reading().refresh());
+    expect(fix.reading().entry?.id).toBe("middle");
+    expect(fix.reading().selection).toMatchObject({ index: 2, after: snapshot });
+    const named: RevisionEntry = { ...head, id: "named-head", name: {
+      text: "Reviewed", namer: null, namedAt: 100, canManage: true,
+    } };
+    vi.mocked(api.name).mockResolvedValue(named);
+    await act(async () => fix.reading().name("Reviewed", "checksum"));
+    expect(fix.reading().entry?.id).toBe("middle");
+    expect(fix.reading().selection).toMatchObject({ index: 3, after: snapshot });
+  });
+
+  it("compares the newest revision with a chosen named revision, not only the latest one", async () => {
+    const api = client();
+    const name = (text: string) => ({ text, namer: { githubUsername: "ben", surface: { kind: "browser" as const, name: "Browser" } }, namedAt: 50, canManage: true });
+    const middle: RevisionEntry = { ...entries[1]!, name: name("Draft") };
+    const earliest: RevisionEntry = { ...entries[2]!, name: name("Kickoff") };
+    vi.mocked(api.list).mockResolvedValue([entries[0]!, middle, earliest]);
+    const fix = mount(api);
+    await act(async () => {});
+    await act(async () => fix.reading().sinceNamed("earliest"));
+    expect(fix.reading().selection!.comparedWith).toEqual(earliest);
+    expect(getMeta(fix.reading().selection!.after).title).toBe("newest");
+    await act(async () => fix.reading().sinceNamed("gone"));
+    expect(fix.reading().error).toMatch(/no longer available/);
+    expect(fix.reading().selection!.comparedWith).toEqual(earliest);
+  });
 });

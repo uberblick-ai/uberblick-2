@@ -212,16 +212,125 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Quiet ‹ › and tag icons beside the revision chip, live and in history. */
+.ub-history-nav,
+.ub-history-steps {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+
+.ub-history-icon {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.ub-history-icon:disabled { opacity: 0.4; cursor: default; }
+.ub-history-icon:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ub-history-nav { margin: 0; border: 0; padding: 0; min-width: 0; }
+.ub-history-name-trigger { opacity: 0.7; }
+@media (hover: hover) {
+  .ub-history-icon:enabled:hover { background: var(--card-accent); color: var(--foreground); opacity: 1; }
+}
+@media (any-pointer: coarse) {
+  .ub-history-icon { width: 44px; height: 44px; }
+}
+
+/* The revision's status row: who and when, position, and which revision. */
 .ub-history-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
-  margin-block: 0.75rem 1rem;
-  padding: 0;
+  column-gap: 0.6rem;
+  row-gap: 0.25rem;
+  margin-block: 0 1rem;
+  padding: 0.35rem 0;
   border: 0;
+  border-bottom: 1px solid var(--border);
   min-width: 0;
+  color: var(--muted-foreground);
 }
+.ub-history-who {
+  display: inline-flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ub-history-author,
+.ub-history-compared { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ub-history-author { color: var(--foreground); font-weight: 500; }
+.ub-history-when { flex: none; }
+.ub-history-state:empty { display: none; }
+.ub-history-position { font-family: var(--font-mono); font-size: var(--type-caption-size); white-space: nowrap; }
+.ub-history-tag { flex: none; color: var(--brand-ink); }
+.ub-history-name-trigger .ub-history-tag { color: currentColor; }
+.ub-history-name-trigger[data-named] { color: var(--brand-ink); opacity: 1; }
+.ub-history-rev {
+  flex: none;
+  min-width: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 0.25rem 0;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ub-history-named {
+  display: inline-flex;
+  max-width: 14rem;
+  /* Sits with its tag, as one name. */
+  margin-inline-start: -0.35rem;
+  color: var(--foreground);
+  font-weight: 500;
+}
+.ub-history-rev:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ub-history-named > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The sidebar holds Back to now; narrow layouts keep it beside the revision. */
+.ub-history-now { display: none; }
+[data-sidebar-collapsed="true"] .ub-history-now { display: inline-flex; }
+@media (width < 80rem) {
+  .ub-history-now { display: inline-flex; }
+}
+
+.ub-history-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding-block: 2rem;
+  color: var(--muted-foreground);
+}
+
+/* History sidebar entries: a ring avatar, rounded square for agent surfaces. */
+.ub-history-avatar {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  place-items: center;
+  box-sizing: border-box;
+  border: 2px solid var(--sidebar-border);
+  border-radius: 50%;
+  color: var(--sidebar-row-foreground);
+  font-size: var(--type-caption-size);
+  font-weight: 600;
+  line-height: 1;
+}
+.ub-history-avatar-agent { border-radius: 8px; }
+.ub-history-entry[aria-current="true"] .ub-history-avatar { border-color: var(--sidebar-row-icon); }
 
 [data-revision-change="added"] {
   color: inherit;
@@ -2713,6 +2822,15 @@ h6.ub-heading {
 
 .ub-last-updated {
   flex: none;
+  white-space: nowrap;
+}
+
+/* Beside the history controls the note shortens instead of adding a line. */
+.ub-status-offline {
+  flex: 1 1 0%;
+  min-width: 6em;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
