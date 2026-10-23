@@ -380,6 +380,8 @@ export interface DocumentSyncReading {
   syncDetails?: boolean;
 }
 
+const OFFLINE_NOTE = "Offline. Changes are saved on this device.";
+
 /** The quiet edit row retains explicit refusals and truthful durability warnings. */
 export function StatusLine({
   connection,
@@ -500,7 +502,7 @@ export function StatusLine({
           </>}
           {refusal !== null && <span className="ub-status-word">{refusal}</span>}
           {unsaved && <span className="ub-not-saved">not saved</span>}
-          {offline && <span className="ub-status-offline">Offline. Changes are saved on this device.</span>}
+          {offline && <span className="ub-status-offline" title={OFFLINE_NOTE}>{OFFLINE_NOTE}</span>}
           {Boolean(statusLink) && (updatedReading !== null || codeNote !== null || refusal !== null || unsaved || offline) &&
             <span className="ub-status-separator" aria-hidden="true"> · </span>}
           {statusLink}
