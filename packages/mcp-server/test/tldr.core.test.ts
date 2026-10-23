@@ -73,7 +73,7 @@ describe("set_metadata", () => {
       uuid: doc.uuid, block_id: read.blocks[0].id, old_text: read.blocks[0].text,
       new_text: "After", rev: read.blocks[0].rev,
     });
-    expect(edited.tldrHint).toContain("review its TL;DR");
+    expect(edited.tldrHint).toContain("if it still fits, do nothing");
     await rig.ok("set_metadata", { uuid: doc.uuid, tldr: "Updated without opt-in." });
     expect((await rig.ok("get_doc", { uuid: doc.uuid })).tldr).toBe("Updated without opt-in.");
   });
@@ -174,6 +174,20 @@ describe("set_metadata", () => {
 });
 
 describe("the TL;DR review reminder", () => {
+  it("skips the reminder when create_doc writes the TL;DR with the content", async () => {
+    const rig = await localRig();
+    const created = await rig.ok("create_doc", {
+      title: "Summarised", description: "Content and summary in one call.", tldr: "Written with its content.",
+      blocks: [{ type: "paragraph", text: "Body" }],
+    });
+    expect(created).toMatchObject({ tldr: "Written with its content." });
+    expect(created).not.toHaveProperty("tldrHint");
+    const inserted = await rig.ok("insert_block", { uuid: created.uuid, blocks: [{ type: "paragraph", text: "More" }] });
+    expect(inserted.tldrHint).toBe(
+      "The content changed: if the TL;DR no longer fits, call set_metadata with `tldr`; if it still fits, do nothing.",
+    );
+  });
+
   it("omits hints and missing-summary fields from all content writes on a marked page", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
@@ -183,7 +197,7 @@ describe("the TL;DR review reminder", () => {
     setTldrOptOut(rig.instance.replicas.replica(doc.uuid).doc, true);
     const first = doc.blocks[0];
     const edited = await rig.ok("edit_block", {
-      uuid: doc.uuid, block_id: first.id, old_text: first.text, new_text: "After", rev: first.rev,
+      uuid: doc.uuid, block_id: first.id, old_text: "Before", new_text: "After", rev: first.rev,
     });
     const inserted = await rig.ok("insert_block", { uuid: doc.uuid, after_block_id: first.id, blocks: [{ type: "paragraph", text: "Temporary" }] });
     const deleted = await rig.ok("delete_block", { uuid: doc.uuid, block_id: inserted.blocks[0].id });
@@ -222,7 +236,7 @@ describe("the TL;DR review reminder", () => {
     const edited = await rig.ok("edit_block", {
       uuid: source.uuid,
       block_id: first.id,
-      old_text: first.text,
+      old_text: "Read the target",
       new_text: "Read the target now",
       rev: first.rev,
     });
@@ -252,7 +266,7 @@ describe("the TL;DR review reminder", () => {
       rev: read.blocks[0].rev,
     });
     expect(reviewed).not.toHaveProperty("tldr");
-    expect(reviewed.tldrHint).toContain("review its TL;DR");
+    expect(reviewed.tldrHint).toContain("if it still fits, do nothing");
 
     const metadataResults = [
       await rig.ok("set_metadata", { uuid: source.uuid, tags: ["auth"] }),

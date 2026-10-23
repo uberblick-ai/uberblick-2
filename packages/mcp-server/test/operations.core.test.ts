@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { startServer, testConfig, toolNamed } from "./core-helpers.js";
 import { INTERNAL_ERROR_MESSAGE, toFailure } from "../src/failures.js";
 import { PersistenceError, Replicas } from "../src/replica.js";
-import { pinDocOperation, unpinDocOperation } from "../src/sidebar-tools.js";
+import { getSidebarOperation, pinDocOperation, unpinDocOperation } from "../src/sidebar-tools.js";
 import { MirrorStore } from "../src/store.js";
 import { ServerWork } from "../src/server-work.js";
 import type { UpdateOrigin } from "../src/store.js";
@@ -89,7 +89,8 @@ it("keeps settle before archive and hydration refusals for direct writes", async
     isError: true, payload: { error: "doc_archived", uuid: archived, applied: false, partial: false, synced: false },
   });
   const pinned = await pinDocOperation(rig.context, { uuid: archived, group: "Archived" }, request);
-  expect(pinned).toMatchObject({ applied: true, groups: [{ docs: [{ uuid: archived, status: "archived" }] }] });
+  expect(pinned).toMatchObject({ applied: true, group: { name: "Archived" } });
+  expect(await getSidebarOperation(rig.context, {}, request)).toMatchObject({ groups: [{ docs: [{ uuid: archived, status: "archived" }] }] });
   expect(await unpinDocOperation(rig.context, { uuid: randomUUID() }, request)).toMatchObject({ unpinned: false, applied: true });
   const unhydrated = randomUUID();
   upsertDirectoryEntry(rig.replicas.directory().doc, { uuid: unhydrated, title: "Unhydrated fixture", tags: [] });
@@ -134,7 +135,7 @@ it("assembles ordinary and content durability on the operation path", async () =
   expect(metadata).toMatchObject({ applied: true, synced: false, hub: { status: "disabled" } });
   expect(metadata).not.toHaveProperty("tldrHint");
   const content = await editBlockOperation(rig.context, {
-    uuid: created.uuid, block_id: block.id, old_text: block.text, new_text: "Changed content", rev: block.rev,
+    uuid: created.uuid, block_id: block.id, old_text: "first paragraph", new_text: "Changed content", rev: block.rev,
   }, request);
   expect(content).toMatchObject({ applied: true, synced: false, tldr: null, tldrHint: expect.any(String) });
 });

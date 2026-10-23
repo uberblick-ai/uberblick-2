@@ -308,12 +308,13 @@ describe("the failure contract", () => {
       uuid: doc.uuid, after_block_id: doc.blockId,
       blocks: [{ type: "table", text: "| Header |\n| --- |\n| Cell |" }],
     });
+    const tableText = "| Header |\n| --- |\n| Cell |";
     record((await rig.call("edit_block", {
-      uuid: doc.uuid, block_id: table.blocks[0].id, old_text: table.blocks[0].text,
+      uuid: doc.uuid, block_id: table.blocks[0].id, old_text: tableText,
       new_text: "| Header | Added |\n| --- | --- |\n| Cell | New |",
     })).payload);
     record((await rig.call("edit_block", {
-      uuid: doc.uuid, block_id: table.blocks[0].id, old_text: table.blocks[0].text, new_text: table.blocks[0].text,
+      uuid: doc.uuid, block_id: table.blocks[0].id, old_text: tableText, new_text: tableText,
       table_mapping: { rows: [0, 2], columns: [0] },
     })).payload);
     record((await rig.call("annotate", {

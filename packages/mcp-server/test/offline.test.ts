@@ -8,14 +8,7 @@
  */
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import {
-  removeTempDirs,
-  startServer,
-  tempDatabasePath,
-  testConfig,
-  TEST_SECRET,
-  WORKSPACE,
-} from "./helpers.js";
+import { TEST_SECRET, WORKSPACE, readBlocks, removeTempDirs, startServer, tempDatabasePath, testConfig } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
@@ -102,7 +95,7 @@ describe("with the hub stopped", () => {
       new_text: "written with no hub in sight, and it worked",
       rev: paragraph.rev,
     });
-    expect(edited.block.text).toBe(
+    expect((await readBlocks(rig, created.uuid, [edited.block]))[0].text).toBe(
       "written with no hub in sight, and it worked",
     );
 
@@ -110,7 +103,7 @@ describe("with the hub stopped", () => {
       uuid: created.uuid, after_block_id: paragraph.id,
       blocks: [{ type: "paragraph", text: "appended offline" }],
     });
-    expect(inserted.blocks[0].text).toBe("appended offline");
+    expect((await readBlocks(rig, created.uuid, inserted.blocks))[0].text).toBe("appended offline");
 
     await rig.ok("delete_block", {
       uuid: created.uuid,

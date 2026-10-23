@@ -1,4 +1,4 @@
-import { DECISION_STATUSES, InvalidDocumentLifecycleError, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionAnswerFailure, decisionAnswerShapeFailure, decisionDirectoryFields, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setDiscussion, setKind, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
+import { DECISION_STATUSES, InvalidDocumentLifecycleError, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionAnswerFailure, decisionAnswerShapeFailure, decisionDirectoryFields, getBlocks, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setDiscussion, setKind, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
 import type { DocumentKind, DocumentStatus } from "@uberblick/schema";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -164,7 +164,7 @@ export const createDocOperation = operation(DOCUMENT_WRITE, inputSchema, (contex
       blocks,
       sidebar,
     }, _request) => {
-  const { replicas, requireWritableDoc, tagCatalog, recordAnswer, documentTags, decisionAuthorityJson, blocksJson, durabilityAcross, tldrReview } = context;
+  const { replicas, requireWritableDoc, tagCatalog, recordAnswer, documentTags, decisionAuthorityJson, durabilityAcross, tldrReview } = context;
 
   const lifecycle =
     kind === undefined ? null : { kind, status: status ?? DECISION_STATUSES[0] };
@@ -353,14 +353,15 @@ export const createDocOperation = operation(DOCUMENT_WRITE, inputSchema, (contex
     description,
     tags: documentTags(replica),
     ...(lifecycle === null ? {} : lifecycle),
-    ...(relatedSet === undefined ? {} : { governs: relatedSet[0], related: relatedSet }),
+    ...(relatedSet === undefined ? {} : { related: relatedSet }),
     ...(lifecycle?.kind === "decision" ? { topic: getMeta(replica.doc, replica.id).topic, discussion: getMeta(replica.doc, replica.id).discussion } : {}),
     ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
     ...(tldr === undefined ? {} : { tldr: getMeta(replica.doc, replica.id).tldr }),
     ...decisionAuthorityJson(replica),
-    blocks: blocksJson(replica),
+    blocks: getBlocks(replica.doc).map(({ id, rev }) => ({ id, rev })),
     ...(placement === null ? {} : { sidebar: placement }),
     ...durabilityAcross(replica, completed),
-    ...(inputs.length === 0 || lifecycle?.status === "decided" ? {} : tldrReview(replica)),
+    // A TL;DR written with the content needs no review prompt.
+    ...(inputs.length === 0 || tldr !== undefined || lifecycle?.status === "decided" ? {} : tldrReview(replica)),
   };
 });

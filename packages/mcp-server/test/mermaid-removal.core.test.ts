@@ -134,15 +134,16 @@ describe("stored Mermaid removal through MCP", () => {
       blocks: [{ type: "paragraph", text: "Keep this text." }],
     });
     const replica = rig.instance.replicas.replica(created.uuid);
+    const seeded = getBlocks(replica.doc);
     const older = new Y.Doc();
     docs.push(older);
     Y.applyUpdate(older, Y.encodeStateAsUpdate(replica.doc));
     mermaid(older, "late log write");
     rig.instance.store.appendUpdate(replica.room, Y.encodeStateAsUpdate(older), "local");
-    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual(created.blocks);
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual(seeded);
     mermaid(older, "offline reconnect write");
     Y.applyUpdate(replica.doc, Y.encodeStateAsUpdate(older), "remote-client");
-    expect(getBlocks(replica.doc)).toEqual(created.blocks);
+    expect(getBlocks(replica.doc)).toEqual(seeded);
     Y.applyUpdate(older, Y.encodeStateAsUpdate(replica.doc));
     expect(getBlocksFragment(older).toArray()).toHaveLength(1);
     await rig.ok("insert_block", { uuid: created.uuid, blocks: [{ type: "paragraph", text: "Still editable." }] });

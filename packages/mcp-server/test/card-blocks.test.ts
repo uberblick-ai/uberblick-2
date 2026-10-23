@@ -5,7 +5,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 
 import { blockText } from "../src/replica.js";
-import { removeTempDirs, startServer } from "./helpers.js";
+import { readBlocks, removeTempDirs, startServer } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
@@ -45,7 +45,7 @@ describe("cards through MCP", () => {
     const created = await rig.ok("create_doc", { title: "Cards", description: "Four prose parts with inline marks.",
       blocks: [{ type: "card", text: unordered }] });
     const doc = rig.instance.replicas.replica(created.uuid).doc;
-    const original = created.blocks[0];
+    const [original] = await readBlocks(rig, created.uuid, created.blocks);
     expect(original).toMatchObject({ type: "card", text: canonical });
     expect(partText(doc, original.id, "label").toString()).toBe('"Literal label"');
     expect(partRuns(doc, original.id, "title")).toEqual([{ text: "Title", marks: { bold: true } }]);
@@ -58,7 +58,7 @@ describe("cards through MCP", () => {
       { text: "document", marks: { docLink: target.uuid } },
     ]);
     const inserted = await rig.ok("insert_block", { uuid: created.uuid, blocks: [{ type: "card", text: canonical }] });
-    expect(inserted.blocks[0].text).toBe(canonical);
+    expect((await readBlocks(rig, created.uuid, inserted.blocks))[0].text).toBe(canonical);
     for (const part of PARTS) expect(partRuns(doc, inserted.blocks[0].id, part)).toEqual(partRuns(doc, original.id, part));
     const text = blockText(doc, inserted.blocks[0].id);
     expect(text).toBeInstanceOf(Y.XmlText);

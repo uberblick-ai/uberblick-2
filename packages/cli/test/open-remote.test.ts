@@ -604,8 +604,8 @@ describe("ub open: sharing through the upstream hub", () => {
       await expectP95Within250ms("live MCP edits", async (index) => {
         const newText = `agent edit arrived live ${index}`;
         const startedAt = performance.now();
-        const edited: { block: { id: string; text: string; rev: string } } = await call<{
-          block: { id: string; text: string; rev: string };
+        const edited: { block: { id: string; rev: string } } = await call<{
+          block: { id: string; rev: string };
         }>("edit_block", {
           uuid: created.uuid,
           block_id: currentBlock.id,
@@ -616,7 +616,7 @@ describe("ub open: sharing through the upstream hub", () => {
         await waitUntil("the MCP edit to reach the live browser room", () =>
           getBlocks(doc)[0]?.text === newText,
         );
-        currentBlock = edited.block;
+        currentBlock = { ...edited.block, text: newText };
         return performance.now() - startedAt;
       });
 
