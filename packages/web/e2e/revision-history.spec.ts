@@ -1033,7 +1033,7 @@ test.describe("document history through ub open", () => {
     // A stylesheet changes layout without asking ProseMirror to repair a DOM mutation.
     const growth = await page.addStyleTag({ content: ".ub-revision-side-after .ProseMirror > .ub-revision-row-start:first-child + .ub-revision-row { padding-bottom: 400px; }" });
     await expect.poll(async () => (await rulerGeometry(page)).marks[0]?.height ?? 0).toBeGreaterThan(firstMark + 20);
-    await growth.evaluate((element) => element.remove());
+    await growth.evaluate((element) => { element.parentNode?.removeChild(element); });
     // A taller window gives a taller ruler, still ending above the pane's edge.
     await page.setViewportSize({ width: 1440, height: 820 });
     await expect.poll(async () => { const now = await rulerGeometry(page); return Math.abs(now.paneBottom - 12 - now.bottom); }).toBeLessThan(1.5);
