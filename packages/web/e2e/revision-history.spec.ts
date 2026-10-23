@@ -26,6 +26,21 @@ function historyList(page: Page): Locator {
   return page.getByRole("navigation", { name: "Revision history", exact: true });
 }
 
+/** On narrow layouts the history list lives in the drawer; true when this opened it. */
+async function showHistoryList(page: Page): Promise<boolean> {
+  if (await historyList(page).isVisible()) return false;
+  await activateControl(page.getByRole("button", { name: "Show document list", exact: true }));
+  await expect(historyList(page)).toBeVisible();
+  return true;
+}
+
+/** The open drawer covers the revision header, as it covers any document. */
+async function closeHistoryList(page: Page, drawer: boolean): Promise<void> {
+  if (!drawer) return;
+  await page.keyboard.press("Escape");
+  await expect(historyList(page)).toBeHidden();
+}
+
 /** The live status line's ‹ opens history; in history it steps to an older revision. */
 async function previous(page: Page): Promise<void> {
   await activateControl(history(page).getByRole("button", { name: "Previous revision", exact: true }));
@@ -207,11 +222,11 @@ test.describe("document history through ub open", () => {
     await expect.poll(() => harness().hubText(room)).toContain("The latest paragraph.");
     await previous(page);
     await expect(historicalEditor(page)).toBeVisible();
-    // On narrow layouts the history list lives in the drawer.
-    if (!await historyList(page).isVisible()) await activateControl(page.getByRole("button", { name: "Show document list", exact: true }));
+    const drawer = await showHistoryList(page);
     const since = historyList(page).getByRole("button", { name: "Changes since this name", exact: true });
     await activateControl(since);
     await expect(since).toHaveAttribute("aria-current", "true");
+    await closeHistoryList(page, drawer);
     const view = historicalEditor(page);
     await expect(history(page)).toContainText("compared with “Reviewed after auth rewrite”");
     await expect(view.locator('[data-revision-change="added"]')).toHaveText(["blue", "current", "latest"]);
@@ -220,7 +235,6 @@ test.describe("document history through ub open", () => {
       await expect(side.locator("p").filter({ hasText: "An unchanged paragraph." }).locator("[data-revision-change]")).toHaveCount(0);
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    if (browserName === "webkit") await page.keyboard.press("Escape");
     await previous(page);
     const renaming = history(page).getByRole("textbox", { name: "Revision name", exact: true });
     await activateControl(history(page).getByRole("button", { name: "Rename revision", exact: true }));
@@ -469,7 +483,7 @@ test.describe("document history through ub open", () => {
     await previous(page);
     await expect(historicalEditor(page)).toContainText("Latest content.");
     await expect(history(page)).not.toContainText("renamed from");
-    if (!await historyList(page).isVisible()) await activateControl(page.getByRole("button", { name: "Show document list", exact: true }));
+    const drawer = await showHistoryList(page);
     const list = historyList(page);
     await expect(list.getByRole("listitem")).toHaveCount(3);
     await expect(list.locator('[aria-current="true"]')).toHaveCount(1);
@@ -483,16 +497,18 @@ test.describe("document history through ub open", () => {
     await expect(historicalEditor(page)).toContainText("Reviewed content.");
     await expect(reviewed).toHaveAttribute("aria-current", "true");
     await expect(reviewed).toBeFocused();
+    await closeHistoryList(page, drawer);
     await expect(history(page)).toContainText("2 of 3");
     // This revision changed the title: the header shows it as it was, the row and the entry say so.
     await expect(page.locator(".ub-revision-title")).toHaveText(title);
     await expect(history(page).locator(".ub-history-renamed s")).toHaveText("Kickoff notes");
-    await expect(reviewed).toContainText("renamed");
-    await expect(list.getByRole("button", { name: /Ben via Claude Code/ })).not.toContainText("renamed");
     const restore = page.getByRole("button", { name: "Restore this version", exact: true });
     await expect(restore).toHaveAttribute("aria-disabled", "true");
     await expect(restore).toHaveAccessibleDescription("Restore is not available yet");
     await expect(page.locator(".ub-revision-header")).toHaveCSS("position", "sticky");
+    await showHistoryList(page);
+    await expect(reviewed).toContainText("renamed");
+    await expect(list.getByRole("button", { name: /Ben via Claude Code/ })).not.toContainText("renamed");
     const screenshotName = browserName === "webkit" ? "history-list-ipad-dark" : "history-list-desktop-light";
     const screenshot = info.outputPath(`${screenshotName}.png`);
     await page.screenshot({ path: screenshot });
