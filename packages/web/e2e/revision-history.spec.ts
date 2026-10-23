@@ -2,11 +2,12 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
-import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, initDoc, insertBlock, snapshotRevision } from "@uberblick/schema";
+import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, initDoc, insertBlock, snapshotRevision } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import { activateControl, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
 import { assertNoViolations, WCAG_TAGS } from "./accessibility-assertions.js";
+import { setPointerSelection } from "./native-selection.js";
 
 function history(page: Page): Locator {
   return page.getByRole("group", { name: "Document history", exact: true });
@@ -113,6 +114,7 @@ function splitHistory(uuid: string, title: string): Record<string, string> {
     initDoc(document, { uuid, title });
     const heading = appendBlock(document, { type: "heading", level: 2, text: "Rollout plan" });
     const fox = appendBlock(document, { type: "paragraph", text: "The amber fox stays." });
+    ((getBlocksFragment(document).get(1) as Y.XmlElement).firstChild as Y.XmlText).format(0, 3, { bold: {} });
     const gone = appendBlock(document, { type: "paragraph", text: "A paragraph that goes away, long enough to wrap across several lines in one half of the side-by-side comparison, so the opposite filler has to grow with it." });
     const table = appendBlock(document, { type: "table", text: "| Day | Latency |\n| --- | --- |\n| Mon | 10 |" });
     appendBlock(document, { type: "paragraph", text: "An unchanged closing paragraph." });
@@ -325,7 +327,7 @@ test.describe("document history through ub open", () => {
     await expect(editor(peer)).toContainText("The blue fox stays.");
     await previous(page);
     const view = historicalEditor(page);
-    await expect(view).toHaveAttribute("contenteditable", "false");
+    expect(await view.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.isEditable)).toBe(false);
     await expect(history(page)).toContainText("browser-person");
     await expect(history(page)).toContainText(/from /);
     await expect(page).toHaveURL(new URL(path, harness().appUrl).href);
@@ -531,7 +533,7 @@ test.describe("document history through ub open", () => {
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   });
 
-  test("side by side, rows line up, selections stay on one side and copies keep authored content", async ({ browser }, info) => {
+  test("side by side, rows line up, selections stay on one side and copies keep authored content", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 900 } } });
     const title = docTitle("Side by side rows");
     const uuid = await newDocument(page, title);
@@ -571,37 +573,88 @@ test.describe("document history through ub open", () => {
     // A block that grows late, like a drawing that finishes loading, realigns both sides.
     await before.locator(":scope > .ub-revision-row").first().evaluate(element => { element.style.paddingBottom = "80px"; });
     await expect.poll(aligned).toBe(true);
-    // A selection made on one side holds only that side's content.
-    const copied = await after.evaluate(element => {
-      const mounted = element as HTMLElement & { editor: Editor };
-      mounted.editor.commands.selectAll();
-      const clipboard = new DataTransfer();
-      element.dispatchEvent(new ClipboardEvent("copy", { clipboardData: clipboard, bubbles: true, cancelable: true }));
-      return { text: clipboard.getData("text/plain"), html: clipboard.getData("text/html") };
-    });
-    expect(copied.text).toContain("The blue fox stays.");
-    expect(copied.text).toContain("An added note.");
-    expect(copied.text).not.toContain("amber");
-    expect(copied.text).not.toContain("goes away");
-    expect(copied.html).not.toMatch(/ub-revision-|data-revision-change|revision-filler|data-id="revision-/);
+    const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+    if (browserName === "chromium") await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    const copy = async () => {
+      await page.keyboard.press(`${modifier}+c`);
+      // WebKit proves the clipboard through the native paste into the live document below.
+      if (browserName !== "chromium") return null;
+      return page.evaluate(async () => {
+        const items = await navigator.clipboard.read();
+        const item = items[0];
+        if (item === undefined) throw new Error("No copied content");
+        return { text: await (await item.getType("text/plain")).text(), html: await (await item.getType("text/html")).text() };
+      });
+    };
+    for (const [own, other, word, excluded] of [[before, after, "amber", "blue"], [after, before, "blue", "amber"]] as const) {
+      const paragraph = own.locator(":scope > p").filter({ hasText: `The ${word} fox stays.` });
+      const start = await paragraph.boundingBox();
+      const end = await other.locator(":scope > p").filter({ hasText: `The ${excluded} fox stays.` }).boundingBox();
+      if (start === null || end === null) throw new Error("Missing comparison paragraph");
+      // Native pointer selection that leaves its column must keep both endpoints in its host.
+      await page.mouse.move(start.x + 20, start.y + 10);
+      await page.mouse.down();
+      await page.mouse.move(end.x + 90, end.y + 10, { steps: 12 });
+      await page.mouse.up();
+      await expect.poll(() => own.evaluate(element => {
+        const selection = window.getSelection();
+        return { nonempty: selection !== null && !selection.isCollapsed, anchor: element.contains(selection?.anchorNode ?? null), focus: element.contains(selection?.focusNode ?? null) };
+      })).toEqual({ nonempty: true, anchor: true, focus: true });
+      const selected = await own.evaluate(() => window.getSelection()?.toString().trim());
+      const partial = await copy();
+      if (partial !== null) {
+        expect(partial.text.trim()).toBe(selected);
+        expect(partial.text).not.toContain(excluded);
+      }
+      // A normal click and the platform shortcut select this side alone.
+      await setPointerSelection(paragraph, () => paragraph.click());
+      await expect(own).toBeFocused();
+      await page.keyboard.press(`${modifier}+a`);
+      await expect.poll(() => own.evaluate(() => window.getSelection()?.toString())).toContain("Rollout plan");
+      const copied = await copy();
+      if (copied !== null) {
+        expect(copied.text).toContain(`The ${word} fox stays.`);
+        expect(copied.text).not.toContain(excluded);
+        expect(copied.text).not.toMatch(/Before ·|After ·|Back to now/);
+        expect(copied.html).not.toMatch(/ub-revision-|data-revision-change|revision-filler|data-id="revision-/);
+      }
+      // Text input, deletion, formatting, cut and paste cannot change the snapshot.
+      const original = await own.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON());
+      await page.keyboard.type("mutation");
+      await page.keyboard.press("Backspace");
+      await page.keyboard.press("Enter");
+      await page.keyboard.press(`${modifier}+b`);
+      await page.keyboard.press(`${modifier}+x`);
+      await page.keyboard.press(`${modifier}+v`);
+      expect(await own.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON())).toEqual(original);
+      // Paste the real system clipboard into the live document, preserving authored formatting.
+      await setPointerSelection(paragraph, () => paragraph.click());
+      await page.keyboard.press(`${modifier}+a`);
+      await expect.poll(() => own.evaluate(() => window.getSelection()?.toString())).toContain("Rollout plan");
+      await copy();
+      await backToNow(page);
+      const live = editor(page);
+      await live.click();
+      await page.keyboard.press(`${modifier}+a`);
+      await page.keyboard.press(`${modifier}+v`);
+      await expect(live).toContainText(`The ${word} fox stays.`);
+      await expect(live).not.toContainText(excluded);
+      await expect(live).not.toContainText(/Before ·|After ·|Back to now/);
+      // This Linux WebKit clipboard backend delivers only plain text on native paste.
+      if (browserName === "chromium") {
+        await expect(live.getByRole("heading", { name: "Rollout plan" })).toHaveCount(1);
+        await expect(live.locator("strong").filter({ hasText: "The" })).toHaveCount(1);
+      }
+      await expect(live.locator('[data-revision-change], .ub-revision-filler, [data-id^="revision-"]')).toHaveCount(0);
+      await previous(page);
+      await expect(split).toBeVisible();
+    }
     // Without room for two readable columns, the single-column comparison returns.
     await page.setViewportSize({ width: 860, height: 900 });
     await expect(split).toHaveCount(0);
     await expect(page.getByLabel("Document revision", { exact: true })).toContainText("The amberblue fox stays.");
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect(split).toBeVisible();
-    await backToNow(page);
-    const live = editor(page);
-    await selectPositions(live, await live.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.content.size - 1));
-    await live.evaluate((element, copied) => {
-      const clipboard = new DataTransfer();
-      clipboard.setData("text/plain", copied.text);
-      clipboard.setData("text/html", copied.html);
-      element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true }));
-    }, copied);
-    await expect(live).toContainText("An added note.");
-    await expect(live.getByRole("heading", { name: "Rollout plan" })).toHaveCount(1);
-    await expect(live.locator("[data-revision-change], .ub-revision-filler")).toHaveCount(0);
   });
 
   test("Back to now in the history drawer closes it and returns focus to the live history control", { tag: "@webkit" }, async ({ browser }) => {

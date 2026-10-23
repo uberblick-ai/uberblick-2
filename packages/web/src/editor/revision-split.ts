@@ -163,6 +163,9 @@ function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide): Ext
   return Extension.create({
     name: "revisionSide",
     priority: 2000,
+    addKeyboardShortcuts() {
+      return { "Mod-a": () => this.editor.commands.selectAll() };
+    },
     addProseMirrorPlugins() {
       return [new Plugin({
         filterTransaction: (transaction) => !transaction.docChanged,
@@ -219,11 +222,17 @@ function sideEditor(element: Element, content: JSONContent, data: Y.Doc, rows: r
       GitHubLinks.configure({ settings: workspaceSettings }), InlineIcons, ToggleHeadings,
     ],
     content,
+    // Native editing hosts contain selection; Tiptap's read-only renderers and transaction guard prevent editing.
     editable: false,
+    enableCoreExtensions: { editable: false },
+    editorProps: {
+      editable: () => true,
+      attributes: { role: "textbox", "aria-label": side === "before" ? "Before this revision" : "This revision", "aria-readonly": "true", "aria-multiline": "true", inputmode: "none" },
+      handleDOMEvents: { beforeinput: (_view, event) => { event.preventDefault(); return true; } },
+    },
     enableContentCheck: true,
     injectCSS: false,
   });
-  editor.setOptions({ editorProps: { attributes: { "aria-label": side === "before" ? "Before this revision" : "This revision" } } });
   // A default text caret in the first chart would open its source on arrival.
   editor.view.dispatch(editor.state.tr.setSelection(new AllSelection(editor.state.doc)));
   return editor;
