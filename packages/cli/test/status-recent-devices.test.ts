@@ -90,6 +90,11 @@ it("withholds the hub version when workspace access is refused even though accou
 });
 
 it.each(["headers", "body"])("keeps an unavailable device list silent and within the status deadline (%s)", async phase => {
+  const deadline = new AbortController();
+  const timeout = AbortSignal.timeout;
+  const deadlines = vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => ms === 100 ? deadline.signal : timeout(ms));
+  let reached!: () => void;
+  const waiting = new Promise<void>(resolve => { reached = resolve; });
   let requestSignal: AbortSignal | undefined;
   let bodyAborted = false;
   const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
@@ -99,6 +104,7 @@ it.each(["headers", "body"])("keeps an unavailable device list silent and within
     if (phase === "headers") return await new Promise<Response>((_resolve, reject) => {
       signal.addEventListener("abort", () => reject(signal.reason), { once: true });
       signal.throwIfAborted();
+      reached();
     });
     return new Response(new ReadableStream({
       start(controller) {
@@ -109,15 +115,20 @@ it.each(["headers", "body"])("keeps an unavailable device list silent and within
         }, { once: true });
         signal.throwIfAborted();
       },
-    }));
+      pull() { reached(); },
+    }, { highWaterMark: 0 }));
   });
   const origin = "http://127.0.0.1:1";
   const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: origin.replace("http:", "ws:") },
     credentials: { hubLogins: { [origin]: fixture() } } });
   const before = readFileSync(credentialPath(box));
   const started = performance.now();
-  const json = await runInProcess(["status", "--json"], box, { UB_TEST_MAX_WAIT_MS: "100.5" });
+  const running = runInProcess(["status", "--json"], box, { UB_TEST_MAX_WAIT_MS: "100.5" });
+  await waiting;
+  deadline.abort();
+  const json = await running;
   expect(performance.now() - started).toBeLessThan(1_000);
+  expect(deadlines).toHaveBeenCalledWith(100);
   expect(fetch).toHaveBeenCalledOnce();
   expect(fetch.mock.calls[0]?.[0]).toBe(`${origin}/auth/manage`);
   expect(requestSignal?.aborted).toBe(true);
