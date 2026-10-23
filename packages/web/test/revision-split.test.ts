@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import type { JSONContent } from "@tiptap/core";
 import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, moveBlocks } from "@uberblick/schema";
-import { createRevisionSplit, revisionSplitModel } from "../src/editor/revision-split.js";
+import { createRevisionSplit, revisionSplitModel, unchangedRuns } from "../src/editor/revision-split.js";
 
 const documents: Y.Doc[] = [];
 afterEach(() => { for (const doc of documents.splice(0)) doc.destroy(); document.body.replaceChildren(); });
@@ -116,6 +116,68 @@ describe("the side-by-side revision model", () => {
       expect(split.after.state.doc.textContent).toBe("Kept");
       // Projected identities never repeat the live document's block ids.
       expect(split.before.getJSON().content?.map((node) => node.attrs?.id)).toEqual([expect.stringMatching(/^revision-0-/), expect.stringMatching(/^revision-1-/)]);
+    } finally { split.destroy(); }
+  });
+
+  it("folds runs of two or more quiet rows, keeping the row next to a change as context", () => {
+    const rows = (pattern: string) => [...pattern].map((mark) => ({ changed: mark === "x" }));
+    expect(unchangedRuns(rows("x....x"))).toEqual([{ start: 2, end: 3 }]);
+    expect(unchangedRuns(rows("x...x"))).toEqual([]);
+    expect(unchangedRuns(rows("....x....."))).toEqual([{ start: 0, end: 2 }, { start: 6, end: 9 }]);
+    expect(unchangedRuns(rows("x.x"))).toEqual([]);
+  });
+
+  it("replaces a folded run on both sides with one bar naming its headings, and shows it again when expanded", () => {
+    const before = doc();
+    const first = appendBlock(before, { type: "paragraph", text: "Opening" });
+    appendBlock(before, { type: "paragraph", text: "Context" });
+    appendBlock(before, { type: "heading", level: 2, text: "Middle" });
+    appendBlock(before, { type: "paragraph", text: "Quiet one" });
+    appendBlock(before, { type: "paragraph", text: "Quiet two" });
+    const after = clone(before);
+    editBlock(after, first, "Opening", "Opened");
+    const folded = revisionSplitModel(before, after, { collapse: true, expanded: new Set() });
+    expect(folded.rows.map((row) => row.kind)).toEqual(["changed", "unchanged", "folded"]);
+    expect(folded.rows[2]?.fold).toEqual({ run: 2, count: 3 });
+    for (const side of [folded.before, folded.after]) {
+      expect(top(side)).toEqual(["paragraph", "paragraph", "revisionFold"]);
+      expect(side.content?.[2]?.attrs).toMatchObject({ run: 2, count: 3, headings: "Middle" });
+    }
+    expect(folded.runs).toEqual([2]);
+    const open = revisionSplitModel(before, after, { collapse: true, expanded: new Set([2]) });
+    expect(open.rows).toHaveLength(5);
+    expect(revisionSplitModel(before, after).rows).toHaveLength(5);
+  });
+
+  it.each([1, 2] as const)("retains a level %i section boundary when its heading is folded away", (level) => {
+    const before = doc();
+    appendBlock(before, { type: "heading", level: 2, text: "> Details" });
+    const inside = appendBlock(before, { type: "paragraph", text: "Inside section" });
+    appendBlock(before, { type: "paragraph", text: "Context after first change" });
+    appendBlock(before, { type: "heading", level, text: "Outside section" });
+    appendBlock(before, { type: "heading", level: 3, text: "Deeper heading" });
+    appendBlock(before, { type: "paragraph", text: "Quiet block" });
+    appendBlock(before, { type: "paragraph", text: "Context before second change" });
+    const outside = appendBlock(before, { type: "paragraph", text: "Outside section change" });
+    appendBlock(before, { type: "paragraph", text: "Tail" });
+    const after = clone(before);
+    editBlock(after, inside, "Inside section", "Inside section changed");
+    editBlock(after, outside, "Outside section change", "Outside section change changed");
+    const left = document.body.appendChild(document.createElement("div"));
+    const right = document.body.appendChild(document.createElement("div"));
+    const split = createRevisionSplit({ beforeElement: left, afterElement: right, before, after,
+      folding: { collapse: true, expanded: new Set() } });
+    try {
+      for (const side of [left, right]) {
+        expect(side.querySelector(".ub-revision-fold-button")?.textContent).toBe("3 unchanged blocks · Outside section, Deeper heading");
+        expect(side.textContent).not.toContain("Quiet block");
+        expect(side.querySelector(".ub-revision-fold")?.hasAttribute("data-toggle-folded")).toBe(false);
+        const changed = [...side.querySelectorAll("p")].find((node) => node.textContent?.startsWith("Outside section change"));
+        expect(changed).toBeDefined();
+        expect(changed?.hasAttribute("data-toggle-folded")).toBe(false);
+        const hidden = [...side.querySelectorAll("p")].find((node) => node.textContent?.startsWith("Inside section"));
+        expect(hidden?.getAttribute("data-toggle-folded")).toBe("true");
+      }
     } finally { split.destroy(); }
   });
 });

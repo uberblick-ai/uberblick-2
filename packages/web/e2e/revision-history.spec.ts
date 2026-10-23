@@ -7,6 +7,7 @@ import type { RevisionEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import { activateControl, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
 import { assertNoViolations, WCAG_TAGS } from "./accessibility-assertions.js";
+import { waitForAcknowledged } from "./settle.js";
 import { setPointerSelection } from "./native-selection.js";
 
 function history(page: Page): Locator {
@@ -56,7 +57,9 @@ async function newDocument(page: Page, title: string): Promise<string> {
   if (!await page.getByRole("button", { name: "+ New page", exact: true }).isVisible()) {
     await activateControl(page.getByRole("button", { name: "Show document list", exact: true }));
   }
-  return await createDoc(page, title);
+  const uuid = await createDoc(page, title);
+  await waitForAcknowledged(page, { path: "relay" });
+  return uuid;
 }
 
 async function selectPositions(view: Locator, from: number, to = from): Promise<void> {
@@ -127,6 +130,29 @@ function splitHistory(uuid: string, title: string): Record<string, string> {
     insertBlock(document, heading, { type: "paragraph", text: "An added note." });
     const rows = getBlock(document, table)?.text ?? "";
     editBlock(document, table, rows, rows.replace("10", "12"));
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+  }
+}
+
+/** A change near the top, a long unchanged middle with headings, and a change near the end. */
+function foldHistory(uuid: string, title: string): Record<string, string> {
+  const document = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title });
+    const first = appendBlock(document, { type: "paragraph", text: "The opening line changes." });
+    for (const section of ["Background", "Approach"]) {
+      appendBlock(document, { type: "heading", level: 2, text: section });
+      for (let index = 1; index <= 5; index += 1) {
+        appendBlock(document, { type: "paragraph", text: `${section} paragraph ${index} stays exactly as it was, long enough to take some room on the page.` });
+      }
+    }
+    const last = appendBlock(document, { type: "paragraph", text: "The closing line changes." });
+    appendBlock(document, { type: "paragraph", text: "A final unchanged line." });
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    editBlock(document, first, "The opening line changes.", "The opening line changed.");
+    editBlock(document, last, "The closing line changes.", "The closing line changed.");
     return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
   } finally {
     document.destroy();
@@ -716,6 +742,9 @@ test.describe("document history through ub open", () => {
       { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
     ], linkedHistory(uuid, title, target, deleted));
     await previous(page);
+    const drawer = await showHistoryList(page);
+    await activateControl(historyList(page).getByRole("switch", { name: "Collapse unchanged" }));
+    await closeHistoryList(page, drawer);
     const split = page.locator(".ub-revision-split");
     await expect(split).toBeVisible();
     for (const side of [earlierSide(page), historicalEditor(page)]) {
@@ -778,6 +807,123 @@ test.describe("document history through ub open", () => {
       }
       expect(await side.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON())).toEqual(original);
     }
+  });
+
+  test("folding a section boundary keeps the next change and its fold bar visible", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 640 } } });
+    const title = docTitle("Folded toggle boundary");
+    const uuid = await newDocument(page, title);
+    const document = new Y.Doc();
+    let states: Record<string, string>;
+    try {
+      initDoc(document, { uuid, title });
+      appendBlock(document, { type: "heading", level: 2, text: "> Details" });
+      const inside = appendBlock(document, { type: "paragraph", text: "Inside section" });
+      appendBlock(document, { type: "paragraph", text: "Context after first change" });
+      appendBlock(document, { type: "heading", level: 2, text: "Outside section" });
+      appendBlock(document, { type: "paragraph", text: "Quiet block" });
+      appendBlock(document, { type: "paragraph", text: "Context before second change" });
+      const outside = appendBlock(document, { type: "paragraph", text: "Outside section change" });
+      appendBlock(document, { type: "paragraph", text: "Long unchanged tail. ".repeat(100) });
+      const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+      editBlock(document, inside, "Inside section", "Inside section changed");
+      editBlock(document, outside, "Outside section change", "Outside section change changed");
+      states = { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+    } finally { document.destroy(); }
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], states);
+    await previous(page);
+    for (const side of [earlierSide(page), historicalEditor(page)]) {
+      const bar = side.locator(".ub-revision-fold-button");
+      await expect(bar).toHaveText("2 unchanged blocks · Outside section");
+      await expect(bar).toBeVisible();
+      await expect(side.locator("p").filter({ hasText: "Outside section change" })).toBeVisible();
+      await expect(side.locator("p").filter({ hasText: "Inside section" })).toBeHidden();
+      await expect(side).not.toContainText("Quiet block");
+    }
+    await historicalEditor(page).locator(".ub-revision-fold-button").click();
+    for (const side of [earlierSide(page), historicalEditor(page)]) {
+      await expect(side.getByRole("heading", { name: "Outside section", exact: true })).toBeVisible();
+      await expect(side.getByText("Quiet block", { exact: true })).toBeVisible();
+      await expect(side.locator("p").filter({ hasText: "Outside section change" })).toBeVisible();
+    }
+  });
+
+  test("unchanged runs fold on both sides, open on demand, and changes are one step apart", async ({ browser }, info) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 640 } } });
+    const title = docTitle("Folded comparison");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], foldHistory(uuid, title));
+    await previous(page);
+    const after = historicalEditor(page);
+    const before = earlierSide(page);
+    // The heading and the paragraph next to each change stay as context.
+    const bars = page.locator(".ub-revision-fold-button");
+    await expect(bars).toHaveCount(2);
+    await expect(after.locator(".ub-revision-fold-button")).toHaveText("10 unchanged blocks · Approach");
+    await expect(before.locator(".ub-revision-fold-button")).toHaveText("10 unchanged blocks · Approach");
+    await expect(after).not.toContainText("Background paragraph 2");
+    await expect(after).toContainText("Approach paragraph 5");
+    await expect(page.locator(".ub-revision-pane").getByText("Background paragraph 1", { exact: false })).toHaveCount(0);
+    const screenshot = info.outputPath("folded.png");
+    await page.screenshot({ path: screenshot });
+    await info.attach("folded", { path: screenshot, contentType: "image/png" });
+    // Folded, both changes fit on screen: there is nowhere to step to.
+    const previousChange = page.getByRole("button", { name: "Previous change", exact: true });
+    const nextChange = page.getByRole("button", { name: "Next change", exact: true });
+    await expect(previousChange).toBeDisabled();
+    await expect(nextChange).toBeDisabled();
+    // Bars open their run from the keyboard.
+    await after.locator(".ub-revision-fold-button").focus();
+    await expect(after.locator(".ub-revision-fold-button")).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(bars).toHaveCount(0);
+    await expect(after).toContainText("Background paragraph 2");
+    await expect(before).toContainText("Background paragraph 2");
+    // Previous and next change step between the two changes.
+    await expect(previousChange).toBeDisabled();
+    await expect(nextChange).toBeEnabled();
+    await activateControl(nextChange);
+    const closing = after.locator("p").filter({ hasText: "The closing line changed." });
+    // The last change sits near the end, so the pane stops at the bottom with it in view below the header.
+    const pane = page.locator(".ub-revision-pane");
+    await expect.poll(() => pane.evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThan(2);
+    await expect.poll(async () => {
+      const line = await page.locator(".ub-revision-header").evaluate(element => element.getBoundingClientRect().bottom);
+      const start = await closing.evaluate(element => element.getBoundingClientRect().top);
+      return start > line && start < 640;
+    }).toBe(true);
+    await expect(previousChange).toBeEnabled();
+    await expect(nextChange).toBeDisabled();
+    await activateControl(previousChange);
+    await expect.poll(() => page.locator(".ub-revision-pane").evaluate(element => element.scrollTop)).toBeLessThan(40);
+    // The switch turns folding off for this browser, across a reload.
+    if (!await historyList(page).isVisible()) await activateControl(page.getByRole("button", { name: "Show document list", exact: true }));
+    const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged" });
+    await expect(collapse).toBeChecked();
+    await activateControl(collapse);
+    await expect(collapse).not.toBeChecked();
+    await page.reload();
+    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    await previous(page);
+    await expect(historicalEditor(page)).toContainText("Background paragraph 2");
+    await expect(page.locator(".ub-revision-fold-button")).toHaveCount(0);
+    await expect(historyList(page).getByRole("switch", { name: "Collapse unchanged" })).not.toBeChecked();
+    await activateControl(historyList(page).getByRole("switch", { name: "Collapse unchanged" }));
+    await expect(bars).toHaveCount(2);
+    await earlierSide(page).locator(".ub-revision-fold-button").focus();
+    await expect(earlierSide(page).locator(".ub-revision-fold-button")).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect(bars).toHaveCount(0);
+    // The pane still scrolls natively.
+    await page.mouse.move(900, 400);
+    await page.mouse.wheel(0, 300);
+    await expect.poll(() => page.locator(".ub-revision-pane").evaluate(element => element.scrollTop)).toBeGreaterThan(100);
   });
 
   test("Back to now in the history drawer closes it and returns focus to the live history control", { tag: "@webkit" }, async ({ browser }) => {
@@ -1055,4 +1201,81 @@ test.describe("local-only document history", () => {
     await expect(history(page)).toHaveCount(0);
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   });
+});
+
+function toggleNavigationHistory(uuid: string, title: string, nested: boolean): Record<string, string> {
+  const document = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title });
+    const first = appendBlock(document, { type: "paragraph", text: "First" });
+    appendBlock(document, { type: "paragraph", text: "Long context ".repeat(50) });
+    appendBlock(document, { type: "heading", level: 2, text: "> Details" });
+    if (nested) appendBlock(document, { type: "heading", level: 3, text: "> Nested details" });
+    const inside = appendBlock(document, { type: "paragraph", text: "Inside section" });
+    appendBlock(document, { type: "heading", level: 2, text: "End" });
+    appendBlock(document, { type: "paragraph", text: "Tail ".repeat(400) });
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    editBlock(document, first, "First", "First changed");
+    editBlock(document, inside, "Inside section", "Inside section changed");
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+  }
+}
+
+test.describe("change navigation through authored toggles", () => {
+  const { openApp } = setupHarness({ accessRole: "admin" });
+
+  for (const nested of [false, true]) {
+    test(`change navigation reveals ${nested ? "nested " : ""}toggle content in both directions and comparison sides`, { tag: "@webkit" }, async ({ browser }) => {
+      const page = await openApp(browser, "/", { readySelector: ".ub-pane",
+        contextOptions: { viewport: { width: 1440, height: 640 }, reducedMotion: "reduce" } });
+      const title = docTitle("Change inside authored toggles");
+      const uuid = await newDocument(page, title);
+      await serveHistory(page, [
+        { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+        { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+      ], toggleNavigationHistory(uuid, title, nested));
+      await previous(page);
+      const sides = [earlierSide(page), historicalEditor(page)];
+      await expect(page.locator(".ub-revision-fold-button")).toHaveCount(0);
+      for (const side of sides) {
+        await expect(side.locator(":scope > p").filter({ hasText: "Inside section" })).toBeHidden();
+      }
+      const nextChange = page.getByRole("button", { name: "Next change", exact: true });
+      const previousChange = page.getByRole("button", { name: "Previous change", exact: true });
+      const assertDestination = async (): Promise<void> => {
+        for (const side of sides) {
+          const destination = side.locator(":scope > p").filter({ hasText: "Inside section" });
+          await expect(destination).toBeVisible();
+          await expect(side.getByRole("button", { name: "Collapse Details", exact: true })).toHaveAttribute("aria-expanded", "true");
+          if (nested) await expect(side.getByRole("button", { name: "Collapse Nested details", exact: true })).toHaveAttribute("aria-expanded", "true");
+          await expect.poll(async () => {
+            const line = await page.locator(".ub-revision-header").evaluate(element => element.getBoundingClientRect().bottom);
+            const top = await destination.evaluate(element => element.getBoundingClientRect().top);
+            return top >= line + 6 && top < line + 80;
+          }).toBe(true);
+        }
+        await expect.poll(() => page.evaluate(() => {
+          const rows = [...document.querySelectorAll<HTMLElement>(".ub-revision-split .ProseMirror")]
+            .map(side => [...side.querySelectorAll<HTMLElement>(":scope > .ub-revision-row-start")].map(row => row.getBoundingClientRect().top));
+          const [before = [], after = []] = rows;
+          return before.length === after.length && before.every((top, index) => Math.abs(top - (after[index] ?? Number.NaN)) <= 1);
+        })).toBe(true);
+      };
+      await expect(nextChange).toBeEnabled();
+      await activateControl(nextChange);
+      await assertDestination();
+      // Close both views again, then approach the same hidden change from below.
+      for (const side of sides) {
+        if (nested) await side.getByRole("button", { name: "Collapse Nested details", exact: true }).evaluate((element: HTMLButtonElement) => element.click());
+        await side.getByRole("button", { name: "Collapse Details", exact: true }).evaluate((element: HTMLButtonElement) => element.click());
+        await expect(side.locator(":scope > p").filter({ hasText: "Inside section" })).toBeHidden();
+      }
+      await page.locator(".ub-revision-pane").evaluate(element => element.scrollTo(0, element.scrollHeight));
+      await expect(previousChange).toBeEnabled();
+      await activateControl(previousChange);
+      await assertDestination();
+    });
+  }
 });

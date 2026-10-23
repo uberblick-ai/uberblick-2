@@ -52,6 +52,20 @@ const Filler = TiptapNode.create({
   renderHTML: () => ["div", { class: "ub-revision-filler", "aria-hidden": "true" }],
 });
 
+/** A run of unchanged blocks shown as one bar; clicking it shows the run again. */
+const Fold = TiptapNode.create({
+  name: "revisionFold",
+  group: "block",
+  atom: true,
+  selectable: false,
+  addAttributes: () => ({ run: { default: 0 }, count: { default: 0 }, headings: { default: "" }, headingLevel: { default: null } }),
+  parseHTML: () => [],
+  renderHTML: ({ node }) => ["div", { class: "ub-revision-fold" }, ["button", {
+    type: "button", class: "ub-revision-fold-button", "data-fold": String(node.attrs.run),
+    "aria-label": `Show ${node.attrs.count} unchanged blocks${node.attrs.headings ? `: ${node.attrs.headings}` : ""}`,
+  }, `${node.attrs.count} unchanged blocks${node.attrs.headings ? ` · ${node.attrs.headings}` : ""}`]],
+});
+
 /** Drawings read the selected revision's source, while its contentDOM shows the diff. */
 function drawingNode(node: PMNode): PMNode {
   return typeof node.attrs.revisionSource === "string"
@@ -87,7 +101,7 @@ export function revisionPalette(ydoc: Y.Doc | null, before: Y.Doc | null = null)
         };
       },
     });
-  }), Added, Removed, Filler];
+  }), Added, Removed, Filler, Fold];
 }
 
 export const revisionSchema = getSchema(revisionPalette(null));
@@ -249,7 +263,7 @@ export function revisionViewModel(before: Y.Doc | null, after: Y.Doc): RevisionV
 export function copiedContent(content: Fragment): Fragment {
   const nodes: PMNode[] = [];
   content.forEach((node) => {
-    if (node.type.name === "revisionFiller") return;
+    if (node.type.name === "revisionFiller" || node.type.name === "revisionFold") return;
     const marks = node.marks.filter((mark) => mark.type.name !== "removed" && mark.type.name !== "revisionAdded");
     nodes.push(node.isText ? node.mark(marks) : node.type.create(
       { ...node.attrs, ...("id" in node.attrs ? { id: null } : {}) },

@@ -3,6 +3,7 @@ import type * as Y from "yjs";
 import type { RevisionEntry } from "@uberblick/schema";
 import { DocumentHistoryError } from "../../shell/document-revisions.js";
 import type { DocumentRevisionsClient } from "../../shell/document-revisions.js";
+import { useStoredFlag } from "../hooks.js";
 
 interface Selection { index: number; before: Y.Doc | null; after: Y.Doc; comparedWith?: RevisionEntry }
 interface HistoryState {
@@ -68,6 +69,8 @@ function namedBaseline(entries: readonly RevisionEntry[], since: string | null):
 
 export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid: string | null, path: string) {
   const current = useRef<Session | null>(null);
+  // A per-browser reading preference, shared by the sidebar switch and the comparison.
+  const [collapseUnchanged, setCollapseUnchanged] = useStoredFlag("uberblick.history.collapse-unchanged", true);
   const [view, setView] = useState<{ session: Session; state: HistoryState } | null>(null);
   const update = useCallback((session: Session, changes: Partial<HistoryState>): void => {
     if (current.current !== session || session.signal.aborted) return;
@@ -177,6 +180,8 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
   return {
     ...state,
     available: client !== null && uuid !== null,
+    collapseUnchanged,
+    setCollapseUnchanged,
     entry: state.selection === null ? null : state.entries?.[state.selection.index] ?? null,
     back: () => { void select({ step: 1 }); },
     forward: () => { void select({ step: -1 }); },
