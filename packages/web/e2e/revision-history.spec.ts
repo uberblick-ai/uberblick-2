@@ -128,6 +128,26 @@ function splitHistory(uuid: string, title: string): Record<string, string> {
   }
 }
 
+/** A json-tree block whose items move, gain one entry and change a version string. */
+function jsonHistory(uuid: string, title: string): Record<string, string> {
+  const document = new Y.Doc();
+  const agents = (entries: { id: string; image: string }[]) => JSON.stringify({ service: "planner", agents: entries,
+    limits: { tokens: 4096, price: 1.5, retries: 3, timeout: 30, region: "eu" }, owner: "platform", tier: "standard", zone: "eu-central" }, null, 2);
+  const before = agents([{ id: "implementer", image: "ub-hub:0.4.8" }, { id: "reviewer", image: "ub-hub:0.4.8" }]);
+  const after = agents([{ id: "reviewer", image: "ub-hub:0.4.8" }, { id: "implementer", image: "ub-hub:0.4.9" }, { id: "preparer", image: "ub-hub:0.4.9" }]);
+  try {
+    initDoc(document, { uuid, title });
+    appendBlock(document, { type: "paragraph", text: "The planner's settings, as the hub reports them." });
+    const block = appendBlock(document, { type: "code", language: "json-tree", text: before });
+    appendBlock(document, { type: "paragraph", text: "An unchanged closing paragraph." });
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    editBlock(document, block, before, after);
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+  }
+}
+
 /** A change near the top, a long unchanged middle with headings, and a change near the end. */
 function foldHistory(uuid: string, title: string): Record<string, string> {
   const document = new Y.Doc();
@@ -625,6 +645,58 @@ test.describe("document history through ub open", () => {
     await expect(live).toContainText("An added note.");
     await expect(live.getByRole("heading", { name: "Rollout plan" })).toHaveCount(1);
     await expect(live.locator("[data-revision-change], .ub-revision-filler")).toHaveCount(0);
+  });
+
+  test("a changed json-tree block spans both columns with paired rows and its own Collapse unchanged switch", async ({ browser }, info) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 1000 } } });
+    const title = docTitle("JSON comparison");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: { githubUsername: "Ben", surface: { kind: "mcp", name: "Claude Code" } }, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: { githubUsername: "browser-person", surface: { kind: "browser", name: "Browser" } }, startedAt: 1_000, endedAt: 2_000 },
+    ], jsonHistory(uuid, title));
+    await previous(page);
+    const split = page.locator(".ub-revision-split");
+    await expect(split).toBeVisible();
+    const compare = page.locator(".ub-json-compare");
+    await expect(compare).toBeVisible();
+    // The block covers both columns: it starts where the left side starts and ends where the right side ends.
+    const bounds = await page.evaluate(() => {
+      const [left, right] = [...document.querySelectorAll<HTMLElement>(".ub-revision-split .ProseMirror")].map((side) => side.getBoundingClientRect());
+      const block = document.querySelector(".ub-json-compare")?.getBoundingClientRect();
+      return { left: left?.left, right: right?.right, blockLeft: block?.left, blockRight: block?.right };
+    });
+    expect(Math.abs((bounds.blockLeft ?? 0) - (bounds.left ?? 0))).toBeLessThanOrEqual(1);
+    expect(Math.abs((bounds.blockRight ?? 0) - (bounds.right ?? 0))).toBeLessThanOrEqual(1);
+    await expect(compare.locator("mark.ub-json-compare-added").first()).toHaveText("9");
+    await expect(compare.locator("mark.ub-json-compare-removed").first()).toHaveText("8");
+    await expect(compare.locator(".ub-json-compare-note")).toContainText(["moved from [1]"]);
+    await expect(compare.locator(".ub-json-compare-after .ub-json-compare-run")).toHaveText(["3 unchanged keys"]);
+    // Rows after the block still line up on both sides.
+    const aligned = () => page.evaluate(() => {
+      const sides = [...document.querySelectorAll<HTMLElement>(".ub-revision-split .ProseMirror")];
+      const rows = sides.map(side => [...side.querySelectorAll<HTMLElement>(":scope > .ub-revision-row-start")]
+        .map(start => start.getBoundingClientRect().top).concat(side.getBoundingClientRect().bottom));
+      const [left = [], right = []] = rows;
+      return left.length === right.length && left.every((top, index) => Math.abs(top - (right[index] ?? Number.NaN)) <= 1);
+    });
+    await expect.poll(aligned).toBe(true);
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      const screenshot = info.outputPath(`json-compare-${scheme}.png`);
+      await compare.screenshot({ path: screenshot });
+      await info.attach(`json-compare-${scheme}`, { path: screenshot, contentType: "image/png" });
+    }
+    await page.emulateMedia({ colorScheme: "light" });
+    await compare.getByRole("switch", { name: "Collapse unchanged" }).uncheck();
+    await expect(compare.locator(".ub-json-compare-run")).toHaveCount(0);
+    await expect(compare).toContainText('"timeout": 30');
+    await expect.poll(aligned).toBe(true);
+    // Each cell pair starts at the same height.
+    expect(await compare.evaluate((element) => [...element.querySelectorAll(".ub-json-compare-row")].every((row) => {
+      const [left, right] = [...row.children].map((cell) => cell.getBoundingClientRect().top);
+      return Math.abs((left ?? 0) - (right ?? 0)) <= 1;
+    }))).toBe(true);
   });
 
   test("unchanged runs fold on both sides, open on demand, and changes are one step apart", async ({ browser }, info) => {
