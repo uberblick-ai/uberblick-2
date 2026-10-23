@@ -634,8 +634,12 @@ test.describe("document history through ub open", () => {
       await copy();
       await backToNow(page);
       const live = editor(page);
-      await live.click();
-      await page.keyboard.press(`${modifier}+a`);
+      // Prepare the paste target; the revision-side selections above use native input.
+      await live.evaluate(element => {
+        const mounted = element as HTMLElement & { editor: Editor };
+        mounted.editor.view.focus();
+        mounted.editor.commands.selectAll();
+      });
       await page.keyboard.press(`${modifier}+v`);
       await expect(live).toContainText(`The ${word} fox stays.`);
       await expect(live).not.toContainText(excluded);
