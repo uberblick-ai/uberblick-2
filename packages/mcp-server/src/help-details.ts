@@ -38,7 +38,8 @@ export const toolHelpDetails = {
     "the document stores canonical ids and the answer resolves each id beside its current name. An unknown or " +
     "deleted selection refuses the whole call before a document exists; list_tags is the existing vocabulary.\n\n" +
     "A `description` is REQUIRED; `title` is also required except for a successor with `supersedes`. " +
-    "A missing required field creates nothing. A title cannot be empty or whitespace: an untitled document cannot be picked out of a listing, " +
+    "A missing required field creates nothing. Titles need not be unique, and every successful call creates a new page with its own UUID: " +
+    "after a lost answer, search for the title before retrying. A title cannot be empty or whitespace: an untitled document cannot be picked out of a listing, " +
     "and set_metadata with `title` is the repair for the untitled ones the web UI creates.\n\n" +
     "Pass `kind: decision` to create a decision record. Its `status` defaults to `open`; `status` " +
     "without `kind` is refused before a document is created. A decision " +

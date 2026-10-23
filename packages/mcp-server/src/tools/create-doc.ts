@@ -14,15 +14,9 @@ import { DOCUMENT_WRITE, operation } from "./operation.js";
 import type { ToolContext } from "./context.js";
 import { discussionTarget } from "./discussion.js";
 
-const DECISION_GUIDANCE =
-  "A decision topic has one title, stored on its first record, naming the question rather than the answer. " +
-  "A rename through any record renames the topic. Successors take the topic's title; omit title or supply that same title. " +
-  "For decision answers, see lifecycle's Decision answers and topics section. " +
-  "Answer blocks are distinct from recorded answer: {who, when, where}.";
-
 const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
   {
-    title: `A decision document (\`kind: decision\`). ${DECISION_GUIDANCE}`,
+    title: "A decision document (`kind: decision`). Decisions help covers topics, titles and answers.",
     when: { field: "kind", is: "decision" },
   },
   {
@@ -84,11 +78,17 @@ const RECOVERY: Record<string, string> & { other: string } = {
 // Refuse unknown keys at the root and throughout nested placement objects.
 export const inputSchema = strictInput(
   {
-    title: titleArg.optional().describe(`Display title; required except on a successor. Identity is the document's UUID, never this. ${DECISION_GUIDANCE}`),
+    title: titleArg.optional().describe(
+      "Display title; identity is the document's UUID, never this. Required except on a decision successor. " +
+        "A decision topic has one title, stored on its first record and naming the question rather than the " +
+        "answer; a successor omits title or repeats that exact title.",
+    ),
     description: descriptionArg,
     tldr: tldrArg.optional(),
     answer: decisionAnswerArg.optional(),
-    tags: z.array(z.string().min(1)).optional(),
+    tags: z.array(z.string().min(1)).optional().describe(
+      "Existing catalog tag ids or names, case ignored. An unknown or deleted tag refuses before anything is created.",
+    ),
     kind: documentKindArg.optional(),
     status: documentStatusArg.optional(),
     related: z.union([uuidArg, z.array(uuidArg).min(1)])
