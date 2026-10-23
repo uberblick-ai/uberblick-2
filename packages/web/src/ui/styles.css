@@ -3024,6 +3024,15 @@ h6.ub-heading {
   white-space: nowrap;
 }
 
+/* Beside the history controls the note shortens instead of adding a line. */
+.ub-status-offline {
+  flex: 1 1 0%;
+  min-width: 6em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ub-status-sync,
 .ub-status-sync-slot {
   display: inline-flex;
