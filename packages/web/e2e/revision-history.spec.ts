@@ -549,13 +549,13 @@ test.describe("document history through ub open", () => {
     await previous(page);
     await expect(historicalEditor(page)).toContainText("Latest content.");
     await expect(history(page)).not.toContainText("renamed from");
+    await expect(history(page).locator(".ub-history-when")).toHaveText("· current version");
     const drawer = await showHistoryList(page);
     const list = historyList(page);
     await expect(list.getByRole("listitem")).toHaveCount(3);
     await expect(list.locator('[aria-current="true"]')).toHaveCount(1);
     await expect(list.locator('[aria-current="true"]')).toContainText("Current version");
     await expect(list.locator('[aria-current="true"] time')).toHaveCount(0);
-    await expect(history(page).locator(".ub-history-when")).toHaveText("· current version");
     const reviewed = list.getByRole("button", { name: /Reviewed after the auth rewrite/ });
     const name = list.locator(".ub-history-name > span:last-child");
     expect(await name.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
