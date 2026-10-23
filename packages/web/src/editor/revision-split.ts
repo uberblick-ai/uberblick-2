@@ -40,6 +40,8 @@ export interface RevisionSideCell {
 
 export interface RevisionRow {
   kind: RevisionRowKind;
+  /** The row's place in the full comparison; a folded run's first row. */
+  at: number;
   /** The heading this row shows, for fold labels. */
   heading?: string;
   /** A folded run: the full model's first row and how many rows it hides. */
@@ -165,7 +167,7 @@ function foldNode(run: number, count: number, headings: string): PMNode {
 
 /** One comparison entry as a row and the block each side shows for it. */
 function splitRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, newNode: PMNode | undefined,
-  comparison: RevisionComparison): { row: RevisionRow; left: PMNode; right: PMNode } {
+  comparison: RevisionComparison, at: number): { row: RevisionRow; left: PMNode; right: PMNode } {
   const fields = cellFields(change);
   const data = (node: PMNode | undefined): string[] => node === undefined ? [] : chartCollections(node, comparison).map((name) => `Data changed: ${name}`);
   const changedLabel = fields.length > 0 ? [`Changed: ${fields.join(", ")}`] : [];
@@ -176,6 +178,7 @@ function splitRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, 
   return {
     row: {
       kind,
+      at,
       ...(shown?.type.name === "heading" && shown.textContent !== "" ? { heading: shown.textContent } : {}),
       changed: kind !== "unchanged" || fields.length > 0 || change.spans.length > 0 || beforeLabels.length > 0 || afterLabels.length > 0,
       before: { labels: beforeLabels, filler: oldNode === undefined },
@@ -198,7 +201,7 @@ export function revisionSplitModel(before: Y.Doc, after: Y.Doc,
     const oldNode = change.beforeIndex === undefined ? undefined : oldNodes[change.beforeIndex];
     const newNode = change.afterIndex === undefined ? undefined : newNodes[change.afterIndex];
     if (oldNode === undefined && newNode === undefined) throw new Error("Revision comparison refers to missing content");
-    const split = splitRow(change, oldNode, newNode, comparison);
+    const split = splitRow(change, oldNode, newNode, comparison, rows.length);
     rows.push(split.row);
     left.push(split.left);
     right.push(split.right);
@@ -223,7 +226,7 @@ function foldRows(rows: readonly RevisionRow[], left: readonly PMNode[], right: 
     if (current === undefined || index < current.start) { shown.rows.push(row); shown.left.push(l); shown.right.push(r); continue; }
     const count = current.end - current.start + 1;
     const headings = rows.slice(current.start, current.end + 1).flatMap((entry) => entry.heading === undefined ? [] : [entry.heading]).join(", ");
-    shown.rows.push({ kind: "folded", changed: false, fold: { run: current.start, count },
+    shown.rows.push({ kind: "folded", at: current.start, changed: false, fold: { run: current.start, count },
       before: { labels: [], filler: false }, after: { labels: [], filler: false } });
     shown.left.push(foldNode(current.start, count, headings));
     shown.right.push(foldNode(current.start, count, headings));
@@ -259,13 +262,15 @@ function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide): Ext
                 const start = window.document.createElement("div");
                 start.className = "ub-revision-row-start";
                 start.dataset.row = String(index);
+                // Stable across folding, so motion can match a row before and after.
+                start.dataset.key = `${row.kind === "folded" ? "fold" : "row"}-${row.at}`;
                 if (cell.labels.length > 0) {
                   const label = start.appendChild(window.document.createElement("span"));
                   label.className = "ub-revision-fields";
                   label.textContent = cell.labels.join(" · ");
                 }
                 return start;
-              }, { side: -1, key: `revision-row-start:${index}:${cell.labels.join("|")}`, ignoreSelection: true }));
+              }, { side: -1, key: `revision-row-start:${index}:${row.kind}:${row.at}:${cell.labels.join("|")}`, ignoreSelection: true }));
               decorations.push(Decoration.widget(pos + node.nodeSize, () => {
                 const end = window.document.createElement("div");
                 end.className = `ub-revision-row-end${cell.filler ? " ub-revision-row-filler" : ""}`;

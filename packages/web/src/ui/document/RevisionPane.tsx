@@ -18,6 +18,9 @@ import type { DocumentHistory } from "./document-history.js";
 import { ClockIcon, DownIcon, NextIcon, PreviousIcon, TagIcon, UpIcon } from "./history-icons.js";
 import { revisionAuthor, revisionTime } from "./revision-list.js";
 import { RevisionNameControls } from "./RevisionNameControls.js";
+import { RevisionRuler } from "./RevisionRuler.js";
+import { animateRows, morphFromLive, reducedMotion, rememberLiveHeader, snapshotRows, takeLiveHeader } from "./revision-motion.js";
+import type { HeaderMorph, RowSnapshot } from "./revision-motion.js";
 
 export function revisionLabel(entry: RevisionEntry): string {
   const author = entry.author === null ? "Unknown author"
@@ -53,7 +56,7 @@ export function HistoryControls({ history, liveDocument = null, writable = false
   if (!history.available) return null;
   return <fieldset className="ub-history-nav" aria-label="Document history">
     <button ref={back} type="button" className="ub-history-icon" aria-label="Previous revision" title="Previous revision"
-      disabled={history.busy && history.active} onClick={history.back}><PreviousIcon /></button>
+      disabled={history.busy && history.active} onClick={(event) => { rememberLiveHeader(event.currentTarget); history.back(); }}><PreviousIcon /></button>
     <button type="button" className="ub-history-icon" aria-label="Next revision" title="This is the current version" disabled><NextIcon /></button>
     {!history.active && <RevisionNameControls history={history} liveDocument={liveDocument} writable={writable} />}
   </fieldset>;
@@ -217,6 +220,30 @@ function ChangeNavigation({ pane, header, side, rows }: {
   </fieldset>;
 }
 
+const TITLE_MOTION = 450;
+
+/**
+ * The title as it was at this revision. Another title slides in from the side
+ * the person moved from while the old one blurs out the other way.
+ */
+function RevisionTitle({ title, index }: { title: string; index: number }): ReactElement {
+  const [shown, setShown] = useState<{ title: string; index: number; turn: number; leaving: { title: string; older: boolean } | null }>(
+    { title, index, turn: 0, leaving: null });
+  if (shown.title !== title) {
+    setShown({ title, index, turn: shown.turn + 1, leaving: reducedMotion() ? null : { title: shown.title, older: index > shown.index } });
+  } else if (shown.index !== index) setShown({ ...shown, index });
+  const { leaving, turn } = shown;
+  useEffect(() => {
+    if (leaving === null) return;
+    const timer = setTimeout(() => setShown((current) => current.turn === turn ? { ...current, leaving: null } : current), TITLE_MOTION);
+    return () => clearTimeout(timer);
+  }, [leaving, turn]);
+  return <h1 className="ub-revision-title" data-direction={leaving === null ? undefined : leaving.older ? "older" : "newer"}>
+    <span key={turn} className="ub-revision-title-text" data-entering={leaving === null ? undefined : ""}>{title || "Untitled"}</span>
+    {leaving !== null && <span key={`leaving-${turn}`} className="ub-revision-title-text" data-leaving="" aria-hidden="true">{leaving.title || "Untitled"}</span>}
+  </h1>;
+}
+
 function authorName(entry: RevisionEntry | undefined, earliest: boolean): string {
   return entry === undefined ? "Unknown author" : revisionAuthor(entry, earliest).name;
 }
@@ -234,9 +261,16 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   const [rows, setRows] = useState<readonly RevisionRow[]>([]);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
   const header = useRef<HTMLElement | null>(null);
-  const [shown, setShown] = useState(selection);
-  // Runs shown again belong to the revision they were opened on.
-  if (shown !== selection) { setShown(selection); setExpanded(new Set()); }
+  // The live header this pane replaced, when a click just entered history.
+  const [live] = useState(takeLiveHeader);
+  const morph = useRef<HeaderMorph | null>(null);
+  const folded = useRef<{ selection: DocumentHistory["selection"]; rows: RowSnapshot } | null>(null);
+  const [shown, setShown] = useState({ selection, collapseUnchanged });
+  // Runs shown again belong to the revision they were opened on; collapsing again folds them all.
+  if (shown.selection !== selection || shown.collapseUnchanged !== collapseUnchanged) {
+    setShown({ selection, collapseUnchanged });
+    setExpanded(new Set());
+  }
   const restoreReason = useId();
   const title = selection === null ? "" : getMeta(selection.after).title;
   const available = useAvailableWidth(pane, history.active);
@@ -252,7 +286,14 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
           onExpand: (run) => setExpanded((current) => new Set([...current, run])) });
         setEditors([{ side: "before", editor: view.before }, { side: "after", editor: view.after }]);
         setRows(view.model.rows);
-        return () => { setEditors([]); setRows([]); view.destroy(); };
+        // Folding rebuilds both sides; rows slide from where they stood.
+        const previous = folded.current;
+        folded.current = null;
+        if (previous?.selection === selection && pane.current !== null) animateRows([view.before.view.dom, view.after.view.dom], previous.rows, pane.current);
+        return () => {
+          folded.current = pane.current === null ? null : { selection, rows: snapshotRows([view.before.view.dom, view.after.view.dom], pane.current) };
+          setEditors([]); setRows([]); view.destroy();
+        };
       }
       if (host.current === null) return;
       const editor = createRevisionEditor({ element: host.current, before: selection.before, after: selection.after, docLinks, workspaceSettings });
@@ -261,19 +302,32 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       return () => { setEditors([]); editor.destroy(); };
     } catch { setFailed(selection); }
   }, [selection, split, docLinks, workspaceSettings, collapseUnchanged, expanded]);
+  // The header arrives from where the live header stood; leaving cancels it at once.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: The morph runs once, when history opens.
+  useLayoutEffect(() => {
+    if (header.current === null || pane.current === null) return;
+    const started = morphFromLive(live, header.current, pane.current);
+    morph.current = started;
+    return () => { morph.current = null; started.stop(); };
+  }, []);
+  // The status row, comparison and change controls arrive with the first revision.
+  useLayoutEffect(() => { morph.current?.follow(); });
   if (!history.active) return null;
-  if (selection === null) return <section ref={pane} className="ub-pane ub-page-pane ub-document-pane ub-revision-pane">
+  // While the first revision loads after a click, the header holds the live title.
+  const arriving = selection === null && live !== null && history.busy && history.error === null;
+  if (selection === null && !arriving) return <section ref={pane} className="ub-pane ub-page-pane ub-document-pane ub-revision-pane">
     <div className="ub-column"><HistoryState history={history} /></div>
   </section>;
-  const entry = entries?.[selection.index];
-  const predecessor = selection.comparedWith ?? entries?.[selection.index + 1];
+  const entry = selection === null ? undefined : entries?.[selection.index];
+  const predecessor = selection === null ? undefined : selection.comparedWith ?? entries?.[selection.index + 1];
   const total = entries?.length ?? 0;
+  const changeSide = afterHost.current === null ? null : afterHost.current.querySelector<HTMLElement>(".ProseMirror") ?? afterHost.current;
   return <section ref={pane} className={`ub-pane ub-page-pane ub-document-pane ub-revision-pane${split ? " ub-revision-split-pane" : ""}`}>
     <div className="ub-column">
       {/* Stays in view while the comparison scrolls; revisions keep no tags. */}
       <header ref={header} className="ub-revision-header">
         <div className="ub-revision-heading">
-          <h1 className="ub-revision-title">{title || "Untitled"}</h1>
+          <RevisionTitle title={selection === null ? live?.title?.text ?? "" : title} index={selection?.index ?? -1} />
           {/* Restore lands later; the control shows where it will be. */}
           <Button variant="secondary" size="sm" aria-disabled="true" aria-describedby={restoreReason}
             title="Restore is not available yet" className="ub-revision-restore" onClick={(event) => event.preventDefault()}>
@@ -281,12 +335,15 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
           </Button>
           <span id={restoreReason} className="sr-only">Restore is not available yet</span>
         </div>
-        <RevisionStatus history={history} writable={writable} />
-        {split && afterHost.current !== null && rows.length > 0 && <ChangeNavigation pane={pane} header={header}
-          side={afterHost.current.querySelector<HTMLElement>(".ProseMirror") ?? afterHost.current} rows={rows} />}
+        {selection === null ? <p role="status" className="ub-history-controls ub-type-small">Loading history…</p>
+          : <RevisionStatus history={history} writable={writable} />}
+        {split && changeSide !== null && rows.length > 0 && <>
+          <ChangeNavigation pane={pane} header={header} side={changeSide} rows={rows} />
+          <RevisionRuler pane={pane} header={header} side={changeSide} rows={rows} />
+        </>}
       </header>
-      {failed === selection && <p role="status">This client cannot display this revision. Update the client and try again.</p>}
-      {split ? <div className="ub-revision-split">
+      {selection !== null && failed === selection && <p role="status">This client cannot display this revision. Update the client and try again.</p>}
+      {selection === null ? null : split ? <div className="ub-revision-split">
         <div className="ub-revision-side ub-revision-side-before">
           <p className="ub-revision-side-label">Before · {authorName(predecessor, selection.index + 2 >= total)}</p>
           <div className="ub-editor-frame ub-revision-view"><div className="ub-editor" ref={beforeHost} /></div>

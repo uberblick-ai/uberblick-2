@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
-import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, initDoc, insertBlock, snapshotRevision } from "@uberblick/schema";
+import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, initDoc, insertBlock, setTitle, snapshotRevision } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import { activateControl, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
@@ -91,6 +91,41 @@ async function serveHistory(page: Page, revisions: RevisionEntry[], states: Reco
   });
 }
 
+/** Animations still running in the revision view: none once motion has settled. */
+function runningMotion(page: Page): Promise<number> {
+  return page.evaluate(() => document.getAnimations().filter((animation) => {
+    const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
+    return animation.playState === "running" && target instanceof Element && target.closest(".ub-revision-pane") !== null;
+  }).length);
+}
+
+interface RulerGeometry {
+  top: number; bottom: number; paneBottom: number; firstRow: number;
+  marks: { kind: string; top: number; height: number }[];
+  view: { top: number; height: number };
+  scrollTop: number; maxScroll: number;
+}
+
+async function rulerGeometry(page: Page): Promise<RulerGeometry> {
+  return await page.evaluate(() => {
+    const pane = document.querySelector<HTMLElement>(".ub-revision-pane");
+    const ruler = document.querySelector<HTMLElement>("[data-testid='revision-ruler']");
+    const first = document.querySelector<HTMLElement>('.ub-revision-pane .ProseMirror[aria-label="This revision"] > .ub-revision-row-start');
+    const view = ruler?.querySelector<HTMLElement>(".ub-revision-ruler-view");
+    if (pane === null || ruler === null || first === null || view == null) throw new Error("The ruler is not shown");
+    const track = ruler.getBoundingClientRect();
+    const box = view.getBoundingClientRect();
+    return {
+      top: track.top, bottom: track.bottom, paneBottom: pane.getBoundingClientRect().bottom, firstRow: first.getBoundingClientRect().top,
+      marks: [...ruler.querySelectorAll<HTMLElement>(".ub-revision-ruler-mark")].map((mark) => ({
+        kind: mark.dataset.mark ?? "", top: mark.getBoundingClientRect().top - track.top, height: mark.getBoundingClientRect().height,
+      })),
+      view: { top: box.top - track.top, height: box.height },
+      scrollTop: pane.scrollTop, maxScroll: pane.scrollHeight - pane.clientHeight,
+    };
+  });
+}
+
 /** Two states with a word change, a wrapped removal, an addition, a table row and an unchanged block. */
 function splitHistory(uuid: string, title: string): Record<string, string> {
   const document = new Y.Doc();
@@ -130,6 +165,21 @@ function foldHistory(uuid: string, title: string): Record<string, string> {
     const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
     editBlock(document, first, "The opening line changes.", "The opening line changed.");
     editBlock(document, last, "The closing line changes.", "The closing line changed.");
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+  }
+}
+
+/** An earlier draft under another title, then the current title and one changed line. */
+function renamedHistory(uuid: string, title: string): Record<string, string> {
+  const document = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title: "Earlier draft" });
+    const line = appendBlock(document, { type: "paragraph", text: "The plan starts small." });
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    setTitle(document, title);
+    editBlock(document, line, "The plan starts small.", "The plan starts smaller.");
     return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
   } finally {
     document.destroy();
@@ -672,6 +722,148 @@ test.describe("document history through ub open", () => {
     await page.mouse.move(900, 400);
     await page.mouse.wheel(0, 300);
     await expect.poll(() => page.locator(".ub-revision-pane").evaluate(element => element.scrollTop)).toBeGreaterThan(100);
+  });
+
+  test("the overview ruler maps the comparison, follows scrolling, folding and growth, and scrolls on press and drag", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 640 } } });
+    const title = docTitle("Ruler comparison");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], foldHistory(uuid, title));
+    await previous(page);
+    const ruler = page.getByTestId("revision-ruler");
+    await expect(ruler).toBeVisible();
+    const pane = page.locator(".ub-revision-pane");
+    // A fine pointer scrolls with the ruler; the native scrollbar steps aside.
+    await expect.poll(() => pane.evaluate((element) => getComputedStyle(element).scrollbarWidth)).toBe("none");
+    await expect.poll(() => runningMotion(page)).toBe(0);
+    // It starts level with the first row and ends just above the pane's bottom edge.
+    let geometry = await rulerGeometry(page);
+    expect(Math.abs(geometry.top - geometry.firstRow)).toBeLessThan(1.5);
+    expect(Math.abs(geometry.paneBottom - 12 - geometry.bottom)).toBeLessThan(1.5);
+    // Folded, everything fits: one box covers every mark, and pressing scrolls nowhere.
+    expect(geometry.marks.filter((mark) => mark.kind === "changed")).toHaveLength(2);
+    expect(geometry.marks.filter((mark) => mark.kind === "fold")).toHaveLength(1);
+    const last = geometry.marks.at(-1);
+    expect(geometry.view.top).toBeLessThan(0.5);
+    expect(Math.abs(geometry.view.height - ((last?.top ?? 0) + (last?.height ?? 0)))).toBeLessThan(4);
+    const track = await ruler.boundingBox();
+    if (track === null) throw new Error("The ruler has no box");
+    await page.mouse.click(track.x + 7, track.y + track.height - 4);
+    expect((await rulerGeometry(page)).scrollTop).toBe(0);
+    // Opening the run maps every row; the box now shows only part of it.
+    await activateControl(historicalEditor(page).locator(".ub-revision-fold-button"));
+    await expect.poll(async () => (await rulerGeometry(page)).marks.length).toBeGreaterThan(geometry.marks.length);
+    await expect.poll(() => runningMotion(page)).toBe(0);
+    geometry = await rulerGeometry(page);
+    expect(geometry.maxScroll).toBeGreaterThan(0);
+    expect(geometry.view.height).toBeLessThan(track.height - 20);
+    // Changes are marked by the same rule as previous and next change.
+    expect(geometry.marks.filter((mark) => mark.kind === "changed")).toHaveLength(2);
+    // Scrolling moves the box in proportion.
+    await pane.evaluate((element) => { element.scrollTop = (element.scrollHeight - element.clientHeight) / 2; });
+    await expect.poll(async () => (await rulerGeometry(page)).view.top).toBeGreaterThan(geometry.view.top + 20);
+    // Pressing below the box centres that place; dragging the box carries the pane with it.
+    await pane.evaluate((element) => { element.scrollTop = 0; });
+    await expect.poll(async () => (await rulerGeometry(page)).view.top).toBeLessThan(0.5);
+    await page.mouse.click(track.x + 7, track.y + track.height - 4);
+    await expect.poll(async () => { const now = await rulerGeometry(page); return now.maxScroll - now.scrollTop; }).toBeLessThan(2);
+    const box = (await rulerGeometry(page)).view;
+    await page.mouse.move(track.x + 7, track.y + box.top + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(track.x + 7, track.y + box.height / 2 - 40, { steps: 6 });
+    await page.mouse.up();
+    await expect.poll(async () => (await rulerGeometry(page)).scrollTop).toBe(0);
+    // A drawing or image that loads late grows its row, and the marks follow it.
+    const firstMark = (await rulerGeometry(page)).marks[0]?.height ?? 0;
+    await historicalEditor(page).locator(".ub-revision-row").first().evaluate((element) => { (element as HTMLElement).style.paddingBottom = "400px"; });
+    await expect.poll(async () => (await rulerGeometry(page)).marks[0]?.height ?? 0).toBeGreaterThan(firstMark + 20);
+    // A taller window gives a taller ruler, still ending above the pane's edge.
+    await page.setViewportSize({ width: 1440, height: 820 });
+    await expect.poll(async () => { const now = await rulerGeometry(page); return Math.abs(now.paneBottom - 12 - now.bottom); }).toBeLessThan(1.5);
+    // Rapid toggles settle on the instant result, with no copy or hidden control left behind.
+    const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged" });
+    for (let toggle = 0; toggle < 5; toggle += 1) await collapse.click();
+    await expect(collapse).not.toBeChecked();
+    await expect.poll(() => runningMotion(page)).toBe(0);
+    await expect(page.locator(".ub-revision-ghost")).toHaveCount(0);
+    await expect(page.locator(".ub-revision-fold-button")).toHaveCount(0);
+    await collapse.click();
+    await expect(page.locator(".ub-revision-fold-button")).toHaveCount(2);
+    // While rows close into their bar, their copy is inert.
+    await expect.poll(() => page.locator(".ub-revision-ghost").evaluateAll((ghosts) => ghosts.every((ghost) => (ghost as HTMLElement).inert))).toBe(true);
+    await expect.poll(() => runningMotion(page)).toBe(0);
+    await expect(page.locator(".ub-revision-ghost")).toHaveCount(0);
+  });
+
+  test("the revision header grows out of the live header, slides between titles, and never holds up leaving", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1280, height: 800 } } });
+    const title = docTitle("A long plan title that wraps onto a second line in the live document view");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], renamedHistory(uuid, title));
+    // A scrolled live document: its title stands partly above the pane.
+    const live = page.locator(".ub-document-pane:not(.ub-revision-pane)");
+    await live.locator(".ub-column").evaluate((element) => { (element as HTMLElement).style.paddingBottom = "2000px"; });
+    await live.evaluate((element) => { element.scrollTop = 24; });
+    const start = await live.locator(".ub-title").evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return { top: rect.top, left: rect.left, height: rect.height, size: Number.parseFloat(getComputedStyle(element).fontSize) };
+    });
+    expect(start.height).toBeGreaterThan(start.size * 1.8);
+    await history(page).getByRole("button", { name: "Previous revision", exact: true }).click();
+    // At its first frame the revision title stands exactly where the live title stood.
+    const first = await page.evaluate(() => {
+      const heading = document.querySelector(".ub-revision-title");
+      const morph = heading?.getAnimations().find((animation) => animation instanceof CSSAnimation === false);
+      if (heading == null || morph === undefined) return null;
+      morph.pause();
+      morph.currentTime = 0;
+      const rect = heading.getBoundingClientRect();
+      morph.play();
+      return { top: rect.top, left: rect.left };
+    });
+    expect(first).not.toBeNull();
+    expect(Math.abs((first?.top ?? 0) - start.top)).toBeLessThan(2);
+    expect(Math.abs((first?.left ?? 0) - start.left)).toBeLessThan(2);
+    await expect.poll(() => runningMotion(page)).toBe(0);
+    const heading = page.locator(".ub-revision-title");
+    await expect(page.getByRole("heading", { level: 1, name: title, exact: true })).toBeVisible();
+    // Stepping to a revision under another title slides the old one out; the heading names only the new one.
+    await history(page).getByRole("button", { name: "Previous revision", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Earlier draft", exact: true })).toBeVisible();
+    await expect(heading.locator("[data-leaving]")).toHaveCount(0);
+    await expect(heading).toHaveText("Earlier draft");
+    // Leaving while the header is still arriving is immediate and leaves nothing running.
+    await backToNow(page);
+    await expect(editor(page)).toBeVisible();
+    await history(page).getByRole("button", { name: "Previous revision", exact: true }).click();
+    await backToNow(page);
+    await expect(editor(page)).toBeVisible();
+    await expect(page.locator(".ub-revision-pane")).toHaveCount(0);
+    expect(await page.evaluate(() => document.getAnimations().filter((animation) =>
+      animation.effect instanceof KeyframeEffect && animation.effect.target instanceof Element && !animation.effect.target.isConnected && animation.playState === "running").length)).toBe(0);
+  });
+
+  test("with reduced motion, history arrives, steps and folds without animating", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 640 }, reducedMotion: "reduce" } });
+    const title = docTitle("Still comparison");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], foldHistory(uuid, title));
+    await previous(page);
+    expect(await runningMotion(page)).toBe(0);
+    await expect(page.getByTestId("revision-ruler")).toBeVisible();
+    await activateControl(historicalEditor(page).locator(".ub-revision-fold-button"));
+    await expect(historicalEditor(page)).toContainText("Background paragraph 2");
+    expect(await runningMotion(page)).toBe(0);
+    await expect(page.locator(".ub-revision-ghost")).toHaveCount(0);
   });
 
   test("opening history preserves unsent comment and reply drafts", { tag: "@webkit" }, async ({ browser }) => {

@@ -144,8 +144,11 @@ describe("the side-by-side revision model", () => {
       expect(side.content?.[2]?.attrs).toMatchObject({ run: 2, count: 3, headings: "Middle" });
     }
     expect(folded.runs).toEqual([2]);
+    // Each row keeps its place in the full comparison, so it can be followed across folding.
+    expect(folded.rows.map((row) => row.at)).toEqual([0, 1, 2]);
     const open = revisionSplitModel(before, after, { collapse: true, expanded: new Set([2]) });
     expect(open.rows).toHaveLength(5);
+    expect(open.rows.map((row) => row.at)).toEqual([0, 1, 2, 3, 4]);
     expect(revisionSplitModel(before, after).rows).toHaveLength(5);
   });
 });
