@@ -117,6 +117,22 @@ export function morphFromLive(live: LiveHeader | null, header: HTMLElement, pane
   return { follow, stop: () => { for (const animation of animations) animation?.cancel(); } };
 }
 
+const STEP_MOTION = 360;
+const STEP_OFFSET = 40;
+
+/**
+ * Stepping to another revision slides its content in from the side it lies
+ * on, as the title does: an older revision from the left, a newer one from
+ * the right. A comparison that is neither, such as changes since a name,
+ * only fades in.
+ */
+export function revealRevision(element: Element, direction: "older" | "newer" | null): void {
+  if (reducedMotion()) return;
+  const offset = direction === null ? 0 : direction === "older" ? -STEP_OFFSET : STEP_OFFSET;
+  animate(element, [{ transform: `translateX(${offset}px)`, opacity: 0 }, { transform: "none", opacity: 1 }],
+    { duration: STEP_MOTION, easing: REVISION_EASE });
+}
+
 /** A row on screen just before folding rebuilt the sides, with a copy to fade out if it folds away. */
 interface RowGhost { key: string; top: number; bottom: number; copy: Node[] }
 

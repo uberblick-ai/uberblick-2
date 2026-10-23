@@ -19,7 +19,7 @@ import { ClockIcon, DownIcon, NextIcon, PreviousIcon, TagIcon, UpIcon } from "./
 import { revisionAuthor, revisionTime } from "./revision-list.js";
 import { RevisionNameControls } from "./RevisionNameControls.js";
 import { RevisionRuler } from "./RevisionRuler.js";
-import { animateRows, morphFromLive, reducedMotion, rememberLiveHeader, snapshotRows, takeLiveHeader } from "./revision-motion.js";
+import { animateRows, morphFromLive, reducedMotion, rememberLiveHeader, revealRevision, snapshotRows, takeLiveHeader } from "./revision-motion.js";
 import type { HeaderMorph, RowSnapshot } from "./revision-motion.js";
 
 export function revisionLabel(entry: RevisionEntry): string {
@@ -265,6 +265,9 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   const [live] = useState(takeLiveHeader);
   const morph = useRef<HeaderMorph | null>(null);
   const folded = useRef<{ selection: DocumentHistory["selection"]; rows: RowSnapshot } | null>(null);
+  // The revision on screen before this one; the first arrives with the header morph instead.
+  const stepped = useRef<DocumentHistory["selection"]>(null);
+  const body = useRef<HTMLDivElement | null>(null);
   const [shown, setShown] = useState({ selection, collapseUnchanged });
   // Runs shown again belong to the revision they were opened on; collapsing again folds them all.
   if (shown.selection !== selection || shown.collapseUnchanged !== collapseUnchanged) {
@@ -276,6 +279,14 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   const available = useAvailableWidth(pane, history.active);
   // The earliest revision has nothing to compare; narrow panes keep one column.
   const split = selection?.before != null && available !== null && available >= SPLIT_MIN_WIDTH;
+  // Starts before the first paint, so the outgoing content never shows under the new header.
+  useLayoutEffect(() => {
+    if (selection === null) return;
+    const from = stepped.current;
+    stepped.current = selection;
+    if (from === null || body.current === null) return;
+    revealRevision(body.current, selection.index > from.index ? "older" : selection.index < from.index ? "newer" : null);
+  }, [selection]);
   useEffect(() => {
     if (selection === null) return;
     try {
@@ -343,7 +354,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
         </>}
       </header>
       {selection !== null && failed === selection && <p role="status">This client cannot display this revision. Update the client and try again.</p>}
-      {selection === null ? null : split ? <div className="ub-revision-split">
+      {selection === null ? null : split ? <div ref={body} className="ub-revision-split">
         <div className="ub-revision-side ub-revision-side-before">
           <p className="ub-revision-side-label">Before · {authorName(predecessor, selection.index + 2 >= total)}</p>
           <div className="ub-editor-frame ub-revision-view"><div className="ub-editor" ref={beforeHost} /></div>
@@ -352,7 +363,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
           <p className="ub-revision-side-label">After · {authorName(entry, selection.index + 1 >= total)}</p>
           <div className="ub-editor-frame ub-revision-view"><div className="ub-editor" ref={afterHost} /></div>
         </div>
-      </div> : <div className="ub-editor-frame ub-revision-view"><div className="ub-editor" ref={host} /></div>}
+      </div> : <div ref={body} className="ub-editor-frame ub-revision-view"><div className="ub-editor" ref={host} /></div>}
       {editors.map(({ side, editor }) => <CardButtonControls key={side} editor={editor} canWrite={() => false} />)}
     </div>
   </section>;

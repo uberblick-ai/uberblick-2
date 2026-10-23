@@ -849,11 +849,28 @@ test.describe("document history through ub open", () => {
     await expect.poll(() => runningMotion(page)).toBe(0);
     const heading = page.locator(".ub-revision-title");
     await expect(page.getByRole("heading", { level: 1, name: title, exact: true })).toBeVisible();
+    // Record where stepped content starts: it comes from the side its revision lies on.
+    await page.evaluate(() => {
+      const steps: string[] = [];
+      Object.assign(window, { revisionSteps: steps });
+      const animate = Element.prototype.animate;
+      Element.prototype.animate = function (this: Element, keyframes, options) {
+        const first = Array.isArray(keyframes) ? keyframes[0] : undefined;
+        if (this.matches(".ub-revision-split, .ub-revision-pane .ub-revision-view")) steps.push(String(first?.transform ?? ""));
+        return animate.call(this, keyframes, options);
+      };
+    });
+    const steps = () => page.evaluate(() => (window as unknown as { revisionSteps: string[] }).revisionSteps);
     // Stepping to a revision under another title slides the old one out; the heading names only the new one.
     await history(page).getByRole("button", { name: "Previous revision", exact: true }).click();
     await expect(page.getByRole("heading", { level: 1, name: "Earlier draft", exact: true })).toBeVisible();
     await expect(heading.locator("[data-leaving]")).toHaveCount(0);
     await expect(heading).toHaveText("Earlier draft");
+    await expect.poll(steps).toEqual(["translateX(-40px)"]);
+    await history(page).getByRole("button", { name: "Next revision", exact: true }).click();
+    await expect(heading).toHaveText(title);
+    await expect.poll(steps).toEqual(["translateX(-40px)", "translateX(40px)"]);
+    await expect.poll(() => runningMotion(page)).toBe(0);
     // Leaving while the header is still arriving is immediate and leaves nothing running.
     await backToNow(page);
     await expect(editor(page)).toBeVisible();
