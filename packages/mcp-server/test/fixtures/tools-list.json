@@ -48,6 +48,7 @@
           "description": "One or two sentences of plain English for a person opening a regular document. At most 300 characters; null clears it. Decisions have no TL;DR."
         },
         "answer": {
+          "description": "Record a person's answer, not the agent's own approval; MCP does not verify its provenance. Accepted only with `kind: decision`.",
           "type": "object",
           "properties": {
             "who": {
@@ -71,8 +72,7 @@
             "when",
             "where"
           ],
-          "additionalProperties": false,
-          "description": "Record a person's answer, not the agent's own approval. MCP does not verify its provenance."
+          "additionalProperties": false
         },
         "tags": {
           "type": "array",
@@ -89,14 +89,14 @@
           "description": "The document's record kind. Omit it for an ordinary working document."
         },
         "status": {
+          "description": "The initial lifecycle state. Accepted only with `kind: decision`.",
           "type": "string",
           "enum": [
             "open",
             "decided",
             "rejected",
             "withdrawn"
-          ],
-          "description": "The recorded lifecycle state. Its kind owns the legal values."
+          ]
         },
         "related": {
           "description": "One live, locally readable regular document UUID or a non-empty list of them. The related set is fixed at creation. Omitted successors inherit their predecessor's whole set; supplying related replaces it. Accepted only with `kind: decision`.",
@@ -265,50 +265,7 @@
       "required": [
         "description"
       ],
-      "additionalProperties": false,
-      "oneOf": [
-        {
-          "title": "A decision document (`kind: decision`). A decision topic has one title, stored on its first record, naming the question rather than the answer. A rename through any record renames the topic. Successors take the topic's title; omit title or supply that same title. For decision answers, see lifecycle's Decision answers and topics section. Answer blocks are distinct from recorded answer: {who, when, where}.",
-          "required": [
-            "kind"
-          ],
-          "properties": {
-            "kind": {
-              "const": "decision"
-            }
-          }
-        },
-        {
-          "title": "An ordinary document",
-          "required": [
-            "title"
-          ],
-          "properties": {
-            "kind": false,
-            "status": false,
-            "related": false,
-            "supersedes": false,
-            "answer": false,
-            "discussion": false
-          }
-        }
-      ],
-      "dependencies": {
-        "kind": {
-          "anyOf": [
-            {
-              "required": [
-                "title"
-              ]
-            },
-            {
-              "required": [
-                "supersedes"
-              ]
-            }
-          ]
-        }
-      }
+      "additionalProperties": false
     },
     "description": "Create doc/stub with optional blocks or regular-page TL;DR. Nonblank description required; title required except successors. Decision topic title lives on its first record; successor title must be omitted or match. Decisions: open/decided only; deciding needs supported nonblank blocks, no TL;DR/data. Decided successors require human answer attribution. related: UUID or non-empty list of live readable regular pages; fixed at creation. Successor: omit to inherit whole set; supply to replace. supersedes: hydrated decision in live topic. Validate targets before allocation/writes. discussion: one live readable RFC UUID, never inherited; correct/clear only while open. Referenced pages untouched. sidebar: existing get_sidebar group id; omit for unpinned. persistence_failed reports uuid, completed/failed rooms and duplicate-safe recovery. Answer guidance: decisions; links: markdown.\n\nHelp: create_doc, edit_doc, workspaces, tool-contracts, decisions, markdown.",
     "annotations": {
@@ -430,20 +387,23 @@
           "type": "string"
         },
         "after": {
-          "description": "Exclusive record-id cursor.",
+          "description": "Exclusive record-id cursor; needs collection.",
           "type": "string"
         },
         "limit": {
+          "description": "Records per page, 0 for the schema only; needs collection.",
           "type": "integer",
           "minimum": 0,
           "maximum": 1000
         },
         "max_bytes": {
+          "description": "Page record budget in bytes; needs collection.",
           "type": "integer",
           "minimum": 1,
           "maximum": 1048576
         },
         "ids": {
+          "description": "Only these record ids; needs collection.",
           "maxItems": 1000,
           "type": "array",
           "items": {
@@ -454,25 +414,7 @@
       "required": [
         "uuid"
       ],
-      "additionalProperties": false,
-      "oneOf": [
-        {
-          "title": "Area summary",
-          "properties": {
-            "collection": false,
-            "after": false,
-            "limit": false,
-            "max_bytes": false,
-            "ids": false
-          }
-        },
-        {
-          "title": "Collection page",
-          "required": [
-            "collection"
-          ]
-        }
-      ]
+      "additionalProperties": false
     },
     "description": "Read a data summary, or name collection for bounded records and diagnostics. limit: 0 reads schema; follow next_after until complete. Optional revision uses a hub ID from list_revisions, including archived documents; omission reads live data. Live data and open revisions can change between calls.\n\nHelp: get_data, workspaces, tool-contracts, data.",
     "annotations": {
@@ -1180,43 +1122,6 @@
         "uuid"
       ],
       "additionalProperties": false,
-      "anyOf": [
-        {
-          "required": [
-            "title"
-          ]
-        },
-        {
-          "required": [
-            "description"
-          ]
-        },
-        {
-          "required": [
-            "tldr"
-          ]
-        },
-        {
-          "required": [
-            "tags"
-          ]
-        },
-        {
-          "required": [
-            "links"
-          ]
-        },
-        {
-          "required": [
-            "discussion"
-          ]
-        },
-        {
-          "required": [
-            "code_check"
-          ]
-        }
-      ],
       "dependencies": {
         "tldr_opt_in": {
           "required": [
@@ -1454,46 +1359,7 @@
         "uuid",
         "text"
       ],
-      "additionalProperties": false,
-      "oneOf": [
-        {
-          "title": "A reply (`thread_id`)",
-          "required": [
-            "thread_id"
-          ],
-          "properties": {
-            "block_id": false,
-            "start": false,
-            "end": false,
-            "row": false,
-            "column": false
-          }
-        },
-        {
-          "title": "Moving a thread's anchor",
-          "required": [
-            "thread_id",
-            "block_id",
-            "start",
-            "end"
-          ],
-          "properties": {
-            "resolved": false
-          }
-        },
-        {
-          "title": "Opening a thread over a range",
-          "required": [
-            "block_id",
-            "start",
-            "end"
-          ],
-          "properties": {
-            "thread_id": false,
-            "resolved": false
-          }
-        }
-      ]
+      "additionalProperties": false
     },
     "description": "Open a thread with block_id/start/end; reply with thread_id and no range fields; move an anchor with thread_id plus block_id/start/end. text adds a comment in every mode; author is optional. Only replies accept resolved to resolve or reopen. Moves remove all previous marks in the document and keep the thread's id, earlier replies and resolution, including for orphaned threads. Incomplete ranges refuse. Table targets need zero-based row/column GFM projection indices including header row 0. Offsets count displayed characters, including stored edge whitespace: remove exactly the GFM padding before decoding inline syntax. Coordinates follow moved cells; orphaned ranges are null. Bad or missing cell coordinates refuse with annotation_cell; empty or other-thread overlap ranges with annotation_range. Offsets clamp to text; a move may overlap its own anchor. Opening or moving into cards/Figma refuses with annotation_card/annotation_figma. Existing card/Figma threads accept replies, resolution, reopening or moves to prose/table cells; Figma ranges name caption.\n\nHelp: annotate, edit_doc, workspaces, tool-contracts, decisions, markdown.",
     "annotations": {
@@ -1738,47 +1604,7 @@
         "action",
         "group"
       ],
-      "additionalProperties": false,
-      "oneOf": [
-        {
-          "title": "rename",
-          "required": [
-            "action",
-            "name"
-          ],
-          "properties": {
-            "action": {
-              "const": "rename"
-            },
-            "index": false
-          }
-        },
-        {
-          "title": "move",
-          "required": [
-            "action"
-          ],
-          "properties": {
-            "action": {
-              "const": "move"
-            },
-            "name": false
-          }
-        },
-        {
-          "title": "delete",
-          "required": [
-            "action"
-          ],
-          "properties": {
-            "action": {
-              "const": "delete"
-            },
-            "name": false,
-            "index": false
-          }
-        }
-      ]
+      "additionalProperties": false
     },
     "description": "Manage the groups themselves. `delete` removes the group and its pins — the documents are untouched, because the group only ever held their uuids, and they stay reachable through list_docs and search.\n\n`action` picks one of three shapes and each takes only its own field: `rename` needs `name` and refuses `index`, `move` takes `index` (omitted: last) and refuses `name`, `delete` takes neither. A field belonging to another action is refused at the input boundary before the sidebar is touched, rather than ignored — so a call that says two things is a failure you can see, not a silent half-success.\n\nThere is no create action: pin_doc creates a group by naming one that does not exist, which is how a group comes into being with something in it rather than empty.\n\nHelp: sidebar_group, workspaces, tool-contracts.",
     "annotations": {

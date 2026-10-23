@@ -69,7 +69,6 @@ export const inputSchema = strictInput({
     }
   })
   .meta({
-    anyOf: fields.map((field) => ({ required: [field] })),
     dependencies: {
       tldr_opt_in: { required: ["tldr"], properties: { tldr: { type: "string", minLength: 1 } } },
     },
