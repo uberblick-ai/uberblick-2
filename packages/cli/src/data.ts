@@ -25,8 +25,6 @@ options:
   --out <file>                   # get: write the collection to this file instead of stdout
   --dry-run                      # update: validate and report, write nothing
   -h, --help                     # show this help
-
-update is not briefed: it skips the workspace guidance reads that MCP writes require.
 `;
 
 type DataCommand =
