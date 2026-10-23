@@ -7,7 +7,7 @@ import {
   readRevisionRequest, roomForDoc, setTitle, tombstoneDirectoryEntry, type RevisionRequest, type RevisionResponse,
 } from "@uberblick/schema";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
-import { getDocumentRevision, listDocumentRevisions } from "../src/revision-client.js";
+import { documentRevisionChecksum, getDocumentRevision, listDocumentRevisions, mutateDocumentRevision } from "../src/revision-client.js";
 import { HubSync } from "../src/sync.js";
 import { openWorkspaceReplicas, type WorkspaceReplicaSet } from "../src/workspace-replicas.js";
 import { cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, startHub, tempDir, testConfig, TEST_SECRET } from "./helpers.js";
@@ -82,6 +82,36 @@ it("returns an empty list only when the hub confirms there are no revisions", as
   const fixture = await admitted();
   fixture.reply((request, send) => send({ requestId: request.requestId, ok: true, revisions: [] }));
   await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid)).resolves.toEqual([]);
+});
+
+it("opts in to naming metadata without changing legacy list requests", async () => {
+  const fixture = await admitted();
+  const requests: RevisionRequest[] = [];
+  fixture.reply((request, send) => {
+    requests.push(request);
+    send({ requestId: request.requestId, ok: true, revisions: [] });
+  });
+  await listDocumentRevisions(fixture.opened.replicas, fixture.uuid);
+  await listDocumentRevisions(fixture.opened.replicas, fixture.uuid, { includeNames: true });
+  expect(requests[0]).not.toHaveProperty("includeNames");
+  expect(requests[1]).toMatchObject({ operation: "list", includeNames: true });
+});
+
+it("does not claim a sent naming request made no change when its reply is lost or unavailable", async () => {
+  const fixture = await admitted();
+  const mutation = { operation: "name" as const, name: "Reviewed", checksum: documentRevisionChecksum(fixture.replica.doc),
+    surface: { kind: "mcp", name: "Claude Code" } };
+  const committed: string[] = [];
+  fixture.reply(request => { committed.push(request.name!); });
+  await expect(mutateDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation, { timeoutMs: 100 }))
+    .rejects.toMatchObject({ code: "naming-outcome-unknown", details: { applied: null, reason: "unsupported" } });
+  expect(committed).toEqual(["Reviewed"]);
+  fixture.reply((request, send) => send({ requestId: request.requestId, ok: false, error: "unavailable" }));
+  await expect(mutateDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation))
+    .rejects.toMatchObject({ code: "naming-outcome-unknown", details: { applied: null, reason: "unreachable" } });
+  fixture.reply((request, send) => send({ requestId: request.requestId, ok: false, error: "stale-state" }));
+  await expect(mutateDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation))
+    .rejects.toMatchObject({ code: "stale-state", details: {} });
 });
 
 it.each([

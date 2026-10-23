@@ -263,20 +263,37 @@ const sidebar = {
   }).strict()).describe("Curated sidebar groups in stored order."),
 };
 
+const revisionAuthor = z.object({
+  githubUsername: z.string().describe("Current GitHub username."),
+  surface: z.object({ kind: z.string(), name: z.string() }).strict(),
+}).strict().nullable();
+const revisionName = z.object({
+  text: z.string(),
+  namer: revisionAuthor.describe("Account and surface that named the revision; separate from its author."),
+  namedAt: z.number().describe("Naming time in epoch milliseconds; renaming preserves this time."),
+  canManage: z.boolean().describe("Whether this account may rename or remove this name."),
+}).strict().nullable();
+const revisionEntry = z.object({
+  id: revisionId,
+  author: revisionAuthor.describe("Verified GitHub account and surface, or null when unknown."),
+  startedAt: z.number().nullable().describe("Start in epoch milliseconds; null only for content predating history."),
+  endedAt: z.number().nullable().describe("End in epoch milliseconds; null means this revision is still open."),
+  name: revisionName.describe("The revision's name, namer and time, or null when unnamed."),
+}).strict();
+
 /** All registered tools use these exact objects for advertisement and checking. */
 export const outputSchemas = {
   get_help: getHelp,
   list_revisions: z.object({
     uuid,
-    revisions: z.array(z.object({
-      id: revisionId,
-      author: z.object({
-        githubUsername: z.string().describe("Author's current GitHub username."),
-        surface: z.object({ kind: z.string(), name: z.string() }).strict(),
-      }).strict().nullable().describe("Verified GitHub account and surface, or null when unknown."),
-      startedAt: z.number().nullable().describe("Start in epoch milliseconds; null only for content predating history."),
-      endedAt: z.number().nullable().describe("End in epoch milliseconds; null means this revision is still open."),
-    }).strict()).describe("Hub-confirmed revisions, newest first; empty only when the hub confirms no history."),
+    revisions: z.array(revisionEntry).describe("Hub-confirmed revisions, newest first; empty only when the hub confirms no history."),
+  }).strict(),
+  name_revision: z.object({
+    uuid,
+    revision: revisionEntry,
+    applied: z.literal(true).describe("The name was applied in the hub's revision store; no local document-log write is made."),
+    synced: z.literal(true).describe("The hub acknowledged this naming transaction."),
+    hub,
   }).strict(),
   get_revision: z.object({
     uuid,

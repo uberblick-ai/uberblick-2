@@ -1,8 +1,9 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
-import { appendBlock, getBlocks, getMeta, initDoc } from "@uberblick/schema";
-import { createDocumentRevisionsClient, DocumentHistoryError } from "../src/shell/document-revisions.js";
+import { appendBlock, getBlocks, getMeta, initDoc, snapshotRevision } from "@uberblick/schema";
+import { createHash } from "node:crypto";
+import { createDocumentRevisionsClient, documentRevisionChecksum, DocumentHistoryError } from "../src/shell/document-revisions.js";
 import { mintHubAuthMessage } from "../src/collab/rooms.js";
 import { localSessionHeaders } from "../src/collab/local-session.js";
 
@@ -24,6 +25,50 @@ function client(body: unknown, status = 200) {
 }
 
 describe("document revision reads", () => {
+  it("captures the displayed document's content before hashing yields to later edits", async () => {
+    const source = new Y.Doc();
+    documents.push(source);
+    initDoc(source, { uuid: UUID, title: "Displayed state" });
+    appendBlock(source, { type: "paragraph", text: "Reviewed words" });
+    const expected = createHash("sha256").update(snapshotRevision(source).checksum).digest("hex");
+    const checksum = documentRevisionChecksum(source);
+    appendBlock(source, { type: "paragraph", text: "Later incoming edit" });
+    await expect(checksum).resolves.toBe(expected);
+    await expect(documentRevisionChecksum(source)).resolves.not.toBe(expected);
+  });
+
+  it("preserves opt-in naming metadata and writes the browser's captured checksum with local authorization", async () => {
+    const revision = { ...entries[0], endedAt: 120, name: {
+      text: "Reviewed", namer: { githubUsername: "ben", surface: { kind: "browser", name: "Browser" } }, namedAt: 120, canManage: true,
+    } };
+    await expect(client({ revisions: [revision] }).api.list(UUID, new AbortController().signal)).resolves.toEqual([revision]);
+    const { api, fetchImpl } = client({ revision });
+    const controller = new AbortController();
+    await expect(api.name(UUID, "Reviewed", "browser-sha", controller.signal)).resolves.toEqual(revision);
+    const [path, request] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(path).toBe("/api/revisions");
+    expect(request).toMatchObject({ method: "POST", cache: "no-store", headers: {
+      "Content-Type": "application/json", Authorization: "Bearer local-browser-proof", "X-Uberblick-Session": "page-session",
+    } });
+    expect(JSON.parse(request.body as string)).toEqual({ uuid: UUID, operation: "name", name: "Reviewed", expectedHash: "browser-sha" });
+    await api.rename(UUID, "newest", "Accepted", controller.signal);
+    expect(JSON.parse(fetchImpl.mock.calls[1]![1]!.body as string)).toEqual({ uuid: UUID, operation: "rename", revisionId: "newest", name: "Accepted" });
+    await api.removeName(UUID, "newest", controller.signal);
+    expect(JSON.parse(fetchImpl.mock.calls[2]![1]!.body as string)).toEqual({ uuid: UUID, operation: "remove_name", revisionId: "newest" });
+  });
+
+  it.each([
+    ["stale-state", /review the current content/], ["invalid-name", /1 to 100/],
+    ["already-named", /already has a name/], ["not-namer", /Only the person/], ["archived", /Archived documents/],
+  ])("explains a refused %s naming write", async (reason, message) => {
+    await expect(client({ reason }, 409).api.name(UUID, "Reviewed", "hash", new AbortController().signal)).rejects.toThrow(message);
+  });
+
+  it("identifies an existing name and namer when naming the same state is refused", async () => {
+    await expect(client({ reason: "already-named", existingName: { text: "Previously accepted", namer: { githubUsername: "alice" } } }, 409)
+      .api.name(UUID, "Reviewed", "hash", new AbortController().signal)).rejects.toThrow(/Previously accepted.*alice/);
+  });
+
   it("keeps newest-first metadata and authenticates uncached local requests with the page session", async () => {
     const { api, fetchImpl } = client({ revisions: entries });
     const controller = new AbortController();

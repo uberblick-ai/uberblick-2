@@ -26,8 +26,8 @@ function mcpPayload(payload: object): object {
 
 /**
  * Workspace writes stay synchronous after opening settle so another await
- * cannot interleave writes to the same Y.Doc. Hub revision reads may await
- * their detached snapshot. handler-invariants checks these boundaries;
+ * cannot interleave writes to the same Y.Doc. Hub revision requests may await
+ * detached reads or hub-only naming, without mutating a local Y.Doc. handler-invariants checks these boundaries;
  * static get_help never settles.
  */
 export function guarded(

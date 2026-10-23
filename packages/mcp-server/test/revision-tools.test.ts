@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  encodeRevisionResponseFrames, getMeta, getMetaMap, readRevisionRequest, roomForDoc,
+  encodeRevisionResponseFrames, getMeta, getMetaMap, readRevisionRequest, readRevisionResponse, roomForDoc,
   snapshotRevision, tombstoneDirectoryEntry, upsertDirectoryEntry,
   type RevisionRequest, type RevisionResponse,
 } from "@uberblick/schema";
@@ -114,6 +114,23 @@ describe("historical reads through the MCP boundary", () => {
     expect(before.revisions).toHaveLength(1);
     const id = before.revisions[0].id;
     expect(before.revisions[0]).toMatchObject({ author: { githubUsername: "revision-author", surface: { kind: "mcp" } }, startedAt: expect.any(Number), endedAt: null });
+    expect(before.revisions[0].name).toBeNull();
+    const currentState = Y.encodeStateAsUpdate(rig.instance.replicas.replica(uuid).doc);
+    const logSize = rig.instance.store.logSize();
+    const named = await rig.ok("name_revision", { uuid, name: "Reviewed after auth rewrite" });
+    expect(named).toMatchObject({ uuid, applied: true, synced: true, revision: {
+      id, author: before.revisions[0].author, endedAt: expect.any(Number), name: {
+        text: "Reviewed after auth rewrite", namer: { githubUsername: "revision-author", surface: { kind: "mcp" } },
+        namedAt: expect.any(Number), canManage: true,
+      },
+    } });
+    expect(named.revision.endedAt).toBe(named.revision.name.namedAt);
+    expect(Y.encodeStateAsUpdate(rig.instance.replicas.replica(uuid).doc)).toEqual(currentState);
+    expect(rig.instance.store.logSize()).toBe(logSize);
+    expect(await rig.call("name_revision", { uuid, name: "Duplicate name" })).toMatchObject({ isError: true,
+      payload: { error: "revision_already_named", applied: false, partial: false, synced: false,
+        existingName: { text: "Reviewed after auth rewrite", namer: { githubUsername: "revision-author" } } } });
+    expect((await rig.ok("list_revisions", { uuid })).revisions[0]).toEqual(named.revision);
     await rig.ok("archive_doc", { uuid });
     expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
     await rig.ok("restore_doc", { uuid });
@@ -151,6 +168,31 @@ describe("historical reads through the MCP boundary", () => {
     expect(await fresh.ok("get_revision", { uuid, revision: id })).toMatchObject({ title: "Earlier team title", blocks: [{ text: "Earlier team prose" }] });
     expect((await fresh.ok("get_data", { uuid, revision: id, collection: "observations" })).records)
       .toMatchObject([{ id: "earlier", value: { text: "earlier team data" } }]);
+
+    await rig.ok("restore_doc", { uuid });
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
+    let droppedReply = false;
+    const dropped = hub.hocuspocus.documents.get(roomForDoc(WORKSPACE, uuid))!.getConnections().map(connection => {
+      const send = connection.sendStateless.bind(connection);
+      return vi.spyOn(connection, "sendStateless").mockImplementation(frame => {
+        const response = readRevisionResponse(frame);
+        if (response?.ok === true && "revision" in response) {
+          droppedReply = true;
+          queueMicrotask(() => hub.hocuspocus.closeConnections());
+          return;
+        }
+        send(frame);
+      });
+    });
+    expect(await rig.call("name_revision", { uuid, name: "Committed before the reply was lost" }))
+      .toMatchObject({ isError: true, payload: { error: "revision_naming_outcome_unknown", applied: null,
+        partial: false, synced: false, reason: "unreachable", recoveryClass: "reread" } });
+    expect(droppedReply).toBe(true);
+    for (const spy of dropped) spy.mockRestore();
+    const afterLoss = await startServer(config());
+    clients.push(() => afterLoss.close());
+    expect((await afterLoss.ok("list_revisions", { uuid })).revisions[0])
+      .toMatchObject({ name: { text: "Committed before the reply was lost" } });
   });
 
   it("reads hub history in get_doc block shapes and pages historical data independently of live content", async () => {
@@ -195,7 +237,7 @@ describe("historical reads through the MCP boundary", () => {
         : { requestId: request.requestId, ok: true, state: snapshot });
     });
     const liveState = Y.encodeStateAsUpdate(document);
-    expect(await rig.ok("list_revisions", { uuid })).toEqual({ uuid, revisions: entries });
+    expect(await rig.ok("list_revisions", { uuid })).toEqual({ uuid, revisions: entries.map(entry => ({ ...entry, name: null })) });
     const historical = await rig.ok("get_revision", { uuid, revision });
     expect(historical).toEqual({ uuid, revision, title: "Earlier title", blocks: expectedBlocks, data: earlierData.data });
     expect(historical.blocks.find((block: { type: string }) => block.type === "paragraph" && "doc_links" in block)?.doc_links)
@@ -303,6 +345,9 @@ describe("historical reads through the MCP boundary", () => {
       expect(help.text).toContain("Example");
     }
     const contracts = await rig.ok("get_help", { topic: "tool-contracts" });
+    expect(advertised.find(tool => tool.name === "name_revision")?.annotations)
+      .toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+    expect((await rig.ok("get_help", { topic: "name_revision" })).text).toContain("only when a person asks");
     for (const code of ["revisions_local_only", "revisions_unreachable", "revisions_sign_in_required", "revisions_forbidden", "revisions_unsupported", "revision_not_found", "doc_deleted"]) {
       expect(contracts.text).toContain(code);
     }

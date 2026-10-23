@@ -102,6 +102,103 @@ function dataHistory(uuid: string, title: string): Record<string, string> {
 test.describe("document history through ub open", () => {
   const { harness, openApp } = setupHarness({ accessRole: "admin" });
 
+  test("names the reviewed state, compares since it, and lets its namer rename or remove it", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    await page.emulateMedia({ colorScheme: browserName === "webkit" ? "dark" : "light" });
+    const title = docTitle("Named review state");
+    const uuid = await newDocument(page, title);
+    const room = `${harness().workspaceUuid}/${uuid}`;
+    const live = editor(page);
+    await activateControl(live);
+    await page.keyboard.type("The amber fox stays.");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("An outdated paragraph.");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("The oldest paragraph.");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("An unchanged paragraph.");
+    await expect.poll(() => harness().hubText(room)).toContain("An unchanged paragraph.");
+    const trigger = history(page).getByRole("button", { name: "Name current revision…", exact: true });
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    const naming = page.getByRole("dialog", { name: "Name current revision", exact: true });
+    const input = naming.getByRole("textbox", { name: "Revision name", exact: true });
+    await expect(input).toBeFocused();
+    await input.fill("Reviewed after auth rewrite");
+    const screenshotName = browserName === "webkit" ? "naming-ipad-dark" : "naming-desktop-light";
+    const screenshot = info.outputPath(`${screenshotName}.png`);
+    await page.screenshot({ path: screenshot });
+    await info.attach(screenshotName, { path: screenshot, contentType: "image/png" });
+    await page.keyboard.press("Enter");
+    await expect(naming).toBeHidden();
+    await expect(trigger).toBeFocused();
+    await activateControl(history(page).getByRole("button", { name: "Back", exact: true }));
+    await expect(history(page)).toContainText("“Reviewed after auth rewrite”, named by browser-person in the browser at ");
+    await expect(history(page).getByRole("status")).not.toContainText("from ");
+    await activateControl(history(page).getByRole("button", { name: "Back to now", exact: true }));
+    for (const [before, after] of [["amber", "blue"], ["outdated", "current"], ["oldest", "latest"]] as const) {
+      const positions = await live.evaluate((element, before) => {
+        const doc = (element as HTMLElement & { editor: Editor }).editor.state.doc;
+        let from = -1;
+        doc.descendants((node, position) => {
+          const index = node.text?.indexOf(before) ?? -1;
+          if (index >= 0) from = position + index;
+        });
+        if (from < 0) throw new Error(`Missing text ${before}`);
+        return { from, to: from + before.length };
+      }, before);
+      await selectPositions(live, positions.from, positions.to);
+      await page.keyboard.type(after);
+    }
+    await expect.poll(() => harness().hubText(room)).toContain("The latest paragraph.");
+    await activateControl(history(page).getByRole("button", { name: "Since last named", exact: true }));
+    const view = historicalEditor(page);
+    await expect(history(page)).toContainText("Compared with “Reviewed after auth rewrite”");
+    await expect(view.locator('[data-revision-change="added"]')).toHaveText(["blue", "current", "latest"]);
+    await expect(view.locator('[data-revision-change="removed"]')).toHaveText(["amber", "outdated", "oldest"]);
+    await expect(view.locator("p").filter({ hasText: "An unchanged paragraph." }).locator("[data-revision-change]")).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await activateControl(history(page).getByRole("button", { name: "Back", exact: true }));
+    await activateControl(history(page).getByRole("button", { name: "Rename revision…", exact: true }));
+    const renaming = page.getByRole("dialog", { name: "Rename revision", exact: true });
+    await renaming.getByRole("textbox", { name: "Revision name", exact: true }).fill("Reviewed baseline");
+    await activateControl(renaming.getByRole("button", { name: "Rename", exact: true }));
+    await expect(renaming).toBeHidden();
+    await expect(history(page)).toContainText("“Reviewed baseline”, named by browser-person in the browser at ");
+    await activateControl(history(page).getByRole("button", { name: "Rename revision…", exact: true }));
+    await activateControl(renaming.getByRole("button", { name: "Remove name", exact: true }));
+    await expect(renaming).toBeHidden();
+    await expect(view).toContainText("The amber fox stays.");
+    await expect(history(page)).not.toContainText("Reviewed baseline");
+    await expect(history(page).getByRole("button", { name: "Since last named", exact: true })).toHaveCount(0);
+    await activateControl(history(page).getByRole("button", { name: "Back to now", exact: true }));
+    await expect(live).toHaveAttribute("contenteditable", "true");
+    await expect(live).toContainText("The blue fox stays.");
+  });
+
+  test("refuses naming if the displayed state changes after opening the naming dialog", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const uuid = await newDocument(page, docTitle("Stale review state"));
+    await activateControl(editor(page));
+    await page.keyboard.type("Reviewed current content.");
+    await expect.poll(() => harness().hubText(`${harness().workspaceUuid}/${uuid}`)).toBe("Reviewed current content.");
+    const peer = await openApp(browser, new URL(page.url()).pathname, { readySelector: ".ub-editor .ProseMirror" });
+    await expect.poll(() => editor(peer).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.textContent))
+      .toBe("Reviewed current content.");
+    await activateControl(history(page).getByRole("button", { name: "Name current revision…", exact: true }));
+    const naming = page.getByRole("dialog", { name: "Name current revision", exact: true });
+    await naming.getByRole("textbox", { name: "Revision name", exact: true }).fill("Reviewed");
+    await selectPositions(editor(peer), 1);
+    await peer.keyboard.type("Later collaborator change: ");
+    await expect.poll(() => harness().hubText(`${harness().workspaceUuid}/${uuid}`)).toContain("Later collaborator change:");
+    await activateControl(naming.getByRole("button", { name: "Name revision", exact: true }));
+    await expect(naming.getByRole("alert")).toContainText("review the current content");
+    await activateControl(naming.getByRole("button", { name: "Cancel", exact: true }));
+    await activateControl(history(page).getByRole("button", { name: "Refresh history", exact: true }));
+    await expect(history(page).getByRole("button", { name: "Since last named", exact: true })).toHaveCount(0);
+    await expect(editor(page)).toContainText("Later collaborator change:");
+  });
+
   test("real hub revisions navigate, keep removed text selectable and isolate the live editor", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
     await page.emulateMedia({ colorScheme: browserName === "webkit" ? "dark" : "light" });

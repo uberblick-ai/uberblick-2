@@ -36,6 +36,7 @@ import { inputSchema as listDocsInput, listDocsOperation } from "./tools/list-do
 import { inputSchema as listTagsInput, listTagsOperation } from "./tools/list-tags.js";
 import { inputSchema as listRevisionsInput, listRevisionsOperation } from "./tools/list-revisions.js";
 import { inputSchema as moveBlockInput, moveBlockOperation } from "./tools/move-block.js";
+import { inputSchema as nameRevisionInput, nameRevisionOperation } from "./tools/name-revision.js";
 import type { Operation, ToolOperation, Writes } from "./tools/operation.js";
 import { inputSchema as restoreDocInput, restoreDocOperation } from "./tools/restore-doc.js";
 import { inputSchema as searchInput, searchOperation } from "./tools/search.js";
@@ -178,13 +179,26 @@ export const tools: readonly Tool[] = [
     name: "list_revisions",
     title: "List document revisions",
     description:
-      "List hub revisions newest first, including archived documents. IDs differ from get_doc rev hashes; " +
-      "use them with get_revision or get_data. Empty means hub-confirmed no history.",
+      "List hub revisions newest first, including archived documents, with names, namers and times or null. " +
+      "IDs work with get_revision/get_data. Empty means hub-confirmed no history.",
     input: listRevisionsInput,
     operation: listRevisionsOperation,
     example: { uuid },
     related: documentContracts,
     details: toolHelpDetails.list_revisions,
+  }),
+  tool({
+    name: "name_revision",
+    title: "Name the current document revision",
+    description:
+      "Name the current synchronized state only when a person asks. Requires team-hub write access; " +
+      "closes its stretch. One name per revision; manage it in the web.",
+    input: nameRevisionInput,
+    operation: nameRevisionOperation,
+    hints: { destructive: false, idempotent: true },
+    example: { uuid, name: "Reviewed after auth rewrite" },
+    related: documentContracts,
+    details: toolHelpDetails.name_revision,
   }),
   tool({
     name: "get_revision",

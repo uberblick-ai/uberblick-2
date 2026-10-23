@@ -144,7 +144,9 @@ export const toolHelpDetails = {
     "List a known document's automatic revisions from the hub, newest first, including an archived document. " +
     "The whole list is returned without paging. An empty list means the hub confirmed there are no revisions; " +
     "unavailable history is a failure, never an empty list.\n\n" +
-    "Each entry has `id`, `author`, `startedAt` and `endedAt`. The author is " +
+    "Each entry has `id`, `author`, `startedAt`, `endedAt` and `name`. A name is null or " +
+    "`{text, namer, namedAt, canManage}`; its namer has the same account/surface shape as author. " +
+    "`namedAt` is epoch milliseconds and `canManage` identifies whether this account may manage the name in the web. The author is " +
     "`{githubUsername, surface: {kind, name}}`, using the author's current GitHub username, or null when unknown. " +
     "Times are epoch milliseconds: null `startedAt` means an unknown start for content from before history began, " +
     "and null `endedAt` means the revision is still open.\n\n" +
@@ -152,6 +154,19 @@ export const toolHelpDetails = {
     "get_doc's page and block `rev` content hashes. Writing tools do not accept revision IDs. " +
     "A UUID unknown to this workspace refuses with doc_not_found before contacting the hub; a permanently " +
     "deleted document refuses with doc_deleted. See tool-contracts for hub history failures and recovery.",
+  name_revision:
+    "Call only when a person asks to name the current document state. Supply `uuid` and a `name` of " +
+    "1 to 100 characters on one line. The hub verifies that this client's displayed title, visible blocks " +
+    "and structured data match its current state. Pending local changes or unseen remote content refuse " +
+    "with revision_stale_state; synchronize and reread before naming. Requires write access to a live " +
+    "team-hub document. Naming closes the current stretch without changing its author or document content, " +
+    "and records the naming account, MCP client surface and hub time. An already named state refuses " +
+    "with revision_already_named and existingName. Renaming and removal are available to the namer in the web.\n\n" +
+    "Success returns the named `revision`, `applied: true` and `synced: true`: the hub applied and " +
+    "acknowledged its naming transaction. This hub-only metadata writes no local document log. A known " +
+    "refusal reports applied: false. If a sent request loses its reply, revision_naming_outcome_unknown " +
+    "reports applied: null, partial: false and synced: false. Read list_revisions before retrying; " +
+    "reason unsupported means an admitted hub stayed silent, while unreachable means transport failed.",
   get_revision:
     "Read a known document as it was at the hub revision ID from list_revisions, including an archived document. " +
     "The result returns `uuid`, `revision`, `title`, visible `blocks` and `data`. Blocks use get_doc's shape " +

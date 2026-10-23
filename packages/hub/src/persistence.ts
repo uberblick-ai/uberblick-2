@@ -22,6 +22,7 @@ import {
   deleteDirectoryEntry,
   enforceDeletedDirectoryEntries,
   isDirectoryEntryDeleted,
+  isDirectoryEntryArchived,
   listDeletedDirectoryUuids,
   parseRoom,
   roomForDoc,
@@ -92,6 +93,7 @@ export class HubDatabase implements Extension {
   private readonly deletedRooms = new Set<string>();
   private readonly pendingDeletedRooms = new Set<string>();
   private readonly reconcilingDirectories = new WeakSet<Y.Doc>();
+  private readonly directories = new Map<string, Y.Doc>();
   private deletionHandler: (rooms: readonly string[]) => void = () => {};
   private loadedRoom: (room: string) => boolean = () => false;
 
@@ -177,6 +179,21 @@ export class HubDatabase implements Extension {
     return this.deletedRooms.has(room);
   }
 
+  /** Loaded directory state takes precedence over its debounced persisted copy. */
+  isArchivedRoom(room: string): boolean {
+    const { workspaceId, uuid } = parseRoom(room);
+    const name = roomForDoc(workspaceId, "_directory");
+    const loaded = this.directories.get(name);
+    if (loaded !== undefined) return isDirectoryEntryArchived(loaded, uuid);
+    const data = this.prepared().select.get({ name })?.data;
+    if (!(data instanceof Uint8Array)) return false;
+    const directory = new Y.Doc();
+    try {
+      Y.applyUpdate(directory, data);
+      return isDirectoryEntryArchived(directory, uuid);
+    } finally { directory.destroy(); }
+  }
+
   requireRoom(room: string): void {
     if (this.isDeletedRoom(room)) throw { reason: DOC_DELETED_REASON };
   }
@@ -211,6 +228,10 @@ export class HubDatabase implements Extension {
       Y.applyUpdate(document, data);
     }
     if (parseRoom(documentName).isDirectory) {
+      this.directories.set(documentName, document);
+      document.on("destroy", () => {
+        if (this.directories.get(documentName) === document) this.directories.delete(documentName);
+      });
       this.reconcileDirectory(documentName, document);
       // This runs synchronously, before an update can be acknowledged. A
       // debounced directory store could otherwise lose its deletion evidence.
@@ -260,6 +281,7 @@ export class HubDatabase implements Extension {
     this.revisionStore = undefined;
     this.deletedRooms.clear();
     this.pendingDeletedRooms.clear();
+    this.directories.clear();
   }
 
   /**
