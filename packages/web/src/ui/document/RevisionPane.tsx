@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ReactElement } from "react";
+import type { ReactElement, RefObject } from "react";
 import type { Editor } from "@tiptap/core";
 import { getMeta } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
@@ -48,10 +48,11 @@ function useFocusOnReturn(target: { current: HTMLElement | null }, active: boole
 }
 
 /** The live status line's way into history: name the current state, or step back. */
-export function HistoryControls({ history, liveDocument = null, writable = false }: {
-  history: DocumentHistory; liveDocument?: Y.Doc | null; writable?: boolean;
+export function HistoryControls({ history, liveDocument = null, writable = false, returnFocus }: {
+  history: DocumentHistory; liveDocument?: Y.Doc | null; writable?: boolean; returnFocus?: RefObject<HTMLButtonElement | null>;
 }): ReactElement | null {
-  const back = useRef<HTMLButtonElement | null>(null);
+  const ownBack = useRef<HTMLButtonElement | null>(null);
+  const back = returnFocus ?? ownBack;
   useFocusOnReturn(back, history.active);
   if (!history.available) return null;
   return <fieldset className="ub-history-nav" aria-label="Document history">
@@ -113,7 +114,7 @@ function RevisionStatus({ history, writable }: { history: DocumentHistory; writa
         disabled={busy || oldest} onClick={() => { focus.current = "back"; history.back(); }}><PreviousIcon /></button>
       <button ref={forward} type="button" className="ub-history-icon" aria-label="Next revision"
         title={selection.index === 0 ? "Back to the current version" : "Next revision"} disabled={busy && selection.index > 0}
-        onClick={() => { if (selection.index === 0 && compared === undefined) history.now(); else { focus.current = "forward"; history.open(Math.max(0, selection.index - 1)); } }}><NextIcon /></button>
+        onClick={() => { if (selection.index === 0) history.now(); else { focus.current = "forward"; history.open(selection.index - 1); } }}><NextIcon /></button>
     </span>
     <span className="ub-history-position">{selection.index + 1} of {total} ·</span>
     {/* A named revision shows its name where the id would be; the tag renames it when its namer may. */}
