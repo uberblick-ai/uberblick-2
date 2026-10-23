@@ -13,7 +13,7 @@ interface HistoryState {
   active: boolean;
   busy: boolean;
   error: string | null;
-  /** Titles of the revisions read so far; the list itself carries none. */
+  /** Title history survives replacement of the comparison's detached documents. */
   titles: Readonly<Record<string, string>>;
 }
 interface Session {
@@ -44,7 +44,7 @@ function knownTitles(documents: Map<string, Y.Doc>): Record<string, string> {
   return Object.fromEntries([...documents].map(([id, doc]) => [id, getMeta(doc).title]));
 }
 
-/** The predecessor's title when this revision changed it, once both have been read. */
+/** Rename attribution always follows adjacent revisions, including named comparisons. */
 export function renamedFrom(entries: readonly RevisionEntry[], titles: Readonly<Record<string, string>>, index: number): string | null {
   const title = titles[entries[index]?.id ?? ""];
   const previous = titles[entries[index + 1]?.id ?? ""];
@@ -98,6 +98,31 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
   }, [client, uuid, path, update, fail]);
   const session = view?.session;
   const state = view !== null && session?.client === client && session.uuid === uuid && session.path === path && current.current === session ? view.state : initial;
+  useEffect(() => {
+    const entries = state.entries;
+    if (session === undefined || !state.active || state.busy || state.error !== null || state.selection === null || entries === null) return;
+    const controller = new AbortController();
+    const signal = AbortSignal.any([session.signal, controller.signal]);
+    const operation = session.operation;
+    // The list has no titles. Read missing ones without keeping whole snapshots
+    // or delaying the selected comparison; only one extra request runs at a time.
+    void (async () => {
+      try {
+        for (const entry of entries) {
+          if (signal.aborted || session.operation !== operation) return;
+          if (Object.hasOwn(session.state.titles, entry.id)) continue;
+          const doc = await session.client.get(session.uuid, entry.id, signal);
+          try {
+            if (signal.aborted || session.operation !== operation) return;
+            update(session, { titles: { ...session.state.titles, [entry.id]: getMeta(doc).title } });
+          } finally { doc.destroy(); }
+        }
+      } catch (error) {
+        if (!signal.aborted && session.operation === operation) update(session, { error: error instanceof DocumentHistoryError ? error.message : new DocumentHistoryError("unreachable").message });
+      }
+    })();
+    return () => controller.abort();
+  }, [session, state.active, state.busy, state.error, state.selection, state.entries, update]);
   const get = async (owner: Session, id: string, operation: number, documents = owner.documents): Promise<Y.Doc> => {
     const cached = documents.get(id);
     if (cached !== undefined) return cached;
@@ -128,7 +153,10 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
       const selection = owner.state.selection;
       const entries = named || relist || selection === null ? await owner.client.list(owner.uuid, owner.signal) : owner.state.entries ?? [];
       if (owner.operation !== operation) return;
-      if (selection === null && fresh === null) { destroyDocuments(owner.documents); update(owner, { titles: {} }); }
+      if (selection === null) {
+        if (fresh === null) destroyDocuments(owner.documents);
+        update(owner, { titles: {} });
+      }
       const index = targetIndex(target, selection, entries);
       if ("id" in target && index < 0) throw new DocumentHistoryError("revision-not-found");
       owner.retryTarget = resolvedTarget(target, entries, index);
@@ -143,7 +171,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
         adopted = true;
       }
       owner.retryTarget = null;
-      update(owner, { entries, selection: next, busy: false, titles: knownTitles(owner.documents) });
+      update(owner, { entries, selection: next, busy: false, titles: { ...owner.state.titles, ...knownTitles(owner.documents) } });
     } catch (error) { if (owner.operation === operation) fail(owner, error); }
     finally { if (fresh !== null && !adopted) destroyDocuments(fresh); }
   };

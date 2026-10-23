@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { getMeta, initDoc, type RevisionEntry } from "@uberblick/schema";
 import { DocumentHistoryError, type DocumentRevisionsClient } from "../src/shell/document-revisions.js";
-import { useDocumentHistory, type DocumentHistory } from "../src/ui/document/document-history.js";
+import { renamedFrom, useDocumentHistory, type DocumentHistory } from "../src/ui/document/document-history.js";
 
 const UUID = "9f3c1a2b-0000-4000-8000-0123456789ab";
 const OTHER_UUID = "4a9939be-2778-442f-9278-e1517ef88335";
@@ -62,7 +62,7 @@ describe("document history navigation", () => {
     expect(getMeta(fix.reading().selection!.after).title).toBe("newest");
     expect(getMeta(fix.reading().selection!.before!).title).toBe("earliest");
     expect(fix.reading().selection!.comparedWith).toEqual(named);
-    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(fix.reading().titles).toEqual({ newest: "newest", middle: "middle", earliest: "earliest" });
     await act(async () => fix.reading().back());
     expect(fix.reading().selection?.comparedWith).toBeUndefined();
     expect(fix.reading().entry?.id).toBe("middle");
@@ -227,29 +227,30 @@ describe("document history navigation", () => {
     await act(async () => fix.reading().back());
     expect(getMeta(fix.reading().selection!.after).title).toBe("newest version 2");
     expect(first.isDestroyed).toBe(true);
-    expect(api.get).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(api.get).mock.calls.filter(call => call[1] === "newest")).toHaveLength(2);
   });
 
   it("never caches an older navigation request that completes after a refreshed visit", async () => {
     const pending = deferred<Y.Doc>();
     const stale = document("Old earliest reading");
-    const fresh = document("Refreshed earliest reading");
-    let earliestReads = 0;
+    let hold = false;
     const api = client(async (_uuid, id) => {
       if (id !== "earliest") return document(id);
-      earliestReads++;
-      return earliestReads === 1 ? pending.promise : fresh;
+      return hold ? pending.promise : document("Refreshed earliest reading");
     });
     const fix = mount(api);
     await act(async () => {});
     await act(async () => fix.reading().back());
     expect(fix.reading().active).toBe(true);
+    hold = true;
     await act(async () => fix.reading().back());
     expect(fix.reading().busy).toBe(true);
     await act(async () => fix.reading().now());
+    hold = false;
     await act(async () => fix.reading().back());
     await act(async () => fix.reading().back());
-    expect(fix.reading().selection!.before).toBe(fresh);
+    const fresh = fix.reading().selection!.before!;
+    expect(getMeta(fresh).title).toBe("Refreshed earliest reading");
     await act(async () => pending.resolve(stale));
     expect(fix.reading().selection!.before).toBe(fresh);
     await act(async () => fix.reading().back());
@@ -373,5 +374,59 @@ describe("document history navigation", () => {
     await act(async () => fix.reading().sinceNamed("gone"));
     expect(fix.reading().error).toMatch(/no longer available/);
     expect(fix.reading().selection!.comparedWith).toEqual(earliest);
+  });
+
+  it("loads sidebar rename information before visiting entries and retains it across named comparisons", async () => {
+    const api = client(async (_uuid, id) => document(id === "earliest" ? "Alpha" : "Beta"));
+    const baseline = { ...entries[2]!, name: { text: "Kickoff", namer: null, namedAt: 50, canManage: false } };
+    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, baseline]);
+    const fix = mount(api);
+    await act(async () => {});
+    expect(api.get).not.toHaveBeenCalled();
+    await act(async () => fix.reading().back());
+    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 1)).toBe("Alpha");
+    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 0)).toBeNull();
+    await act(async () => fix.reading().open(1));
+    await act(async () => fix.reading().sinceNamed("earliest"));
+    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 1)).toBe("Alpha");
+    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 0)).toBeNull();
+    fix.view.unmount();
+    expect(documents.every(doc => doc.isDestroyed)).toBe(true);
+  });
+
+  it("cancels title-only reads on leaving history and destroys late answers without adopting them", async () => {
+    const pending = deferred<Y.Doc>();
+    const api = client(async (_uuid, id) => id === "earliest" ? pending.promise : document(id));
+    const fix = mount(api);
+    await act(async () => {});
+    await act(async () => fix.reading().back());
+    const signal = vi.mocked(api.get).mock.calls.find(call => call[1] === "earliest")![2];
+    expect(fix.reading().busy).toBe(false);
+    await act(async () => fix.reading().now());
+    expect(signal.aborted).toBe(true);
+    const late = document("Late title");
+    await act(async () => pending.resolve(late));
+    expect(late.isDestroyed).toBe(true);
+    expect(fix.reading().titles.earliest).toBeUndefined();
+    expect(fix.reading().error).toBeNull();
+  });
+
+  it("reports a title read failure without discarding the comparison and retries the missing information", async () => {
+    let unavailable = true;
+    const api = client(async (_uuid, id) => {
+      if (id === "earliest" && unavailable) throw new DocumentHistoryError("unreachable");
+      return document(id);
+    });
+    const fix = mount(api);
+    await act(async () => {});
+    await act(async () => fix.reading().back());
+    const selected = fix.reading().selection;
+    expect(fix.reading().error).toMatch(/cannot be reached/);
+    expect(selected!.after.isDestroyed).toBe(false);
+    unavailable = false;
+    await act(async () => fix.reading().retry());
+    expect(fix.reading().selection).toBe(selected);
+    expect(fix.reading().titles.earliest).toBe("earliest");
+    expect(fix.reading().error).toBeNull();
   });
 });

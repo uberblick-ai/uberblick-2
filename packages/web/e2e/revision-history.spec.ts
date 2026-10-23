@@ -518,6 +518,71 @@ test.describe("document history through ub open", () => {
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   });
 
+  test("rename markers are available before visiting and survive a named comparison without misattributing the rename", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const uuid = await newDocument(page, docTitle("Rename attribution"));
+    const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
+    await serveHistory(page, [
+      { id: "latest", author: { ...person, githubUsername: "Latest author" }, startedAt: 3_000, endedAt: null },
+      { id: "middle", author: { ...person, githubUsername: "Middle author" }, startedAt: 2_000, endedAt: 3_000 },
+      { id: "baseline", author: person, startedAt: 1_000, endedAt: 2_000,
+        name: { text: "Kickoff", namer: person, namedAt: 2_000, canManage: true } },
+    ], {
+      latest: savedState(uuid, "Beta", "Latest content."),
+      middle: savedState(uuid, "Beta", "Middle content."),
+      baseline: savedState(uuid, "Alpha", "Baseline content."),
+    });
+    await previous(page);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(history(page)).not.toContainText("renamed from");
+    let drawer = await showHistoryList(page);
+    const list = historyList(page);
+    const middle = list.getByRole("button", { name: /Middle author/ });
+    await expect(middle).toContainText("renamed");
+    await expect(list.getByRole("button", { name: /Latest author/ })).not.toContainText("renamed");
+    await activateControl(middle);
+    await expect(historicalEditor(page)).toContainText("Middle content.");
+    await closeHistoryList(page, drawer);
+    await expect(history(page).locator(".ub-history-renamed s")).toHaveText("Alpha");
+    drawer = await showHistoryList(page);
+    const since = list.getByRole("button", { name: "Changes since this name", exact: true });
+    await activateControl(since);
+    await expect(since).toHaveAttribute("aria-current", "true");
+    await closeHistoryList(page, drawer);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(history(page)).toContainText("compared with “Kickoff”");
+    await expect(history(page)).not.toContainText("renamed from");
+    await showHistoryList(page);
+    await expect(middle).toContainText("renamed");
+  });
+
+  test("a named comparison attributes a rename back to the immediate predecessor", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const uuid = await newDocument(page, docTitle("Rename back attribution"));
+    const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
+    await serveHistory(page, [
+      { id: "latest", author: person, startedAt: 3_000, endedAt: null },
+      { id: "middle", author: person, startedAt: 2_000, endedAt: 3_000 },
+      { id: "baseline", author: person, startedAt: 1_000, endedAt: 2_000,
+        name: { text: "Kickoff", namer: person, namedAt: 2_000, canManage: true } },
+    ], {
+      latest: savedState(uuid, "Alpha", "Latest content."),
+      middle: savedState(uuid, "Beta", "Middle content."),
+      baseline: savedState(uuid, "Alpha", "Baseline content."),
+    });
+    await previous(page);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(history(page).locator(".ub-history-renamed s")).toHaveText("Beta");
+    const drawer = await showHistoryList(page);
+    const since = historyList(page).getByRole("button", { name: "Changes since this name", exact: true });
+    await activateControl(since);
+    await expect(since).toHaveAttribute("aria-current", "true");
+    await closeHistoryList(page, drawer);
+    await expect(historicalEditor(page)).toContainText("Latest content.");
+    await expect(history(page)).toContainText("compared with “Kickoff”");
+    await expect(history(page).locator(".ub-history-renamed s")).toHaveText("Beta");
+  });
+
   test("opening history preserves unsent comment and reply drafts", { tag: "@webkit" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
     const title = docTitle("Retained discussion drafts");

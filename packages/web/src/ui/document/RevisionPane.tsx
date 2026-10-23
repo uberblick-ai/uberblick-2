@@ -13,6 +13,7 @@ import { CardButtonControls } from "../editor-controls/CardButtonControls.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
 import type { FormattedTimestamp } from "../timestamps.js";
 import type { DocumentHistory } from "./document-history.js";
+import { renamedFrom } from "./document-history.js";
 import { ClockIcon, NextIcon, PreviousIcon, TagIcon } from "./history-icons.js";
 import { revisionAuthor, revisionTime } from "./revision-list.js";
 import { RevisionNameControls } from "./RevisionNameControls.js";
@@ -91,9 +92,7 @@ function RevisionStatus({ history, writable }: { history: DocumentHistory; writa
   const oldest = selection.index >= total - 1;
   const { label, time } = attribution(entry, oldest, now);
   const compared = selection.comparedWith;
-  const title = getMeta(selection.after).title;
-  const previousTitle = selection.before === null ? null : getMeta(selection.before).title;
-  const renamed = previousTitle !== null && previousTitle !== title ? previousTitle : null;
+  const renamed = renamedFrom(entries, history.titles, selection.index);
   return <fieldset ref={group} aria-label="Document history" className="ub-history-controls ub-type-small">
     <span className="ub-history-who" title={revisionLabel(entry)}>
       <ClockIcon />
