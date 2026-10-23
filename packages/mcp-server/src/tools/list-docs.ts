@@ -17,6 +17,10 @@ export const inputSchema = strictInput({
   include_superseded: z.boolean().optional().describe("Return every decision record instead of one row per topic."),
 });
 
+const DIRECTORY_HINT =
+  "The hub has not delivered the document directory to this replica yet, so documents may be missing; " +
+  "sync_status says whether it can still arrive.";
+
 export const listDocsOperation = operation(READ, inputSchema, (context, { tag, kind, status, has_open_threads, include_deleted, include_superseded }, _request) => {
   const { replicas, tagCatalog, topicRow, directoryRowJson } = context;
 
@@ -49,11 +53,14 @@ export const listDocsOperation = operation(READ, inputSchema, (context, { tag, k
       .map(topicRow);
   // Derived, never stored: the sidebar doc is the one place a pin lives.
   const pinned = pinnedUuids(replicas);
+  const complete = replicas.roomComplete(replicas.directory().room);
   return {
     workspace: replicas.config.workspaceId,
+    complete,
+    ...(complete ? {} : { directoryHint: DIRECTORY_HINT }),
     docs: [...documents, ...decisionRows]
       .sort(compareDirectoryEntries)
       .map((entry: TopicRowEntry) => directoryRowJson(entry, pinned.has(entry.uuid))),
-    hub: replicas.sync.state(),
+    hub: replicas.hubState(),
   };
 });

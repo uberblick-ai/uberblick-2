@@ -232,7 +232,8 @@ export const toolHelpDetails = {
     "true` returns one row per record, with predicates applied per record and no topic UUID lists. Permanently deleted UUIDs are always excluded. `include_deleted` admits archived topics " +
     "but is not a predicate and does not lift the default omission, so an archived decision needs it together " +
     "with a matching predicate. A fresh replica can list the whole corpus once the directory room has " +
-    "synced. See [Decision records](uberblick://help/decisions) for decision answer guidance.\n\n" +
+    "synced; until then `complete` is false and `directoryHint` says why. A local workspace's listing is " +
+    "always complete, because every replica on this computer shares one log. See [Decision records](uberblick://help/decisions) for decision answer guidance.\n\n" +
     "A decision row's `discussion` caches the record's RFC UUID, null when none or absent when unknown until a " +
     "newer client repairs the stub. Listed with `include_superseded: true`, each pending proposal therefore names " +
     "its own discussion without opening its room. The reference is distinct from curated links and recorded " +
@@ -691,7 +692,8 @@ export const toolHelpDetails = {
     "What this replica holds and what the hub has acknowledged.\n\n" +
     "`hub.status` distinguishes `hub-down`, a retryable connection or renewal failure, from `auth-failed`, an " +
     "authentication problem that needs human action. `disabled` means sync is disabled, so this server is " +
-    "local-only. Every reading carries `hub.recoveryClass`: `retry` means a missing room can still arrive as " +
+    "local-only. `local` means a local workspace whose hub runs only while `ub open` does: changes are saved " +
+    "on this computer, nothing needs retrying, and `ub open` syncs them as it starts. Every hub reading carries `hub.recoveryClass`: `retry` means a missing room can still arrive as " +
     "the connection recovers; `manual` means a person must act before sync can resume. This also applies to " +
     "shared-secret readings. `hub.authRecovery`, when present on `auth-failed`, distinguishes " +
     "`sign-in-required`, `no-workspace-access`, `credential-store` and `renewal-unavailable`; `hub.reason` " +
@@ -700,11 +702,16 @@ export const toolHelpDetails = {
     "replica's and `hub.hubProtocolVersion` the hub's, and `hub.reason` says which side is older; nothing " +
     "syncs until that side is updated, and no amount of waiting changes it. Every tool still works locally " +
     "throughout.\n\n" +
+    "`caughtUp` is the one field to check before reporting work as delivered: true when the replica is " +
+    "connected, has no pending room or attach drain, and every attached room is acknowledged. A local " +
+    "workspace is caught up once its writes are saved, because every replica on this computer shares one " +
+    "log. The counters below explain a false.\n\n" +
     "The two counts here are in different units, so they are not expected to agree. `unsyncedChanges` counts " +
     "ROOMS, not updates: the rooms holding local changes the hub has not acknowledged, the ones " +
     "`pendingRooms` names. It is read from the durable pending set, so it survives a restart and is non-zero " +
     "in local-only mode: work that never left this machine is unsynced, whether or not a connection was ever " +
-    "attempted. `inFlightUpdates` counts provider SYNC MESSAGES awaiting acknowledgement on the current " +
+    "attempted. A local workspace reports no pending rooms, `inFlightUpdates` 0 and `lastSync` null, as `ub " +
+    "status` does. `inFlightUpdates` counts provider SYNC MESSAGES awaiting acknowledgement on the current " +
     "connection, which is not a count of Yjs updates: the provider merges a batch of updates into one " +
     "message, counts a message before it goes out, and resets the backlog to the single sync-handshake " +
     "message on every reconnect — so it can read 1 for a whole document's worth of unsent work. It is in " +

@@ -47,7 +47,7 @@ export const getSidebarOperation = operation(READ, getSidebarInput, (context, _a
   const sidebar = replicas.sidebar();
   return ({
     ...sidebarPayload(replicas, sidebar),
-    hub: replicas.sync.state(),
+    hub: replicas.hubState(),
   });
 });
 

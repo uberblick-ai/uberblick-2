@@ -237,8 +237,9 @@ describe("with the hub stopped", () => {
     // The count comes from the durable pending set, not a provider's in-memory
     // counter: with sync disabled there is no provider at all, and an offline
     // restart starts every counter at zero — but the work is still unsynced.
+    // A local workspace reports none pending instead; this is a hub workspace.
     const databasePath = tempDatabasePath();
-    const first = await startServer(testConfig({ databasePath }));
+    const first = await startServer({ ...testConfig({ databasePath }), localWorkspace: false });
     rigs.push(first);
     const created = await first.ok("create_doc", { title: "Never left home", description: "A test document." });
 
@@ -250,13 +251,36 @@ describe("with the hub stopped", () => {
     await first.close();
     rigs.length = 0;
 
-    const restarted = await startServer(testConfig({ databasePath }));
+    const restarted = await startServer({ ...testConfig({ databasePath }), localWorkspace: false });
     rigs.push(restarted);
     const after = await restarted.ok("sync_status", {});
     expect(after.unsyncedChanges).toBeGreaterThan(0);
     expect(
       (after.pendingRooms as { room: string }[]).map((entry) => entry.room),
     ).toContain(`${WORKSPACE}/${created.uuid}`);
+  });
+
+  it("reports a local workspace without `ub open` as local, with nothing pending", async () => {
+    const rig = await startServer({
+      ...testConfig({ authSecret: TEST_SECRET, hubUrl: "ws://127.0.0.1:1" }),
+      localWorkspace: true,
+    });
+    rigs.push(rig);
+    const status = await rig.ok("sync_status", {});
+    expect(status).toMatchObject({
+      hub: { status: "local", recoveryClass: "manual" },
+      caughtUp: true, unsyncedChanges: 0, pendingRooms: [], inFlightUpdates: 0, lastSync: null,
+    });
+    expect(status.hub.reason).toContain("ub open");
+
+    const created = await rig.ok("create_doc", { title: "Saved here", description: "A test document." });
+    expect(created).toMatchObject({ applied: true, synced: false, hub: { status: "local" } });
+    // Replicas on this computer share one log, so nothing is missing locally.
+    for (const tool of ["list_tags", "list_docs"]) {
+      const listed = await rig.ok(tool, {});
+      expect(listed.complete).toBe(true);
+      expect(Object.keys(listed).filter((key) => key.endsWith("Hint"))).toEqual([]);
+    }
   });
 
   it("does not open a room for a document nobody has heard of", async () => {

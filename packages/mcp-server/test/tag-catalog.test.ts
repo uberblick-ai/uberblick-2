@@ -105,6 +105,7 @@ describe("the workspace tag catalog", () => {
 
     const listed = await rig.ok("list_tags");
     expect(listed).toMatchObject({ complete: false, tags: [] });
+    expect(listed.catalogHint).toContain("sync_status");
     expect(isTagCatalogSeeded(rig.instance.replicas.settings().doc)).toBe(false);
     expect(listed.hub.status).not.toBe("connected");
 

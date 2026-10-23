@@ -25,6 +25,8 @@ export interface SyncStatus {
   workspace: string;
   database: string;
   hub: HubState;
+  /** The one summary: nothing is waiting to reach, or arrive from, the hub. */
+  caughtUp: boolean;
   /** Rooms holding local changes the hub has not acknowledged. Counts ROOMS. */
   unsyncedChanges: number;
   pendingRooms: PendingRoom[];
@@ -128,23 +130,29 @@ export function collectServingSyncStatus(
 
 /**
  * Diagnostics must still settle and answer after persistence has failed.
+ * CLI status reads this too. A local workspace has no hub waiting for its
+ * changes: `ub open` syncs them as it starts, so nothing counts as pending.
  */
 export async function collectSyncStatus(
   replicas: Replicas,
 ): Promise<SyncStatus> {
   await replicas.settle({ requireHealthy: false });
-  const pending = replicas.store.pendingRooms();
+  const local = replicas.config.localWorkspace === true;
+  const pending = local ? [] : replicas.store.pendingRooms();
 
   return {
     session: replicas.config.sessionId,
     agent: replicas.name,
     workspace: replicas.config.workspaceId,
     database: replicas.store.databasePath,
-    hub: replicas.sync.state(),
+    hub: replicas.hubState(),
+    caughtUp: local
+      ? !replicas.store.isRemoved() && replicas.persistenceError() === null
+      : collectReplicaSyncState(replicas).caughtUp,
     unsyncedChanges: pending.length,
     pendingRooms: pending,
-    lastSync: replicas.readLastSync(),
-    inFlightUpdates: replicas.sync.unsyncedChanges(),
+    lastSync: local ? null : replicas.readLastSync(),
+    inFlightUpdates: local ? 0 : replicas.sync.unsyncedChanges(),
     rooms: replicas.attachedReplicas().map((replica) => ({
       room: replica.room,
       appliedSeq: replica.lastSeq,
