@@ -84,17 +84,30 @@ it("returns an empty list only when the hub confirms there are no revisions", as
   await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid)).resolves.toEqual([]);
 });
 
-it("opts in to naming metadata without changing legacy list requests", async () => {
+it("opts in to names and titles independently without changing legacy list requests or replies", async () => {
   const fixture = await admitted();
   const requests: RevisionRequest[] = [];
+  const entry = { id: "revision-1", author: null, startedAt: 100, endedAt: null };
   fixture.reply((request, send) => {
     requests.push(request);
-    send({ requestId: request.requestId, ok: true, revisions: [] });
+    send({ requestId: request.requestId, ok: true,
+      revisions: [request.includeTitles === true ? { ...entry, title: "Earlier title" } : entry] });
   });
-  await listDocumentRevisions(fixture.opened.replicas, fixture.uuid);
-  await listDocumentRevisions(fixture.opened.replicas, fixture.uuid, { includeNames: true });
+  await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid)).resolves.toEqual([entry]);
+  await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid, { includeNames: true })).resolves.toEqual([entry]);
+  await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid, { includeTitles: true }))
+    .resolves.toEqual([{ ...entry, title: "Earlier title" }]);
+  await listDocumentRevisions(fixture.opened.replicas, fixture.uuid, { includeNames: true, includeTitles: true });
   expect(requests[0]).not.toHaveProperty("includeNames");
+  expect(requests[0]).not.toHaveProperty("includeTitles");
   expect(requests[1]).toMatchObject({ operation: "list", includeNames: true });
+  expect(requests[1]).not.toHaveProperty("includeTitles");
+  expect(requests[2]).toMatchObject({ operation: "list", includeTitles: true });
+  expect(requests[2]).not.toHaveProperty("includeNames");
+  expect(requests[3]).toMatchObject({ operation: "list", includeNames: true, includeTitles: true });
+
+  fixture.reply((request, send) => send({ requestId: request.requestId, ok: true, revisions: [entry] }));
+  await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid, { includeTitles: true })).resolves.toEqual([entry]);
 });
 
 it("does not claim a sent naming request made no change when its reply is lost or unavailable", async () => {
