@@ -268,6 +268,7 @@ function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docL
             // Leave focus navigation and fold-button activation to the browser.
             keydown: (_view, event) => event.key === "Tab" ||
               event.target instanceof Element && event.target.closest(".ub-revision-fold-button") !== null,
+            keypress: (_view, event) => event.target instanceof Element && event.target.closest(".ub-revision-fold-button") !== null,
           },
           transformCopied: (slice) => new Slice(copiedContent(slice.content), slice.openStart, slice.openEnd),
           decorations(state) {

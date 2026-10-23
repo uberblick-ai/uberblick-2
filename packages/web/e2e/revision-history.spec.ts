@@ -880,6 +880,7 @@ test.describe("document history through ub open", () => {
     await expect(nextChange).toBeDisabled();
     // Bars open their run from the keyboard.
     await after.locator(".ub-revision-fold-button").focus();
+    await expect(after.locator(".ub-revision-fold-button")).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(bars).toHaveCount(0);
     await expect(after).toContainText("Background paragraph 2");
@@ -913,6 +914,12 @@ test.describe("document history through ub open", () => {
     await expect(historicalEditor(page)).toContainText("Background paragraph 2");
     await expect(page.locator(".ub-revision-fold-button")).toHaveCount(0);
     await expect(historyList(page).getByRole("switch", { name: "Collapse unchanged" })).not.toBeChecked();
+    await activateControl(historyList(page).getByRole("switch", { name: "Collapse unchanged" }));
+    await expect(bars).toHaveCount(2);
+    await earlierSide(page).locator(".ub-revision-fold-button").focus();
+    await expect(earlierSide(page).locator(".ub-revision-fold-button")).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect(bars).toHaveCount(0);
     // The pane still scrolls natively.
     await page.mouse.move(900, 400);
     await page.mouse.wheel(0, 300);
