@@ -12,6 +12,8 @@ import type { RevisionBlockComparison, RevisionComparison, TextSpan } from "@ube
 import { yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
 import type * as Y from "yjs";
 import { AblaufBlocks } from "./ablauf.js";
+import { JsonTreeBlocks } from "./json-tree.js";
+import { RevisionJsonCompare, RevisionJsonPlaceholder } from "./json-compare-view.js";
 import { CardBlocks } from "./card.js";
 import { ChartBlocks, chartBlockView } from "./chart.js";
 import { DocLinks } from "./doc-links.js";
@@ -101,7 +103,7 @@ export function revisionPalette(ydoc: Y.Doc | null, before: Y.Doc | null = null)
         };
       },
     });
-  }), Added, Removed, Filler, Fold];
+  }), Added, Removed, Filler, Fold, RevisionJsonCompare, RevisionJsonPlaceholder];
 }
 
 export const revisionSchema = getSchema(revisionPalette(null));
@@ -263,7 +265,13 @@ export function revisionViewModel(before: Y.Doc | null, after: Y.Doc): RevisionV
 export function copiedContent(content: Fragment): Fragment {
   const nodes: PMNode[] = [];
   content.forEach((node) => {
-    if (node.type.name === "revisionFiller" || node.type.name === "revisionFold") return;
+    if (node.type.name === "revisionFiller" || node.type.name === "revisionFold" || node.type.name === "revisionJsonPlaceholder") return;
+    if (node.type.name === "revisionJsonCompare") {
+      const code = revisionSchema.nodes.code;
+      const text = String(node.attrs.after);
+      if (code !== undefined) nodes.push(code.create({ language: "json-tree" }, text === "" ? [] : revisionSchema.text(text)));
+      return;
+    }
     const marks = node.marks.filter((mark) => mark.type.name !== "removed" && mark.type.name !== "revisionAdded");
     nodes.push(node.isText ? node.mark(marks) : node.type.create(
       { ...node.attrs, ...("id" in node.attrs ? { id: null } : {}) },
@@ -288,7 +296,7 @@ function revisionPresentation(blocks: readonly RevisionBlockDetails[]): Extensio
               const block = blocks[index];
               if (!block) return;
               const classes = [`ub-revision-block-${block.kind}`];
-              if (block.showSource) classes.push("ub-revision-source-changed", "ub-ablauf-editing", "ub-wireframe-editing", "ub-terminal-editing", "ub-chart-editing");
+              if (block.showSource) classes.push("ub-revision-source-changed", "ub-ablauf-editing", "ub-json-tree-editing", "ub-wireframe-editing", "ub-terminal-editing", "ub-chart-editing");
               decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: classes.join(" "), "data-revision-block": block.kind }));
               const labels = [
                 ...(block.kind === "added" ? ["Added block"] : block.kind === "removed" ? ["Removed block"] : []),
@@ -326,7 +334,7 @@ export function createRevisionEditor(options: CreateRevisionEditorOptions): Edit
     element: options.element,
     extensions: [
       ...revisionPalette(options.after, options.before), revisionPresentation(model.blocks),
-      CodeHighlighting, ListBlocks, CardBlocks, TerminalBlocks, ChartBlocks, WireframeBlocks, AblaufBlocks,
+      CodeHighlighting, ListBlocks, CardBlocks, TerminalBlocks, ChartBlocks, WireframeBlocks, AblaufBlocks, JsonTreeBlocks,
       DocLinks.configure({ context: options.docLinks ?? null }), ExternalLinks,
       GitHubLinks.configure({ settings: options.workspaceSettings ?? null }), InlineIcons, ToggleHeadings,
     ],

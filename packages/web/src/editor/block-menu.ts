@@ -138,6 +138,16 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
     attrs: {},
   },
   {
+    id: "json-tree",
+    label: "JSON tree",
+    group: "Source",
+    trigger: null,
+    keywords: ["json", "tree", "object", "api", "response", "fold"],
+    type: "code",
+    attrs: { language: "json-tree" },
+    initialText: "{}",
+  },
+  {
     // No trigger: a table is two lines before it is a table, so the shortcut is
     // typing the header row and the delimiter row under it — see table.ts.
     id: "table",
