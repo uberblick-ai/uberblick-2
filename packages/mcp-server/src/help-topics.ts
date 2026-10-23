@@ -15,15 +15,11 @@ export const STARTUP_ORIENTATION =
   "Uberblick stores this repo's documents and decision records. " +
   "Before you change anything, search the corpus for relevant documents and decisions, then read them with `get_doc`. " +
   "If the request conflicts with a decision in force, ask before building. " +
-  "Use `list_docs` for broader discovery; pass `kind: \"decision\"` to list decision topics. " +
-  "Documents can store arbitrary, structured json as additional data. " +
-  "Consult `get_help(edit_doc)` to understand how to edit or create documents. " +
-  "Discover additional product help through MCP resources, or call `get_help(topic)`. " +
-  "Built-in help is repo agnostic; the conventions for this repo are in the corpus. " +
-  "Follow recovery guidance on failures. " +
-  "Help topics: orientation, edit_doc, decisions, workspaces, markdown, ablauf, data, tools, " +
-  "tool-contracts. " +
-  "Read uberblick://help/{topic} or get_help({topic}).";
+  "`list_docs` lists documents; with `kind: \"decision\"`, decision topics. " +
+  "Read `get_help(edit_doc)` before you create or edit a document, and follow each failure's recovery. " +
+  "This repo's conventions are in the corpus, not in help. " +
+  "Help topics, through `get_help({topic})` or uberblick://help/{topic}: orientation, edit_doc, decisions, " +
+  "workspaces, markdown, ablauf, wireframe, data, tools, tool-contracts.";
 
 const workspaces = `# Workspaces and documents
 
@@ -153,7 +149,7 @@ Markdown supports paragraphs, ATX headings \`#\` through \`######\`, bullet and 
 
 Stored Mermaid blocks are deleted automatically, including in archived documents and decision records; their source is not retained. Their comment threads remain available with no anchor. Removing an approved answer block reports \`approvalChanged: true\` without recording another approval.
 
-A \`\`\`\` \`\`\`wireframe \`\`\`\` fence is an ordinary code block that the web editor draws as a wireframe.
+A \`\`\`\` \`\`\`wireframe \`\`\`\` fence is an ordinary code block that the web editor draws as a wireframe; see [Wireframes](uberblick://help/wireframe) for writing one.
 
 An \`ablauf\` fence is an ordinary code block that the web editor draws as a diagram. It supports \`flow v0\` and \`fan-out v0\`; see [Ablauf diagrams](uberblick://help/ablauf) for reading, writing and editing. Import, export and MCP preserve its literal source.
 
@@ -400,6 +396,92 @@ destinations right-aligned, no arrows).
 
 [Full Ablauf authoring primer](https://github.com/uberblick-ai/ablauf/blob/v0.2.0/spike/PRIMER.md)`;
 
+const wireframe = `# Wireframes
+
+A wireframe is a static UI sketch that the web editor draws from a fenced code block whose info string is exactly \`wireframe\`. This topic follows Format v0.1 of \`@uberblick/wireframe\` 0.3.0. Import, export and MCP keep the source as a code block with language \`wireframe\`. Nothing else goes on the fence line.
+
+\`\`\`wireframe
+dialog Delete “Q3 launch draft”?
+  text It will be gone for everyone, with its comments and history. This can't be undone.
+  row.end
+    button.focus Cancel
+    button.danger Delete
+\`\`\`
+
+## Lines
+
+Each line is one node: \`kind.variant#id key=value Label\`.
+
+- **kind** is the first word, from the table below. Variants are dot classes and combine: \`button.link.danger\`. An optional \`#id\` comes last in the first word and does not change the drawing.
+- **Attributes** sit between the first word and the label: \`label=\` on \`input\` and \`select\`, such as \`label="Work email"\`, and \`width=\` on \`page\`, \`card\` and \`image\`, in whole CSS pixels from 1 to 9999: \`width=256\`.
+- **The label** is the rest of the line. Only \`text\` lines format anything: paired single backticks draw monospace. Other Markdown shows as written, and typographic quotes are plain text.
+- **Quote a label** only when it starts with \`word=\` or with \`"\`. Quote all of it, escape \`"\` as \`\\"\` and \`\\\` as \`\\\\\`, and end the line at the closing quote.
+- **Indent** a child by exactly two spaces more than its parent, with spaces only. The first line has none. Blank lines are skipped but count as lines, and several roots draw one after another.
+- **Limits:** 64,000 characters, 200 lines and 8 levels.
+
+## Kinds
+
+Roots stand at the top level: \`dialog\`, whose label is its title; \`banner\` with \`.neutral\`, \`.info\`, \`.warning\`, \`.danger\` or \`.success\`; \`page\` and \`phone\`, which take no label, so their title goes on a \`text.title\` line; and \`frame\`, whose label is a caption and whose direct buttons sit in that caption row. A \`card\` may also stand at the top level.
+
+| Kind | Directly inside | Variants | Label |
+| --- | --- | --- | --- |
+| \`text\` | root, dock, card, row | \`.muted\`, \`.strong\`, \`.title\`, \`.small\`, \`.red\`, \`.amber\`, \`.green\`, \`.blue\` | the text |
+| \`row\` | root, dock, card, table | one of \`.end\`, \`.between\`, \`.scroll\`; \`.head\` for a table's header row | none |
+| \`card\` | top level, root, dock, row | none; optional \`width=\` | none: it holds text, images and rows |
+| \`image\` | root, dock, card, row | \`.square\`, \`.round\`; optional \`width=\` | what it shows |
+| \`button\` | row, cell, frame | \`.primary\`, \`.danger\`, \`.link\`, \`.focus\` | the caption, or none when it holds an icon |
+| \`icon\` | root, dock, cell, button, option | \`.filled\` and the four colours | an exact kebab-case Tabler name, such as \`pin\` or \`dots-vertical\` |
+| \`input\`, \`select\` | root, dock, row | none; optional \`label=\` | the placeholder, or the chosen value |
+| \`toggle\` | root, dock, row | none | none: its choices are \`option\` lines, \`.current\` for the chosen one |
+| \`table\` | root, dock | none | none: its rows hold only \`cell\` lines |
+| \`cell\` | a table's row | \`.end\`; on header cells \`.sortable\`, \`.ascending\` or \`.descending\` | its text, or none |
+| \`chip\` | row, cell | \`.more\` for the count of the rest | the tag |
+| \`divider\` | dialog, page, frame, phone, dock | none | none |
+| \`dock\` | a phone, as its last child | none | none |
+
+Write \`icon.filled pin\`, not \`pin-filled\`. Use one colour per node and pair a coloured state with words. Give every table row the same number of cells, with an empty \`cell\` where a column has nothing.
+
+\`\`\`wireframe
+page
+  text.title All documents
+  input Search titles
+  row
+    toggle
+      option.current Documents
+      option Decisions
+    select label=Tag Any tag
+  table
+    row.head
+      cell.ascending Title
+      cell.end Changed
+      cell
+    row
+      cell Web UI system
+      cell.end 2 hours ago
+      cell
+        button.link
+          icon pin
+  row.end
+    text.muted 1–10 of 24
+    button Previous
+    button.primary Next
+\`\`\`
+
+\`\`\`wireframe
+banner.warning
+  icon archive
+  text Archived. Read-only and hidden from the document list.
+  row.end
+    button Restore
+    button.link.danger Delete…
+\`\`\`
+
+## Checking a wireframe
+
+Errors stop the drawing: tabs or odd indentation, a jump of more than one level, an indented first line, an unterminated quote, text after a closing quote, or an exceeded limit. Warnings still draw, but the block no longer says what you meant: an unknown kind, variant, attribute or icon, a label on a kind that takes none, or a node in the wrong place. The usual misplacements are a \`button\` outside a \`row\`, \`cell\` or \`frame\`, anything but a \`cell\` in a table's row, and a root inside another node. Fix both.
+
+MCP stores the source without checking it. The web editor lists each diagnostic with its line number. When nobody can open the editor, keep to the kinds and places above and report the wireframe as unchecked. The full primer, with every kind's drawing, phones, docks and each mistake with its diagnostic, ships as \`AUTHORING.md\` in \`@uberblick/wireframe\` 0.3.0.`;
+
 const data = `# Structured data and views
 
 A document can own named collections beside its prose. Each collection has one schema and identified whole JSON-object records. Collection names and record ids are non-empty well-formed Unicode strings; ids are unique within a collection and ordered by Unicode code point. Different collections and records merge independently, with eventual consistency and competing-write loss rather than distributed atomicity or compare-and-swap.
@@ -545,6 +627,12 @@ export const conceptTopics: readonly HelpTopic[] = [
     title: "Ablauf diagrams",
     description: "Reading, writing and editing flow and fan-out diagrams: placement, nodes, edges, legends and editing recipes.",
     text: ablauf,
+  },
+  {
+    id: "wireframe",
+    title: "Wireframes",
+    description: "Writing wireframe blocks: line syntax, kinds and where they go, quoting, examples and checking a block without the web editor.",
+    text: wireframe,
   },
   {
     id: "data",

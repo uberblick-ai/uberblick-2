@@ -178,7 +178,7 @@ it.each(["progress-token", 0])("forwards the signal, metadata and %s token throu
   const answer = await guarded({ ...toolNamed("get_sidebar"), operation }, rig.context)({}, { signal, _meta });
   expect(operation).toHaveBeenCalledWith(rig.context, {}, { signal, _meta, progressToken });
   expect(answer.structuredContent).toEqual(payload);
-  expect(answer.content).toEqual([{ type: "text", text: JSON.stringify(payload, null, 2) }]);
+  expect(answer.content).toEqual([{ type: "text", text: JSON.stringify(payload) }]);
 
   const core = await startServer();
   close.push(() => core.close());
