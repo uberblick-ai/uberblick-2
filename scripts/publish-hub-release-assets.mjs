@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readHubReleaseAssets } from "./hub-release-assets.mjs";
-import { assertImage, assertRemoteTag, getImage, imageRefs, run, versionForTag } from "./publish-hub-release.mjs";
+import { assertPublishedImage, assertRemoteTag, getImage, imageRefs, run, versionForTag } from "./publish-hub-release.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPOSITORY = "uberblick-ai/uberblick-2";
@@ -71,7 +71,7 @@ export async function publishHubReleaseAssets(input, services) {
   for (const ref of imageRefs(version)) {
     const image = await services.getImage(ref);
     if (image === null) fail(`both images must be published before release assets; ${ref} is missing`);
-    assertImage(image, input);
+    assertPublishedImage(image, input);
   }
 
   let release = await services.getRelease(input.tag);
