@@ -262,6 +262,9 @@ jobs:
     name: browser webkit (1/2)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+      options: --init --ipc=host
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -275,20 +278,10 @@ jobs:
           key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: playwright-
-
       - name: Install workspace packages
         run: mise run install
         env:
           PNPM_STORE_DIR: ~/.pnpm-store
-
-      # Browser caches omit system packages; locals never install host packages.
-      - name: Provision WebKit host libraries
-        run: mise exec -- pnpm --filter @uberblick/web exec playwright install-deps webkit
 
       - name: Download pinned browser engines
         run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
@@ -311,6 +304,9 @@ jobs:
     name: browser webkit (2/2)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+      options: --init --ipc=host
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -324,20 +320,10 @@ jobs:
           key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: playwright-
-
       - name: Install workspace packages
         run: mise run install
         env:
           PNPM_STORE_DIR: ~/.pnpm-store
-
-      # Browser caches omit system packages; locals never install host packages.
-      - name: Provision WebKit host libraries
-        run: mise exec -- pnpm --filter @uberblick/web exec playwright install-deps webkit
 
       - name: Download pinned browser engines
         run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
