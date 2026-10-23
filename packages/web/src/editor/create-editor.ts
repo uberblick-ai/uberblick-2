@@ -26,6 +26,7 @@ import { ChartBlock, paletteExtensions } from "./nodes.js";
 import { ChartBlocks } from "./chart.js";
 import { WireframeBlocks } from "./wireframe.js";
 import { AblaufBlocks } from "./ablauf.js";
+import { JsonTreeBlocks } from "./json-tree.js";
 import { CodeHighlighting } from "./syntax-highlighting.js";
 import { TableBlocks } from "./table.js";
 import { TerminalBlocks } from "./terminal.js";
@@ -106,6 +107,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     ChartBlocks,
     WireframeBlocks,
     AblaufBlocks,
+    JsonTreeBlocks,
     // Directory and routing behavior is per editor; the docLink mark is shared schema.
     DocLinks.configure({ context: options.docLinks ?? null }),
     ExternalLinks,

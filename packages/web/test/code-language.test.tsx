@@ -85,7 +85,7 @@ describe("code block language", () => {
     expect(document.activeElement).toBe(search);
     const labels = options().map((item) => item.textContent?.replace("✓", "").trim());
     expect(labels).toEqual(["Plain text", ...[...createLowlight(common).listLanguages()
-      .filter((name) => name !== "plaintext"), "wireframe", "ablauf"].sort()]);
+      .filter((name) => name !== "plaintext"), "wireframe", "ablauf", "json-tree"].sort()]);
     expect(screen.queryByRole("option", { name: "plaintext" })).toBeNull();
     expect(screen.queryByRole("option", { name: "ts" })).toBeNull();
 

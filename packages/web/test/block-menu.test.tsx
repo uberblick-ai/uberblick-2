@@ -195,6 +195,7 @@ describe("the registry", () => {
       "Bullet list",
       "Numbered list",
       "Code",
+      "JSON tree",
       "Table",
       "Terminal demo",
       "Line chart",

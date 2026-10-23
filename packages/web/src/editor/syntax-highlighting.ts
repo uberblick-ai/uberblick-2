@@ -35,6 +35,10 @@ for (const [id, label] of [
   ["console", "Shell session"],
 ] as const) displayNames.set(id, label);
 
+// A json-tree block is drawn as a tree, and its source is JSON.
+highlighter.registerAlias("json", "json-tree");
+displayNames.set("json-tree", "JSON tree");
+
 /** Display labels never change the stored language or the Markdown fence. */
 export function codeLanguageLabel(language: unknown): string {
   if (typeof language !== "string" || language === "") return "Plain text";

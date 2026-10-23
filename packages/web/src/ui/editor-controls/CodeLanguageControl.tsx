@@ -14,7 +14,7 @@ import { PickerList } from "../PickerList.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../shadcn/popover.js";
 import { useEditorControlsHost } from "./EditorControlsHost.js";
 
-const languages = ["", ...[...codeLanguages.filter((name) => name !== "plaintext"), "wireframe", "ablauf"].sort()];
+const languages = ["", ...[...codeLanguages.filter((name) => name !== "plaintext"), "wireframe", "ablauf", "json-tree"].sort()];
 
 interface Target {
   id: string;
