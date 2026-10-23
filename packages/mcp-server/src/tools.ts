@@ -7,7 +7,6 @@
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { GuidanceBriefing } from "./briefing.js";
 import type { Replicas } from "./replica.js";
 import type { ServerWork } from "./server-work.js";
 import { HelpCatalog } from "./help.js";
@@ -19,11 +18,10 @@ import { createToolContext } from "./tools/context.js";
 export function registerTools(
   server: McpServer,
   replicas: Replicas,
-  briefing: GuidanceBriefing,
   work: ServerWork,
 ): HelpCatalog {
   const help = new HelpCatalog();
-  const context = createToolContext(replicas, briefing, work, help);
+  const context = createToolContext(replicas, work, help);
   for (const tool of tools) {
     const registered = server.registerTool(tool.name, {
       title: tool.title,

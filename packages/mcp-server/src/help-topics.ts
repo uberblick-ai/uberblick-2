@@ -1,6 +1,5 @@
 /** Built-in product concepts. No workspace content or replica state enters these pages. */
 import { BLOCK_TYPES, DATA_LIMITS, INLINE_ICONS, MAX_DESCRIPTION_LENGTH, MAX_TLDR_LENGTH } from "@uberblick/schema";
-import { GUIDANCE_INSTRUCTIONS } from "./briefing.js";
 import { FAILURE_INSTRUCTIONS } from "./failures.js";
 import { TLDR_AFTER_CONTENT_CHANGE } from "./tools/descriptions.js";
 
@@ -11,7 +10,7 @@ export interface HelpTopic {
   text: string;
 }
 
-/** The same orientation is served in initialize.instructions and its help topic. */
+/** Workspace-independent orientation shared by startup and its help topic. */
 export const STARTUP_ORIENTATION =
   "Uberblick stores this repo's documents and decision records. " +
   "Before you change anything, search the corpus for relevant documents and decisions, then read them with `get_doc`. " +
@@ -45,7 +44,7 @@ Start with \`get_sidebar({})\` for curated entry points, \`list_docs({})\` for d
 
 \`set_metadata\` accepts any non-empty subset of these fields and leaves unnamed fields untouched. All named fields are validated before any write; a field-specific refusal preserves its error code and names \`field\`. Title and description cannot be cleared. Its successful answer returns the descriptive metadata as get_doc would read it, with shared write durability and no TL;DR review reminder. Open decision records additionally accept \`discussion\`, as explained in \`decisions\`.
 
-Reads return absent description and TL;DR as null. Document writes can return non-blocking hints for a missing description, missing tags or a TL;DR needing review. Decision metadata and the decided-answer lock belong to \`decisions\`, the archive lock to \`archive_doc\`; write durability and the guidance briefing belong to \`tool-contracts\`.
+Reads return absent description and TL;DR as null. Document writes can return non-blocking hints for a missing description, missing tags or a TL;DR needing review. Decision metadata and the decided-answer lock belong to \`decisions\`, the archive lock to \`archive_doc\`; write durability belongs to \`tool-contracts\`.
 
 ## Sidebar organization
 
@@ -413,7 +412,7 @@ A document can own named collections beside its prose. Each collection has one s
 
 For an earlier state, pass \`revision\`, a hub revision ID returned by \`list_revisions\`, to \`get_data\`. It uses the same summary and bounded collection paging from that revision, including for archived documents. Keep the same revision on every page; an open revision can still change between calls. An unavailable revision refuses rather than falling back to live data. \`get_revision\` returns the same area summary beside the revision's title and blocks. Hub revision IDs differ from \`get_doc\`'s page and block \`rev\` content hashes, and writing tools do not accept them.
 
-\`update_data\` takes one validated batch, naming each touched collection once. For each collection it sets \`schema\`, optionally \`replaceRecords\`, then applies \`deleteRecords\` and \`upsert\` whole id/value records. \`deleteCollection: true\` excludes other changes. Every retained record must satisfy the resulting schema before the batch commits in one local transaction. An identical refresh returns \`changed: false\` and emits no update. Keep producer records and human dispositions in separate collections, sharing ids by convention. The decided-answer lock is in \`decisions\` and the archive lock in \`archive_doc\`; briefing and durability are in \`tool-contracts\`.
+\`update_data\` takes one validated batch, naming each touched collection once. For each collection it sets \`schema\`, optionally \`replaceRecords\`, then applies \`deleteRecords\` and \`upsert\` whole id/value records. \`deleteCollection: true\` excludes other changes. Every retained record must satisfy the resulting schema before the batch commits in one local transaction. An identical refresh returns \`changed: false\` and emits no update. Keep producer records and human dispositions in separate collections, sharing ids by convention. The decided-answer lock is in \`decisions\` and the archive lock in \`archive_doc\`; durability is in \`tool-contracts\`.
 
 ## Closed version-1 schema vocabulary
 
@@ -505,10 +504,6 @@ Successful writes report \`applied\`, \`synced\` and \`hub\`. Applied means this
 
 \`synced: true\` means the hub acknowledged this update: it is in the hub's memory, and a healthy hub has scheduled the write on its store debounce — by default 2s after the last change to the document, 10s at the outside. It does NOT mean the hub has stored it: the write is still ahead of the hub's disk, and the store itself can fail. A hub that dies abruptly inside that window (SIGKILL, a crash, power loss) loses its volatile copy of the update. That is recoverable rather than fatal: \`applied: true\` is the durable half — this server's append-only update log holds the write before the tool returns and re-sends it on reconnect — so losing it for good takes the crash plus no replica holding that update ever coming back.
 
-## Guidance briefing
-
-${GUIDANCE_INSTRUCTIONS}
-
 ## Related
 
 [Decision records](uberblick://help/decisions) · [Workspaces and metadata](uberblick://help/workspaces) · [Structured data](uberblick://help/data) · [sync_status](uberblick://help/sync_status)`;
@@ -566,7 +561,7 @@ export const conceptTopics: readonly HelpTopic[] = [
   {
     id: "tool-contracts",
     title: "Shared tool contracts",
-    description: "Arguments and results, failure recovery, local write durability, synced and the guidance briefing.",
+    description: "Arguments and results, failure recovery, local write durability and synced.",
     text: toolContracts,
   },
 ];

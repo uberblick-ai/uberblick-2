@@ -7,7 +7,7 @@ import { READ, operation } from "./operation.js";
 export const inputSchema = strictInput({ uuid: uuidArg });
 
 export const getDocOperation = operation(READ, inputSchema, (context, { uuid }, _request) => {
-  const { replicas, requireDoc, decisionAuthorityJson, documentTags, decisionEntryJson, topicJson, decisionReadJson, blocksJson, annotationJson, briefing } = context;
+  const { replicas, requireDoc, decisionAuthorityJson, documentTags, decisionEntryJson, topicJson, decisionReadJson, blocksJson, annotationJson } = context;
 
   const replica = requireDoc(uuid);
   const meta = getMeta(replica.doc, replica.id);
@@ -39,6 +39,5 @@ export const getDocOperation = operation(READ, inputSchema, (context, { uuid }, 
     ),
     ...(collections === null ? {} : { data: { collections, readWith: "get_data" } }),
   };
-  briefing.recordRead(uuid);
   return result;
 });

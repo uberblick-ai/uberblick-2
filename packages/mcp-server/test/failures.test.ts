@@ -14,7 +14,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { applyDocData, createTagCatalogEntry, DATA_LIMITS, DataError, InvalidDocumentLifecycleError, setTags, setTldrOptOut, upsertDirectoryEntry } from "@uberblick/schema";
+import { applyDocData, DATA_LIMITS, DataError, InvalidDocumentLifecycleError, setTldrOptOut, upsertDirectoryEntry } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   FAILURE_CODES,
@@ -172,7 +172,6 @@ const EXPECTED: Record<
   revision_not_found: { recoveryClass: "reread", detail: [] },
   doc_not_archived: { recoveryClass: "manual", detail: ["uuid"] },
   decision_delete_unsupported: { recoveryClass: "manual", detail: ["uuid"] },
-  guidance_required: { recoveryClass: "reread", detail: ["unread"] },
   group_not_found: { recoveryClass: "reread", detail: ["group"] },
   invalid_document_lifecycle: {
     recoveryClass: "manual",
@@ -579,10 +578,6 @@ describe("the failure contract", () => {
       }
       expect(rejected, "the shared data operation must refuse this input").toBe(true);
     }
-
-    const guidanceTag = createTagCatalogEntry(rig.instance.replicas.settings().doc, "guidance");
-    setTags(rig.instance.replicas.replica(doc.uuid).doc, [guidanceTag.id]);
-    record((await rig.call("set_metadata", { uuid: doc.uuid, title: "Unbriefed" })).payload);
 
     // A handler that threw something nobody mapped, and a refused log write:
     // both need their own server, so they get one.

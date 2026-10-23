@@ -166,8 +166,7 @@ export const tools: readonly Tool[] = [
     description:
       "Read live metadata, blocks with edit-assertion rev hashes, comment threads and decision context. " +
       "Creation time createdAt and decision entries' createdAt/updatedAt are ISO 8601 UTC strings when known and representable. " +
-      "Data lists collections/counts; use get_data for records. Use get_revision for a historical state. " +
-      "Eligible guidance reads count toward this process's briefing.",
+      "Data lists collections/counts; use get_data for records. Use get_revision for a historical state.",
     input: getDocInput,
     operation: getDocOperation,
     example: { uuid },
@@ -695,7 +694,7 @@ export const tools: readonly Tool[] = [
     description:
       "Read bundled, version-matched product help by topic or exact registered tool name. Omit topic to list " +
       "every topic with its id, title, description and URI. The returned text is the same Markdown as " +
-      "uberblick://help/{topic}. Help is workspace-agnostic, needs no guidance briefing and never opens or " +
+      "uberblick://help/{topic}. Help is workspace-agnostic and never opens or " +
       "settles a replica; it remains available offline and while the replica store is quarantined. " +
       "Unknown topics refuse with unknown_help_topic and list valid topic ids; choose one and retry.",
     input: getHelpInput,

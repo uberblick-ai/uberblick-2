@@ -39,7 +39,6 @@ import {
   ToolError,
   hydrationRecovery,
 } from "../failures.js";
-import type { GuidanceBriefing } from "../briefing.js";
 import { docLinkRanges } from "../replica.js";
 import type { Replica, Replicas } from "../replica.js";
 import type { ServerWork } from "../server-work.js";
@@ -101,9 +100,9 @@ function toBlockInput(
   };
 }
 
-/** Shared per-server helpers; each closure keeps the registering replica and briefing. */
+/** Shared per-server helpers; each closure keeps the registering replicas. */
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
-export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing, work: ServerWork, help = new HelpCatalog()) {
+export function createToolContext(replicas: Replicas, work: ServerWork, help = new HelpCatalog()) {
 
   /** One refusal builder; callers retain their original message and identity field. */
   const notKnownLocally = (
@@ -461,7 +460,6 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   return {
     replicas,
     help,
-    briefing,
     work,
     requireStub,
     requireKnownDoc,

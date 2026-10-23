@@ -17,38 +17,34 @@
   <p>Flow diagrams are the first thing a team wants in a design doc, and Mermaid gets half of it right: a few lines of text an agent can write, diff and review. The other half, layout, is all algorithm, so one added node reshuffles the whole chart and nobody has a handle to grab. <a href="https://github.com/uberblick-ai/ablauf">Ablauf</a> keeps the text and gives the layout to the author: the source names the columns, puts each node in a row, and says which side an edge leaves and enters. The renderer measures the text, draws in one house style for light and dark, and reports every crossing or overlap with a line number. It never moves anything, so an agent gets to a clean diagram from the text and the diagnostics alone, without looking at the picture. The format is early and lives in its own repository; the block in Uberblick follows it. Since 0.4.5 Mermaid is gone, so a <code>mermaid</code> fence is an ordinary code block with that language and is never drawn.</p>
   <div class="tabs ex"><div class="tablist" role="tablist" aria-label="ablauf example"><button role="tab" id="t-ablauf-v" aria-selected="true" aria-controls="p-ablauf-v" type="button">Displayed</button><button role="tab" id="t-ablauf-m" aria-selected="false" aria-controls="p-ablauf-m" type="button">Markdown</button><button class="copy" type="button" data-copy="```ablauf
 flow v0
-columns rework main
+columns agent workspace
 
-pill edit_block col=main tone=agent &quot;agent calls edit_block&quot;
-box server &quot;checks the guidance lease&quot;
-end applied &quot;Edit applied&quot;
+pill change col=agent tone=agent &quot;Update a page&quot;
+box read col=agent tone=agent &quot;Read with get_doc&quot;
+box edit col=agent tone=agent &quot;Write with edit_block&quot;
+box local col=workspace row=edit tone=system &quot;Saved locally&quot;
+end synced col=workspace &quot;Hub acknowledges&quot;
 
-pill guidance_required col=rework row=server tone=rework
-box get_doc &quot;agent reads the pages it was told to&quot;
-
-edit_block --&gt; server
-server --&gt; applied : read within ten minutes
-server --&gt; guidance_required tone=rework : not read
-guidance_required --&gt; get_doc tone=rework
-get_doc --&gt; edit_block tone=rework from=left to=left label=end : calls again
+change --&gt; read
+read --&gt; edit
+edit --&gt; local
+local --&gt; synced
 ```">Copy</button></div>
-  <div class="panel" role="tabpanel" id="p-ablauf-v" aria-labelledby="t-ablauf-v"><img class="l" src="/img/blocks/ablauf-light.png" alt="The Ablauf block as the editor shows it: an agent calls edit_block, the server checks the guidance lease, an edit applied when the pages were read within ten minutes, otherwise guidance_required, the agent reads the pages with get_doc and calls again" loading="lazy"><img class="d" src="/img/blocks/ablauf-dark.png" alt="" loading="lazy"></div>
+  <div class="panel" role="tabpanel" id="p-ablauf-v" aria-labelledby="t-ablauf-v"><img class="l" src="/img/blocks/ablauf-light.png" alt="The Ablauf block as the editor shows it: an agent reads a page with get_doc and writes with edit_block; the change is saved locally and the hub acknowledges it" loading="lazy"><img class="d" src="/img/blocks/ablauf-dark.png" alt="" loading="lazy"></div>
   <div class="panel" role="tabpanel" id="p-ablauf-m" aria-labelledby="t-ablauf-m" hidden><pre>```ablauf
 flow v0
-columns rework main
+columns agent workspace
 
-pill edit_block col=main tone=agent &quot;agent calls edit_block&quot;
-box server &quot;checks the guidance lease&quot;
-end applied &quot;Edit applied&quot;
+pill change col=agent tone=agent &quot;Update a page&quot;
+box read col=agent tone=agent &quot;Read with get_doc&quot;
+box edit col=agent tone=agent &quot;Write with edit_block&quot;
+box local col=workspace row=edit tone=system &quot;Saved locally&quot;
+end synced col=workspace &quot;Hub acknowledges&quot;
 
-pill guidance_required col=rework row=server tone=rework
-box get_doc &quot;agent reads the pages it was told to&quot;
-
-edit_block --&gt; server
-server --&gt; applied : read within ten minutes
-server --&gt; guidance_required tone=rework : not read
-guidance_required --&gt; get_doc tone=rework
-get_doc --&gt; edit_block tone=rework from=left to=left label=end : calls again
+change --&gt; read
+read --&gt; edit
+edit --&gt; local
+local --&gt; synced
 ```</pre></div></div>
   </section>
 

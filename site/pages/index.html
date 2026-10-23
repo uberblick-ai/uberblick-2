@@ -60,16 +60,16 @@
 </section>
 
 <section class="blk" id="mcp">
-<div class="blk-h"><h2>An opinionated MCP: agents read before they write.</h2><a href="/docs/agents">Agents over MCP</a></div>
-<p class="blk-intro">Tag the pages that matter as guidance. The server refuses every write from an agent that has not read them, and tells it which ones. No prompt engineering, no hoping.</p>
-<div class="flow" role="img" aria-label="An agent calls edit_block; the server refuses with guidance_required and lists the unread pages; the agent reads them with get_doc; the write is accepted for ten minutes of edits.">
-  <div class="step"><span class="k">1 · agent</span><b>Calls <code>edit_block</code></b><span>on a page in the workspace</span></div>
+<div class="blk-h"><h2>Your guidance starts each agent session.</h2><a href="/docs/agents">Agents over MCP</a></div>
+<p class="blk-intro">Tag the pages that matter as guidance. When agents connect, the server points them to guidance pages and asks them to read the ones that apply before their first write. Your workspace's conventions travel with its documents.</p>
+<div class="flow" role="img" aria-label="The server names guidance pages when an agent connects; the agent reads the ones that apply with get_doc, then calls edit_block; the change is saved locally.">
+  <div class="step"><span class="k">1 · server</span><b>Names guidance pages</b><span>when the agent connects</span></div>
   <span class="arr" aria-hidden="true"></span>
-  <div class="step no"><span class="k">2 · server</span><b>Refuses: <code>guidance_required</code></b><span>unread: Product principles, Web UI: typography</span></div>
+  <div class="step"><span class="k">2 · agent</span><b>Reads with <code>get_doc</code></b><span>the pages that apply to this change</span></div>
   <span class="arr" aria-hidden="true"></span>
-  <div class="step"><span class="k">3 · agent</span><b>Reads both with <code>get_doc</code></b><span>the same pages people pinned</span></div>
+  <div class="step"><span class="k">3 · agent</span><b>Calls <code>edit_block</code></b><span>with the workspace's context</span></div>
   <span class="arr" aria-hidden="true"></span>
-  <div class="step ok"><span class="k">4 · server</span><b>Accepts the write</b><span>and every write for ten minutes</span></div>
+  <div class="step ok"><span class="k">4 · workspace</span><b>Saves the change</b><span>locally, then syncs with the hub</span></div>
 </div>
 </section>
 

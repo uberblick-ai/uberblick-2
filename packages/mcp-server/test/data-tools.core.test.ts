@@ -332,7 +332,7 @@ describe("dedicated document data MCP tools", () => {
     })) }], "data_limit_exceeded", { limit: "operation" });
   });
 
-  it("gates writes on guidance and keeps archived and decided data readable but immutable", async () => {
+  it("allows unread guidance and keeps archived and decided data readable but immutable", async () => {
     const rig = await local();
     const guide = await create(rig, { title: "Guidance" });
     const target = await create(rig);
@@ -340,9 +340,7 @@ describe("dedicated document data MCP tools", () => {
     createTagCatalogEntry(rig.instance.replicas.settings().doc, "guidance", marker);
     setTags(document(rig, guide.uuid), [marker]);
     const operations = [{ collection: "observations", schema: objectSchema, upsert: [{ id: "row-a", value: {} }] }];
-    await refuse(rig, target.uuid, operations, "guidance_required");
     expect(await rig.ok("get_data", { uuid: target.uuid })).toEqual({ uuid: target.uuid, data: null });
-    await rig.ok("get_doc", { uuid: guide.uuid });
     await rig.ok("update_data", { uuid: target.uuid, operations });
     const archivedData = await rig.ok("get_data", { uuid: target.uuid, collection: "observations" });
     await rig.ok("archive_doc", { uuid: target.uuid });
