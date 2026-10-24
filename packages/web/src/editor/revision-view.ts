@@ -265,10 +265,10 @@ export function revisionViewModel(before: Y.Doc | null, after: Y.Doc): RevisionV
 export function copiedContent(content: Fragment): Fragment {
   const nodes: PMNode[] = [];
   content.forEach((node) => {
-    if (node.type.name === "revisionFiller" || node.type.name === "revisionFold" || node.type.name === "revisionJsonPlaceholder") return;
-    if (node.type.name === "revisionJsonCompare") {
+    if (node.type.name === "revisionFiller" || node.type.name === "revisionFold") return;
+    if (node.type.name === "revisionJsonCompare" || node.type.name === "revisionJsonPlaceholder") {
       const code = revisionSchema.nodes.code;
-      const text = String(node.attrs.after);
+      const text = String(node.type.name === "revisionJsonCompare" ? node.attrs.after : node.attrs.before);
       if (code !== undefined) nodes.push(code.create({ language: "json-tree" }, text === "" ? [] : revisionSchema.text(text)));
       return;
     }

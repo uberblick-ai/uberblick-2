@@ -1,7 +1,6 @@
 /**
  * A changed json-tree block in the side-by-side comparison: one block across
- * both columns, with a before cell and an after cell in every grid row so the
- * two panes stay aligned even when a value wraps.
+ * both columns. The panes share grid rows but keep separate selection hosts.
  */
 import { Node as TiptapNode } from "@tiptap/core";
 import type { NodeViewRendererProps } from "@tiptap/core";
@@ -41,8 +40,10 @@ function cell(row: JsonCompareRow, side: "before" | "after", open: boolean): HTM
   element.className = `ub-json-compare-cell ub-json-compare-${side}`;
   element.style.setProperty("--json-depth", String(row.depth));
   if (row.type === "run") {
+    element.dataset.chrome = "true";
     const bar = document.createElement("button");
     bar.type = "button";
+    bar.contentEditable = "false";
     bar.className = "ub-json-compare-run";
     bar.dataset.key = row.id;
     bar.textContent = row.label;
@@ -59,11 +60,12 @@ function cell(row: JsonCompareRow, side: "before" | "after", open: boolean): HTM
   element.dataset.kind = node.kind;
   element.dataset.mark = sign(node, side, form);
   if (form === "open" || form === "closed") {
-    const toggle = document.createElement("span");
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.contentEditable = "false";
     toggle.className = "ub-json-toggle";
     toggle.textContent = open ? "▾" : "▸";
     toggle.dataset.key = node.path;
-    toggle.setAttribute("role", "button");
     toggle.setAttribute("aria-label", open ? "Fold" : "Unfold");
     toggle.setAttribute("aria-expanded", String(open));
     element.append(toggle);
@@ -82,12 +84,11 @@ function cell(row: JsonCompareRow, side: "before" | "after", open: boolean): HTM
 /** Copy one pane's selected lines as plain JSON text. */
 function paneText(grid: HTMLElement, selection: Selection): string | null {
   const anchor = selection.anchorNode instanceof Element ? selection.anchorNode : selection.anchorNode?.parentElement;
-  const start = anchor?.closest(".ub-json-compare-cell");
-  if (start == null || !grid.contains(start)) return null;
-  const side = start.classList.contains("ub-json-compare-before") ? "before" : "after";
+  const pane = anchor?.closest(".ub-json-compare-pane");
+  if (pane == null || !grid.contains(pane)) return null;
   const lines: string[] = [];
-  for (const each of grid.querySelectorAll<HTMLElement>(`.ub-json-compare-${side}`)) {
-    if (!selection.containsNode(each, true) || each.classList.contains("ub-json-compare-filler")) continue;
+  for (const each of pane.querySelectorAll<HTMLElement>(".ub-json-compare-cell")) {
+    if (!selection.containsNode(each, true) || each.classList.contains("ub-json-compare-filler") || each.dataset.chrome === "true") continue;
     const depth = Number(each.style.getPropertyValue("--json-depth"));
     const text = [...each.children].filter((child) => child instanceof HTMLElement && child.dataset.chrome !== "true"
       && !child.classList.contains("ub-json-toggle")).map((child) => child.textContent).join("");
@@ -114,8 +115,6 @@ function jsonCompareView({ node }: NodeViewRendererProps): NodeView {
   bar.append(label);
   const grid = document.createElement("div");
   grid.className = "ub-json-compare-grid ub-code";
-  grid.setAttribute("role", "table");
-  grid.setAttribute("aria-label", "JSON comparison");
   dom.append(bar, grid);
 
   const render = (): void => {
@@ -127,16 +126,26 @@ function jsonCompareView({ node }: NodeViewRendererProps): NodeView {
     const defaults = jsonComparisonOpenPaths(result.root, state.collapse);
     const isOpen = (key: string): boolean => state.open.get(key) ?? (key.startsWith("run:") ? false : defaults.has(key));
     const rows = jsonComparisonRows(result.root, { isOpen, collapseUnchanged: state.collapse });
-    grid.replaceChildren(...rows.flatMap((row) => {
-      const open = row.type === "node" && isOpen(row.node.path);
-      const line = document.createElement("div");
-      line.className = "ub-json-compare-row";
-      line.setAttribute("role", "row");
-      if (row.type === "node") line.dataset.kind = row.node.kind;
-      // A change row: what the ruler and change navigation step through.
-      if (row.type === "node" && row.node.kind !== "unchanged" && row.form !== "close") line.dataset.change = "true";
-      line.append(cell(row, "before", open), cell(row, "after", open));
-      return [line];
+    grid.style.gridTemplateRows = `repeat(${rows.length}, auto)`;
+    grid.replaceChildren(...(["before", "after"] as const).map((side) => {
+      const pane = document.createElement("div");
+      pane.className = "ub-json-compare-pane";
+      pane.dataset.side = side;
+      // Native editing hosts contain selection; input is blocked below.
+      pane.contentEditable = "true";
+      pane.tabIndex = 0;
+      pane.setAttribute("role", "textbox");
+      pane.setAttribute("aria-label", side === "before" ? "Before JSON" : "After JSON");
+      pane.setAttribute("aria-readonly", "true");
+      pane.setAttribute("aria-multiline", "true");
+      pane.setAttribute("inputmode", "none");
+      pane.style.gridRow = `1 / span ${rows.length}`;
+      pane.append(...rows.map((row) => {
+        const line = cell(row, side, row.type === "node" && isOpen(row.node.path));
+        if (side === "after" && row.type === "node" && row.node.kind !== "unchanged" && row.form !== "close") line.dataset.change = "true";
+        return line;
+      }));
+      return pane;
     }));
   };
 
@@ -152,9 +161,17 @@ function jsonCompareView({ node }: NodeViewRendererProps): NodeView {
     const key = target.dataset.key ?? "";
     const state = compareState(String(current.attrs.key));
     const opened = target.classList.contains("ub-json-compare-run") || target.getAttribute("aria-expanded") !== "true";
+    const side = target.closest<HTMLElement>("[data-side]")?.dataset.side;
+    const focused = target === document.activeElement;
     state.open.set(key, opened);
     render();
+    if (focused) {
+      const pane = [...grid.querySelectorAll<HTMLElement>("[data-side]")].find((each) => each.dataset.side === side);
+      const control = [...pane?.querySelectorAll<HTMLElement>("[data-key]") ?? []].find((each) => each.dataset.key === key);
+      (control ?? pane)?.focus({ preventScroll: true });
+    }
   });
+  for (const type of ["beforeinput", "paste", "drop"]) grid.addEventListener(type, (event) => event.preventDefault());
   grid.addEventListener("copy", (event) => {
     const selection = document.getSelection();
     const text = selection === null ? null : paneText(grid, selection);
@@ -187,6 +204,7 @@ export const RevisionJsonCompare = TiptapNode.create({
   addAttributes: () => ({ before: { default: "" }, after: { default: "" }, key: { default: "" } }),
   parseHTML: () => [],
   renderHTML: () => ["div", { class: "ub-json-compare" }],
+  renderText: ({ node }) => String(node.attrs.after),
   addNodeView: () => jsonCompareView,
 });
 
@@ -196,6 +214,8 @@ export const RevisionJsonPlaceholder = TiptapNode.create({
   group: "block",
   atom: true,
   selectable: false,
+  addAttributes: () => ({ before: { default: "" } }),
   parseHTML: () => [],
   renderHTML: () => ["div", { class: "ub-json-compare-placeholder", "aria-hidden": "true" }],
+  renderText: ({ node }) => String(node.attrs.before),
 });
