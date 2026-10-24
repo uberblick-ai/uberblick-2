@@ -10,6 +10,7 @@ import { activateControl, createDoc, docTitle, editor, setupHarness } from "./ap
 import { assertNoViolations, WCAG_TAGS } from "./accessibility-assertions.js";
 import { waitForAcknowledged } from "./settle.js";
 import { setPointerSelection } from "./native-selection.js";
+import { mockFigmaLookup } from "./figma-fixtures.js";
 
 function history(page: Page): Locator {
   return page.getByRole("group", { name: "Document history", exact: true });
@@ -229,6 +230,75 @@ function foldHistory(uuid: string, title: string): Record<string, string> {
   } finally {
     document.destroy();
   }
+}
+
+/** A drawing stays above a long folded run, where rebuilding can clamp the pane's scroll. */
+function drawnFoldHistory(uuid: string, title: string): Record<string, string> {
+  const document = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title });
+    const first = appendBlock(document, { type: "paragraph", text: "The opening line changes." });
+    appendBlock(document, { type: "code", language: "wireframe", text:
+      "dialog Opening wireframe\n  text First field\n  text Second field\n  text Third field\n  text Fourth field\n  row.end\n    button Continue" });
+    for (let index = 1; index <= 20; index += 1) {
+      appendBlock(document, { type: "paragraph", text: `Unchanged context ${index} stays exactly as it was.` });
+    }
+    const last = appendBlock(document, { type: "paragraph", text: "The closing line changes." });
+    appendBlock(document, { type: "paragraph", text: "A final unchanged line." });
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    editBlock(document, first, "The opening line changes.", "The opening line changed.");
+    editBlock(document, last, "The closing line changes.", "The closing line changed.");
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+  }
+}
+
+/** Opening the first run puts all four embed types above the second one. */
+function embeddedFoldHistory(uuid: string, title: string): Record<string, string> {
+  const document = new Y.Doc();
+  const directory = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title });
+    applyDocData(document, directory, [{ collection: "values", schema: { version: 1, schema: { type: "object" } },
+      upsert: [{ id: "one", value: { day: "2026-10-20", count: 7 } }] }]);
+    const embeds: Parameters<typeof appendBlock>[1][] = [
+      { type: "code", language: "wireframe", text: "page\n  text.title Context drawing\n  text A steady wireframe" },
+      { type: "code", language: "ablauf", text: 'flow v0\ncolumns main\nbox first "Start"\nend last "Done"\nfirst --> last' },
+      { type: "chart", text: JSON.stringify({ version: 1, type: "line", collection: "values", title: "Context chart",
+        x: { field: "day", type: "date" }, y: [{ field: "count", label: "Count" }] }) },
+      { type: "figma", text: "url: https://www.figma.com/design/foldFixture/Context\ntitle: Context design\nheight: 240" },
+    ];
+    const changed: string[] = [];
+    for (let run = 1; run <= 2; run += 1) {
+      for (const embed of embeds) {
+        // Initial Figma node views cannot read an editor that is still mounting.
+        if (embed.type === "figma") continue;
+        changed.push(appendBlock(document, { type: "paragraph", text: "Draft marker" }));
+        appendBlock(document, embed);
+      }
+      appendBlock(document, { type: "paragraph", text: `Opened run ${run} begins here.` });
+      for (const embed of embeds) appendBlock(document, embed);
+      for (let row = 1; row <= 8; row += 1) appendBlock(document, { type: "paragraph", text: `Run ${run} context ${row}.` });
+      changed.push(appendBlock(document, { type: "paragraph", text: "Draft marker" }));
+      appendBlock(document, { type: "paragraph", text: "Context after the change." });
+    }
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    for (const id of changed) editBlock(document, id, "Draft marker", "Final marker");
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+    directory.destroy();
+  }
+}
+
+async function comparisonDrawn(page: Page): Promise<void> {
+  const blocks = page.locator(".ub-revision-pane .ub-wireframe, .ub-revision-pane .ub-ablauf, .ub-revision-pane .ub-chart");
+  await expect.poll(() => blocks.evaluateAll(elements => elements.every(element => element.getAttribute("data-draw-state") === "success"))).toBe(true);
+  await expect.poll(() => page.locator(".ub-revision-pane .ub-wireframe-fit").evaluateAll(elements =>
+    elements.every(element => element.getBoundingClientRect().height > 0))).toBe(true);
+  await page.evaluate(() => document.fonts.ready);
+  await expect.poll(() => runningMotion(page)).toBe(0);
 }
 
 function linkedHistory(uuid: string, title: string, target: string, deleted: string): Record<string, string> {
@@ -1718,6 +1788,85 @@ test.describe("document history through ub open", () => {
     }
     await expect(previousChange).toBeDisabled();
   });
+
+  test("opening a drawn history fold keeps the reading position", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 420 } } });
+    const title = docTitle("Drawn fold position");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], drawnFoldHistory(uuid, title));
+    await previous(page);
+    const pane = page.locator(".ub-revision-pane");
+    const after = historicalEditor(page);
+    await expect(after.locator(".ub-wireframe-fit")).toHaveCSS("height", /[1-9][0-9]+px/);
+    await expect.poll(() => runningMotion(page)).toBe(0);
+    const bar = after.locator(".ub-revision-fold-button");
+    await bar.scrollIntoViewIfNeeded();
+    const start = after.locator('.ub-revision-row-start[data-key="fold-2"]');
+    const top = await start.evaluate(element => element.getBoundingClientRect().top);
+    const scroll = await pane.evaluate(element => element.scrollTop);
+    expect(scroll).toBeGreaterThan(0);
+    await bar.click();
+    await expect(after).toContainText("Unchanged context 1");
+    await expect.poll(() => runningMotion(page)).toBe(0);
+    expect(await pane.evaluate(element => element.scrollTop)).toBe(scroll);
+    expect(Math.abs(await after.locator('.ub-revision-row-start[data-key="row-2"]').evaluate(element => element.getBoundingClientRect().top) - top)).toBeLessThanOrEqual(2);
+  });
+
+  for (const appearance of ["light", "dark"] as const) {
+    for (const reducedMotion of ["no-preference", "reduce"] as const) {
+      test(`drawn folds stay in place on either side — ${appearance}, ${reducedMotion}`, { tag: "@webkit" }, async ({ browser }) => {
+        const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+          viewport: { width: 1440, height: 420 }, colorScheme: appearance, reducedMotion,
+        }, beforeNavigate: async page => {
+          await mockFigmaLookup(page);
+          await page.route("https://embed.figma.com/**", route => route.fulfill({ contentType: "text/html", body: "<p>Context design</p>" }));
+        } });
+        const title = docTitle("Embedded fold position");
+        const uuid = await newDocument(page, title);
+        await serveHistory(page, [
+          { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+          { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+        ], embeddedFoldHistory(uuid, title));
+        await previous(page);
+        const pane = page.locator(".ub-revision-pane");
+        await expect(page.locator(".ub-revision-fold-button")).toHaveCount(4);
+        for (const [index, side] of [historicalEditor(page), earlierSide(page)].entries()) {
+          await comparisonDrawn(page);
+          const bar = side.locator(".ub-revision-fold-button").first();
+          await bar.scrollIntoViewIfNeeded();
+          const run = await bar.getAttribute("data-fold");
+          const positions = await Promise.all([historicalEditor(page), earlierSide(page)].map(view =>
+            view.locator(`.ub-revision-row-start[data-key="fold-${run}"]`).evaluate(element => element.getBoundingClientRect().top)));
+          const above = await side.locator(`.ub-revision-row-start[data-key="fold-${run}"]`).locator("xpath=preceding-sibling::*[2]").elementHandle();
+          if (above === null) throw new Error("The context above the fold is missing");
+          const aboveTop = await above.evaluate(element => element.getBoundingClientRect().top);
+          const scroll = await pane.evaluate(element => element.scrollTop);
+          expect(scroll).toBeGreaterThan(0);
+          await activateControl(bar);
+          await expect(historicalEditor(page)).toContainText(`Opened run ${index + 1} begins here.`);
+          expect(await pane.evaluate(element => element.scrollTop)).toBe(scroll);
+          if (reducedMotion === "reduce") expect(await runningMotion(page)).toBe(0);
+          else expect(await runningMotion(page)).toBeGreaterThan(0);
+          await comparisonDrawn(page);
+          expect(await pane.evaluate(element => element.scrollTop)).toBe(scroll);
+          expect(Math.abs(await above.evaluate(element => element.getBoundingClientRect().top) - aboveTop)).toBeLessThanOrEqual(2);
+          for (const [sideIndex, view] of [historicalEditor(page), earlierSide(page)].entries()) {
+            const top = await view.locator(`.ub-revision-row-start[data-key="row-${run}"]`).evaluate(element => element.getBoundingClientRect().top);
+            expect(Math.abs(top - (positions[sideIndex] ?? 0))).toBeLessThanOrEqual(2);
+          }
+          if (index === 0) {
+            const figma = side.locator(".ub-figma").first();
+            await figma.scrollIntoViewIfNeeded();
+            await expect(figma.locator("iframe").contentFrame().locator("p")).toHaveText("Context design");
+          }
+        }
+        await expect(page.locator(".ub-revision-fold-button")).toHaveCount(0);
+      });
+    }
+  }
 
   test("unchanged runs fold on both sides, open on demand, and changes are one step apart", async ({ browser }, info) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 640 } } });

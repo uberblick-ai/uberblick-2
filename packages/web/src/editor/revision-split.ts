@@ -8,7 +8,7 @@ import { Editor, Extension } from "@tiptap/core";
 import type { JSONContent } from "@tiptap/core";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { AllSelection, Plugin } from "@tiptap/pm/state";
+import { AllSelection, Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { EditorView } from "@tiptap/pm/view";
 import { canonicalDocumentUuid, compareJsonSources, compareRevisions, isExternalHref } from "@uberblick/schema";
@@ -134,8 +134,8 @@ function identified(node: PMNode, index: number): PMNode {
     : node.type.create({ ...node.attrs, id: `revision-${index}-${node.attrs.id ?? ""}` }, node.content, node.marks);
 }
 
-function document(nodes: PMNode[]): JSONContent {
-  return revisionSchema.topNodeType.create(null, Fragment.fromArray(nodes.map(identified))).toJSON() as JSONContent;
+function document(nodes: PMNode[], rows: readonly RevisionRow[]): JSONContent {
+  return revisionSchema.topNodeType.create(null, Fragment.fromArray(nodes.map((node, index) => identified(node, rows[index]?.at ?? index)))).toJSON() as JSONContent;
 }
 
 export interface RevisionFolding {
@@ -241,7 +241,7 @@ export function revisionSplitModel(before: Y.Doc, after: Y.Doc,
   const runs = unchangedRuns(rows);
   const shown = folding.collapse ? foldRows(rows, left, right, runs.filter((run) => !folding.expanded.has(run.start)))
     : { rows, left, right };
-  return { comparison, rows: shown.rows, runs: runs.map((run) => run.start), before: document(shown.left), after: document(shown.right) };
+  return { comparison, rows: shown.rows, runs: runs.map((run) => run.start), before: document(shown.left, shown.rows), after: document(shown.right, shown.rows) };
 }
 
 /** Replaces each run with one bar row, the same bar on both sides. */
@@ -269,6 +269,7 @@ function foldRows(rows: readonly RevisionRow[], left: readonly PMNode[], right: 
 }
 
 const MARK: Record<RevisionRowKind, string> = { unchanged: "", changed: "~", added: "+", removed: "−", folded: "" };
+const revisionRows = new PluginKey<readonly RevisionRow[]>("revisionSideRows");
 
 /** Side-scoped interaction and row widgets: captions and the spacers the aligner sizes. */
 function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docLinks: DocLinkContext | null): Extension {
@@ -296,7 +297,12 @@ function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docL
     },
     addProseMirrorPlugins() {
       return [new Plugin({
-        filterTransaction: (transaction) => !transaction.docChanged,
+        key: revisionRows,
+        state: {
+          init: () => rows,
+          apply: (transaction, current) => transaction.getMeta(revisionRows) ?? current,
+        },
+        filterTransaction: (transaction) => !transaction.docChanged || transaction.getMeta(revisionRows) !== undefined,
         props: {
           handleDOMEvents: {
             // Leave focus navigation and fold-button activation to the browser.
@@ -308,7 +314,7 @@ function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docL
           decorations(state) {
             const decorations: Decoration[] = [];
             state.doc.forEach((node, pos, index) => {
-              const row = rows[index];
+              const row = revisionRows.getState(state)?.[index];
               if (row === undefined) return;
               const cell = row[side];
               const tint = row.kind;
@@ -334,7 +340,7 @@ function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docL
                 end.dataset.row = String(index);
                 end.setAttribute("aria-hidden", "true");
                 return end;
-              }, { side: -2, key: `revision-row-end:${index}`, ignoreSelection: true }));
+              }, { side: -2, key: `revision-row-end:${index}:${row.kind}:${row.at}`, ignoreSelection: true }));
             });
             return DecorationSet.create(state.doc, decorations);
           },
@@ -435,6 +441,7 @@ export interface RevisionSplit {
   model: RevisionSplitModel;
   before: Editor;
   after: Editor;
+  expand: (run: number) => void;
   align: () => void;
   destroy: () => void;
 }
@@ -452,7 +459,8 @@ export interface CreateRevisionSplitOptions {
 }
 
 export function createRevisionSplit(options: CreateRevisionSplitOptions): RevisionSplit {
-  const model = revisionSplitModel(options.before, options.after, options.folding);
+  let model = revisionSplitModel(options.before, options.after, options.folding);
+  const expanded = new Set(options.folding?.expanded);
   const before = sideEditor(options.beforeElement, model.before, options.before, model.rows, "before", options.docLinks ?? null, options.workspaceSettings ?? null);
   const after = sideEditor(options.afterElement, model.after, options.after, model.rows, "after", options.docLinks ?? null, options.workspaceSettings ?? null);
   let frame = 0;
@@ -462,9 +470,13 @@ export function createRevisionSplit(options: CreateRevisionSplitOptions): Revisi
   };
   // Drawings, images and fonts load late; either side growing realigns both.
   const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(align);
-  for (const view of [before.view, after.view]) {
-    view.dom.querySelectorAll(":scope > :not(.ub-revision-row-start, .ub-revision-row-end)").forEach((element) => { observer?.observe(element, { box: "border-box" }); });
-  }
+  const observeRows = (): void => {
+    observer?.disconnect();
+    for (const view of [before.view, after.view]) {
+      view.dom.querySelectorAll(":scope > :not(.ub-revision-row-start, .ub-revision-row-end)").forEach((element) => { observer?.observe(element, { box: "border-box" }); });
+    }
+  };
+  observeRows();
   const expand = (event: MouseEvent): void => {
     const button = event.target instanceof Element ? event.target.closest<HTMLElement>(".ub-revision-fold-button") : null;
     if (button === null) return;
@@ -474,7 +486,26 @@ export function createRevisionSplit(options: CreateRevisionSplitOptions): Revisi
   for (const view of [before.view, after.view]) view.dom.addEventListener("click", expand);
   alignRevisionSides(before.view, after.view);
   return {
-    model, before, after, align,
+    get model() { return model; },
+    before, after, align,
+    expand: (run) => {
+      const index = model.rows.findIndex((row) => row.fold?.run === run);
+      const fold = model.rows[index]?.fold;
+      if (fold === undefined) return;
+      expanded.add(run);
+      const next = revisionSplitModel(options.before, options.after, { collapse: true, expanded });
+      const start = next.rows.findIndex((row) => row.at === run);
+      for (const [editor, content] of [[before, next.before], [after, next.after]] as const) {
+        let position = 0;
+        for (let row = 0; row < index; row += 1) position += editor.state.doc.child(row).nodeSize;
+        const replacement = Fragment.fromArray((content.content ?? []).slice(start, start + fold.count).map((node) => editor.schema.nodeFromJSON(node)));
+        editor.view.dispatch(editor.state.tr.replaceWith(position, position + editor.state.doc.child(index).nodeSize, replacement)
+          .setMeta(revisionRows, next.rows));
+      }
+      model = next;
+      observeRows();
+      alignRevisionSides(before.view, after.view);
+    },
     destroy: () => {
       cancelAnimationFrame(frame);
       observer?.disconnect();

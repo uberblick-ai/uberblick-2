@@ -301,7 +301,6 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   const [failed, setFailed] = useState<DocumentHistory["selection"]>(null);
   const [editors, setEditors] = useState<{ side: string; editor: Editor }[]>([]);
   const [rows, setRows] = useState<readonly RevisionRow[]>([]);
-  const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
   const header = useRef<HTMLElement | null>(null);
   // The live header this pane replaced, when a click just entered history.
   const [live] = useState(takeLiveHeader);
@@ -310,12 +309,6 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   // The revision on screen before this one; the first arrives with the header morph instead.
   const stepped = useRef<DocumentHistory["selection"]>(null);
   const body = useRef<HTMLDivElement | null>(null);
-  const [shown, setShown] = useState({ selection, collapseUnchanged });
-  // Runs shown again belong to the revision they were opened on; collapsing again folds them all.
-  if (shown.selection !== selection || shown.collapseUnchanged !== collapseUnchanged) {
-    setShown({ selection, collapseUnchanged });
-    setExpanded(new Set());
-  }
   const restoreReason = useId();
   const title = selection === null ? "" : getMeta(selection.after).title;
   const available = useAvailableWidth(pane, history.active);
@@ -335,14 +328,19 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       if (split && selection.before !== null && beforeHost.current !== null && afterHost.current !== null) {
         const view = createRevisionSplit({ beforeElement: beforeHost.current, afterElement: afterHost.current,
           before: selection.before, after: selection.after, docLinks, workspaceSettings,
-          folding: { collapse: collapseUnchanged, expanded },
-          onExpand: (run) => setExpanded((current) => new Set([...current, run])) });
+          folding: { collapse: collapseUnchanged, expanded: new Set() },
+          onExpand: (run) => {
+            const previous = pane.current === null ? null : snapshotRows(sides, pane.current);
+            view.expand(run);
+            setRows(view.model.rows);
+            if (previous !== null && pane.current !== null) animateRows(sides, previous, pane.current);
+          } });
         const sides = [view.before.view.dom, view.after.view.dom];
         const activate = (event: MouseEvent): void => { handleDocLinkClick(event, docLinks); };
         for (const side of sides) side.addEventListener("click", activate);
         setEditors([{ side: "before", editor: view.before }, { side: "after", editor: view.after }]);
         setRows(view.model.rows);
-        // Folding rebuilds both sides; rows slide from where they stood.
+        // The Collapse unchanged switch rebuilds both sides; rows slide from where they stood.
         const previous = folded.current;
         folded.current = null;
         if (previous?.selection === selection && pane.current !== null) animateRows([view.before.view.dom, view.after.view.dom], previous.rows, pane.current);
@@ -360,7 +358,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       setEditors([{ side: "single", editor }]);
       return () => { setEditors([]); editor.destroy(); };
     } catch { setFailed(selection); }
-  }, [selection, split, docLinks, workspaceSettings, collapseUnchanged, expanded]);
+  }, [selection, split, docLinks, workspaceSettings, collapseUnchanged]);
   // The header arrives from where the live header stood; leaving cancels it at once.
   // biome-ignore lint/correctness/useExhaustiveDependencies: The morph runs once, when history opens.
   useLayoutEffect(() => {
