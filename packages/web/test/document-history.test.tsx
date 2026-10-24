@@ -700,22 +700,30 @@ describe("document history navigation", () => {
     expect(fix.reading().selection!.comparedWith).toEqual(earliest);
   });
 
-  it("loads sidebar rename information before visiting entries and retains it across named comparisons", async () => {
-    const api = client(async (_uuid, id) => document(id === "earliest" ? "Alpha" : "Beta"));
+  it.each([true, false])("loads only supplied sidebar rename information through named comparisons, with list titles: %s", async includeTitles => {
+    const api = client(async (_uuid, id) => document(id === "earliest" || (!includeTitles && id === "newest") ? "Alpha" : "Beta"));
     const baseline = { ...entries[2]!, title: "Alpha", name: { text: "Kickoff", namer: null, namedAt: 50, canManage: false } };
-    vi.mocked(api.list).mockResolvedValue([{ ...entries[0]!, title: "Beta" }, { ...entries[1]!, title: "Beta" }, baseline]);
+    const listed = [{ ...entries[0]!, title: "Beta" }, { ...entries[1]!, title: "Beta" }, baseline];
+    vi.mocked(api.list).mockResolvedValue(includeTitles ? listed : listed.map(({ id, author, startedAt, endedAt, name }) => ({
+      id, author, startedAt, endedAt, ...(name === undefined ? {} : { name }),
+    })));
     const fix = mount(api);
     await act(async () => {});
     expect(api.get).not.toHaveBeenCalled();
-    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 1)).toBe("Alpha");
+    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 1)).toBe(includeTitles ? "Alpha" : null);
     await act(async () => fix.reading().back());
     expect(api.get).toHaveBeenCalledTimes(2);
-    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 1)).toBe("Alpha");
+    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 1)).toBe(includeTitles ? "Alpha" : null);
     expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 0)).toBeNull();
     await act(async () => fix.reading().open(1));
     await act(async () => fix.reading().sinceNamed("earliest"));
-    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 1)).toBe("Alpha");
+    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 1)).toBe(includeTitles ? "Alpha" : null);
     expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 0)).toBeNull();
+    expect(fix.reading().selection!.comparedWith?.id).toBe("earliest");
+    expect(getMeta(fix.reading().selection!.after).title).toBe(includeTitles ? "Beta" : "Alpha");
+    expect(vi.mocked(api.get).mock.calls.map(call => call[1])).toEqual(["newest", "middle", "earliest", "newest", "earliest"]);
+    expect(fix.reading().error).toBeNull();
+    if (!includeTitles) expect(fix.reading().titles).toEqual({});
     fix.view.unmount();
     expect(documents.every(doc => doc.isDestroyed)).toBe(true);
   });

@@ -148,13 +148,24 @@ and share a harness, except proofs requiring fresh state per test. Only the
 release-runtime, shared-controls and compiled-loopback fallback proofs build
 their own bundles.
 
-Browser tests cover what jsdom cannot: two live clients converging on one
-block, a rendered remote cursor, and fresh and reloaded browsers receiving only
-what their server sends. Other tests belong in `mise run test`. Arguments after
+Browser tests keep the main user journeys and guarantees that need a real
+browser or running system, such as two live clients converging on one block,
+native focus and selection, rendered geometry, and fresh or reloaded browsers
+receiving only what their server sends. Follow
+[test ownership](.agents/development.md#test-ownership) when choosing component
+versus E2E coverage or consolidating cases. Unit and component cases run through
+`mise run test`. Arguments after
 `--` pass unchanged to Playwright; for example:
 
 ```sh
 mise run e2e -- --repeat-each=3 sidebar.spec.ts
+```
+
+Website screenshot asset generation is opt-in. Rendering and appearance
+regression assertions stay in routine acceptance:
+
+```sh
+mise run e2e -- --config=playwright-captures.config.ts
 ```
 
 Wait for saves and drawing through `e2e/settle.ts`. `waitForAcknowledged` names

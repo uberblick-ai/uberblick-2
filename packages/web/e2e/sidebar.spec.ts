@@ -45,6 +45,16 @@ async function openDrawer(page: Page, settings = false): Promise<void> {
   await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
 }
 
+async function expectInsideViewport(control: Locator): Promise<void> {
+  await expect(control).toBeVisible();
+  await expect.poll(() => control.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    const viewport = window.visualViewport;
+    const top = viewport?.offsetTop ?? 0;
+    return box.top >= top - 1 && box.bottom <= top + (viewport?.height ?? window.innerHeight) + 1;
+  })).toBe(true);
+}
+
 test("workspace header controls work with keyboard, pointer and touch @webkit-touch", async ({ browser }) => {
   for (const width of [1280, 810]) {
     const page = await openApp(browser, "/", {
@@ -184,10 +194,14 @@ test("narrow and docked layouts keep the drawer and pane controls inside the vie
     for (const width of webkit ? [projectWidth] : [810, 1280]) {
       await test.step(`${settings ? "settings" : "documents"} at ${width}px`, async () => {
         if (!webkit) await page.setViewportSize({ width, height: 832 });
+        await expectInsideViewport(page.locator(".ub-app"));
+        await expectInsideViewport(page.locator(".ub-pane"));
+        if (!settings) await expectInsideViewport(page.locator(".ub-document-pane"));
         if (width < 1280) {
           await expect(page.getByRole("button", { name: settings ? "Show sidebar" : "Show document list", exact: true })).toBeVisible();
           const before = await expectPaneClearsOpener(page);
           await openDrawer(page, settings);
+          await expectInsideViewport(page.locator(".ub-list"));
           const sidebar = await page.locator(".ub-list").boundingBox();
           const close = await page.getByRole("button", { name: settings ? "Close sidebar" : "Close document list", exact: true }).boundingBox();
           if (!sidebar || !close) throw new Error("e2e: drawer has no geometry");
@@ -204,6 +218,7 @@ test("narrow and docked layouts keep the drawer and pane controls inside the vie
         } else {
           await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
           await expect(page.locator(".ub-list")).toBeVisible();
+          await expectInsideViewport(page.locator(".ub-list"));
           await expectPaneAtSidebarEdge(page);
         }
       });

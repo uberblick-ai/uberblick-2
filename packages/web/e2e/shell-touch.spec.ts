@@ -329,16 +329,6 @@ async function expectTargetGeometry(page: Page, coarse: boolean, kind: "group" |
   }), "table fits its pane").toBe(true);
 }
 
-async function expectInsideViewport(control: Locator): Promise<void> {
-  await expect(control).toBeVisible();
-  await expect.poll(() => control.evaluate((node) => {
-    const box = node.getBoundingClientRect();
-    const viewport = window.visualViewport;
-    const top = viewport?.offsetTop ?? 0;
-    return box.top >= top - 1 && box.bottom <= top + (viewport?.height ?? window.innerHeight) + 1;
-  })).toBe(true);
-}
-
 async function devicePage(browser: Browser, info: TestInfo, touch = false, upstream = false): Promise<Page> {
   return openApp(browser, "/", {
     upstream,
@@ -509,14 +499,4 @@ test("a Delete group confirmation refuses in place after sidebar readiness is lo
   await expect(confirmation).toHaveCount(0);
   await expect(drawer(page)).toBeVisible();
   await expect(group(page, "Reading")).toBeVisible();
-});
-
-test("the shell, sidebar and document pane stay within the visible viewport", { tag: "@webkit" }, async ({ browser }, info) => {
-  const page = await devicePage(browser, info);
-  await expectInsideViewport(page.locator(".ub-app"));
-  await expectInsideViewport(page.locator(".ub-pane"));
-  await showSidebar(page);
-  await expectInsideViewport(page.locator(".ub-list"));
-  await createDoc(page, "Viewport document");
-  await expectInsideViewport(page.locator(".ub-document-pane"));
 });

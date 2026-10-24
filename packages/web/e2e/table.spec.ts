@@ -43,9 +43,10 @@ test("TableKit cells stay drawn and wide tables contain horizontal scrolling", {
   const header = "| Name | Amount | Date | Status | Owner | Notes | Source | Last column |";
   await page.keyboard.type(header);
   await page.keyboard.press("Enter");
-  await page.keyboard.type("| --- | --- | --- | --- | --- | --- | --- | --- |");
+  await page.keyboard.type("| --- | ---: | --- | --- | --- | --- | --- | --- |");
   const wide = page.locator(".ub-table").first();
   await expect(wide.locator("th")).toHaveCount(8);
+  await expect(page.locator(".ub-editor .ProseMirror > *")).toHaveCount(3);
   const wrapper = wide.locator("..");
   await expect.poll(() => wrapper.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
