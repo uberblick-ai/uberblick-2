@@ -121,6 +121,48 @@ function entry(page: Page, uuid: string): Locator {
   return page.locator(`.ub-decision-timeline > li[data-record="${uuid}"]`);
 }
 
+test("legacy decision dates stay calendar dates west of UTC at every decision time", async ({ browser }) => {
+  const writer = session();
+  const owner = await create(writer, "Legacy decision date owner", "The related page's prose.");
+  const first = await create(writer, "Legacy date question", "Earlier answer.", {
+    kind: "decision", status: "decided", answer: answer(),
+  });
+  const current = await create(writer, undefined, "Current answer.", {
+    kind: "decision", status: "decided", supersedes: first.uuid, related: owner.uuid, answer: answer(),
+  });
+  const peer = await legacyDecisionPeer(harness(), current.uuid);
+  try {
+    getMetaMap(peer.doc).set("decidedAt", "2026-10-24");
+    peer.decide("decided");
+    await expectMcp(() => writer.call<{ decidedAt?: string }>("get_doc", { uuid: current.uuid }), (stored) => {
+      expect(stored.decidedAt).toBe("2026-10-24");
+    });
+    const topicPath = `/${harness().workspace}/${first.uuid}`;
+    const page = await openApp(browser, topicPath, {
+      upstream: true, contextOptions: { locale: "en-US", timezoneId: "America/Los_Angeles" },
+    });
+    await selected(page, current.uuid, answerText(current));
+    const calendarTime = async (time: Locator): Promise<void> => {
+      await expect(time).toHaveText("Oct 24, 2026");
+      await expect(time).toHaveAttribute("datetime", "2026-10-24");
+      await expect(time).toHaveAttribute("title", "Oct 24, 2026");
+    };
+    await calendarTime(entry(page, current.uuid).locator("time"));
+    const instant = entry(page, first.uuid).locator("time");
+    await expect(instant).toHaveText(/ago$/);
+    await expect(instant).toHaveAttribute("datetime", "2026-10-04T12:00:00.000Z");
+    await expect(instant).toHaveAttribute("title", await page.evaluate(() =>
+      new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date("2026-10-04T12:00:00.000Z"))));
+    await entry(page, first.uuid).locator(".ub-decision-record").click();
+    await selected(page, first.uuid, answerText(first));
+    const replaced = page.locator(".ub-decision-earlier-answer");
+    await expect(replaced).toHaveText("Earlier answer. Replaced Oct 24, 2026; it no longer applies.");
+    await calendarTime(replaced.locator("time"));
+    await page.goto(new URL(`/${harness().workspace}/${owner.uuid}`, page.url()).href);
+    await calendarTime(page.getByRole("region", { name: "Decisions" }).locator("time"));
+  } finally { peer.close(); }
+});
+
 async function selected(page: Page, uuid: string, text: string): Promise<void> {
   await expect(entry(page, uuid).locator(".ub-decision-record")).toHaveAttribute("aria-current", "true");
   await expect(page.locator(".ub-decision-timeline")).not.toContainText("viewing");

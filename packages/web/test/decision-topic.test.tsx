@@ -787,7 +787,7 @@ describe("decision topic navigation and history", () => {
     {
       label: "a date-only recorded answer", status: "decided",
       options: { answerer: "Ben (@bk-one)", answerDate: "2026-10-09" },
-      person: "Ben (@bk-one)", dateTime: "2026-10-09T00:00:00.000Z",
+      person: "Ben (@bk-one)", dateTime: "2026-10-09",
     },
     {
       label: "an older recorded answer without a person", status: "decided",
@@ -845,7 +845,12 @@ describe("decision topic navigation and history", () => {
       expect(historyTime).toBeNull();
     } else {
       expect(historyTime?.dateTime).toBe(dateTime);
-      expect(historyTime?.title).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(dateTime)));
+      if (dateTime === "2026-10-09") {
+        expect(historyTime?.textContent).toBe("Oct 9, 2026");
+        expect(historyTime?.title).toBe("Oct 9, 2026");
+      } else {
+        expect(historyTime?.title).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(dateTime)));
+      }
     }
   });
 
@@ -866,7 +871,10 @@ describe("decision topic navigation and history", () => {
     expect(banner?.querySelector("time")?.dateTime).toBe(new Date(DATE).toISOString());
     expect(within(host).getByRole("link", { name: "Go to the current answer" })).toBeDefined();
     await choose(host, CURRENT);
-    expect(host.querySelector(".ub-decision-earlier-answer")?.textContent).toContain("Earlier answer. Replaced 5 days ago; it no longer applies.");
+    const replaced = host.querySelector(".ub-decision-earlier-answer");
+    expect(replaced?.textContent).toContain("Earlier answer. Replaced Nov 1, 2026; it no longer applies.");
+    expect(replaced?.querySelector("time")?.dateTime).toBe("2026-11-01");
+    expect(replaced?.querySelector("time")?.title).toBe("Nov 1, 2026");
   });
 
   it.each([undefined, "not a date"])("omits an unavailable first replacement date (%s) without borrowing a later answer date", async (answerDate) => {

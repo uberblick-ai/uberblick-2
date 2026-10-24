@@ -60,7 +60,10 @@ export const tldrArg = z
 
 export const decisionAnswerArg = z.object({
   who: z.string().trim().min(1).describe("Person who gave the answer."),
-  when: z.string().trim().min(1).describe("When the person gave the answer, preferably an ISO date-time."),
+  when: z.string().trim().check(z.iso.datetime({
+    offset: true,
+    error: "Use an ISO 8601 date-time with a time zone, e.g. 2026-10-24T10:55:00Z; pass the current time if the answer was given just now.",
+  })).describe("When the person gave the answer: an ISO 8601 date-time with a time zone, e.g. 2026-10-24T10:55:00Z. Pass the current time if the answer was given just now."),
   where: z.string().trim().min(1).describe("Where the answer was given, such as a conversation or review URL."),
 }).strict().describe("Record a person's answer, not the agent's own approval. MCP does not verify its provenance.");
 

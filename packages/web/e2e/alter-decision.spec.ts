@@ -24,6 +24,7 @@ interface StoredDoc {
   title: string;
   status?: string;
   decidedBy?: string;
+  decidedAt?: string;
   approvalChanged?: boolean;
   discussion?: string | null;
   related?: string[];
@@ -270,7 +271,12 @@ test("Decide records a successor at the topic address and RFC opens its new page
   await expect(newest.locator(".ub-decision-record-state")).toHaveText("In force");
   await expect(newest.locator(".ub-decision-event")).toHaveText("Browser decision maker");
   await expect(newest.getByRole("link", { name: "Browser decision maker" })).toHaveAttribute("aria-current", "true");
-  await expect(newest.locator("time")).toHaveAttribute("datetime", /^\d{4}-/);
+  const decidedTime = newest.locator("time");
+  await expect(decidedTime).toHaveText("just now");
+  await expect(decidedTime).toHaveAttribute("datetime", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  const decidedAt = await decidedTime.getAttribute("datetime");
+  await expect(decidedTime).toHaveAttribute("title", await page.evaluate((value) =>
+    new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value ?? "")), decidedAt));
   await expect(page.locator(`.ub-decision-timeline > li[data-record="${source.uuid}"]`)).toContainText("Superseded");
   let decided: string | undefined;
   await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: source.uuid }), (stored) => {
@@ -279,6 +285,7 @@ test("Decide records a successor at the topic address and RFC opens its new page
     expect(decided).not.toBe(source.uuid);
   });
   await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: decided }), (stored) => {
+    expect(stored.decidedAt).toBe(decidedAt);
     expect(stored.related).toEqual(relatedUuids);
     expect(stored.approvalChanged).toBe(false);
     expect(stored.blocks.map(({ type, text }) => ({ type, text }))).toEqual([

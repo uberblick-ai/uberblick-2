@@ -204,7 +204,7 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
   const recordAnswer = (replica: Replica, answer: DecisionAnswer): void => {
     const meta = getMetaMap(replica.doc);
     meta.set("decidedBy", answer.who);
-    meta.set("decidedAt", answer.when);
+    meta.set("decidedAt", new Date(answer.when).toISOString());
     meta.set("decidedWhere", answer.where);
     meta.set("agentStance", false);
     meta.set("approvalFingerprint", decisionApprovalFingerprint(replica.doc));

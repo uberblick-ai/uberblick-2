@@ -75,7 +75,7 @@ describe("structured tables through MCP", () => {
     expect(parseTableCell(canonicalCell).map(run => run.text).join("")).toBe("  Alpha  ");
     expect(parseGfmTable(before.text)?.rows[0]?.[0]).toBe("**Alpha**");
     await rig.ok("set_status", { uuid: created.uuid, status: "decided",
-      answer: { who: "Owner", when: "2026-10-07", where: "https://example.com/answer" } });
+      answer: { who: "Owner", when: "2026-10-07T12:00:00Z", where: "https://example.com/answer" } });
     const approved = getMetaMap(doc).get("approvalFingerprint");
     const opened = await rig.ok("annotate", { uuid: created.uuid, block_id: id, row: 1, column: 0,
       start: 2, end: 7, text: "Discuss Alpha" });

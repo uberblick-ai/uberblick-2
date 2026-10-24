@@ -116,7 +116,7 @@ A topic is the question; it keeps its identity while its answer changes. The fir
 
 - \`create_doc\` with \`kind: "decision"\` creates an open record, or a decided one with its answer. \`set_status\` moves it later, or turns an ordinary page into a decision record.
 - An open record may be empty or hold a proposal. Moving to \`decided\` needs a non-blank answer.
-- A topic's first record may be decided as an agent stance without a person. Every later decision, and confirming a stance, needs \`answer: {who, when, where}\`: who gave the answer, when and where. MCP stores it without verifying it, so have that authority first.
+- A topic's first record may be decided as an agent stance without a person. Every later decision, and confirming a stance, needs \`answer: {who, when, where}\`: who gave the answer, when and where. \`when\` is an ISO 8601 date-time with a time zone, e.g. \`2026-10-24T10:55:00Z\`; pass the current time if the answer was given just now. MCP normalises it to UTC and stores the attribution without verifying it, so have that authority first.
 - An open proposal may be withdrawn. Rejecting needs a reason and a person's answer. Decided records cannot reopen; rejected and withdrawn records are final.
 
 ## Changing a decided answer

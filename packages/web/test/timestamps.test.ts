@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatShortTimestamp, formatTimestamp } from "../src/ui/timestamps.js";
+import { formatDecisionTimestamp, formatShortTimestamp, formatTimestamp } from "../src/ui/timestamps.js";
 
 const NOW = Date.parse("2026-10-12T12:00:00Z");
 const MINUTE = 60_000;
@@ -10,7 +10,19 @@ describe("recorded-answer timestamps", () => {
   it("keeps invalid free text out and accepts recorded date-only values", () => {
     expect(formatShortTimestamp("not a date", NOW)).toBeNull();
     expect(formatShortTimestamp(Number.NaN, NOW)).toBeNull();
-    expect(formatShortTimestamp("2026-10-07", NOW)).toMatchObject({ label: "5d", dateTime: "2026-10-07T00:00:00.000Z" });
+    for (const compact of [false, true]) {
+      expect(formatDecisionTimestamp("2026-10-07", NOW, compact)).toEqual({
+        label: "Oct 7, 2026", dateTime: "2026-10-07", title: "Oct 7, 2026",
+      });
+      expect(formatDecisionTimestamp("not a date", NOW, compact)).toBeNull();
+    }
+  });
+
+  it("keeps full instants and other legacy values on their existing display path", () => {
+    for (const value of ["2026-10-07T12:00:00Z", "2026-10-07T19:00:00+07:00", "2026-10-07T12:00", "October 7, 2026"]) {
+      expect(formatDecisionTimestamp(value, NOW)).toEqual(formatTimestamp(value, NOW, true));
+      expect(formatDecisionTimestamp(value, NOW, true)).toEqual(formatShortTimestamp(value, NOW));
+    }
   });
 
   it("keeps exact hover dates and short relative labels for all recorded ages", () => {

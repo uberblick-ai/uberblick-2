@@ -113,7 +113,7 @@ describe("delete_doc", () => {
   it("refuses a live topic through an individually archived record without writing", async () => {
     const rig = await local();
     const first = await rig.ok("create_doc", { title: "Live topic", description: "Its first answer.", kind: "decision", status: "decided", blocks: [{ type: "paragraph", text: "Keep the topic live." }] });
-    const current = await rig.ok("create_doc", { title: "Live topic", description: "Its current answer.", kind: "decision", status: "decided", supersedes: first.uuid, answer: { who: "A person", when: "2026-10-22", where: "Recorded approval." }, blocks: [{ type: "paragraph", text: "Keep the topic live." }] });
+    const current = await rig.ok("create_doc", { title: "Live topic", description: "Its current answer.", kind: "decision", status: "decided", supersedes: first.uuid, answer: { who: "A person", when: "2026-10-22T12:00:00Z", where: "Recorded approval." }, blocks: [{ type: "paragraph", text: "Keep the topic live." }] });
     const proposal = await rig.ok("create_doc", { title: "Live topic", description: "An archived proposal.", kind: "decision", supersedes: current.uuid });
     const directory = rig.instance.replicas.directory().doc;
     directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).set(first.uuid, true);
@@ -140,7 +140,7 @@ describe("delete_doc", () => {
       title: "Erase this topic", description: "A permanent topic deletion.", kind: "decision", related: source.uuid,
       blocks: [{ type: "paragraph", inline: [{ text: "Erase this topic answer.", marks: { link: "https://github.com/owner/repo/issues/42" } }] }],
     };
-    const answer = { who: "A person", when: "2026-10-22", where: "Recorded approval." };
+    const answer = { who: "A person", when: "2026-10-22T12:00:00Z", where: "Recorded approval." };
     const first = await rig.ok("create_doc", { ...fields, status: "decided" });
     const middle = await rig.ok("create_doc", { ...fields, supersedes: first.uuid, status: "decided", answer });
     const current = await rig.ok("create_doc", { ...fields, supersedes: middle.uuid, status: "decided", answer });
