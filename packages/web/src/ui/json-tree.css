@@ -120,11 +120,16 @@
   cursor: pointer;
   user-select: none;
 }
-.ub-json-compare-grid { white-space: normal; }
-.ub-json-compare-row {
+.ub-json-compare-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   column-gap: var(--json-compare-gap, 2.25rem);
+  white-space: normal;
+}
+.ub-json-compare-pane {
+  display: grid;
+  grid-template-rows: subgrid;
+  min-width: 0;
 }
 .ub-json-compare-cell {
   position: relative;
@@ -134,7 +139,8 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.ub-json-compare-cell > .ub-json-toggle { cursor: pointer; }
+.ub-json-compare-cell > .ub-json-toggle { padding: 0; border: 0; background: transparent; font: inherit; cursor: pointer; }
+.ub-json-compare-cell > .ub-json-toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .ub-json-compare-cell:not([data-mark=""])::before {
   content: attr(data-mark);
   position: absolute;
@@ -163,6 +169,7 @@ mark.ub-json-compare-added { background: var(--revision-added-background); color
   color: var(--muted-foreground);
   font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
   cursor: pointer;
+  user-select: none;
 }
 .ub-json-compare-run:hover { background: var(--accent); color: var(--foreground); }
 .ub-json-compare-run:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }

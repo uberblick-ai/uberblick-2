@@ -192,7 +192,7 @@ function jsonRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, n
       kind: "changed", at, changed: true,
       before: { labels: [], filler: false, spanned: true }, after: { labels: [], filler: false, spanned: true },
     },
-    left: placeholder.create(),
+    left: placeholder.create({ before }),
     right: compare.create({ before, after, key: `${String(newNode.attrs.id ?? "")}:${before.length}:${after.length}` }),
   };
 }

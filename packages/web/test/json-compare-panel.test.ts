@@ -30,7 +30,7 @@ describe("JSON comparison panel", () => {
     const folded = shown.grid.querySelector<HTMLElement>('[data-path=".nested"]');
     expect(folded?.dataset.folded).toBe("true");
     expect(folded?.dataset.change).toBe("changed");
-    expect(folded?.querySelector(".ub-json-compare-after")?.getAttribute("data-mark")).toBe("~");
+    expect(folded?.getAttribute("data-mark")).toBe("~");
     if (folded == null) throw new Error("The folded row is missing");
     openFoldedChange(folded);
     expect(shown.grid.querySelector('[data-path=".nested.deep.level"]')).not.toBeNull();
@@ -52,6 +52,28 @@ describe("JSON comparison panel", () => {
     shown.reveal(matches[1] ?? null);
     expect(shown.grid.querySelector('[data-path=".b"]')).not.toBeNull();
     expect(shown.grid.querySelectorAll("mark.ub-json-match-current")).toHaveLength(2);
+  });
+
+  it("highlights a match that spans the marked pieces of a changed value", () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const shown = panel();
+    shown.show(JSON.stringify({ greeting: "alpha old omega" }), JSON.stringify({ greeting: "alpha new omega" }));
+    const matches = shown.search("alpha new");
+    expect(matches.map((match) => match.path)).toEqual([".greeting"]);
+    shown.reveal(matches[0] ?? null);
+    const current = [...shown.grid.querySelectorAll(".ub-json-compare-after mark.ub-json-match-current")];
+    expect(current.map((mark) => mark.textContent).join("")).toBe("alpha new");
+    expect(shown.grid.querySelectorAll(".ub-json-compare-before mark.ub-json-match")).toHaveLength(0);
+  });
+
+  it("keeps each side in its own pane and fold arrows as buttons", () => {
+    const shown = panel();
+    shown.show(BEFORE, AFTER);
+    const panes = [...shown.grid.querySelectorAll<HTMLElement>(".ub-json-compare-pane")];
+    expect(panes.map((pane) => pane.dataset.side)).toEqual(["before", "after"]);
+    expect(panes[0]?.querySelectorAll(".ub-json-compare-after")).toHaveLength(0);
+    expect(panes[0]?.children).toHaveLength(panes[1]?.children.length ?? -1);
+    expect(shown.grid.querySelector(".ub-json-toggle")?.tagName).toBe("BUTTON");
   });
 
   it("draws nothing for text it cannot compare", () => {

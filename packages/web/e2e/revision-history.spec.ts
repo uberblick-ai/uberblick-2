@@ -137,12 +137,12 @@ function splitHistory(uuid: string, title: string): Record<string, string> {
 }
 
 /** A json-tree block whose items move, gain one entry and change a version string. */
-function jsonHistory(uuid: string, title: string): Record<string, string> {
+function jsonHistory(uuid: string, title: string, sources?: { before: string; after: string }): Record<string, string> {
   const document = new Y.Doc();
   const agents = (entries: { id: string; image: string }[]) => JSON.stringify({ service: "planner", agents: entries,
     limits: { tokens: 4096, price: 1.5, retries: 3, timeout: 30, region: "eu" }, owner: "platform", tier: "standard", zone: "eu-central" }, null, 2);
-  const before = agents([{ id: "implementer", image: "ub-hub:0.4.8" }, { id: "reviewer", image: "ub-hub:0.4.8" }]);
-  const after = agents([{ id: "reviewer", image: "ub-hub:0.4.8" }, { id: "implementer", image: "ub-hub:0.4.9" }, { id: "preparer", image: "ub-hub:0.4.9" }]);
+  const before = sources?.before ?? agents([{ id: "implementer", image: "ub-hub:0.4.8" }, { id: "reviewer", image: "ub-hub:0.4.8" }]);
+  const after = sources?.after ?? agents([{ id: "reviewer", image: "ub-hub:0.4.8" }, { id: "implementer", image: "ub-hub:0.4.9" }, { id: "preparer", image: "ub-hub:0.4.9" }]);
   try {
     initDoc(document, { uuid, title });
     appendBlock(document, { type: "paragraph", text: "The planner's settings, as the hub reports them." });
@@ -993,10 +993,117 @@ test.describe("document history through ub open", () => {
     await expect(compare).toContainText('"timeout": 30');
     await expect.poll(aligned).toBe(true);
     // Each cell pair starts at the same height.
-    expect(await compare.evaluate((element) => [...element.querySelectorAll(".ub-json-compare-row")].every((row) => {
-      const [left, right] = [...row.children].map((cell) => cell.getBoundingClientRect().top);
-      return Math.abs((left ?? 0) - (right ?? 0)) <= 1;
-    }))).toBe(true);
+    expect(await compare.evaluate((element) => {
+      const left = [...element.querySelectorAll(".ub-json-compare-before")];
+      const right = [...element.querySelectorAll(".ub-json-compare-after")];
+      return left.length > 0 && left.length === right.length && left.every((cell, index) =>
+        Math.abs(cell.getBoundingClientRect().top - (right[index]?.getBoundingClientRect().top ?? Number.NaN)) <= 1);
+    })).toBe(true);
+  });
+
+  test("JSON comparison selection, copying and folding work independently in either pane", { tag: "@webkit" }, async ({ browser }, info) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 1000 } } });
+    const title = docTitle("JSON comparison interactions");
+    const uuid = await newDocument(page, title);
+    const oldValue = "Earlier version with a long value that wraps within the JSON pane. ".repeat(4);
+    const sources = {
+      before: JSON.stringify({ version: oldValue, nested: { a: 1, b: 2 }, tail: "same" }, null, 2),
+      after: JSON.stringify({ version: "new", nested: { a: 1, b: 2 }, tail: "same" }, null, 2),
+    };
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], jsonHistory(uuid, title, sources));
+    await previous(page);
+    const compare = page.locator(".ub-json-compare");
+    const before = compare.getByRole("textbox", { name: "Before JSON", exact: true });
+    const after = compare.getByRole("textbox", { name: "After JSON", exact: true });
+    await expect(compare).toBeVisible();
+    const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+    const copyText = async () => {
+      await page.keyboard.press(`${modifier}+c`);
+      const target = page.locator("textarea[data-copy-target]");
+      await page.evaluate(() => {
+        const textarea = document.createElement("textarea");
+        textarea.dataset.copyTarget = "true";
+        document.body.append(textarea);
+        textarea.focus();
+      });
+      await page.keyboard.press(`${modifier}+v`);
+      const text = await target.inputValue();
+      await target.evaluate(element => element.remove());
+      return text;
+    };
+    // Select all from surrounding prose, then paste the native clipboard into a plain-text target.
+    for (const [side, source] of [[earlierSide(page), sources.before], [historicalEditor(page), sources.after]] as const) {
+      const paragraph = side.locator(":scope > p").first();
+      await setPointerSelection(paragraph, () => paragraph.click());
+      await page.keyboard.press(`${modifier}+a`);
+      expect(await copyText()).toBe(`The planner's settings, as the hub reports them.\n\n${source}\n\nAn unchanged closing paragraph.`);
+    }
+    const aligned = () => compare.evaluate(element => {
+      const left = [...element.querySelectorAll(".ub-json-compare-before")];
+      const right = [...element.querySelectorAll(".ub-json-compare-after")];
+      return left.length > 0 && left.length === right.length && left.every((cell, index) =>
+        Math.abs(cell.getBoundingClientRect().top - (right[index]?.getBoundingClientRect().top ?? Number.NaN)) <= 1);
+    });
+    await expect.poll(aligned).toBe(true);
+    for (const [own, other, side] of [[before, after, "before"], [after, before, "after"]] as const) {
+      // Tab reaches both container buttons; Enter and Space update both panes and keep focus.
+      await own.focus();
+      await page.keyboard.press("Tab");
+      await expect(own.locator(".ub-json-toggle").first()).toBeFocused();
+      await page.keyboard.press("Tab");
+      const nested = own.locator(".ub-json-toggle").nth(1);
+      await expect(nested).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(nested).toHaveAttribute("aria-expanded", "true");
+      await expect(other.locator(".ub-json-toggle").nth(1)).toHaveAttribute("aria-expanded", "true");
+      await expect(nested).toBeFocused();
+      await page.keyboard.press("Space");
+      await expect(nested).toHaveAttribute("aria-expanded", "false");
+      await page.keyboard.press("Enter");
+      await expect(own.getByRole("button", { name: "2 unchanged keys", exact: true })).toBeVisible();
+      await expect.poll(aligned).toBe(true);
+      const start = await own.locator(".ub-json-key").filter({ hasText: '"version"' }).boundingBox();
+      const finish = await own.locator(".ub-json-key").filter({ hasText: '"tail"' }).boundingBox();
+      const across = await other.locator(".ub-json-key").filter({ hasText: '"tail"' }).boundingBox();
+      if (start === null || finish === null || across === null) throw new Error("Missing JSON selection endpoints");
+      for (const end of [finish, across]) {
+        await page.mouse.move(start.x, start.y + start.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(end.x + end.width, end.y + end.height / 2, { steps: 12 });
+        await page.mouse.up();
+        await expect.poll(() => own.evaluate(element => {
+          const selection = document.getSelection();
+          return selection !== null && !selection.isCollapsed && element.contains(selection.anchorNode) && element.contains(selection.focusNode);
+        })).toBe(true);
+        const selected = await page.evaluate(() => document.getSelection()?.toString() ?? "");
+        expect(selected.match(/"version"/g)).toHaveLength(1);
+        expect(selected).toContain(side === "before" ? "Earlier version" : '"new"');
+        expect(selected).not.toContain(side === "before" ? '"new"' : "Earlier version");
+        const copied = await copyText();
+        expect(copied).toContain('"version"');
+        expect(copied).not.toMatch(/unchanged keys|▾|▸/);
+      }
+      // Native input and clipboard actions cannot mutate the read-only selection host.
+      await own.click();
+      await page.keyboard.press(`${modifier}+a`);
+      const paneCopy = await copyText();
+      expect(paneCopy).toContain('"version"');
+      expect(paneCopy).not.toMatch(/unchanged keys|▾|▸/);
+      await own.click();
+      await page.keyboard.press(`${modifier}+a`);
+      const original = await own.innerHTML();
+      await page.keyboard.type("mutation");
+      await page.keyboard.press("Backspace");
+      await page.keyboard.press("Enter");
+      await page.keyboard.press(`${modifier}+x`);
+      await page.keyboard.press(`${modifier}+v`);
+      expect(await own.innerHTML()).toBe(original);
+      await nested.click();
+    }
+    await info.attach("JSON comparison interactions", { body: await compare.screenshot(), contentType: "image/png" });
   });
 
   test("changes inside a json-tree comparison get their own ruler marks and change steps, and open full screen", async ({ browser }, info) => {
@@ -1013,11 +1120,11 @@ test.describe("document history through ub open", () => {
     await expect.poll(() => runningMotion(page)).toBe(0);
     const changeMarks = async () => (await rulerGeometry(page)).marks.filter((mark) => mark.kind !== "same" && mark.kind !== "fold");
     // One ruler mark per changed row inside the block, plus the changed paragraph.
-    const innerChanges = () => compare.locator(".ub-json-compare-row[data-change]").count();
+    const innerChanges = () => compare.locator(".ub-json-compare-after[data-change]").count();
     await expect.poll(async () => (await changeMarks()).length).toBe(await innerChanges() + 1);
     // Showing unchanged keys spreads the block; the marks follow, and the nested change is folded away.
     await compare.getByRole("switch", { name: "Collapse unchanged" }).uncheck();
-    await expect(compare.locator('.ub-json-compare-row[data-path=".nested"]')).toHaveAttribute("data-folded", "true");
+    await expect(compare.locator('.ub-json-compare-after[data-path=".nested"]')).toHaveAttribute("data-folded", "true");
     await expect.poll(async () => (await changeMarks()).length).toBe(await innerChanges() + 1);
     const marks = await changeMarks();
     expect((marks.at(-1)?.top ?? 0) - (marks[0]?.top ?? 0)).toBeGreaterThan(100);
@@ -1042,15 +1149,15 @@ test.describe("document history through ub open", () => {
     // The nested change in the middle, then the end; the first change is already current.
     expect(steps).toBeGreaterThanOrEqual(2);
     await expect(nextChange).toBeDisabled();
-    await expect(compare.locator('.ub-json-compare-row[data-path=".nested.deep.level"]')).toBeVisible();
-    await expect(compare.locator(".ub-json-compare-row[data-folded]")).toHaveCount(0);
+    await expect(compare.locator('.ub-json-compare-after[data-path=".nested.deep.level"]')).toBeVisible();
+    await expect(compare.locator(".ub-json-compare-after[data-folded]")).toHaveCount(0);
     await expect.poll(() => pane.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThan(2);
     // Full screen shows the same rows, searches both panes, and steps between changes.
-    const rows = await compare.locator(".ub-json-compare-row").count();
+    const rows = await compare.locator(".ub-json-compare-after").count();
     await compare.getByRole("button", { name: "Expand JSON comparison" }).click();
     const dialog = page.getByRole("dialog", { name: "JSON comparison" });
     await expect(dialog).toBeVisible();
-    await expect(dialog.locator(".ub-json-compare-row")).toHaveCount(rows);
+    await expect(dialog.locator(".ub-json-compare-after")).toHaveCount(rows);
     await expect(dialog.getByRole("switch", { name: "Collapse unchanged" })).not.toBeChecked();
     await expect(dialog.getByRole("button", { name: "Previous change" })).toBeDisabled();
     await dialog.getByRole("button", { name: "Next change" }).click();
@@ -1078,7 +1185,7 @@ test.describe("document history through ub open", () => {
     await expect(dialog).toHaveCount(0);
     await expect(compare.getByRole("button", { name: "Expand JSON comparison" })).toBeFocused();
     await expect(compare.getByRole("switch", { name: "Collapse unchanged" })).toBeChecked();
-    await expect(compare.locator('.ub-json-compare-row[data-path=".nested.deep.label"]')).toBeVisible();
+    await expect(compare.locator('.ub-json-compare-after[data-path=".nested.deep.label"]')).toBeVisible();
   });
 
   test("unchanged runs fold on both sides, open on demand, and changes are one step apart", async ({ browser }, info) => {

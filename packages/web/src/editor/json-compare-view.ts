@@ -1,7 +1,6 @@
 /**
  * A changed json-tree block in the side-by-side comparison: one block across
- * both columns, with a before cell and an after cell in every grid row so the
- * two panes stay aligned even when a value wraps.
+ * both columns. The panes share grid rows but keep separate selection hosts.
  */
 import { Node as TiptapNode } from "@tiptap/core";
 import type { NodeViewRendererProps } from "@tiptap/core";
@@ -73,6 +72,7 @@ export const RevisionJsonCompare = TiptapNode.create({
   addAttributes: () => ({ before: { default: "" }, after: { default: "" }, key: { default: "" } }),
   parseHTML: () => [],
   renderHTML: () => ["div", { class: "ub-json-compare" }],
+  renderText: ({ node }) => String(node.attrs.after),
   addNodeView: () => jsonCompareView,
 });
 
@@ -82,6 +82,8 @@ export const RevisionJsonPlaceholder = TiptapNode.create({
   group: "block",
   atom: true,
   selectable: false,
+  addAttributes: () => ({ before: { default: "" } }),
   parseHTML: () => [],
   renderHTML: () => ["div", { class: "ub-json-compare-placeholder", "aria-hidden": "true" }],
+  renderText: ({ node }) => String(node.attrs.before),
 });
