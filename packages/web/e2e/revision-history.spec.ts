@@ -149,6 +149,24 @@ function splitHistory(uuid: string, title: string): Record<string, string> {
   }
 }
 
+/** The first block is removed, then a tall wireframe is added before the same long tail. */
+function coveredHeaderHistory(uuid: string, title: string): Record<string, string> {
+  const document = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title });
+    const first = appendBlock(document, { type: "paragraph", text: "Removed opening content. ".repeat(40) });
+    appendBlock(document, { type: "paragraph", text: "Unchanged trailing content leaves room to scroll. ".repeat(100) });
+    const baseline = Buffer.from(snapshotRevision(document).state).toString("base64");
+    deleteBlock(document, first);
+    const removed = Buffer.from(snapshotRevision(document).state).toString("base64");
+    insertBlock(document, null, { type: "code", language: "wireframe", text:
+      "dialog Added opening wireframe\n  text First field\n  text Second field\n  text Third field\n  text Fourth field\n  text Fifth field\n  text Sixth field\n  row.end\n    button Continue" });
+    return { baseline, removed, added: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+  }
+}
+
 /** A json-tree block whose items move, gain one entry and change a version string. */
 function jsonHistory(uuid: string, title: string, sources?: { before: string; after: string }): Record<string, string> {
   const document = new Y.Doc();
@@ -973,6 +991,84 @@ test.describe("document history through ub open", () => {
     await expect(list).toBeHidden();
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   });
+
+  for (const width of [1440, 1200, 860]) {
+    test(`the sticky history header covers comparison paint at both outer edges at ${width}px`, { tag: "@webkit" }, async ({ browser }, info) => {
+      const page = await openApp(browser, "/", { readySelector: ".ub-pane",
+        contextOptions: { viewport: { width, height: 640 }, reducedMotion: "reduce" } });
+      const title = docTitle("Covered comparison header");
+      const uuid = await newDocument(page, title);
+      await serveHistory(page, [
+        { id: "added", author: null, startedAt: 3_000, endedAt: null },
+        { id: "removed", author: null, startedAt: 2_000, endedAt: 3_000 },
+        { id: "baseline", author: null, startedAt: 1_000, endedAt: 2_000 },
+      ], coveredHeaderHistory(uuid, title));
+      const split = width >= 900;
+      const pane = page.locator(".ub-revision-pane");
+      const header = page.locator(".ub-revision-header");
+      for (const change of ["added", "removed"] as const) {
+        await previous(page);
+        await expect(page.locator(".ub-revision-split")).toHaveCount(Number(split));
+        const row = change === "added" ? historicalEditor(page).locator(".ub-wireframe") : earlierSide(page).locator(":scope > p").first();
+        await expect(row).toBeVisible();
+        if (change === "added") await expect(row.locator(".wf-root")).toBeVisible();
+        if (split) {
+          await expect(row).toHaveClass(new RegExp(`ub-revision-row-${change}`));
+          await expect(page.locator(".ub-revision-row-filler")).toHaveCount(1);
+          await expect(page.getByTestId("revision-ruler")).toBeVisible();
+        }
+        await expect(page.locator(".ub-revision-title")).toHaveText(title);
+        await expect(history(page)).toContainText(change === "added" ? "1 of 3" : "2 of 3");
+        await expect(header).toHaveCSS("position", "sticky");
+        for (const scheme of ["light", "dark"] as const) {
+          await page.emulateMedia({ colorScheme: scheme });
+          await expect.poll(() => runningMotion(page)).toBe(0);
+          await row.evaluate(element => {
+            const pane = element.closest<HTMLElement>(".ub-revision-pane");
+            const header = pane?.querySelector(".ub-revision-header");
+            if (pane == null || header == null) throw new Error("The revision pane or header is missing");
+            pane.scrollTop += element.getBoundingClientRect().top - Math.max(header.getBoundingClientRect().top, pane.getBoundingClientRect().top) - 4;
+          });
+          await expect.poll(() => row.evaluate(element => {
+            const pane = element.closest(".ub-revision-pane");
+            const header = pane?.querySelector(".ub-revision-header");
+            if (pane == null || header == null) return false;
+            const row = element.getBoundingClientRect(), band = header.getBoundingClientRect();
+            return row.top < band.bottom - 8 && row.bottom > band.bottom && pane.scrollTop > 0;
+          })).toBe(true);
+          const geometry = () => header.evaluate(element => {
+            const rect = (target: Element) => {
+              const box = target.getBoundingClientRect();
+              return { x: box.x, y: box.y, width: box.width, height: box.height };
+            };
+            return { header: rect(element), parts: [...element.querySelectorAll(".ub-revision-title, .ub-history-controls, .ub-change-nav, .ub-revision-ruler")].map(rect),
+              body: element.nextElementSibling?.className };
+          });
+          const before = await geometry();
+          expect(before.body).toContain(split ? "ub-revision-split" : "ub-revision-view");
+          const clip = await header.evaluate(element => {
+            const box = element.getBoundingClientRect();
+            const pane = element.closest(".ub-revision-pane");
+            const column = element.parentElement;
+            if (pane === null || column === null) throw new Error("The revision pane or column is missing");
+            const gutter = Number.parseFloat(getComputedStyle(column).paddingLeft);
+            const x = Math.floor(box.left - gutter), y = Math.ceil(Math.max(box.top, pane.getBoundingClientRect().top));
+            return { x, y, width: Math.ceil(box.right + 8) - x, height: Math.floor(box.bottom) - y };
+          });
+          const name = `covered-header-${width}-${change}-${scheme}`;
+          const visible = await page.screenshot({ clip, animations: "disabled", caret: "hide", scale: "css" });
+          const hidden = await page.addStyleTag({ content: ".ub-revision-header + :is(.ub-revision-split, .ub-revision-view) { visibility: hidden; }" });
+          const covered = await page.screenshot({ clip, animations: "disabled", caret: "hide", scale: "css" });
+          expect(await geometry()).toEqual(before);
+          await hidden.evaluate(element => element.parentNode?.removeChild(element));
+          await info.attach(name, { body: visible, contentType: "image/png" });
+          if (!visible.equals(covered)) await info.attach(`${name}-without-comparison`, { body: covered, contentType: "image/png" });
+          expect(visible.equals(covered), "Comparison paint must be invisible throughout the header band, including its gutter and tint overhang").toBe(true);
+        }
+        await pane.evaluate(element => element.scrollTo(0, 0));
+      }
+    });
+  }
 
   test("side by side, rows line up, selections stay on one side and copies keep authored content", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 900 } } });
