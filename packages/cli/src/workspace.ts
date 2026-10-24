@@ -28,7 +28,7 @@ commands:
   member <command>            grant workspace access and manage members
   list [--json]               workspaces this machine has a database for
   use <link|id>               fetch a shared workspace or select a local replica
-  remove <id|prefix> [--yes]  delete this computer's copy of a workspace
+  remove <id|prefix> [--yes]  delete this computer's copy of a workspace (alias: rm)
 
 options:
   -h, --help             show this help; after a command, that command's help
@@ -124,6 +124,8 @@ export const WORKSPACE_REMOVE_OPTIONS = {
 } as const;
 
 export const WORKSPACE_REMOVE_HELP = `usage: ub workspace remove <id|prefix> [--yes]
+
+Alias: rm
 
 Delete this computer's database files and record for one workspace. Accepts a
 workspace UUID, decorated <slug>-<uuid>, or a unique UUID prefix from this
