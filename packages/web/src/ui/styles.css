@@ -105,6 +105,14 @@
   --revision-added-ink: light-dark(oklch(0.45 0.12 150), oklch(0.78 0.12 150));
   --revision-removed-ink: light-dark(oklch(0.5 0.16 25), oklch(0.78 0.11 25));
   --revision-filler: light-dark(oklch(0.93 0.005 75), oklch(0.2 0.005 65));
+  /* The overview ruler: muted in dark mode so it never outshines the comparison. */
+  --revision-ruler-same: light-dark(oklch(0.86 0.012 70), oklch(0.33 0.01 70));
+  --revision-ruler-added: light-dark(oklch(0.64 0.15 150), oklch(0.48 0.09 150));
+  --revision-ruler-removed: light-dark(oklch(0.63 0.18 25), oklch(0.47 0.11 25));
+  --revision-ruler-changed: light-dark(oklch(0.71 0.14 80), oklch(0.53 0.08 85));
+  --revision-ruler-track: light-dark(oklch(0 0 0 / 0.025), oklch(1 0 0 / 0.03));
+  --revision-ruler-view: light-dark(oklch(0.2 0.005 70 / 0.07), oklch(1 0 0 / 0.05));
+  --revision-ruler-view-border: light-dark(oklch(0.2 0.005 70 / 0.4), oklch(1 0 0 / 0.22));
 
   --archived-background: light-dark(oklch(0.97 0.015 75), oklch(0.23 0.015 75));
   --archived-icon: light-dark(oklch(0.52 0.07 75), oklch(0.7 0.07 75));
@@ -277,11 +285,36 @@
   font-size: var(--type-h2-size);
   font-weight: 500;
   line-height: 1.25;
+  /* The morph from the live title scales from its first letter. */
+  transform-origin: 0 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+/* The title at another revision shares one cell with the one leaving. */
+.ub-revision-title-text {
+  grid-area: 1 / 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ub-revision-restore[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
+.ub-revision-title[data-direction="older"] { --title-enter: -14px; --title-leave: 14px; }
+.ub-revision-title[data-direction="newer"] { --title-enter: 14px; --title-leave: -14px; }
+.ub-revision-title-text[data-entering] { animation: ub-revision-title-enter 450ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.ub-revision-title-text[data-leaving] { animation: ub-revision-title-leave 450ms cubic-bezier(0.2, 0.7, 0.2, 1) both; pointer-events: none; }
+@keyframes ub-revision-title-enter {
+  0% { opacity: 0; transform: translateX(var(--title-enter)); filter: blur(3px); }
+  20% { opacity: 0; }
+  70% { filter: blur(0); }
+}
+@keyframes ub-revision-title-leave {
+  60% { opacity: 0; filter: blur(3px); }
+  100% { opacity: 0; transform: translateX(var(--title-leave)); filter: blur(3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ub-revision-title-text[data-entering] { animation: none; }
+  .ub-revision-title-text[data-leaving] { display: none; }
+}
+.ub-revision-restore[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
 .ub-history-renamed s { color: var(--muted-foreground); }
 
 /* The revision's status row: who and when, position, and which revision. */
@@ -467,12 +500,12 @@
   color: var(--muted-foreground);
   font: 500 var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
 }
-.ub-revision-side .ProseMirror > .ub-revision-row { position: relative; }
-.ub-revision-side-before .ProseMirror > :is(.ub-revision-row-removed, .ub-revision-row-changed) {
+.ub-revision-side :is(.ProseMirror, .ub-revision-ghost) > .ub-revision-row { position: relative; }
+.ub-revision-side-before :is(.ProseMirror, .ub-revision-ghost) > :is(.ub-revision-row-removed, .ub-revision-row-changed) {
   background: var(--revision-removed-row);
   box-shadow: -0.5rem 0 0 var(--revision-removed-row), 0.5rem 0 0 var(--revision-removed-row);
 }
-.ub-revision-side-after .ProseMirror > :is(.ub-revision-row-added, .ub-revision-row-changed) {
+.ub-revision-side-after :is(.ProseMirror, .ub-revision-ghost) > :is(.ub-revision-row-added, .ub-revision-row-changed) {
   background: var(--revision-added-row);
   box-shadow: -0.5rem 0 0 var(--revision-added-row), 0.5rem 0 0 var(--revision-added-row);
 }
@@ -490,7 +523,19 @@
 .ub-revision-filler { height: 0; }
 /* Rows never share a collapsed margin, so each side's spacing is its own and
    the aligner's padding moves exactly what it measures. */
-.ub-revision-side .ProseMirror > .ub-revision-row { margin-bottom: 0; }
+.ub-revision-side :is(.ProseMirror, .ub-revision-ghost) > .ub-revision-row { margin-bottom: 0; }
+/* Rows folding away close into their bar from a clipped, inert copy. */
+.ub-revision-side .ub-editor { position: relative; }
+.ub-revision-ghost {
+  position: absolute;
+  inset-inline: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-leading);
+  white-space: pre-wrap;
+}
 .ub-revision-side .ProseMirror > .ub-revision-row-start:first-child + .ub-revision-row { margin-top: 0; }
 .ub-revision-row-start,
 .ub-revision-row-end { padding-top: 0.1px; }
@@ -538,6 +583,58 @@
 }
 @media (max-width: 767px) {
   .ub-change-nav { position: static; flex-direction: row; }
+}
+
+/*
+ * The overview ruler hangs from the sticky header, centred under ↑ ↓, and maps
+ * the comparison from its first row to its last. It replaces the scrollbar
+ * for fine pointers; touch keeps native scrolling.
+ */
+.ub-revision-ruler {
+  position: absolute;
+  inset-inline-end: calc(-1 * var(--document-rail-gap) + 0.5rem + 6px);
+  width: 14px;
+  border-radius: 3px;
+  background: var(--revision-ruler-track);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+@media (any-pointer: coarse) {
+  .ub-revision-ruler { inset-inline-end: calc(-1 * var(--document-rail-gap) + 0.5rem + 15px); }
+}
+.ub-revision-ruler-mark {
+  position: absolute;
+  inset-inline: 4px;
+  border-radius: 1.5px;
+  background: var(--revision-ruler-same);
+  opacity: 0.7;
+}
+.ub-revision-ruler-mark:is([data-mark="added"], [data-mark="removed"], [data-mark="changed"]) { inset-inline: 0; opacity: 1; }
+.ub-revision-ruler-mark[data-mark="added"] { background: var(--revision-ruler-added); }
+.ub-revision-ruler-mark[data-mark="removed"] { background: var(--revision-ruler-removed); }
+.ub-revision-ruler-mark[data-mark="changed"] { background: var(--revision-ruler-changed); }
+.ub-revision-ruler-mark[data-mark="fold"] {
+  inset-inline: 3px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  opacity: 1;
+}
+.ub-revision-ruler-view {
+  position: absolute;
+  inset-inline: -3px;
+  box-sizing: border-box;
+  border: 1px solid var(--revision-ruler-view-border);
+  border-radius: 4px;
+  background: var(--revision-ruler-view);
+  pointer-events: none;
+}
+@media (max-width: 767px) {
+  .ub-revision-ruler { display: none; }
+}
+@media (pointer: fine) and (min-width: 768px) {
+  .ub-revision-split-pane { scrollbar-width: none; }
+  .ub-revision-split-pane::-webkit-scrollbar { display: none; }
 }
 
 /* Drawings show their whole state on each side, without in-drawing marks. */
