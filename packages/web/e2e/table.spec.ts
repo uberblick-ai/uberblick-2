@@ -36,17 +36,19 @@ test("TableKit cells stay drawn and wide tables contain horizontal scrolling", {
   await expect(first.locator("p")).toHaveCount(1);
   await expect(page.locator(".ub-table-source")).toHaveCount(0);
 
-  // A fresh empty paragraph takes exactly one GFM table, retaining the block.
+  // The two GFM source paragraphs become one table, retaining neighboring blocks.
   await page.locator(".ub-editor .ProseMirror > p").first().click();
   await placeCaret(page);
   await page.keyboard.press("Enter");
   const header = "| Name | Amount | Date | Status | Owner | Notes | Source | Last column |";
   await page.keyboard.type(header);
   await page.keyboard.press("Enter");
+  const blocks = page.locator(".ub-editor .ProseMirror > *");
+  const sourceBlockCount = await blocks.count();
   await page.keyboard.type("| --- | ---: | --- | --- | --- | --- | --- | --- |");
   const wide = page.locator(".ub-table").first();
   await expect(wide.locator("th")).toHaveCount(8);
-  await expect(page.locator(".ub-editor .ProseMirror > *")).toHaveCount(3);
+  await expect(blocks).toHaveCount(sourceBlockCount - 1);
   const wrapper = wide.locator("..");
   await expect.poll(() => wrapper.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
