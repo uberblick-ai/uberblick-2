@@ -113,6 +113,8 @@ test("decision topics keep only their record timeline while regular pages retain
   await activateControl(history(page).getByRole("button", { name: "Previous revision", exact: true }));
   await expect(page.locator(".ub-revision-pane")).toBeVisible();
   await expect(history(page)).toContainText("Reviewed guidance");
+  await expect(page).toHaveURL(new RegExp(`${ownerPath}/rev/[0-9a-f-]+$`));
+  const revisionAddress = page.url();
   await historyList(page);
   // Follow an authored link without reloading, while the regular page's history is open.
   await activateControl(page.locator(`.ub-revision-pane a.ub-doclink[data-doc-id="${first.uuid}"]`).last());
@@ -124,6 +126,10 @@ test("decision topics keep only their record timeline while regular pages retain
   await closeIfOpen(page.getByRole("button", { name: "Close threads", exact: true }), threadsToggle);
 
   await page.goBack();
+  await expect(page).toHaveURL(revisionAddress);
+  await expect(page.locator(".ub-revision-pane")).toBeVisible();
+  await expect(history(page)).toContainText("Reviewed guidance");
+  await activateControl(page.getByRole("button", { name: "Back to now", exact: true }).first());
   await expect(page).toHaveURL(new RegExp(`${ownerPath}$`));
   await expect(history(page)).toBeVisible();
   await expect(history(page).getByRole("button", { name: "Name current revision", exact: true })).toBeVisible();

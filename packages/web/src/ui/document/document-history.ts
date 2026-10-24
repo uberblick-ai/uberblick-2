@@ -4,6 +4,7 @@ import type { RevisionEntry } from "@uberblick/schema";
 import { documentRevisionChecksum, DocumentHistoryError } from "../../shell/document-revisions.js";
 import type { DocumentRevisionsClient } from "../../shell/document-revisions.js";
 import { useStoredFlag } from "../hooks.js";
+import type { RevisionView } from "../route.js";
 
 interface Selection { index: number; before: Y.Doc | null; after: Y.Doc; comparedWith?: RevisionEntry }
 interface HistoryState {
@@ -19,7 +20,9 @@ interface HistoryState {
 interface Session {
   client: DocumentRevisionsClient;
   uuid: string;
-  path: string;
+  key: string;
+  requestedView: RevisionView | null;
+  listing: Promise<RevisionEntry[]> | null;
   operation: number;
   signal: AbortSignal;
   documents: Map<string, Y.Doc>;
@@ -28,13 +31,26 @@ interface Session {
   state: HistoryState;
 }
 const initial: HistoryState = { entries: null, selection: null, active: false, busy: true, error: null, titles: {} };
-type Target = { index: number } | { step: -1 | 1 } | { since: string | null } | { id: string };
+type Target = { index: number } | { step: -1 | 1 } | { since: string | null } | { id: string; since?: string };
+interface HistoryRoute { view: RevisionView | null; navigate: (view: RevisionView | null) => void }
+function sameView(left: RevisionView | null, right: RevisionView | null): boolean {
+  return left?.revision === right?.revision && left?.since === right?.since;
+}
+function displayedState(state: HistoryState, session: Session | undefined, route: HistoryRoute | undefined): HistoryState {
+  if (route === undefined) return state;
+  const pending = !sameView(route.view, session?.requestedView ?? null);
+  const selectedId = state.selection === null ? undefined : state.entries?.[state.selection.index]?.id;
+  const matches = route.view === null || (selectedId === route.view.revision && state.selection?.comparedWith?.id === route.view.since);
+  return { ...state, active: route.view !== null || (!pending && state.active),
+    selection: pending || (!matches && !state.busy) ? null : state.selection,
+    error: pending ? null : state.error, busy: pending || state.busy };
+}
 function destroyDocuments(documents: Map<string, Y.Doc>): void {
   for (const doc of documents.values()) doc.destroy();
   documents.clear();
 }
 
-/** Entering steps open the newest revision; a comparison always shows the newest. */
+/** Entering steps and named shortcuts open the newest revision. */
 function targetIndex(target: Target, selection: Selection | null, entries: readonly RevisionEntry[]): number {
   if ("id" in target) return entries.findIndex(entry => entry.id === target.id);
   if ("since" in target || (selection === null && "step" in target)) return 0;
@@ -97,8 +113,98 @@ function captureStartingPoint(owner: Session, document: Y.Doc | null, needed = t
     .catch(() => new Error("Couldn't read this document's state. Refresh history and try again."));
 }
 
-export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid: string | null, path: string, liveDocument: Y.Doc | null = null) {
+type Update = (owner: Session, changes: Partial<HistoryState>) => void;
+type Fail = (owner: Session, error: unknown) => void;
+
+async function selectionEntries(owner: Session, target: Target, relist: boolean, fromRoute: boolean): Promise<RevisionEntry[]> {
+  if (fromRoute && owner.listing !== null && owner.state.entries === null && !relist) return owner.listing;
+  return "since" in target || relist || owner.state.selection === null
+    ? owner.client.list(owner.uuid, owner.signal) : owner.state.entries ?? [];
+}
+
+function comparisonBaseline(target: Target, entries: RevisionEntry[], index: number): RevisionEntry | undefined {
+  if (!("since" in target)) return undefined;
+  const previous = "id" in target ? entries.find(entry => entry.id === target.since) : namedBaseline(entries, target.since ?? null);
+  if (previous === undefined) throw new DocumentHistoryError("revision-not-found", "History is unavailable: this revision is no longer available. Try again.");
+  if (entries.indexOf(previous) <= index) throw new DocumentHistoryError("revision-not-found");
+  return previous;
+}
+
+async function selectTarget(owner: Session | null, target: Target, liveDocument: Y.Doc | null,
+  update: Update, fail: Fail, navigate: HistoryRoute["navigate"], relist = false, fromRoute = false): Promise<void> {
+  if (owner === null || (owner.state.busy && !fromRoute)) return;
+  const operation = ++owner.operation;
+  captureStartingPoint(owner, liveDocument, refreshesList(target, relist, owner.state.active));
+  const fresh = "since" in target ? new Map<string, Y.Doc>() : null;
+  let adopted = false;
+  owner.retryTarget = target;
+  update(owner, { busy: true, error: null, active: true });
+  try {
+    const entries = await selectionEntries(owner, target, relist, fromRoute);
+    if (owner.operation !== operation) return;
+    if (owner.state.selection === null && fresh === null) destroyDocuments(owner.documents);
+    const index = targetIndex(target, owner.state.selection, entries);
+    if ("id" in target && index < 0) throw new DocumentHistoryError("revision-not-found");
+    owner.retryTarget = resolvedTarget(target, entries, index);
+    const previous = comparisonBaseline(target, entries, index);
+    const entry = entries[index];
+    if (entry !== undefined) {
+      const address = { revision: entry.id, ...(previous === undefined ? {} : { since: previous.id }) };
+      owner.retryTarget = { id: entry.id, ...(previous === undefined ? {} : { since: previous.id }) };
+      owner.requestedView = address;
+      if (!fromRoute) navigate(address);
+    }
+    const next = await readSelection(owner, entries, index, operation, fresh ?? owner.documents, previous);
+    if (owner.operation !== operation) return;
+    if (next === null) { update(owner, { busy: false, ...replaceEntries(owner, entries) }); return; }
+    if (fresh !== null) {
+      destroyDocuments(owner.documents);
+      owner.documents = fresh;
+      adopted = true;
+    }
+    owner.retryTarget = null;
+    update(owner, { entries, selection: next, busy: false, titles: listedTitles(entries) });
+  } catch (error) { if (owner.operation === operation) fail(owner, error); }
+  finally { if (fresh !== null && !adopted) destroyDocuments(fresh); }
+}
+
+async function reloadSelection(owner: Session, operation: number, update: Update): Promise<void> {
+  const entries = await owner.client.list(owner.uuid, owner.signal);
+  if (owner.operation !== operation) return;
+  const replacement = replaceEntries(owner, entries);
+  let baseline: RevisionEntry | undefined;
+  const target = owner.requestedView;
+  if (target !== null) {
+    try {
+      const index = entries.findIndex(entry => entry.id === target.revision);
+      if (index < 0) throw new DocumentHistoryError("revision-not-found");
+      baseline = comparisonBaseline({ id: target.revision, ...(target.since === undefined ? {} : { since: target.since }) }, entries, index);
+    } catch (error) { update(owner, { ...replacement, selection: null }); throw error; }
+  }
+  // A still-open revision can have changed since its detached copy was read.
+  const fresh = new Map(owner.documents);
+  for (const entry of owner.state.entries ?? []) if (entry.endedAt === null) fresh.delete(entry.id);
+  let adopted = false;
+  try {
+    const selected = replacement.selection;
+    if (selected !== null) {
+      const next = await readSelection(owner, entries, selected.index, operation, fresh, baseline);
+      if (owner.operation !== operation) return;
+      if (next?.after !== selected.after || next?.before !== selected.before || next?.comparedWith !== selected.comparedWith) replacement.selection = next;
+    }
+    for (const [id, doc] of owner.documents) if (fresh.get(id) !== doc) doc.destroy();
+    owner.documents = fresh;
+    adopted = true;
+    update(owner, { busy: false, ...replacement });
+  } finally {
+    if (!adopted) for (const [id, doc] of fresh) if (owner.documents.get(id) !== doc) doc.destroy();
+  }
+}
+
+export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid: string | null, key: string, liveDocument: Y.Doc | null = null, route?: HistoryRoute) {
   const current = useRef<Session | null>(null);
+  const routing = useRef(route);
+  routing.current = route;
   // A per-browser reading preference, shared by the sidebar switch and the comparison.
   const [collapseUnchanged, setCollapseUnchanged] = useStoredFlag("uberblick.history.collapse-unchanged", true);
   const [view, setView] = useState<{ session: Session; state: HistoryState } | null>(null);
@@ -110,61 +216,33 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
   const fail = useCallback((session: Session, error: unknown): void => update(session, {
     busy: false, error: error instanceof DocumentHistoryError ? error.message : new DocumentHistoryError("unreachable").message,
   }), [update]);
-  // Each route visit owns its detached documents and pending requests. The
+  // Each document visit owns its detached documents and pending requests. The
   // live room never participates in this cache or its teardown.
   useEffect(() => {
     if (client === null || uuid === null) { current.current = null; setView(null); return; }
     const controller = new AbortController();
-    const session: Session = { client, uuid, path, operation: 0, signal: controller.signal, documents: new Map(), retryTarget: null, startingHash: null, state: initial };
+    const listing = client.list(uuid, controller.signal);
+    const session: Session = { client, uuid, key, requestedView: null, listing, operation: 0, signal: controller.signal, documents: new Map(), retryTarget: null, startingHash: null, state: initial };
     current.current = session;
     setView({ session, state: initial });
-    void client.list(uuid, controller.signal).then(
-      (entries) => update(session, { entries, titles: listedTitles(entries), busy: false }),
-      (error: unknown) => fail(session, error),
+    void listing.then(
+      (entries) => { session.listing = null; if (session.operation === 0) update(session, { entries, titles: listedTitles(entries), busy: false }); },
+      (error: unknown) => { session.listing = null; if (session.operation === 0) fail(session, error); },
     );
     return () => {
       controller.abort();
       if (current.current === session) current.current = null;
       destroyDocuments(session.documents);
     };
-  }, [client, uuid, path, update, fail]);
+  }, [client, uuid, key, update, fail]);
   const session = view?.session;
-  const state = view !== null && session?.client === client && session.uuid === uuid && session.path === path && current.current === session ? view.state : initial;
-  const select = async (target: Target, relist = false): Promise<void> => {
+  const state = view !== null && session?.client === client && session.uuid === uuid && session.key === key && current.current === session ? view.state : initial;
+  useEffect(() => {
     const owner = current.current;
-    if (owner === null || owner.state.busy) return;
-    const operation = ++owner.operation;
-    const named = "since" in target;
-    captureStartingPoint(owner, liveDocument, refreshesList(target, relist, owner.state.active));
-    const fresh = named ? new Map<string, Y.Doc>() : null;
-    let adopted = false;
-    owner.retryTarget = target;
-    update(owner, { busy: true, error: null, active: true });
-    try {
-      const selection = owner.state.selection;
-      const entries = named || relist || selection === null ? await owner.client.list(owner.uuid, owner.signal) : owner.state.entries ?? [];
-      if (owner.operation !== operation) return;
-      if (selection === null) {
-        if (fresh === null) destroyDocuments(owner.documents);
-      }
-      const index = targetIndex(target, selection, entries);
-      if ("id" in target && index < 0) throw new DocumentHistoryError("revision-not-found");
-      owner.retryTarget = resolvedTarget(target, entries, index);
-      const previous = named ? namedBaseline(entries, target.since) : undefined;
-      if (named && previous === undefined) { update(owner, { busy: false, ...replaceEntries(owner, entries), error: "This named revision is no longer available. Try again." }); return; }
-      const next = await readSelection(owner, entries, index, operation, fresh ?? owner.documents, previous);
-      if (owner.operation !== operation) return;
-      if (next === null) { update(owner, { busy: false, ...replaceEntries(owner, entries) }); return; }
-      if (fresh !== null) {
-        destroyDocuments(owner.documents);
-        owner.documents = fresh;
-        adopted = true;
-      }
-      owner.retryTarget = null;
-      update(owner, { entries, selection: next, busy: false, titles: listedTitles(entries) });
-    } catch (error) { if (owner.operation === operation) fail(owner, error); }
-    finally { if (fresh !== null && !adopted) destroyDocuments(fresh); }
-  };
+    if (liveDocument !== null && state.active && owner !== null && owner.startingHash === null) captureStartingPoint(owner, liveDocument);
+  }, [liveDocument, state.active]);
+  const select = (target: Target, relist = false, fromRoute = false): Promise<void> => selectTarget(
+    current.current, target, liveDocument, update, fail, view => routing.current?.navigate(view), relist, fromRoute);
   const mutate = async (write: (owner: Session) => Promise<RevisionEntry>): Promise<void> => {
     const owner = current.current;
     if (owner === null || owner.state.busy) return;
@@ -180,31 +258,13 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
       const selection = replacement.selection;
       update(owner, { busy: false, ...replacement,
         ...(selection?.comparedWith?.id === revision.id ? (revision.name == null ? { selection: null, active: false } : { selection: { ...selection, comparedWith: revision } }) : {}) });
+      if (selection?.comparedWith?.id === revision.id && revision.name == null) {
+        owner.requestedView = null;
+        routing.current?.navigate(null);
+      }
     } catch (error) { if (owner.operation === operation) update(owner, { busy: false }); throw error; }
   };
-  const reload = async (owner: Session, operation: number): Promise<void> => {
-    const entries = await owner.client.list(owner.uuid, owner.signal);
-    if (owner.operation !== operation) return;
-    // A still-open revision can have changed since its detached copy was read.
-    const fresh = new Map(owner.documents);
-    for (const entry of owner.state.entries ?? []) if (entry.endedAt === null) fresh.delete(entry.id);
-    let adopted = false;
-    try {
-      const replacement = replaceEntries(owner, entries);
-      const selected = replacement.selection;
-      if (selected !== null) {
-        const next = await readSelection(owner, entries, selected.index, operation, fresh, selected.comparedWith);
-        if (owner.operation !== operation) return;
-        if (next?.after !== selected.after || next?.before !== selected.before) replacement.selection = next;
-      }
-      for (const [id, doc] of owner.documents) if (fresh.get(id) !== doc) doc.destroy();
-      owner.documents = fresh;
-      adopted = true;
-      update(owner, { busy: false, ...replacement });
-    } finally {
-      if (!adopted) for (const [id, doc] of fresh) if (owner.documents.get(id) !== doc) doc.destroy();
-    }
-  };
+  const reload = (owner: Session, operation: number): Promise<void> => reloadSelection(owner, operation, update);
   const refresh = (): void => {
     const owner = current.current;
     if (owner === null || owner.state.busy) return;
@@ -245,12 +305,38 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
       throw error;
     }
   };
+  const close = useCallback((fromRoute = false): void => {
+    const owner = current.current;
+    if (owner !== null) {
+      owner.operation++;
+      owner.retryTarget = null;
+      owner.requestedView = null;
+      update(owner, { selection: null, active: false, error: null, busy: false });
+    }
+    if (!fromRoute) routing.current?.navigate(null);
+  }, [update]);
+  const selectRef = useRef(select);
+  selectRef.current = select;
+  const routeControlled = route !== undefined;
+  const revision = route?.view?.revision;
+  const since = route?.view?.since;
+  useEffect(() => {
+    const owner = current.current;
+    if (!routeControlled || owner === null || owner.client !== client || owner.uuid !== uuid || owner.key !== key) return;
+    const next = revision === undefined ? null : { revision, ...(since === undefined ? {} : { since }) };
+    if (sameView(owner.requestedView, next)) return;
+    owner.requestedView = next;
+    if (next === null) close(true);
+    else void selectRef.current({ id: next.revision, ...(next.since === undefined ? {} : { since: next.since }) }, false, true);
+  }, [client, uuid, key, routeControlled, revision, since, close]);
+  // A new address never displays the previous address's comparison or live editor.
+  const displayed = displayedState(state, session, route);
   return {
-    ...state,
+    ...displayed,
     available: client !== null && uuid !== null,
     collapseUnchanged,
     setCollapseUnchanged,
-    entry: state.selection === null ? null : state.entries?.[state.selection.index] ?? null,
+    entry: displayed.selection === null ? null : displayed.entries?.[displayed.selection.index] ?? null,
     back: () => { void select({ step: 1 }); },
     forward: () => { void select({ step: -1 }); },
     open: (index: number) => { void select({ index }); },
@@ -260,10 +346,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
     rename: (revisionId: string, name: string) => mutate(owner => owner.client.rename(owner.uuid, revisionId, name, owner.signal)),
     removeName: (revisionId: string) => mutate(owner => owner.client.removeName(owner.uuid, revisionId, owner.signal)),
     restore,
-    now: () => {
-      const owner = current.current;
-      if (owner !== null) { owner.operation++; owner.retryTarget = null; update(owner, { selection: null, active: false, error: null, busy: false }); }
-    },
+    now: () => close(),
     /** A failed read retains its target even when newer revisions arrive. */
     retry: () => {
       const owner = current.current;

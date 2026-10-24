@@ -87,6 +87,21 @@ describe("history sidebar", () => {
     expect(history.sinceNamed).toHaveBeenCalledWith("reviewed");
   });
 
+  it("marks Changes since this name only when the comparison ends at the newest revision", () => {
+    const selection = { index: 0, after: new Y.Doc(), before: null, comparedWith: entries[1]! };
+    const view = render(<HistorySidebar history={fakeHistory({ selection })} title="Auth plan" />);
+    expect(screen.getByRole("button", { name: "Changes since this name" }).getAttribute("aria-current")).toBe("true");
+
+    const olderBaseline = { ...entries[2]!, name: named("Earlier review") };
+    view.rerender(<HistorySidebar history={fakeHistory({
+      entries: [entries[0]!, entries[1]!, olderBaseline],
+      selection: { ...selection, index: 1, comparedWith: olderBaseline },
+    })} title="Auth plan" />);
+    for (const button of screen.getAllByRole("button", { name: "Changes since this name" })) {
+      expect(button.hasAttribute("aria-current")).toBe(false);
+    }
+  });
+
   it.each([null, NOW - 30 * 60_000])("keeps the current caption, time and rename marker together when the head ends at %s", (endedAt) => {
     vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
     const head = { ...entries[0]!, endedAt, name: named("Current draft") };
