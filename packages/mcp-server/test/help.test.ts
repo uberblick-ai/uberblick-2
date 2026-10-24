@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { createTagCatalogEntry, setTags } from "@uberblick/schema";
+import { parseWireframe } from "@uberblick/wireframe";
 import { afterEach, expect, it, vi } from "vitest";
 import { FAILURE_INSTRUCTIONS } from "../src/failures.js";
 import { HelpCatalog } from "../src/help.js";
@@ -9,7 +13,7 @@ import { INTERNAL_RESOURCE_ERROR_MESSAGE } from "../src/resource-adapter.js";
 import { FailingStore, TEST_SECRET, readBlocks, removeTempDirs, startServer, testConfig, toolNamed } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
-const concepts = ["orientation", "edit_doc", "decisions", "workspaces", "markdown", "ablauf", "data", "tools", "tool-contracts"];
+const concepts = ["orientation", "edit_doc", "decisions", "workspaces", "markdown", "ablauf", "wireframe", "data", "tools", "tool-contracts"];
 const rigs: Rig[] = [];
 
 async function local(config = testConfig(), store?: FailingStore): Promise<Rig> {
@@ -79,6 +83,20 @@ it("points Markdown authors to Ablauf help and requires checking edits in the we
   const ablauf = help.read("ablauf").text.replace(/\s+/g, " ");
   expect(ablauf).toContain("After every edit, check the drawing in the web editor.");
   expect(ablauf).toContain("MCP does not return the renderer's diagnostics");
+});
+
+it("teaches the installed wireframe format, with every example parsing cleanly", () => {
+  const help = new HelpCatalog();
+  expect(help.read("markdown").text).toContain("[Wireframes](uberblick://help/wireframe)");
+  const wireframe = help.read("wireframe").text;
+  // A format change in a new package version must reach this topic too.
+  const entry = fileURLToPath(import.meta.resolve("@uberblick/wireframe"));
+  const { version } = JSON.parse(readFileSync(join(dirname(entry), "..", "package.json"), "utf8"));
+  expect(wireframe).toContain(`\`@uberblick/wireframe\` ${version}`);
+  const examples = [...wireframe.matchAll(/```wireframe\n([\s\S]*?)\n```/g)].map((match) => match[1]!);
+  expect(examples.length).toBeGreaterThanOrEqual(3);
+  for (const source of examples) expect(parseWireframe(source).diagnostics, source).toEqual([]);
+  expect(wireframe.replace(/\s+/g, " ")).toContain("MCP stores the source without checking it.");
 });
 
 it("documents move preservation, refusal recovery and the full concurrent-edit limit", async () => {
@@ -208,14 +226,12 @@ it("serves the short startup orientation verbatim and directs clients to the com
   const corpusOrientation = "Uberblick stores this repo's documents and decision records. " +
     "Before you change anything, search the corpus for relevant documents and decisions, then read them with `get_doc`. " +
     "If the request conflicts with a decision in force, ask before building. " +
-    "Use `list_docs` for broader discovery; pass `kind: \"decision\"` to list decision topics. " +
-    "Documents can store arbitrary, structured json as additional data. " +
-    "Consult `get_help(edit_doc)` to understand how to edit or create documents. " +
-    "Discover additional product help through MCP resources, or call `get_help(topic)`. " +
-    "Built-in help is repo agnostic; the conventions for this repo are in the corpus. " +
-    "Follow recovery guidance on failures.";
+    "`list_docs` lists documents; with `kind: \"decision\"`, decision topics. " +
+    "Read `get_help(edit_doc)` before you create or edit a document, and follow each failure's recovery. " +
+    "This repo's conventions are in the corpus, not in help.";
   expect(instructions.replace(/\s+/g, " ")).toContain(corpusOrientation);
-  expect(instructions.length).toBeLessThanOrEqual(1_200);
+  // Some clients repeat the instructions in every tool's description.
+  expect(instructions.length).toBeLessThanOrEqual(700);
   expect((await rig.ok("get_help", { topic: "orientation" })).text).toBe(instructions);
   for (const id of concepts) expect(instructions).toContain(id);
   expect(instructions).toContain("uberblick://help/{topic}");
