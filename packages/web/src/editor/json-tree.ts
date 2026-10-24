@@ -238,6 +238,10 @@ function followingCopyValue(tree: HTMLElement, itemAt: (path: string) => JsonTre
   tree.addEventListener("focusin", (event) => {
     if (event.target instanceof HTMLElement && event.target.classList.contains("ub-json-row")) place(event.target);
   });
+  tree.addEventListener("focusout", (event) => {
+    if (event.relatedTarget instanceof Node && tree.contains(event.relatedTarget)) return;
+    if (!tree.matches(":hover")) copyValue.remove();
+  });
   copyValue.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
