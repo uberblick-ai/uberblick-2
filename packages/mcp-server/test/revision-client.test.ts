@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import {
-  appendBlock, compareRevisions, deleteDirectoryEntry, encodeRevisionResponseFrames, getMeta, initDoc,
-  readRevisionRequest, roomForDoc, setTitle, tombstoneDirectoryEntry, type RevisionRequest, type RevisionResponse,
+  appendBlock, compareRevisions, deleteDirectoryEntry, encodeRevisionResponseFrames, getMeta, getMetaMap, initDoc,
+  readRevisionRequest, roomForDoc, setTitle, tombstoneDirectoryEntry, upsertDirectoryEntry, type RevisionRequest, type RevisionResponse,
 } from "@uberblick/schema";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
-import { documentRevisionChecksum, getDocumentRevision, listDocumentRevisions, mutateDocumentRevision } from "../src/revision-client.js";
+import { documentRevisionChecksum, getDocumentRevision, listDocumentRevisions, mutateDocumentRevision, restoreDocumentRevision } from "../src/revision-client.js";
 import { HubSync } from "../src/sync.js";
 import { openWorkspaceReplicas, type WorkspaceReplicaSet } from "../src/workspace-replicas.js";
 import { cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, startHub, tempDir, testConfig, TEST_SECRET } from "./helpers.js";
@@ -15,6 +15,7 @@ import { cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, startHub, tempDir, testC
 const clients: Array<() => unknown> = [];
 const hubs: Array<() => unknown> = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   await cleanupTestResources({ clients: clients.splice(0), hubs: hubs.splice(0) });
 });
 
@@ -84,17 +85,54 @@ it("returns an empty list only when the hub confirms there are no revisions", as
   await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid)).resolves.toEqual([]);
 });
 
-it("opts in to naming metadata without changing legacy list requests", async () => {
+it.each(["directory", "document"] as const)("refuses decision history known through the %s before sending any client request", async source => {
+  const opened = workspace();
+  const uuid = randomUUID();
+  const topic = randomUUID();
+  if (source === "directory") {
+    upsertDirectoryEntry(opened.replicas.directory().doc, { uuid, title: "Decision", kind: "decision", topic, status: "open" });
+  } else {
+    const doc = opened.replicas.replica(uuid).doc;
+    initDoc(doc, { uuid, title: "Decision" });
+    getMetaMap(doc).set("kind", "decision");
+    getMetaMap(doc).set("topic", topic);
+  }
+  const request = vi.spyOn(opened.replicas.sync, "requestRevisions");
+  const expected = { code: "decision-no-history", details: { uuid, topic } };
+  await expect(listDocumentRevisions(opened.replicas, uuid)).rejects.toMatchObject(expected);
+  await expect(getDocumentRevision(opened.replicas, uuid, "earlier")).rejects.toMatchObject(expected);
+  await expect(mutateDocumentRevision(opened.replicas, uuid, { operation: "name", name: "Reviewed", checksum: "unused" }))
+    .rejects.toMatchObject(expected);
+  await expect(restoreDocumentRevision(opened.replicas, uuid, { operation: "restore", revisionId: "earlier",
+    checksum: "unused", surface: { kind: "mcp", name: "Codex" } })).rejects.toMatchObject(expected);
+  expect(request).not.toHaveBeenCalled();
+  expect(opened.replicas.hydrated(uuid)).toBe(source === "document");
+});
+
+it("opts in to names and titles independently without changing legacy list requests or replies", async () => {
   const fixture = await admitted();
   const requests: RevisionRequest[] = [];
+  const entry = { id: "revision-1", author: null, startedAt: 100, endedAt: null };
   fixture.reply((request, send) => {
     requests.push(request);
-    send({ requestId: request.requestId, ok: true, revisions: [] });
+    send({ requestId: request.requestId, ok: true,
+      revisions: [request.includeTitles === true ? { ...entry, title: "Earlier title" } : entry] });
   });
-  await listDocumentRevisions(fixture.opened.replicas, fixture.uuid);
-  await listDocumentRevisions(fixture.opened.replicas, fixture.uuid, { includeNames: true });
+  await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid)).resolves.toEqual([entry]);
+  await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid, { includeNames: true })).resolves.toEqual([entry]);
+  await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid, { includeTitles: true }))
+    .resolves.toEqual([{ ...entry, title: "Earlier title" }]);
+  await listDocumentRevisions(fixture.opened.replicas, fixture.uuid, { includeNames: true, includeTitles: true });
   expect(requests[0]).not.toHaveProperty("includeNames");
+  expect(requests[0]).not.toHaveProperty("includeTitles");
   expect(requests[1]).toMatchObject({ operation: "list", includeNames: true });
+  expect(requests[1]).not.toHaveProperty("includeTitles");
+  expect(requests[2]).toMatchObject({ operation: "list", includeTitles: true });
+  expect(requests[2]).not.toHaveProperty("includeNames");
+  expect(requests[3]).toMatchObject({ operation: "list", includeNames: true, includeTitles: true });
+
+  fixture.reply((request, send) => send({ requestId: request.requestId, ok: true, revisions: [entry] }));
+  await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid, { includeTitles: true })).resolves.toEqual([entry]);
 });
 
 it("does not claim a sent naming request made no change when its reply is lost or unavailable", async () => {
@@ -111,6 +149,27 @@ it("does not claim a sent naming request made no change when its reply is lost o
     .rejects.toMatchObject({ code: "naming-outcome-unknown", details: { applied: null, reason: "unreachable" } });
   fixture.reply((request, send) => send({ requestId: request.requestId, ok: false, error: "stale-state" }));
   await expect(mutateDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation))
+    .rejects.toMatchObject({ code: "stale-state", details: {} });
+});
+
+it("preserves restore no-op results and treats missing restore acknowledgements as unknown outcomes", async () => {
+  const fixture = await admitted();
+  const mutation = { operation: "restore" as const, revisionId: "earlier", checksum: documentRevisionChecksum(fixture.replica.doc),
+    surface: { kind: "mcp", name: "Codex" } };
+  const entry = { id: "current", author: null, startedAt: 100, endedAt: 200, name: null };
+  fixture.reply((request, send) => send({ requestId: request.requestId, ok: true, revision: entry, applied: false }));
+  await expect(restoreDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation))
+    .resolves.toEqual({ revision: entry, applied: false });
+  const requests: RevisionRequest[] = [];
+  fixture.reply(request => { requests.push(request); });
+  await expect(restoreDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation, { timeoutMs: 100 }))
+    .rejects.toMatchObject({ code: "restore-outcome-unknown", details: { applied: null, reason: "unsupported" } });
+  expect(requests).toMatchObject([mutation]);
+  fixture.reply((request, send) => send({ requestId: request.requestId, ok: false, error: "unavailable" }));
+  await expect(restoreDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation))
+    .rejects.toMatchObject({ code: "restore-outcome-unknown", details: { applied: null, reason: "unreachable" } });
+  fixture.reply((request, send) => send({ requestId: request.requestId, ok: false, error: "stale-state" }));
+  await expect(restoreDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation))
     .rejects.toMatchObject({ code: "stale-state", details: {} });
 });
 

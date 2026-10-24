@@ -44,7 +44,9 @@ issue's Pointers cite wherever the change touches its product meaning, under
 for each changed command, tool or screen by name; a missing rewrite for a claim
 the change makes wrong or for behavior no page describes, one that misstates
 the change, or one that removes intent the code does not yet deliver, is a
-finding.
+finding. So is a rewrite that breaks
+[corpus-writing.md](corpus-writing.md): a fact written on a page that doesn't
+own it, or a page grown past the reshape signs without being reshaped.
 
 A corrections review asks a narrower question: for each finding id the
 revision lists, does the corrected head resolve it, or is the implementer's
@@ -110,7 +112,7 @@ A finding keeps its id across heads. Reopen a settled one only when changed
 code or new evidence invalidates how it was settled.
 
 When a PR settles a choice that passes
-the bundled MCP lifecycle help's initial-record threshold, under
+the bundled MCP decisions help's initial-record threshold, under
 [delivery policy's authority route](delivery-policy.md#decision-records)
 but has no record, raise a finding; the reviewer does not draft it. The
 implementer supplies the complete record in the same PR under

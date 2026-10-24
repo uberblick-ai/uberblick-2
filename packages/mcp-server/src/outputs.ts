@@ -30,7 +30,7 @@ const decisionAuthority = {
 };
 
 const hub = z.object({
-  status: z.enum(["disabled", "connecting", "connected", "hub-down", "auth-failed", "update-required", "quarantined"]),
+  status: z.enum(["disabled", "connecting", "connected", "hub-down", "auth-failed", "update-required", "quarantined", "local"]),
   url: z.string().nullable().describe("Configured hub endpoint; null when synchronization is disabled."),
   reason: z.string().optional(),
   recoveryClass: z.enum(["retry", "manual"]).optional(),
@@ -195,8 +195,8 @@ const dataSummary = z.object({
 const revisionId = z.string().describe("Hub revision ID from list_revisions, distinct from page and block rev hashes.");
 
 /**
- * The SDK requires a root object; strictInput must enforce and advertise the
- * same branches through this superset.
+ * The SDK requires a root object; strictInput validates each mode through this
+ * advertised superset.
  */
 const getData = strictInput({
   uuid,
@@ -269,14 +269,14 @@ const revisionAuthor = z.object({
 const revisionName = z.object({
   text: z.string(),
   namer: revisionAuthor.describe("Account and surface that named the revision; separate from its author."),
-  namedAt: z.number().describe("Naming time in epoch milliseconds; renaming preserves this time."),
+  namedAt: z.string().describe("Naming time as an ISO 8601 UTC string; renaming preserves this time."),
   canManage: z.boolean().describe("Whether this account may rename or remove this name."),
 }).strict().nullable();
 const revisionEntry = z.object({
   id: revisionId,
   author: revisionAuthor.describe("Verified GitHub account and surface, or null when unknown."),
-  startedAt: z.number().nullable().describe("Start in epoch milliseconds; null only for content predating history."),
-  endedAt: z.number().nullable().describe("End in epoch milliseconds; null means this revision is still open."),
+  startedAt: z.string().nullable().describe("Start as an ISO 8601 UTC string; null only for content predating history."),
+  endedAt: z.string().nullable().describe("End as an ISO 8601 UTC string; null means this revision is still open."),
   name: revisionName.describe("The revision's name, namer and time, or null when unnamed."),
 }).strict();
 
@@ -294,6 +294,13 @@ export const outputSchemas = {
     synced: z.literal(true).describe("The hub acknowledged this naming transaction."),
     hub,
   }).strict(),
+  restore_revision: z.object({
+    uuid,
+    revision: revisionEntry,
+    applied: z.boolean().describe("True when restored; false when the live title, blocks and data already match, with no new revision."),
+    synced: z.literal(true).describe("The hub acknowledged this restore result; content arrives through normal sync."),
+    hub,
+  }).strict(),
   get_revision: z.object({
     uuid,
     revision: revisionId,
@@ -304,6 +311,7 @@ export const outputSchemas = {
   list_tags: z.object({
     workspace: z.string(),
     complete: z.boolean(),
+    catalogHint: z.string().optional().describe("Why tags may be missing; present only when complete is false."),
     tags,
     hub,
   }).strict(),
@@ -363,6 +371,8 @@ export const outputSchemas = {
   }).strict(),
   list_docs: z.object({
     workspace: z.string(),
+    complete: z.boolean().describe("Whether the hub has delivered the whole document directory to this replica."),
+    directoryHint: z.string().optional().describe("Why documents may be missing; present only when complete is false."),
     docs: z.array(z.union([listEntry, listDecision])),
     hub,
   }).strict(),
@@ -441,6 +451,7 @@ export const outputSchemas = {
     workspace: z.string(),
     database: z.string(),
     hub,
+    caughtUp: z.boolean().describe("Nothing is waiting to reach or arrive from the hub; check this before reporting work as delivered."),
     unsyncedChanges: count.describe("Number of rooms with local changes not acknowledged by the hub."),
     pendingRooms: z.array(z.object({ room: z.string(), seq: count }).strict()),
     lastSync: z.string().nullable(),

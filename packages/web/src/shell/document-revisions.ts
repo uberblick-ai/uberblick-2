@@ -12,20 +12,23 @@ const unavailableMessages = {
   deleted: "History is unavailable: this document was deleted.",
   "revision-not-found": "History is unavailable: this revision no longer exists.",
   unsupported: "History is unavailable: this hub does not serve revisions.",
-  "stale-state": "This document has changed or is not synced. Close this dialog, wait for sync, review the current content and try naming it again.",
+  "stale-state": "This document has changed or is not synced. Wait for sync, review the current content and try naming it again.",
   "invalid-name": "Use a name of 1 to 100 characters on one line.",
-  "already-named": "This revision already has a name. Refresh history to see it.",
+  "already-named": "This revision already has a name. Open history to see it.",
   "not-namer": "Only the person who named this revision can change its name.",
   archived: "Archived documents are read-only. Restore the document before changing revision names.",
+  "restore-outcome-unknown": "The restore may have completed. Review the latest document and history before trying again.",
 };
 
 export class DocumentHistoryError extends Error {
-  constructor(reason?: string) {
-    super(reason !== undefined && Object.hasOwn(unavailableMessages, reason)
+  constructor(readonly reason?: string, message?: string) {
+    super(message ?? (reason !== undefined && Object.hasOwn(unavailableMessages, reason)
       ? unavailableMessages[reason as keyof typeof unavailableMessages]
-      : "History is unavailable. Try again.");
+      : "History is unavailable. Try again."));
   }
 }
+
+export interface RestoredRevision { revision: RevisionEntry; applied: boolean }
 
 export interface DocumentRevisionsClient {
   list(uuid: string, signal: AbortSignal): Promise<RevisionEntry[]>;
@@ -33,6 +36,7 @@ export interface DocumentRevisionsClient {
   name(uuid: string, name: string, checksum: string, signal: AbortSignal): Promise<RevisionEntry>;
   rename(uuid: string, revisionId: string, name: string, signal: AbortSignal): Promise<RevisionEntry>;
   removeName(uuid: string, revisionId: string, signal: AbortSignal): Promise<RevisionEntry>;
+  restore(uuid: string, revisionId: string, checksum: string, signal: AbortSignal): Promise<RestoredRevision>;
 }
 
 /** Capture the displayed content before hashing can yield to incoming edits. */
@@ -61,7 +65,7 @@ export function createDocumentRevisionsClient(
     if (parsed === null || !parsed.ok) throw new DocumentHistoryError();
     return parsed;
   };
-  const write = async (uuid: string, operation: Record<string, string>, signal: AbortSignal): Promise<RevisionEntry> => {
+  const write = async (uuid: string, operation: Record<string, string>, signal: AbortSignal): Promise<RestoredRevision> => {
     const response = await fetchImpl("/api/revisions", {
       method: "POST", cache: "no-store", signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
       headers: { ...await headers(), "Content-Type": "application/json" },
@@ -69,23 +73,37 @@ export function createDocumentRevisionsClient(
     });
     const body = await response.json();
     if (!response.ok) {
+      if (operation.operation === "restore" && body?.reason === "stale-state") {
+        throw new DocumentHistoryError("stale-state", "This document changed. Review the newer changes in history and try again.");
+      }
+      if (operation.operation === "restore" && body?.reason === "archived") {
+        throw new DocumentHistoryError("archived", "This document is archived. Restore the document first, then restore a revision.");
+      }
       if (body?.reason === "already-named" && typeof body?.existingName?.text === "string") {
         const namer = body.existingName.namer;
         const surface = namer?.surface?.kind === "browser" ? " in the browser"
           : typeof namer?.surface?.name === "string" ? ` via ${namer.surface.name}` : "";
         const by = typeof namer?.githubUsername === "string" ? ` by ${namer.githubUsername}${surface}` : "";
-        throw new Error(`This revision is already named “${body.existingName.text}”${by}. Refresh history to see it.`);
+        throw new Error(`This revision is already named “${body.existingName.text}”${by}. Open history to see it.`);
       }
       throw new DocumentHistoryError(typeof body?.reason === "string" ? body.reason : undefined);
     }
     const parsed = readRevisionResponse(JSON.stringify({ ...body, type: "uberblick:revision-response", requestId: "http", ok: true }));
     if (parsed === null || !parsed.ok || !("revision" in parsed)) throw new DocumentHistoryError();
-    return parsed.revision;
+    if (operation.operation === "restore" && !("applied" in parsed)) throw new DocumentHistoryError();
+    return { revision: parsed.revision, applied: !("applied" in parsed) || parsed.applied !== false };
   };
   return {
-    name: (uuid, name, checksum, signal) => write(uuid, { operation: "name", name, expectedHash: checksum }, signal),
-    rename: (uuid, revisionId, name, signal) => write(uuid, { operation: "rename", revisionId, name }, signal),
-    removeName: (uuid, revisionId, signal) => write(uuid, { operation: "remove_name", revisionId }, signal),
+    name: async (uuid, name, checksum, signal) => (await write(uuid, { operation: "name", name, expectedHash: checksum }, signal)).revision,
+    rename: async (uuid, revisionId, name, signal) => (await write(uuid, { operation: "rename", revisionId, name }, signal)).revision,
+    removeName: async (uuid, revisionId, signal) => (await write(uuid, { operation: "remove_name", revisionId }, signal)).revision,
+    restore: async (uuid, revisionId, checksum, signal) => {
+      try { return await write(uuid, { operation: "restore", revisionId, expectedHash: checksum }, signal); }
+      catch (error) {
+        if (error instanceof DocumentHistoryError && error.reason !== undefined && error.reason !== "unreachable") throw error;
+        throw new DocumentHistoryError("unreachable", "The restore may have completed. Review the latest document and history before trying again.");
+      }
+    },
     list: async (uuid, signal) => {
       const response = await request(uuid, null, signal);
       if (!("revisions" in response)) throw new DocumentHistoryError();

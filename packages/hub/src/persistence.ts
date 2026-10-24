@@ -32,6 +32,8 @@ import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
 import { revokeHmacCredentials } from "./credentials-schema.js";
 import { writeDatabaseRelease } from "./database-release.js";
 import { HubRevisions } from "./revisions.js";
+import type { RestoreRevisionResult } from "./revisions.js";
+import type { UpdateAuthor } from "./update-attribution.js";
 
 /**
  * Retain the exact extension schema and unique index; SQLite does not enforce
@@ -217,6 +219,12 @@ export class HubDatabase implements Extension {
   get revisions(): HubRevisions {
     if (this.revisionStore === undefined) throw new Error("HubDatabase.revisions: the database is not open");
     return this.revisionStore;
+  }
+
+  restoreRevision(room: string, document: Y.Doc, checksum: string, id: string, author: UpdateAuthor): RestoreRevisionResult {
+    return this.revisions.restore(room, document, checksum, id, author, state => {
+      this.prepared().upsert.run({ name: room, data: state });
+    });
   }
 
   async onLoadDocument({

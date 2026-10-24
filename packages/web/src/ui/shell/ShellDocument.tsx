@@ -74,10 +74,10 @@ export function ShellDocument({ shell }: { shell: AppShell }) {
         threads={threads}
         threadsOpen={threadsOpen}
         onToggleThreads={onToggleThreads}
-        historyControl={<HistoryControls history={shell.history} liveDocument={doc?.ydoc ?? null} writable={docStatus.writable && !archived} />}
+        historyControl={<HistoryControls history={shell.history} liveDocument={doc?.ydoc ?? null} writable={docStatus.writable && !archived} returnFocus={shell.historyBack} />}
         historyActive={historyVisible}
       />
-      {historyVisible && <RevisionPane history={shell.history} docLinks={docLinks} workspaceSettings={catalog?.ydoc ?? null} writable={docStatus.writable && !archived} />}
+      {historyVisible && <RevisionPane history={shell.history} docLinks={docLinks} workspaceSettings={catalog?.ydoc ?? null} writable={docStatus.writable && !archived} archived={archived} />}
       {!deleted && !historyVisible && (route.kind === "doc" || route.kind === "decision") && (
         <PopoverContent
           align="start"

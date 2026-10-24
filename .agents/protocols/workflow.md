@@ -60,17 +60,16 @@ Schema risk uses those reviews and gates, not package locks.
 ### Milestone gate
 
 New issue starts also require the active milestone. ub-agents selects the
-oldest-created open milestone with open issues or pull requests, breaking ties
-by milestone number. Later and unassigned issues wait even when the active
+open milestone with open issues or pull requests whose title comes first in
+alphabetical order. Later and unassigned issues wait even when the active
 milestone has no eligible issue. PR work, owned runs and recovery continue;
 priority orders eligible work within the gate.
 
 Milestones advance when the active milestone closes or has no open items, not
-when a release is published. Keep open milestone creation order aligned with
-the roadmap: version titles and due dates do not determine scheduling. When
-inserting a milestone before existing future work, recreate the affected future
-milestones in roadmap order, move their open items, and close the superseded
-records while preserving their closed-item history. Check native dependencies
+when a release is published. Titles set the roadmap order; creation time and
+due dates do not. The comparison is plain character order, so `v0.4.12` comes
+before `v0.5.0` but `v0.4.9` would come after `v0.4.10`: choose titles that sort
+in roadmap order, and rename a milestone to move it. Check native dependencies
 before changing the order: a blocker in a later milestone can stall the gate.
 
 ### Priority

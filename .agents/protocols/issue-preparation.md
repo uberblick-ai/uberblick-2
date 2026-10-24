@@ -9,7 +9,10 @@
    relevant live corpus documents, the primary product-intent authority.
    Follow [source authority](../../AGENTS.md#find-the-right-authority) and
    [discovery/read rules](../../AGENTS.md#read-for-the-action), including in-force
-   and pending decisions. Code establishes implemented behavior, not product intent.
+   and pending decisions. Resolve the issue's `Touches:` areas through MCP
+   `list_tags`, then use matching existing tag names or IDs for tag-filtered
+   corpus searches; package names are not assumed to be corpus tags.
+   Code establishes implemented behavior, not product intent.
    Catalog-only treatment requires intent established by authoritative sources or
    an explicit human decision, no governing product document, and a mechanical
    correction preserving that intent; explain why.
@@ -19,6 +22,11 @@
    extras. Preserve explicit requested outcomes unless settled maintainer authorization
    permits deferral or removal; another issue alone is not that authorization.
    Cite agreed allocation and retain real prerequisites when avoiding duplicate work.
+   When an outcome needs data or behavior another package does not supply yet,
+   say under Out of scope which packages may change (for example web only, or
+   web, hub and schema). Cite the owning corpus rules that must keep holding
+   around the change, such as links and keyboard reach, so implementation and
+   review prove them; do not copy them into criteria.
 3. **Resolve.** Resolve factual gaps from evidence; never invent intent or treat
    silence, agent assertions or an invitation to object as approval. Reuse settled
    authorization regardless of issue origin. If intake and live corpus already

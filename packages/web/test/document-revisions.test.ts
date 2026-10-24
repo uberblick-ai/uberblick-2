@@ -66,7 +66,31 @@ describe("document revision reads", () => {
 
   it("identifies an existing name and namer when naming the same state is refused", async () => {
     await expect(client({ reason: "already-named", existingName: { text: "Previously accepted", namer: { githubUsername: "alice" } } }, 409)
-      .api.name(UUID, "Reviewed", "hash", new AbortController().signal)).rejects.toThrow(/Previously accepted.*alice/);
+      .api.name(UUID, "Reviewed", "hash", new AbortController().signal)).rejects.toThrow("This revision is already named “Previously accepted” by alice. Open history to see it.");
+  });
+
+  it.each([true, false])("restores by revision id with the reviewed live checksum and reports applied=%s", async applied => {
+    const { api, fetchImpl } = client({ revision: entries[0], applied });
+    await expect(api.restore(UUID, "earlier", "history-open-sha", new AbortController().signal))
+      .resolves.toEqual({ revision: entries[0], applied });
+    expect(JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string)).toEqual({
+      uuid: UUID, operation: "restore", revisionId: "earlier", expectedHash: "history-open-sha",
+    });
+  });
+
+  it("explains stale restores and distinguishes a lost restore reply from a refusal", async () => {
+    const signal = new AbortController().signal;
+    await expect(client({ reason: "stale-state" }, 409).api.restore(UUID, "earlier", "hash", signal))
+      .rejects.toThrow("This document changed. Review the newer changes in history and try again.");
+    await expect(client({ reason: "archived" }, 409).api.restore(UUID, "earlier", "hash", signal))
+      .rejects.toThrow("This document is archived. Restore the document first, then restore a revision.");
+    await expect(client({ reason: "restore-outcome-unknown" }, 503).api.restore(UUID, "earlier", "hash", signal))
+      .rejects.toThrow("The restore may have completed. Review the latest document and history before trying again.");
+    const lost = createDocumentRevisionsClient("workspace", "browser", async () => { throw new Error("Lost reply"); });
+    await expect(lost.restore(UUID, "earlier", "hash", signal))
+      .rejects.toThrow("The restore may have completed. Review the latest document and history before trying again.");
+    await expect(client({ revision: entries[0] }).api.restore(UUID, "earlier", "hash", signal))
+      .rejects.toThrow("The restore may have completed. Review the latest document and history before trying again.");
   });
 
   it("keeps newest-first metadata and authenticates uncached local requests with the page session", async () => {

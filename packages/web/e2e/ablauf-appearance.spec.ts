@@ -1,7 +1,7 @@
 /** Real SVG paint, font metrics and editor captures for Ablauf's host integration. */
 import { expect, test } from "@playwright/test";
 import type { Locator } from "@playwright/test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import { waitForDocumentDraw } from "./settle.js";
@@ -236,12 +236,25 @@ for (const appearance of ["light", "dark"] as const) {
   test(`website Ablauf example is captured from the ${appearance} editor at 648 CSS pixels`, async ({ browser }, info) => {
     if (agent === null) throw new Error("e2e: missing Ablauf screenshot writer");
     const session = agent.open({ name: "ablauf-site-e2e" });
-    const html = readFileSync(new URL("../../../site/pages/docs/custom-markdown.html", import.meta.url), "utf8");
-    const fence = /data-copy="```ablauf\n([\s\S]*?)\n```"/.exec(html)?.[1];
-    if (fence === undefined) throw new Error("e2e: website Ablauf source is missing");
-    const text = fence.replaceAll("&quot;", '"').replaceAll("&gt;", ">").replaceAll("&lt;", "<").replaceAll("&amp;", "&");
+    // The first example on uberblick.ai/docs/markdown/diagrams (repository uberblick-ai/uberblick.ai); the
+    // captured ablauf-light.png and ablauf-dark.png attachments are what that page shows.
+    const text = `flow v0
+columns rework main
+
+pill edit_block col=main tone=agent "agent calls edit_block"
+box server "checks old text and revision"
+end applied "Edit applied"
+
+pill stale_block col=rework row=server tone=rework
+box rediff "agent re-diffs against the current text"
+
+edit_block --> server
+server --> applied : text and revision match
+server --> stale_block tone=rework : someone edited meanwhile
+stale_block --> rediff tone=rework
+rediff --> edit_block tone=rework from=left to=left label=end : calls again`;
     const { uuid } = await session.call<{ uuid: string }>("create_doc", {
-      title: "Ablauf website example", description: "The real editor block shown on the Markdown reference page.",
+      title: "Ablauf website example", description: "The real editor block shown on the Diagrams page.",
       blocks: [{ type: "paragraph", text: "Reading, editing and syncing a page in one diagram." }, { type: "code", language: "ablauf", text }],
     });
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {

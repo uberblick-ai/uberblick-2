@@ -86,10 +86,6 @@ description = "Build the web client into packages/web/dist (no secret in the bun
 depends = ["install"]
 run = "pnpm --filter @uberblick/web build"
 
-[tasks.site]
-description = "Build uberblick.ai into site/out (standard-library Python; see site/README.md)"
-run = "python3 site/build.py"
-
 [tasks.build-install-payload]
 description = "Build a versioned, checkout-free CLI and web archive"
 usage = 'arg "<version>" help="Release version, for example 0.1.0"'
@@ -175,8 +171,8 @@ description = "Run the browser end-to-end proof points (Chromium and tagged WebK
 run = 'sh "{{config_root}}/bin/run-e2e.sh"'
 
 [tasks.ci]
-description = "Run what .github/workflows/ci.yml runs, locally: install, lint, typecheck, test, site, then e2e"
-usage = 'flag "--skip-e2e" help="Stop after the site build; the browser suite is the slow part"'
+description = "Run what .github/workflows/ci.yml runs, locally: install, lint, typecheck, test, then e2e"
+usage = 'flag "--skip-e2e" help="Stop after the unit tests; the browser suite is the slow part"'
 # A local convenience, not the merge gate: GitHub Actions stays the only source
 # of the required checks. It runs the workflow's commands in its order, under
 # `CI=true` like a runner, and keeps going past a failure so one run shows
@@ -203,7 +199,7 @@ if ! mise run install; then
 fi
 
 failed=""
-for check in lint typecheck test site; do
+for check in lint typecheck test; do
   mise run "$check" || failed="$failed $check"
 done
 if [ "${usage_skip_e2e:-false}" = "true" ]; then

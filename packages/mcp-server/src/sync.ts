@@ -43,7 +43,12 @@ export type HubStatus =
   | "hub-down"
   | "auth-failed"
   | "update-required"
-  | "quarantined";
+  | "quarantined"
+  | "local";
+
+export const LOCAL_HUB_REASON =
+  "Local workspace: changes are saved on this computer, so nothing needs retrying. " +
+  "They reach the web editor when `ub open` runs.";
 
 export interface HubState {
   status: HubStatus;
@@ -1391,7 +1396,8 @@ export class HubSync {
       const fail = (code: ConstructorParameters<typeof RevisionClientError>[0]) => {
         cleanup();
         if (sent && operation.operation !== "list" && operation.operation !== "get") {
-          reject(new RevisionClientError("naming-outcome-unknown", { applied: null, reason: code }));
+          reject(new RevisionClientError(operation.operation === "restore" ? "restore-outcome-unknown" : "naming-outcome-unknown",
+            { applied: null, reason: code }));
           return;
         }
         reject(new RevisionClientError(code));

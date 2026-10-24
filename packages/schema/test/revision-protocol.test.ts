@@ -32,6 +32,41 @@ it("negotiates names without changing legacy list replies and validates write re
   expect(readRevisionResponse(invalidName)).toBeNull();
 });
 
+it("validates restore's revision, checksum and author surface and preserves no-op replies", () => {
+  const request = { requestId: "restore", operation: "restore" as const, revisionId: "past", checksum: "a".repeat(64),
+    surface: { kind: "mcp", name: "Claude Code" } };
+  expect(readRevisionRequest(encodeRevisionRequest(request))).toEqual(request);
+  for (const invalid of [{ ...request, revisionId: undefined }, { ...request, checksum: "stale" },
+    { ...request, surface: undefined }, { ...request, surface: { kind: "", name: "browser" } }]) {
+    expect(readRevisionRequest(JSON.stringify({ type: "uberblick:revision-request", ...invalid }))).toBeNull();
+  }
+  for (const applied of [true, false]) {
+    const response = { requestId: "restore", ok: true as const, applied,
+      revision: { id: "restored", author: null, startedAt: 1, endedAt: 1 } };
+    const encoded = encodeRevisionResponseFrames(response)[0]!;
+    expect(readRevisionResponse(encoded)).toEqual(response);
+    expect(readRevisionResponse(encoded.replace(`"applied":${applied}`, '"applied":"unknown"'))).toBeNull();
+  }
+});
+
+it("opts into titles independently of names and accepts legacy replies without titles", () => {
+  const legacy = { id: "revision", author: null, startedAt: null, endedAt: 1 };
+  const request = { requestId: "one", operation: "list" as const, includeTitles: true as const };
+  expect(readRevisionRequest(encodeRevisionRequest(request))).toEqual(request);
+  expect(readRevisionRequest(encodeRevisionRequest({ ...request, includeNames: true })))
+    .toEqual({ ...request, includeNames: true });
+  expect(readRevisionRequest(encodeRevisionRequest(request).replace('"includeTitles":true', '"includeTitles":false')))
+    .toEqual({ requestId: "one", operation: "list" });
+  for (const revisions of [[legacy], [{ ...legacy, title: "Alpha" }, { ...legacy, title: "" }]]) {
+    const response = { requestId: "one", ok: true as const, revisions };
+    expect(readRevisionResponse(encodeRevisionResponseFrames(response)[0]!)).toEqual(response);
+  }
+  const encoded = encodeRevisionResponseFrames({ requestId: "one", ok: true, revisions: [{ ...legacy, title: "Alpha" }] })[0]!;
+  for (const invalid of ["null", "7", "{}", "[]"]) {
+    expect(readRevisionResponse(encoded.replace('"title":"Alpha"', `"title":${invalid}`))).toBeNull();
+  }
+});
+
 it("reassembles large snapshots and lists without exceeding the WebSocket frame ceiling", () => {
   const state = Uint8Array.from({ length: 17 * 1024 * 1024 }, (_, index) => index % 251);
   const responses: RevisionResponse[] = [

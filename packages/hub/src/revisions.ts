@@ -2,17 +2,20 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   DIRECTORY_DOCS_KEY,
+  getMeta,
   isDirectoryEntryArchived,
   parseRoom,
   roomForDoc,
+  restoreRevisionContent,
   snapshotRevision,
   validRevisionName,
 } from "@uberblick/schema";
-import type * as Y from "yjs";
+import * as Y from "yjs";
 import { getUpdateAttribution, type UpdateAuthor } from "./update-attribution.js";
 
 const STRETCH_MS = 15 * 60 * 1_000;
 const MAX_SURFACE_LENGTH = 256;
+const RESTORE_ORIGIN = Symbol("revision restore");
 
 export interface StoredRevision {
   id: string;
@@ -29,6 +32,9 @@ export interface StoredRevisionName {
 
 export type NameRevisionResult = { ok: true; id: string }
   | { ok: false; error: "stale-state" | "invalid-name" | "already-named" | "revision-not-found" | "not-namer"; name?: StoredRevisionName };
+
+export type RestoreRevisionResult = { ok: true; id: string; applied: boolean }
+  | { ok: false; error: "stale-state" | "revision-not-found" };
 
 interface Snapshot {
   state: Uint8Array;
@@ -123,9 +129,14 @@ export class HubRevisions {
     let before = snapshot(document);
     let missedCapture = false;
     document.on("afterTransaction", (transaction: Y.Transaction) => {
-      if (transaction.changed.size === 0 || this.isDeleted(room)) return;
+      if (transaction.changed.size === 0 || this.isDeleted(room) || getMeta(document).kind === "decision") return;
       try {
         const after = snapshot(document);
+        if (transaction.origin === RESTORE_ORIGIN) {
+          before = after;
+          missedCapture = false;
+          return;
+        }
         if (before.checksum === after.checksum) return;
         this.record(room, before, after, missedCapture ? null : getUpdateAttribution(transaction.origin)?.author ?? null);
         before = after;
@@ -193,6 +204,46 @@ export class HubRevisions {
       row.revision_id as string, { text: row.text as string, namedAt: row.named_at as number,
         namer: { principalId: row.principal_id as string, surface: JSON.parse(row.surface as string) as UpdateAuthor["surface"] } },
     ]));
+  }
+
+  restore(room: string, document: Y.Doc, checksum: string, id: string, author: UpdateAuthor,
+    store: (state: Uint8Array) => void): RestoreRevisionResult {
+    const current = snapshot(document);
+    if (current.checksum !== checksum) return { ok: false, error: "stale-state" };
+    const state = this.get(room, id);
+    if (state === null) return { ok: false, error: "revision-not-found" };
+    const revision = new Y.Doc();
+    const staged = new Y.Doc();
+    try {
+      Y.applyUpdate(revision, state);
+      const target = snapshot(revision);
+      if (target.checksum === current.checksum) return { ok: true, id: this.list(room)[0]?.id ?? id, applied: false };
+      Y.applyUpdate(staged, Y.encodeStateAsUpdate(document));
+      restoreRevisionContent(staged, revision);
+      const restored = snapshot(staged);
+      if (restored.checksum !== target.checksum) throw new Error("restored revision does not match requested content");
+      const update = Y.encodeStateAsUpdate(staged, Y.encodeStateVector(document));
+      const restoredId = randomUUID();
+      const at = this.now();
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        const head = this.head(room);
+        if (head !== undefined) this.closeHead(room, head, at);
+        this.insert(room, restoredId, authorIdentity(author).label, at, at, restored);
+        // Room state and its closed revision commit before any peer receives the update.
+        store(Y.encodeStateAsUpdate(staged));
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        this.onStoreFailed(error);
+        throw error;
+      }
+      Y.applyUpdate(document, update, RESTORE_ORIGIN);
+      return { ok: true, id: restoredId, applied: true };
+    } finally {
+      revision.destroy();
+      staged.destroy();
+    }
   }
 
   name(room: string, document: Y.Doc, checksum: string, text: string, namer: UpdateAuthor): NameRevisionResult {

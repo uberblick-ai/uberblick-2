@@ -47,7 +47,7 @@ function controlledReplicas(): {
   const databasePath = ":memory:";
   const store = new MirrorStore(databasePath, WORKSPACE);
   stores.push(store);
-  const replicas = new Replicas(testConfig({ databasePath }), store);
+  const replicas = new Replicas({ ...testConfig({ databasePath }), localWorkspace: false }, store);
   replicasToClose.push(replicas);
   const controls = { connected: true, draining: false, unacknowledged: null as string | null };
   const hub = replicas.sync.state();
@@ -173,7 +173,7 @@ describe("last acknowledged sync", () => {
 
   it("checks ordinary MCP tools after settle and ignores timestamp write failures", async () => {
     const time = clock();
-    const rig = await startServer();
+    const rig = await startServer({ ...testConfig(), localWorkspace: false });
     rigs.push(rig);
     const hub = rig.instance.replicas.sync.state();
     vi.spyOn(rig.instance.replicas.sync, "state").mockReturnValue({ ...hub, status: "connected" });

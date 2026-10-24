@@ -1,6 +1,7 @@
 import type { Connection, Extension, onStatelessPayload } from "@hocuspocus/server";
-import { encodeRevisionResponseFrames, parseRoom, readRevisionRequest, type RevisionEntry, type RevisionName,
+import { encodeRevisionResponseFrames, getMeta, parseRoom, readRevisionRequest, type RevisionEntry, type RevisionName,
   type RevisionRequest, type RevisionResponse } from "@uberblick/schema";
+import * as Y from "yjs";
 import type { HubDatabase } from "./persistence.js";
 import type { StoredRevision, StoredRevisionName } from "./revisions.js";
 import type { HubContext } from "./server.js";
@@ -36,13 +37,15 @@ export class RevisionReads implements Extension<HubContext> {
         response = { requestId: request.requestId, ok: false, error: "deleted" };
       } else if (!("principalId" in connection.context)) {
         response = { requestId: request.requestId, ok: false, error: "forbidden" };
-      } else if (!database.revisions.enabled || parseRoom(documentName).uuid.startsWith("_")) {
+      } else if (!database.revisions.enabled || parseRoom(documentName).uuid.startsWith("_") || getMeta(document).kind === "decision") {
         response = { requestId: request.requestId, ok: false, error: "unsupported" };
       } else if (request.operation === "list") {
         const names = request.includeNames ? database.revisions.names(documentName) : undefined;
         const canWrite = !connection.readOnly && !database.isArchivedRoom(documentName);
-        response = { requestId: request.requestId, ok: true, revisions: database.revisions.list(documentName).map(revision =>
-          this.entry(revision, names?.get(revision.id), connection.context.principalId, request.includeNames === true, canWrite)) };
+        response = { requestId: request.requestId, ok: true, revisions: database.revisions.list(documentName).map(revision => ({
+          ...this.entry(revision, names?.get(revision.id), connection.context.principalId, request.includeNames === true, canWrite),
+          ...(request.includeTitles ? this.title(documentName, revision.id) : {}),
+        })) };
       } else if (request.operation === "get") {
         const state = database.revisions.get(documentName, request.revisionId ?? "");
         response = state === null ? { requestId: request.requestId, ok: false, error: "revision-not-found" }
@@ -60,9 +63,27 @@ export class RevisionReads implements Extension<HubContext> {
     for (const frame of encodeRevisionResponseFrames(response)) connection.sendStateless(frame);
   };
 
+  private title(room: string, id: string): { title?: string } {
+    const document = new Y.Doc();
+    try {
+      const state = this.options.database.revisions.get(room, id);
+      if (state === null) return {};
+      Y.applyUpdate(document, state);
+      return { title: getMeta(document).title };
+    } catch {
+      return {};
+    } finally {
+      document.destroy();
+    }
+  }
+
   private write(request: RevisionRequest, document: onStatelessPayload["document"], room: string, principalId: string): RevisionResponse {
     const { revisions } = this.options.database;
-    const result = request.operation === "name"
+    const result = request.operation === "restore"
+      ? this.options.database.restoreRevision(room, document, request.checksum ?? "", request.revisionId ?? "", {
+        principalId, surface: request.surface ?? { kind: "unknown", name: "unknown" },
+      })
+      : request.operation === "name"
       ? revisions.name(room, document, request.checksum ?? "", request.name ?? "", {
         principalId, surface: request.surface ?? { kind: "unknown", name: "unknown" },
       })
@@ -70,11 +91,12 @@ export class RevisionReads implements Extension<HubContext> {
         ? revisions.rename(room, request.revisionId ?? "", request.name ?? "", principalId)
         : revisions.removeName(room, request.revisionId ?? "", principalId);
     if (!result.ok) return { requestId: request.requestId, ok: false, error: result.error,
-      ...(result.name === undefined ? {} : { name: this.name(result.name, principalId) }) };
+      ...(!("name" in result) || result.name === undefined ? {} : { name: this.name(result.name, principalId) }) };
     const revision = revisions.list(room).find(entry => entry.id === result.id);
-    if (revision === undefined) throw new Error("named revision missing");
+    if (revision === undefined) throw new Error("written revision missing");
     return { requestId: request.requestId, ok: true, revision: this.entry(revision,
-      revisions.names(room).get(result.id), principalId, true) };
+      revisions.names(room).get(result.id), principalId, true),
+      ...("applied" in result && typeof result.applied === "boolean" ? { applied: result.applied } : {}) };
   }
 
   private author(author: UpdateAuthor | null): RevisionEntry["author"] {

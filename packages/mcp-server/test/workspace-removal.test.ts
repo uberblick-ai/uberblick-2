@@ -64,9 +64,14 @@ it("refuses every later write in each open MCP session and leaves no files at sh
   const second = await startServer(config);
   rigs.push(first, second);
   await first.ok("create_doc", { title: "Before removal", description: "Removal test." });
+  expect(await first.ok("sync_status")).toMatchObject({ caughtUp: true });
 
   removeFiles(databasePath);
   for (const rig of [first, second]) {
+    expect(await rig.ok("sync_status")).toMatchObject({
+      hub: { status: "quarantined" },
+      caughtUp: false,
+    });
     expectRemoved(await rig.call("create_doc", { title: "After removal", description: "Removal test." }));
     expectRemoved(await rig.call("sidebar_group", { action: "rename", group: "existing", name: "After removal" }));
     expectRemoved(await rig.call("create_doc", { title: "Still removed", description: "Removal test." }));
@@ -89,6 +94,10 @@ it("detects a replacement before its first later call and cannot damage the new 
   const fresh = await startServer(config);
   rigs.push(fresh);
   const created = await fresh.ok("create_doc", { title: "New copy", description: "Removal test." });
+  expect(await old.ok("sync_status")).toMatchObject({
+    hub: { status: "quarantined" },
+    caughtUp: false,
+  });
   expectRemoved(await old.call("create_doc", { title: "Must not reach new copy", description: "Removal test." }));
   await old.close();
   expect(existsSync(`${databasePath}-wal`)).toBe(true);

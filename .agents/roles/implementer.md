@@ -73,8 +73,11 @@ Find the pages that describe what the change touches: search the corpus for
 each changed command, tool or screen by name, beyond the issue's Pointers.
 When the change makes a claim on one of them wrong, or adds behavior no page
 describes yet, draft the rewrite under the pull request's
-`Corpus update`: each document by title and UUID, the block, and its new text,
-following [AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action)
+`Corpus update` on the page that owns the fact: each document by title and UUID,
+the block, and its new text. When the change grows the page, draft the page's
+reshaped sections instead of a longer block, under
+[corpus-writing.md's Editing](../protocols/corpus-writing.md#editing). Follow
+[AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action)
 and any governing authoring guidance discovered by purpose. The integrator applies it after merge,
 so the corpus never describes unmerged code. Keep it current with every revision.
 
@@ -89,7 +92,7 @@ integrator makes its own comparison after merge.
 
 ## Decision records
 
-Consult bundled `get_help({topic: "lifecycle"})` for the initial-record
+Consult bundled `get_help({topic: "decisions"})` for the initial-record
 threshold and short answer guidance. Apply
 [`delivery-policy.md`'s Decision records](../protocols/delivery-policy.md#decision-records)
 for repository authority and whether a first record is `decided` as an agent
@@ -252,7 +255,7 @@ Compared:
 - <title> (<uuid>) — paths: <paths looked at>; claims: <claims covered>; proposed result: <matches|ahead|drift>.
 Or: None — no regular page compared with code.
 
-Rewrites: None — <why no documented claim changes> | <title> (<uuid>), block <id>: <new text>
+Rewrites: None — <why no documented claim changes> | <title> (<uuid>), block <id>: <new text> | <title> (<uuid>), reshaped: <sections and their new text, blocks removed>
 
 ## Self-review
 KISS: <why this is the least defensible change>

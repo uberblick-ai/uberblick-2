@@ -8,7 +8,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "List existing tag ids, names and descriptions in name order. complete:false means the hub catalog has not arrived. MCP cannot curate tags.\n\nHelp: list_tags, workspaces, tool-contracts.",
+    "description": "List existing tag ids, names and descriptions in name order. complete:false means the hub catalog has not arrived. MCP cannot curate tags; people add them in Workspace settings.\n\nHelp: list_tags, workspaces, tool-contracts.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -23,7 +23,7 @@
       "type": "object",
       "properties": {
         "title": {
-          "description": "Display title; required except on a successor. Identity is the document's UUID, never this. A decision topic has one title, stored on its first record, naming the question rather than the answer. A rename through any record renames the topic. Successors take the topic's title; omit title or supply that same title. For decision answers, see lifecycle's Decision answers and topics section. Answer blocks are distinct from recorded answer: {who, when, where}.",
+          "description": "Display title; identity is the document's UUID, never this. Required except on a decision successor. A decision topic has one title, stored on its first record and naming the question rather than the answer; a successor omits title or repeats that exact title.",
           "type": "string",
           "minLength": 1
         },
@@ -47,6 +47,7 @@
           "description": "One or two sentences of plain English for a person opening a regular document. At most 300 characters; null clears it. Decisions have no TL;DR."
         },
         "answer": {
+          "description": "Record a person's answer, not the agent's own approval; MCP does not verify its provenance. Accepted only with `kind: decision`.",
           "type": "object",
           "properties": {
             "who": {
@@ -70,10 +71,10 @@
             "when",
             "where"
           ],
-          "additionalProperties": false,
-          "description": "Record a person's answer, not the agent's own approval. MCP does not verify its provenance."
+          "additionalProperties": false
         },
         "tags": {
+          "description": "Existing catalog tag ids or names, case ignored. An unknown or deleted tag refuses before anything is created.",
           "type": "array",
           "items": {
             "type": "string",
@@ -88,14 +89,14 @@
           "description": "The document's record kind. Omit it for an ordinary working document."
         },
         "status": {
+          "description": "The initial lifecycle state. Accepted only with `kind: decision`.",
           "type": "string",
           "enum": [
             "open",
             "decided",
             "rejected",
             "withdrawn"
-          ],
-          "description": "The recorded lifecycle state. Its kind owns the legal values."
+          ]
         },
         "related": {
           "description": "One live, locally readable regular document UUID or a non-empty list of them. The related set is fixed at creation. Omitted successors inherit their predecessor's whole set; supplying related replaces it. Accepted only with `kind: decision`.",
@@ -152,7 +153,7 @@
                 ]
               },
               "text": {
-                "description": "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer at most once, a required nonempty title, any number of button lines, then a blank line and optional prose body. Prose header values are one-line inline Markdown, not YAML; quotes stay literal. Each button has one [Text](destination) link: nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, alone or with ?query. At most one style (outline/filled) and color (neutral/blue/green/violet) may follow in either order; defaults are outline neutral. Invalid buttons, other trailing text, unknown, duplicate prose or non-key headers refuse with invalid_card. Prose parts support code, bold, italic, strike, external and document links. Export orders label, title, footer, then buttons in authored order, writes style before color and omits default words. Empty prose keys are omitted, prose header newlines fold to spaces, and prose lines starting ::: are escaped. Figma takes the content between :::figma and :::; required url, optional literal plain one-line title and whole-pixel height 240–960 (default 480), then a blank line and optional caption with the same inline marks. Keys are lowercase, each at most once. Only https figma.com/www.figma.com links to design, file, proto, board, slides or community/file are accepted, with a key/id and optional name; saving keeps those path parts and node-id, starting-point-node-id and version-id on https://www.figma.com, dropping other query fields and fragments. Invalid content refuses with invalid_figma and writes nothing; figma blocks take figma.com links only; use a plain link for other sites. get_doc returns canonical text and read-only figma kind, file, optional fileName and node. Source blocks remain literal text.",
+                "description": "Block text. Prose blocks take plain text; use `inline` for formatting. Code, terminal and chart take literal source. A table takes exactly one GFM table with inline Markdown in its cells. A card or figma block takes the content between its opening `:::card` or `:::figma` line and the closing `:::`; markdown help gives their keys, buttons and accepted links, and invalid content refuses with invalid_card or invalid_figma before writing.",
                 "type": "string"
               },
               "level": {
@@ -162,7 +163,7 @@
                 "maximum": 6
               },
               "language": {
-                "description": "Code language, e.g. \"ts\". Code blocks only.",
+                "description": "Code language, e.g. \"ts\". Code blocks only. Drawings are code blocks too, with language \"ablauf\" or \"wireframe\".",
                 "type": "string"
               },
               "list": {
@@ -265,52 +266,9 @@
         "description"
       ],
       "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "oneOf": [
-        {
-          "title": "A decision document (`kind: decision`). A decision topic has one title, stored on its first record, naming the question rather than the answer. A rename through any record renames the topic. Successors take the topic's title; omit title or supply that same title. For decision answers, see lifecycle's Decision answers and topics section. Answer blocks are distinct from recorded answer: {who, when, where}.",
-          "required": [
-            "kind"
-          ],
-          "properties": {
-            "kind": {
-              "const": "decision"
-            }
-          }
-        },
-        {
-          "title": "An ordinary document",
-          "required": [
-            "title"
-          ],
-          "properties": {
-            "kind": false,
-            "status": false,
-            "related": false,
-            "supersedes": false,
-            "answer": false,
-            "discussion": false
-          }
-        }
-      ],
-      "dependencies": {
-        "kind": {
-          "anyOf": [
-            {
-              "required": [
-                "title"
-              ]
-            },
-            {
-              "required": [
-                "supersedes"
-              ]
-            }
-          ]
-        }
-      }
+      "additionalProperties": false
     },
-    "description": "Create doc/stub with optional blocks or regular-page TL;DR. Nonblank description required; title required except successors. Decision topic title lives on its first record; successor title must be omitted or match. Decisions: open/decided only; deciding needs supported nonblank blocks, no TL;DR/data. Decided successors require human answer attribution. related: UUID or non-empty list of live readable regular pages; fixed at creation. Successor: omit to inherit whole set; supply to replace. supersedes: hydrated decision in live topic. Validate targets before allocation/writes. discussion: one live readable RFC UUID, never inherited; correct/clear only while open. Referenced pages untouched. sidebar: existing get_sidebar group id; omit for unpinned. persistence_failed reports uuid, completed/failed rooms and duplicate-safe recovery. Answer guidance: decisions; links: markdown.\n\nHelp: create_doc, edit_doc, workspaces, tool-contracts, decisions, markdown.",
+    "description": "Create a regular page or a decision record, optionally with starting blocks, tags, a TL;DR (regular pages only) and a sidebar pin. A description is always required, and so is a title except on a decision successor, which takes its topic's title. Every reference (tags, related pages, supersedes, discussion and sidebar group) is checked before anything is written, so a refusal creates nothing. A decision is created open or decided: deciding needs supported answer blocks and no TL;DR or data, and a decided successor also needs a recorded person's answer. The document, directory and sidebar are separate writes; if one fails, persistence_failed names the completed rooms and gives a recovery that cannot create a duplicate.\n\nHelp: create_doc, edit_doc, workspaces, tool-contracts, decisions, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -364,7 +322,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "List hub revisions newest first, including archived documents, with names, namers and times or null. IDs work with get_revision/get_data. Empty means hub-confirmed no history.\n\nHelp: list_revisions, workspaces, tool-contracts.",
+    "description": "List hub revisions newest first, including archived documents, with names, namers and times or null. IDs work with get_revision/get_data/restore_revision. Empty means hub-confirmed no history. Listing a decision record refuses with decision_no_history.\n\nHelp: list_revisions, workspaces, tool-contracts.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -376,7 +334,6 @@
     "name": "name_revision",
     "title": "Name the current document revision",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
       "type": "object",
       "properties": {
         "uuid": {
@@ -394,12 +351,47 @@
         "uuid",
         "name"
       ],
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Name the current synchronized state only when a person asks. Requires team-hub write access; closes its stretch. One name per revision; manage it in the web.\n\nHelp: name_revision, workspaces, tool-contracts.",
+    "description": "Name the current synchronized state only when a person asks. Requires team-hub write access; closes its stretch. One name per revision; manage it in the web. Naming a decision record refuses with decision_no_history.\n\nHelp: name_revision, workspaces, tool-contracts.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "restore_revision",
+    "title": "Restore a document revision",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uuid": {
+          "description": "Document UUID.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "A hub revision id from list_revisions."
+        }
+      },
+      "required": [
+        "uuid",
+        "revision"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false
+    },
+    "description": "Restore title, blocks and data from a hub revision as a new revision. Requires synchronized write access to a live document; history and other metadata stay. An identical state writes nothing. Restoring a decision record refuses with decision_no_history.\n\nHelp: restore_revision, workspaces, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
       "idempotentHint": true,
       "openWorldHint": false
     }
@@ -430,7 +422,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Read a hub revision from list_revisions: title, visible blocks without rev, and data summary. Archived documents work. Page records with get_data and the same revision.\n\nHelp: get_revision, workspaces, tool-contracts, data.",
+    "description": "Read a hub revision from list_revisions: title, visible blocks without rev, and data summary. Archived documents work. Page records with get_data and the same revision. Reading a decision record's revision refuses with decision_no_history.\n\nHelp: get_revision, workspaces, tool-contracts, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -461,20 +453,23 @@
           "type": "string"
         },
         "after": {
-          "description": "Exclusive record-id cursor.",
+          "description": "Exclusive record-id cursor; needs collection.",
           "type": "string"
         },
         "limit": {
+          "description": "Records per page, 0 for the schema only; needs collection.",
           "type": "integer",
           "minimum": 0,
           "maximum": 1000
         },
         "max_bytes": {
+          "description": "Page record budget in bytes; needs collection.",
           "type": "integer",
           "minimum": 1,
           "maximum": 1048576
         },
         "ids": {
+          "description": "Only these record ids; needs collection.",
           "maxItems": 1000,
           "type": "array",
           "items": {
@@ -486,27 +481,9 @@
         "uuid"
       ],
       "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "oneOf": [
-        {
-          "title": "Area summary",
-          "properties": {
-            "collection": false,
-            "after": false,
-            "limit": false,
-            "max_bytes": false,
-            "ids": false
-          }
-        },
-        {
-          "title": "Collection page",
-          "required": [
-            "collection"
-          ]
-        }
-      ]
+      "additionalProperties": false
     },
-    "description": "Read a data summary, or name collection for bounded records and diagnostics. limit: 0 reads schema; follow next_after until complete. Optional revision uses a hub ID from list_revisions, including archived documents; omission reads live data. Live data and open revisions can change between calls.\n\nHelp: get_data, workspaces, tool-contracts, data.",
+    "description": "Read a data summary, or name collection for bounded records and diagnostics. limit: 0 reads schema; follow next_after until complete. Optional revision uses a hub ID from list_revisions, including archived documents; omission reads live data. Live data and open revisions can change between calls. Historical decision data refuses with decision_no_history.\n\nHelp: get_data, workspaces, tool-contracts, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -595,7 +572,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Apply one validated batch through applyDocData, naming each touched collection once. Within each collection, set `schema`, optionally `replaceRecords`, then `deleteRecords`, then `upsert` whole `{id, value}` records. `deleteCollection: true` excludes other changes. Schema and value JSON reach validation unaltered; unsupported schemas and invalid retained records refuse before mutation. The batch is one local transaction; identical refreshes return `changed: false` without an update. The result summarizes touched collection names, counts and deletion with durability, without values.\n\nRefresh producer-owned collections by upsert or full-set replacement. Keep human dispositions in a separate collection keyed by producer record ids. Split changes above the 1 MiB schema/value budget across calls; they are not atomic together and supply no CAS or distributed lock. Read with get_data; get_doc summarizes collections. Decisions refuse data with decision_data_unsupported; decided records keep decision_read_only, and legacy data stays readable. Decision answer guidance is in decisions. Their directory answerPreview uses the first answer paragraph/list; decisions have no TL;DR. get_doc page decisions are marked related or linked. Recorded attribution {who, when, where} is separate from the answer's content blocks.\n\nHelp: update_data, workspaces, tool-contracts, data.",
+    "description": "Apply one validated batch of changes to a document's structured data, naming each touched collection once. Within a collection the steps run in order: set `schema`, optionally `replaceRecords`, then `deleteRecords`, then `upsert` whole `{id, value}` records; `deleteCollection: true` excludes other changes. Schema and value JSON are validated as sent, and unsupported schemas or invalid retained records refuse before anything changes. The batch is one local transaction; an identical refresh returns `changed: false` without writing. The result summarizes touched collections, record counts and deletions with durability, without values.\n\nRefresh producer-owned collections by upsert or full-set replacement, and keep human dispositions in a separate collection keyed by producer record ids. Split changes above the 1 MiB schema/value budget across calls; separate calls are not atomic together and offer no compare-and-swap or lock. Read records with get_data. Decision records refuse data with decision_data_unsupported, decided records refuse it with decision_read_only, and legacy data stays readable.\n\nHelp: update_data, workspaces, tool-contracts, data.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -648,7 +625,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "List documents from synced directory stubs without opening rooms: uuid, title, tags, description, updatedAt (ISO 8601 UTC when known and representable), openThreadCount (absent means unknown) and pinned. Unfiltered omits decisions; kind/status/tag/has_open_threads predicates include them. A decision topic row shows the record in force, else pending, else first, with status, topic, discussion, answerPreview and inForce/pending/conflicts UUIDs. include_superseded returns one row per record; include_deleted admits archived rows (deleted: true). Filters combine; unknown tags refuse; has_open_threads accepts only true. get_doc reads code checks, threads and lifecycle details.\n\nHelp: list_docs, workspaces, tool-contracts, decisions.",
+    "description": "List documents from this replica's directory, including local writes the hub has not acknowledged yet, without opening document rooms. Rows carry uuid, title, tags, description, updatedAt (ISO 8601 UTC when known and representable), openThreadCount (absent when unknown) and pinned. Unfiltered listings omit decisions; kind, status, tag and has_open_threads include them. A decision topic row shows the record in force, else pending, else first, with status, topic, discussion, answerPreview and inForce/pending/conflicts UUIDs. include_superseded lists every record; include_deleted adds archived rows (`deleted: true`). Filters combine; unknown tags refuse; has_open_threads accepts only true. get_doc reads code checks, threads and lifecycle details.\n\nHelp: list_docs, workspaces, tool-contracts, decisions.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -861,7 +838,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Splice block text, preserving edits elsewhere; list-item list/indent can change in place. Assert old_text and preferably rev from get_doc; stale_block or old_text_mismatch returns currentText/currentRev. Assertions are replica-local. Prose marks can shift at splice edges; verify formatting with export_markdown. open_thread_anchored refuses loss of an open thread's last anchor; resolve it or move its anchor with annotate. Tables require GFM old/new text and table_mapping for structural/multi-cell edits. Cards take :::card content: inline-Markdown prose, repeated button: [Text](destination) lines after footer in authored order. Buttons use nonempty plain labels, https or supported app routes, optional style/color; invalid_card refuses bad input; unchanged parts, buttons and anchors survive. Rev includes each button's text, destination, appearance and order. Figma takes :::figma content: url, optional plain title and height 240–960, blank line and marked caption. Accepted Figma view URLs retain only the path and node-id, starting-point-node-id, version-id on www.figma.com. invalid_figma refuses without writing. Changed headers update their fields; unchanged caption marks/anchors survive. Figma rev includes caption formatting. Card/Figma conversions and table_mapping are refused; new document targets must be known locally. Link and GitHub reference syntax: markdown.\n\nHelp: edit_block, edit_doc, workspaces, tool-contracts, decisions, markdown.",
+    "description": "Change one block's text by diff-and-splice, so concurrent edits elsewhere in the block survive; a list item's `list` and `indent` can also change in place. Assert `old_text` and preferably the `rev` from get_doc: a mismatch refuses with stale_block or old_text_mismatch and returns currentText and currentRev to re-diff against. The assertion checks this replica only. A splice that touches a formatting mark's edge can re-anchor the mark, so check formatted text with export_markdown afterwards. An edit that would remove an open thread's last anchor refuses with open_thread_anchored; resolve the thread or move its anchor with annotate first. Tables take GFM and need `table_mapping` for structural or multi-cell edits. Card and Figma blocks take their `:::` content and cannot be converted to or from other types. New document-link targets must be known to this replica.\n\nHelp: edit_block, edit_doc, workspaces, tool-contracts, decisions, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -915,7 +892,7 @@
                 ]
               },
               "text": {
-                "description": "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer at most once, a required nonempty title, any number of button lines, then a blank line and optional prose body. Prose header values are one-line inline Markdown, not YAML; quotes stay literal. Each button has one [Text](destination) link: nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, alone or with ?query. At most one style (outline/filled) and color (neutral/blue/green/violet) may follow in either order; defaults are outline neutral. Invalid buttons, other trailing text, unknown, duplicate prose or non-key headers refuse with invalid_card. Prose parts support code, bold, italic, strike, external and document links. Export orders label, title, footer, then buttons in authored order, writes style before color and omits default words. Empty prose keys are omitted, prose header newlines fold to spaces, and prose lines starting ::: are escaped. Figma takes the content between :::figma and :::; required url, optional literal plain one-line title and whole-pixel height 240–960 (default 480), then a blank line and optional caption with the same inline marks. Keys are lowercase, each at most once. Only https figma.com/www.figma.com links to design, file, proto, board, slides or community/file are accepted, with a key/id and optional name; saving keeps those path parts and node-id, starting-point-node-id and version-id on https://www.figma.com, dropping other query fields and fragments. Invalid content refuses with invalid_figma and writes nothing; figma blocks take figma.com links only; use a plain link for other sites. get_doc returns canonical text and read-only figma kind, file, optional fileName and node. Source blocks remain literal text.",
+                "description": "Block text. Prose blocks take plain text; use `inline` for formatting. Code, terminal and chart take literal source. A table takes exactly one GFM table with inline Markdown in its cells. A card or figma block takes the content between its opening `:::card` or `:::figma` line and the closing `:::`; markdown help gives their keys, buttons and accepted links, and invalid content refuses with invalid_card or invalid_figma before writing.",
                 "type": "string"
               },
               "level": {
@@ -925,7 +902,7 @@
                 "maximum": 6
               },
               "language": {
-                "description": "Code language, e.g. \"ts\". Code blocks only.",
+                "description": "Code language, e.g. \"ts\". Code blocks only. Drawings are code blocks too, with language \"ablauf\" or \"wireframe\".",
                 "type": "string"
               },
               "list": {
@@ -1132,6 +1109,7 @@
           "type": "boolean"
         },
         "tags": {
+          "description": "The complete tag set, as existing catalog ids or names with case ignored. It replaces the current tags; [] clears them.",
           "type": "array",
           "items": {
             "type": "string",
@@ -1139,6 +1117,7 @@
           }
         },
         "links": {
+          "description": "The complete curated link set. It replaces the current links; [] clears them. A new target must be known to this replica's directory; archived targets are accepted.",
           "type": "array",
           "items": {
             "description": "Target document UUID.",
@@ -1212,43 +1191,6 @@
       ],
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false,
-      "anyOf": [
-        {
-          "required": [
-            "title"
-          ]
-        },
-        {
-          "required": [
-            "description"
-          ]
-        },
-        {
-          "required": [
-            "tldr"
-          ]
-        },
-        {
-          "required": [
-            "tags"
-          ]
-        },
-        {
-          "required": [
-            "links"
-          ]
-        },
-        {
-          "required": [
-            "discussion"
-          ]
-        },
-        {
-          "required": [
-            "code_check"
-          ]
-        }
-      ],
       "dependencies": {
         "tldr_opt_in": {
           "required": [
@@ -1263,7 +1205,7 @@
         }
       }
     },
-    "description": "Set title/description/tldr/tags/links/code_check or decision discussion; require one. Omissions stay; refusals write nothing and field failures name field. Title/description cannot be cleared. tldr: null clears but preserves deliberate absence; replacing a marked TL;DR requires tldr_opt_in: true with non-null tldr. Tags/links replace; [] clears existing tags or links. list_tags ids/names (case ignored); hidden pending tag references stay stored. New links: directory-known; archived/unchanged accepted. Regular-only code_check replaces one repository's entry (case-insensitive); {repository, commit, result, rev, paths?}. rev must match get_doc's page rev; on refusal reread and compare before recording. paths are hints, not complete dependencies. Writer sets UTC checked_at. Content edits preserve checks; decisions refuse. Only open decisions accept discussion: live, readable non-decision RFC UUID/null. Reuse/create RFC first; RFC/page/approval untouched. Separate from curated links/recorded answer; fixed after open. Decisions have no TL;DR; non-null refuses decision_tldr_unsupported, open null accepted. Decided records refuse tldr/discussion. Title on any live record renames its decision topic; successors inherit it. Title renames preserve approval. answerPreview: first answer paragraph/list; get_doc marks related/linked. See decisions. Archived metadata refuses; lifecycle: set_status.\n\nHelp: set_metadata, workspaces, tool-contracts, decisions.",
+    "description": "Change one or more of a document's title, description, TL;DR, tags, curated links and code check, or an open decision's discussion RFC. Name at least one field; omitted fields keep their values. The call is all or nothing: a refusal writes none of the named fields and names the failing `field`. Tags and links replace the whole set, and `[]` clears it. Title and description cannot be cleared; `tldr: null` clears the TL;DR. Decision records take no TL;DR or code check, and decided records also refuse discussion. Archived documents refuse every field; lifecycle status belongs to set_status.\n\nHelp: set_metadata, workspaces, tool-contracts, decisions.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -1490,46 +1432,7 @@
         "text"
       ],
       "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "oneOf": [
-        {
-          "title": "A reply (`thread_id`)",
-          "required": [
-            "thread_id"
-          ],
-          "properties": {
-            "block_id": false,
-            "start": false,
-            "end": false,
-            "row": false,
-            "column": false
-          }
-        },
-        {
-          "title": "Moving a thread's anchor",
-          "required": [
-            "thread_id",
-            "block_id",
-            "start",
-            "end"
-          ],
-          "properties": {
-            "resolved": false
-          }
-        },
-        {
-          "title": "Opening a thread over a range",
-          "required": [
-            "block_id",
-            "start",
-            "end"
-          ],
-          "properties": {
-            "thread_id": false,
-            "resolved": false
-          }
-        }
-      ]
+      "additionalProperties": false
     },
     "description": "Open a thread with block_id/start/end; reply with thread_id and no range fields; move an anchor with thread_id plus block_id/start/end. text adds a comment in every mode; author is optional. Only replies accept resolved to resolve or reopen. Moves remove all previous marks in the document and keep the thread's id, earlier replies and resolution, including for orphaned threads. Incomplete ranges refuse. Table targets need zero-based row/column GFM projection indices including header row 0. Offsets count displayed characters, including stored edge whitespace: remove exactly the GFM padding before decoding inline syntax. Coordinates follow moved cells; orphaned ranges are null. Bad or missing cell coordinates refuse with annotation_cell; empty or other-thread overlap ranges with annotation_range. Offsets clamp to text; a move may overlap its own anchor. Opening or moving into cards/Figma refuses with annotation_card/annotation_figma. Existing card/Figma threads accept replies, resolution, reopening or moves to prose/table cells; Figma ranges name caption.\n\nHelp: annotate, edit_doc, workspaces, tool-contracts, decisions, markdown.",
     "annotations": {
@@ -1629,7 +1532,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Render a Markdown projection: code, terminal and chart keep source fences; tables write padded GFM with inline cell marks. Cards export separate :::card containers with inline-Markdown prose and button: [Text](destination) lines after footer in authored order. Each exported button's plain label links to https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; export writes style before color and omits defaults. Import restores buttons and appearances. Figma exports separate :::figma containers: url, optional literal title and height, blank line and marked caption. Normalized HTTPS www.figma.com links retain design/file/proto/board/slides/community/file path, key/id, optional name and node-id, starting-point-node-id, version-id; other query values and fragments were dropped at save. Absent keys are omitted; header newlines fold to spaces and prose lines starting ::: are escaped. Import restores caption marks and adjacent containers; invalid/unclosed containers remain literal paragraphs. MCP refuses bad Figma content with invalid_figma; get_doc derives kind/file/fileName/node. Markdown help owns height 240–960 and accepted links. Export contacts no Figma service. Chart/data records are omitted with a notice; Markdown is never storage and MCP has no import tool.\n\nHelp: export_markdown, edit_doc, workspaces, tool-contracts, decisions, markdown, data.",
+    "description": "Render one document as read-only Markdown for reading, review or checking formatting. Markdown is never how documents are stored, and MCP has no Markdown import. The default frontmatter carries uuid, title, tags and, when set, description, kind and status; the TL;DR is not exported. Document links export as `[label](document-uuid)`. Comments are dropped unless `annotations` is `html-comments`, and structured data records are left out with a notice. Source blocks keep their fences, tables export as GFM, and cards and Figma blocks export as `:::` containers whose syntax markdown help gives.\n\nHelp: export_markdown, edit_doc, workspaces, tool-contracts, decisions, markdown, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -1646,7 +1549,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Inspect local replica state, pending rooms and hub connection/acknowledgements. hub.status distinguishes disabled, retryable hub-down, auth-failed requiring action, and update-required protocol mismatch. hub.recoveryClass, authRecovery and reason explain recovery; protocolVersion and hubProtocolVersion identify the incompatible side. Tools still work locally. unsyncedChanges counts durable pending rooms; inFlightUpdates counts provider sync messages on the current connection, resetting on reconnect. lastSync is this machine's stored UTC time when its full replica caught up, or null; it never moves backwards across processes. persistence diagnoses a failed log append and remains readable when ordinary replica tools are quarantined until restart. See this tool's help for counter units and lastSync conditions.\n\nHelp: sync_status, workspaces, tool-contracts.",
+    "description": "Inspect local replica state, pending rooms and hub connection/acknowledgements. hub.status distinguishes local, disabled, retryable hub-down, auth-failed requiring action, and update-required protocol mismatch. hub.recoveryClass, authRecovery and reason explain recovery; protocolVersion and hubProtocolVersion identify the incompatible side. Tools still work locally. unsyncedChanges counts durable pending rooms; inFlightUpdates counts provider sync messages on the current connection, resetting on reconnect. lastSync is this machine's stored UTC time when its full replica caught up, or null; it never moves backwards across processes. persistence diagnoses a failed log append and remains readable when ordinary replica tools are quarantined until restart. See this tool's help for counter units and lastSync conditions.\n\nHelp: sync_status, workspaces, tool-contracts.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -1774,47 +1677,7 @@
         "group"
       ],
       "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "oneOf": [
-        {
-          "title": "rename",
-          "required": [
-            "action",
-            "name"
-          ],
-          "properties": {
-            "action": {
-              "const": "rename"
-            },
-            "index": false
-          }
-        },
-        {
-          "title": "move",
-          "required": [
-            "action"
-          ],
-          "properties": {
-            "action": {
-              "const": "move"
-            },
-            "name": false
-          }
-        },
-        {
-          "title": "delete",
-          "required": [
-            "action"
-          ],
-          "properties": {
-            "action": {
-              "const": "delete"
-            },
-            "name": false,
-            "index": false
-          }
-        }
-      ]
+      "additionalProperties": false
     },
     "description": "Manage the groups themselves. `delete` removes the group and its pins — the documents are untouched, because the group only ever held their uuids, and they stay reachable through list_docs and search.\n\n`action` picks one of three shapes and each takes only its own field: `rename` needs `name` and refuses `index`, `move` takes `index` (omitted: last) and refuses `name`, `delete` takes neither. A field belonging to another action is refused at the input boundary before the sidebar is touched, rather than ignored — so a call that says two things is a failure you can see, not a silent half-success.\n\nThere is no create action: pin_doc creates a group by naming one that does not exist, which is how a group comes into being with something in it rather than empty.\n\nHelp: sidebar_group, workspaces, tool-contracts.",
     "annotations": {

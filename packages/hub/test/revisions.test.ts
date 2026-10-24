@@ -2,16 +2,26 @@ import { Document } from "@hocuspocus/server";
 import { createHash } from "node:crypto";
 import {
   compareRevisions,
+  appendBlock,
+  createAnnotation,
+  editBlock,
+  findBlockElement,
+  getAnnotation,
+  getBlock,
+  getBlocks,
+  getDocDataEntries,
   deleteDirectoryEntry,
   directoryRoom,
   encodeOriginUpdate,
   getMeta,
+  getMetaMap,
+  moveBlocks,
+  resolveAnnotationRange,
   restoreDirectoryEntry,
   roomForDoc,
   settingsRoom,
   sidebarRoom,
   tombstoneDirectoryEntry,
-  tombstoneDecisionRecord,
   snapshotRevision,
 } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
@@ -69,6 +79,154 @@ afterEach(() => {
 });
 
 describe("automatic hub revisions", () => {
+  it("restores title, blocks and data as an isolated closed revision, preserving comments and excluded metadata", async () => {
+    const db = database();
+    const doc = await load(db);
+    let unchanged = "";
+    let changed = "";
+    let moved = "";
+    doc.transact(() => {
+      title(doc, "Past title");
+      unchanged = appendBlock(doc, { type: "paragraph", text: "Keep this text" });
+      appendBlock(doc, { type: "paragraph", text: "Also retained" });
+      changed = appendBlock(doc, { type: "paragraph", text: "Past text" });
+      moved = appendBlock(doc, { type: "paragraph", text: "Moved text" });
+      doc.getMap("data").set("collection", { records: [1, 2] });
+    }, { attribution: { author: browser } });
+    const past = db.revisions.list(ROOM)[0]!.id;
+    db.revisions.name(ROOM, doc, checksum(doc), "Past", browser);
+    clock = MINUTE;
+    doc.transact(() => {
+      title(doc, "Present title");
+      editBlock(doc, changed, "Past text", "Present text");
+      appendBlock(doc, { type: "paragraph", text: "Remove this block" });
+      moveBlocks(doc, [moved]);
+      doc.getMap("data").set("collection", { records: [3] });
+      doc.getMap("data").set("new collection", 7);
+    }, { attribution: { author: browser } });
+    const before = db.revisions.list(ROOM)[0]!.id;
+    const beforeSnapshot = revision(db, before);
+    const thread = createAnnotation(doc, unchanged, 0, 4, "reviewer", "Keep anchor");
+    const replacedThread = createAnnotation(doc, changed, 0, 7, "reviewer", "Loses anchor");
+    const movedThread = createAnnotation(doc, moved, 0, 5, "reviewer", "Moves with text");
+    const metadata = { description: "Current description", tldr: "Current TLDR", tags: ["current"], pinned: true,
+      code_check: [{ result: "matches" }] };
+    doc.transact(() => {
+      for (const [key, value] of Object.entries(metadata)) getMetaMap(doc).set(key, value);
+    });
+    const keptElement = findBlockElement(doc, unchanged);
+    const keptBlock = getBlock(doc, unchanged);
+    const movedBlock = getBlock(doc, moved);
+    const threadBefore = getAnnotation(doc, thread.id);
+    const replacedThreadBefore = getAnnotation(doc, replacedThread.id);
+    const oldBytes = db.revisions.get(ROOM, past);
+    clock = 2 * MINUTE;
+    const restored = db.restoreRevision(ROOM, doc, checksum(doc), past, claude);
+    expect(restored).toMatchObject({ ok: true, applied: true });
+    if (!restored.ok) throw new Error("restore refused");
+    expect(getMeta(doc).title).toBe("Past title");
+    expect(getBlocks(doc).map(block => block.text)).toEqual(["Keep this text", "Also retained", "Past text", "Moved text"]);
+    expect(getDocDataEntries(doc)).toEqual([["collection", { records: [1, 2] }]]);
+    expect(findBlockElement(doc, unchanged)).toBe(keptElement);
+    expect(getBlock(doc, unchanged)).toEqual(keptBlock);
+    expect(getBlock(doc, moved)).toEqual(movedBlock);
+    expect(resolveAnnotationRange(doc, thread.id)).toEqual({ start: 0, end: 4, collapsed: false });
+    expect(resolveAnnotationRange(doc, movedThread.id)).toEqual({ start: 0, end: 5, collapsed: false });
+    expect(resolveAnnotationRange(doc, replacedThread.id)).toBeNull();
+    expect(getAnnotation(doc, thread.id)).toEqual(threadBefore);
+    expect(getAnnotation(doc, replacedThread.id)).toEqual(replacedThreadBefore);
+    for (const [key, value] of Object.entries(metadata)) expect(getMetaMap(doc).get(key)).toEqual(value);
+    expect(db.revisions.list(ROOM).slice(0, 3)).toEqual([
+      { id: restored.id, author: claude, startedAt: 2 * MINUTE, endedAt: 2 * MINUTE },
+      { id: before, author: browser, startedAt: MINUTE, endedAt: 2 * MINUTE },
+      { id: past, author: browser, startedAt: 0, endedAt: 0 },
+    ]);
+    expect(db.revisions.get(ROOM, past)).toEqual(oldBytes);
+    const saved = await load(db);
+    expect(compareRevisions(saved, doc).changed).toBe(false);
+    expect(resolveAnnotationRange(saved, thread.id)).not.toBeNull();
+    const undone = db.restoreRevision(ROOM, doc, checksum(doc), before, browser);
+    expect(undone).toMatchObject({ ok: true, applied: true });
+    expect(compareRevisions(beforeSnapshot, doc).changed).toBe(false);
+    expect(resolveAnnotationRange(doc, replacedThread.id)).toBeNull();
+    clock = 3 * MINUTE;
+    title(doc, "Later edit", browser);
+    expect(db.revisions.list(ROOM)[0]).toMatchObject({ author: browser, endedAt: null });
+    expect(db.revisions.list(ROOM)[1]).toMatchObject({ id: undone.ok ? undone.id : "", endedAt: 2 * MINUTE });
+  });
+
+  it("refuses stale or foreign revisions and leaves a no-op's bytes and open boundary untouched", async () => {
+    const db = database();
+    const doc = await load(db);
+    title(doc, "Current");
+    const current = db.revisions.list(ROOM)[0]!;
+    const bytes = Y.encodeStateAsUpdate(doc);
+    const rows = db.revisions.list(ROOM);
+    expect(db.restoreRevision(ROOM, doc, checksum(doc), current.id, claude)).toEqual({ ok: true, id: current.id, applied: false });
+    expect(db.restoreRevision(ROOM, doc, "0".repeat(64), current.id, claude)).toEqual({ ok: false, error: "stale-state" });
+    const foreign = await load(db, roomForDoc(WORKSPACE, TOPIC));
+    title(foreign, "Foreign");
+    const foreignId = db.revisions.list(roomForDoc(WORKSPACE, TOPIC))[0]!.id;
+    expect(db.restoreRevision(ROOM, doc, checksum(doc), foreignId, claude)).toEqual({ ok: false, error: "revision-not-found" });
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(bytes);
+    expect(db.revisions.list(ROOM)).toEqual(rows);
+    expect(db.connection.prepare("SELECT name FROM documents WHERE name = ?").get(ROOM)).toBeUndefined();
+  });
+
+  it.each(["documents", "document_revisions"])("rolls back room state and history before broadcasting when %s cannot store", async (table) => {
+    const failures: unknown[] = [];
+    const db = database(true, error => failures.push(error));
+    const doc = await load(db);
+    title(doc, "Past");
+    const past = db.revisions.list(ROOM)[0]!.id;
+    db.revisions.name(ROOM, doc, checksum(doc), "Past", browser);
+    title(doc, "Current");
+    await db.onStoreDocument({ document: doc, documentName: ROOM });
+    const persisted = db.connection.prepare("SELECT data FROM documents WHERE name = ?").get(ROOM)!.data;
+    const bytes = Y.encodeStateAsUpdate(doc);
+    const history = db.revisions.list(ROOM);
+    let updates = 0;
+    doc.on("update", () => { updates++; });
+    db.connection.exec(`CREATE TRIGGER fail_restore BEFORE ${table === "documents" ? "UPDATE" : "INSERT"} ON ${table}
+      BEGIN SELECT RAISE(ABORT, 'restore failed'); END`);
+    expect(() => db.restoreRevision(ROOM, doc, checksum(doc), past, claude)).toThrow("restore failed");
+    expect(failures).toHaveLength(1);
+    expect(updates).toBe(0);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(bytes);
+    expect(db.revisions.list(ROOM)).toEqual(history);
+    expect(db.connection.prepare("SELECT data FROM documents WHERE name = ?").get(ROOM)!.data).toEqual(persisted);
+    db.connection.exec("DROP TRIGGER fail_restore");
+    expect(db.restoreRevision(ROOM, doc, checksum(doc), past, claude)).toMatchObject({ ok: true, applied: true });
+    expect(updates).toBe(1);
+  });
+
+  it("drops delayed edits in replaced blocks while keeping concurrent edits in untouched blocks", async () => {
+    const db = database();
+    const doc = await load(db);
+    let replaced = "";
+    let retained = "";
+    doc.transact(() => {
+      replaced = appendBlock(doc, { type: "paragraph", text: "Past" });
+      retained = appendBlock(doc, { type: "paragraph", text: "Keep" });
+    }, { attribution: { author: browser } });
+    const past = db.revisions.list(ROOM)[0]!.id;
+    db.revisions.name(ROOM, doc, checksum(doc), "Past", browser);
+    editBlock(doc, replaced, "Past", "Present");
+    const offline = new Y.Doc();
+    documents.push(offline);
+    Y.applyUpdate(offline, Y.encodeStateAsUpdate(doc));
+    const vector = Y.encodeStateVector(doc);
+    editBlock(offline, replaced, "Present", "Offline present");
+    editBlock(offline, retained, "Keep", "Keep offline edit");
+    const delayed = Y.encodeStateAsUpdate(offline, vector);
+    expect(db.restoreRevision(ROOM, doc, checksum(doc), past, browser)).toMatchObject({ ok: true, applied: true });
+    Y.applyUpdate(doc, delayed, { attribution: { author: claude } });
+    Y.applyUpdate(offline, Y.encodeStateAsUpdate(doc));
+    expect(getBlocks(doc).map(block => block.text)).toEqual(["Past", "Keep offline edit"]);
+    expect(getBlocks(offline)).toEqual(getBlocks(doc));
+    expect(db.revisions.list(ROOM)[0]).toMatchObject({ author: claude, endedAt: null });
+  });
+
   it("names and freezes another surface's open stretch, independently of naming attribution", async () => {
     const db = database();
     const doc = await load(db);
@@ -272,29 +430,89 @@ describe("automatic hub revisions", () => {
     expect(rows[2]!.author).toBeNull();
   });
 
-  it("closes for archive and restore through a decision topic and an individual record", async () => {
+  it.each(["open", "decided", "rejected", "withdrawn"] as const)("records no first content or later title, blocks or data for %s decisions", async status => {
+    const db = database();
+    const doc = await load(db);
+    doc.transact(() => {
+      getMetaMap(doc).set("kind", "decision");
+      getMetaMap(doc).set("status", status);
+      title(doc, "First answer");
+      appendBlock(doc, { type: "paragraph", text: "First content" });
+      doc.getMap("data").set("collection", { records: [1] });
+    }, { attribution: { author: browser } });
+    expect(db.revisions.list(ROOM)).toEqual([]);
+    const directory = await load(db, directoryRoom(WORKSPACE));
+    directory.getMap("docs").set(UUID, { title: "Record", tags: [], kind: "decision", topic: UUID, status });
+    for (const archived of [false, true]) {
+      if (archived) tombstoneDirectoryEntry(directory, UUID);
+      title(doc, `Changed title, archived: ${archived}`);
+      doc.transact(() => appendBlock(doc, { type: "paragraph", text: `Changed blocks, archived: ${archived}` }),
+        { attribution: { author: claude } });
+      doc.transact(() => doc.getMap("data").set("collection", { archived }), { attribution: { author: browser } });
+      expect(db.revisions.list(ROOM)).toEqual([]);
+      expect(db.connection.prepare("SELECT room FROM document_revision_heads WHERE room = ?").all(ROOM)).toEqual([]);
+      expect(db.connection.prepare("SELECT room FROM document_revisions WHERE room = ?").all(ROOM)).toEqual([]);
+    }
+  });
+
+  it("retains a converted page's earlier revisions and names without recording decision changes, then purges them on deletion", async () => {
     const db = database();
     const doc = await load(db);
     const directory = await load(db, directoryRoom(WORKSPACE));
-    directory.getMap("docs").set(TOPIC, { title: "Topic", tags: [], kind: "decision", topic: TOPIC, status: "open" });
-    directory.getMap("docs").set(UUID, { title: "Record", tags: [], kind: "decision", topic: TOPIC, status: "rejected" });
-    title(doc, "One");
+    title(doc, "Named regular page");
+    expect(db.revisions.name(ROOM, doc, checksum(doc), "Before conversion", browser).ok).toBe(true);
+    clock = 10;
+    title(doc, "Regular page's latest edit");
+    const rows = db.revisions.list(ROOM);
+    const content = rows.map(row => db.revisions.get(ROOM, row.id));
+    const names = db.revisions.names(ROOM);
+    doc.transact(() => {
+      getMetaMap(doc).set("kind", "decision");
+      getMetaMap(doc).set("status", "open");
+      title(doc, "Converted decision");
+      appendBlock(doc, { type: "paragraph", text: "Decision answer" });
+      doc.getMap("data").set("collection", { records: [1] });
+    }, { attribution: { author: claude } });
+    directory.getMap("docs").set(UUID, { title: "Converted decision", tags: [], kind: "decision", topic: UUID, status: "open" });
+    await db.onStoreDocument({ document: doc, documentName: ROOM });
+    const reloaded = await load(db);
+    title(reloaded, "Later decision title", claude);
+    expect(db.revisions.list(ROOM)).toEqual(rows);
+    expect(rows.map(row => db.revisions.get(ROOM, row.id))).toEqual(content);
+    expect(db.revisions.names(ROOM)).toEqual(names);
+    tombstoneDirectoryEntry(directory, UUID);
+    expect(db.revisions.list(ROOM).map(row => row.id)).toEqual(rows.map(row => row.id));
+    expect(rows.map(row => db.revisions.get(ROOM, row.id))).toEqual(content);
+    expect(db.revisions.names(ROOM)).toEqual(names);
+    deleteDirectoryEntry(directory, UUID);
+    expect(db.revisions.list(ROOM)).toEqual([]);
+    expect(db.revisions.names(ROOM).size).toBe(0);
+    expect(db.connection.prepare("SELECT room FROM document_revision_heads WHERE room = ?").all(ROOM)).toEqual([]);
+    expect(db.connection.prepare("SELECT name FROM documents WHERE name = ?").get(ROOM)).toBeUndefined();
+  });
+
+  it("closes regular-page heads for archive and restore without losing names", async () => {
+    const db = database();
+    const doc = await load(db);
+    const directory = await load(db, directoryRoom(WORKSPACE));
+    directory.getMap("docs").set(UUID, { title: "Regular page", tags: [] });
+    title(doc, "Named state");
     expect(db.revisions.name(ROOM, doc, checksum(doc), "Before archive", browser).ok).toBe(true);
     const names = db.revisions.names(ROOM);
+    clock = 5;
+    title(doc, "One");
     clock = 10;
-    tombstoneDirectoryEntry(directory, TOPIC);
-    expect(db.revisions.list(ROOM)[0]!.endedAt).toBe(0);
+    tombstoneDirectoryEntry(directory, UUID);
+    expect(db.revisions.list(ROOM)[0]!.endedAt).toBe(10);
     expect(db.revisions.names(ROOM)).toEqual(names);
     clock = 20;
-    restoreDirectoryEntry(directory, TOPIC);
     title(doc, "Two");
     clock = 30;
-    expect(tombstoneDecisionRecord(directory, UUID)).toBe(true);
+    restoreDirectoryEntry(directory, UUID);
     expect(db.revisions.list(ROOM)[0]!.endedAt).toBe(30);
     clock = 40;
-    restoreDirectoryEntry(directory, UUID);
     title(doc, "Three");
-    expect(db.revisions.list(ROOM)).toHaveLength(3);
+    expect(db.revisions.list(ROOM)).toHaveLength(4);
     expect(db.revisions.list(ROOM)[0]!.startedAt).toBe(40);
   });
 

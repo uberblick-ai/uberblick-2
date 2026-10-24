@@ -66,6 +66,7 @@ export type { RevInput } from "./rev.js";
 
 export { compareRevisions } from "./revisions.js";
 export { snapshotRevision } from "./revision-snapshot.js";
+export { restoreRevisionContent } from "./revision-restore.js";
 export type { RevisionSnapshot } from "./revision-snapshot.js";
 export { encodeRevisionRequest, readRevisionRequest, encodeRevisionResponse, encodeRevisionResponseFrames,
   readRevisionResponse, createRevisionResponseReader } from "./revision-protocol.js";
@@ -278,3 +279,12 @@ export type {
 } from "./types.js";
 export { encodeOriginUpdate, readOriginUpdate, encodeOriginAck, readOriginAck } from "./origin.js";
 export type { UpdateSurface, UpdateOriginMetadata, OriginUpdate, OriginUpdateAck } from "./origin.js";
+export { parseJsonSource, formatJsonSource, jsonPathStep, JSON_SOURCE_MAX_DEPTH } from "./json-source.js";
+export type { JsonSourceNode, JsonSourceEntry, JsonSourceResult } from "./json-source.js";
+export {
+  compareJsonSources, changedRanges, jsonComparisonOpenPaths, jsonComparisonRows,
+  JSON_COMPARE_FIRST_VIEW_ROWS, JSON_COMPARE_MAX_NODES, JSON_COMPARE_WORD_LENGTH,
+} from "./json-compare.js";
+export type {
+  JsonChangeKind, JsonCompareNode, JsonComparePiece, JsonCompareRow, JsonCompareRowOptions, JsonComparison, JsonTextRange,
+} from "./json-compare.js";

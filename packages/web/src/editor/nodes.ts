@@ -26,6 +26,7 @@ import type * as Y from "yjs";
 import { chartBlockView } from "./chart.js";
 import { wireframeBlockView } from "./wireframe.js";
 import { ablaufBlockView } from "./ablauf.js";
+import { jsonTreeBlockView } from "./json-tree.js";
 import { Card, CardParts } from "./card.js";
 import { Figma, FigmaCaption } from "./figma.js";
 
@@ -233,9 +234,11 @@ const CodeBlock = Node.create({
     const ordinary = sourceBlockView(codeBlockChrome);
     const wireframe = wireframeBlockView();
     const ablauf = ablaufBlockView();
+    const jsonTree = jsonTreeBlockView();
     return (props) => {
       const language = props.node.attrs.language;
-      const rendererFor = (value: unknown) => value === "wireframe" ? wireframe : value === "ablauf" ? ablauf : ordinary;
+      const rendererFor = (value: unknown) =>
+        value === "wireframe" ? wireframe : value === "ablauf" ? ablauf : value === "json-tree" ? jsonTree : ordinary;
       const selected = rendererFor(language);
       const view = selected(props);
       const update = view.update;

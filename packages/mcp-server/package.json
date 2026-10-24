@@ -32,10 +32,11 @@
     "@uberblick/schema": "workspace:*",
     "y-protocols": "catalog:",
     "yjs": "catalog:",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "@uberblick/wireframe": "^0.3.0",
     "esbuild": "0.28.2",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",

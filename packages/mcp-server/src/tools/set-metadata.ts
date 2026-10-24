@@ -48,8 +48,8 @@ export const inputSchema = strictInput({
   description: descriptionArg.optional(),
   tldr: tldrArg.optional().describe(`Person-facing regular-document summary, at most ${MAX_TLDR_LENGTH} characters. Null clears it without changing a deliberate removal mark. On a marked page, a non-null summary requires tldr_opt_in: true. Decisions have no TL;DR; open records accept null.`),
   tldr_opt_in: z.boolean().optional().describe("Pass true with a non-null tldr to lift a person's deliberate TL;DR removal. Requires a non-null tldr; false does not lift the mark."),
-  tags: z.array(z.string().min(1)).optional(),
-  links: z.array(linkArg).optional(),
+  tags: z.array(z.string().min(1)).optional().describe("The complete tag set, as existing catalog ids or names with case ignored. It replaces the current tags; [] clears them."),
+  links: z.array(linkArg).optional().describe("The complete curated link set. It replaces the current links; [] clears them. A new target must be known to this replica's directory; archived targets are accepted."),
   discussion: uuidArg.nullable().optional().describe("RFC discussion document UUID, or null to clear. Only an open decision record accepts changes; the target must be live, locally readable and not a decision. Distinct from curated links and the recorded answer; no document is created or tagged."),
   code_check: codeCheckArg.optional().describe("Record a regular page's latest comparison for one repository, replacing only that repository's entry. The writer sets checked_at to current UTC; callers do not supply it. Content edits leave checks unchanged."),
 })
@@ -69,7 +69,6 @@ export const inputSchema = strictInput({
     }
   })
   .meta({
-    anyOf: fields.map((field) => ({ required: [field] })),
     dependencies: {
       tldr_opt_in: { required: ["tldr"], properties: { tldr: { type: "string", minLength: 1 } } },
     },
