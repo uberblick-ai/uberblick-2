@@ -3,14 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { getMeta, initDoc, type RevisionEntry } from "@uberblick/schema";
 import { DocumentHistoryError, type DocumentRevisionsClient } from "../src/shell/document-revisions.js";
-import { useDocumentHistory, type DocumentHistory } from "../src/ui/document/document-history.js";
+import { renamedFrom, useDocumentHistory, type DocumentHistory } from "../src/ui/document/document-history.js";
 
 const UUID = "9f3c1a2b-0000-4000-8000-0123456789ab";
 const OTHER_UUID = "4a9939be-2778-442f-9278-e1517ef88335";
 const entries: RevisionEntry[] = [
-  { id: "newest", author: { githubUsername: "ben", surface: { kind: "mcp", name: "Claude Code" } }, startedAt: 100, endedAt: null },
-  { id: "middle", author: { githubUsername: "ben", surface: { kind: "browser", name: "Browser" } }, startedAt: 50, endedAt: 100 },
-  { id: "earliest", author: null, startedAt: null, endedAt: 50 },
+  { id: "newest", title: "newest", author: { githubUsername: "ben", surface: { kind: "mcp", name: "Claude Code" } }, startedAt: 100, endedAt: null },
+  { id: "middle", title: "middle", author: { githubUsername: "ben", surface: { kind: "browser", name: "Browser" } }, startedAt: 50, endedAt: 100 },
+  { id: "earliest", title: "earliest", author: null, startedAt: null, endedAt: 50 },
 ];
 const documents: Y.Doc[] = [];
 afterEach(() => { for (const doc of documents.splice(0)) if (!doc.isDestroyed) doc.destroy(); });
@@ -62,7 +62,7 @@ describe("document history navigation", () => {
     expect(getMeta(fix.reading().selection!.after).title).toBe("newest");
     expect(getMeta(fix.reading().selection!.before!).title).toBe("earliest");
     expect(fix.reading().selection!.comparedWith).toEqual(named);
-    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(fix.reading().titles).toEqual({ newest: "newest", middle: "middle", earliest: "earliest" });
     await act(async () => fix.reading().back());
     expect(fix.reading().selection?.comparedWith).toBeUndefined();
     expect(fix.reading().entry?.id).toBe("middle");
@@ -227,29 +227,30 @@ describe("document history navigation", () => {
     await act(async () => fix.reading().back());
     expect(getMeta(fix.reading().selection!.after).title).toBe("newest version 2");
     expect(first.isDestroyed).toBe(true);
-    expect(api.get).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(api.get).mock.calls.filter(call => call[1] === "newest")).toHaveLength(2);
   });
 
   it("never caches an older navigation request that completes after a refreshed visit", async () => {
     const pending = deferred<Y.Doc>();
     const stale = document("Old earliest reading");
-    const fresh = document("Refreshed earliest reading");
-    let earliestReads = 0;
+    let hold = false;
     const api = client(async (_uuid, id) => {
       if (id !== "earliest") return document(id);
-      earliestReads++;
-      return earliestReads === 1 ? pending.promise : fresh;
+      return hold ? pending.promise : document("Refreshed earliest reading");
     });
     const fix = mount(api);
     await act(async () => {});
     await act(async () => fix.reading().back());
     expect(fix.reading().active).toBe(true);
+    hold = true;
     await act(async () => fix.reading().back());
     expect(fix.reading().busy).toBe(true);
     await act(async () => fix.reading().now());
+    hold = false;
     await act(async () => fix.reading().back());
     await act(async () => fix.reading().back());
-    expect(fix.reading().selection!.before).toBe(fresh);
+    const fresh = fix.reading().selection!.before!;
+    expect(getMeta(fresh).title).toBe("Refreshed earliest reading");
     await act(async () => pending.resolve(stale));
     expect(fix.reading().selection!.before).toBe(fresh);
     await act(async () => fix.reading().back());
@@ -373,5 +374,83 @@ describe("document history navigation", () => {
     await act(async () => fix.reading().sinceNamed("gone"));
     expect(fix.reading().error).toMatch(/no longer available/);
     expect(fix.reading().selection!.comparedWith).toEqual(earliest);
+  });
+
+  it("loads sidebar rename information before visiting entries and retains it across named comparisons", async () => {
+    const api = client(async (_uuid, id) => document(id === "earliest" ? "Alpha" : "Beta"));
+    const baseline = { ...entries[2]!, title: "Alpha", name: { text: "Kickoff", namer: null, namedAt: 50, canManage: false } };
+    vi.mocked(api.list).mockResolvedValue([{ ...entries[0]!, title: "Beta" }, { ...entries[1]!, title: "Beta" }, baseline]);
+    const fix = mount(api);
+    await act(async () => {});
+    expect(api.get).not.toHaveBeenCalled();
+    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 1)).toBe("Alpha");
+    await act(async () => fix.reading().back());
+    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 1)).toBe("Alpha");
+    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 0)).toBeNull();
+    await act(async () => fix.reading().open(1));
+    await act(async () => fix.reading().sinceNamed("earliest"));
+    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 1)).toBe("Alpha");
+    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 0)).toBeNull();
+    fix.view.unmount();
+    expect(documents.every(doc => doc.isDestroyed)).toBe(true);
+  });
+
+  it.each([true, false])("reads only the selected comparison in a 200-revision history, with list titles: %s", async includeTitles => {
+    const revisions = Array.from({ length: 200 }, (_, index) => ({
+      id: `revision-${index}`, author: null, startedAt: index, endedAt: index,
+      ...(includeTitles ? { title: index % 2 === 0 ? "Alpha" : "Beta" } : {}),
+    }));
+    const api = client();
+    vi.mocked(api.list).mockResolvedValue(revisions);
+    const fix = mount(api);
+    await act(async () => {});
+    expect(api.get).not.toHaveBeenCalled();
+    await act(async () => fix.reading().back());
+    expect(vi.mocked(api.get).mock.calls.map(call => call[1])).toEqual(["revision-0", "revision-1"]);
+    expect(renamedFrom(revisions, fix.reading().titles, 150)).toBe(includeTitles ? "Beta" : null);
+    expect(fix.reading().error).toBeNull();
+    await act(async () => fix.reading().now());
+    await act(async () => fix.reading().back());
+    expect(vi.mocked(api.get).mock.calls.map(call => call[1])).toEqual(["revision-0", "revision-1", "revision-0", "revision-1"]);
+    if (!includeTitles) expect(fix.reading().titles).toEqual({});
+    expect(fix.reading().error).toBeNull();
+  });
+
+  it("keeps history available when list titles are missing and never falls back to snapshot scans", async () => {
+    const api = client(async (_uuid, id) => {
+      if (id === "earliest") throw new DocumentHistoryError("unreachable");
+      return document(id);
+    });
+    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, {
+      id: "earliest", author: null, startedAt: null, endedAt: 50,
+    }]);
+    const fix = mount(api);
+    await act(async () => {});
+    await act(async () => fix.reading().back());
+    const selected = fix.reading().selection;
+    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(renamedFrom(fix.reading().entries!, fix.reading().titles, 1)).toBeNull();
+    expect(fix.reading().error).toBeNull();
+    expect(selected!.after.isDestroyed).toBe(false);
+    await act(async () => fix.reading().refresh());
+    expect(fix.reading().selection).toBe(selected);
+    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(fix.reading().titles.earliest).toBeUndefined();
+    expect(fix.reading().error).toBeNull();
+  });
+
+  it("keeps list titles through a metadata-only name mutation and replaces them on a fresh list", async () => {
+    const api = client();
+    const fix = mount(api);
+    await act(async () => {});
+    const named: RevisionEntry = { id: "middle", author: entries[1]!.author, startedAt: 50, endedAt: 100,
+      name: { text: "Reviewed", namer: null, namedAt: 100, canManage: true } };
+    vi.mocked(api.rename).mockResolvedValue(named);
+    await act(async () => fix.reading().rename("middle", "Reviewed"));
+    expect(fix.reading().titles.middle).toBe("middle");
+    vi.mocked(api.list).mockResolvedValue([named]);
+    await act(async () => fix.reading().refresh());
+    expect(fix.reading().titles).toEqual({});
   });
 });

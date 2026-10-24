@@ -97,8 +97,22 @@
   /* Warning text needs darker light-mode ink than the fill/stroke accent. */
   --status-warning-ink: light-dark(oklch(0.48 0.1 75), var(--status-warning));
 
-  --revision-added-background: light-dark(oklch(0.92 0.04 240), oklch(0.3 0.05 240));
-  --revision-removed-background: light-dark(oklch(0.93 0.035 305), oklch(0.3 0.045 305));
+  /* Light green and red read as additions and removals, not as sync or errors. */
+  --revision-added-background: light-dark(oklch(0.89 0.07 150), oklch(0.36 0.07 150));
+  --revision-removed-background: light-dark(oklch(0.9 0.055 25), oklch(0.36 0.07 25));
+  --revision-added-row: light-dark(oklch(0.96 0.03 150), oklch(0.235 0.035 150));
+  --revision-removed-row: light-dark(oklch(0.96 0.022 25), oklch(0.235 0.035 25));
+  --revision-added-ink: light-dark(oklch(0.45 0.12 150), oklch(0.78 0.12 150));
+  --revision-removed-ink: light-dark(oklch(0.5 0.16 25), oklch(0.78 0.11 25));
+  --revision-filler: light-dark(oklch(0.93 0.005 75), oklch(0.2 0.005 65));
+  /* The overview ruler: muted in dark mode so it never outshines the comparison. */
+  --revision-ruler-same: light-dark(oklch(0.86 0.012 70), oklch(0.33 0.01 70));
+  --revision-ruler-added: light-dark(oklch(0.64 0.15 150), oklch(0.48 0.09 150));
+  --revision-ruler-removed: light-dark(oklch(0.63 0.18 25), oklch(0.47 0.11 25));
+  --revision-ruler-changed: light-dark(oklch(0.71 0.14 80), oklch(0.53 0.08 85));
+  --revision-ruler-track: light-dark(oklch(0 0 0 / 0.025), oklch(1 0 0 / 0.03));
+  --revision-ruler-view: light-dark(oklch(0.2 0.005 70 / 0.07), oklch(1 0 0 / 0.05));
+  --revision-ruler-view-border: light-dark(oklch(0.2 0.005 70 / 0.4), oklch(1 0 0 / 0.22));
 
   --archived-background: light-dark(oklch(0.97 0.015 75), oklch(0.23 0.015 75));
   --archived-icon: light-dark(oklch(0.52 0.07 75), oklch(0.7 0.07 75));
@@ -244,14 +258,73 @@
   .ub-history-icon { width: 44px; height: 44px; }
 }
 
+/* The revision view's compact header stays above the scrolling comparison. */
+.ub-revision-header {
+  position: sticky;
+  top: -0.75rem;
+  z-index: 3;
+  margin-top: -0.75rem;
+  padding-top: 0.75rem;
+  background: var(--page-ground);
+  background-attachment: fixed;
+}
+/* The line under the title is the header's bottom edge; ↑ ↓ end on it. */
+.ub-revision-header { margin-bottom: 1rem; }
+.ub-revision-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+.ub-revision-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0.2rem 0;
+  font-family: var(--font-display);
+  font-size: var(--type-h2-size);
+  font-weight: 500;
+  line-height: 1.25;
+  /* The morph from the live title scales from its first letter. */
+  transform-origin: 0 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+/* The title at another revision shares one cell with the one leaving. */
+.ub-revision-title-text {
+  grid-area: 1 / 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ub-revision-title[data-direction="older"] { --title-enter: -14px; --title-leave: 14px; }
+.ub-revision-title[data-direction="newer"] { --title-enter: 14px; --title-leave: -14px; }
+.ub-revision-title-text[data-entering] { animation: ub-revision-title-enter 450ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.ub-revision-title-text[data-leaving] { animation: ub-revision-title-leave 450ms cubic-bezier(0.2, 0.7, 0.2, 1) both; pointer-events: none; }
+@keyframes ub-revision-title-enter {
+  0% { opacity: 0; transform: translateX(var(--title-enter)); filter: blur(3px); }
+  20% { opacity: 0; }
+  70% { filter: blur(0); }
+}
+@keyframes ub-revision-title-leave {
+  60% { opacity: 0; filter: blur(3px); }
+  100% { opacity: 0; transform: translateX(var(--title-leave)); filter: blur(3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ub-revision-title-text[data-entering] { animation: none; }
+  .ub-revision-title-text[data-leaving] { display: none; }
+}
+.ub-revision-restore[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.ub-history-renamed s { color: var(--muted-foreground); }
+
 /* The revision's status row: who and when, position, and which revision. */
 .ub-history-controls {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   column-gap: 0.6rem;
   row-gap: 0.25rem;
-  margin-block: 0 1rem;
+  margin-block: 0;
   padding: 0.35rem 0;
   border: 0;
   border-bottom: 1px solid var(--border);
@@ -261,21 +334,49 @@
 .ub-history-who {
   display: inline-flex;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  margin-inline-end: auto;
   align-items: center;
   gap: 0.4rem;
   white-space: nowrap;
   overflow: hidden;
 }
 .ub-history-author,
+.ub-history-renamed,
 .ub-history-compared { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ub-history-author { color: var(--foreground); font-weight: 500; }
-.ub-history-when { flex: none; }
+.ub-history-when,
+.ub-history-who > svg { flex: none; }
 .ub-history-state:empty { display: none; }
 .ub-history-position { font-family: var(--font-mono); font-size: var(--type-caption-size); white-space: nowrap; }
 .ub-history-tag { flex: none; color: var(--brand-ink); }
 .ub-history-name-trigger .ub-history-tag { color: currentColor; }
 .ub-history-name-trigger[data-named] { color: var(--brand-ink); opacity: 1; }
+/* Naming happens in place, in a field the width of a short name. */
+.ub-history-naming {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  color: var(--brand-ink);
+}
+.ub-history-name-field {
+  width: 14rem;
+  max-width: 50vw;
+  min-height: 26px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  padding: 0.1rem 0.4rem;
+  color: var(--foreground);
+  font: inherit;
+}
+.ub-history-name-field:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ub-history-name-field:disabled { opacity: 0.6; }
+.ub-history-name-error { color: var(--destructive); }
+@media (any-pointer: coarse) {
+  .ub-history-name-field { min-height: 44px; }
+}
 .ub-history-rev {
   flex: none;
   min-width: 0;
@@ -290,7 +391,7 @@
 }
 .ub-history-named {
   display: inline-flex;
-  max-width: 14rem;
+  max-width: 11rem;
   /* Sits with its tag, as one name. */
   margin-inline-start: -0.35rem;
   color: var(--foreground);
@@ -300,6 +401,10 @@
 .ub-history-named > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* The sidebar holds Back to now; narrow layouts keep it beside the revision. */
 .ub-history-now { display: none; }
+/* Narrow screens wrap the row rather than hide who made the revision. */
+@media (max-width: 767px) {
+  .ub-history-controls { flex-wrap: wrap; }
+}
 [data-sidebar-collapsed="true"] .ub-history-now { display: inline-flex; }
 @media (width < 80rem) {
   .ub-history-now { display: inline-flex; }
@@ -315,6 +420,36 @@
 }
 
 /* History sidebar entries: a ring avatar, rounded square for agent surfaces. */
+/* A small switch for the sidebar's Collapse unchanged. */
+.ub-history-switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 16px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--sidebar-border);
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.ub-history-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--background);
+  transition: transform 120ms ease;
+}
+.ub-history-switch:checked { background: var(--sidebar-foreground); }
+.ub-history-switch:checked::after { transform: translateX(12px); }
+.ub-history-switch:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .ub-history-switch, .ub-history-switch::after { transition: none; }
+}
 .ub-history-avatar {
   display: inline-grid;
   width: 28px;
@@ -352,6 +487,159 @@
   font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
   margin-block: 0.35rem;
 }
+
+.ub-revision-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 2.25rem;
+  align-items: start;
+}
+.ub-revision-side { min-width: 0; }
+.ub-revision-side-label {
+  margin: 0 0 0.5rem;
+  color: var(--muted-foreground);
+  font: 500 var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
+}
+.ub-revision-side :is(.ProseMirror, .ub-revision-ghost) > .ub-revision-row { position: relative; }
+.ub-revision-side-before :is(.ProseMirror, .ub-revision-ghost) > :is(.ub-revision-row-removed, .ub-revision-row-changed) {
+  background: var(--revision-removed-row);
+  box-shadow: -0.5rem 0 0 var(--revision-removed-row), 0.5rem 0 0 var(--revision-removed-row);
+}
+.ub-revision-side-after :is(.ProseMirror, .ub-revision-ghost) > :is(.ub-revision-row-added, .ub-revision-row-changed) {
+  background: var(--revision-added-row);
+  box-shadow: -0.5rem 0 0 var(--revision-added-row), 0.5rem 0 0 var(--revision-added-row);
+}
+/* A narrow gutter mark: − removed, + added, ~ changed. */
+.ub-revision-side .ProseMirror > .ub-revision-row:not([data-revision-mark=""])::before {
+  content: attr(data-revision-mark);
+  position: absolute;
+  inset-inline-start: calc(-1 * var(--block-gutter) + 0.1rem);
+  top: 0.15em;
+  font: 600 var(--type-caption-size)/1.4 var(--font-mono);
+  pointer-events: none;
+}
+.ub-revision-side-before .ProseMirror > .ub-revision-row::before { color: var(--revision-removed-ink); }
+.ub-revision-side-after .ProseMirror > .ub-revision-row::before { color: var(--revision-added-ink); }
+.ub-revision-filler { height: 0; }
+/* Rows never share a collapsed margin, so each side's spacing is its own and
+   the aligner's padding moves exactly what it measures. */
+.ub-revision-side :is(.ProseMirror, .ub-revision-ghost) > .ub-revision-row { margin-bottom: 0; }
+/* Rows folding away close into their bar from a clipped, inert copy. */
+.ub-revision-side .ub-editor { position: relative; }
+.ub-revision-ghost {
+  position: absolute;
+  inset-inline: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-leading);
+  white-space: pre-wrap;
+}
+.ub-revision-side .ProseMirror > .ub-revision-row-start:first-child + .ub-revision-row { margin-top: 0; }
+.ub-revision-row-start,
+.ub-revision-row-end { padding-top: 0.1px; }
+.ub-revision-row-start > .ub-revision-fields { margin-block: 0.35rem; }
+.ub-revision-row-end { pointer-events: none; }
+.ub-revision-row-end.ub-revision-row-filler {
+  background: repeating-linear-gradient(135deg, var(--revision-filler) 0 6px, transparent 6px 12px);
+  border-radius: var(--radius-sm);
+}
+/* A folded run: one dashed bar on each side, on the same row. */
+.ub-revision-fold { margin-block: 0.5rem; }
+.ub-revision-fold-button {
+  display: block;
+  width: 100%;
+  min-height: 2rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 0.3rem 0.75rem;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ub-revision-fold-button:hover { background: var(--card-accent); color: var(--foreground); }
+.ub-revision-fold-button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+@media (any-pointer: coarse) {
+  .ub-revision-fold-button { min-height: 44px; }
+}
+/* Previous and next change, stacked at the right edge and ending on the line under the title. */
+.ub-change-nav {
+  margin: 0;
+  border: 0;
+  padding: 0;
+  min-width: 0;
+  position: absolute;
+  inset-inline-end: calc(-1 * var(--document-rail-gap) + 0.5rem);
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+@media (max-width: 767px) {
+  .ub-change-nav { position: static; flex-direction: row; }
+}
+
+/*
+ * The overview ruler hangs from the sticky header, centred under ↑ ↓, and maps
+ * the comparison from its first row to its last. It replaces the scrollbar
+ * for fine pointers; touch keeps native scrolling.
+ */
+.ub-revision-ruler {
+  position: absolute;
+  inset-inline-end: calc(-1 * var(--document-rail-gap) + 0.5rem + 6px);
+  width: 14px;
+  border-radius: 3px;
+  background: var(--revision-ruler-track);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+@media (any-pointer: coarse) {
+  .ub-revision-ruler { inset-inline-end: calc(-1 * var(--document-rail-gap) + 0.5rem + 15px); }
+}
+.ub-revision-ruler-mark {
+  position: absolute;
+  inset-inline: 4px;
+  border-radius: 1.5px;
+  background: var(--revision-ruler-same);
+  opacity: 0.7;
+}
+.ub-revision-ruler-mark:is([data-mark="added"], [data-mark="removed"], [data-mark="changed"]) { inset-inline: 0; opacity: 1; }
+.ub-revision-ruler-mark[data-mark="added"] { background: var(--revision-ruler-added); }
+.ub-revision-ruler-mark[data-mark="removed"] { background: var(--revision-ruler-removed); }
+.ub-revision-ruler-mark[data-mark="changed"] { background: var(--revision-ruler-changed); }
+.ub-revision-ruler-mark[data-mark="fold"] {
+  inset-inline: 3px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  opacity: 1;
+}
+.ub-revision-ruler-view {
+  position: absolute;
+  inset-inline: -3px;
+  box-sizing: border-box;
+  border: 1px solid var(--revision-ruler-view-border);
+  border-radius: 4px;
+  background: var(--revision-ruler-view);
+  pointer-events: none;
+}
+@media (max-width: 767px) {
+  .ub-revision-ruler { display: none; }
+}
+@media (pointer: fine) and (min-width: 768px) {
+  .ub-revision-split-pane { scrollbar-width: none; }
+  .ub-revision-split-pane::-webkit-scrollbar { display: none; }
+}
+
+/* Drawings show their whole state on each side, without in-drawing marks. */
+.ub-revision-side [data-revision-change] { text-decoration: none; }
+.ub-revision-side :is(.ub-ablauf, .ub-wireframe, .ub-chart, .ub-terminal) [data-revision-change] { background: none; }
 
 .ub-revision-block-removed {
   border-inline-start: 2px solid var(--muted-foreground);
@@ -759,6 +1047,14 @@ body {
 
 .ub-page-pane > .ub-column {
   margin-inline: 0;
+}
+
+/* Side by side, the comparison takes its own width, up to about 1200px. */
+.ub-revision-split-pane {
+  flex: 1 1 calc(var(--pane-document-inset) + 1200px);
+}
+.ub-revision-split-pane > .ub-column {
+  max-width: 1200px;
 }
 
 .ub-tag {
