@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
-  appendBlock, deleteDirectoryEntry, getDirectoryMap, getMeta, initDoc,
-  roomForDoc, setLinks, setTitle,
+  appendBlock, deleteDecisionTopic, deleteDirectoryEntry, documentStubFields, getDirectoryMap, getMeta, initDoc,
+  isDirectoryEntryDeleted, roomForDoc, setKind, setLinks, setStatus, setTitle, tombstoneDirectoryEntry, upsertDirectoryEntry,
 } from "@uberblick/schema";
 import { openWorkspaceReplicas, type WorkspaceReplicaSet } from "../src/workspace-replicas.js";
 import { FailingStore, cleanupTestResources, testConfig } from "./core-helpers.js";
@@ -87,6 +87,52 @@ it("never treats an absent directory entry as deletion evidence", async () => {
   expect(store.hasRoom(replica.room)).toBe(true);
   expect(replicas.known(uuid)).toBe(true);
   expect(getMeta(replica.doc).title).toBe("Still here");
+});
+
+it.each(["after archive", "after deletion"])("purges a stale successor arriving %s with its topic", async (arrival) => {
+  const { replicas, store } = workspace();
+  const topic = randomUUID();
+  const late = randomUUID();
+  const first = replicas.replica(topic);
+  initDoc(first.doc, { uuid: topic, title: "Retired topic" });
+  setKind(first.doc, "decision");
+  setStatus(first.doc, "open");
+  await replicas.settle();
+  const directory = replicas.directory().doc;
+  const stale = new Y.Doc();
+  const successor = new Y.Doc();
+  try {
+    Y.applyUpdate(stale, Y.encodeStateAsUpdate(directory));
+    initDoc(successor, { uuid: late, title: "Retired topic", topic, supersedes: topic });
+    setKind(successor, "decision");
+    setStatus(successor, "open");
+    appendBlock(successor, { type: "paragraph", text: "Unseen successor content" });
+    upsertDirectoryEntry(stale, documentStubFields(successor));
+    tombstoneDirectoryEntry(directory, topic);
+    if (arrival === "after deletion") deleteDecisionTopic(directory, topic);
+    const lateRoom = roomForDoc(replicas.config.workspaceId, late);
+    store.appendUpdate(lateRoom, Y.encodeStateAsUpdate(successor), "local");
+    store.indexDoc({ uuid: late, title: "Unseen successor", tags: [], description: "", links: [], body: "private" }, 1);
+    expect(store.hasRoom(lateRoom)).toBe(true);
+
+    Y.applyUpdate(directory, Y.encodeStateAsUpdate(stale));
+    if (arrival === "after archive") deleteDecisionTopic(directory, late);
+    await replicas.settle();
+
+    for (const uuid of [topic, late]) {
+      expect(isDirectoryEntryDeleted(directory, uuid)).toBe(true);
+      expect(getDirectoryMap(directory).has(uuid)).toBe(false);
+      expect(store.hasRoom(roomForDoc(replicas.config.workspaceId, uuid))).toBe(false);
+      expect(store.isIndexed(uuid)).toBe(false);
+      expect(replicas.known(uuid)).toBe(false);
+      expect(() => replicas.replica(uuid)).toThrow("permanently deleted");
+    }
+    expect(store.pendingRooms().some(row => row.room === lateRoom)).toBe(false);
+    expect(store.search("unseen", 10)).toEqual([]);
+  } finally {
+    stale.destroy();
+    successor.destroy();
+  }
 });
 
 it("retains authoritative rows and indexes when the deletion mark cannot be logged", () => {

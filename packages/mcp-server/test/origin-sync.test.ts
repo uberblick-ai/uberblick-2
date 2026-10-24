@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { connect, createServer, type Socket } from "node:net";
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import { encodeOriginUpdate, readOriginUpdate, roomForDoc, type UpdateOriginMetadata } from "@uberblick/schema";
-import { wrapToken } from "@uberblick/schema/protocol";
+import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import { writeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -73,7 +73,7 @@ async function hub(): Promise<DeviceHub> {
   return fixture;
 }
 
-async function wireClient(fixture: DeviceHub, room: string, login: StoredHubLogin, protocolVersion = 7) {
+async function wireClient(fixture: DeviceHub, room: string, login: StoredHubLogin, protocolVersion = SYNC_PROTOCOL_VERSION) {
   const key = await importCredentialKey(Buffer.from(login.credential.key, "base64url"));
   const token = wrapToken(await mintToken(key, {
     typ: "room", sub: `session-${randomUUID()}`, workspace: WORKSPACE, scope: "read-write",
@@ -423,7 +423,7 @@ describe("per-update origin on the authenticated wire", () => {
     const room = roomForDoc(WORKSPACE, randomUUID());
     const peer = await wireClient(fixture, room, login, 6);
     await waitUntil("the old protocol refusal", () => peer.refusals.length > 0);
-    expect(peer.refusals).toEqual(["protocol-mismatch:7"]);
+    expect(peer.refusals).toEqual([`protocol-mismatch:${SYNC_PROTOCOL_VERSION}`]);
     expect(peer.synced()).toBe(false);
     expect(fixture.changes.filter(change => change.room === room)).toEqual([]);
     const config = remoteConfig(fixture, { XDG_CONFIG_HOME: tempDir() });

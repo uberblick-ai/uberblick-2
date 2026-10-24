@@ -3,7 +3,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import {
-  createGroup, deleteDirectoryEntry, directoryRoom, pinDoc, readSidebar, sidebarRoom,
+  archiveDecisionRecord, createGroup, deleteDirectoryEntry, directoryRoom, pinDoc, readSidebar, sidebarRoom,
 } from "@uberblick/schema";
 import { wrapToken } from "@uberblick/schema/protocol";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
@@ -32,7 +32,7 @@ function session(): McpSession {
   return agent.open({ name: "deleted-documents-e2e" });
 }
 
-async function create(writer: McpSession, title: string, fields: Record<string, unknown> = {}): Promise<{ uuid: string }> {
+async function create(writer: McpSession, title: string | undefined, fields: Record<string, unknown> = {}): Promise<{ uuid: string }> {
   return writer.call("create_doc", {
     title, description: "Deletion browser acceptance fixture.",
     blocks: [{ type: "paragraph", text: "Content that permanent deletion must remove." }], ...fields,
@@ -121,7 +121,7 @@ for (const { touch, appearance } of [
     await expect(banner.getByRole("button", { name: "Restore", exact: true })).toBeFocused();
     await calmBanner(page, touch);
     const trigger = banner.getByRole("button", { name: "Delete…", exact: true });
-    const dialog = page.getByRole("alertdialog", { name: `Delete "${title}"?`, exact: true });
+    const dialog = page.getByRole("alertdialog", { name: `Delete “${title}”?`, exact: true });
     await activateControl(trigger, { touch });
     await expect(dialog).toContainText("It will be gone for everyone, with its comments and history. Links to it will show it was deleted. This can't be undone.");
     await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
@@ -146,6 +146,78 @@ for (const { touch, appearance } of [
     await deletedPage(page);
     await page.reload();
     await deletedPage(page);
+  });
+}
+
+for (const { touch, appearance } of [
+  { touch: false, appearance: "light" }, { touch: false, appearance: "dark" },
+  { touch: true, appearance: "light" }, { touch: true, appearance: "dark" },
+] as const) {
+  test(`archived topic deletion includes every record on ${touch ? "iPad touch @webkit-touch" : "desktop"} in ${appearance}`, async ({ browser }) => {
+    const writer = session();
+    const title = `Delete topic acceptance ${appearance} ${touch ? "touch" : "desktop"}`;
+    const owner = await create(writer, "Owner of a permanently deleted topic");
+    const first = await create(writer, title, { kind: "decision", status: "decided", related: owner.uuid });
+    const current = await create(writer, undefined, {
+      kind: "decision", status: "decided", supersedes: first.uuid,
+      answer: { who: "Browser acceptance", when: "2026-10-22T12:00:00Z", where: "https://example.org/decision" },
+    });
+    const proposal = await create(writer, undefined, { kind: "decision", supersedes: current.uuid });
+    const source = await create(writer, "Deleted topic reference fixture", { blocks: [
+      { type: "paragraph", inline: [
+        { text: "topic reference", marks: { docLink: first.uuid } },
+        { text: " and ", marks: {} },
+        { text: "record reference", marks: { docLink: proposal.uuid } },
+      ] },
+    ] });
+    const directory = await peer(directoryRoom(harness().workspaceUuid));
+    const sidebar = await peer(sidebarRoom(harness().workspaceUuid));
+    try {
+      expect(archiveDecisionRecord(directory.doc, sidebar.doc, proposal.uuid)).toBe(true);
+      const page = await openApp(browser, `/${harness().workspace}/${first.uuid}/record/${proposal.uuid}`, {
+        contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1440, height: 1000 } }), colorScheme: appearance },
+      });
+      const banner = page.locator(".ub-archived-banner");
+      await expect(banner).toBeVisible();
+      await expect(banner.getByRole("button", { name: /^Delete/ })).toHaveCount(0);
+      await writer.call("archive_doc", { uuid: current.uuid });
+      const trigger = banner.getByRole("button", { name: "Delete topic…", exact: true });
+      await expect(trigger).toBeVisible();
+      for (const uuid of [first.uuid, current.uuid, proposal.uuid]) {
+        await page.goto(new URL(`/${harness().workspace}/${first.uuid}/record/${uuid}`, page.url()).href);
+        await expect(trigger).toBeVisible();
+      }
+      await calmBanner(page, touch);
+      const dialog = page.getByRole("alertdialog", { name: `Delete topic “${title}”?`, exact: true });
+      await activateControl(trigger, { touch });
+      await expect(dialog).toContainText("The topic and all its records will be deleted for everyone, with their comments and history.");
+      await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
+      await activateControl(dialog.getByRole("button", { name: "Cancel", exact: true }), { touch });
+      await expect(dialog).toHaveCount(0);
+      await activateControl(trigger, { touch });
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+      await expect(editor(page)).toBeVisible();
+      const references = await openApp(browser, `/${harness().workspace}/${source.uuid}`);
+      await expect(editor(references).locator(".ub-doclink")).toHaveCount(2);
+      await activateControl(trigger, { touch });
+      await activateControl(dialog.getByRole("button", { name: "Delete topic", exact: true }), { touch });
+      await deletedPage(page);
+      for (const uuid of [first.uuid, current.uuid, proposal.uuid]) {
+        await expectMcp(async () => {
+          await expect(writer.call("get_doc", { uuid })).rejects.toThrow(/doc_deleted/);
+        });
+      }
+      for (const link of await editor(references).locator(".ub-doclink").all()) {
+        await expect(link).toHaveAttribute("data-doc-link-state", "deleted");
+        await expect(link).not.toHaveAttribute("href");
+      }
+      await page.reload();
+      await deletedPage(page);
+      const ownerPage = await openApp(browser, `/${harness().workspace}/${owner.uuid}`);
+      await expect(editor(ownerPage)).toBeVisible();
+      await expect(ownerPage.locator(".ub-decisions-block")).toHaveCount(0);
+    } finally { sidebar.close(); directory.close(); }
   });
 }
 

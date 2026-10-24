@@ -486,15 +486,13 @@ export const tools: readonly Tool[] = [
     name: "archive_doc",
     title: "Archive a document",
     description:
-      "Archive a document or every record in a decision topic: tombstone directory entries, drop local search " +
-      "rows and unconditionally unpin without erasing content. Reads by UUID remain available. unpinned reports " +
-      "the asserted unpin, not whether a pin was found. An unseen concurrent pin can survive with archived " +
-      "status; use get_sidebar then unpin_doc to remove it. This writes directory and sidebar rooms " +
-      "independently, without rollback or remote atomicity. The answer reports rooms; partial " +
-      "persistence_failed carries uuid, completed/failed rooms, rolledBack: false and recovery. Follow recovery " +
-      "to finish. indexed is false only on index-write failure; the archive remains applied and a later call " +
-      "retries indexing. Restoration uses restore_doc; pin_doc deliberately places the restored document back " +
-      "in navigation.",
+      "Archive a document or every record of a decision topic, preserving content and UUID reads while hiding " +
+      "directory/search entries and unpinning. unpinned asserts the unpin, not whether a pin was found. " +
+      "An unseen concurrent pin may survive; get_sidebar shows it as archived and unpin_doc removes it. " +
+      "Restoration uses restore_doc and never re-pins. To delete an archived topic, call delete_doc with topic: true; " +
+      "one decision record cannot be deleted on its own yet. Directory/sidebar rooms persist independently without " +
+      "rollback. Results name rooms and indexed; persistence_failed names completed/failed rooms and recovery. " +
+      "Follow recovery before retrying.",
     input: archiveDocInput,
     operation: archiveDocOperation,
     // Tombstones and unpins; every repeat raises the unpin counter, suppressing later pins.
@@ -507,11 +505,13 @@ export const tools: readonly Tool[] = [
     name: "delete_doc",
     title: "Permanently delete an archived document",
     description:
-      "Permanently delete an archived regular document, including content, comments, data and history. " +
-      "Only its UUID and permanent deletion mark remain. Replicas remove their copies when they learn the mark; " +
-      "the hub refuses later room updates. This cannot be undone, including by an offline restore. " +
-      "Live documents refuse with doc_not_archived; deleted UUIDs refuse with doc_deleted; decision records refuse. " +
-      "Links stored in other documents stay unchanged. Directory and sidebar writes report independent durability.",
+      "Permanently delete an archived regular document, or with topic: true an archived decision topic given its " +
+      "topic UUID or any record UUID. Every topic record goes, including individually archived records. Deletes " +
+      "content, comments, data and history; only permanent UUID deletion evidence remains. Offline restores cannot undo it; " +
+      "replicas drop copies and the hub refuses rooms. Live topics/documents refuse with doc_not_archived; deleted " +
+      "UUIDs with doc_deleted. A decision UUID " +
+      "without topic: true refuses; one decision record cannot be deleted on its own yet. " +
+      "Other documents keep stored links. Directory/sidebar writes report independent durability.",
     input: deleteDocInput,
     operation: deleteDocOperation,
     hints: { destructive: true, idempotent: true },
@@ -661,11 +661,10 @@ export const tools: readonly Tool[] = [
     name: "unpin_doc",
     title: "Unpin a document",
     description:
-      "Remove a document from the sidebar, wherever it sits; the document itself is untouched. archive_doc " +
-      "hides a document; delete_doc permanently deletes an archived regular document.\n\n" +
-      "An unpin beats a concurrent move on another replica, so a dragged document does not reappear. It takes " +
-      "no group: a document has at most one pin. `unpinned` is false when the document was not pinned. A group " +
-      "left empty stays until sidebar_group deletes it; `groupHint` names that call.",
+      "Unpin without changing the document. archive_doc hides documents or topics; delete_doc permanently deletes " +
+      "archived documents or whole topics with topic: true. One decision record cannot be deleted on its own yet. Unpin " +
+      "beats concurrent moves; no group is needed because each document has at most one pin. unpinned:false " +
+      "means none existed. Empty groups remain; groupHint names sidebar_group to delete them.",
     input: unpinDocInput,
     operation: unpinDocOperation,
     // Removes a pin; repeating reports unpinned: false.

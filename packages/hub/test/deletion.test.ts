@@ -5,10 +5,17 @@ import type { Connection } from "@hocuspocus/server";
 import { messageYjsUpdate } from "y-protocols/sync";
 import {
   deleteDirectoryEntry,
+  deleteDecisionTopic,
+  DIRECTORY_DELETED_DECISION_TOPICS_KEY,
   directoryRoom,
+  enforceDeletedDirectoryEntries,
+  getDirectoryEntry,
   isDirectoryEntryDeleted,
   parseRoom,
+  roomForDoc,
+  tombstoneDecisionRecord,
   tombstoneDirectoryEntry,
+  upsertDirectoryEntry,
 } from "@uberblick/schema";
 import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
 import { HubDatabase } from "../src/persistence.js";
@@ -63,6 +70,110 @@ afterEach(async () => {
 });
 
 describe("permanent room deletion", () => {
+  it.each(["after archive", "after deletion"])("purges a whole topic and a late record arriving %s, including across restart", async (arrival) => {
+    const databasePath = tempDatabasePath();
+    const first = await hub(databasePath);
+    const topicRoom = testRoom();
+    const formerRoom = testRoom();
+    const currentRoom = testRoom();
+    const lateRoom = testRoom();
+    const topic = parseRoom(topicRoom).uuid;
+    const former = parseRoom(formerRoom).uuid;
+    const current = parseRoom(currentRoom).uuid;
+    const late = parseRoom(lateRoom).uuid;
+    const topicWriter = await client(first, topicRoom);
+    const formerWriter = await client(first, formerRoom);
+    const currentWriter = await client(first, currentRoom);
+    const lateWriter = await client(first, lateRoom);
+    const directory = await client(first, directoryRoom(WORKSPACE));
+    await Promise.all([topicWriter.synced, formerWriter.synced, currentWriter.synced, lateWriter.synced, directory.synced]);
+    for (const writer of [topicWriter, formerWriter, currentWriter]) {
+      writer.text.insert(0, "topic record content");
+      await acknowledged(writer);
+    }
+    for (const [uuid, status] of [[topic, "decided"], [former, "rejected"], [current, "open"]] as const) {
+      upsertDirectoryEntry(directory.doc, { uuid, title: "Question", kind: "decision", topic, status });
+    }
+    expect(tombstoneDecisionRecord(directory.doc, former)).toBe(true);
+    await acknowledged(directory, "topic records");
+    await first.flush();
+    tombstoneDirectoryEntry(directory.doc, topic);
+    await acknowledged(directory, "topic archive");
+
+    if (arrival === "after archive") {
+      upsertDirectoryEntry(directory.doc, { uuid: late, title: "Late proposal", kind: "decision", topic, status: "open" });
+      await acknowledged(directory, "late proposal");
+      expect(getDirectoryEntry(directory.doc, late)?.deleted).toBeUndefined();
+    }
+    deleteDecisionTopic(directory.doc, current);
+    await acknowledged(directory, "topic deletion");
+
+    if (arrival === "after deletion") {
+      // A replica can collect an unseen stub before the creator uploads its room metadata.
+      const cleaner = new Y.Doc();
+      try {
+        Y.applyUpdate(cleaner, Y.encodeStateAsUpdate(directory.doc));
+        upsertDirectoryEntry(cleaner, { uuid: late, title: "GC erased late proposal", kind: "decision", topic, status: "open" });
+        enforceDeletedDirectoryEntries(cleaner);
+        expect(cleaner.getMap("docs").has(late)).toBe(false);
+        expect(cleaner.getMap(DIRECTORY_DELETED_DECISION_TOPICS_KEY).get(late)).toBe(topic);
+        const update = Y.encodeStateAsUpdate(cleaner, Y.encodeStateVector(directory.doc));
+        expect(Buffer.from(update).includes("GC erased late proposal")).toBe(false);
+        Y.applyUpdate(directory.doc, update);
+      } finally { cleaner.destroy(); }
+      await acknowledged(directory, "late deletion evidence");
+    }
+    const rooms = [topicRoom, formerRoom, currentRoom, lateRoom];
+    await Promise.all([topicWriter, formerWriter, currentWriter, lateWriter].map(async writer => {
+      expect(await writer.denied).toBe(DOC_DELETED_REASON);
+    }));
+    for (const room of rooms) {
+      expect(storedText(databasePath, room)).toBeNull();
+      expect(first.hocuspocus.documents.has(room)).toBe(false);
+    }
+    expect(directory.doc.getMap("deleted-docs").get(late)).toBe(true);
+    for (const created of clients.splice(0)) created.destroy();
+    await first.stop();
+    hubs.length = 0;
+
+    const second = await hub(databasePath);
+    for (const room of rooms) {
+      expect(await (await client(second, room)).denied).toBe(DOC_DELETED_REASON);
+      expect(storedText(databasePath, room)).toBeNull();
+    }
+  });
+
+  it("rejects a raw whole-topic deletion when the topic authority is live", async () => {
+    const databasePath = tempDatabasePath();
+    const started = await hub(databasePath);
+    const topicRoom = testRoom();
+    const recordRoom = testRoom();
+    const topic = parseRoom(topicRoom).uuid;
+    const record = parseRoom(recordRoom).uuid;
+    const topicWriter = await client(started, topicRoom);
+    const recordWriter = await client(started, recordRoom);
+    const directory = await client(started, directoryRoom(WORKSPACE));
+    await Promise.all([topicWriter.synced, recordWriter.synced, directory.synced]);
+    topicWriter.text.insert(0, "live topic");
+    recordWriter.text.insert(0, "archived record");
+    await Promise.all([acknowledged(topicWriter), acknowledged(recordWriter)]);
+    upsertDirectoryEntry(directory.doc, { uuid: topic, title: "Live topic", kind: "decision", topic, status: "decided" });
+    upsertDirectoryEntry(directory.doc, { uuid: record, title: "Archived proposal", kind: "decision", topic, status: "rejected" });
+    expect(tombstoneDecisionRecord(directory.doc, record)).toBe(true);
+    await acknowledged(directory, "live topic and separate record archive");
+
+    deleteDecisionTopic(directory.doc, record);
+    await acknowledged(directory, "unarchived topic deletion");
+    await waitUntil("both topic marks to be refused", () => !isDirectoryEntryDeleted(directory.doc, topic) && !isDirectoryEntryDeleted(directory.doc, record));
+    expect(getDirectoryEntry(directory.doc, topic)?.deleted).toBeUndefined();
+    expect(getDirectoryEntry(directory.doc, record)?.recordArchived).toBe(true);
+    expect(started.hocuspocus.documents.has(roomForDoc(WORKSPACE, topic))).toBe(true);
+    expect(started.hocuspocus.documents.has(recordRoom)).toBe(true);
+    await started.flush();
+    expect(storedText(databasePath, topicRoom)).toBe("live topic");
+    expect(storedText(databasePath, recordRoom)).toBe("archived record");
+  });
+
   it("persists fresh deletion before acknowledgement while later directory writes stay debounced", async () => {
     const databasePath = tempDatabasePath();
     const started = await hub(databasePath);

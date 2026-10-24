@@ -17,6 +17,7 @@ import type {
 import * as Y from "yjs";
 import {
   DIRECTORY_DELETED_KEY,
+  DIRECTORY_DELETED_DECISION_TOPICS_KEY,
   DIRECTORY_DOCS_KEY,
   canonicalDocumentUuid,
   deleteDirectoryEntry,
@@ -73,6 +74,13 @@ function directoryState(document: Y.Doc): Uint8Array {
 
 function isArchivedEntry(entry: unknown): boolean {
   return typeof entry === "object" && entry !== null && (entry as { deleted?: unknown }).deleted === true;
+}
+
+function entryDecisionTopic(entry: unknown, uuid: string): string | undefined {
+  if (typeof entry !== "object" || entry === null) return undefined;
+  const candidate = entry as { kind?: unknown; topic?: unknown };
+  if (candidate.kind !== "decision") return undefined;
+  return typeof candidate.topic === "string" ? candidate.topic : uuid;
 }
 
 /** Anonymous SQLite databases need no directory and do not survive close. */
@@ -229,6 +237,7 @@ export class HubDatabase implements Extension {
       // leaving that transaction's change records keyed by the discarded type.
       document.getMap(DIRECTORY_DOCS_KEY);
       document.getMap(DIRECTORY_DELETED_KEY);
+      document.getMap(DIRECTORY_DELETED_DECISION_TOPICS_KEY);
     }
     const row = this.prepared().select.get({ name: documentName });
     const data = row?.data;
@@ -305,16 +314,31 @@ export class HubDatabase implements Extension {
     const { workspaceId } = parseRoom(room);
     const purgeable = new Set(listDeletedDirectoryUuids(directory));
     const docs = directory.getMap<unknown>(DIRECTORY_DOCS_KEY);
+    const topics = directory.getMap<unknown>(DIRECTORY_DELETED_DECISION_TOPICS_KEY);
     const entryChanges = [...transaction.changedParentTypes].find(([type]) => (type as unknown) === docs)?.[1]
       .find(event => event.target === docs)?.changes.keys;
     const refused: Array<{ uuid: string; before: unknown }> = [];
+    const archivedBeforeOrNow = (uuid: string): boolean => {
+      const change = entryChanges?.get(uuid);
+      return isArchivedEntry(change === undefined ? docs.get(uuid) : change.oldValue) || isArchivedEntry(docs.get(uuid));
+    };
+    const authorizedTopicMark = (topic: string): boolean => {
+      if (marks.get(topic) !== true) return false;
+      const topicRoom = roomForDoc(workspaceId, topic);
+      return this.deletedRooms.has(topicRoom) || !this.holdsRoom(topicRoom) || archivedBeforeOrNow(topic);
+    };
     for (const uuid of changed) {
-      if (uuid === null || !purgeable.has(uuid)) continue;
+      if (uuid === null || !purgeable.has(uuid) || marks.get(uuid) !== true) continue;
       const target = roomForDoc(workspaceId, uuid);
       if (this.deletedRooms.has(target) || !this.holdsRoom(target)) continue;
       const change = entryChanges?.get(uuid);
       const before = change === undefined ? docs.get(uuid) : change.oldValue;
-      if (isArchivedEntry(before) || isArchivedEntry(docs.get(uuid))) continue;
+      const savedTopic = topics.get(uuid);
+      const topic = entryDecisionTopic(before, uuid) ?? entryDecisionTopic(docs.get(uuid), uuid) ??
+        (typeof savedTopic === "string" && canonicalDocumentUuid(savedTopic) !== null ? savedTopic : undefined);
+      if (topic !== undefined && topic !== uuid && marks.get(topic) === true) {
+        if (authorizedTopicMark(topic)) continue;
+      } else if (archivedBeforeOrNow(uuid)) continue;
       refused.push({ uuid, before });
     }
     if (refused.length === 0) return;

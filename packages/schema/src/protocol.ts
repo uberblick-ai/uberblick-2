@@ -10,8 +10,8 @@ import { MAX_TOKEN_LENGTH } from "./token.js";
  * 409 protocol-mismatch with reason protocol-mismatch:<hubVersion> on skew,
  * or 401 sign-in-required on equality.
  */
-// Exact update envelopes preserve unsigned origin independently of the delivering process.
-export const SYNC_PROTOCOL_VERSION = 7;
+// Topic deletion requires hubs to honor the topic's archive authority for every record.
+export const SYNC_PROTOCOL_VERSION = 8;
 
 /** Terminal, room-local refusal; the client must discard its copy and stop publishing. */
 export const DOC_DELETED_REASON = "uberblick:doc-deleted";
