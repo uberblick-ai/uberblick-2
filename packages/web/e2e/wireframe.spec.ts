@@ -402,9 +402,11 @@ test("desktop and iPad wireframes fit inside their column and follow both appear
   await waitForDocumentDraw(page, session, uuid, { source: invalid, outcome: "error" });
   await expect(page.locator(".ub-wireframe-stale")).toBeVisible();
   const originalWidth = await viewport.evaluate((element) => element.clientWidth);
-  await viewport.evaluate((element) => { (element as HTMLElement).style.width = `${element.clientWidth - 80}px`; });
-  await expect.poll(() => viewport.evaluate((element) => element.clientWidth)).toBe(originalWidth - 80);
+  // Stay above the floor so a failed source's wider page cannot share its scale.
+  await viewport.evaluate((element) => { (element as HTMLElement).style.width = `${element.clientWidth - 20}px`; });
+  await expect.poll(() => viewport.evaluate((element) => element.clientWidth)).toBe(originalWidth - 20);
   await expectPageFit(page, 1080);
+  expect(await fitScale(page)).toBeGreaterThan(0.6);
   expect(await sizedRoot.evaluate((element) => element === document.querySelector(".ub-wireframe-drawing > .wf-root"))).toBe(true);
   expect(await paragraph.evaluate((element) => (element as HTMLElement).offsetHeight)).toBe(paragraphHeight);
   const narrow = pageSource("page width=400");
