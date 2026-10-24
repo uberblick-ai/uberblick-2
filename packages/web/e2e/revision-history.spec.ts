@@ -1028,6 +1028,7 @@ test.describe("document history through ub open", () => {
       });
     };
     for (const [own, other, word, excluded] of [[before, after, "amber", "blue"], [after, before, "blue", "amber"]] as const) {
+      await expect.poll(() => runningMotion(page)).toBe(0);
       const paragraph = own.locator(":scope > p").filter({ hasText: `The ${word} fox stays.` });
       const start = await paragraph.boundingBox();
       const end = await other.locator(":scope > p").filter({ hasText: `The ${excluded} fox stays.` }).boundingBox();
