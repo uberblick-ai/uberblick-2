@@ -219,7 +219,13 @@ function answerHeader(host: HTMLElement): HTMLElement {
   const headers = host.querySelectorAll<HTMLElement>(".ub-decision-answer-header");
   expect(headers).toHaveLength(1);
   const header = headers[0]!;
-  expect(header.textContent).toContain("ANSWER");
+  const pills = header.querySelectorAll(".ub-decision-answer-state");
+  expect(pills).toHaveLength(1);
+  const alter = within(header).queryByRole("button", { name: "Alter decision" });
+  expect(header.textContent).toBe(`${pills[0]?.textContent}${alter?.textContent ?? ""}`);
+  expect(header.querySelector(".ub-decision-answer-caption")).toBeNull();
+  expect(header.querySelector(".ub-decision-attribution")).toBeNull();
+  expect(header.querySelector("time")).toBeNull();
   expect(host.querySelector(".ub-decision-topic-state")).toBeNull();
   expect(host.querySelector(".ub-decision-answer-label")).toBeNull();
   return header;
@@ -408,6 +414,8 @@ describe("decision topic navigation and history", () => {
     record(CURRENT, "Left question", "decided", "Left answer.", { supersedes: FIRST, order: 1 });
     const latest = record(NEXT, "Right question", "decided", "Right answer.", { supersedes: FIRST, order: 2 });
     const host = (await open()).container;
+    expectAnswerState(host, "Conflicting answer");
+    expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("Nothing is in force.");
     const title = within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
     expect(title.readOnly).toBe(false);
     await act(async () => fireEvent.change(title, { target: { value: "Renamed conflict question" } }));
@@ -518,8 +526,6 @@ describe("decision topic navigation and history", () => {
     expect(host.querySelector(".ub-decision-rfc")).toBeNull();
     expect(answer(host).textContent).toContain("Use the current answer.");
     expectAnswerState(host, "In force");
-    expect(answerHeader(host).querySelector(".ub-decision-attribution")?.textContent).toBe("Ben · 4 weeks ago");
-    expect(answerHeader(host).querySelector("time")?.dateTime).toBe(new Date(DATE).toISOString());
     expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("stays in force");
     expect(selection(host)).toBe(CURRENT);
     expect(item(host, FIRST).textContent).toContain("Linked record");
@@ -595,8 +601,8 @@ describe("decision topic navigation and history", () => {
     const rows = [
       { uuid: OPEN, state: "under-review", label: "Under review", event: null, green: true },
       { uuid: WITHDRAWN, state: "withdrawn", label: "Withdrawn", event: null, green: true },
-      { uuid: REJECTED, state: "rejected", label: "Rejected", event: "Alex rejected the proposal from 4 weeks ago", green: true },
-      { uuid: CURRENT, state: "in-force", label: "In force", event: "Ben decided", green: true },
+      { uuid: REJECTED, state: "rejected", label: "Rejected", event: "Alex", green: true },
+      { uuid: CURRENT, state: "in-force", label: "In force", event: "Ben", green: true },
       { uuid: FIRST, state: "superseded", label: "Superseded", event: "Agent stance, never confirmed", green: false },
     ];
     for (const { uuid, state, label, event, green } of rows) {
@@ -608,8 +614,8 @@ describe("decision topic navigation and history", () => {
       expect(row.querySelector(".ub-decision-event")?.textContent ?? null).toBe(event);
       await choose(host, uuid);
       expectAnswerState(host, label);
-      if (uuid === FIRST) {
-        expect(answerHeader(host).querySelector(".ub-decision-attribution")?.textContent).toBe("Agent stance · 4 weeks ago");
+      if (uuid === REJECTED) {
+        expect(host.querySelector(".ub-decision-rejection")?.textContent).toBe("Rejection reason: It loses compatibility.");
       }
       expect(selection(host)).toBe(uuid);
       expect(item(host, uuid).getAttribute("data-selected")).toBe("true");
@@ -624,7 +630,7 @@ describe("decision topic navigation and history", () => {
   });
 
   it.each([
-    { label: "a recorded rejection without a creation date", options: { answerer: "Ben (@bk-one)", createdAt: null }, event: "Ben (@bk-one) rejected the proposal" },
+    { label: "a recorded rejection without a creation date", options: { answerer: "Ben (@bk-one)", createdAt: null }, event: "Ben (@bk-one)" },
     { label: "a rejection without a recorded person", options: {}, event: null },
   ])("uses only cached attribution for $label", async ({ options, event }) => {
     record(FIRST, "Rejected proposal", "rejected", "A rejected answer.", { ...options, answerDate: DATE });
@@ -657,7 +663,8 @@ describe("decision topic navigation and history", () => {
     expect(rfcLink.closest(".ub-decision-record")).toBeNull();
     expect(rejected.querySelectorAll("a a")).toHaveLength(0);
     expect(rejected.textContent).not.toContain("Only in the selected record room.");
-    expect(rejected.querySelector(".ub-decision-event")?.textContent).toBe("  Ben (@bk-one)   rejected the proposal from 4 weeks ago");
+    expect(rejected.querySelector(".ub-decision-event")?.textContent).toBe("  Ben (@bk-one)  ");
+    expect(within(rejected).getByRole("link", { name: /Ben \(@bk-one\)/ })).toBe(recordLink);
     expect(item(host, OPEN).querySelector(".ub-decision-preview")).toBeNull();
     expect(item(host, OPEN).querySelector(".ub-decision-record-comments")).toBeNull();
     expect(item(host, OPEN).querySelector(".ub-decision-record-rfc")).toBeNull();
@@ -733,7 +740,6 @@ describe("decision topic navigation and history", () => {
     expect(answer(host).textContent).toContain("Withdrawn latest answer.");
     expectAnswerState(host, "Withdrawn");
     expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("Not yet decided.");
-    expect(answerHeader(host).querySelector(".ub-decision-attribution")?.textContent).toBe("Opened 4 weeks ago");
     expect(host.querySelector(".ub-decision-related")).toBeNull();
     expect(within(host).queryByRole("link", { name: "Go to the current answer" })).toBeNull();
     expect(within(host).queryByRole("link", { name: "Open proposal" })).toBeNull();
@@ -777,65 +783,69 @@ describe("decision topic navigation and history", () => {
     expect(within(host).queryByRole("link", { name: "Go to the current answer" })).toBeNull();
   });
 
-  it.each<{ label: string; status: DecisionStatus; options: RecordOptions; text: string | null; dateTime?: string }>([
+  it.each<{ label: string; status: DecisionStatus; options: RecordOptions; person: string | null; dateTime?: string }>([
     {
       label: "a date-only recorded answer", status: "decided",
       options: { answerer: "Ben (@bk-one)", answerDate: "2026-10-09" },
-      text: "Ben (@bk-one) · 4 weeks ago", dateTime: "2026-10-09T00:00:00.000Z",
+      person: "Ben (@bk-one)", dateTime: "2026-10-09T00:00:00.000Z",
     },
     {
       label: "an older recorded answer without a person", status: "decided",
       options: { answerDate: "2026-09-01T10:00:00Z" },
-      text: "2 months ago", dateTime: "2026-09-01T10:00:00.000Z",
+      person: null, dateTime: "2026-09-01T10:00:00.000Z",
     },
     {
       label: "a person with an unparseable decision date", status: "decided",
       options: { answerer: "  Ben (@bk-one)  ", answerDate: "sometime last month" },
-      text: "  Ben (@bk-one)  ",
+      person: "  Ben (@bk-one)  ",
     },
-    { label: "a recorded answer with no attribution", status: "decided", options: {}, text: null },
+    { label: "a recorded answer with no attribution", status: "decided", options: {}, person: null },
+    { label: "an answer with a blank person", status: "decided", options: { answerer: "   " }, person: null },
+    {
+      label: "a rejected proposal with a full recorded person", status: "rejected",
+      options: { answerer: "Benedict Hiroshi Kubota (bk-one, architecture reviewer)", answerDate: DATE },
+      person: "Benedict Hiroshi Kubota (bk-one, architecture reviewer)", dateTime: "2026-10-09T10:00:00.000Z",
+    },
     {
       label: "an unparseable decision date without a person", status: "rejected",
-      options: { answerDate: "not a date" }, text: null,
+      options: { answerDate: "not a date" }, person: null,
     },
     {
       label: "an older agent stance", status: "decided",
-      options: { agent: true, createdAt: Date.parse("2026-09-01T10:00:00Z") },
-      text: "2 months ago", dateTime: "2026-09-01T10:00:00.000Z",
+      options: { agent: true, answerer: "Ignored", createdAt: Date.parse("2026-09-01T10:00:00Z") },
+      person: null, dateTime: "2026-09-01T10:00:00.000Z",
     },
-    { label: "an agent stance without its creation date", status: "decided", options: { agent: true, createdAt: null }, text: null },
+    { label: "an agent stance without its creation date", status: "decided", options: { agent: true, createdAt: null }, person: null },
     {
       label: "an open proposal", status: "open",
       options: { answerer: "Ignored", answerDate: DATE, createdAt: Date.parse("2026-09-01T10:00:00Z") },
-      text: "Opened 2 months ago", dateTime: "2026-09-01T10:00:00.000Z",
+      person: null, dateTime: "2026-09-01T10:00:00.000Z",
     },
-    { label: "a withdrawn proposal without its creation date", status: "withdrawn", options: { createdAt: null }, text: null },
-  ])("uses only stored, valid attribution for $label", async ({ status, options, text, dateTime }) => {
+    {
+      label: "a withdrawn proposal without its creation date", status: "withdrawn",
+      options: { answerer: "Ignored", answerDate: DATE, createdAt: null }, person: null,
+    },
+  ])("keeps the header to its state and stored attribution in history for $label", async ({ status, options, person, dateTime }) => {
     record(FIRST, "Attribution example", status, "An answer.", options);
     if (options.createdAt === null) {
       Object.defineProperty(room(directoryRoom(WORKSPACE)), "status", { value: { ...LIVE, writable: false } });
     }
     const host = (await open()).container;
     if (status === "open") expect(host.querySelector(".ub-decision-notice")).toBeNull();
-    const attribution = answerHeader(host).querySelector(".ub-decision-attribution");
+    answerHeader(host);
+    const row = item(host, FIRST);
+    expect(row.querySelector(".ub-decision-event")?.textContent ?? null).toBe(person);
+    if (person !== null) {
+      const name = person.trim().replace(/\s+/g, " ");
+      expect(within(row).getByRole("link", { name: (accessibleName) => accessibleName.includes(name) }))
+        .toBe(row.querySelector(".ub-decision-record"));
+    }
     const historyTime = item(host, FIRST).querySelector("time");
     if (dateTime === undefined) {
       expect(historyTime).toBeNull();
     } else {
       expect(historyTime?.dateTime).toBe(dateTime);
       expect(historyTime?.title).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(dateTime)));
-    }
-    if (text === null) {
-      expect(attribution).toBeNull();
-    } else {
-      expect(attribution?.textContent).toBe(text);
-      const time = attribution?.querySelector("time");
-      if (dateTime === undefined) {
-        expect(time).toBeNull();
-      } else {
-        expect(time?.dateTime).toBe(dateTime);
-        expect(time?.title).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(dateTime)));
-      }
     }
   });
 
@@ -883,7 +893,6 @@ describe("decision topic navigation and history", () => {
     expect(item(host, FIRST).querySelector(".ub-decision-event")).toBeNull();
     expect(host.querySelector(".ub-decision-rfc")?.textContent).toBe("RFC Stance discussion");
     expect(answerHeader(host).textContent?.match(/Agent stance/g)).toHaveLength(1);
-    expect(answerHeader(host).querySelector(".ub-decision-attribution")?.textContent).toBe("4 weeks ago");
     await act(async () => {
       const meta = getMetaMap(ydoc);
       meta.set("agentStance", false);
@@ -892,7 +901,7 @@ describe("decision topic navigation and history", () => {
     });
     expectAnswerState(host, "In force");
     expect(host.querySelector(".ub-decision-rfc")?.textContent).toBe("RFC Stance discussion");
-    expect(answerHeader(host).querySelector(".ub-decision-attribution")?.textContent).toBe("Ben · 4 weeks ago");
+    expect(item(host, FIRST).querySelector(".ub-decision-event")?.textContent).toBe("Ben");
   });
 
   it.each([false, true])("keeps an archived earlier answer superseded when approved answers conflict: %s", async (conflict) => {
