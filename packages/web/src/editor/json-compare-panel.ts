@@ -46,11 +46,13 @@ function changeKind(row: JsonCompareRow): "added" | "removed" | "changed" | null
 function pieceMatches(pieces: JsonComparePiece[], query: string, compact = false): [number, number][][] {
   const result = pieces.map((): [number, number][] => []);
   if (query === "") return result;
+  // The compact value is one piece, separate from its key separator and trailing comma.
+  const compactValue = compact ? (pieces[0]?.role === "key" ? 2 : 0) : -1;
   for (let start = 0; start < pieces.length;) {
     const role = pieces[start]?.role;
     let end = start + 1;
-    while (end < pieces.length && pieces[end]?.role === role) end++;
-    if (role !== undefined && (SEARCHED.has(role) || (compact && role === "punct"))) {
+    while (end < pieces.length && pieces[end]?.role === role && start !== compactValue && end !== compactValue) end++;
+    if (role !== undefined && (SEARCHED.has(role) || start === compactValue)) {
       const text = pieces.slice(start, end).map((piece) => piece.text).join("").toLowerCase();
       const found: [number, number][] = [];
       for (let at = text.indexOf(query); at !== -1; at = text.indexOf(query, at + query.length)) found.push([at, at + query.length]);

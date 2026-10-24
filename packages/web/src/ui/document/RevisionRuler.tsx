@@ -63,7 +63,9 @@ function measure(scroller: HTMLElement, header: HTMLElement, side: HTMLElement, 
     const own = { key, kind: markKind(row), top: (top - base) * scale, height: Math.max(0, next - top) * scale };
     // A JSON comparison marks each changed row inside it, so a small change in a long block stays small.
     const block = row.after.spanned === true ? spanningComparison(start) : null;
+    // Hidden comparisons keep the row's mark until their toggle section opens.
     if (block === null) return [own];
+    if (block.getClientRects().length === 0) return [{ ...own, height: Math.max(MARK_MIN[own.kind], own.height) }];
     return [{ ...own, kind: "same" as const }, ...jsonChangeRows(block).map(({ element, kind }, inner) => {
       const rect = element.getBoundingClientRect();
       return { key: `${key}-${inner}`, kind, top: (scrolled(rect.top) - base) * scale, height: rect.height * scale };

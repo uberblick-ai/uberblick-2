@@ -37,4 +37,28 @@ describe.each(cases)("JSON comparison search: $name", ({ before, after, side }) 
     expect(scroll).toHaveBeenCalledWith({ block: "center" });
     expect(scroll.mock.instances).toEqual([highlights[0]]);
   });
+
+  it("searches the compact value without highlighting its separator or trailing comma", () => {
+    keys += 1;
+    const shown = jsonComparePanel(`type-search-${keys}`);
+    document.body.append(shown.grid);
+    expect(shown.show(JSON.stringify({ field: before, same: "steady" }), JSON.stringify({ field: after, same: "steady" }))).toBe(true);
+
+    expect(shown.search(":").map((match) => match.path)).toEqual([".field"]);
+    expect([...shown.grid.querySelectorAll(`.ub-json-compare-${side} .ub-json-match`)].map((mark) => mark.textContent)).toEqual([":"]);
+    expect(shown.grid.querySelectorAll(`.ub-json-compare-${side === "before" ? "after" : "before"} .ub-json-match`)).toHaveLength(0);
+
+    expect(shown.search(",")).toEqual([]);
+    expect(shown.grid.querySelectorAll(".ub-json-match")).toHaveLength(0);
+  });
+});
+
+it("does not find a row separator beside an empty compact value", () => {
+  keys += 1;
+  const shown = jsonComparePanel(`type-search-${keys}`);
+  document.body.append(shown.grid);
+  expect(shown.show('{"field":{},"same":"steady"}', '{"field":"replacement","same":"steady"}')).toBe(true);
+
+  expect(shown.search(":")).toEqual([]);
+  expect(shown.grid.querySelectorAll(".ub-json-match")).toHaveLength(0);
 });

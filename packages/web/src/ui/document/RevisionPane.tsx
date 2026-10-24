@@ -202,7 +202,8 @@ function ChangeNavigation({ pane, header, before, after, rows }: {
       if (element === null) return [];
       // A JSON comparison is stepped through change by change.
       const block = spanned(rows[row]) ? spanningComparison(element) : null;
-      const inner = block === null ? [] : jsonChangeStarts(block);
+      // A toggle can hide the block; its row marker still has a position to reveal.
+      const inner = block === null || block.getClientRects().length === 0 ? [] : jsonChangeStarts(block);
       // Relative to where a change lands: 0 is the current change.
       return (inner.length > 0 ? inner : [element]).map((each) => ({ row, top: each.getBoundingClientRect().top - line - CHANGE_OFFSET, element: each }));
     });
@@ -246,7 +247,9 @@ function ChangeNavigation({ pane, header, before, after, rows }: {
     }
     alignRevisionSides(before.view, after.view);
     // Revealing moves the change, and can redraw its row.
-    const revealed = targets().find((entry) => entry.element === target.element) ?? targets().find((entry) => entry.row === target.row);
+    const visible = targets();
+    const revealed = visible.find((entry) => entry.element === target.element)
+      ?? (direction > 0 ? visible.find((entry) => entry.row === target.row) : visible.findLast((entry) => entry.row === target.row));
     if (revealed === undefined) return;
     // A change folded inside a JSON comparison opens when navigation reaches it.
     openFoldedChange(revealed.element);

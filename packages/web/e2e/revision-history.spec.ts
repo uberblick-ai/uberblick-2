@@ -1906,8 +1906,109 @@ function toggleNavigationHistory(uuid: string, title: string, nested: boolean): 
   }
 }
 
+function toggleJsonNavigationHistory(uuid: string, title: string, precedingChange: boolean): Record<string, string> {
+  const document = new Y.Doc();
+  const source = (value: number) => JSON.stringify({ one: value, between: "steady", two: value }, null, 2);
+  try {
+    initDoc(document, { uuid, title });
+    const first = appendBlock(document, { type: "paragraph", text: "First" });
+    appendBlock(document, { type: "paragraph", text: "Long context ".repeat(50) });
+    appendBlock(document, { type: "heading", level: 2, text: "> Details" });
+    const inside = appendBlock(document, { type: "code", language: "json-tree", text: source(1) });
+    appendBlock(document, { type: "heading", level: 2, text: "End" });
+    appendBlock(document, { type: "paragraph", text: "Tail ".repeat(400) });
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    if (precedingChange) editBlock(document, first, "First", "First changed");
+    editBlock(document, inside, source(1), source(2));
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+  }
+}
+
 test.describe("change navigation through authored toggles", () => {
   const { openApp } = setupHarness({ accessRole: "admin" });
+
+  for (const precedingChange of [false, true]) {
+    test(`JSON changes in folded toggles remain marked and reachable ${precedingChange ? "after a preceding change" : "as the only change"}`, { tag: "@webkit" }, async ({ browser }) => {
+      const page = await openApp(browser, "/", { readySelector: ".ub-pane",
+        contextOptions: { viewport: { width: 1440, height: 640 }, reducedMotion: "reduce" } });
+      const title = docTitle("JSON changes inside authored toggles");
+      const uuid = await newDocument(page, title);
+      await serveHistory(page, [
+        { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+        { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+      ], toggleJsonNavigationHistory(uuid, title, precedingChange));
+      await previous(page);
+      const sides = [earlierSide(page), historicalEditor(page)];
+      const compare = page.locator(".ub-json-compare");
+      const pane = page.locator(".ub-revision-pane");
+      const nextChange = page.getByRole("button", { name: "Next change", exact: true });
+      const previousChange = page.getByRole("button", { name: "Previous change", exact: true });
+      const changeMarks = async () => (await rulerGeometry(page)).marks.filter(mark => mark.kind !== "same" && mark.kind !== "fold");
+      const offset = (path: string) => compare.locator(`.ub-json-compare-after[data-path=".${path}"]`).evaluate(element => {
+        const header = document.querySelector(".ub-revision-header");
+        if (header === null) throw new Error("The revision header is missing");
+        return element.getBoundingClientRect().top - header.getBoundingClientRect().bottom - 8;
+      });
+      const assertFolded = async (): Promise<void> => {
+        await expect(page.getByTestId("revision-ruler")).toBeAttached();
+        await expect(compare).toBeHidden();
+        await expect.poll(async () => (await changeMarks()).length).toBe(1 + Number(precedingChange));
+        await expect(previousChange).toBeDisabled();
+        await expect(nextChange).toBeEnabled();
+      };
+      const assertDestination = async (path: string): Promise<void> => {
+        await expect(compare).toBeVisible();
+        for (const side of sides) {
+          await expect(side.getByRole("button", { name: "Collapse Details", exact: true })).toHaveAttribute("aria-expanded", "true");
+        }
+        await expect.poll(async () => Math.abs(await offset(path))).toBeLessThan(2);
+        await expect.poll(async () => (await changeMarks()).length).toBe(2 + Number(precedingChange));
+      };
+      const stepBack = async (path: string): Promise<void> => {
+        const before = await pane.evaluate(element => element.scrollTop);
+        await expect(previousChange).toBeEnabled();
+        await activateControl(previousChange);
+        await assertDestination(path);
+        expect(await pane.evaluate(element => element.scrollTop)).toBeLessThan(before);
+      };
+      await expect.poll(() => runningMotion(page)).toBe(0);
+      await assertFolded();
+      expect(await pane.evaluate(element => element.scrollHeight - element.clientHeight)).toBeGreaterThan(100);
+      await activateControl(nextChange);
+      await assertDestination("one");
+      if (!precedingChange) await expect(previousChange).toBeDisabled();
+      await activateControl(nextChange);
+      await assertDestination("two");
+      await expect(nextChange).toBeDisabled();
+      await stepBack("one");
+      if (!precedingChange) await expect(previousChange).toBeDisabled();
+      // Closing both sections restores one fallback mark and target before the hidden inner rows.
+      for (const side of sides) {
+        await side.getByRole("button", { name: "Collapse Details", exact: true }).evaluate((element: HTMLButtonElement) => element.click());
+      }
+      await pane.evaluate(element => element.scrollTo(0, 0));
+      await assertFolded();
+      // Approaching from below opens the final inner change, then Previous continues upward.
+      await pane.evaluate(element => element.scrollTo(0, element.scrollHeight));
+      await expect(previousChange).toBeEnabled();
+      await activateControl(previousChange);
+      await assertDestination("two");
+      await stepBack("one");
+      if (precedingChange) {
+        const before = await pane.evaluate(element => element.scrollTop);
+        await activateControl(previousChange);
+        await expect.poll(() => sides[1]?.locator(":scope > .ub-revision-row-start").first().evaluate(element => {
+          const header = document.querySelector(".ub-revision-header");
+          if (header === null) throw new Error("The revision header is missing");
+          return Math.abs(element.getBoundingClientRect().top - header.getBoundingClientRect().bottom - 8);
+        })).toBeLessThan(2);
+        expect(await pane.evaluate(element => element.scrollTop)).toBeLessThan(before);
+      }
+      await expect(previousChange).toBeDisabled();
+    });
+  }
 
   for (const nested of [false, true]) {
     test(`change navigation reveals ${nested ? "nested " : ""}toggle content in both directions and comparison sides`, { tag: "@webkit" }, async ({ browser }) => {
