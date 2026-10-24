@@ -406,7 +406,7 @@ destinations right-aligned, no arrows).
 
 const wireframe = `# Wireframes
 
-A wireframe is a static UI sketch that the web editor draws from a fenced code block whose info string is exactly \`wireframe\`. This topic follows Format v0.1 of \`@uberblick/wireframe\` 0.3.0. Import, export and MCP keep the source as a code block with language \`wireframe\`. Nothing else goes on the fence line.
+A wireframe is a static UI sketch that the web editor draws from a fenced code block whose info string is exactly \`wireframe\`. This topic follows Format v0.1 of \`@uberblick/wireframe\` 0.3.1. Import, export and MCP keep the source as a code block with language \`wireframe\`. Nothing else goes on the fence line.
 
 \`\`\`wireframe
 dialog Delete “Q3 launch draft”?
@@ -421,7 +421,7 @@ dialog Delete “Q3 launch draft”?
 Each line is one node: \`kind.variant#id key=value Label\`.
 
 - **kind** is the first word, from the table below. Variants are dot classes and combine: \`button.link.danger\`. An optional \`#id\` comes last in the first word and does not change the drawing.
-- **Attributes** sit between the first word and the label: \`label=\` on \`input\` and \`select\`, such as \`label="Work email"\`, and \`width=\` on \`page\`, \`card\` and \`image\`, in whole CSS pixels from 1 to 9999: \`width=256\`.
+- **Attributes** sit between the first word and the label: \`label=\` on \`input\` and \`select\`, such as \`label="Work email"\`; \`width=\` on \`page\`, \`card\` and \`image\`, in whole CSS pixels from 1 to 9999: \`width=256\`; and \`padding=\` on \`card\`, in whole CSS pixels from 0 to 64: \`padding=8\`. Cards directly inside full-width rows also accept fractional widths such as \`width=1/3\`, described below.
 - **The label** is the rest of the line. Only \`text\` lines format anything: paired single backticks draw monospace. Other Markdown shows as written, and typographic quotes are plain text.
 - **Quote a label** only when it starts with \`word=\` or with \`"\`. Quote all of it, escape \`"\` as \`\\"\` and \`\\\` as \`\\\\\`, and end the line at the closing quote.
 - **Indent** a child by exactly two spaces more than its parent, with spaces only. The first line has none. Blank lines are skipped but count as lines, and several roots draw one after another.
@@ -429,28 +429,35 @@ Each line is one node: \`kind.variant#id key=value Label\`.
 
 ## Kinds
 
-Roots stand at the top level: \`dialog\`, whose label is its title; \`banner\` with \`.neutral\`, \`.info\`, \`.warning\`, \`.danger\` or \`.success\`; \`page\` and \`phone\`, which take no label, so their title goes on a \`text.title\` line; and \`frame\`, whose label is a caption and whose direct buttons sit in that caption row. A \`card\` may also stand at the top level.
+Roots stand at the top level: \`dialog\`, whose label is its title; \`banner\` with \`.neutral\`, \`.info\`, \`.warning\`, \`.danger\` or \`.success\`; \`page\` and \`phone\`, whose content title goes on a \`text.title\` line; and \`frame\`, whose label is a caption and whose direct buttons sit in that caption row. Plain \`page\` and \`phone\` take no label. \`page.browser\` uses its label as an address in a browser toolbar; \`page.window\` as the title in a macOS title bar. Choose one page variant; both keep the plain page's children and optional \`width=\`, with inert chrome. A \`card\` may also stand at the top level.
 
 | Kind | Directly inside | Variants | Label |
 | --- | --- | --- | --- |
-| \`text\` | root, dock, card, row | \`.muted\`, \`.strong\`, \`.title\`, \`.small\`, \`.red\`, \`.amber\`, \`.green\`, \`.blue\` | the text |
-| \`row\` | root, dock, card, table | one of \`.end\`, \`.between\`, \`.scroll\`; \`.head\` for a table's header row | none |
-| \`card\` | top level, root, dock, row | none; optional \`width=\` | none: it holds text, images and rows |
+| \`text\` | root, dock, card, row | \`.muted\`, \`.strong\`, \`.title\`, \`.small\`, \`.red\`, \`.amber\`, \`.green\`, \`.blue\`; backgrounds \`.bg-red\`, \`.bg-amber\`, \`.bg-green\`, \`.bg-blue\` | the text |
+| \`row\` | root, dock, card, non-table row, table | one of \`.end\`, \`.between\`, \`.scroll\`, plus \`.stretch\`, only in roots, docks and cards; \`.head\` only in a table | none |
+| \`card\` | top level, root, dock, non-table row | none; optional \`width=\` and \`padding=\` | none: it holds text, images, rows, switches and tabs |
 | \`image\` | root, dock, card, row | \`.square\`, \`.round\`; optional \`width=\` | what it shows |
 | \`button\` | row, cell, frame | \`.primary\`, \`.danger\`, \`.link\`, \`.focus\` | the caption, or none when it holds an icon |
 | \`icon\` | root, dock, cell, button, option | \`.filled\` and the four colours | an exact kebab-case Tabler name, such as \`pin\` or \`dots-vertical\` |
 | \`input\`, \`select\` | root, dock, row | none; optional \`label=\` | the placeholder, or the chosen value |
 | \`toggle\` | root, dock, row | none | none: its choices are \`option\` lines, \`.current\` for the chosen one |
+| \`switch\` | root, dock, card, non-table row | \`.on\`; off by default | the caption, or none for a bare switch |
+| \`tabs\` | root, card | none | none: its tabs are \`option\` lines |
+| \`option\` | toggle, tabs | \`.current\` for the chosen one | the caption; may hold one icon |
 | \`table\` | root, dock | none | none: its rows hold only \`cell\` lines |
 | \`cell\` | a table's row | \`.end\`; on header cells \`.sortable\`, \`.ascending\` or \`.descending\` | its text, or none |
 | \`chip\` | row, cell | \`.more\` for the count of the rest | the tag |
 | \`divider\` | dialog, page, frame, phone, dock | none | none |
 | \`dock\` | a phone, as its last child | none | none |
 
-Write \`icon.filled pin\`, not \`pin-filled\`. Use one colour per node and pair a coloured state with words. Give every table row the same number of cells, with an empty \`cell\` where a column has nothing.
+Write \`icon.filled pin\`, not \`pin-filled\`. Use one text or icon colour per node and pair a coloured state with words. Give every table row the same number of cells, with an empty \`cell\` where a column has nothing.
+
+Plain rows nested in non-table rows group their children side by side as one content-width item. Row variants do not apply to these inner groups. \`row.stretch\` gives direct cards equal heights and aligns other children to the top; it combines with \`.end\` or \`.between\`, but competes with \`.scroll\` (first written wins). Fractional card widths use \`N/M\` with \`1 <= N <= M <= 9999\`, sharing the space left after gaps and fixed-width children. Their row must be directly inside a dialog, page, frame, phone, dock or card and must not scroll; banner rows and nested groups do not accept them. Unsized cards share what remains.
+
+Switches show an inert on/off state; captions wrap beside the track. Tabs underline the first \`option.current\`; later current options warn. They do not change content. An overflowing tab strip scrolls inside the drawing and becomes one native keyboard stop with a visible focus ring; fitting strips and individual tabs add none. Text backgrounds use the existing danger, warning, success and info tints, respectively. Choose one background and one text colour independently; the background alone keeps ink text.
 
 \`\`\`wireframe
-page
+page.browser app.example/documents
   text.title All documents
   input Search titles
   row
@@ -476,6 +483,28 @@ page
 \`\`\`
 
 \`\`\`wireframe
+page.window width=720 Review settings
+  tabs
+    option.current General
+    option Notifications
+  row.stretch
+    card width=1/3 padding=8
+      text.title Display
+      switch.on Collapse unchanged
+      switch Show whitespace
+      text.bg-blue Applies to this device.
+    card width=2/3 padding=8
+      row.between
+        row
+          text.strong Notifications
+          text.small.muted Daily
+        button.link Edit
+      text.bg-green + Mentions included
+      text.bg-amber Summary pending
+      text.bg-red − Email disabled
+\`\`\`
+
+\`\`\`wireframe
 banner.warning
   icon archive
   text Archived. Read-only and hidden from the document list.
@@ -488,7 +517,7 @@ banner.warning
 
 Errors stop the drawing: tabs or odd indentation, a jump of more than one level, an indented first line, an unterminated quote, text after a closing quote, or an exceeded limit. Warnings still draw, but the block no longer says what you meant: an unknown kind, variant, attribute or icon, a label on a kind that takes none, or a node in the wrong place. The usual misplacements are a \`button\` outside a \`row\`, \`cell\` or \`frame\`, anything but a \`cell\` in a table's row, and a root inside another node. Fix both.
 
-MCP stores the source without checking it. The web editor lists each diagnostic with its line number. When nobody can open the editor, keep to the kinds and places above and report the wireframe as unchecked. The full primer, with every kind's drawing, phones, docks and each mistake with its diagnostic, ships as \`AUTHORING.md\` in \`@uberblick/wireframe\` 0.3.0.`;
+MCP stores the source without checking it. The web editor lists each diagnostic with its line number. When nobody can open the editor, keep to the kinds and places above and report the wireframe as unchecked. The [full authoring primer](https://github.com/uberblick-ai/wireframe-md/blob/v0.3.1/AUTHORING.md), with every kind's drawing, phones, docks and each mistake with its diagnostic, ships as \`AUTHORING.md\` in \`@uberblick/wireframe\` 0.3.1.`;
 
 const data = `# Structured data and views
 

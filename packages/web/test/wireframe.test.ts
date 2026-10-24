@@ -61,6 +61,25 @@ async function draw(): Promise<void> {
 }
 
 describe("wireframe code blocks", () => {
+  it("draws tabs and switches without diagnostics, active controls or stored changes", async () => {
+    const source = "page.window width=480 Settings\n  tabs\n    option.current General\n    option Accounts\n  switch.on Sync automatically\n  switch Show archived";
+    const fix = fixture(source);
+    const before = snapshotFragment(fix.doc);
+    try {
+      await draw();
+      const block = root(fix.element);
+      expect(block.dataset.drawState).toBe("success");
+      expect(block.querySelector<HTMLElement>(".ub-wireframe-diagnostics")?.hidden).toBe(true);
+      expect(block.querySelector(".wf-tabs .wf-current")?.textContent).toBe("General");
+      expect(block.querySelectorAll(".wf-switch")).toHaveLength(2);
+      expect(block.querySelector(".wf-switch.wf-on")?.textContent).toContain("Sync automatically");
+      expect(block.querySelector(".wf-root")?.querySelectorAll("button, input, a, script")).toHaveLength(0);
+      expect(snapshotFragment(fix.doc)).toEqual(before);
+    } finally {
+      fix.editor.destroy(); fix.doc.destroy();
+    }
+  });
+
   it.each([true, false])("renders Markdown and MCP-shaped code in an editable=%s editor without changing stored content", async (editable) => {
     const fence = `\`\`\`wireframe\n${SOURCE}\n\`\`\`\n`;
     const doc = new Y.Doc();

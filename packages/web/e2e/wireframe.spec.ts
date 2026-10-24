@@ -325,7 +325,7 @@ async function fitScale(page: Page): Promise<number> {
 }
 
 async function expectPageFit(page: Page, width: number): Promise<void> {
-  await expect.poll(() => preview(page).locator(".wf-page").evaluate((element) => (element as HTMLElement).offsetWidth)).toBe(width);
+  await expect.poll(() => preview(page).locator(".wf-page[data-line]").evaluate((element) => (element as HTMLElement).offsetWidth)).toBe(width);
   const expectedScale = await page.locator(".ub-wireframe-viewport").evaluate((element, width) => {
     const root = element.querySelector(".wf-root");
     if (root === null) throw new Error("e2e: page root is missing");
@@ -417,6 +417,15 @@ test("desktop and iPad wireframes fit inside their column and follow both appear
   expect(await fitScale(page)).toBe(1);
   await viewport.evaluate((element) => { (element as HTMLElement).style.removeProperty("width"); });
   await expect.poll(() => viewport.evaluate((element) => element.clientWidth)).toBe(originalWidth);
+  for (const firstRoot of ["page width=1080", "page.browser width=1080 example.com", "page.window width=1080 Library"]) {
+    const grouped = `${pageSource(firstRoot)}\n  row.between\n    row\n      text Grouped controls\n      switch.on Enabled\n    button Save`;
+    await editSource(session, uuid, grouped);
+    await waitForDocumentDraw(page, session, uuid, { source: grouped });
+    await expect(page.locator(".ub-wireframe-diagnostics")).toBeHidden();
+    await expectPageFit(page, 1080);
+    expect(await fitScale(page)).toBeGreaterThan(0.6);
+    expect(await fitScale(page)).toBeLessThan(1);
+  }
   const oversized = pageSource("page width=1400");
   await editSource(session, uuid, oversized);
   await waitForDocumentDraw(page, session, uuid, { source: oversized });
@@ -458,6 +467,60 @@ test("desktop and iPad wireframes fit inside their column and follow both appear
   expect(await fitScale(page)).toBeLessThan(1);
   await expectContained(page);
   await editSource(session, uuid, SOURCE);
+});
+
+test("tabs and switches stay inert, text backgrounds follow both appearances, and keyboard focus leaves overflowing tabs", { tag: "@webkit" }, async ({ browser }, info) => {
+  const session = writer();
+  const sketch = [
+    "page.window width=480 Settings", "  tabs", "    option.current General",
+    ...Array.from({ length: 12 }, (_, index) => `    option Section ${index + 1}`),
+    "  switch.on Sync automatically", "  switch Show archived",
+    "  text.bg-red Danger", "  text.bg-amber Warning", "  text.bg-blue Information", "  text.bg-green Success",
+  ].join("\n");
+  const uuid = await wireframeDoc(session, "Wireframe tabs and text backgrounds", sketch);
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
+  await waitForDocumentDraw(page, session, uuid, { source: sketch });
+  await expect(page.locator(".ub-wireframe-diagnostics")).toBeHidden();
+  await expect(preview(page).locator("button, input, a, script")).toHaveCount(0);
+  const tabs = preview(page).locator(".wf-tabs");
+  await expect(tabs.locator(".wf-current")).toHaveText("General");
+  await expect(preview(page).locator(".wf-switch")).toHaveCount(2);
+  await expect.poll(() => tabs.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  for (const appearance of ["light", "dark"]) {
+    await page.evaluate((theme) => document.documentElement.setAttribute("data-theme", theme), appearance);
+    for (const [variant, token] of [
+      ["red", "var(--destructive-subtle)"],
+      ["amber", "var(--status-warning-subtle)"],
+      ["blue", "color-mix(in oklab, var(--syntax-name) 8%, var(--card))"],
+    ] as const) {
+      const colours = await preview(page).locator(`.wf-text.wf-bg-${variant}`).evaluate((element, token) => {
+        const probe = document.createElement("span");
+        probe.style.backgroundColor = token;
+        element.append(probe);
+        const result = { actual: getComputedStyle(element).backgroundColor, expected: getComputedStyle(probe).backgroundColor };
+        probe.remove();
+        return result;
+      }, token);
+      expect(colours.actual).toBe(colours.expected);
+    }
+    await expectContained(page);
+    await evidence(page, info, `wireframe-tabs-backgrounds-${appearance}`);
+  }
+  if (info.project.use.hasTouch !== true) {
+    const viewport = page.locator(".ub-wireframe-viewport");
+    await viewport.focus();
+    await page.keyboard.press("Tab");
+    await expect(tabs).toBeFocused();
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(() => tabs.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+    await page.keyboard.press("Tab");
+    expect(await preview(page).evaluate((element) => element.contains(document.activeElement))).toBe(false);
+    await page.keyboard.press("Shift+Tab");
+    await expect(tabs).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(viewport).toBeFocused();
+  }
+  await expectMcp(async () => { expect((await codeBlock(session, uuid)).text).toBe(sketch); });
 });
 
 test("warning banners use the product warning colours in both appearances", { tag: "@webkit" }, async ({ browser }, info) => {
