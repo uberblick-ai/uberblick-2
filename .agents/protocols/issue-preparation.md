@@ -9,7 +9,10 @@
    relevant live corpus documents, the primary product-intent authority.
    Follow [source authority](../../AGENTS.md#find-the-right-authority) and
    [discovery/read rules](../../AGENTS.md#read-for-the-action), including in-force
-   and pending decisions. Code establishes implemented behavior, not product intent.
+   and pending decisions. Resolve the issue's `Touches:` areas through MCP
+   `list_tags`, then use matching existing tag names or IDs for tag-filtered
+   corpus searches; package names are not assumed to be corpus tags.
+   Code establishes implemented behavior, not product intent.
    Catalog-only treatment requires intent established by authoritative sources or
    an explicit human decision, no governing product document, and a mechanical
    correction preserving that intent; explain why.
