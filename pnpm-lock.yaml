@@ -137,6 +137,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      '@uberblick/wireframe':
+        specifier: ^0.3.0
+        version: 0.3.0
       esbuild:
         specifier: 0.28.2
         version: 0.28.2

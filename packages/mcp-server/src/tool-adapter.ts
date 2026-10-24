@@ -4,11 +4,14 @@ import type { OperationRequest } from "./tools/operation.js";
 import type { ToolContext } from "./tools/context.js";
 import { toFailure } from "./failures.js";
 
-/** Both wire answers use the same JSON serialization; failures stay text-only. */
+/**
+ * Both wire answers carry the same JSON; failures stay text-only. The text copy
+ * is compact because clients that show both pay for it twice.
+ */
 export function toolResult(payload: object, isError = false): CallToolResult {
   return {
     ...(isError ? { isError: true } : {}),
-    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+    content: [{ type: "text", text: JSON.stringify(payload) }],
     ...(isError ? {} : { structuredContent: { ...payload } }),
   };
 }

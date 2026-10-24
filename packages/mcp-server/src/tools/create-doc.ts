@@ -85,12 +85,14 @@ export const inputSchema = strictInput(
     ),
     description: descriptionArg,
     tldr: tldrArg.optional(),
-    answer: decisionAnswerArg.optional(),
+    answer: decisionAnswerArg.optional().describe(
+      "Record a person's answer, not the agent's own approval; MCP does not verify its provenance. Accepted only with `kind: decision`.",
+    ),
     tags: z.array(z.string().min(1)).optional().describe(
       "Existing catalog tag ids or names, case ignored. An unknown or deleted tag refuses before anything is created.",
     ),
     kind: documentKindArg.optional(),
-    status: documentStatusArg.optional(),
+    status: documentStatusArg.optional().describe("The initial lifecycle state. Accepted only with `kind: decision`."),
     related: z.union([uuidArg, z.array(uuidArg).min(1)])
       .optional()
       .describe(
@@ -115,8 +117,6 @@ export const inputSchema = strictInput(
   if (args.kind === "decision" && args.supersedes === undefined && args.title === undefined) {
     ctx.addIssue({ code: "custom", path: ["title"], message: "A topic's first record needs `title`" });
   }
-}).meta({
-  dependencies: { kind: { anyOf: [{ required: ["title"] }, { required: ["supersedes"] }] } },
 });
 
 function initialBlocks(

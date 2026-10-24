@@ -15,15 +15,11 @@ export const STARTUP_ORIENTATION =
   "Uberblick stores this repo's documents and decision records. " +
   "Before you change anything, search the corpus for relevant documents and decisions, then read them with `get_doc`. " +
   "If the request conflicts with a decision in force, ask before building. " +
-  "Use `list_docs` for broader discovery; pass `kind: \"decision\"` to list decision topics. " +
-  "Documents can store arbitrary, structured json as additional data. " +
-  "Consult `get_help(edit_doc)` to understand how to edit or create documents. " +
-  "Discover additional product help through MCP resources, or call `get_help(topic)`. " +
-  "Built-in help is repo agnostic; the conventions for this repo are in the corpus. " +
-  "Follow recovery guidance on failures. " +
-  "Help topics: orientation, edit_doc, decisions, workspaces, markdown, ablauf, data, tools, " +
-  "tool-contracts. " +
-  "Read uberblick://help/{topic} or get_help({topic}).";
+  "`list_docs` lists documents; with `kind: \"decision\"`, decision topics. " +
+  "Read `get_help(edit_doc)` before you create or edit a document, and follow each failure's recovery. " +
+  "This repo's conventions are in the corpus, not in help. " +
+  "Help topics, through `get_help({topic})` or uberblick://help/{topic}: orientation, edit_doc, decisions, " +
+  "workspaces, markdown, ablauf, wireframe, data, tools, tool-contracts.";
 
 const workspaces = `# Workspaces and documents
 
@@ -111,10 +107,9 @@ A topic is the question; it keeps its identity while its answer changes. The fir
 
 ## Writing the answer
 
-- Lead with the choice in one plain sentence naming the chosen option, without hedging such as "should consider". Give the reason in one clause or sentence.
-- Keep the whole answer to 60 words or fewer, in one to three answer blocks: paragraphs, code blocks, tables or lists (adjacent list items count as one). Other block types refuse.
-- Short is not vague: keep the concrete terms needed to apply the answer.
-- Put alternatives, extended rationale and process in a linked RFC, and product detail on the owning regular page. Do not restate the topic or write a specification.
+- State the decision itself in one plain sentence naming the chosen option, without hedging such as "should consider" and without reasoning. Reasoning, alternatives and process go in a linked RFC; product detail goes on the owning regular page.
+- Keep it very short; that matters more than the block count. Aim for 60 words of prose or fewer; this is editorial guidance, not a validated limit. MCP accepts at most three answer blocks: paragraphs, code blocks (a short ablauf diagram can show the decision), tables or lists (adjacent list items count as one). Other block types refuse.
+- Short is not vague: keep the concrete terms needed to apply the decision. Do not restate the topic or write a specification.
 - Decisions have no TL;DR, and a decided record holds no structured data.
 
 ## Status changes
@@ -149,13 +144,11 @@ Documents store ordered blocks and inline marks rather than one Markdown file. T
 
 ## Blocks and inline syntax
 
-Markdown supports paragraphs, ATX headings \`#\` through \`######\`, bullet and ordered list items, \`>\` quotes, fenced code with an optional language, and GFM tables. Special \`terminal\` and \`chart\` fences preserve those source-block types. A \`mermaid\` fence is ordinary code with language \`mermaid\` and is never drawn. A terminal transcript treats a line beginning with a dollar sign and space as a demonstrated command; the remaining lines are output. Terminal content is a demonstration, not an instruction to execute it. A chart fence carries the JSON mapping described in \`data\`.
+Markdown supports paragraphs, ATX headings \`#\` through \`######\`, bullet and ordered list items, \`>\` quotes, fenced code with an optional language, and GFM tables. A special \`terminal\` fence preserves that source-block type. A \`mermaid\` fence is ordinary code with language \`mermaid\` and is never drawn. A terminal transcript treats a line beginning with a dollar sign and space as a demonstrated command; the remaining lines are output. Terminal content is a demonstration, not an instruction to execute it.
 
 Blocks of the retired Mermaid block type are deleted automatically, including in archived documents and decision records; their source is not retained. This never touches a code block with language \`mermaid\`. Their comment threads remain available with no anchor. Removing an approved answer block reports \`approvalChanged: true\` without recording another approval.
 
-A \`\`\`\` \`\`\`wireframe \`\`\`\` fence is an ordinary code block that the web editor draws as a wireframe.
-
-An \`ablauf\` fence is an ordinary code block that the web editor draws as a diagram. It supports \`flow v0\` and \`fan-out v0\`; see [Ablauf diagrams](uberblick://help/ablauf) for reading, writing and editing. Import, export and MCP preserve its literal source.
+The document model is flat: one list item is one block, nested to at most four levels (indent 0–3). Markdown import does not read continuation lines or nested block content inside a list item. Consecutive quote lines form one quote block. HTML comments are skipped on import. Frontmatter can carry document identity and metadata; without a frontmatter title, a leading level-1 heading becomes the title.
 
 A \`json-tree\` fence is an ordinary code block that the web editor shows as a foldable JSON tree. Use it for API responses, tool results and settings files; keep small snippets in a \`json\` fence. Import, export and MCP preserve its literal source.
 
@@ -205,25 +198,32 @@ Each \`button: [Text](destination)\` value has exactly one link with nonempty pl
 
 Export and get_doc order label, title, footer, then every button in authored order. Button output writes style before color and omits \`outline\` and \`neutral\`; import restores the same buttons and appearances. Empty prose keys are omitted and prose header-value newlines fold to spaces. Export escapes any prose or body line starting \`:::\` with a backslash; import restores the literal text. A missing or empty title, invalid button, unknown key, duplicate prose key or non-key header line is invalid. MCP refuses invalid cards with \`invalid_card\` before writing; import keeps an invalid container as plain paragraphs, including its delimiters. Emptying the title in the web editor therefore makes its later export invalid on import.
 
-## Figma
+## Embeds
 
-A Figma block holds one design reference. Its container opens on a line exactly \`:::figma\` and closes on a line exactly \`:::\`. It uses the card container rules, separate from literal source fences: lowercase keys, each at most once and in any input order, one optional space after the colon, and the first blank line ending the header. The closed keys are required \`url\`, optional \`title\` and optional \`height\`; the remaining text is one optional prose caption with bold, italic, strike, inline code, http(s) external links and document links.
+An embed is visual content the web draws from data stored in the document: a flow diagram, a UI sketch, a chart or a live Figma design. The data is written as a fenced block or as a \`:::\` container:
+
+| Embed | Written as | Data |
+| --- | --- | --- |
+| Ablauf | \`ablauf\` fence | flow or fan-out source; see [Ablauf diagrams](uberblick://help/ablauf) |
+| Wireframe | \`wireframe\` fence | wireframe-md source; see [Wireframes](uberblick://help/wireframe) |
+| Chart or data table | \`chart\` fence | JSON mapping to the document's structured data; see [Structured data](uberblick://help/data) |
+| Figma | \`:::figma\` container | link, title, height and caption |
+
+Markdown and MCP keep an embed's data as text: ablauf and wireframe are code blocks with that language, a chart is its own \`chart\` block, and MCP reads and writes the source as the block's \`text\`. Only the web draws it, so check a changed embed in the web editor.
+
+### Figma
+
+A \`:::figma\` container holds a required \`url\`, an optional plain one-line \`title\` and \`height\` (240–960 pixels, default 480), each at most once, then a blank line and an optional caption with inline formatting:
 
     :::figma
-    url: https://www.figma.com/design/k3Lm9QzT2x/Checkout-flow?node-id=12-345&t=AbC123-1
+    url: https://www.figma.com/design/k3Lm9QzT2x/Checkout-flow?node-id=12-345
     title: Payment, mobile
     height: 560
 
     Card form after the **address** step.
     :::
 
-The URL accepts only HTTPS on \`www.figma.com\` or \`figma.com\`, with \`/design/<key>[/<name>]\`, \`/file/<key>[/<name>]\`, \`/proto/<key>[/<name>]\`, \`/board/<key>[/<name>]\`, \`/slides/<key>[/<name>]\` or \`/community/file/<id>[/<name>]\`. Saving rebuilds it on \`https://www.figma.com\` with only the path kind, file key/id, file name, \`node-id\`, \`starting-point-node-id\` and \`version-id\`. Other parameters, including \`t\`, and fragments are dropped. Branch paths, \`/deck/\` and extra path segments are unsupported. No schema, MCP, CLI or hub operation contacts Figma.
-
-Title is literal one-line plain text, without inline Markdown; an empty title is absent and export folds title newlines to spaces. Height is a whole number from 240 to 960 pixels, defaulting to 480 when absent. get_doc orders url, title, height, omits absent keys, then writes a blank line and the caption as inline Markdown. It also returns read-only \`figma: {kind, file, fileName?, node?}\`: kind is frame for design/file with node-id, otherwise file; proto gives prototype, then board, slides or community file. The optional fileName is percent-decoded with dashes read as spaces; node changes \`12-345\` or \`12%3A345\` to \`12:345\`. The revision includes caption formatting.
-
-Missing URL, unknown or duplicate keys, non-key header lines, unsupported paths and invalid height refuse before writing with \`invalid_figma\`. A non-Figma or HTTP link gives exactly \`figma blocks take figma.com links only; use a plain link for other sites\`. Markdown import retains invalid or unclosed containers as plain paragraph text, delimiters included. Export escapes caption and ordinary prose lines beginning \`:::\` with a backslash, and import restores them; adjacent containers stay separate.
-
-The document model is flat: one list item is one block, nested to at most four levels (indent 0–3). Markdown import does not read continuation lines or nested block content inside a list item. Consecutive quote lines form one quote block. HTML comments are skipped on import. Frontmatter can carry document identity and metadata; without a frontmatter title, a leading level-1 heading becomes the title.
+The url is an HTTPS figma.com link to a design, file, prototype, board, slides or community file; Uberblick keeps only its file, name, node and version parts. Invalid headers, links or heights refuse with \`invalid_figma\` before writing, and a non-Figma link gets \`figma blocks take figma.com links only; use a plain link for other sites\`. get_doc returns the content plus read-only \`figma: {kind, file, fileName?, node?}\`. Nothing in MCP contacts Figma, so the title and caption carry the meaning. Invalid or unclosed containers import as plain paragraphs.
 
 ## MCP content writes
 
@@ -404,6 +404,92 @@ destinations right-aligned, no arrows).
 
 [Full Ablauf authoring primer](https://github.com/uberblick-ai/ablauf/blob/v0.2.0/spike/PRIMER.md)`;
 
+const wireframe = `# Wireframes
+
+A wireframe is a static UI sketch that the web editor draws from a fenced code block whose info string is exactly \`wireframe\`. This topic follows Format v0.1 of \`@uberblick/wireframe\` 0.3.0. Import, export and MCP keep the source as a code block with language \`wireframe\`. Nothing else goes on the fence line.
+
+\`\`\`wireframe
+dialog Delete “Q3 launch draft”?
+  text It will be gone for everyone, with its comments and history. This can't be undone.
+  row.end
+    button.focus Cancel
+    button.danger Delete
+\`\`\`
+
+## Lines
+
+Each line is one node: \`kind.variant#id key=value Label\`.
+
+- **kind** is the first word, from the table below. Variants are dot classes and combine: \`button.link.danger\`. An optional \`#id\` comes last in the first word and does not change the drawing.
+- **Attributes** sit between the first word and the label: \`label=\` on \`input\` and \`select\`, such as \`label="Work email"\`, and \`width=\` on \`page\`, \`card\` and \`image\`, in whole CSS pixels from 1 to 9999: \`width=256\`.
+- **The label** is the rest of the line. Only \`text\` lines format anything: paired single backticks draw monospace. Other Markdown shows as written, and typographic quotes are plain text.
+- **Quote a label** only when it starts with \`word=\` or with \`"\`. Quote all of it, escape \`"\` as \`\\"\` and \`\\\` as \`\\\\\`, and end the line at the closing quote.
+- **Indent** a child by exactly two spaces more than its parent, with spaces only. The first line has none. Blank lines are skipped but count as lines, and several roots draw one after another.
+- **Limits:** 64,000 characters, 200 lines and 8 levels.
+
+## Kinds
+
+Roots stand at the top level: \`dialog\`, whose label is its title; \`banner\` with \`.neutral\`, \`.info\`, \`.warning\`, \`.danger\` or \`.success\`; \`page\` and \`phone\`, which take no label, so their title goes on a \`text.title\` line; and \`frame\`, whose label is a caption and whose direct buttons sit in that caption row. A \`card\` may also stand at the top level.
+
+| Kind | Directly inside | Variants | Label |
+| --- | --- | --- | --- |
+| \`text\` | root, dock, card, row | \`.muted\`, \`.strong\`, \`.title\`, \`.small\`, \`.red\`, \`.amber\`, \`.green\`, \`.blue\` | the text |
+| \`row\` | root, dock, card, table | one of \`.end\`, \`.between\`, \`.scroll\`; \`.head\` for a table's header row | none |
+| \`card\` | top level, root, dock, row | none; optional \`width=\` | none: it holds text, images and rows |
+| \`image\` | root, dock, card, row | \`.square\`, \`.round\`; optional \`width=\` | what it shows |
+| \`button\` | row, cell, frame | \`.primary\`, \`.danger\`, \`.link\`, \`.focus\` | the caption, or none when it holds an icon |
+| \`icon\` | root, dock, cell, button, option | \`.filled\` and the four colours | an exact kebab-case Tabler name, such as \`pin\` or \`dots-vertical\` |
+| \`input\`, \`select\` | root, dock, row | none; optional \`label=\` | the placeholder, or the chosen value |
+| \`toggle\` | root, dock, row | none | none: its choices are \`option\` lines, \`.current\` for the chosen one |
+| \`table\` | root, dock | none | none: its rows hold only \`cell\` lines |
+| \`cell\` | a table's row | \`.end\`; on header cells \`.sortable\`, \`.ascending\` or \`.descending\` | its text, or none |
+| \`chip\` | row, cell | \`.more\` for the count of the rest | the tag |
+| \`divider\` | dialog, page, frame, phone, dock | none | none |
+| \`dock\` | a phone, as its last child | none | none |
+
+Write \`icon.filled pin\`, not \`pin-filled\`. Use one colour per node and pair a coloured state with words. Give every table row the same number of cells, with an empty \`cell\` where a column has nothing.
+
+\`\`\`wireframe
+page
+  text.title All documents
+  input Search titles
+  row
+    toggle
+      option.current Documents
+      option Decisions
+    select label=Tag Any tag
+  table
+    row.head
+      cell.ascending Title
+      cell.end Changed
+      cell
+    row
+      cell Web UI system
+      cell.end 2 hours ago
+      cell
+        button.link
+          icon pin
+  row.end
+    text.muted 1–10 of 24
+    button Previous
+    button.primary Next
+\`\`\`
+
+\`\`\`wireframe
+banner.warning
+  icon archive
+  text Archived. Read-only and hidden from the document list.
+  row.end
+    button Restore
+    button.link.danger Delete…
+\`\`\`
+
+## Checking a wireframe
+
+Errors stop the drawing: tabs or odd indentation, a jump of more than one level, an indented first line, an unterminated quote, text after a closing quote, or an exceeded limit. Warnings still draw, but the block no longer says what you meant: an unknown kind, variant, attribute or icon, a label on a kind that takes none, or a node in the wrong place. The usual misplacements are a \`button\` outside a \`row\`, \`cell\` or \`frame\`, anything but a \`cell\` in a table's row, and a root inside another node. Fix both.
+
+MCP stores the source without checking it. The web editor lists each diagnostic with its line number. When nobody can open the editor, keep to the kinds and places above and report the wireframe as unchecked. The full primer, with every kind's drawing, phones, docks and each mistake with its diagnostic, ships as \`AUTHORING.md\` in \`@uberblick/wireframe\` 0.3.0.`;
+
 const data = `# Structured data and views
 
 A document can own named collections beside its prose. Each collection has one schema and identified whole JSON-object records. Collection names and record ids are non-empty well-formed Unicode strings; ids are unique within a collection and ordered by Unicode code point. Different collections and records merge independently, with eventual consistency and competing-write loss rather than distributed atomicity or compare-and-swap.
@@ -546,7 +632,7 @@ export const conceptTopics: readonly HelpTopic[] = [
   {
     id: "markdown",
     title: "Supported Markdown",
-    description: "Supported block and inline syntax, tables, content writes and Markdown export behavior.",
+    description: "Supported block and inline syntax, tables, embeds, content writes and Markdown export behavior.",
     text: markdown,
   },
   {
@@ -554,6 +640,12 @@ export const conceptTopics: readonly HelpTopic[] = [
     title: "Ablauf diagrams",
     description: "Reading, writing and editing flow and fan-out diagrams: placement, nodes, edges, legends and editing recipes.",
     text: ablauf,
+  },
+  {
+    id: "wireframe",
+    title: "Wireframes",
+    description: "Writing wireframe blocks: line syntax, kinds and where they go, quoting, examples and checking a block without the web editor.",
+    text: wireframe,
   },
   {
     id: "data",

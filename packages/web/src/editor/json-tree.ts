@@ -2,14 +2,16 @@
 import { Extension } from "@tiptap/core";
 import type { NodeViewRenderer, NodeViewRendererProps } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { AllSelection, Selection, TextSelection } from "@tiptap/pm/state";
+import { AllSelection, Plugin, PluginKey, Selection, TextSelection } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { NodeView } from "@tiptap/pm/view";
 import { formatJsonSource, parseJsonSource } from "@uberblick/schema";
 import type { JsonSourceNode, JsonSourceResult } from "@uberblick/schema";
 import { toast } from "sonner";
+import { ySyncPluginKey } from "y-prosemirror";
 import { endUndoCapture } from "./blocks.js";
 import {
-  blockCaption, carriesComment, chromeFilters, codeBlockChrome, copyButton, selectedBlock, sourceEditingPlugin, writeToClipboard,
+  blockCaption, carriesComment, chromeFilters, codeBlockChrome, copyButton, selectedBlock, writeToClipboard,
 } from "./source-chrome.js";
 import {
   ROW_PAGE, firstView, foldable, itemCount, jsonTreeRows, rootItem, subtreePaths,
@@ -20,6 +22,7 @@ import type { JsonTreeItem, JsonTreeRow } from "./json-tree-rows.js";
 const RENDER_DELAY = 200;
 /** Say the JSON is invalid only once typing has paused this long. */
 const NOTE_DELAY = 1500;
+const editingKey = new PluginKey<boolean>("jsonTreeEditing");
 
 /** What a reader opened, per block, for the life of the tab; never document state. */
 interface ViewState { open: Map<string, boolean>; wrapped: Set<string>; limit: number }
@@ -177,7 +180,7 @@ function jsonTreeChrome(source: () => string) {
   return { dom, panel, tree, duplicates, edit, sourceFrame, header: header.row, done, contentDOM, note };
 }
 
-/** ARIA tree keys: arrows move and fold, Home and End jump, Enter and Space toggle. */
+/** ARIA tree keys: arrows move and fold; Enter and Space toggle folds or string wrapping. */
 function treeKeys(tree: HTMLElement, toggle: (path: string, subtree: boolean) => void, focused: (path: string) => void) {
   return (event: KeyboardEvent): void => {
     const elements = [...tree.querySelectorAll<HTMLElement>(".ub-json-row[role=treeitem]")];
@@ -213,7 +216,7 @@ function treeKeys(tree: HTMLElement, toggle: (path: string, subtree: boolean) =>
         break;
       case "Enter":
       case " ":
-        if (expanded !== null) toggle(path, event.altKey);
+        toggle(path, event.altKey);
         break;
       default: return;
     }
@@ -225,25 +228,34 @@ function treeKeys(tree: HTMLElement, toggle: (path: string, subtree: boolean) =>
 function followingCopyValue(tree: HTMLElement, itemAt: (path: string) => JsonTreeItem | null): void {
   const copyValue = button("Copy value", "Copy this value");
   copyValue.className = "ub-json-copy-value";
-  copyValue.tabIndex = -1;
+  let copying = false;
   const place = (row: HTMLElement | null): void => {
     if (row === null || row.dataset.form === "close" || row.dataset.path === undefined) { copyValue.remove(); return; }
     copyValue.dataset.path = row.dataset.path;
     if (copyValue.parentElement !== row) row.append(copyValue);
   };
   tree.addEventListener("mouseover", (event) => {
+    if (document.activeElement === copyValue) return;
     place(event.target instanceof Element ? event.target.closest<HTMLElement>(".ub-json-row") : null);
   });
   tree.addEventListener("mouseleave", () => { if (!tree.contains(document.activeElement)) copyValue.remove(); });
   tree.addEventListener("focusin", (event) => {
     if (event.target instanceof HTMLElement && event.target.classList.contains("ub-json-row")) place(event.target);
   });
+  tree.addEventListener("focusout", (event) => {
+    // Selection-copy briefly focuses a textarea before restoring this button.
+    if (copying || (event.relatedTarget instanceof Node && tree.contains(event.relatedTarget))) return;
+    if (!tree.matches(":hover")) copyValue.remove();
+  });
   copyValue.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     const item = itemAt(copyValue.dataset.path ?? "");
     if (item === null) return;
-    void writeToClipboard(valueText(item)).then((copied) => {
+    copying = true;
+    void writeToClipboard(valueText(item), undefined, tree).then((copied) => {
+      copying = false;
+      if (!tree.contains(document.activeElement) && !tree.matches(":hover")) copyValue.remove();
       toast[copied ? "success" : "error"](copied ? "Value copied" : "Couldn't copy the value.", { id: "clipboard" });
     });
   });
@@ -264,7 +276,7 @@ function replaceSource(editor: NodeViewRendererProps["editor"], pos: number, nod
 function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): NodeView {
   let current: PMNode = node;
   let parsed: JsonSourceResult = parseJsonSource(current.textContent);
-  /** The last valid tree, kept while the text is invalid. */
+  /** The last valid tree, kept for the next typing pause. */
   let shown: { root: JsonTreeItem; defaults: Set<string>; duplicates: boolean } | null = null;
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
   let noteTimer: ReturnType<typeof setTimeout> | null = null;
@@ -274,15 +286,20 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
   const chrome = jsonTreeChrome(() => current.textContent);
   const { dom, tree, note } = chrome;
 
-  const editing = (): boolean => selectedBlock(editor.state, "code")?.pos === getPos();
+  const editing = (): boolean => editingKey.getState(editor.state) === true && selectedBlock(editor.state, "code")?.pos === getPos();
   const isOpen = (path: string): boolean => state.open.get(path) ?? shown?.defaults.has(path) ?? false;
+
+  const syncDisplay = (): void => {
+    const stale = shown !== null && (noteTimer !== null || editing());
+    dom.dataset.json = parsed.ok ? "valid" : stale ? "stale" : "invalid";
+  };
 
   const render = (): void => {
     if (parsed.ok && shown?.root.node !== parsed.value) {
       const root = rootItem(parsed.value);
       shown = { root, defaults: firstView(root), duplicates: parsed.duplicateKeys };
     }
-    dom.dataset.json = parsed.ok ? "valid" : shown === null ? "invalid" : "stale";
+    syncDisplay();
     chrome.duplicates.hidden = shown?.duplicates !== true;
     if (shown === null) { tree.replaceChildren(); return; }
     const hadFocus = tree.contains(document.activeElement);
@@ -297,13 +314,10 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
     if (hadFocus) focusable.focus({ preventScroll: true });
   };
 
-  const showNote = (): void => {
-    note.textContent = parsed.ok ? "" : `Not valid JSON: line ${parsed.line}, column ${parsed.column} (${parsed.message})`;
-  };
   const syncNote = (): void => {
-    // Typing is debounced into calm; an invalid block nobody is editing says so at once.
-    if (parsed.ok) note.textContent = "";
-    else if (!editing() && editor.isEditable) showNote();
+    // Local and remote text edits share the pause; initially invalid source has no pending edit.
+    note.textContent = parsed.ok || !editor.isEditable || noteTimer !== null ? ""
+      : `Not valid JSON: line ${parsed.line}, column ${parsed.column} (${parsed.message})`;
   };
   const reparse = (): void => {
     if (renderTimer !== null) clearTimeout(renderTimer);
@@ -347,9 +361,14 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
   };
   const toggle = (path: string, subtree: boolean): void => {
     const item = itemAt(path);
-    if (item === null || !foldable(item)) return;
-    const next = !isOpen(path);
-    for (const each of subtree ? subtreePaths(item) : [path]) state.open.set(each, next);
+    if (item === null) return;
+    if (item.type === "value" && item.node.kind === "string") {
+      if (!state.wrapped.delete(path)) state.wrapped.add(path);
+    } else {
+      if (!foldable(item)) return;
+      const next = !isOpen(path);
+      for (const each of subtree ? subtreePaths(item) : [path]) state.open.set(each, next);
+    }
     active = path;
     render();
   };
@@ -362,18 +381,26 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
     const path = row.dataset.path ?? "";
     active = path;
     if (row.dataset.form === "leaf" && target?.closest(".ub-json-string") != null) {
-      if (!state.wrapped.delete(path)) state.wrapped.add(path);
-      render();
+      toggle(path, false);
     } else if (row.dataset.form === "open" || row.dataset.form === "closed") toggle(path, event.altKey);
   });
   tree.addEventListener("keydown", treeKeys(tree, toggle, (path) => { active = path; }));
   followingCopyValue(tree, itemAt);
 
+  let wasEditing = false;
   const sync = (): void => {
+    const isEditing = editing();
+    if (wasEditing && !isEditing) {
+      if (renderTimer !== null) reparse();
+      // Leaving this view's source settles invalid text immediately.
+      if (!parsed.ok) { shown = null; render(); }
+    }
+    wasEditing = isEditing;
     codeBlockChrome.sync(current, dom);
     chrome.edit.hidden = !editor.isEditable;
     chrome.done.hidden = !editor.isEditable;
     dom.dataset.annotated = String(carriesComment(current));
+    syncDisplay();
     syncNote();
   };
   editor.on("transaction", sync);
@@ -396,7 +423,8 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
         noteTimer = setTimeout(() => {
           noteTimer = null;
           if (renderTimer !== null) reparse();
-          showNote();
+          syncDisplay();
+          syncNote();
         }, NOTE_DELAY);
       }
       sync();
@@ -415,5 +443,31 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
 
 export const JsonTreeBlocks = Extension.create({
   name: "uberblickJsonTreeBlocks",
-  addProseMirrorPlugins() { return [sourceEditingPlugin("code", "ub-json-tree-editing")]; },
+  addProseMirrorPlugins() {
+    return [new Plugin<boolean>({
+      key: editingKey,
+      state: {
+        init: () => false,
+        apply(transaction, editing, oldState, state) {
+          const block = selectedBlock(state, "code");
+          if (block?.node.attrs.language !== "json-tree") return false;
+          // Initial content and remote edits can put the default caret in this
+          // block; only a local selection or edit opens its source.
+          const sync = transaction.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined;
+          const textChanged = transaction.docChanged && block.node.textContent !== selectedBlock(oldState, "code")?.node.textContent;
+          return editing || (sync?.isChangeOrigin !== true && (transaction.selectionSet || textChanged));
+        },
+      },
+      props: {
+        decorations(state) {
+          if (editingKey.getState(state) !== true) return null;
+          const block = selectedBlock(state, "code");
+          if (block === null) return null;
+          return DecorationSet.create(state.doc, [Decoration.node(block.pos, block.pos + block.node.nodeSize, {
+            class: "ub-json-tree-editing",
+          })]);
+        },
+      },
+    })];
+  },
 });

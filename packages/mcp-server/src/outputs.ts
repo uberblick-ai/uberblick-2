@@ -195,8 +195,8 @@ const dataSummary = z.object({
 const revisionId = z.string().describe("Hub revision ID from list_revisions, distinct from page and block rev hashes.");
 
 /**
- * The SDK requires a root object; strictInput must enforce and advertise the
- * same branches through this superset.
+ * The SDK requires a root object; strictInput validates each mode through this
+ * advertised superset.
  */
 const getData = strictInput({
   uuid,
