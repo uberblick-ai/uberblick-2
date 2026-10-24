@@ -230,6 +230,10 @@ const RECOVERIES: Record<string, Recovery> = {
     recoveryClass: "manual",
     guidance: "Automatic revisions require a team hub. Use a workspace connected to a team hub before reading revisions.",
   },
+  decision_no_history: {
+    recoveryClass: "manual",
+    guidance: "Call get_doc for the topic UUID in topic, then read its inForce, pending, conflicts, predecessors and successors records; the topic's records are its history.",
+  },
   revisions_unreachable: {
     recoveryClass: "retry",
     guidance: "Call again once the hub is reachable; sync_status reports the connection state.",
@@ -482,6 +486,7 @@ const REVISION_FAILURE_CODES: Record<RevisionClientFailure, string> = {
   "sign-in-required": "revisions_sign_in_required",
   forbidden: "revisions_forbidden",
   deleted: "doc_deleted",
+  "decision-no-history": "decision_no_history",
   "revision-not-found": "revision_not_found",
   unsupported: "revisions_unsupported",
   "stale-state": "revision_stale_state",

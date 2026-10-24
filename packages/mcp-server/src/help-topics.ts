@@ -582,6 +582,7 @@ Failures are marked \`isError: true\` and omit structuredContent, so success-sch
 | \`revisions_sign_in_required\` | Run ub auth login, restart the MCP server, then repeat the read. |
 | \`revisions_forbidden\` | Ask a workspace maintainer to grant read access before repeating the read. |
 | \`revisions_unsupported\` | Ask the hub operator to update to a version that serves automatic revisions. |
+| \`decision_no_history\` | Decision records have no history. Read the topic's records with get_doc instead. |
 | \`revision_not_found\` | List this document's revisions again and select an ID belonging to it. |
 | \`revision_stale_state\` | Synchronize, read and review the current state before naming or restoring. |
 | \`revision_restore_outcome_unknown\` | Read list_revisions and get_doc before retrying a restore whose reply was lost. |
