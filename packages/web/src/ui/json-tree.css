@@ -76,10 +76,10 @@
 .ub-json-tree:where(:hover, :focus-within, [data-annotated="true"]) .ub-figure-toolbar { opacity: 1; pointer-events: auto; }
 @media (pointer: coarse) { .ub-json-tree .ub-figure-toolbar, .ub-json-copy-value { display: none; } }
 
-/* The source shows while editing, beside a comment, or when the text is not valid JSON. */
+/* Keep the last tree during typing; show invalid source after the pause. */
 .ub-json-tree-source-frame { display: none; }
-.ub-json-tree:is(.ub-json-tree-editing, [data-annotated="true"], :not([data-json="valid"])) > .ub-json-tree-source-frame { display: block; }
-.ub-json-tree:is(.ub-json-tree-editing, :not([data-json="valid"])) > .ub-json-tree-panel { display: none; }
+.ub-json-tree:is(.ub-json-tree-editing, [data-annotated="true"], [data-json="invalid"]) > .ub-json-tree-source-frame { display: block; }
+.ub-json-tree:is(.ub-json-tree-editing, [data-json="invalid"]) > .ub-json-tree-panel { display: none; }
 .ub-json-tree:not(.ub-json-tree-editing) .ub-json-tree-source-frame .ub-block-caption { display: none; }
 .ub-json-tree-source {
   margin: 0;
@@ -90,15 +90,14 @@
   font: var(--type-small-size)/1.7 var(--font-mono);
   white-space: pre;
 }
-/* One reserved line while editing, so the note never moves the content around it. */
+/* Reserve the line wherever live source is visible, including beside a comment. */
 .ub-json-tree-validity {
+  min-height: var(--type-caption-leading);
   margin: 0.3rem 0 0;
   color: var(--muted-foreground);
   font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
   overflow-wrap: anywhere;
 }
-.ub-json-tree-validity:empty { display: none; }
-.ub-json-tree-editing .ub-json-tree-validity { display: block; min-height: var(--type-caption-leading); }
 
 /* A changed json-tree block in the side-by-side comparison spans both columns. */
 .ub-revision-side-after .ProseMirror > .ub-json-compare {

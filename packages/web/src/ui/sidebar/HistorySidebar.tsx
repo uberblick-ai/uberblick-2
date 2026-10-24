@@ -27,7 +27,7 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
   const count = entries.length === 1 ? "1 revision" : `${entries.length} revisions`;
   return (
     <>
-      <SidebarHeader className="pr-12 [@media(any-pointer:coarse)]:pr-15 gap-1">
+      <SidebarHeader className="pr-12 [@media(any-pointer:coarse)]:pr-15 pb-1">
         <button
           type="button"
           className="ub-history-back flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 w-full items-center gap-2 rounded-(--radius-sm) border border-transparent bg-transparent px-2 py-1.5 text-left ub-type-ui font-[inherit] text-(--sidebar-row-foreground) cursor-pointer hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
@@ -36,29 +36,30 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
           <span className="grid size-7 shrink-0 place-items-center [&_svg]:size-4" aria-hidden="true"><PreviousIcon /></span>
           Back to now
         </button>
-        <div className="flex min-w-0 items-end justify-between gap-2 px-2 pt-2">
-          <div className="min-w-0">
-            <h2 className="m-0 ub-type-ui font-semibold text-sidebar-foreground">History</h2>
-            <p className="m-0 ub-type-caption text-(--sidebar-muted-foreground) truncate">
-              {title || "Untitled"}{history.entries === null ? "" : ` · ${count}`}
-            </p>
-          </div>
-          <fieldset className="ub-history-filter m-0 flex min-w-0 flex-none rounded-(--radius-sm) border-0 bg-(--sidebar-accent) p-0.5" aria-label="Show revisions">
-            {(["all", "named"] as const).map((value) => (
-              <button key={value} type="button" aria-pressed={filter === value}
-                className="border-0 rounded-[calc(var(--radius-sm)-2px)] bg-transparent px-2.5 py-1 ub-type-caption font-medium font-[inherit] text-(--sidebar-muted-foreground) cursor-pointer aria-pressed:bg-background aria-pressed:text-sidebar-foreground [@media(any-pointer:coarse)]:min-h-11"
-                onClick={() => setFilter(value)}>
-                {value === "all" ? "All" : "Named"}
-              </button>
-            ))}
-          </fieldset>
+      </SidebarHeader>
+      {/* Below the sidebar's own close control, so these use its full width. */}
+      <div className="flex min-w-0 shrink-0 flex-col gap-1 px-2 pb-2">
+        <div className="min-w-0 px-2">
+          <h2 className="m-0 ub-type-ui font-semibold text-sidebar-foreground">History</h2>
+          <p className="m-0 ub-type-caption text-(--sidebar-muted-foreground) truncate">
+            {title || "Untitled"}{history.entries === null ? "" : ` · ${count}`}
+          </p>
         </div>
+        <fieldset className="ub-history-filter mx-2 mt-1 mb-0 flex min-w-0 rounded-(--radius-sm) border-0 bg-(--sidebar-accent) p-0.5" aria-label="Show revisions">
+          {(["all", "named"] as const).map((value) => (
+            <button key={value} type="button" aria-pressed={filter === value}
+              className="flex-1 border-0 rounded-[calc(var(--radius-sm)-2px)] bg-transparent px-2.5 py-1 ub-type-caption font-medium font-[inherit] text-(--sidebar-muted-foreground) cursor-pointer aria-pressed:bg-background aria-pressed:text-sidebar-foreground [@media(any-pointer:coarse)]:min-h-11"
+              onClick={() => setFilter(value)}>
+              {value === "all" ? "All" : "Named"}
+            </button>
+          ))}
+        </fieldset>
         <label className="ub-history-collapse flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 cursor-pointer items-center justify-between gap-2 px-2 ub-type-caption text-(--sidebar-muted-foreground)">
           Collapse unchanged
           <input type="checkbox" role="switch" className="ub-history-switch" checked={history.collapseUnchanged} aria-checked={history.collapseUnchanged}
             onChange={(event) => history.setCollapseUnchanged(event.currentTarget.checked)} />
         </label>
-      </SidebarHeader>
+      </div>
       <SidebarScrollContent className="pb-2 [&>*]:shrink-0">
         {history.error !== null && (
           <div className="px-4 py-2 ub-type-caption text-(--sidebar-muted-foreground)" role="status">
@@ -82,7 +83,9 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
               {group.items.map(({ entry, index }) => {
                 const author = revisionAuthor(entry, index === entries.length - 1);
                 const time = revisionTime(entry);
-                const when = entry.endedAt === null ? "in progress" : time === null ? null : formatTimestamp(time, now);
+                // The newest entry is what the live document shows, even while its revision is still open.
+                const latest = index === 0;
+                const when = entry.endedAt === null || time === null ? null : formatTimestamp(time, now);
                 const name = entry.name?.text;
                 const current = index === selected;
                 const renamed = renamedFrom(entries, history.titles, index) !== null;
@@ -101,10 +104,11 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
                         <span className={`min-w-0 truncate ${name === undefined ? "ub-type-ui font-medium text-sidebar-foreground" : "ub-type-caption text-(--sidebar-muted-foreground)"}`}>
                           {author.name}{author.surface !== "" && <span className="font-normal text-(--sidebar-muted-foreground)"> {author.surface}</span>}
                         </span>
-                        {(when !== null || renamed) && (
+                        {(latest || when !== null || renamed) && (
                           <span className="ub-type-caption text-(--sidebar-muted-foreground)">
-                            {when === null ? null : typeof when === "string" ? when : <time dateTime={when.dateTime} title={when.title}>{when.label}</time>}
-                            {renamed && <span className="ub-history-renamed-tag">{when === null ? "renamed" : " · renamed"}</span>}
+                            {latest && "Current version"}{latest && when !== null && " · "}
+                            {when !== null && <time dateTime={when.dateTime} title={when.title}>{when.label}</time>}
+                            {renamed && <span className="ub-history-renamed-tag">{latest || when !== null ? " · renamed" : "renamed"}</span>}
                           </span>
                         )}
                       </span>

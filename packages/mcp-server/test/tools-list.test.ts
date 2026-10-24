@@ -46,6 +46,21 @@ it("keeps the model-facing tool catalog within its byte and description budgets"
   }
 });
 
+it("advertises flat schemas, with no root combinator a client could flatten away", async () => {
+  const rig = await startServer();
+  try {
+    const { tools } = await rig.client.listTools();
+    for (const { name, inputSchema, outputSchema } of tools) {
+      for (const schema of [inputSchema, outputSchema]) {
+        if (schema === undefined) continue;
+        expect(Object.keys(schema).filter((key) => ["oneOf", "anyOf", "allOf"].includes(key)), name).toEqual([]);
+      }
+    }
+  } finally {
+    await rig.close();
+  }
+});
+
 it("ends each tool-specific description with one complete, resolvable help pointer", async () => {
   const rig = await startServer();
   try {

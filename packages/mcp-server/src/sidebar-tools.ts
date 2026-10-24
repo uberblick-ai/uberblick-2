@@ -19,7 +19,7 @@ const indexArg = z
   .describe("Position, clamped into range. Omitted means last.");
 
 /**
- * One table validates and advertises each action; fields belonging to another
+ * One table validates each action; fields belonging to another
  * action must refuse rather than silently disappear.
  */
 const SIDEBAR_GROUP_MODES: readonly ToolMode[] = [

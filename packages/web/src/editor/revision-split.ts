@@ -11,7 +11,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { AllSelection, Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { EditorView } from "@tiptap/pm/view";
-import { compareJsonSources, compareRevisions } from "@uberblick/schema";
+import { canonicalDocumentUuid, compareJsonSources, compareRevisions, isExternalHref } from "@uberblick/schema";
 import type { RevisionBlockComparison, RevisionComparison, TextSpan } from "@uberblick/schema";
 import type * as Y from "yjs";
 import { AblaufBlocks } from "./ablauf.js";
@@ -42,6 +42,8 @@ export interface RevisionSideCell {
 
 export interface RevisionRow {
   kind: RevisionRowKind;
+  /** The row's place in the full comparison; a folded run's first row. */
+  at: number;
   /** The heading this row shows, for fold labels. */
   heading?: string;
   /** A folded run: the full model's first row and how many rows it hides. */
@@ -159,10 +161,11 @@ export function unchangedRuns(rows: readonly Pick<RevisionRow, "changed">[]): { 
   return runs.filter((run) => run.end > run.start);
 }
 
-function foldNode(run: number, count: number, headings: string): PMNode {
+function foldNode(run: number, count: number, headings: string, nodes: readonly PMNode[]): PMNode {
   const type = revisionSchema.nodes.revisionFold;
   if (type === undefined) throw new Error("Revision fold is missing");
-  return type.create({ run, count, headings });
+  const levels = nodes.filter((node) => node.type.name === "heading").map((node) => Number(node.attrs.level));
+  return type.create({ run, count, headings, headingLevel: levels.length === 0 ? null : Math.min(...levels) });
 }
 
 function sourceText(node: PMNode): string {
@@ -173,7 +176,7 @@ function sourceText(node: PMNode): string {
  * A changed json-tree block that is valid on both sides spans both columns: the
  * left keeps a placeholder the aligner pads, the right draws the comparison.
  */
-function jsonRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, newNode: PMNode | undefined):
+function jsonRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, newNode: PMNode | undefined, at: number):
   { row: RevisionRow; left: PMNode; right: PMNode } | null {
   if (oldNode === undefined || newNode === undefined || change.kind === "unchanged") return null;
   if (oldNode.type.name !== "code" || newNode.type.name !== "code") return null;
@@ -186,7 +189,7 @@ function jsonRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, n
   if (compare === undefined || placeholder === undefined) return null;
   return {
     row: {
-      kind: "changed", changed: true,
+      kind: "changed", at, changed: true,
       before: { labels: [], filler: false, spanned: true }, after: { labels: [], filler: false, spanned: true },
     },
     left: placeholder.create(),
@@ -196,7 +199,7 @@ function jsonRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, n
 
 /** One comparison entry as a row and the block each side shows for it. */
 function splitRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, newNode: PMNode | undefined,
-  comparison: RevisionComparison): { row: RevisionRow; left: PMNode; right: PMNode } {
+  comparison: RevisionComparison, at: number): { row: RevisionRow; left: PMNode; right: PMNode } {
   const fields = cellFields(change);
   const data = (node: PMNode | undefined): string[] => node === undefined ? [] : chartCollections(node, comparison).map((name) => `Data changed: ${name}`);
   const changedLabel = fields.length > 0 ? [`Changed: ${fields.join(", ")}`] : [];
@@ -207,6 +210,7 @@ function splitRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, 
   return {
     row: {
       kind,
+      at,
       ...(shown?.type.name === "heading" && shown.textContent !== "" ? { heading: shown.textContent } : {}),
       changed: kind !== "unchanged" || fields.length > 0 || change.spans.length > 0 || beforeLabels.length > 0 || afterLabels.length > 0,
       before: { labels: beforeLabels, filler: oldNode === undefined },
@@ -229,7 +233,7 @@ export function revisionSplitModel(before: Y.Doc, after: Y.Doc,
     const oldNode = change.beforeIndex === undefined ? undefined : oldNodes[change.beforeIndex];
     const newNode = change.afterIndex === undefined ? undefined : newNodes[change.afterIndex];
     if (oldNode === undefined && newNode === undefined) throw new Error("Revision comparison refers to missing content");
-    const split = jsonRow(change, oldNode, newNode) ?? splitRow(change, oldNode, newNode, comparison);
+    const split = jsonRow(change, oldNode, newNode, rows.length) ?? splitRow(change, oldNode, newNode, comparison, rows.length);
     rows.push(split.row);
     left.push(split.left);
     right.push(split.right);
@@ -254,10 +258,10 @@ function foldRows(rows: readonly RevisionRow[], left: readonly PMNode[], right: 
     if (current === undefined || index < current.start) { shown.rows.push(row); shown.left.push(l); shown.right.push(r); continue; }
     const count = current.end - current.start + 1;
     const headings = rows.slice(current.start, current.end + 1).flatMap((entry) => entry.heading === undefined ? [] : [entry.heading]).join(", ");
-    shown.rows.push({ kind: "folded", changed: false, fold: { run: current.start, count },
+    shown.rows.push({ kind: "folded", at: current.start, changed: false, fold: { run: current.start, count },
       before: { labels: [], filler: false }, after: { labels: [], filler: false } });
-    shown.left.push(foldNode(current.start, count, headings));
-    shown.right.push(foldNode(current.start, count, headings));
+    shown.left.push(foldNode(current.start, count, headings, left.slice(current.start, current.end + 1)));
+    shown.right.push(foldNode(current.start, count, headings, right.slice(current.start, current.end + 1)));
     index = current.end;
     run += 1;
   }
@@ -266,15 +270,40 @@ function foldRows(rows: readonly RevisionRow[], left: readonly PMNode[], right: 
 
 const MARK: Record<RevisionRowKind, string> = { unchanged: "", changed: "~", added: "+", removed: "−", folded: "" };
 
-/** Row widgets: an end spacer the aligner sizes, and the captions above each block. */
-function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide): Extension {
+/** Side-scoped interaction and row widgets: captions and the spacers the aligner sizes. */
+function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docLinks: DocLinkContext | null): Extension {
   return Extension.create({
     name: "revisionSide",
     priority: 2000,
+    addKeyboardShortcuts() {
+      return {
+        "Mod-a": () => this.editor.commands.selectAll(),
+        Enter: () => {
+          const { selection } = this.editor.state;
+          if (!selection.empty) return false;
+          const marks = selection.$from.marks();
+          const docId = canonicalDocumentUuid(marks.find((mark) => mark.type.name === "docLink")?.attrs.docId);
+          if (docId !== null && docLinks !== null) {
+            if (docLinks.lookup(docId).state !== "deleted") docLinks.open(docId);
+            return true;
+          }
+          const href = marks.find((mark) => mark.type.name === "link")?.attrs.href;
+          if (!isExternalHref(href)) return false;
+          window.open(href, "_blank", "noopener,noreferrer");
+          return true;
+        },
+      };
+    },
     addProseMirrorPlugins() {
       return [new Plugin({
         filterTransaction: (transaction) => !transaction.docChanged,
         props: {
+          handleDOMEvents: {
+            // Leave focus navigation and fold-button activation to the browser.
+            keydown: (_view, event) => event.key === "Tab" ||
+              event.target instanceof Element && event.target.closest(".ub-revision-fold-button") !== null,
+            keypress: (_view, event) => event.target instanceof Element && event.target.closest(".ub-revision-fold-button") !== null,
+          },
           transformCopied: (slice) => new Slice(copiedContent(slice.content), slice.openStart, slice.openEnd),
           decorations(state) {
             const decorations: Decoration[] = [];
@@ -290,13 +319,15 @@ function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide): Ext
                 const start = window.document.createElement("div");
                 start.className = "ub-revision-row-start";
                 start.dataset.row = String(index);
+                // Stable across folding, so motion can match a row before and after.
+                start.dataset.key = `${row.kind === "folded" ? "fold" : "row"}-${row.at}`;
                 if (cell.labels.length > 0) {
                   const label = start.appendChild(window.document.createElement("span"));
                   label.className = "ub-revision-fields";
                   label.textContent = cell.labels.join(" · ");
                 }
                 return start;
-              }, { side: -1, key: `revision-row-start:${index}:${cell.labels.join("|")}`, ignoreSelection: true }));
+              }, { side: -1, key: `revision-row-start:${index}:${row.kind}:${row.at}:${cell.labels.join("|")}`, ignoreSelection: true }));
               decorations.push(Decoration.widget(pos + node.nodeSize, () => {
                 const end = window.document.createElement("div");
                 end.className = `ub-revision-row-end${cell.filler ? " ub-revision-row-filler" : ""}`;
@@ -321,17 +352,23 @@ function sideEditor(element: Element, content: JSONContent, data: Y.Doc, rows: r
     element,
     extensions: [
       // Each side binds its charts to its own document; no predecessor override is needed.
-      ...revisionPalette(data), sidePresentation(rows, side),
+      ...revisionPalette(data), sidePresentation(rows, side, docLinks),
       CodeHighlighting, ListBlocks, CardBlocks, TerminalBlocks, ChartBlocks, WireframeBlocks, AblaufBlocks,
       DocLinks.configure({ context: docLinks }), ExternalLinks,
       GitHubLinks.configure({ settings: workspaceSettings }), InlineIcons, ToggleHeadings,
     ],
     content,
+    // Native editing hosts contain selection; Tiptap's read-only renderers and transaction guard prevent editing.
     editable: false,
+    enableCoreExtensions: { editable: false },
+    editorProps: {
+      editable: () => true,
+      attributes: { role: "textbox", "aria-label": side === "before" ? "Before this revision" : "This revision", "aria-readonly": "true", "aria-multiline": "true", inputmode: "none" },
+      handleDOMEvents: { beforeinput: (_view, event) => { event.preventDefault(); return true; } },
+    },
     enableContentCheck: true,
     injectCSS: false,
   });
-  editor.setOptions({ editorProps: { attributes: { "aria-label": side === "before" ? "Before this revision" : "This revision" } } });
   // A default text caret in the first chart would open its source on arrival.
   editor.view.dispatch(editor.state.tr.setSelection(new AllSelection(editor.state.doc)));
   return editor;

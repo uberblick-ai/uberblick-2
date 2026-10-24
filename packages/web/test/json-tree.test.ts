@@ -91,6 +91,39 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); });
 
 describe("JSON tree block", () => {
+  it("keeps a first-block tree closed to source until a local edit, across remote updates", () => {
+    const doc = new Y.Doc();
+    const id = appendBlock(doc, { type: "code", language: "json-tree", text: '{"a":1}' });
+    const { editor, element } = mountEditor(doc);
+    expect(tree(element).classList.contains("ub-json-tree-editing")).toBe(false);
+    editBlock(doc, id, '{"a":1}', '{"a":2}');
+    vi.advanceTimersByTime(200);
+    expect(tree(element).classList.contains("ub-json-tree-editing")).toBe(false);
+    button(element, "Edit JSON").click();
+    expect(tree(element).classList.contains("ub-json-tree-editing")).toBe(true);
+    editBlock(doc, id, '{\n  "a": 2\n}', '{\n  "a": 3\n}');
+    vi.advanceTimersByTime(200);
+    expect(tree(element).classList.contains("ub-json-tree-editing")).toBe(true);
+    button(element, "Done editing JSON").click();
+    expect(tree(element).classList.contains("ub-json-tree-editing")).toBe(false);
+    editor.destroy();
+  });
+
+  it("opens invalid stored first-block source when typing at the default caret", () => {
+    const doc = new Y.Doc();
+    appendBlock(doc, { type: "code", language: "json-tree", text: '{"a":}' });
+    const { editor, element } = mountEditor(doc);
+    const note = tree(element).querySelector<HTMLElement>(".ub-json-tree-validity");
+    expect(note?.textContent).toContain("Not valid JSON");
+    typeText(editor, " ");
+    expect(tree(element).classList.contains("ub-json-tree-editing")).toBe(true);
+    vi.advanceTimersByTime(200);
+    expect(note?.textContent).toBe("");
+    vi.advanceTimersByTime(1300);
+    expect(note?.textContent).toContain("Not valid JSON");
+    editor.destroy();
+  });
+
   it("draws json-tree code as rows with literals as written and leaves json code alone", () => {
     const fix = fixture();
     expect(tree(fix.element).dataset.json).toBe("valid");
@@ -177,6 +210,8 @@ describe("JSON tree block", () => {
     expect(tree(fix.element).dataset.json).toBe("stale");
     expect(note?.textContent).toBe("");
     vi.advanceTimersByTime(600);
+    expect(tree(fix.element).dataset.json).toBe("stale");
+    expect(tree(fix.element).classList.contains("ub-json-tree-editing")).toBe(true);
     expect(note?.textContent).toMatch(/^Not valid JSON: line 3, column 1/);
     typeText(fix.editor, '"b": 2');
     vi.advanceTimersByTime(200);
@@ -189,10 +224,85 @@ describe("JSON tree block", () => {
     fix.editor.destroy();
   });
 
-  it("shows invalid stored text as code, with the note for editors", () => {
-    const fix = fixture('{"a": }');
+  it.each([true, false])("keeps the last tree during remote typing, then shows invalid source when editable=%s", (editable) => {
+    const valid = '{\n  "a": 1\n}';
+    const firstInvalid = '{\n  "a": 1,\n}';
+    const secondInvalid = '{\n  "a": 1, \n}';
+    const thirdInvalid = '{\n  "a": 1,  \n}';
+    const fix = fixture(valid);
+    fix.editor.setEditable(editable);
+    const before = rowTexts(fix.element);
+    const note = tree(fix.element).querySelector<HTMLElement>(".ub-json-tree-validity");
+    editBlock(fix.doc, fix.id, valid, firstInvalid);
+    vi.advanceTimersByTime(200);
+    expect(tree(fix.element).dataset.json).toBe("stale");
+    expect(tree(fix.element).classList.contains("ub-json-tree-editing")).toBe(false);
+    expect(rowTexts(fix.element)).toEqual(before);
+    expect(note?.textContent).toBe("");
+
+    vi.advanceTimersByTime(800);
+    editBlock(fix.doc, fix.id, firstInvalid, secondInvalid);
+    vi.advanceTimersByTime(1499);
+    expect(tree(fix.element).dataset.json).toBe("stale");
+    expect(rowTexts(fix.element)).toEqual(before);
+    expect(note?.textContent).toBe("");
+    vi.advanceTimersByTime(1);
     expect(tree(fix.element).dataset.json).toBe("invalid");
-    expect(tree(fix.element).querySelector(".ub-json-tree-validity")?.textContent).toMatch(/^Not valid JSON: line 1, column 7/);
+    expect(tree(fix.element).querySelector(".ub-json-tree-source")?.textContent).toBe(secondInvalid);
+    if (editable) expect(note?.textContent).toMatch(/^Not valid JSON: line 3, column 1/);
+    else expect(note?.textContent).toBe("");
+
+    editBlock(fix.doc, fix.id, secondInvalid, thirdInvalid);
+    expect(tree(fix.element).dataset.json).toBe("stale");
+    expect(note?.textContent).toBe("");
+    vi.advanceTimersByTime(1499);
+    expect(tree(fix.element).dataset.json).toBe("stale");
+    expect(rowTexts(fix.element)).toEqual(before);
+    expect(note?.textContent).toBe("");
+    vi.advanceTimersByTime(1);
+    expect(tree(fix.element).dataset.json).toBe("invalid");
+    expect(tree(fix.element).querySelector(".ub-json-tree-source")?.textContent).toBe(thirdInvalid);
+    if (editable) expect(note?.textContent).toMatch(/^Not valid JSON: line 3, column 1/);
+    else expect(note?.textContent).toBe("");
+    vi.advanceTimersByTime(10_000);
+    expect(tree(fix.element).dataset.json).toBe("invalid");
+
+    editBlock(fix.doc, fix.id, thirdInvalid, '{\n  "a": 2\n}');
+    vi.advanceTimersByTime(200);
+    expect(tree(fix.element).dataset.json).toBe("valid");
+    expect(rowTexts(fix.element)).toContain('"a": 2');
+    expect(note?.textContent).toBe("");
+    fix.editor.destroy();
+  });
+
+  it.each(["Done", "selection leaving"])("shows invalid source after %s ends local editing", (exit) => {
+    const fix = fixture('{"a": 1}');
+    button(fix.element, "Edit JSON").click();
+    fix.editor.commands.setTextSelection(fix.editor.state.selection.from + '{\n  "a": 1'.length);
+    typeText(fix.editor, ",");
+    vi.advanceTimersByTime(200);
+    expect(tree(fix.element).dataset.json).toBe("stale");
+    if (exit === "Done") button(fix.element, "Done editing JSON").click();
+    else fix.editor.commands.setTextSelection(1);
+    expect(tree(fix.element).classList.contains("ub-json-tree-editing")).toBe(false);
+    expect(tree(fix.element).dataset.json).toBe("invalid");
+    expect(tree(fix.element).querySelector(".ub-json-tree-source")?.textContent).toBe('{\n  "a": 1,\n}');
+    expect(blockText(fix.editor, fix.id)).toBe('{\n  "a": 1,\n}');
+    fix.editor.destroy();
+  });
+
+  it.each([true, false])("shows invalid stored text as code with an editor-only note when editable=%s", (editable) => {
+    const fix = fixture('{"a": }');
+    fix.editor.setEditable(editable);
+    expect(tree(fix.element).dataset.json).toBe("invalid");
+    expect(rowTexts(fix.element)).toEqual([]);
+    expect(tree(fix.element).querySelector(".ub-json-tree-source")?.textContent).toBe('{"a": }');
+    const note = tree(fix.element).querySelector<HTMLElement>(".ub-json-tree-validity");
+    if (editable) expect(note?.textContent).toMatch(/^Not valid JSON: line 1, column 7/);
+    else expect(note?.textContent).toBe("");
+    vi.advanceTimersByTime(1500);
+    if (editable) expect(note?.textContent).toMatch(/^Not valid JSON: line 1, column 7/);
+    else expect(note?.textContent).toBe("");
     fix.editor.destroy();
   });
 
@@ -209,6 +319,21 @@ describe("JSON tree block", () => {
     await vi.waitFor(() => expect(written).toEqual(['{\n  "tokens": 9007199254740993,\n  "price": 1.50\n}']));
     fix.editor.destroy();
     Reflect.deleteProperty(navigator, "clipboard");
+  });
+
+  it("drops Copy value when focus leaves the tree", async () => {
+    const fix = fixture();
+    const limits = row(fix.element, ".limits");
+    limits.focus();
+    limits.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    expect(tree(fix.element).querySelector(".ub-json-copy-value")).not.toBeNull();
+    row(fix.element, ".name").focus();
+    await Promise.resolve();
+    expect(tree(fix.element).querySelector(".ub-json-copy-value")).not.toBeNull();
+    button(fix.element, "Edit JSON").focus();
+    await Promise.resolve();
+    expect(tree(fix.element).querySelector(".ub-json-copy-value")).toBeNull();
+    fix.editor.destroy();
   });
 
   it("moves and folds with the keyboard", () => {
