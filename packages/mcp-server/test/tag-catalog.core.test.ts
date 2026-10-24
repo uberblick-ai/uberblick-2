@@ -10,7 +10,7 @@ import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
 const AUTH = EXAMPLE_TAGS[0];
-const MCP = EXAMPLE_TAGS[2];
+const MCP = EXAMPLE_TAGS.find((tag) => tag.name === "mcp")!;
 const OFF_CATALOG = "3f5c0b1e-6f6a-4a2b-9c1d-0e7a5b3c9d21";
 
 async function local(): Promise<Rig> {

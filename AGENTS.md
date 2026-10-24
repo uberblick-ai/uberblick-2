@@ -64,8 +64,8 @@ permissions or policy.
   maintain or admin access when naming who decides, approves or answers.
 - **Corpus context:** discover `ub` command intent through the current tag
   catalog and purpose-based search. These pages describe the intended state, so
-  check the code for what ships. The corpus holds no agent workflow or
-  editorial contract; the local protocols govern delivery.
+  check the code for what ships. The corpus holds editorial guidance; the
+  local protocols govern agent workflow and delivery.
 - **MCP route:** use the registered `uberblick` server (`ub mcp serve` through
   mise, from `.mcp.json`).
 - **Commands:** `.agents/development.md`.
@@ -141,10 +141,10 @@ A pointer is a route to the source, not a substitute for reading it.
 - **Review or integrate:** `.agents/protocols/delivery-policy.md`, then
   `.agents/protocols/review-protocol.md` or `.agents/protocols/integration.md`.
 - **Edit corpus:** update the owning document rather than copying its content
-  into repository instructions. Write and rewrite pages by
-  `.agents/protocols/corpus-writing.md`: product intent, not technical
-  documentation; start small; rewrite, never append. Decision-record prose may
-  cite GitHub items. Corpus edits
+  into repository instructions. Write and rewrite pages using the `Writing pages`
+  guidance page, discovered by purpose through
+  [.agents/protocols/corpus-writing.md](.agents/protocols/corpus-writing.md).
+  Decision-record prose may cite GitHub items. Corpus edits
   must stay within recorded authorization: update descriptions of delivered
   behavior, but do not weaken a guarantee or expand agent authority through a
   doc edit. An unsettled change to those commitments requires a maintainer decision.
