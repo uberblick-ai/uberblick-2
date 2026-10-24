@@ -7,7 +7,7 @@ updating the client and the hub.
 
 ## v0.4.10 — 2026-10-24
 
-Document history on team hubs: browse every revision, compare it side by side, name reviewed states, restore an earlier version and share a link to any view. Also sync protocol 8 with permanent deletion of archived decision topics, and JSON trees.
+Document history on team hubs (browse every revision, compare it side by side, name reviewed states, restore an earlier version and link to any view), sync protocol 8 with permanent deletion of archived decision topics, JSON trees, and an emoji and icon picker.
 
 ### Breaking
 
@@ -19,10 +19,11 @@ Document history on team hubs: browse every revision, compare it side by side, n
 - Each revision is compared side by side with the one before it: Before on the left, After on the right, changed words marked, added and removed blocks opposite a hatched gap. Collapse unchanged folds the runs nobody touched, Previous and Next change jump between edits, and an overview ruler maps the whole comparison (#2224, #2225, #2226).
 - Name a reviewed state ("Reviewed by legal"), then compare with Changes since this name. Only the person who named a revision renames or removes the name (#2183, #2223).
 - Restore this version brings a document's title, blocks and data back to an earlier revision as a new revision on top. History stays intact, comments and tags stay put, and restoring refuses if the document changed since you opened history (#2286).
-- Every history view has its own address, so a link to a revision or a comparison shows the same Before and After later, and Back and Forward retrace your steps (#2289).
+- Every history view has its own address, so a link keeps pointing at the same revisions, and Back and Forward retrace your steps. A revision still open for edits can change until it closes; a closed one always shows the same content (#2289).
 - MCP reads and names history: `list_revisions`, `get_revision`, `name_revision`, `restore_revision`, and `get_data` at a revision (#2165, #2183, #2286).
 - Permanently delete an archived decision topic with all its records: Delete topic… on the archived banner, or MCP `delete_doc({uuid, topic: true})`. Single records still can't be deleted on their own (#2170).
 - Code blocks in the `json-tree` language draw as a foldable JSON tree, with a full-screen viewer that searches keys and values. In history, a changed JSON tree is compared row by row with moves and type changes marked (#2236, #2237, #2238, #2240).
+- Typing a colon and two letters opens a picker of matching emoji and Uberblick icons (#2156).
 - A decision record can relate to more than one page (#2169).
 - After a search finds nothing, the MCP server asks whether to create the missing page instead of guessing (#2176).
 - MCP help has a wireframe topic (#2210).
