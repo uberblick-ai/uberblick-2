@@ -132,6 +132,7 @@ test("legacy decision dates stay calendar dates west of UTC at every decision ti
   });
   const peer = await legacyDecisionPeer(harness(), current.uuid);
   try {
+    await expect.poll(() => getMetaMap(peer.doc).get("decidedAt")).toBe("2026-10-04T12:00:00.000Z");
     getMetaMap(peer.doc).set("decidedAt", "2026-10-24");
     peer.decide("decided");
     await expectMcp(() => writer.call<{ decidedAt?: string }>("get_doc", { uuid: current.uuid }), (stored) => {

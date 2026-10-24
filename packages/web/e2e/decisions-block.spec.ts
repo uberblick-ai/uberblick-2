@@ -227,11 +227,13 @@ for (const touch of [false, true]) {
     const alpha = await create(writer, alphaQuestion, "The cached answer is deliberately long enough to extend beyond a single line in the compact block, and the remainder stays available on the topic page.", {
       kind: "decision", status: "decided", related: owner.uuid, answer: recordedAnswer,
     });
+    const zuluAnswer = answer("bk-one");
     const zulu = await create(writer, "Zulu settled question", "A second settled answer.", {
-      kind: "decision", status: "decided", related: owner.uuid, answer: answer("bk-one"),
+      kind: "decision", status: "decided", related: owner.uuid, answer: zuluAnswer,
     });
     const legacy = await legacyDecisionPeer(harness(), zulu.uuid);
     try {
+      await expect.poll(() => getMetaMap(legacy.doc).get("decidedAt")).toBe(zuluAnswer.when);
       getMetaMap(legacy.doc).set("decidedAt", "An unparseable recorded date");
       legacy.decide("decided");
       await expectMcp(() => writer.call<{ decidedAt?: string }>("get_doc", { uuid: zulu.uuid }), (stored) => {
