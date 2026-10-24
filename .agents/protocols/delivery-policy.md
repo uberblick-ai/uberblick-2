@@ -7,10 +7,10 @@ owns operational authority only. `integration.md` holds how the gates run, and
 
 ## Decision records
 
-Use bundled MCP lifecycle help as the authority for when to create a decision
-record and how to write its answer: `get_help({topic: "lifecycle"})` or
-`uberblick://help/lifecycle`, sections "When to create a decision record" and
-"Decision answers and topics". Discover existing topics before proposing a new
+Use bundled MCP decisions help as the authority for when to create a decision
+record and how to write its answer: `get_help({topic: "decisions"})` or
+`uberblick://help/decisions`, sections "When to create one", "Topics and
+titles" and "Writing the answer". Discover existing topics before proposing a new
 one. Keep task-local reasoning in the issue or PR; code comments follow
 [AGENTS.md's comment rule](../../AGENTS.md#find-the-right-authority).
 
@@ -23,7 +23,7 @@ integrator moves that first record to `decided` after merge without `answer`,
 recording an agent stance; a topic reserved to a person stays `open` until
 their answer. This timing route changes neither the decision threshold nor
 required maintainer approval where the topic is reserved to a person.
-Local protocols own this authority. Discover relevant live decision records and lifecycle guidance
+Local protocols own this authority. Discover relevant live decision records and decision guidance
 by purpose under [AGENTS.md](../../AGENTS.md#read-for-the-action); use installed MCP
 schemas for stance, answer, rejection and topic-resolution calls and refusals.
 Missing required guidance does not grant authority; stop the dependent decision.
