@@ -309,13 +309,10 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
     if (hadFocus) focusable.focus({ preventScroll: true });
   };
 
-  const showNote = (): void => {
-    note.textContent = parsed.ok ? "" : `Not valid JSON: line ${parsed.line}, column ${parsed.column} (${parsed.message})`;
-  };
   const syncNote = (): void => {
-    // Typing is debounced into calm; an invalid block nobody is editing says so at once.
-    if (parsed.ok) note.textContent = "";
-    else if (!editing() && editor.isEditable) showNote();
+    // Local and remote text edits share the pause; initially invalid source has no pending edit.
+    note.textContent = parsed.ok || !editor.isEditable || noteTimer !== null ? ""
+      : `Not valid JSON: line ${parsed.line}, column ${parsed.column} (${parsed.message})`;
   };
   const reparse = (): void => {
     if (renderTimer !== null) clearTimeout(renderTimer);
@@ -385,7 +382,15 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
   tree.addEventListener("keydown", treeKeys(tree, toggle, (path) => { active = path; }));
   followingCopyValue(tree, itemAt);
 
+  let wasEditing = false;
   const sync = (): void => {
+    const isEditing = editing();
+    if (wasEditing && !isEditing) {
+      if (renderTimer !== null) reparse();
+      // Leaving this view's source settles invalid text; remote typing keeps its last tree.
+      if (!parsed.ok) { shown = null; render(); }
+    }
+    wasEditing = isEditing;
     codeBlockChrome.sync(current, dom);
     chrome.edit.hidden = !editor.isEditable;
     chrome.done.hidden = !editor.isEditable;
@@ -412,7 +417,7 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
         noteTimer = setTimeout(() => {
           noteTimer = null;
           if (renderTimer !== null) reparse();
-          showNote();
+          syncNote();
         }, NOTE_DELAY);
       }
       sync();

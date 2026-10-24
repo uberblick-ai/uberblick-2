@@ -1,6 +1,6 @@
 /** JSON trees are view chrome over ordinary code source, read and edited through the production replica. */
 import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
@@ -36,6 +36,21 @@ async function treeDoc(session: McpSession, title: string, text: string): Promis
 async function codeText(session: McpSession, uuid: string): Promise<string | undefined> {
   const result = await session.call<{ blocks: { type: string; text: string }[] }>("get_doc", { uuid });
   return result.blocks.find((block) => block.type === "code")?.text;
+}
+
+async function rewriteTree(session: McpSession, uuid: string, text: string): Promise<void> {
+  const doc = await session.call<{ blocks: { id: string; text: string; rev: string }[] }>("get_doc", { uuid });
+  const block = doc.blocks[0];
+  if (block === undefined) throw new Error("e2e: JSON tree document has no block");
+  await session.call("edit_block", { uuid, block_id: block.id, rev: block.rev, old_text: block.text, new_text: text });
+}
+
+async function authoredText(source: Locator): Promise<string> {
+  return source.evaluate(element => {
+    const copy = element.cloneNode(true) as HTMLElement;
+    for (const cursor of copy.querySelectorAll(".ProseMirror-yjs-cursor")) cursor.remove();
+    return copy.textContent ?? "";
+  });
 }
 
 function row(page: Page, path: string) {
@@ -77,6 +92,57 @@ test("an existing first-block tree opens as a tree, and Edit and Done format the
   await expect(row(page, ".limits")).toHaveAttribute("aria-expanded", "false");
   await expectMcp(() => codeText(session, uuid), (text) => { expect(text).toBe(FORMATTED); });
 });
+
+for (const annotated of [false, true]) {
+  test(`remote invalid edits retain the tree and debounce validation${annotated ? " beside a comment" : ""}`, async ({ browser }) => {
+    const session = writer();
+    const valid = '{\n  "a": 1\n}';
+    const invalid = '{\n  "a": 1,\n}';
+    const uuid = await treeDoc(session, "JSON tree remote validation", valid);
+    if (annotated) {
+      const doc = await session.call<{ blocks: { id: string }[] }>("get_doc", { uuid });
+      await session.call("annotate", { uuid, block_id: doc.blocks[0]?.id, start: 4, end: 5, text: "Keep this key." });
+    }
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      beforeNavigate: async loading => { await loading.clock.install(); },
+    });
+    const block = page.locator(".ub-json-tree");
+    const source = page.locator(".ub-json-tree-source");
+    const note = page.locator(".ub-json-tree-validity");
+    const tree = page.getByRole("tree", { name: "JSON tree" });
+    await expect(tree).toBeVisible();
+    await expect(block).not.toHaveClass(/ub-json-tree-editing/);
+    await page.clock.pauseAt(new Date(Date.now() + 1_000));
+    const height = await block.evaluate(element => element.getBoundingClientRect().height);
+
+    await rewriteTree(session, uuid, invalid);
+    await expect.poll(() => authoredText(source)).toBe(invalid);
+    await page.clock.runFor(1_000);
+    await expect(block).toHaveAttribute("data-json", "stale");
+    await expect(tree).toBeVisible();
+    await expect(row(page, ".a")).toContainText('"a": 1');
+    await expect(note).toHaveText("");
+    if (!annotated) await expect(source).toBeHidden();
+
+    await rewriteTree(session, uuid, invalid.replace("1,", "1, "));
+    await expect.poll(() => authoredText(source)).toBe(invalid.replace("1,", "1, "));
+    await page.clock.runFor(1_499);
+    await expect(note).toHaveText("");
+    await page.clock.runFor(1);
+    await expect(note).toContainText("Not valid JSON: line 3, column 1");
+    await expect(tree).toBeVisible();
+    if (annotated) await expect(note).toBeVisible();
+    expect(await block.evaluate(element => element.getBoundingClientRect().height)).toBe(height);
+
+    await rewriteTree(session, uuid, valid.replace("1", "2"));
+    await expect.poll(() => authoredText(source)).toBe(valid.replace("1", "2"));
+    await page.clock.runFor(200);
+    await expect(block).toHaveAttribute("data-json", "valid");
+    await expect(row(page, ".a")).toContainText('"a": 2');
+    await expect(note).toHaveText("");
+    expect(await block.evaluate(element => element.getBoundingClientRect().height)).toBe(height);
+  });
+}
 
 test("keyboard focus reaches Copy value and reveals a truncated string while preserving tree navigation", async ({ browser }) => {
   const session = writer();
