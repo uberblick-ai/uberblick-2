@@ -2377,7 +2377,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
     expect(Number.parseFloat(await paintedIn(trigger, `border-${edge}-width`))).toBe(0);
   }
 
-  // Five entries is under the threshold, so the panel is a list: no field, and
+  // The seeded catalog is under the threshold, so the panel is a list: no field, and
   // the keyboard enters the list itself.
   await trigger.focus();
   await trigger.press("Enter");
@@ -2393,7 +2393,8 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
     separation(await paintedIn(first, "background-color"), panelFill),
   ).toBeGreaterThan(0.02);
 
-  // A comfortable list rather than a narrow box.
+  // A comfortable list rather than a narrow box. Each name fits its row even
+  // when the panel scrolls to reach entries below its visible area.
   const comfortableList = () => page.locator(".ub-tag-picker-panel").evaluate((panel) => {
     const box = panel.getBoundingClientRect();
     return {
@@ -2407,7 +2408,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
         const row = option.getBoundingClientRect();
         return lines.length === 1 && lines.every((line) =>
           line.left >= Math.max(row.left, box.left) && line.right <= Math.min(row.right, box.right) &&
-          line.top >= Math.max(row.top, box.top) && line.bottom <= Math.min(row.bottom, box.bottom),
+          line.top >= row.top && line.bottom <= row.bottom,
         ) && name.scrollWidth <= name.clientWidth;
       }),
     };
@@ -2451,7 +2452,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   expect(oklab(fieldFill).L).toBeLessThanOrEqual(oklab(panel).L);
   expect(separation(fieldFill, panel)).toBeGreaterThan(0.02);
 
-  // Eleven pills cannot sit on one line at iPad mini portrait width. They take a
+  // The selected pills cannot sit on one line at iPad mini portrait width. They take a
   // second line inside the row and the row grows to hold them, so nothing is
   // out of sight.
   for (const name of added) await page.getByRole("option", { name, exact: true }).click();
