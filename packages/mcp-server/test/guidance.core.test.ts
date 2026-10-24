@@ -24,7 +24,7 @@ afterEach(async () => {
 it("selects only the ten most recently updated live guidance pointers from local directory stubs", async () => {
   const rig = await local();
   const { replicas } = rig.instance;
-  createTagCatalogEntry(replicas.settings().doc, "guidance", marker);
+  const marker = createTagCatalogEntry(replicas.settings().doc, "guidance").id;
   const directory = replicas.directory().doc;
   const documents = Array.from({ length: 12 }, (_, index) => ({
     uuid: randomUUID(), title: `Guide ${index}`, tags: [marker], updatedAt: 100 + index,
@@ -49,6 +49,7 @@ it("keeps the plain orientation for an empty replica, absent or deleted tag, and
   const rig = await local();
   const { replicas } = rig.instance;
   expect(startupInstructions(replicas)).toBe(STARTUP_ORIENTATION);
+  deleteTagCatalogEntry(replicas.settings().doc, createTagCatalogEntry(replicas.settings().doc, "guidance").id);
   const uuid = randomUUID();
   upsertDirectoryEntry(replicas.directory().doc, { uuid, title: "Guide", tags: [marker] });
   expect(startupInstructions(replicas)).toBe(STARTUP_ORIENTATION);
@@ -75,7 +76,7 @@ it("allows every document mutation while guidance remains unread", async () => {
   const guide = await rig.ok("create_doc", {
     title: "Unread guidance", description: "Do not require this read.",
   });
-  createTagCatalogEntry(rig.instance.replicas.settings().doc, "guidance", marker);
+  const marker = createTagCatalogEntry(rig.instance.replicas.settings().doc, "guidance").id;
   await rig.ok("set_metadata", { uuid: guide.uuid, tags: [marker] });
   const target = await rig.ok("create_doc", {
     title: "Target", description: "Mutable fixture.", blocks: [
