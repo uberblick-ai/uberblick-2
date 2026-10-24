@@ -5,6 +5,45 @@ first. The first paragraph of each release is its summary; uberblick.ai shows
 the five newest. Upgrade steps appear only when a release needs more than
 updating the client and the hub.
 
+## v0.4.10 — 2026-10-24
+
+Document history on team hubs: browse every revision, compare it side by side, name reviewed states, restore an earlier version and share a link to any view. Also sync protocol 8 with permanent deletion of archived decision topics, and JSON trees.
+
+### Breaking
+
+- Sync protocol 8. The hub and every client move together: upgrade the hub to 0.4.10 and run `brew upgrade uberblick` (or `ub update`) on every computer and agent host, then restart MCP servers and `ub open` and reload open tabs. A 0.4.9 client and a 0.4.10 hub refuse each other with "update required", whichever side is older; edits made in the meantime wait and sync after the update. Nobody signs in again (#2170).
+
+### Added
+
+- Document history on team hubs. ‹ and › in the status line open the newest revision and step through older ones; the sidebar turns into a History list grouped by day, with author, surface and time, an All / Named filter and Back to now. The newest entry reads "Current version" (#2164, #2222, #2235).
+- Each revision is compared side by side with the one before it: Before on the left, After on the right, changed words marked, added and removed blocks opposite a hatched gap. Collapse unchanged folds the runs nobody touched, Previous and Next change jump between edits, and an overview ruler maps the whole comparison (#2224, #2225, #2226).
+- Name a reviewed state ("Reviewed by legal"), then compare with Changes since this name. Only the person who named a revision renames or removes the name (#2183, #2223).
+- Restore this version brings a document's title, blocks and data back to an earlier revision as a new revision on top. History stays intact, comments and tags stay put, and restoring refuses if the document changed since you opened history (#2286).
+- Every history view has its own address, so a link to a revision or a comparison shows the same Before and After later, and Back and Forward retrace your steps (#2289).
+- MCP reads and names history: `list_revisions`, `get_revision`, `name_revision`, `restore_revision`, and `get_data` at a revision (#2165, #2183, #2286).
+- Permanently delete an archived decision topic with all its records: Delete topic… on the archived banner, or MCP `delete_doc({uuid, topic: true})`. Single records still can't be deleted on their own (#2170).
+- Code blocks in the `json-tree` language draw as a foldable JSON tree, with a full-screen viewer that searches keys and values. In history, a changed JSON tree is compared row by row with moves and type changes marked (#2236, #2237, #2238, #2240).
+- A decision record can relate to more than one page (#2169).
+- After a search finds nothing, the MCP server asks whether to create the missing page instead of guessing (#2176).
+- MCP help has a wireframe topic (#2210).
+- Hub images are published for both amd64 and arm64 (#2173).
+
+### Changed
+
+- Decision records keep no revision history: the hub stops recording it, and decision topics show no history controls (#2250, #2291).
+- Workspace settings shows tags in a simpler list, with descriptions edited in place (#2163).
+- MCP writes no longer wait on reading tag guidance; the startup orientation points agents to it instead (#2175).
+- MCP answers are shorter: block writes return ids and revs, pinning returns the pin rather than the whole sidebar, decision records aren't repeated, and the text copy is compact JSON. Tool descriptions are plain sentences with details in help (#2178, #2180, #2210).
+- Alter decision keeps its reasoning out of the recorded answer (#2171).
+- Inline Ablauf diagrams sit centered in the text column (#2174).
+- The Members role picker matches the inputs around it (#2184).
+
+### Fixed
+
+- MCP advertises flat tool schemas, so clients such as Codex see every field (#2207).
+- On a local-only workspace, MCP reports the hub as local instead of down, and listings say when they are complete (#2179).
+- MCP timestamps are ISO UTC and revision output fields are stable (#2167, #2213).
+
 ## v0.4.9 — 2026-10-22
 
 Sync protocol 7, tag descriptions with Delete in place of Retire, sections that fold under toggle headings, deleting an archived document from its banner, and quieter table controls.
