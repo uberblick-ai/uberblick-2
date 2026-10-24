@@ -12,8 +12,7 @@ async function assertReadTitles(rig: Rig, records: string[], page: string, title
   for (const uuid of records) {
     const read = await rig.ok("get_doc", { uuid });
     expect(read.title).toBe(title);
-    const entries = [read.resolution, read.resolution.inForce, ...read.resolution.pending, ...read.resolution.conflicts, ...read.predecessors, ...read.successors];
-    for (const entry of entries) if (entry !== null) expect(entry.title).toBe(title);
+    for (const entry of [...read.predecessors, ...read.successors]) expect(entry.title).toBe(title);
     expect((await rig.ok("export_markdown", { uuid })).markdown).toContain(`title: ${title}\n`);
   }
   const topics = (await rig.ok("list_docs", { kind: "decision" })).docs;
@@ -24,11 +23,7 @@ async function assertReadTitles(rig: Rig, records: string[], page: string, title
     expect(topic.title).toBe(title);
     for (const uuid of [topic.inForce, ...topic.pending, ...topic.conflicts]) if (uuid !== null) expect(records).toContain(uuid);
   }
-  for (const topic of related) {
-    for (const entry of [topic, topic.inForce, ...topic.pending, ...topic.conflicts]) {
-      if (entry !== null) expect(entry.title).toBe(title);
-    }
-  }
+  for (const topic of related) expect(topic.title).toBe(title);
   for (const row of rows) expect(row.title).toBe(title);
   expect((await rig.ok("export_markdown", { uuid: page })).markdown).toContain(`— ${title} —`);
   for (const [name, result] of [

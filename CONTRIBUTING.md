@@ -355,8 +355,7 @@ is reviewed as a change to the merge rules.
 
 Linux unit tests run in four independent jobs: `cli tests`, `mcp-server tests`,
 `web tests` and `hub, schema and scripts tests`. A failing job leaves the others
-running. `lint, typecheck and site` runs those three checks together, continuing
-after a failure. The required `lint, typecheck and tests` aggregate succeeds only
+running. `lint and typecheck` runs both checks, continuing after a failure. The required `lint, typecheck and tests` aggregate succeeds only
 when that job and all four Linux unit-test jobs succeed; failure, cancellation
 or a skipped job fails the aggregate. A new workspace package must be assigned
 to a Linux job or the script contract tests fail.

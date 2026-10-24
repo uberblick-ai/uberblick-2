@@ -89,7 +89,7 @@ integrator makes its own comparison after merge.
 
 ## Decision records
 
-Consult bundled `get_help({topic: "lifecycle"})` for the initial-record
+Consult bundled `get_help({topic: "decisions"})` for the initial-record
 threshold and short answer guidance. Apply
 [`delivery-policy.md`'s Decision records](../protocols/delivery-policy.md#decision-records)
 for repository authority and whether a first record is `decided` as an agent

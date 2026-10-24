@@ -91,11 +91,16 @@ it("allows every document mutation while guidance remains unread", async () => {
   };
   await write("link_range", { uuid, block_id: block.id, start: 0, end: 5, doc_id: guide.uuid, rev: block.rev });
   await write("annotate", { uuid, block_id: target.blocks[1].id, start: 0, end: 6, text: "Comment" });
-  await write("edit_block", { uuid, block_id: block.id, old_text: block.text, new_text: "Changed paragraph.", rev: block.rev });
+  await write("edit_block", { uuid, block_id: block.id, old_text: "First paragraph.", new_text: "Changed paragraph.", rev: block.rev });
   await write("insert_block", { uuid, blocks: [{ type: "paragraph", text: "Third paragraph." }] });
   await write("move_block", { uuid, block_ids: [block.id], after_block_id: target.blocks[1].id });
   await write("delete_block", { uuid, block_id: block.id });
   await write("update_data", { uuid, operations: [{ collection: "notes", schema: { version: 1, schema: { type: "object" } } }] });
+  // This local-only fixture reaches naming's hub requirement without a guidance gate;
+  // revision-tools covers successful naming against a team hub.
+  expect(await rig.call("name_revision", { uuid, name: "Reviewed" })).toMatchObject({ isError: true,
+    payload: { error: "revisions_local_only", applied: false, partial: false, synced: false } });
+  called.add("name_revision");
   const decision = await rig.ok("create_doc", { title: "A question", description: "Open proposal.", kind: "decision", status: "open" });
   await write("set_status", { uuid: decision.uuid, status: "withdrawn" });
   await write("archive_doc", { uuid });

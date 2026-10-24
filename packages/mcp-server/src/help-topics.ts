@@ -33,7 +33,7 @@ Start with \`get_sidebar({})\` for curated entry points, \`list_docs({})\` for d
 
 - \`title\` names the document. MCP creation requires a non-empty title and description; \`set_metadata\` with \`title\` repairs untitled documents.
 - \`description\` is read only by agents and never shown to people. Write whatever best helps an agent find this document with list_docs and search and decide whether to open it: what it covers, how it differs from its neighbours and the terms someone would search for. A keyword list is fine. list_docs, search and backlinks all answer with it, so a good one saves a get_doc and a bad one wastes it. At most ${MAX_DESCRIPTION_LENGTH} characters.
-- \`tldr\` is one or two sentences of plain English for a person opening a regular document, independent of its description. \`set_metadata\` accepts up to ${MAX_TLDR_LENGTH} characters for it, refuses empty or whitespace-only strings, and accepts null to clear it. A person can choose Remove TL;DR from the web's Document actions to clear the summary and mark the page as having none on purpose. Marked pages return \`tldr: null\` and \`tldrOptOut: true\` only in \`get_doc\`, and content writes omit TL;DR hints. A non-null summary on a marked page refuses with \`tldr_opted_out\` and \`field: "tldr"\` unless \`set_metadata\` passes \`tldr_opt_in: true\` in the same call. The flag requires a non-null \`tldr\`; writing it lifts the mark. Null preserves the mark. The web's Add TL;DR lifts it before editing, even if editing is cancelled. Summary text takes precedence over the mark after concurrent or older-client writes. MCP cannot set the mark. Decisions have no TL;DR: they use answer blocks, return \`tldr: null\`, omit it from directory entries and never report the mark. Ordinary stubs, search and Markdown do not carry TL;DR or the mark. ${TLDR_AFTER_CONTENT_CHANGE}
+- \`tldr\` is one or two sentences of plain English for a person opening a regular document, independent of its description. \`set_metadata\` accepts up to ${MAX_TLDR_LENGTH} characters for it, refuses empty or whitespace-only strings, and accepts null to clear it. A person can choose Remove TL;DR from the web's Document actions to clear the summary and mark the page as having none on purpose. Marked pages return \`tldr: null\` and \`tldrOptOut: true\` only in \`get_doc\`, and content writes omit TL;DR hints. A non-null summary on a marked page refuses with \`tldr_opted_out\` and \`field: "tldr"\` unless \`set_metadata\` passes \`tldr_opt_in: true\` in the same call. The flag requires a non-null \`tldr\`; writing it lifts the mark. Null preserves the mark. The web's Add TL;DR lifts it before editing, even if editing is cancelled. Summary text takes precedence over the mark after concurrent or older-client writes. MCP cannot set the mark. Decisions have no TL;DR: they use answer blocks, return \`tldr: null\`, omit it from directory entries and never report the mark. Ordinary stubs, search and Markdown do not carry TL;DR or the mark. Content writes to an unmarked regular page with a TL;DR return \`tldrHint\`: "${TLDR_AFTER_CONTENT_CHANGE}" A create_doc call that supplies \`tldr\` returns none.
 - \`tags\` store stable catalog ids. Call \`list_tags\` before choosing existing ids or names (case ignored); entries include optional descriptions. Document reads show only existing catalog tags. \`set_metadata\` with \`tags\` replaces existing-tag assignments; an empty array clears those assignments. References awaiting their catalog entry stay stored and hidden; confirmed-deleted references are cleaned only during later permitted document writes. MCP cannot curate the catalog. \`list_tags\` reports \`complete: false\` until the catalog arrives from a configured hub, so an unseen selection cannot be assumed invalid in the full workspace.
 - Curated \`links\` are target document UUIDs, replaced by \`set_metadata\` with \`links\`; an empty array clears them. Newly added targets must be known to this replica's directory, archived targets are accepted, and existing curated targets can be retained unchanged. Inline document references also contribute backlinks. Decision-derived links and decision metadata are explained in \`decisions\`.
 - \`code_check\` records a regular page's latest comparison with code per repository. \`set_metadata\` takes one \`{repository, commit, result, rev, paths?}\` entry: \`matches\` means agreement with the commit, \`ahead\` means intentionally undelivered behavior, and \`drift\` means unintended disagreement. \`rev\` must match the page-level revision read with \`get_doc\`, the same value the web status row shows for regular pages and decisions. Missing or stale rev refuses the whole call with \`field: "code_check"\`: read the page again and compare it with code before recording, rather than just resending with a new rev. Optional \`paths\` are hints about repo-relative files/folders looked at, not a complete dependency list; see \`set_metadata\` help for limits. Repository identity ignores case; the writing replica supplies \`checked_at\` in UTC. Only that repository's entry is replaced. \`get_doc\` returns the entries or [], with recorded rev and paths when present; earlier entries and older-client rewrites can omit them, making compared text or paths unknown. list_docs does not return checks. Decisions omit the attribute and refuse writes to it. Content edits and other metadata writes leave it unchanged; blocks and Markdown export never carry it.
@@ -44,7 +44,7 @@ Reads return absent description and TL;DR as null. Document writes can return no
 
 ## Sidebar organization
 
-The sidebar holds ordered named groups and pinned document UUIDs. Unpinned documents remain discoverable through listings, search, links and backlinks. Every sidebar tool returns the whole sidebar: ordered \`groups\` with \`id\`, \`name\` and ordered \`docs\`, so a caller never has to re-read to see where a change landed. Pinned titles come from directory stubs without opening document rooms. A pin's status is \`ok\`, \`archived\` (the document is tombstoned but still pinned — archive_doc unpins, so this pin outlived the archive), or \`unknown\` (no directory entry at all — a document nothing can resolve, left visible so it can be unpinned).
+The sidebar holds ordered named groups and pinned document UUIDs. Unpinned documents remain discoverable through listings, search, links and backlinks. \`get_sidebar\` and \`sidebar_group\` return the whole sidebar: ordered \`groups\` with \`id\`, \`name\` and ordered \`docs\`. \`pin_doc\` answers with the pin's group and \`unpin_doc\` with whether a pin was removed; unpinning a group's last document leaves the group empty, and the answer's \`groupHint\` names the \`sidebar_group\` delete that removes it. Pinned titles come from directory stubs without opening document rooms. A pin's status is \`ok\`, \`archived\` (the document is tombstoned but still pinned — archive_doc unpins, so this pin outlived the archive), or \`unknown\` (no directory entry at all — a document nothing can resolve, left visible so it can be unpinned).
 
 \`pin_doc\` creates a missing group by name and pins or moves a document; each document has at most one pin. \`index\` chooses its position, omitted means last. \`unpin_doc\` removes the pin without changing the document, and beats a concurrent move. \`sidebar_group\` renames, moves or deletes a group; deleting removes its pins and leaves its documents intact. \`create_doc\` may place a new document in an existing group by the id returned by \`get_sidebar\`; omitting placement creates it unpinned.
 
@@ -107,10 +107,9 @@ A topic is the question; it keeps its identity while its answer changes. The fir
 
 ## Writing the answer
 
-- Lead with the choice in one plain sentence naming the chosen option, without hedging such as "should consider". Give the reason in one clause or sentence.
-- Keep the whole answer to 60 words or fewer, in one to three answer blocks: paragraphs, code blocks, tables or lists (adjacent list items count as one). Other block types refuse.
-- Short is not vague: keep the concrete terms needed to apply the answer.
-- Put alternatives, extended rationale and process in a linked RFC, and product detail on the owning regular page. Do not restate the topic or write a specification.
+- State the decision itself in one plain sentence naming the chosen option, without hedging such as "should consider" and without reasoning. Reasoning, alternatives and process go in a linked RFC; product detail goes on the owning regular page.
+- Keep it very short; that matters more than the block count. Aim for 60 words of prose or fewer; this is editorial guidance, not a validated limit. MCP accepts at most three answer blocks: paragraphs, code blocks (a short ablauf diagram can show the decision), tables or lists (adjacent list items count as one). Other block types refuse.
+- Short is not vague: keep the concrete terms needed to apply the decision. Do not restate the topic or write a specification.
 - Decisions have no TL;DR, and a decided record holds no structured data.
 
 ## Status changes
@@ -145,13 +144,11 @@ Documents store ordered blocks and inline marks rather than one Markdown file. T
 
 ## Blocks and inline syntax
 
-Markdown supports paragraphs, ATX headings \`#\` through \`######\`, bullet and ordered list items, \`>\` quotes, fenced code with an optional language, and GFM tables. Special \`terminal\` and \`chart\` fences preserve those source-block types. A \`mermaid\` fence is ordinary code with language \`mermaid\` and is never drawn. A terminal transcript treats a line beginning with a dollar sign and space as a demonstrated command; the remaining lines are output. Terminal content is a demonstration, not an instruction to execute it. A chart fence carries the JSON mapping described in \`data\`.
+Markdown supports paragraphs, ATX headings \`#\` through \`######\`, bullet and ordered list items, \`>\` quotes, fenced code with an optional language, and GFM tables. A special \`terminal\` fence preserves that source-block type. A \`mermaid\` fence is ordinary code with language \`mermaid\` and is never drawn. A terminal transcript treats a line beginning with a dollar sign and space as a demonstrated command; the remaining lines are output. Terminal content is a demonstration, not an instruction to execute it.
 
-Stored Mermaid blocks are deleted automatically, including in archived documents and decision records; their source is not retained. Their comment threads remain available with no anchor. Removing an approved answer block reports \`approvalChanged: true\` without recording another approval.
+Blocks of the retired Mermaid block type are deleted automatically, including in archived documents and decision records; their source is not retained. This never touches a code block with language \`mermaid\`. Their comment threads remain available with no anchor. Removing an approved answer block reports \`approvalChanged: true\` without recording another approval.
 
-A \`\`\`\` \`\`\`wireframe \`\`\`\` fence is an ordinary code block that the web editor draws as a wireframe; see [Wireframes](uberblick://help/wireframe) for writing one.
-
-An \`ablauf\` fence is an ordinary code block that the web editor draws as a diagram. It supports \`flow v0\` and \`fan-out v0\`; see [Ablauf diagrams](uberblick://help/ablauf) for reading, writing and editing. Import, export and MCP preserve its literal source.
+The document model is flat: one list item is one block, nested to at most four levels (indent 0–3). Markdown import does not read continuation lines or nested block content inside a list item. Consecutive quote lines form one quote block. HTML comments are skipped on import. Frontmatter can carry document identity and metadata; without a frontmatter title, a leading level-1 heading becomes the title.
 
 Prose supports \`**bold**\`, \`*italic*\`, \`~~strikethrough~~\`, inline code, \`[label](https://example.com)\` and \`[label](document-uuid)\` document links. Underscore emphasis (\`__bold__\` and \`_italic_\`) is also read; export uses asterisks. Source blocks keep literal text. Tables read inline Markdown inside cells and escape literal punctuation and pipes. Alignment markers are accepted but not stored. Table rows are projected to the widest row with virtual empty padding.
 
@@ -199,25 +196,32 @@ Each \`button: [Text](destination)\` value has exactly one link with nonempty pl
 
 Export and get_doc order label, title, footer, then every button in authored order. Button output writes style before color and omits \`outline\` and \`neutral\`; import restores the same buttons and appearances. Empty prose keys are omitted and prose header-value newlines fold to spaces. Export escapes any prose or body line starting \`:::\` with a backslash; import restores the literal text. A missing or empty title, invalid button, unknown key, duplicate prose key or non-key header line is invalid. MCP refuses invalid cards with \`invalid_card\` before writing; import keeps an invalid container as plain paragraphs, including its delimiters. Emptying the title in the web editor therefore makes its later export invalid on import.
 
-## Figma
+## Embeds
 
-A Figma block holds one design reference. Its container opens on a line exactly \`:::figma\` and closes on a line exactly \`:::\`. It uses the card container rules, separate from literal source fences: lowercase keys, each at most once and in any input order, one optional space after the colon, and the first blank line ending the header. The closed keys are required \`url\`, optional \`title\` and optional \`height\`; the remaining text is one optional prose caption with bold, italic, strike, inline code, http(s) external links and document links.
+An embed is visual content the web draws from data stored in the document: a flow diagram, a UI sketch, a chart or a live Figma design. The data is written as a fenced block or as a \`:::\` container:
+
+| Embed | Written as | Data |
+| --- | --- | --- |
+| Ablauf | \`ablauf\` fence | flow or fan-out source; see [Ablauf diagrams](uberblick://help/ablauf) |
+| Wireframe | \`wireframe\` fence | wireframe-md source; see [Wireframes](uberblick://help/wireframe) |
+| Chart or data table | \`chart\` fence | JSON mapping to the document's structured data; see [Structured data](uberblick://help/data) |
+| Figma | \`:::figma\` container | link, title, height and caption |
+
+Markdown and MCP keep an embed's data as text: ablauf and wireframe are code blocks with that language, a chart is its own \`chart\` block, and MCP reads and writes the source as the block's \`text\`. Only the web draws it, so check a changed embed in the web editor.
+
+### Figma
+
+A \`:::figma\` container holds a required \`url\`, an optional plain one-line \`title\` and \`height\` (240–960 pixels, default 480), each at most once, then a blank line and an optional caption with inline formatting:
 
     :::figma
-    url: https://www.figma.com/design/k3Lm9QzT2x/Checkout-flow?node-id=12-345&t=AbC123-1
+    url: https://www.figma.com/design/k3Lm9QzT2x/Checkout-flow?node-id=12-345
     title: Payment, mobile
     height: 560
 
     Card form after the **address** step.
     :::
 
-The URL accepts only HTTPS on \`www.figma.com\` or \`figma.com\`, with \`/design/<key>[/<name>]\`, \`/file/<key>[/<name>]\`, \`/proto/<key>[/<name>]\`, \`/board/<key>[/<name>]\`, \`/slides/<key>[/<name>]\` or \`/community/file/<id>[/<name>]\`. Saving rebuilds it on \`https://www.figma.com\` with only the path kind, file key/id, file name, \`node-id\`, \`starting-point-node-id\` and \`version-id\`. Other parameters, including \`t\`, and fragments are dropped. Branch paths, \`/deck/\` and extra path segments are unsupported. No schema, MCP, CLI or hub operation contacts Figma.
-
-Title is literal one-line plain text, without inline Markdown; an empty title is absent and export folds title newlines to spaces. Height is a whole number from 240 to 960 pixels, defaulting to 480 when absent. get_doc orders url, title, height, omits absent keys, then writes a blank line and the caption as inline Markdown. It also returns read-only \`figma: {kind, file, fileName?, node?}\`: kind is frame for design/file with node-id, otherwise file; proto gives prototype, then board, slides or community file. The optional fileName is percent-decoded with dashes read as spaces; node changes \`12-345\` or \`12%3A345\` to \`12:345\`. The revision includes caption formatting.
-
-Missing URL, unknown or duplicate keys, non-key header lines, unsupported paths and invalid height refuse before writing with \`invalid_figma\`. A non-Figma or HTTP link gives exactly \`figma blocks take figma.com links only; use a plain link for other sites\`. Markdown import retains invalid or unclosed containers as plain paragraph text, delimiters included. Export escapes caption and ordinary prose lines beginning \`:::\` with a backslash, and import restores them; adjacent containers stay separate.
-
-The document model is flat: one list item is one block, nested to at most four levels (indent 0–3). Markdown import does not read continuation lines or nested block content inside a list item. Consecutive quote lines form one quote block. HTML comments are skipped on import. Frontmatter can carry document identity and metadata; without a frontmatter title, a leading level-1 heading becomes the title.
+The url is an HTTPS figma.com link to a design, file, prototype, board, slides or community file; Uberblick keeps only its file, name, node and version parts. Invalid headers, links or heights refuse with \`invalid_figma\` before writing, and a non-Figma link gets \`figma blocks take figma.com links only; use a plain link for other sites\`. get_doc returns the content plus read-only \`figma: {kind, file, fileName?, node?}\`. Nothing in MCP contacts Figma, so the title and caption carry the meaning. Invalid or unclosed containers import as plain paragraphs.
 
 ## MCP content writes
 
@@ -231,7 +235,7 @@ Figma header edits update only changed URL, title or height fields, and caption 
 
 ## Export
 
-\`export_markdown\` renders each block and its supported inline marks. Fenced source blocks retain their source. The default frontmatter carries UUID, title, tags, optional description and lifecycle fields. Pass \`frontmatter: false\` to omit it. Comments are dropped by default; \`annotations: "html-comments"\` exports anchored threads as HTML comments, which Markdown import does not restore.
+\`export_markdown\` renders each block and its supported inline marks. Fenced source blocks retain their source. The default frontmatter carries UUID, title, tags, optional description and lifecycle fields, but no TL;DR. Pass \`frontmatter: false\` to omit it. Document links export as \`[label](document-uuid)\`, which import reads back. Comments are dropped by default; \`annotations: "html-comments"\` exports anchored threads as HTML comments, which Markdown import does not restore.
 
 The decision log of any regular page is exported as a derived topic summary, not restorable directory relationships. Structured record data is omitted and the export states that omission; chart mappings remain ordinary exported content. Markdown is a readable projection rather than a backup of datasets, lifecycle relationships, comment anchors or CRDT history.
 
@@ -370,6 +374,8 @@ for edges crossing nodes or edges. A visible crossing gap still needs fixing.
 
 After every edit, check the drawing in the web editor. MCP does not return the
 renderer's diagnostics; the editor lists them with source lines below the drawing.
+MCP stores the source without checking it, so when nobody can open the web editor,
+report the drawing as unchecked.
 Inspect the drawing for crossings as well as fixing reported problems.
 
 ## Fan-out
@@ -575,6 +581,11 @@ Failures are marked \`isError: true\` and omit structuredContent, so success-sch
 | \`revisions_forbidden\` | Ask a workspace maintainer to grant read access before repeating the read. |
 | \`revisions_unsupported\` | Ask the hub operator to update to a version that serves automatic revisions. |
 | \`revision_not_found\` | List this document's revisions again and select an ID belonging to it. |
+| \`revision_stale_state\` | Synchronize and read the current state before naming it. |
+| \`revision_invalid_name\` | Supply 1 to 100 characters on one line. |
+| \`revision_already_named\` | Read existingName; its namer can rename or remove it in the web. |
+| \`revision_not_namer\` | Ask the naming account to manage the name in the web. |
+| \`revision_naming_outcome_unknown\` | A sent request may have applied. Read list_revisions before retrying; applied is null. |
 
 An empty history is returned only when the hub confirms it has no revisions. Archived documents remain readable.
 
@@ -582,7 +593,7 @@ Unknown help topics through get_help are manual refusals and name all valid topi
 
 ## Write durability and synced
 
-Successful writes report \`applied\`, \`synced\` and \`hub\`. Applied means this server's local update log holds the write. Hub describes the connection, not remote storage. Calls touching multiple rooms report each room independently; aggregate synced is true only when every touched room is acknowledged. There is no rollback or cross-room remote atomicity.
+Successful writes report \`applied\`, \`synced\` and \`hub\`. Applied means this server's local update log holds the write. Hub describes the connection, not remote storage. Calls touching multiple rooms report each room independently; aggregate synced is true only when every touched room is acknowledged. There is no rollback or cross-room remote atomicity. The hub-only \`name_revision\` operation is separate: applied means the hub applied its revision-store transaction and synced means it acknowledged that transaction; no local document log is written. A sent naming request whose reply is lost reports \`applied: null\` and \`synced: false\`; check list_revisions before retrying.
 
 \`synced: true\` means the hub acknowledged this update: it is in the hub's memory, and a healthy hub has scheduled the write on its store debounce — by default 2s after the last change to the document, 10s at the outside. It does NOT mean the hub has stored it: the write is still ahead of the hub's disk, and the store itself can fail. A hub that dies abruptly inside that window (SIGKILL, a crash, power loss) loses its volatile copy of the update. That is recoverable rather than fatal: \`applied: true\` is the durable half — this server's append-only update log holds the write before the tool returns and re-sends it on reconnect — so losing it for good takes the crash plus no replica holding that update ever coming back.
 
@@ -619,7 +630,7 @@ export const conceptTopics: readonly HelpTopic[] = [
   {
     id: "markdown",
     title: "Supported Markdown",
-    description: "Supported block and inline syntax, tables, content writes and Markdown export behavior.",
+    description: "Supported block and inline syntax, tables, embeds, content writes and Markdown export behavior.",
     text: markdown,
   },
   {

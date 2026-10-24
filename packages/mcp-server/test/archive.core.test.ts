@@ -12,7 +12,7 @@
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { DIRECTORY_ARCHIVED_RECORDS_KEY, getMetaMap, pinDoc, setTags, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
-import { WORKSPACE, directoryStub, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
+import { WORKSPACE, directoryStub, readBlocks, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 import { MirrorStore } from "../src/store.js";
 import type { IndexedDoc } from "../src/store.js";
@@ -137,8 +137,8 @@ describe("archive_doc", () => {
     });
     const expectedLog = (await rig.ok("get_doc", { uuid: page.uuid })).decisions;
     expect(expectedLog).toMatchObject([
-      { topic: first.uuid, inForce: { uuid: first.uuid }, pending: [] },
-      { topic: second.uuid, inForce: null, pending: [{ uuid: second.uuid }] },
+      { topic: first.uuid, inForce: first.uuid, pending: [] },
+      { topic: second.uuid, inForce: null, pending: [second.uuid] },
     ]);
     const decisionsBefore = await Promise.all(
       [first.uuid, second.uuid].map((uuid) => rig.ok("get_doc", { uuid })),
@@ -489,7 +489,7 @@ describe("an archived document is read-only", () => {
       new_text: "A glossary, rewritten.",
     });
     expect(edited).toMatchObject({ applied: true });
-    expect(edited.block.text).toBe("A glossary, rewritten.");
+    expect((await readBlocks(rig, doc.uuid, [edited.block]))[0].text).toBe("A glossary, rewritten.");
   });
 
   // Reading an archive is the whole point of archiving rather than deleting.
@@ -818,7 +818,7 @@ describe("individual decision record archives", () => {
     const topic = (await rig.ok("list_docs", { kind: "decision" })).docs[0];
     expect(topic.inForce).toBeNull();
     expect([...topic.conflicts].sort()).toEqual([proposal.uuid, rival.uuid].sort());
-    expect((await rig.ok("get_doc", { uuid: proposal.uuid })).resolution.conflicts).toMatchObject([{ deleted: false }, { deleted: false }]);
+    expect([...(await rig.ok("get_doc", { uuid: proposal.uuid })).resolution.conflicts].sort()).toEqual([proposal.uuid, rival.uuid].sort());
     const records = (await rig.ok("list_docs", { kind: "decision", include_superseded: true, include_deleted: true })).docs;
     expect(records.find((entry: any) => entry.uuid === first.uuid).deleted).toBe(true);
     expect(records.find((entry: any) => entry.uuid === proposal.uuid)).not.toHaveProperty("deleted");

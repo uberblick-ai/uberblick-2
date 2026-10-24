@@ -1,7 +1,7 @@
 import * as Y from "yjs";
 import { getMeta, getMetaMap, setKind, setStatus, setTldr } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { removeTempDirs, startServer, testConfig } from "./core-helpers.js";
+import { readBlocks, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
@@ -70,7 +70,7 @@ describe("short decision answers", () => {
       await refuse(rig, "set_status", { uuid: open.uuid, status: "decided", answer: attribution }, "decision_answer_empty", open.uuid);
     }
     const decided = await create(rig, { status: "decided", blocks: [{ type: "paragraph", text: "", inline: [{ text: "Use the log.", marks: { italic: true } }] }] });
-    expect(decided.blocks[0].text).toBe("Use the log.");
+    expect((await readBlocks(rig, decided.uuid, decided.blocks))[0].text).toBe("Use the log.");
   });
 
   it("validates legacy open content and kind adoption before mutation", async () => {

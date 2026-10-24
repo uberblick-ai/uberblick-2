@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import type { Connection } from "@hocuspocus/server";
+import { Document, type Connection } from "@hocuspocus/server";
 import {
   compareRevisions,
   createRevisionResponseReader,
@@ -14,6 +14,8 @@ import {
   readOriginAck,
   type RevisionRequest,
   type RevisionResponse,
+  snapshotRevision,
+  tombstoneDirectoryEntry,
 } from "@uberblick/schema";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 import { importCredentialKey, mintToken } from "@uberblick/schema/token";
@@ -76,10 +78,10 @@ function receiver(readOnly = false, signedIn = true) {
 }
 
 async function request(reads: RevisionReads, connection: Connection<HubContext>, room: string,
-  value: Omit<RevisionRequest, "requestId">, sent: string[]): Promise<RevisionResponse> {
+  value: Omit<RevisionRequest, "requestId">, sent: string[], current = document()): Promise<RevisionResponse> {
   const requestId = randomUUID();
   const start = sent.length;
-  await reads.onStateless({ connection, document: document(), documentName: room,
+  await reads.onStateless({ connection, document: current, documentName: room,
     payload: encodeRevisionRequest({ ...value, requestId }) } as Parameters<RevisionReads["onStateless"]>[0]);
   const read = createRevisionResponseReader(requestId);
   const response = sent.slice(start).map(read).find(result => result !== null);
@@ -89,6 +91,136 @@ async function request(reads: RevisionReads, connection: Connection<HubContext>,
 }
 
 describe("revision replies on admitted document rooms", () => {
+  it("reads titles from active and closed snapshots only when a list opts in", async () => {
+    const db = database();
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const saved = seed(db, room, "First");
+    saved.doc.transact(() => getMetaMap(saved.doc).set("title", "Second"), {
+      attribution: { author: { principalId: "other", surface: { kind: "browser", name: "browser" } } },
+    });
+    const reads = new RevisionReads({ database: db, assertCurrent() {}, username: id => id });
+    const reader = receiver(true);
+    const get = vi.spyOn(db.revisions, "get");
+    for (const value of [{ operation: "list" as const }, { operation: "list" as const, includeNames: true as const }]) {
+      const legacy = await request(reads, reader.connection, room, value, reader.sent);
+      if (!("revisions" in legacy)) throw new Error("expected list");
+      expect(legacy.revisions).toHaveLength(2);
+      expect(legacy.revisions.every(revision => !("title" in revision))).toBe(true);
+    }
+    expect(get).not.toHaveBeenCalled();
+    const response = await request(reads, reader.connection, room, { operation: "list", includeTitles: true }, reader.sent);
+    expect(response).toMatchObject({ ok: true, revisions: [{ title: "Second" }, { id: saved.id, title: "First" }] });
+    expect(get).toHaveBeenCalledTimes(2);
+    if (!("revisions" in response)) throw new Error("expected list");
+    expect(response.revisions.every(revision => !("state" in revision) && !("name" in revision))).toBe(true);
+    expect(await request(reads, reader.connection, room,
+      { operation: "list", includeTitles: true, includeNames: true }, reader.sent))
+      .toMatchObject({ revisions: [{ title: "Second", name: null }, { title: "First", name: null }] });
+  });
+
+  it.each(["missing", "corrupt", "throw"])("keeps history readable when one title lookup is %s", async failure => {
+    const db = database();
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const saved = seed(db, room, "First");
+    saved.doc.transact(() => getMetaMap(saved.doc).set("title", "Second"), {
+      attribution: { author: { principalId: "other", surface: { kind: "browser", name: "browser" } } },
+    });
+    const middle = db.revisions.list(room)[0]!.id;
+    saved.doc.transact(() => getMetaMap(saved.doc).set("title", "Third"), {
+      attribution: { author: { principalId: "ben", surface: { kind: "browser", name: "browser" } } },
+    });
+    const originalGet = db.revisions.get.bind(db.revisions);
+    vi.spyOn(db.revisions, "get").mockImplementation((requestedRoom, id) => {
+      if (id !== middle) return originalGet(requestedRoom, id);
+      if (failure === "throw") throw new Error("snapshot unavailable");
+      return failure === "missing" ? null : Uint8Array.of(255);
+    });
+    const destroy = vi.spyOn(Y.Doc.prototype, "destroy");
+    const reads = new RevisionReads({ database: db, assertCurrent() {}, username: id => id });
+    const reader = receiver(true);
+    const response = await request(reads, reader.connection, room, { operation: "list", includeTitles: true }, reader.sent);
+    expect(response).toMatchObject({ ok: true, revisions: [{ title: "Third" }, { id: middle }, { title: "First" }] });
+    if (!("revisions" in response)) throw new Error("expected list");
+    expect(response.revisions[1]).not.toHaveProperty("title");
+    expect(destroy).toHaveBeenCalledTimes(3);
+  });
+
+  it("opts into naming metadata and enforces write authority and account-owned management", async () => {
+    const db = database();
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const saved = seed(db, room, "Reviewed content");
+    const reads = new RevisionReads({ database: db, assertCurrent() {}, username: id => id });
+    const namer = receiver();
+    const checksum = createHash("sha256").update(snapshotRevision(saved.doc).checksum).digest("hex");
+    const naming: Omit<RevisionRequest, "requestId"> = { operation: "name", name: "Reviewed", checksum,
+      surface: { kind: "browser", name: "browser" } };
+    const readOnly = receiver(true);
+    expect(await request(reads, readOnly.connection, room, naming, readOnly.sent, saved.doc))
+      .toMatchObject({ ok: false, error: "forbidden" });
+    expect(await request(reads, namer.connection, room, { ...naming, checksum: "0".repeat(64) }, namer.sent, saved.doc))
+      .toMatchObject({ ok: false, error: "stale-state" });
+    expect(await request(reads, namer.connection, room, { ...naming, name: "" }, namer.sent, saved.doc))
+      .toMatchObject({ ok: false, error: "invalid-name" });
+    const named = await request(reads, namer.connection, room, naming, namer.sent, saved.doc);
+    const name = { text: "Reviewed", namer: { githubUsername: "reader", surface: { kind: "browser", name: "browser" } },
+      namedAt: 1_000, canManage: true };
+    expect(named).toMatchObject({ ok: true, revision: { id: saved.id, endedAt: 1_000, name,
+      author: { githubUsername: "ben", surface: { kind: "mcp", name: "Claude Code" } } } });
+    expect(await request(reads, namer.connection, room, naming, namer.sent, saved.doc))
+      .toMatchObject({ ok: false, error: "already-named", name });
+    const legacy = await request(reads, namer.connection, room, { operation: "list" }, namer.sent);
+    if (!("revisions" in legacy)) throw new Error("expected list");
+    expect(Object.keys(legacy.revisions[0]!).sort()).toEqual(["author", "endedAt", "id", "startedAt"]);
+    expect(await request(reads, namer.connection, room, { operation: "list", includeNames: true }, namer.sent))
+      .toMatchObject({ revisions: [{ name }] });
+    expect(await request(reads, readOnly.connection, room, { operation: "list", includeNames: true }, readOnly.sent))
+      .toMatchObject({ revisions: [{ name: { canManage: false } }] });
+    const other = receiver();
+    (other.connection.context as { principalId: string }).principalId = "other-account";
+    expect(await request(reads, other.connection, room, { operation: "list", includeNames: true }, other.sent))
+      .toMatchObject({ revisions: [{ name: { canManage: false } }] });
+    for (const operation of ["rename", "remove-name"] as const) {
+      expect(await request(reads, other.connection, room, { operation, revisionId: saved.id, name: "Other" }, other.sent))
+        .toMatchObject({ ok: false, error: "not-namer" });
+      expect(await request(reads, readOnly.connection, room, { operation, revisionId: saved.id, name: "Other" }, readOnly.sent))
+        .toMatchObject({ ok: false, error: "forbidden" });
+    }
+    expect(await request(reads, namer.connection, room, { operation: "rename", revisionId: saved.id, name: "Renamed" }, namer.sent))
+      .toMatchObject({ revision: { name: { ...name, text: "Renamed" } } });
+    expect(await request(reads, namer.connection, room, { operation: "remove-name", revisionId: saved.id }, namer.sent))
+      .toMatchObject({ revision: { id: saved.id, endedAt: 1_000, name: null } });
+    const fetched = await request(reads, namer.connection, room, { operation: "get", revisionId: saved.id }, namer.sent);
+    if (!("state" in fetched)) throw new Error("expected historical state");
+    expect(fetched.state).toEqual(db.revisions.get(room, saved.id));
+  });
+
+  it("refuses writes to archived documents from live and stored directory state while keeping names readable", async () => {
+    const db = database();
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const saved = seed(db, room, "Before archive");
+    const reads = new RevisionReads({ database: db, assertCurrent() {}, username: id => id });
+    const reader = receiver();
+    const naming: Omit<RevisionRequest, "requestId"> = { operation: "name", name: "Preserved",
+      checksum: createHash("sha256").update(snapshotRevision(saved.doc).checksum).digest("hex"),
+      surface: { kind: "browser", name: "browser" } };
+    expect(await request(reads, reader.connection, room, naming, reader.sent, saved.doc)).toMatchObject({ ok: true });
+    const directory = new Document(directoryRoom(WORKSPACE));
+    documents.push(directory);
+    await db.onLoadDocument({ document: directory, documentName: directoryRoom(WORKSPACE) });
+    const uuid = room.split("/")[1]!;
+    getDirectoryMap(directory).set(uuid, { title: "Archived", tags: [] });
+    tombstoneDirectoryEntry(directory, uuid);
+    for (const operation of ["name", "rename", "remove-name"] as const) {
+      expect(await request(reads, reader.connection, room, { ...naming, operation, revisionId: saved.id }, reader.sent, saved.doc))
+        .toMatchObject({ ok: false, error: "archived" });
+    }
+    expect(await request(reads, reader.connection, room, { operation: "list", includeNames: true }, reader.sent))
+      .toMatchObject({ revisions: [{ name: { text: "Preserved", canManage: false } }] });
+    await db.onStoreDocument({ document: directory, documentName: directoryRoom(WORKSPACE) });
+    directory.destroy();
+    expect(await request(reads, reader.connection, room, naming, reader.sent, saved.doc)).toMatchObject({ ok: false, error: "archived" });
+  });
+
   it("serves read-only readers newest first, resolving current usernames and preserving unknown authors", async () => {
     const db = database();
     const room = `${WORKSPACE}/${randomUUID()}`;
@@ -158,7 +290,7 @@ describe("revision replies on admitted document rooms", () => {
     const assertCurrent = vi.fn(() => { throw new Error("membership removed"); });
     const reads = new RevisionReads({ database: db, assertCurrent, username });
     const reader = receiver();
-    for (const value of [{ operation: "list" as const }, { operation: "get" as const, revisionId: saved.id }]) {
+    for (const value of [{ operation: "list" as const, includeTitles: true as const }, { operation: "get" as const, revisionId: saved.id }]) {
       expect(await request(reads, reader.connection, room, value, reader.sent))
         .toMatchObject({ ok: false, error: "forbidden" });
     }
@@ -266,15 +398,15 @@ it("records and serves team-hub history to read-only members with current userna
   arrivals[0]?.splice(0);
   const reader = clients[1];
   if (reader === undefined) throw new Error("read-only provider missing");
-  async function read(value: Omit<RevisionRequest, "requestId">): Promise<RevisionResponse> {
+  async function read(value: Omit<RevisionRequest, "requestId">, index = 1): Promise<RevisionResponse> {
     const requestId = randomUUID();
     const decode = createRevisionResponseReader(requestId);
     let response: RevisionResponse | null = null;
-    let consumed = arrivals[1]?.length ?? 0;
-    reader?.sendStateless(encodeRevisionRequest({ requestId, ...value }));
+    let consumed = arrivals[index]?.length ?? 0;
+    clients[index]?.sendStateless(encodeRevisionRequest({ requestId, ...value }));
     await waitUntil("the requested team-hub history", () => {
-      for (const frame of arrivals[1]?.slice(consumed) ?? []) response = decode(frame) ?? response;
-      consumed = arrivals[1]?.length ?? 0;
+      for (const frame of arrivals[index]?.slice(consumed) ?? []) response = decode(frame) ?? response;
+      consumed = arrivals[index]?.length ?? 0;
       return response !== null;
     });
     if (response === null) throw new Error("no team revision response");
@@ -296,4 +428,16 @@ it("records and serves team-hub history to read-only members with current userna
   expect(getMeta(revision).title).toBe("Team historical content");
   expect(compareRevisions(authored, revision).changed).toBe(false);
   expect(arrivals[0]).toEqual([]);
+  const naming: Omit<RevisionRequest, "requestId"> = { operation: "name", name: "Reviewed in browser",
+    checksum: createHash("sha256").update(snapshotRevision(authored).checksum).digest("hex"),
+    surface: { kind: "browser", name: "browser" } };
+  expect(await read(naming)).toMatchObject({ ok: false, error: "forbidden" });
+  expect(await read(naming, 0)).toMatchObject({ ok: true, revision: { id,
+    author: { githubUsername: "after-rename", surface: { kind: "mcp", name: "Claude Code" } },
+    name: { text: "Reviewed in browser", namer: { githubUsername: "after-rename", surface: { kind: "browser", name: "browser" } },
+      canManage: true, namedAt: expect.any(Number) }, endedAt: expect.any(Number) } });
+  expect(await read({ operation: "list", includeNames: true, includeTitles: true }))
+    .toMatchObject({ revisions: [{ title: "Team historical content", name: { canManage: false } }] });
+  expect(await read({ operation: "rename", revisionId: id, name: "Renamed across surfaces" }, 0))
+    .toMatchObject({ revision: { id, name: { text: "Renamed across surfaces", namer: { surface: { kind: "browser" } } } } });
 });
