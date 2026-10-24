@@ -169,7 +169,8 @@ function jsonTreeChrome(source: () => string) {
   const note = document.createElement("p");
   note.className = "ub-json-tree-validity";
   note.contentEditable = "false";
-  note.setAttribute("aria-live", "polite");
+  // No aria-live: a modal's aria-hidden pass walks into live regions, and that
+  // would mark the source ProseMirror owns, which rebuilds this view.
   sourceFrame.append(header.row, contentDOM, note);
   dom.append(panel, sourceFrame);
   for (const control of [edit, done]) control.addEventListener("mousedown", (event) => event.preventDefault());
