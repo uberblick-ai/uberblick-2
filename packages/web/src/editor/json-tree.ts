@@ -276,7 +276,7 @@ function replaceSource(editor: NodeViewRendererProps["editor"], pos: number, nod
 function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): NodeView {
   let current: PMNode = node;
   let parsed: JsonSourceResult = parseJsonSource(current.textContent);
-  /** The last valid tree, kept while the text is invalid. */
+  /** The last valid tree, kept for the next typing pause. */
   let shown: { root: JsonTreeItem; defaults: Set<string>; duplicates: boolean } | null = null;
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
   let noteTimer: ReturnType<typeof setTimeout> | null = null;
@@ -289,12 +289,17 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
   const editing = (): boolean => editingKey.getState(editor.state) === true && selectedBlock(editor.state, "code")?.pos === getPos();
   const isOpen = (path: string): boolean => state.open.get(path) ?? shown?.defaults.has(path) ?? false;
 
+  const syncDisplay = (): void => {
+    const stale = shown !== null && (noteTimer !== null || editing());
+    dom.dataset.json = parsed.ok ? "valid" : stale ? "stale" : "invalid";
+  };
+
   const render = (): void => {
     if (parsed.ok && shown?.root.node !== parsed.value) {
       const root = rootItem(parsed.value);
       shown = { root, defaults: firstView(root), duplicates: parsed.duplicateKeys };
     }
-    dom.dataset.json = parsed.ok ? "valid" : shown === null ? "invalid" : "stale";
+    syncDisplay();
     chrome.duplicates.hidden = shown?.duplicates !== true;
     if (shown === null) { tree.replaceChildren(); return; }
     const hadFocus = tree.contains(document.activeElement);
@@ -387,7 +392,7 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
     const isEditing = editing();
     if (wasEditing && !isEditing) {
       if (renderTimer !== null) reparse();
-      // Leaving this view's source settles invalid text; remote typing keeps its last tree.
+      // Leaving this view's source settles invalid text immediately.
       if (!parsed.ok) { shown = null; render(); }
     }
     wasEditing = isEditing;
@@ -395,6 +400,7 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
     chrome.edit.hidden = !editor.isEditable;
     chrome.done.hidden = !editor.isEditable;
     dom.dataset.annotated = String(carriesComment(current));
+    syncDisplay();
     syncNote();
   };
   editor.on("transaction", sync);
@@ -417,6 +423,7 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
         noteTimer = setTimeout(() => {
           noteTimer = null;
           if (renderTimer !== null) reparse();
+          syncDisplay();
           syncNote();
         }, NOTE_DELAY);
       }

@@ -76,7 +76,7 @@
 .ub-json-tree:where(:hover, :focus-within, [data-annotated="true"]) .ub-figure-toolbar { opacity: 1; pointer-events: auto; }
 @media (pointer: coarse) { .ub-json-tree .ub-figure-toolbar, .ub-json-copy-value { display: none; } }
 
-/* Invalid edits keep the last tree; source is the fallback when no tree is available. */
+/* Keep the last tree during typing; show invalid source after the pause. */
 .ub-json-tree-source-frame { display: none; }
 .ub-json-tree:is(.ub-json-tree-editing, [data-annotated="true"], [data-json="invalid"]) > .ub-json-tree-source-frame { display: block; }
 .ub-json-tree:is(.ub-json-tree-editing, [data-json="invalid"]) > .ub-json-tree-panel { display: none; }

@@ -94,7 +94,7 @@ test("an existing first-block tree opens as a tree, and Edit and Done format the
 });
 
 for (const annotated of [false, true]) {
-  test(`remote invalid edits retain the tree and debounce validation${annotated ? " beside a comment" : ""}`, async ({ browser }) => {
+  test(`remote invalid edits keep the tree during the pause, then show source${annotated ? " beside a comment" : ""}`, async ({ browser }) => {
     const session = writer();
     const valid = '{\n  "a": 1\n}';
     const invalid = '{\n  "a": 1,\n}';
@@ -108,12 +108,12 @@ for (const annotated of [false, true]) {
     });
     const block = page.locator(".ub-json-tree");
     const source = page.locator(".ub-json-tree-source");
+    const sourceFrame = page.locator(".ub-json-tree-source-frame");
     const note = page.locator(".ub-json-tree-validity");
     const tree = page.getByRole("tree", { name: "JSON tree" });
     await expect(tree).toBeVisible();
     await expect(block).not.toHaveClass(/ub-json-tree-editing/);
     await page.clock.pauseAt(new Date(Date.now() + 1_000));
-    const height = await block.evaluate(element => element.getBoundingClientRect().height);
 
     await rewriteTree(session, uuid, invalid);
     await expect.poll(() => authoredText(source)).toBe(invalid);
@@ -127,20 +127,41 @@ for (const annotated of [false, true]) {
     await rewriteTree(session, uuid, invalid.replace("1,", "1, "));
     await expect.poll(() => authoredText(source)).toBe(invalid.replace("1,", "1, "));
     await page.clock.runFor(1_499);
+    await expect(block).toHaveAttribute("data-json", "stale");
+    await expect(tree).toBeVisible();
+    await expect(note).toHaveText("");
+    if (annotated) await expect(source).toBeVisible();
+    else await expect(source).toBeHidden();
+    const sourceHeight = annotated
+      ? await sourceFrame.evaluate(element => element.getBoundingClientRect().height)
+      : null;
+    await page.clock.runFor(1);
+    await expect(block).toHaveAttribute("data-json", "invalid");
+    await expect(tree).toBeHidden();
+    await expect(source).toBeVisible();
+    await expect(note).toContainText("Not valid JSON: line 3, column 1");
+    await expect(note).toBeVisible();
+    if (annotated) {
+      expect(await sourceFrame.evaluate(element => element.getBoundingClientRect().height)).toBe(sourceHeight);
+    }
+
+    await rewriteTree(session, uuid, invalid.replace("1,", "1,  "));
+    await expect.poll(() => authoredText(source)).toBe(invalid.replace("1,", "1,  "));
+    await expect(note).toHaveText("");
+    await page.clock.runFor(1_499);
     await expect(note).toHaveText("");
     await page.clock.runFor(1);
     await expect(note).toContainText("Not valid JSON: line 3, column 1");
-    await expect(tree).toBeVisible();
-    if (annotated) await expect(note).toBeVisible();
-    expect(await block.evaluate(element => element.getBoundingClientRect().height)).toBe(height);
+    await expect(note).toBeVisible();
 
     await rewriteTree(session, uuid, valid.replace("1", "2"));
     await expect.poll(() => authoredText(source)).toBe(valid.replace("1", "2"));
     await page.clock.runFor(200);
     await expect(block).toHaveAttribute("data-json", "valid");
+    await expect(tree).toBeVisible();
     await expect(row(page, ".a")).toContainText('"a": 2');
     await expect(note).toHaveText("");
-    expect(await block.evaluate(element => element.getBoundingClientRect().height)).toBe(height);
+    if (!annotated) await expect(source).toBeHidden();
   });
 }
 

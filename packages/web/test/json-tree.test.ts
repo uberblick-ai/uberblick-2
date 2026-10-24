@@ -210,6 +210,8 @@ describe("JSON tree block", () => {
     expect(tree(fix.element).dataset.json).toBe("stale");
     expect(note?.textContent).toBe("");
     vi.advanceTimersByTime(600);
+    expect(tree(fix.element).dataset.json).toBe("stale");
+    expect(tree(fix.element).classList.contains("ub-json-tree-editing")).toBe(true);
     expect(note?.textContent).toMatch(/^Not valid JSON: line 3, column 1/);
     typeText(fix.editor, '"b": 2');
     vi.advanceTimersByTime(200);
@@ -222,7 +224,7 @@ describe("JSON tree block", () => {
     fix.editor.destroy();
   });
 
-  it.each([true, false])("keeps the last tree through invalid remote edits when editable=%s", (editable) => {
+  it.each([true, false])("keeps the last tree during remote typing, then shows invalid source when editable=%s", (editable) => {
     const valid = '{\n  "a": 1\n}';
     const firstInvalid = '{\n  "a": 1,\n}';
     const secondInvalid = '{\n  "a": 1, \n}';
@@ -245,19 +247,25 @@ describe("JSON tree block", () => {
     expect(rowTexts(fix.element)).toEqual(before);
     expect(note?.textContent).toBe("");
     vi.advanceTimersByTime(1);
+    expect(tree(fix.element).dataset.json).toBe("invalid");
+    expect(tree(fix.element).querySelector(".ub-json-tree-source")?.textContent).toBe(secondInvalid);
     if (editable) expect(note?.textContent).toMatch(/^Not valid JSON: line 3, column 1/);
     else expect(note?.textContent).toBe("");
 
     editBlock(fix.doc, fix.id, secondInvalid, thirdInvalid);
+    expect(tree(fix.element).dataset.json).toBe("stale");
     expect(note?.textContent).toBe("");
-    vi.advanceTimersByTime(1500);
+    vi.advanceTimersByTime(1499);
     expect(tree(fix.element).dataset.json).toBe("stale");
     expect(rowTexts(fix.element)).toEqual(before);
+    expect(note?.textContent).toBe("");
+    vi.advanceTimersByTime(1);
+    expect(tree(fix.element).dataset.json).toBe("invalid");
+    expect(tree(fix.element).querySelector(".ub-json-tree-source")?.textContent).toBe(thirdInvalid);
     if (editable) expect(note?.textContent).toMatch(/^Not valid JSON: line 3, column 1/);
     else expect(note?.textContent).toBe("");
     vi.advanceTimersByTime(10_000);
-    expect(tree(fix.element).dataset.json).toBe("stale");
-    expect(rowTexts(fix.element)).toEqual(before);
+    expect(tree(fix.element).dataset.json).toBe("invalid");
 
     editBlock(fix.doc, fix.id, thirdInvalid, '{\n  "a": 2\n}');
     vi.advanceTimersByTime(200);
