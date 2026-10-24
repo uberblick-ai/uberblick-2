@@ -93,6 +93,103 @@ test("an existing first-block tree opens as a tree, and Edit and Done format the
   await expectMcp(() => codeText(session, uuid), (text) => { expect(text).toBe(FORMATTED); });
 });
 
+test("Expand opens a full-screen viewer whose search opens folded matches and follows remote edits", async ({ browser }) => {
+  const session = writer();
+  const source = JSON.stringify({ agents: [{ id: "implementer", labels: ["needs-review"] }, { id: "reviewer", labels: [] }], review: true,
+    filler: Array.from({ length: 30 }, (_, index) => ({ index })) });
+  const uuid = await treeDoc(session, "JSON tree viewer", source);
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
+  await page.locator(".ub-json-tree").hover();
+  await page.getByRole("button", { name: "Expand JSON tree", exact: true }).click();
+  const viewer = page.getByRole("dialog", { name: "JSON tree", exact: true });
+  await expect(viewer).toBeVisible();
+
+  const search = viewer.getByRole("searchbox", { name: "Search keys and values" });
+  const close = viewer.getByRole("button", { name: "Close JSON viewer", exact: true });
+  expect((await search.boundingBox())?.height).toBe((await close.boundingBox())?.height);
+  await viewer.getByRole("button", { name: "Collapse all", exact: true }).click();
+  await expect(viewer.locator('.ub-json-row[data-path=".agents"]')).toHaveAttribute("aria-expanded", "false");
+  await search.fill("review");
+  await expect(viewer.locator(".ub-json-tree-count")).toHaveText("1 of 3");
+  await expect(viewer.locator(".ub-json-match-current")).toHaveText("review");
+  await expect(viewer.locator('.ub-json-row[data-path=".agents[0].labels"]')).toHaveAttribute("aria-expanded", "true");
+  await search.press("Enter");
+  await expect(viewer.locator(".ub-json-tree-count")).toHaveText("2 of 3");
+  await search.press("Shift+Enter");
+  await search.press("Shift+Enter");
+  await expect(viewer.locator(".ub-json-tree-count")).toHaveText("3 of 3");
+
+  const block = await session.call<{ blocks: { id: string; type: string; text: string; rev: string }[] }>("get_doc", { uuid });
+  const code = block.blocks.find((entry) => entry.type === "code");
+  if (code === undefined) throw new Error("e2e: JSON tree block is missing");
+  await session.call("edit_block", { uuid, block_id: code.id, rev: code.rev, old_text: code.text, new_text: code.text.replace('"reviewer"', '"second reviewer"') });
+  await expect(viewer.getByText('"second reviewer"')).toBeVisible();
+  await expect(viewer.locator(".ub-json-tree-count")).toContainText("of 3");
+  await expect(search).toHaveValue("review");
+
+  await page.keyboard.press("Escape");
+  await expect(viewer).toBeHidden();
+  await expect(page.locator('.ub-json-tree [role="treeitem"][tabindex="0"]')).toBeFocused();
+});
+
+test("an open viewer follows settled invalid source and restores its search and folds when valid JSON returns", async ({ browser }) => {
+  const session = writer();
+  const valid = '{\n  "active": {"current": 1},\n  "folded": {"hidden": true}\n}';
+  const invalid = valid.replace('"current": 1', '"current": 2,');
+  const recovered = valid.replace('"current": 1', '"current": 3');
+  const uuid = await treeDoc(session, "JSON viewer remote validation", valid);
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: async loading => { await loading.clock.install(); },
+  });
+  await page.locator(".ub-json-tree").hover();
+  await page.getByRole("button", { name: "Expand JSON tree", exact: true }).click();
+  const viewer = page.getByRole("dialog", { name: "JSON tree", exact: true });
+  const tree = viewer.getByRole("tree", { name: "JSON tree" });
+  const source = viewer.locator(".ub-json-tree-viewer-source");
+  const blockSource = page.locator(".ub-json-tree .ub-json-tree-source");
+  const search = viewer.getByRole("searchbox", { name: "Search keys and values" });
+  const current = viewer.locator('.ub-json-row[data-path=".active.current"]');
+  const folded = viewer.locator('.ub-json-row[data-path=".folded"]');
+  await expect(tree).toBeVisible();
+  await folded.press("ArrowLeft");
+  await expect(folded).toHaveAttribute("aria-expanded", "false");
+  await search.fill("current");
+  await expect(viewer.locator(".ub-json-tree-count")).toHaveText("1 of 1");
+  await page.clock.pauseAt(new Date(Date.now() + 1_000));
+
+  await rewriteTree(session, uuid, invalid);
+  await expect.poll(() => authoredText(blockSource)).toBe(invalid);
+  await page.clock.runFor(1_499);
+  await expect(page.locator(".ub-json-tree")).toHaveAttribute("data-json", "stale");
+  await expect(tree).toBeVisible();
+  await expect(current).toContainText('"current": 1');
+  await expect(source).toBeHidden();
+  await page.clock.runFor(1);
+  await expect(page.locator(".ub-json-tree")).toHaveAttribute("data-json", "invalid");
+  await expect(viewer).toBeVisible();
+  await expect(tree).toBeHidden();
+  await expect(source).toBeVisible();
+  await expect(source).toHaveText(invalid);
+  await expect(viewer.getByText(/^Not valid JSON:/)).toBeVisible();
+  await expect(search).toHaveValue("current");
+  await expect(viewer.locator(".ub-json-tree-count")).toHaveText("No matches");
+  await expect(viewer.getByRole("button", { name: "Previous match", exact: true })).toBeDisabled();
+  await expect(viewer.getByRole("button", { name: "Next match", exact: true })).toBeDisabled();
+  await expect(viewer.getByRole("button", { name: "Collapse all", exact: true })).toBeDisabled();
+  await expect(viewer.getByRole("button", { name: "Expand all", exact: true })).toBeDisabled();
+
+  await rewriteTree(session, uuid, recovered);
+  await expect.poll(() => authoredText(blockSource)).toBe(recovered);
+  await page.clock.runFor(200);
+  await expect(tree).toBeVisible();
+  await expect(current).toContainText('"current": 3');
+  await expect(source).toBeHidden();
+  await expect(search).toHaveValue("current");
+  await expect(viewer.locator(".ub-json-tree-count")).toHaveText("1 of 1");
+  await expect(folded).toHaveAttribute("aria-expanded", "false");
+  await expect(viewer.locator('.ub-json-row[data-path=".folded.hidden"]')).toHaveCount(0);
+});
+
 for (const annotated of [false, true]) {
   test(`remote invalid edits keep the tree during the pause, then show source${annotated ? " beside a comment" : ""}`, async ({ browser }) => {
     const session = writer();

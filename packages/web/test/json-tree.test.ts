@@ -5,6 +5,7 @@ import { undo } from "y-prosemirror";
 import { appendBlock, createAnnotation, editBlock, exportMarkdown, importMarkdown, parseJsonSource } from "@uberblick/schema";
 import type { JsonSourceNode } from "@uberblick/schema";
 import { children, firstView, itemCount, jsonTreeRows, rootItem, subtreePaths } from "../src/editor/json-tree-rows.js";
+import { jsonTreeMatches, jsonTreePanel, jsonTreeViewState } from "../src/editor/json-tree-panel.js";
 import { mountEditor, snapshotFragment, typeText } from "./helpers.js";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -84,11 +85,12 @@ function button(element: HTMLElement, label: string): HTMLButtonElement {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query }));
   const empty = new DOMRect();
   Range.prototype.getClientRects = () => [empty] as unknown as DOMRectList;
   Range.prototype.getBoundingClientRect = () => empty;
 });
-afterEach(() => { vi.useRealTimers(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("JSON tree block", () => {
   it("keeps a first-block tree closed to source until a local edit, across remote updates", () => {
@@ -356,5 +358,35 @@ describe("JSON tree block", () => {
     const doc = new Y.Doc();
     appendBlock(doc, { type: "code", language: "json-tree", text: '{"a":1}' });
     expect(exportMarkdown(doc)).toContain("```json-tree\n{\"a\":1}\n```");
+  });
+});
+
+describe("JSON tree search", () => {
+  const SOURCE = '{"agents":[{"id":"implementer","labels":["needs-review"]},{"id":"reviewer","labels":[]}],"review":true}';
+
+  it("finds keys and scalar values case-insensitively in document order, folded or not", () => {
+    const root = rootItem(parsed(SOURCE));
+    expect(jsonTreeMatches(root, "review").map((match) => `${match.part} ${match.path}`)).toEqual([
+      'value .agents[0].labels[0]', "value .agents[1].id", "key .review",
+    ]);
+    expect(jsonTreeMatches(root, "")).toEqual([]);
+  });
+
+  it("opens a match's containers, marks it current, and collapses or expands everything", () => {
+    const root = rootItem(parsed(SOURCE));
+    Element.prototype.scrollIntoView = vi.fn();
+    const panel = jsonTreePanel(jsonTreeViewState("root"));
+    document.body.append(panel.element);
+    panel.show(root);
+    expect(panel.element.querySelectorAll("[role=treeitem]")).toHaveLength(3);
+    const [first] = panel.search("NEEDS");
+    panel.reveal(first ?? null);
+    expect(panel.element.querySelector(".ub-json-match-current")?.textContent).toBe("needs");
+    expect(panel.element.querySelector('[data-path=".agents[0].labels"]')?.getAttribute("aria-expanded")).toBe("true");
+    panel.openAll(false);
+    expect(panel.element.querySelectorAll("[role=treeitem]")).toHaveLength(3);
+    panel.openAll(true);
+    expect(panel.element.querySelectorAll("[role=treeitem]")).toHaveLength(10);
+    panel.element.remove();
   });
 });

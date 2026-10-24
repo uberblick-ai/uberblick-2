@@ -166,3 +166,11 @@ mark.ub-json-compare-added { background: var(--revision-added-background); color
 }
 .ub-json-compare-run:hover { background: var(--accent); color: var(--foreground); }
 .ub-json-compare-run:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* Full-screen viewer. */
+.ub-json-tree-viewer .ub-json-tree-search { width: min(20rem, 40vw); height: 2rem; }
+.ub-json-tree-count { min-width: 5.5rem; color: var(--muted-foreground); font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans); font-variant-numeric: tabular-nums; }
+.ub-json-tree-viewer-body { flex: 1; min-height: 0; overflow: auto; padding: 0.75rem 1rem 2rem; white-space: normal; }
+.ub-json-tree-viewer-body .ub-json-tree-rows { overflow: visible; }
+.ub-json-match { border-radius: 2px; background: color-mix(in oklch, var(--brand) 22%, transparent); color: inherit; }
+.ub-json-match-current { background: color-mix(in oklch, var(--brand) 55%, transparent); outline: 1px solid var(--brand); }
+@media (any-pointer: coarse) { .ub-json-tree-viewer .ub-json-tree-search { height: 44px; } }
