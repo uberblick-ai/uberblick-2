@@ -404,8 +404,8 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
             title={restoreUnavailable ?? undefined} className="ub-revision-restore" onClick={() => { void restore(); }}>
             Restore this version
           </Button>
-          {restoreUnavailable !== null && <span id={restoreReason} className="sr-only">{restoreUnavailable}</span>}
         </div>
+        {restoreUnavailable !== null && <p id={restoreReason} className={archived || !writable ? "m-0 ub-type-small text-(--muted-foreground)" : "sr-only"}>{restoreUnavailable}</p>}
         {selection === null ? <p role="status" className="ub-history-controls ub-type-small">Loading history…</p>
           : <RevisionStatus history={history} writable={writable} />}
         {split && before !== undefined && after !== undefined && rows.length > 0 && <>

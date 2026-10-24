@@ -511,6 +511,9 @@ test.describe("document history through ub open", () => {
     await previous(page);
     await expect(restore).toBeDisabled();
     await expect(restore).toHaveAccessibleDescription("This document is archived. Restore the document first, then restore a revision.");
+    const reason = page.getByText("This document is archived. Restore the document first, then restore a revision.", { exact: true });
+    await expect(reason).toBeVisible();
+    expect((await reason.boundingBox())?.height).toBeGreaterThan(10);
   });
 
   test("refuses restore after a collaborator changes the live document and refreshes the history list", async ({ browser }) => {
