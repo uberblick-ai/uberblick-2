@@ -1087,11 +1087,18 @@ test.describe("document history through ub open", () => {
         expect(copied).not.toMatch(/unchanged keys|▾|▸/);
       }
       // Native input and clipboard actions cannot mutate the read-only selection host.
+      // Select-all from a caret in a pane selects that pane only.
       await own.click();
       await page.keyboard.press(`${modifier}+a`);
+      expect(await own.evaluate(element => {
+        const selection = document.getSelection();
+        return selection !== null && !selection.isCollapsed && element.contains(selection.anchorNode) && element.contains(selection.focusNode);
+      })).toBe(true);
       const paneCopy = await copyText();
-      expect(paneCopy).toContain('"version"');
-      expect(paneCopy).not.toMatch(/unchanged keys|▾|▸/);
+      expect(paneCopy.match(/"version"/g)).toHaveLength(1);
+      expect(paneCopy).toContain(side === "before" ? "Earlier version" : '"new"');
+      expect(paneCopy).not.toContain(side === "before" ? '"new"' : "Earlier version");
+      expect(paneCopy).not.toMatch(/unchanged keys|▾|▸|planner's settings|closing paragraph/);
       await own.click();
       await page.keyboard.press(`${modifier}+a`);
       const original = await own.innerHTML();

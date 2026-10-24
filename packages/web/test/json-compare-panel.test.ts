@@ -76,6 +76,24 @@ describe("JSON comparison panel", () => {
     expect(shown.grid.querySelector(".ub-json-toggle")?.tagName).toBe("BUTTON");
   });
 
+  it("selects all of one pane, and copies only its lines, from a caret inside it", () => {
+    const shown = panel();
+    shown.show(BEFORE, AFTER);
+    const before = shown.grid.querySelector<HTMLElement>('.ub-json-compare-pane[data-side="before"]');
+    if (before === null) throw new Error("The before pane is missing");
+    before.dispatchEvent(new KeyboardEvent("keydown", { key: "a", ctrlKey: true, bubbles: true, cancelable: true }));
+    const selection = document.getSelection();
+    expect(selection?.anchorNode).toBe(before);
+    expect(selection?.focusNode).toBe(before);
+    const data = new Map<string, string>();
+    const copy = new Event("copy", { bubbles: true, cancelable: true });
+    Object.defineProperty(copy, "clipboardData", { value: { setData: (type: string, text: string) => data.set(type, text) } });
+    before.dispatchEvent(copy);
+    expect(data.get("text/plain")).toContain('"first": "draft"');
+    expect(data.get("text/plain")).not.toContain("final");
+    expect(data.get("text/plain")).not.toMatch(/unchanged keys/);
+  });
+
   it("draws nothing for text it cannot compare", () => {
     const shown = panel();
     expect(shown.show("{", AFTER)).toBe(false);

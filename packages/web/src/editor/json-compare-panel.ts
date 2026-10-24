@@ -275,6 +275,16 @@ export function jsonComparePanel(key: string, rendered: () => void = () => {}): 
     }
   });
   for (const type of ["beforeinput", "paste", "drop"]) grid.addEventListener(type, (event) => event.preventDefault());
+  // Select-all would climb to the editor around the panes, so it selects the pane the caret is in.
+  grid.addEventListener("keydown", (event) => {
+    const pane = event.target instanceof Element ? event.target.closest(".ub-json-compare-pane") : null;
+    if (pane === null || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "a") return;
+    event.preventDefault();
+    const range = document.createRange();
+    range.selectNodeContents(pane);
+    document.getSelection()?.removeAllRanges();
+    document.getSelection()?.addRange(range);
+  });
   grid.addEventListener(OPEN_CHANGE, (event) => {
     const path = event instanceof CustomEvent ? String(event.detail) : "";
     const open = (node: JsonCompareNode): void => {
