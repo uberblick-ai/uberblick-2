@@ -48,7 +48,6 @@
   background: transparent;
   color: var(--muted-foreground);
   font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
-  cursor: pointer;
 }
 .ub-json-more:hover { background: var(--accent); color: var(--foreground); }
 .ub-json-copy-value {
@@ -62,7 +61,6 @@
   background: var(--popover);
   color: var(--popover-foreground);
   font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
-  cursor: pointer;
 }
 .ub-json-copy-value:hover { background: var(--accent); }
 .ub-json-tree-note:not([hidden]) {
@@ -139,7 +137,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.ub-json-compare-cell > .ub-json-toggle { padding: 0; border: 0; background: transparent; font: inherit; cursor: pointer; }
+.ub-json-compare-cell > .ub-json-toggle { padding: 0; border: 0; background: transparent; font: inherit; }
 .ub-json-compare-cell > .ub-json-toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .ub-json-compare-cell:not([data-mark=""])::before {
   content: attr(data-mark);
@@ -168,7 +166,6 @@ mark.ub-json-compare-added { background: var(--revision-added-background); color
   background: transparent;
   color: var(--muted-foreground);
   font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
-  cursor: pointer;
   user-select: none;
 }
 .ub-json-compare-run:hover { background: var(--accent); color: var(--foreground); }

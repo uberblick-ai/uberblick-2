@@ -73,6 +73,18 @@
 }
 
 @layer base {
+  /* Keep cursor defaults layered so text and resize controls can override them. */
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  button[aria-disabled="true"],
+  [role="button"]:is(:disabled, [aria-disabled="true"]) {
+    cursor: default;
+  }
+
   /*
    * Scope box-sizing and inherited form-control type to data-slot. Portals
    * are outside ub-app; global preflight would also change editor content.

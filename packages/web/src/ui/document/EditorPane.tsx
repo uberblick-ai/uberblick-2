@@ -152,7 +152,7 @@ function ArchivedBanner({
           <AlertDialogTrigger asChild>
             <button
               type="button"
-              className="min-h-6 min-w-6 cursor-pointer rounded-(--radius-sm) bg-transparent px-2 py-1 ub-type-ui text-(--destructive-ink) disabled:opacity-50"
+              className="min-h-6 min-w-6 rounded-(--radius-sm) bg-transparent px-2 py-1 ub-type-ui text-(--destructive-ink) disabled:opacity-50"
               disabled={onDelete === null}
               aria-describedby={onDelete === null ? "ub-delete-unavailable" : undefined}
             >{decision ? "Delete topic…" : "Delete…"}</button>
@@ -988,7 +988,7 @@ export function EditorPane({
       {threads.length > 0 && onToggleThreads !== undefined && (
         <button
           type="button"
-          className="ub-threads-toggle ub-pane-threads-toggle hidden max-xl:inline-flex items-center gap-[0.35rem] [font-family:inherit] [font-weight:inherit] ub-type-caption border border-border rounded-full py-[0.1rem] px-[0.55rem] bg-(--card-accent) text-secondary-foreground whitespace-nowrap cursor-pointer"
+          className="ub-threads-toggle ub-pane-threads-toggle hidden max-xl:inline-flex items-center gap-[0.35rem] [font-family:inherit] [font-weight:inherit] ub-type-caption border border-border rounded-full py-[0.1rem] px-[0.55rem] bg-(--card-accent) text-secondary-foreground whitespace-nowrap"
           aria-expanded={threadsOpen}
           aria-controls="ub-rail"
           onClick={onToggleThreads}

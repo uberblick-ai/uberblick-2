@@ -168,7 +168,7 @@ for (const coarse of [false, true]) {
   });
 }
 
-test("each component owns its disabled appearance", async ({ browser }) => {
+test("buttons share cursors and each component owns its disabled appearance", async ({ browser }) => {
   const page = await openFixture(browser, false, 1280);
   for (const slot of ["button", "input", "textarea"] as const) {
     const opacity = async (selector: string): Promise<number> => page.locator(selector).first().evaluate(
@@ -178,4 +178,40 @@ test("each component owns its disabled appearance", async ({ browser }) => {
       await opacity(`[data-slot="${slot}"]:enabled`),
     );
   }
+  for (const control of await page.getByRole("region", { name: "Button recipes", exact: true }).getByRole("button").all()) {
+    await expect(control).toHaveCSS("cursor", "pointer");
+  }
+  for (const name of ["Disabled Button", "Aria-disabled Button", "Disabled native Button", "Aria-disabled native Button"]) {
+    await expect(page.getByRole("button", { name, exact: true })).toHaveCSS("cursor", "default");
+  }
+  for (const slot of ["input", "textarea"] as const) {
+    await expect(page.locator(`[data-slot="${slot}"]:disabled`)).toHaveCSS("cursor", "not-allowed");
+  }
+  for (const [name, cursor] of [
+    ["Text cursor Button", "text"],
+    ["Resize cursor Button", "ns-resize"],
+    ["Column resize cursor Button", "col-resize"],
+  ] as const) {
+    await expect(page.getByRole("button", { name, exact: true })).toHaveCSS("cursor", cursor);
+  }
+  const references = page.getByRole("region", { name: "Cursor references", exact: true });
+  await references.evaluate((section) => {
+    for (const disabled of [null, "false", "true"]) {
+      const control = document.createElement("div");
+      control.setAttribute("role", "button");
+      control.textContent = `Role Button ${disabled ?? "enabled"}`;
+      if (disabled !== null) control.setAttribute("aria-disabled", disabled);
+      section.append(control);
+    }
+    const terminal = document.createElement("div");
+    terminal.setAttribute("role", "button");
+    terminal.className = "ub-terminal-screen";
+    terminal.textContent = "Terminal text cursor";
+    section.append(terminal);
+  });
+  for (const state of ["enabled", "false", "true"]) {
+    await expect(page.getByRole("button", { name: `Role Button ${state}`, exact: true }))
+      .toHaveCSS("cursor", state === "true" ? "default" : "pointer");
+  }
+  await expect(references.locator(".ub-terminal-screen")).toHaveCSS("cursor", "text");
 });

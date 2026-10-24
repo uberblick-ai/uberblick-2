@@ -245,9 +245,8 @@
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted-foreground);
-  cursor: pointer;
 }
-.ub-history-icon:disabled { opacity: 0.4; cursor: default; }
+.ub-history-icon:disabled { opacity: 0.4; }
 .ub-history-icon:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .ub-history-nav { margin: 0; border: 0; padding: 0; min-width: 0; }
 .ub-history-name-trigger { opacity: 0.7; }
@@ -386,7 +385,6 @@
   color: inherit;
   font: inherit;
   white-space: nowrap;
-  cursor: pointer;
 }
 .ub-history-named {
   display: inline-flex;
@@ -560,7 +558,6 @@
   text-align: start;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
 }
 .ub-revision-fold-button:hover { background: var(--card-accent); color: var(--foreground); }
 .ub-revision-fold-button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
@@ -856,15 +853,6 @@ body {
 .ub-docs-search,
 .ub-docs-open {
   font: inherit;
-}
-
-.ub-swatch,
-.ub-mention,
-.ub-tool,
-.ub-terminal-toggle,
-.ub-copy,
-.ub-docs-open {
-  cursor: pointer;
 }
 
 .ub-list ul {
@@ -1314,7 +1302,6 @@ textarea.ub-title {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted-foreground);
-  cursor: pointer;
 }
 
 .ub-actions-face {
@@ -1608,7 +1595,6 @@ h6.ub-heading {
   font: inherit;
   letter-spacing: normal;
   text-align: center;
-  cursor: pointer;
 }
 .ub-block-actions > button:focus-visible,
 .ub-figma-placeholder > button:focus-visible { color: var(--foreground); }
@@ -1626,7 +1612,7 @@ h6.ub-heading {
 .ub-figma-placeholder { display: grid; place-content: center; gap: 0.5rem; height: 100%; padding: 1rem; background: var(--muted); color: var(--muted-foreground); font-family: var(--font-sans); overflow-wrap: anywhere; }
 .ub-figma-placeholder-title { color: var(--foreground); }
 .ub-figma-placeholder > button { justify-self: start; }
-.ub-figma-shield { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; color: var(--foreground); font: inherit; cursor: pointer; }
+.ub-figma-shield { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; color: var(--foreground); font: inherit; }
 .ub-figma-shield > span { opacity: 0; position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 0.2rem 0.5rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--background); color: var(--foreground); font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans); white-space: nowrap; }
 .ub-figma-shield:is(:hover, :focus-visible) > span { opacity: 1; }
 .ub-figma:is([data-figma-active="true"], :focus-within, .ProseMirror-selectednode) .ub-figma-viewer { box-shadow: 0 0 0 2px var(--ring); }
@@ -1696,7 +1682,6 @@ h6.ub-heading {
   padding: 0.05rem 0.3rem;
   font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
   letter-spacing: 0.04em;
-  cursor: pointer;
 }
 .ub-chart-message, .ub-chart-diagnostics, .ub-chart-notice {
   font-size: var(--type-small-size);
@@ -1782,7 +1767,7 @@ h6.ub-heading {
   display: flex; align-items: center; gap: 0.3rem;
   width: 100%; min-height: 1.5rem;
   border: 0; border-radius: var(--radius-sm); background: transparent;
-  padding: 0; font: inherit; color: inherit; text-align: inherit; cursor: pointer;
+  padding: 0; font: inherit; color: inherit; text-align: inherit;
 }
 .ub-data-sort:hover { background: var(--accent); color: var(--accent-foreground); }
 @media (any-pointer: coarse) { .ub-data-sort { min-height: 2.75rem; min-width: 2.75rem; } }
@@ -1839,7 +1824,6 @@ h6.ub-heading {
   font: inherit;
   font-size: var(--type-small-size);
   line-height: var(--type-small-leading);
-  cursor: pointer;
   border-radius: var(--radius-sm);
 }
 
@@ -2199,7 +2183,6 @@ h6.ub-heading {
   background: transparent;
   color: var(--muted-foreground);
   font: inherit;
-  cursor: pointer;
 }
 .ub-toggle-heading-button > span { font-size: var(--type-body-size); }
 .ub-toggle-heading-button:hover { color: var(--foreground); background: var(--muted); }
@@ -3124,8 +3107,6 @@ h6.ub-heading {
   color: inherit;
   font: inherit;
 }
-
-.ub-status-sync { cursor: pointer; }
 .ub-status-sync--code {
   width: 44px;
   column-gap: 4px;
@@ -3178,7 +3159,6 @@ h6.ub-heading {
   color: inherit;
   font: inherit;
   white-space: nowrap;
-  cursor: pointer;
 }
 @media (hover: hover) {
   .ub-status-sync:hover { background: var(--card-accent); }
@@ -3283,7 +3263,6 @@ h6.ub-heading {
   background: transparent;
   color: var(--muted-foreground);
   font: 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
-  cursor: pointer;
 }
 
 @media (hover: hover) {
@@ -3396,7 +3375,6 @@ h6.ub-heading {
 
 .ub-docs-tag-filter {
   max-width: 100%;
-  cursor: pointer;
 }
 
 .ub-docs-filter-value {
@@ -3456,7 +3434,6 @@ h6.ub-heading {
   background: transparent;
   color: var(--foreground);
   font: 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
-  cursor: pointer;
   text-decoration: underline;
 }
 
@@ -3643,10 +3620,6 @@ h6.ub-heading {
   color: var(--muted-foreground);
   font: 400 var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
   white-space: nowrap;
-}
-
-button.ub-docs-tag-chip {
-  cursor: pointer;
 }
 
 button.ub-docs-tag-chip:hover {

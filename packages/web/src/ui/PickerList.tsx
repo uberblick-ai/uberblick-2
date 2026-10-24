@@ -48,7 +48,7 @@ export function PickerList({
         <button
           key={option.id}
           type="button"
-          className={`${multiple ? "ub-tag-option " : ""}ub-picker-option flex w-full cursor-pointer items-center gap-[0.45rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.45rem] py-[0.4rem] text-left text-popover-foreground [font:inherit] hover:bg-accent focus-visible:bg-accent focus-visible:outline-none disabled:cursor-default disabled:opacity-50 [@media(pointer:coarse)]:min-h-11`}
+          className={`${multiple ? "ub-tag-option " : ""}ub-picker-option flex w-full items-center gap-[0.45rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.45rem] py-[0.4rem] text-left text-popover-foreground [font:inherit] hover:bg-accent focus-visible:bg-accent focus-visible:outline-none disabled:opacity-50 [@media(pointer:coarse)]:min-h-11`}
           role="option"
           aria-selected={option.selected}
           disabled={option.disabled}

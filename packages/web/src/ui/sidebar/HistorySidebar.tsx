@@ -12,7 +12,7 @@ import { formatTimestamp, useTimestampClock } from "../timestamps.js";
 import { SidebarContent as SidebarScrollContent, SidebarHeader } from "../shadcn/sidebar.js";
 import { PreviousIcon, TagIcon } from "../document/history-icons.js";
 
-const ROW_CLASSES = "ub-history-entry flex w-full min-w-0 items-center gap-2.5 border-0 bg-transparent px-4 py-2 text-left font-[inherit] text-(--sidebar-row-foreground) cursor-pointer min-h-11 enabled:hover:bg-(--sidebar-accent) aria-[current=true]:bg-(--sidebar-accent) aria-[current=true]:text-sidebar-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-sidebar-ring";
+const ROW_CLASSES = "ub-history-entry flex w-full min-w-0 items-center gap-2.5 border-0 bg-transparent px-4 py-2 text-left font-[inherit] text-(--sidebar-row-foreground) min-h-11 enabled:hover:bg-(--sidebar-accent) aria-[current=true]:bg-(--sidebar-accent) aria-[current=true]:text-sidebar-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-sidebar-ring";
 
 export function HistorySidebar({ history, title, onNow = history.now }: {
   history: DocumentHistory;
@@ -30,7 +30,7 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
       <SidebarHeader className="pr-12 [@media(any-pointer:coarse)]:pr-15 pb-1">
         <button
           type="button"
-          className="ub-history-back flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 w-full items-center gap-2 rounded-(--radius-sm) border border-transparent bg-transparent px-2 py-1.5 text-left ub-type-ui font-[inherit] text-(--sidebar-row-foreground) cursor-pointer hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
+          className="ub-history-back flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 w-full items-center gap-2 rounded-(--radius-sm) border border-transparent bg-transparent px-2 py-1.5 text-left ub-type-ui font-[inherit] text-(--sidebar-row-foreground) hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
           onClick={onNow}
         >
           <span className="grid size-7 shrink-0 place-items-center [&_svg]:size-4" aria-hidden="true"><PreviousIcon /></span>
@@ -48,7 +48,7 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
         <fieldset className="ub-history-filter mx-2 mt-1 mb-0 flex min-w-0 rounded-(--radius-sm) border-0 bg-(--sidebar-accent) p-0.5" aria-label="Show revisions">
           {(["all", "named"] as const).map((value) => (
             <button key={value} type="button" aria-pressed={filter === value}
-              className="flex-1 border-0 rounded-[calc(var(--radius-sm)-2px)] bg-transparent px-2.5 py-1 ub-type-caption font-medium font-[inherit] text-(--sidebar-muted-foreground) cursor-pointer aria-pressed:bg-background aria-pressed:text-sidebar-foreground [@media(any-pointer:coarse)]:min-h-11"
+              className="flex-1 border-0 rounded-[calc(var(--radius-sm)-2px)] bg-transparent px-2.5 py-1 ub-type-caption font-medium font-[inherit] text-(--sidebar-muted-foreground) aria-pressed:bg-background aria-pressed:text-sidebar-foreground [@media(any-pointer:coarse)]:min-h-11"
               onClick={() => setFilter(value)}>
               {value === "all" ? "All" : "Named"}
             </button>
@@ -64,7 +64,7 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
         {history.error !== null && (
           <div className="px-4 py-2 ub-type-caption text-(--sidebar-muted-foreground)" role="status">
             <p className="m-0">{history.error}</p>
-            <button type="button" className="mt-1.5 border-0 bg-transparent p-0 font-[inherit] ub-type-caption font-medium text-sidebar-foreground underline cursor-pointer" onClick={history.retry}>Try again</button>
+            <button type="button" className="mt-1.5 border-0 bg-transparent p-0 font-[inherit] ub-type-caption font-medium text-sidebar-foreground underline" onClick={history.retry}>Try again</button>
           </div>
         )}
         {history.error === null && history.entries === null && history.busy && (
@@ -114,7 +114,7 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
                       </span>
                     </button>
                     {name !== undefined && index > 0 && (
-                      <button type="button" className="ub-history-since mb-1 ml-[3.25rem] border-0 bg-transparent p-0 font-[inherit] ub-type-caption text-(--sidebar-muted-foreground) underline-offset-2 hover:underline cursor-pointer aria-[current=true]:text-sidebar-foreground [@media(any-pointer:coarse)]:min-h-11"
+                      <button type="button" className="ub-history-since mb-1 ml-[3.25rem] border-0 bg-transparent p-0 font-[inherit] ub-type-caption text-(--sidebar-muted-foreground) underline-offset-2 hover:underline aria-[current=true]:text-sidebar-foreground [@media(any-pointer:coarse)]:min-h-11"
                         aria-current={history.selection?.index === 0 && history.selection.comparedWith?.id === entry.id ? "true" : undefined}
                         onClick={() => history.sinceNamed(entry.id)}>
                         Changes since this name

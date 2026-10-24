@@ -218,7 +218,7 @@ function TagStrip({
         <button
           ref={trigger}
           type="button"
-          className="ub-tags ub-tag-picker-trigger group/tags flex min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 flex-initial cursor-pointer flex-wrap items-center gap-[0.3rem] border-0 bg-transparent p-0 text-left [font:inherit] text-inherit focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+          className="ub-tags ub-tag-picker-trigger group/tags flex min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 flex-initial flex-wrap items-center gap-[0.3rem] border-0 bg-transparent p-0 text-left [font:inherit] text-inherit focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
           aria-label="Edit tags"
           aria-expanded={open}
           aria-haspopup="listbox"
@@ -320,7 +320,7 @@ export function CopyLink({
     <span className="ub-copy-wrap">
       <button
         type="button"
-        className="ub-copy-link inline-flex min-h-11 min-w-[max(2.75rem,6em)] cursor-pointer items-center justify-center border-0 bg-transparent px-[0.15rem] py-0 [font:inherit] text-(--muted-foreground) hover:text-(--foreground) hover:underline focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+        className="ub-copy-link inline-flex min-h-11 min-w-[max(2.75rem,6em)] items-center justify-center border-0 bg-transparent px-[0.15rem] py-0 [font:inherit] text-(--muted-foreground) hover:text-(--foreground) hover:underline focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
         aria-label={`Copy link — copies the canonical document URL for ${address}`}
         title={`Copy link — copies the canonical document URL for ${address}`}
         onClick={() => void copyText(shareUrl(address, window.location.origin), "Link copied", "Couldn't copy the link. Select it in the address bar instead.")}

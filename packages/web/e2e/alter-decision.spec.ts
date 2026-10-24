@@ -96,6 +96,11 @@ test("rich answer controls stay inside the modal on desktop keyboard and pointer
     contextOptions: touch ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 1000 } },
   });
   await expect(editor(page)).toContainText("Select this answer");
+  if (!touch) {
+    const alter = page.getByRole("button", { name: "Alter decision", exact: true });
+    await alter.hover();
+    await expect(alter).toHaveCSS("cursor", "pointer");
+  }
   await openDialog(page, touch);
   await expect(dialog(page)).toContainText(title);
   await expect(dialog(page).getByLabel(/Why the change/)).toHaveCount(0);
@@ -173,6 +178,7 @@ test("rich answer controls stay inside the modal on desktop keyboard and pointer
   await expect(dialog(page)).toBeVisible();
   await expect(dialog(page)).toContainText(/at most three blocks/i);
   await expect(dialog(page).getByRole("button", { name: "Decide", exact: true })).toBeDisabled();
+  await expect(dialog(page).getByRole("button", { name: "Decide", exact: true })).toHaveCSS("cursor", "default");
   await expect(dialog(page).getByRole("button", { name: "Open an RFC instead", exact: true })).toBeDisabled();
   await page.keyboard.press("Backspace");
   await page.keyboard.type(`@${reference.title}`);
