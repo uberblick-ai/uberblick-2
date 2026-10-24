@@ -200,7 +200,8 @@ test("Tags settings is address-selected and its catalog changes converge", async
   );
   await expect(first.getByRole("option").first()).toBeFocused();
   const product = first.getByRole("option", { name: "product", exact: true });
-  for (let step = 0; step < 4; step += 1) await first.keyboard.press("ArrowDown");
+  const productIndex = [...examples, "product"].sort().indexOf("product");
+  for (let step = 0; step < productIndex; step += 1) await first.keyboard.press("ArrowDown");
   await expect(product).toBeFocused();
   await product.press("Space");
   await product.press("Escape");

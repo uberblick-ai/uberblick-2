@@ -10,7 +10,7 @@ import type { Rig } from "./core-helpers.js";
 const rigs: Rig[] = [];
 const DESCRIPTION = "Metadata contract fixture.";
 const AUTH = { ...EXAMPLE_TAGS[0] };
-const MCP = { ...EXAMPLE_TAGS[2] };
+const MCP = { ...EXAMPLE_TAGS.find((tag) => tag.name === "mcp")! };
 const COMMIT = "33086e02eb66f2e32dcce67a21c6c8ece9cf9ae4";
 const CHECK = { repository: "uberblick-ai/uberblick-2", commit: COMMIT, result: "matches" } as const;
 
