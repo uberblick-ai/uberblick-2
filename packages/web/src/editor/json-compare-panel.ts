@@ -43,14 +43,14 @@ function changeKind(row: JsonCompareRow): "added" | "removed" | "changed" | null
 }
 
 /** Where a lowercase query falls in each piece; a match may span pieces of one value that a change split. */
-function pieceMatches(pieces: JsonComparePiece[], query: string): [number, number][][] {
+function pieceMatches(pieces: JsonComparePiece[], query: string, compact = false): [number, number][][] {
   const result = pieces.map((): [number, number][] => []);
   if (query === "") return result;
   for (let start = 0; start < pieces.length;) {
     const role = pieces[start]?.role;
     let end = start + 1;
     while (end < pieces.length && pieces[end]?.role === role) end++;
-    if (role !== undefined && SEARCHED.has(role)) {
+    if (role !== undefined && (SEARCHED.has(role) || (compact && role === "punct"))) {
       const text = pieces.slice(start, end).map((piece) => piece.text).join("").toLowerCase();
       const found: [number, number][] = [];
       for (let at = text.indexOf(query); at !== -1; at = text.indexOf(query, at + query.length)) found.push([at, at + query.length]);
@@ -115,7 +115,7 @@ function cell(row: JsonCompareRow, side: "before" | "after", open: boolean, sear
     toggle.setAttribute("aria-expanded", String(open));
     element.append(toggle);
   }
-  const matches = pieceMatches(pieces, search.query);
+  const matches = pieceMatches(pieces, search.query, node.kind === "type-changed");
   pieces.forEach((piece, index) => {
     const part = document.createElement(piece.mark === true ? "mark" : "span");
     part.className = PIECE_CLASS[piece.role];
@@ -132,18 +132,27 @@ function paneText(grid: HTMLElement, selection: Selection): string | null {
   const anchor = selection.anchorNode instanceof Element ? selection.anchorNode : selection.anchorNode?.parentElement;
   const pane = anchor?.closest(".ub-json-compare-pane");
   if (pane == null || !grid.contains(pane)) return null;
+  if (selection.rangeCount === 0) return "";
+  const selected = selection.getRangeAt(0);
   const lines: string[] = [];
   for (const each of pane.querySelectorAll<HTMLElement>(".ub-json-compare-cell")) {
-    if (!selection.containsNode(each, true) || each.classList.contains("ub-json-compare-filler") || each.dataset.chrome === "true") continue;
+    if (!selected.intersectsNode(each) || each.classList.contains("ub-json-compare-filler") || each.dataset.chrome === "true") continue;
+    const clipped = document.createRange();
+    clipped.selectNodeContents(each);
+    if (selected.compareBoundaryPoints(Range.START_TO_START, clipped) > 0) clipped.setStart(selected.startContainer, selected.startOffset);
+    if (selected.compareBoundaryPoints(Range.END_TO_END, clipped) < 0) clipped.setEnd(selected.endContainer, selected.endOffset);
+    const fragment = clipped.cloneContents();
+    fragment.querySelectorAll('[data-chrome="true"], .ub-json-toggle').forEach((chrome) => { chrome.remove(); });
+    const text = fragment.textContent ?? "";
+    if (text === "") continue;
     const depth = Number(each.style.getPropertyValue("--json-depth"));
-    const text = [...each.children].filter((child) => child instanceof HTMLElement && child.dataset.chrome !== "true"
-      && !child.classList.contains("ub-json-toggle")).map((child) => child.textContent).join("");
-    lines.push(`${"  ".repeat(depth)}${text}`);
+    const indent = selected.comparePoint(each, 0) === 0 ? "  ".repeat(depth) : "";
+    lines.push(`${indent}${text}`);
   }
   return lines.join("\n");
 }
 
-/** A search hit: a node whose key or scalar value contains the query on either side, with the nodes that hold it. */
+/** A search hit: a node whose key or displayed value contains the query on either side, with the nodes that hold it. */
 export interface JsonCompareMatch { path: string; chain: JsonCompareNode[] }
 
 function scalarText(node: JsonSourceNode | null): string {
@@ -162,7 +171,12 @@ function compareMatches(root: JsonCompareNode, query: string): JsonCompareMatch[
   const hit = (text: string | number | null): boolean => typeof text === "string" && text.toLowerCase().includes(query);
   const visit = (node: JsonCompareNode, chain: JsonCompareNode[]): void => {
     const here = [...chain, node];
-    if (hit(node.beforeKey) || hit(node.afterKey) || hit(scalarText(node.before)) || hit(scalarText(node.after))) {
+    // A type change is one leaf whose compact value can still contain nested keys and values.
+    const leaf = node.kind === "type-changed"
+      ? jsonComparisonRows(node, { isOpen: () => false, collapseUnchanged: false })[0] : undefined;
+    const compact = leaf?.type === "node" && [leaf.before, leaf.after].some((pieces) =>
+      pieces !== null && pieceMatches(pieces, query, true).some((ranges) => ranges.length > 0));
+    if (compact || hit(node.beforeKey) || hit(node.afterKey) || hit(scalarText(node.before)) || hit(scalarText(node.after))) {
       matches.push({ path: node.path, chain: here });
     }
     for (const child of node.children) visit(child, here);

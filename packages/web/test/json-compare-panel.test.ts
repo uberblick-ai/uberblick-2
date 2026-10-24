@@ -99,4 +99,33 @@ describe("JSON comparison panel", () => {
     expect(shown.show("{", AFTER)).toBe(false);
     expect(shown.grid.children).toHaveLength(0);
   });
+
+  it.each(["before", "after"])("clips copied text to selected boundaries in the %s pane", (side) => {
+    const shown = panel();
+    shown.show(JSON.stringify({ version: "alpha old omega", nested: { a: 1 }, tail: "ending" }),
+      JSON.stringify({ version: "alpha new omega", nested: { a: 1 }, tail: "ending" }));
+    const pane = shown.grid.querySelector<HTMLElement>(`.ub-json-compare-pane[data-side="${side}"]`);
+    if (pane == null) throw new Error("The pane is missing");
+    const key = [...pane.querySelectorAll(".ub-json-key")].find((each) => each.textContent === '"version"');
+    const value = key?.parentElement?.querySelector(".ub-json-string")?.firstChild;
+    const tail = [...pane.querySelectorAll(".ub-json-key")].find((each) => each.textContent === '"tail"')
+      ?.parentElement?.querySelector(".ub-json-string")?.firstChild;
+    if (key?.firstChild == null || value == null || tail == null) throw new Error("Selection endpoints are missing");
+    const copy = (start: Node, from: number, end: Node, to: number): string | undefined => {
+      const range = document.createRange();
+      range.setStart(start, from);
+      range.setEnd(end, to);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      const data = new Map<string, string>();
+      const event = new Event("copy", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clipboardData", { value: { setData: (type: string, text: string) => data.set(type, text) } });
+      pane.dispatchEvent(event);
+      return data.get("text/plain");
+    };
+    expect(copy(value, 1, value, 6)).toBe("alpha");
+    expect(copy(key.firstChild, 1, key.firstChild, 4)).toBe("ver");
+    expect(copy(value, 1, tail, 4)).toBe(`alpha ${side === "before" ? "old" : "new"} omega",\n  "nested": { … },\n  "tail": "end`);
+  });
 });

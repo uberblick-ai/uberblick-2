@@ -178,6 +178,12 @@ function changeStarts(rows: readonly RevisionRow[]): number[] {
   return rows.flatMap((row, index) => row.changed && (!rows[index - 1]?.changed || spanned(row) || spanned(rows[index - 1])) ? [index] : []);
 }
 
+function nextChangeTarget<T extends { top: number }>(list: readonly T[]): T | undefined {
+  const current = list.findIndex((entry) => entry.top >= -2 && entry.top <= CHANGE_SLACK);
+  // Only one target is current, even when several JSON changes fit within the tolerance.
+  return current < 0 ? list.find((entry) => entry.top > CHANGE_SLACK) : list[current + 1];
+}
+
 /**
  * Stacked previous and next change, level with the line under the title. They
  * scroll the pane so a change sits just below the sticky header.
@@ -210,7 +216,7 @@ function ChangeNavigation({ pane, header, before, after, rows }: {
       frame = requestAnimationFrame(() => {
         const list = targets();
         const end = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1;
-        setState({ previous: list.some((target) => target.top < -2), next: !end && list.some((target) => target.top > CHANGE_SLACK) });
+        setState({ previous: list.some((target) => target.top < -2), next: !end && nextChangeTarget(list) !== undefined });
       });
     };
     measure();
@@ -229,7 +235,7 @@ function ChangeNavigation({ pane, header, before, after, rows }: {
     const scroller = pane.current;
     if (scroller === null) return;
     const list = targets();
-    const target = direction > 0 ? list.find((entry) => entry.top > CHANGE_SLACK) : list.findLast((entry) => entry.top < -2);
+    const target = direction > 0 ? nextChangeTarget(list) : list.findLast((entry) => entry.top < -2);
     if (target === undefined) return;
     // A change can span several rows under different nested toggle headings.
     for (let row = target.row; rows[row]?.changed; row += 1) {
