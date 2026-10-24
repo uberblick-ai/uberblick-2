@@ -132,6 +132,64 @@ test("Expand opens a full-screen viewer whose search opens folded matches and fo
   await expect(page.locator('.ub-json-tree [role="treeitem"][tabindex="0"]')).toBeFocused();
 });
 
+test("an open viewer follows settled invalid source and restores its search and folds when valid JSON returns", async ({ browser }) => {
+  const session = writer();
+  const valid = '{\n  "active": {"current": 1},\n  "folded": {"hidden": true}\n}';
+  const invalid = valid.replace('"current": 1', '"current": 2,');
+  const recovered = valid.replace('"current": 1', '"current": 3');
+  const uuid = await treeDoc(session, "JSON viewer remote validation", valid);
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: async loading => { await loading.clock.install(); },
+  });
+  await page.locator(".ub-json-tree").hover();
+  await page.getByRole("button", { name: "Expand JSON tree", exact: true }).click();
+  const viewer = page.getByRole("dialog", { name: "JSON tree", exact: true });
+  const tree = viewer.getByRole("tree", { name: "JSON tree" });
+  const source = viewer.locator(".ub-json-tree-viewer-source");
+  const blockSource = page.locator(".ub-json-tree .ub-json-tree-source");
+  const search = viewer.getByRole("searchbox", { name: "Search keys and values" });
+  const current = viewer.locator('.ub-json-row[data-path=".active.current"]');
+  const folded = viewer.locator('.ub-json-row[data-path=".folded"]');
+  await expect(tree).toBeVisible();
+  await folded.press("ArrowLeft");
+  await expect(folded).toHaveAttribute("aria-expanded", "false");
+  await search.fill("current");
+  await expect(viewer.locator(".ub-json-tree-count")).toHaveText("1 of 1");
+  await page.clock.pauseAt(new Date(Date.now() + 1_000));
+
+  await rewriteTree(session, uuid, invalid);
+  await expect.poll(() => authoredText(blockSource)).toBe(invalid);
+  await page.clock.runFor(1_499);
+  await expect(page.locator(".ub-json-tree")).toHaveAttribute("data-json", "stale");
+  await expect(tree).toBeVisible();
+  await expect(current).toContainText('"current": 1');
+  await expect(source).toBeHidden();
+  await page.clock.runFor(1);
+  await expect(page.locator(".ub-json-tree")).toHaveAttribute("data-json", "invalid");
+  await expect(viewer).toBeVisible();
+  await expect(tree).toBeHidden();
+  await expect(source).toBeVisible();
+  await expect(source).toHaveText(invalid);
+  await expect(viewer.getByText(/^Not valid JSON:/)).toBeVisible();
+  await expect(search).toHaveValue("current");
+  await expect(viewer.locator(".ub-json-tree-count")).toHaveText("No matches");
+  await expect(viewer.getByRole("button", { name: "Previous match", exact: true })).toBeDisabled();
+  await expect(viewer.getByRole("button", { name: "Next match", exact: true })).toBeDisabled();
+  await expect(viewer.getByRole("button", { name: "Collapse all", exact: true })).toBeDisabled();
+  await expect(viewer.getByRole("button", { name: "Expand all", exact: true })).toBeDisabled();
+
+  await rewriteTree(session, uuid, recovered);
+  await expect.poll(() => authoredText(blockSource)).toBe(recovered);
+  await page.clock.runFor(200);
+  await expect(tree).toBeVisible();
+  await expect(current).toContainText('"current": 3');
+  await expect(source).toBeHidden();
+  await expect(search).toHaveValue("current");
+  await expect(viewer.locator(".ub-json-tree-count")).toHaveText("1 of 1");
+  await expect(folded).toHaveAttribute("aria-expanded", "false");
+  await expect(viewer.locator('.ub-json-row[data-path=".folded.hidden"]')).toHaveCount(0);
+});
+
 for (const annotated of [false, true]) {
   test(`remote invalid edits keep the tree during the pause, then show source${annotated ? " beside a comment" : ""}`, async ({ browser }) => {
     const session = writer();

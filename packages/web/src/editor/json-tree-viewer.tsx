@@ -13,9 +13,10 @@ import type { JsonTreeItem } from "./json-tree-rows.js";
 import "../ui/figure-viewer.css";
 
 interface JsonTreeViewerOptions {
-  root: JsonTreeItem;
+  root: JsonTreeItem | null;
   source: () => string;
   editable: boolean;
+  note: string;
   openEdit: () => void;
   /** Focus the block again; false when it has left the document. */
   returnFocus: () => boolean;
@@ -23,8 +24,8 @@ interface JsonTreeViewerOptions {
 
 export interface JsonTreeViewerHandle {
   close: () => void;
-  /** Follow the block: a new tree keeps the viewer's folds and search. */
-  update: (root: JsonTreeItem, editable: boolean) => void;
+  /** Follow the block's tree or invalid source, keeping folds and search. */
+  update: (root: JsonTreeItem | null, editable: boolean, note: string) => void;
 }
 
 /** Mount the viewer outside ProseMirror's tree, closing on Back like the Ablauf viewer. */
@@ -57,10 +58,11 @@ export function openJsonTreeViewer(options: JsonTreeViewerOptions): JsonTreeView
   render();
   return {
     close: () => { close(); },
-    update: (next, editable) => {
+    update: (next, editable, note) => {
       if (disposed) return;
       options.root = next;
       options.editable = editable;
+      options.note = note;
       render();
     },
   };
@@ -120,13 +122,19 @@ function JsonTreeViewer({ options, panel, close, restoreFocus }: {
         </output>
         <Button variant="outline" size="sm" aria-label="Previous match" disabled={matches.length === 0} onClick={() => step(-1)}>↑</Button>
         <Button variant="outline" size="sm" aria-label="Next match" disabled={matches.length === 0} onClick={() => step(1)}>↓</Button>
-        <Button variant="outline" size="sm" onClick={() => { panel.openAll(false); }}>Collapse all</Button>
-        <Button variant="outline" size="sm" onClick={() => { panel.openAll(true); }}>Expand all</Button>
+        <Button variant="outline" size="sm" disabled={options.root === null} onClick={() => { panel.openAll(false); }}>Collapse all</Button>
+        <Button variant="outline" size="sm" disabled={options.root === null} onClick={() => { panel.openAll(true); }}>Expand all</Button>
         <span className="ub-figure-viewer-spacer" />
         <Button variant="outline" size="sm" aria-label="Copy JSON" onClick={copy}>Copy</Button>
         {options.editable && <Button variant="outline" size="sm" aria-label="Edit JSON" onClick={() => close(true)}>Edit</Button>}
       </div>
-      <div className="ub-json-tree-viewer-body ub-code" ref={setBody} />
+      <div className="ub-json-tree-viewer-body ub-code">
+        <div ref={setBody} hidden={options.root === null} />
+        {options.root === null && <>
+          <pre className="ub-json-tree-source ub-json-tree-viewer-source">{options.source()}</pre>
+          <p className="ub-json-tree-validity">{options.note}</p>
+        </>}
+      </div>
     </DialogContent>
   </Dialog>;
 }

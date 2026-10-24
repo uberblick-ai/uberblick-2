@@ -126,7 +126,6 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
       const root = rootItem(parsed.value);
       shown = { root, duplicates: parsed.duplicateKeys };
       tree.show(root, firstView(root));
-      viewer?.update(root, editor.isEditable);
     }
     syncDisplay();
     chrome.duplicates.hidden = shown?.duplicates !== true;
@@ -136,6 +135,7 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
     // Local and remote text edits share the pause; initially invalid source has no pending edit.
     note.textContent = parsed.ok || !editor.isEditable || noteTimer !== null ? ""
       : `Not valid JSON: line ${parsed.line}, column ${parsed.column} (${parsed.message})`;
+    viewer?.update(dom.dataset.json === "invalid" ? null : shown?.root ?? null, editor.isEditable, note.textContent);
   };
   const reparse = (): void => {
     if (renderTimer !== null) clearTimeout(renderTimer);
@@ -177,7 +177,7 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
     if (shown === null) return;
     viewer?.close();
     viewer = openJsonTreeViewer({
-      root: shown.root, source: () => current.textContent, editable: editor.isEditable,
+      root: shown.root, source: () => current.textContent, editable: editor.isEditable, note: "",
       openEdit: startEditing,
       returnFocus: () => { if (!dom.isConnected) return false; tree.focus(); return true; },
     });
