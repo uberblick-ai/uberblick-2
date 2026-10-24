@@ -39,7 +39,7 @@ import { statusReading } from "../status/status-reading.js";
 import { documentSyncFacts } from "../status/sync-facts.js";
 import { bindSyncAttributes } from "../status/sync-state.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
-import { isPlainClick } from "../route.js";
+import { handleDocLinkClick } from "./doc-link-click.js";
 import { BlockMenu } from "../editor-controls/BlockMenu.js";
 import { CodeLanguageControl } from "../editor-controls/CodeLanguageControl.js";
 import { CardButtonControls } from "../editor-controls/CardButtonControls.js";
@@ -717,21 +717,7 @@ const BoundEditor = memo(function BoundEditor({
       });
     };
     const activate = (event: MouseEvent): void => {
-      const docId = docLinkFromTarget(event.target);
-      if (docId !== null) {
-        if (docLinks?.lookup(docId).state === "deleted") {
-          event.preventDefault();
-          return;
-        }
-        // A modifier or a middle button is the browser's business — the anchor
-        // carries a real address, so cmd-click still opens a tab. Everything
-        // else navigates in-app, which is what keeps Back working.
-        if (isPlainClick(event) && docLinks !== null) {
-          event.preventDefault();
-          docLinks.open(docId);
-        }
-        return;
-      }
+      if (handleDocLinkClick(event, docLinks)) return;
       const anchor = linkAnchorFromTarget(event.target);
       if (anchor !== null) {
         // Editable links open through ProseMirror's non-moving handleClick,
