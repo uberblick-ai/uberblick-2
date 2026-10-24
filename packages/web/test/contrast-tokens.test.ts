@@ -213,5 +213,19 @@ it.each(["light", "dark"] as const)("source-token contrast — %s", (scheme) => 
   } catch (error) {
     failures.push(`orphaned chip relation: ${String(error)}`);
   }
+  try {
+    // Ruler marks stay visible on the page, and in dark mode quieter than the prose they map.
+    for (const ground of ["--page-ground[0]", "--page-ground[1]"]) {
+      const backing = resolve(tokens, ground, scheme);
+      const prose = contrast(resolve(tokens, "--prose-text", scheme), backing);
+      for (const mark of ["--revision-ruler-added", "--revision-ruler-removed", "--revision-ruler-changed"]) {
+        const value = contrast(resolve(tokens, mark, scheme), backing);
+        if (!(value >= 2)) failures.push(`ruler mark ${mark} on ${ground}: ${value} < 2`);
+        if (scheme === "dark" && !(value < prose / 2)) failures.push(`dark ruler mark ${mark} on ${ground}: ${value} outshines prose ${prose}`);
+      }
+    }
+  } catch (error) {
+    failures.push(`ruler marks: ${String(error)}`);
+  }
   expect(failures, failures.join("\n")).toEqual([]);
 });
