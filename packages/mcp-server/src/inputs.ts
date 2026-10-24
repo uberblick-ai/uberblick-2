@@ -1,14 +1,15 @@
 /**
  * Pass strict objects to registerTool: raw shapes silently strip unknown keys.
- * ToolMode drives both validation and advertised oneOf branches. SDK validation
- * refuses before handlers run and returns its own plain-text error.
+ * ToolMode drives validation only. Advertised schemas stay flat: some clients
+ * drop the root properties of a schema with a root oneOf or anyOf. SDK
+ * validation refuses before handlers run and returns its own plain-text error.
  */
 
 import { z } from "zod";
 
 /**
  * Select by a field's value or presence. Modes must be mutually exclusive and
- * cover every valid input so validation and advertised oneOf select one shape.
+ * cover every valid input so validation selects one shape.
  */
 export type ModeSelector =
   | { field: string; is: string }
@@ -17,7 +18,7 @@ export type ModeSelector =
 
 /** One valid shape of a tool that multiplexes several actions over one name. */
 export interface ToolMode {
-  /** How the shape names itself in a rejection and in its advertised branch. */
+  /** How the shape names itself in a rejection. */
   title: string;
   /** Which calls are this shape. */
   when: ModeSelector;
@@ -31,35 +32,6 @@ function selects(when: ModeSelector, args: Record<string, unknown>): boolean {
   if ("all" in when) return when.all.every((selector) => selects(selector, args));
   const value = args[when.field];
   return "is" in when ? value === when.is : (value !== undefined) === when.present;
-}
-
-/**
- * Include the selector in each oneOf branch; draft-07 forbids a present key
- * with `properties: {field: false}`.
- */
-function branch(mode: ToolMode): Record<string, unknown> {
-  const properties: Record<string, unknown> = {};
-  const required: string[] = [];
-  const select = (when: ModeSelector): void => {
-    if ("all" in when) {
-      for (const selector of when.all) select(selector);
-    } else if ("is" in when) {
-      properties[when.field] = { const: when.is };
-      required.push(when.field);
-    } else if (when.present) {
-      required.push(when.field);
-    } else {
-      properties[when.field] = false;
-    }
-  };
-  select(mode.when);
-  required.push(...(mode.requires ?? []));
-  for (const field of mode.forbids ?? []) properties[field] = false;
-  return {
-    title: mode.title,
-    ...(required.length === 0 ? {} : { required }),
-    ...(Object.keys(properties).length === 0 ? {} : { properties }),
-  };
 }
 
 /**
@@ -95,6 +67,5 @@ export function strictInput<Shape extends z.ZodRawShape>(
           });
         }
       }
-    })
-    .meta({ oneOf: modes.map(branch) });
+    });
 }

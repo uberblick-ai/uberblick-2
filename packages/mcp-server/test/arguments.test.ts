@@ -36,13 +36,6 @@ async function localRig(): Promise<Rig> {
   return rig;
 }
 
-/** The advertised input schema of one tool, as a client reads it. */
-async function inputSchema(rig: Rig, tool: string): Promise<any> {
-  const { tools } = await rig.client.listTools();
-  const found = tools.find((candidate) => candidate.name === tool);
-  if (found === undefined) throw new Error(`no tool ${tool}`);
-  return found.inputSchema as any;
-}
 
 /** A document with one paragraph. */
 async function seeded(rig: Rig): Promise<{ uuid: string; blockId: string }> {
@@ -169,25 +162,6 @@ describe("create_doc lifecycle arguments", () => {
   it("refuses a status without a kind before creation", async () => {
     const rig = await localRig();
 
-    expect((await inputSchema(rig, "create_doc")).oneOf).toEqual([
-      {
-        title: expect.stringMatching(/^A decision document \(`kind: decision`\)\. /),
-        required: ["kind"],
-        properties: { kind: { const: "decision" } },
-      },
-      {
-        title: "An ordinary document",
-        required: ["title"],
-        properties: {
-          kind: false,
-          status: false,
-          related: false,
-          supersedes: false,
-          answer: false,
-          discussion: false,
-        },
-      },
-    ]);
 
     const withoutKind = await rig.call("create_doc", {
       title: "No kind",
@@ -250,27 +224,10 @@ describe("create_doc lifecycle arguments", () => {
 });
 
 describe("annotate", () => {
-  it("advertises three shapes and resolves threads only through replies", async () => {
+  it("takes three shapes and resolves threads only through replies", async () => {
     const rig = await localRig();
     const doc = await seeded(rig);
 
-    expect((await inputSchema(rig, "annotate")).oneOf).toEqual([
-      {
-        title: "A reply (`thread_id`)",
-        required: ["thread_id"],
-        properties: { block_id: false, start: false, end: false, row: false, column: false },
-      },
-      {
-        title: "Moving a thread's anchor",
-        required: ["thread_id", "block_id", "start", "end"],
-        properties: { resolved: false },
-      },
-      {
-        title: "Opening a thread over a range",
-        required: ["block_id", "start", "end"],
-        properties: { thread_id: false, resolved: false },
-      },
-    ]);
 
     const opened = await rig.ok("annotate", {
       uuid: doc.uuid,
@@ -345,29 +302,12 @@ describe("annotate", () => {
 });
 
 describe("sidebar_group", () => {
-  it("advertises three shapes and refuses another action's fields", async () => {
+  it("takes three shapes and refuses another action's fields", async () => {
     const rig = await localRig();
     const doc = await seeded(rig);
     await rig.ok("pin_doc", { uuid: doc.uuid, group: "Start here" });
     await rig.ok("pin_doc", { uuid: doc.uuid, group: "Reference" });
 
-    expect((await inputSchema(rig, "sidebar_group")).oneOf).toEqual([
-      {
-        title: "rename",
-        required: ["action", "name"],
-        properties: { action: { const: "rename" }, index: false },
-      },
-      {
-        title: "move",
-        required: ["action"],
-        properties: { action: { const: "move" }, name: false },
-      },
-      {
-        title: "delete",
-        required: ["action"],
-        properties: { action: { const: "delete" }, name: false, index: false },
-      },
-    ]);
 
     const refused = [
       // rename says which name, and nothing about position.
