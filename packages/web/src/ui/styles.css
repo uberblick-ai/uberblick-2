@@ -998,7 +998,6 @@ body {
 .ub-comment-buttons .ub-tool:disabled,
 .ub-tldr-actions .ub-tool:disabled {
   opacity: 0.5;
-  cursor: default;
 }
 
 .ub-pane {
@@ -3445,7 +3444,6 @@ h6.ub-heading {
 
 .ub-docs-clear-tags:disabled {
   color: var(--muted-foreground);
-  cursor: default;
 }
 
 .ub-docs-empty {
