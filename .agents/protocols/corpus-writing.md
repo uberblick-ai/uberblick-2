@@ -30,6 +30,10 @@ existing page follows the same rule.
    only, not scenarios.
 4. Related links last.
 
+Add a visual where it shows more than prose would: an `ablauf` diagram for a
+flow or states, a `wireframe` for a screen, a code or JSON block for a command,
+a tool call or what it returns. Leave it out when the prose is already clear.
+
 ## Length and tone
 
 - Intros are one or two sentences. No TL;DR.
