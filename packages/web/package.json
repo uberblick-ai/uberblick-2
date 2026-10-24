@@ -34,7 +34,7 @@
     "@uberblick/hub": "workspace:*",
     "@uberblick/mcp-server": "workspace:*",
     "@uberblick/schema": "workspace:*",
-    "@uberblick/wireframe": "^0.3.0",
+    "@uberblick/wireframe": "^0.3.1",
     "chart.js": "4.5.1",
     "gemoji": "8.1.0",
     "lowlight": "^3.3.0",
