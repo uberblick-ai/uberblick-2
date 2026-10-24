@@ -14,6 +14,10 @@ local paths, hostnames or log excerpts. Write the body file in private scratch,
 never the worktree, where it could be committed. A
 retrospective is telemetry, never a gate.
 
+If a missing corpus tag caused a qualifying discovery problem, the preparer
+suggests it in the retrospective, stating its meaning and why existing tags do
+not fit; a maintainer creates it.
+
 Use the launcher's literal `report_command` followed by
 `retrospective --body-file <private-body-file>`; `ub-agents.yaml` pins each role's
 board. Do not substitute another installation or direct GraphQL. A failed post
