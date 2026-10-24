@@ -5,5 +5,5 @@ export default defineConfig({
   ...acceptance,
   testDir: "./e2e/captures",
   testMatch: "**/*.capture.ts",
-  projects: acceptance.projects?.filter(project => project.name === "chromium"),
+  projects: (acceptance.projects ?? []).filter(project => project.name === "chromium"),
 });
