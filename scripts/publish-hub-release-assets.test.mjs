@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { downloadAsset, publishHubReleaseAssets } from "./publish-hub-release-assets.mjs";
+import { imageRefs, PLATFORMS } from "./publish-hub-release.mjs";
 
 const SHA = "a".repeat(40);
 const TAG = "hub-v1.2.3";
@@ -15,11 +16,17 @@ function input(overrides = {}) {
     tagSha: SHA, workflowSha: SHA, ...overrides };
 }
 
-function image(revision = SHA) {
-  return { Os: "linux", Architecture: "amd64", Config: { Labels: {
+function image(platform = "linux/amd64", revision = SHA) {
+  const refs = imageRefs("1.2.3");
+  return { Os: "linux", Architecture: platform.split("/")[1], Config: { Labels: {
     "org.opencontainers.image.version": "1.2.3", "org.opencontainers.image.revision": revision,
     "io.uberblick.sync-protocol-version": "1",
-  } } };
+  } }, release: { version: "1.2.3", sourceCommit: revision, syncProtocolVersion: 1,
+    images: { hub: refs[0], web: refs[1] } } };
+}
+
+function published(revision = SHA) {
+  return Object.fromEntries(PLATFORMS.map((platform) => [platform, image(platform, revision)]));
 }
 
 function asset(name, overrides = {}) {
@@ -38,7 +45,7 @@ function services(overrides = {}) {
   const calls = [];
   return { calls,
     assertRemoteTag: async () => { calls.push("tag"); },
-    getImage: async (ref) => { calls.push(`image ${ref}`); return image(); },
+    getImage: async (ref) => { calls.push(`image ${ref}`); return published(); },
     getRelease: async () => { calls.push("release"); return null; },
     downloadAsset: async (url) => { calls.push(`download ${url.split("/").at(-1)}`); return ASSETS[url.split("/").at(-1)]; },
     wait: async (ms) => { calls.push(`wait ${ms}`); },
@@ -65,7 +72,7 @@ test("assets publish only for a person's matching immutable hub tag push", async
   }
 });
 
-test("both registry images match before any release is created, including an image-publisher no-op", async () => {
+test("both platforms of both registry images match before any release is created, including a publisher no-op", async () => {
   const fake = services();
   assert.equal((await publishHubReleaseAssets(input(), fake)).outcome, "published");
   assert.deepEqual(fake.calls.slice(0, 4), ["tag", "image ghcr.io/uberblick-ai/hub:1.2.3",
@@ -75,12 +82,32 @@ test("both registry images match before any release is created, including an ima
 });
 
 test("missing, mismatching or unreadable registry images stop before any release write", async () => {
-  for (const getImage of [async () => null, async () => image("b".repeat(40)),
+  for (const getImage of [async () => null, async () => published("b".repeat(40)),
     async () => { throw new Error("registry unavailable"); }]) {
     const fake = services({ getImage });
     await assert.rejects(publishHubReleaseAssets(input(), fake), /both images|disagrees|registry unavailable/);
     assert.deepEqual(mutations(fake), []);
     assert.ok(!fake.calls.includes("release"));
+  }
+});
+
+test("missing platforms or a single mismatching platform stop before any release write", async () => {
+  for (const platform of PLATFORMS) {
+    for (const targetRef of imageRefs("1.2.3")) {
+      for (const failure of ["missing", "labels", "metadata"]) {
+        const fake = services({ getImage: async (ref) => {
+          const result = published();
+          if (ref !== targetRef) return result;
+          if (failure === "missing") delete result[platform];
+          if (failure === "labels") result[platform].Config.Labels["org.opencontainers.image.revision"] = "b".repeat(40);
+          if (failure === "metadata") result[platform].release.sourceCommit = "b".repeat(40);
+          return result;
+        } });
+        await assert.rejects(publishHubReleaseAssets(input(), fake), /missing|platform|disagrees/);
+        assert.deepEqual(mutations(fake), []);
+        assert.ok(!fake.calls.includes("release"));
+      }
+    }
   }
 });
 

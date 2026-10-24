@@ -28,6 +28,8 @@ import {
   getWorkspaceName,
   getWorkspaceMainRepository,
   listTagCatalog,
+  listDeletedTagCatalogEntries,
+  migrateRetiredTagCatalogEntries,
   normalizeLegacyTables,
   removeLegacyMermaidBlocks,
   repairDuplicateBlocks,
@@ -52,7 +54,7 @@ import { log } from "./log.js";
 import { collectReplicaSyncState } from "./status.js";
 import type { MirrorStore, UpdateOrigin } from "./store.js";
 import { SettingsResetError, WorkspaceRemovedError } from "./store.js";
-import { HubSync, type SyncWaitResult } from "./sync.js";
+import { HubSync, LOCAL_HUB_REASON, type HubState, type SyncWaitResult } from "./sync.js";
 import { readDeviceLogin } from "./device-login.js";
 
 /** Replayed updates are already durable; the update observer must skip them. */
@@ -976,6 +978,7 @@ export class Replicas {
     }
 
     this.refreshReplicas();
+    this.migrateTagCatalog();
     if (this.persistenceFailure !== null) {
       this.assertHealthy();
       return;
@@ -983,6 +986,14 @@ export class Replicas {
     this.releaseQuietRooms();
     this.compactLargeLogs();
     this.recordLastSyncIfCaughtUp();
+  }
+
+  private migrateTagCatalog(): boolean {
+    if (this.persistenceFailure !== null ||
+      !(this.config.localWorkspace === true || this.sync.canWriteRoom(this.settings().room))) return false;
+    const changed = migrateRetiredTagCatalogEntries(this.settings().doc);
+    if (changed && this.sync.enabled) this.settleNeeded = true;
+    return changed;
   }
 
   /** Await hub acknowledgement of the replica, never hub storage. */
@@ -1075,7 +1086,8 @@ export class Replicas {
       const changes: string[] = [];
       if (getWorkspaceName(old) !== getWorkspaceName(authoritative)) changes.push("workspace name");
       if (getWorkspaceMainRepository(old) !== getWorkspaceMainRepository(authoritative)) changes.push("main repository");
-      if (JSON.stringify(listTagCatalog(old)) !== JSON.stringify(listTagCatalog(authoritative))) changes.push("tag catalog");
+      if (JSON.stringify([listTagCatalog(old), listDeletedTagCatalogEntries(old)]) !==
+        JSON.stringify([listTagCatalog(authoritative), listDeletedTagCatalogEntries(authoritative)])) changes.push("tag catalog");
       const notice = `The hub refused changes to ${changes.length === 0 ? "workspace settings" : changes.join(", ")} because workspace-admin authority is required. The hub's settings have been restored.`;
       this.store.replaceSettings(state, notice, replica.settingsResetSeq);
       this.reloadSettingsIfReplaced();
@@ -1148,6 +1160,12 @@ export class Replicas {
     }
 
     if (this.persistenceFailure !== null) return;
+    if (this.migrateTagCatalog() && this.sync.enabled) {
+      await this.sync.waitForQuiet();
+      if (this.persistenceFailure !== null) return;
+      this.pollAll();
+      this.settleNeeded = this.sync.isDraining();
+    }
     this.releaseQuietRooms();
     this.compactLargeLogs();
     this.recordLastSyncIfCaughtUp();
@@ -1294,6 +1312,33 @@ export class Replicas {
   /** Whether a room's local changes are known to have reached the hub. */
   isRoomQuiet(room: string): boolean {
     return this.sync.isRoomQuiet(room);
+  }
+
+  /**
+   * Whether this replica holds everything known of a room. Every replica on
+   * this computer shares one update log, so a local workspace's rooms are
+   * complete once replayed; a hub workspace's need the hub's delivery and
+   * acknowledgement. With sync disabled the local copy is all there is.
+   */
+  roomComplete(room: string): boolean {
+    return !this.sync.enabled || this.config.localWorkspace === true || this.isRoomQuiet(room);
+  }
+
+  /**
+   * The hub reading agents receive. A local workspace's hub runs only while
+   * `ub open` does, so its absence is the normal state rather than an outage.
+   * `ub open` itself reads `sync.state()` to supervise the hub it starts.
+   */
+  hubState(): HubState {
+    const state = this.sync.state();
+    if (this.config.localWorkspace !== true || state.status !== "hub-down") return state;
+    return {
+      protocolVersion: state.protocolVersion,
+      recoveryClass: "manual",
+      status: "local",
+      url: state.url,
+      reason: LOCAL_HUB_REASON,
+    };
   }
 
   attachedReplicas(): Replica[] {

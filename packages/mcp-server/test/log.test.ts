@@ -80,12 +80,11 @@ describe("the update log", () => {
             {
               id: "00000000-0000-4000-8000-000000000001",
               name: "auth",
-              state: "active",
             },
           ],
           description: "A test document.",
           pinned: false,
-          updatedAt: expect.any(Number),
+          updatedAt: expect.any(String),
           openThreadCount: 0,
         },
       ]);

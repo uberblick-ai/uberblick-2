@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { directoryRoom, getDirectoryEntry, isDirectoryEntryDeleted, decisionCurrentRecord, resolveDecisionTopics, roomForDoc, settingsRoom, sidebarRoom } from "@uberblick/schema";
+import { useEffect, useMemo } from "react";
+import { directoryRoom, getDirectoryEntry, isDirectoryEntryDeleted, decisionCurrentRecord, migrateRetiredTagCatalogEntries, resolveDecisionTopics, roomForDoc, settingsRoom, sidebarRoom } from "@uberblick/schema";
 import type { DecisionTopicResolution } from "@uberblick/schema";
 import type { RoomConnection } from "../../collab/rooms.js";
 import { useDirectory, useRoom, useRoomStatus } from "../hooks.js";
@@ -24,13 +24,15 @@ function resolveSelection(route: Route, topics: DecisionTopicResolution[], direc
 }
 
 function resolveTitle(route: Route, topic: DecisionTopicResolution | null, directory: RoomConnection | null) {
+  if (directory === null) return null;
   const routedTitleUuid = route.kind === "decision" ? route.topic : route.kind === "doc" ? route.uuid : null;
+  if (directory !== null && routedTitleUuid !== null && isDirectoryEntryDeleted(directory.ydoc, routedTitleUuid)) return null;
   const routedTitleEntry = directory === null || routedTitleUuid === null ? null : getDirectoryEntry(directory.ydoc, routedTitleUuid);
   const titleUuid = topic?.topic ?? (routedTitleEntry === null || routedTitleEntry.kind === "decision" ? routedTitleUuid : null);
   return titleUuid;
 }
 
-export function useShellRooms({ roomReady, workspace, defaultIdentity, route }: ShellEnvironment) {
+export function useShellRooms({ roomReady, workspace, defaultIdentity, route, serving }: ShellEnvironment) {
   const routedSelection = route.kind === "doc" ? route.uuid : route.kind === "decision" ? route.record : null;
   const directory = useRoom(
     roomReady && workspace !== null ? directoryRoom(workspace.uuid) : null,
@@ -71,7 +73,18 @@ export function useShellRooms({ roomReady, workspace, defaultIdentity, route }: 
   const directoryStatus = useRoomStatus(directory);
   const docStatus = useRoomStatus(doc);
   const sidebarStatus = useRoomStatus(sidebar);
+  const catalogStatus = useRoomStatus(catalog);
+  useEffect(() => {
+    // A locally served browser has only the engine's cache; the engine waits
+    // for its upstream catalog before migrating. Direct hub admission owns
+    // this browser's settings authority and initial-state boundary.
+    if (serving === null && catalog !== null && catalogStatus.writable && catalogStatus.hasReceivedServerState) {
+      migrateRetiredTagCatalogEntries(catalog.ydoc);
+    }
+  }, [serving, catalog, catalogStatus.writable, catalogStatus.hasReceivedServerState]);
+  const deleted = docStatus.deleted === true || (directory !== null && routedSelection !== null &&
+    isDirectoryEntryDeleted(directory.ydoc, routedSelection));
   return { directory, allEntries, topics, topic, selected, routedSelection, doc, topicTitleRoom,
-    sidebar, catalog, directoryStatus, docStatus, sidebarStatus };
+    sidebar, catalog, directoryStatus, docStatus, sidebarStatus, deleted };
 }
 export type ShellRooms = ReturnType<typeof useShellRooms>;

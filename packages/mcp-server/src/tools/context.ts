@@ -39,12 +39,12 @@ import {
   ToolError,
   hydrationRecovery,
 } from "../failures.js";
-import type { GuidanceBriefing } from "../briefing.js";
 import { docLinkRanges } from "../replica.js";
 import type { Replica, Replicas } from "../replica.js";
 import type { ServerWork } from "../server-work.js";
 import { HelpCatalog } from "../help.js";
 import { activeTagCatalog } from "../tag-catalog.js";
+import { isoTimestamp } from "../timestamps.js";
 import { TLDR_AFTER_CONTENT_CHANGE } from "./descriptions.js";
 import type { DecisionAnswer, blockInputSchema, inlineArg } from "./schemas.js";
 
@@ -56,8 +56,8 @@ const DESCRIPTION_NUDGE =
 
 /** The one-line prompt a mutating tool carries when a document has no tags. */
 const TAG_NUDGE =
-  "This document has no tag assignments: call list_tags for the active workspace vocabulary, then call set_metadata " +
-  "with `tags` to assign one or more tags.";
+  "This document has no tags: to add some, call list_tags for the workspace vocabulary, then set_metadata with " +
+  "`tags`; leave it untagged if no tag fits.";
 
 /** The stronger prompt returned when a changed document has no summary yet. */
 const TLDR_MISSING_NUDGE =
@@ -100,9 +100,14 @@ function toBlockInput(
   };
 }
 
-/** Shared per-server helpers; each closure keeps the registering replica and briefing. */
+/** A directory row; a decision topic's row also names its records by UUID. */
+export type TopicRowEntry = DirectoryEntry & {
+  resolution?: { inForce: string | null; pending: string[]; conflicts: string[] };
+};
+
+/** Shared per-server helpers; each closure keeps the registering replicas. */
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
-export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing, work: ServerWork, help = new HelpCatalog()) {
+export function createToolContext(replicas: Replicas, work: ServerWork, help = new HelpCatalog()) {
 
   /** One refusal builder; callers retain their original message and identity field. */
   const notKnownLocally = (
@@ -117,7 +122,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
       {
         ...(doclink ? { docId: uuid } : { uuid }),
         inDirectory: false,
-        hub: replicas.sync.state(),
+        hub: replicas.hubState(),
       },
     );
   };
@@ -128,17 +133,19 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     }
   };
 
-  /**
-   * Refuse unknown UUIDs before joining a room: a typo would create an empty
-   * document on the hub. Known but unhydrated rooms get a separate refusal.
-   */
-  const requireDoc = (uuid: string): Replica => {
+  /** Refuse unknown UUIDs before a room join can create an empty hub document. */
+  const requireKnownDoc = (uuid: string): DirectoryEntry | null => {
     requireNotDeleted(uuid);
     const stub = getDirectoryEntry(replicas.directory().doc, uuid);
     if (!replicas.known(uuid) && stub === null && !replicas.hasLog(uuid)) {
       throw notKnownLocally(uuid, "document");
     }
+    return stub;
+  };
 
+  /** Live reads also need hydrated content; hub revision reads do not. */
+  const requireDoc = (uuid: string): Replica => {
+    const stub = requireKnownDoc(uuid);
     const replica = replicas.replica(uuid);
     if (getMeta(replica.doc, replica.id).uuid !== "") {
       // Touch only tools that access the document room; directory/index reads
@@ -146,7 +153,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
       replicas.touch(replica);
       return replica;
     }
-    const hub = replicas.sync.state();
+    const hub = replicas.hubState();
     throw new ToolError(
       "doc_not_hydrated",
       `Document ${uuid} is known but its room has not synced to this replica yet`,
@@ -234,22 +241,57 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
 
   /** Normalize directory descriptions and resolve tags through the settings catalog. */
   const decisionEntryJson = (entry: DirectoryEntry, title: string, archived: boolean) => {
-    const { recordArchived: _recordArchived, ...fields } = entry;
+    // `governs` stays stored for released clients; answers name every page in `related`.
+    const { recordArchived: _recordArchived, governs: _governs, createdAt: storedCreatedAt, updatedAt: storedUpdatedAt, ...fields } = entry;
+    const createdAt = isoTimestamp(storedCreatedAt);
+    const updatedAt = isoTimestamp(storedUpdatedAt);
     return {
       ...fields, title, tags: readDirectoryTags(entry, tagCatalog()),
+      ...(createdAt === undefined ? {} : { createdAt }),
+      ...(updatedAt === undefined ? {} : { updatedAt }),
       ...(entry.kind === "decision" ? { deleted: archived || entry.recordArchived === true } : {}),
       description: entry.description ?? null,
     };
   };
 
-  const topicJson = (topic: DecisionTopicResolution) => {
-    const entryJson = (entry: DirectoryEntry) => decisionEntryJson(entry, decisionTopicTitle(topic), topic.archived);
+  /** Name a topic's records by UUID; get_doc on one of them reads its details. */
+  const topicRecordsJson = (topic: DecisionTopicResolution) => ({
+    inForce: topic.inForce?.uuid ?? null,
+    pending: topic.pending.map(entry => entry.uuid),
+    conflicts: topic.conflicts.map(entry => entry.uuid),
+  });
+
+  /** A topic presented by its record in force, else pending, else first record. */
+  const topicRow = (topic: DecisionTopicResolution): TopicRowEntry => ({
+    ...topic.representative,
+    topic: topic.topic,
+    title: decisionTopicTitle(topic),
+    deleted: topic.archived,
+    resolution: topicRecordsJson(topic),
+  });
+
+  /** One row shape for list_docs and a regular page's get_doc decisions. */
+  const directoryRowJson = (entry: TopicRowEntry, pinned?: boolean): Record<string, unknown> => {
+    const updatedAt = isoTimestamp(entry.updatedAt);
     return {
-      topic: topic.topic,
-      inForce: topic.inForce === null ? null : entryJson(topic.inForce),
-      pending: topic.pending.map(entryJson),
-      conflicts: topic.conflicts.map(entryJson),
-      archived: topic.archived,
+      uuid: entry.uuid,
+      title: entry.title,
+      tags: readDirectoryTags(entry, tagCatalog()),
+      // Keep absent descriptions explicit as null.
+      description: entry.description ?? null,
+      ...(updatedAt === undefined ? {} : { updatedAt }),
+      ...(entry.openThreadCount === undefined ? {} : { openThreadCount: entry.openThreadCount }),
+      ...(entry.deleted === true ? { deleted: true as const } : {}),
+      ...(pinned === undefined ? {} : { pinned }),
+      ...(entry.kind === "decision" ? {
+        kind: "decision" as const,
+        status: entry.status,
+        topic: entry.topic,
+        ...(entry.related === undefined ? {} : { related: entry.related }),
+        ...(entry.discussion === undefined ? {} : { discussion: entry.discussion }),
+        ...(entry.answerPreview === undefined ? {} : { answerPreview: entry.answerPreview }),
+        ...entry.resolution,
+      } : {}),
     };
   };
 
@@ -262,7 +304,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
       ...(resolution === null ? {} : { title: decisionTopicTitle(resolution) }),
       predecessors: predecessors.map(entryJson),
       successors: successors.map(entryJson),
-      resolution: resolution === null ? null : { ...entryJson(resolution.representative), ...topicJson(resolution) },
+      resolution: resolution === null ? null : { ...topicRecordsJson(resolution), archived: resolution.archived },
     };
   };
 
@@ -351,7 +393,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   /**
    * doc_links exposes prose ranges; table links stay in GFM text and its rev.
    */
-  const blocksJson = (replica: Replica): Record<string, unknown>[] =>
+  const blocksJson = (replica: Pick<Replica, "doc">): Record<string, unknown>[] =>
     getBlocksWithInline(replica.doc).map(({ block, inline }) => {
       const links = docLinkRanges(block, inline);
       return { ...block, ...(links.length === 0 ? {} : { doc_links: links }) };
@@ -402,7 +444,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     return {
       applied: true,
       synced: replicas.isRoomQuiet(replica.room),
-      hub: replicas.sync.state(),
+      hub: replicas.hubState(),
       ...descriptionGap(replica),
       ...tagGap(replica),
     };
@@ -432,7 +474,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
       applied: true,
       synced: detail.every((entry) => entry.synced),
       rooms: detail,
-      hub: replicas.sync.state(),
+      hub: replicas.hubState(),
       ...descriptionGap(primary),
       ...tagGap(primary),
     };
@@ -454,9 +496,9 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   return {
     replicas,
     help,
-    briefing,
     work,
     requireStub,
+    requireKnownDoc,
     requireNotDeleted,
     durability,
     tagCatalog,
@@ -470,7 +512,8 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     tldrReview,
     requireDoc,
     decisionEntryJson,
-    topicJson,
+    topicRow,
+    directoryRowJson,
     decisionReadJson,
     annotationJson,
     validateBlockTargets,

@@ -10,6 +10,8 @@ import type { ReactElement, ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
 import { autoUpdate, computePosition, flip, hide, inline, offset, shift, size } from "@floating-ui/dom";
 import type * as Y from "yjs";
+import type { RoomConnection } from "../../collab/rooms.js";
+import { writeDocument } from "../../collab/document-write.js";
 import {
   AnnotationRangeError,
   createAnnotation,
@@ -207,20 +209,27 @@ function FormatButton({
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export function CommentComposer({
   editor,
+  hidden = false,
   contentReadOnly = false,
   formattingOnly = false,
   ydoc,
+  catalogConnection = null,
+  canCleanupTags,
   author,
   mentions,
   host,
   onCreated,
 }: {
   editor: Editor;
+  /** Retain an unsent draft while its live document is hidden. */
+  hidden?: boolean;
   /** Comments remain writable while content is read-only. */
   contentReadOnly?: boolean;
   /** Detached answer drafts support formatting and links without comments. */
   formattingOnly?: boolean;
   ydoc: Y.Doc;
+  catalogConnection?: RoomConnection | null;
+  canCleanupTags?: (() => boolean) | undefined;
   /** The awareness name this client publishes — the comment's author. */
   author: string;
   /** Peer names offered as `@name` chips. */
@@ -469,7 +478,7 @@ export function CommentComposer({
 
   const create = (text: string): boolean => {
     try {
-      const thread = createAnnotation(
+      const thread = writeDocument(ydoc, catalogConnection?.ydoc ?? null, () => createAnnotation(
         ydoc,
         target.blockId,
         target.start,
@@ -477,7 +486,7 @@ export function CommentComposer({
         author,
         text,
         cell ? { row: target.row, column: target.column } : card ? { part: target.part } : undefined,
-      );
+      ), undefined, canCleanupTags);
       close();
       onCreated(thread.id);
       editor.commands.focus(target.contentStart + target.end);
@@ -496,6 +505,8 @@ export function CommentComposer({
   return createPortal(
     <div
       ref={floating}
+      inert={hidden}
+      style={hidden ? { display: "none" } : undefined}
       data-slot="selection-composer"
       data-input={touch ? "touch" : "fine"}
       className={`ub-composer fixed top-0 left-0 z-5 flex overflow-auto text-card-foreground shadow-(--shadow-float) ${mode === "comment" ? "w-80 flex-col [&>*]:shrink-0 gap-[0.4rem] rounded-(--radius-sm) border border-(--border) border-l-(length:--border-width-emphasis) border-l-brand bg-card px-[0.6rem] py-2 ub-type-ui" : !formatting ? "w-max bg-transparent shadow-none" : "w-max items-center rounded-(--radius-sm) border border-(--border) bg-[color-mix(in_srgb,var(--card)_95%,transparent)] p-1 backdrop-blur-[8px]"}`}

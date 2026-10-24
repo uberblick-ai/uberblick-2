@@ -35,6 +35,7 @@ const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const CURRENT = "9ebf44bd-97f8-479d-8e7c-5fbc96173504";
 const NEXT = "e795b3c7-cd85-4e6f-8950-a4f479b077ba";
 const RELATED = "34865e42-d48f-497a-8e1b-132c504a3e45";
+const OTHER_RELATED = "f96ea9b7-012a-4f05-98b0-d92ac4c4b0df";
 const DISCUSSION = "63c11ea4-0e60-40ee-a46d-6feef7e55b61";
 const TAG = "00000000-0000-4000-8000-000000000001";
 const RFC_TAG = "00000000-0000-4000-8000-000000000006";
@@ -118,12 +119,12 @@ function draftOf(source: Y.Doc): Y.Doc {
   return draft;
 }
 
-function fixture(blocks: BlockInput[] = [{ type: "paragraph", text: "The current answer." }]) {
+function fixture(blocks: BlockInput[] = [{ type: "paragraph", text: "The current answer." }], related?: string[]) {
   const source = room(roomForDoc(WORKSPACE, CURRENT), true);
   const directory = room(directoryRoom(WORKSPACE), true);
   initDoc(source.connection.ydoc, {
     uuid: CURRENT, title: "Current question", description: "A useful description.",
-    tags: [TAG], governs: RELATED,
+    tags: [TAG], ...(related === undefined ? { governs: RELATED } : { related }),
   });
   setKind(source.connection.ydoc, "decision");
   for (const block of blocks) appendBlock(source.connection.ydoc, block);
@@ -143,7 +144,7 @@ function fixture(blocks: BlockInput[] = [{ type: "paragraph", text: "The current
   const input = {
     source: source.connection, directory: directory.connection, draft,
     identity: { name: "Default identity", color: "#e30c4e" },
-    mode: "decide" as "decide" | "rfc", reason: "  A clearer answer is needed.  ",
+    mode: "decide" as "decide" | "rfc",
     displayName: "  Current reader  ", tagCatalog, signal: controller.signal,
   };
   return { source, directory, tagCatalog, draft, controller, input };
@@ -215,7 +216,7 @@ describe("copying the current decision answer", () => {
     const result = await pending;
     if (!result.ok) throw new Error(result.message);
     const answer = stored(result.decision);
-    expect(getBlocksWithInline(answer).slice(0, before.length)).toEqual(before);
+    expect(getBlocksWithInline(answer)).toEqual(before);
     expect(listAnnotations(answer)).toEqual([]);
     for (const block of getBlocks(answer)) expect(listAnnotationRanges(answer, block.id)).toEqual([]);
     expect(() => createAnnotation(answer, prose!.id, 5, 14, "Current reader", "New prose discussion")).not.toThrow();
@@ -239,7 +240,7 @@ describe("copying the current decision answer", () => {
     await admitAll();
     const result = await pending;
     if (!result.ok) throw new Error(result.message);
-    expect(getBlocksWithInline(stored(result.decision)).slice(0, -1)).toEqual(original);
+    expect(getBlocksWithInline(stored(result.decision))).toEqual(original);
     result.release();
   });
 
@@ -253,6 +254,7 @@ describe("copying the current decision answer", () => {
       { type: "list-item", inline: [{ text: "Nested", marks: { link: "https://example.com", bold: true } }], list: "bullet", indent: 2 },
       { type: "list-item", text: "Next", list: "ordered", indent: 1 },
       { type: "code", text: "const answer = 42;", language: "typescript" },
+      { type: "paragraph", text: "Keep the final answer block." },
     ] },
   ] satisfies Array<{ blocks: BlockInput[] }>)("preserves answer formatting through the draft and a decided successor (%#)", async ({ blocks }) => {
     const { source, draft, input } = fixture(blocks);
@@ -264,22 +266,39 @@ describe("copying the current decision answer", () => {
     const result = await pending;
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error(result.message);
-    expect(getBlocksWithInline(stored(result.decision)).slice(0, -1)).toEqual(before);
+    expect(getBlocksWithInline(stored(result.decision))).toEqual(before);
     expect(getBlocksWithInline(source.connection.ydoc)).toEqual(before);
     result.release();
   });
 
-  it("copies every answer block and refuses the longer copy until it is shortened", async () => {
+  it.each(["decide", "rfc"] as const)("copies three answer blocks exactly in %s mode, including an existing reason paragraph", async (mode) => {
+    const { source, draft, input } = fixture([
+      { type: "paragraph", text: "One" }, { type: "paragraph", text: "Two" },
+      { type: "paragraph", text: "An existing reason stays as written." },
+    ]);
+    const before = getBlocksWithInline(source.connection.ydoc);
+    expect(getBlocksWithInline(draft)).toEqual(before);
+    const pending = recordAlteredDecision({ ...input, mode });
+    await admitAll();
+    const result = await pending;
+    if (!result.ok) throw new Error(result.message);
+    expect(getBlocksWithInline(stored(result.decision))).toEqual(before);
+    expect(decisionApprovalChanged(stored(result.decision))).toBe(false);
+    expect(getBlocksWithInline(source.connection.ydoc)).toEqual(before);
+    result.release();
+  });
+
+  it.each(["decide", "rfc"] as const)("copies every answer block and refuses a fourth until shortened in %s mode", async (mode) => {
     const { source, directory, draft, input } = fixture([
       { type: "paragraph", text: "One" }, { type: "paragraph", text: "Two" },
-      { type: "paragraph", text: "Three" },
+      { type: "paragraph", text: "Three" }, { type: "paragraph", text: "Four" },
     ]);
     expect(getBlocksWithInline(draft)).toEqual(getBlocksWithInline(source.connection.ydoc));
-    expect(await recordAlteredDecision(input)).toMatchObject({ ok: false, code: "decision_answer_too_long" });
+    expect(await recordAlteredDecision({ ...input, mode })).toMatchObject({ ok: false, code: "decision_answer_too_long" });
     expect(acquired).toHaveLength(0);
     expect(listDirectory(directory.connection.ydoc)).toHaveLength(1);
-    getBlocksFragment(draft).delete(2, 1);
-    const pending = recordAlteredDecision(input);
+    getBlocksFragment(draft).delete(3, 1);
+    const pending = recordAlteredDecision({ ...input, mode });
     await admitAll();
     const result = await pending;
     expect(result).toMatchObject({ ok: true });
@@ -288,6 +307,25 @@ describe("copying the current decision answer", () => {
 });
 
 describe("MCP-compatible stored successors", () => {
+  it.each([
+    { mode: "decide", legacy: false }, { mode: "rfc", legacy: false },
+    { mode: "decide", legacy: true }, { mode: "rfc", legacy: true },
+  ] as const)("inherits every related page in $mode mode (legacy=$legacy)", async ({ mode, legacy }) => {
+    const related = legacy ? [RELATED] : [RELATED, OTHER_RELATED];
+    const { source, directory, input } = fixture(undefined, related);
+    if (legacy) getMetaMap(source.connection.ydoc).delete("related");
+    const before = Y.encodeStateAsUpdate(source.connection.ydoc);
+    const pending = recordAlteredDecision({ ...input, mode });
+    await admitAll();
+    const result = await pending;
+    if (!result.ok) throw new Error(result.message);
+    expect(getMeta(stored(result.decision)).related).toEqual(related);
+    expect(getMeta(stored(result.decision)).governs).toBe(RELATED);
+    expect(getDirectoryEntry(directory.connection.ydoc, result.decision)?.related).toEqual(related);
+    expect(Y.encodeStateAsUpdate(source.connection.ydoc)).toEqual(before);
+    result.release();
+  });
+
   it("uses the source room identity when stored metadata names another record", async () => {
     const { source, input } = fixture();
     getMetaMap(source.connection.ydoc).set("uuid", NEXT);
@@ -300,7 +338,7 @@ describe("MCP-compatible stored successors", () => {
     result.release();
   });
 
-  it("records a Decide answer with its final reason, approval and attribution", async () => {
+  it("records exactly the Decide answer with matching approval and attribution", async () => {
     const { source, directory, input } = fixture();
     const original = getMeta(source.connection.ydoc);
     const pending = recordAlteredDecision(input);
@@ -319,10 +357,7 @@ describe("MCP-compatible stored successors", () => {
     });
     expect(getMetaMap(doc).has("approvalTitle")).toBe(false);
     expect(decisionApprovalChanged(doc)).toBe(false);
-    expect(getBlocksWithInline(doc).at(-1)).toMatchObject({
-      block: { type: "paragraph", text: "A clearer answer is needed." },
-      inline: [{ text: "A clearer answer is needed.", marks: {} }],
-    });
+    expect(getBlocksWithInline(doc)).toEqual(getBlocksWithInline(input.draft));
     expect(getDirectoryEntry(directory.connection.ydoc, result.decision)).toMatchObject({
       uuid: result.decision, title: original.title, description: original.description,
       tags: original.tags, kind: "decision", status: "decided", topic: CURRENT,
@@ -387,7 +422,6 @@ describe("MCP-compatible stored successors", () => {
         { text: "Current question", marks: { docLink: result.decision } },
         { text: ".", marks: {} },
       ] },
-      { block: { type: "paragraph", text: "A clearer answer is needed." } },
     ]);
     expect(getDirectoryEntry(directory.connection.ydoc, result.rfc)).toMatchObject({
       title: "Current question", tags: hasTag ? [RFC_TAG] : [],
@@ -401,16 +435,6 @@ describe("MCP-compatible stored successors", () => {
     expect(topic.pending.map((record) => record.uuid)).toEqual([result.decision]);
     expect(decisionTopicState(topic)).toBe("under-review");
     expect(listTagCatalog(tagCatalog)).toEqual(beforeCatalog);
-    result.release();
-  });
-
-  it("leaves an omitted RFC reason out of its content", async () => {
-    const { input } = fixture();
-    const pending = recordAlteredDecision({ ...input, mode: "rfc", reason: " \n " });
-    await admitAll();
-    const result = await pending;
-    if (!result.ok || result.rfc === undefined) throw new Error("RFC write did not succeed");
-    expect(getBlocks(stored(result.rfc))).toHaveLength(1);
     result.release();
   });
 });
@@ -432,7 +456,7 @@ describe("validation without writes", () => {
     { blocks: [{ type: "paragraph", text: " \n " }], code: "decision_answer_empty", fix: /answer/i },
     { blocks: [{ type: "table", text: "|   |   |\n| --- | --- |\n|   |   |" }], code: "decision_answer_empty", fix: /answer/i },
     { blocks: [{ type: "heading", text: "Unsupported" }], code: "decision_block_unsupported", fix: /paragraph|list|code|table/i },
-    { blocks: [{ type: "paragraph", text: "One" }, { type: "code", text: "Two" }, { type: "paragraph", text: "Three" }], code: "decision_answer_too_long", fix: /two|2/i },
+    { blocks: [{ type: "paragraph", text: "One" }, { type: "code", text: "Two" }, { type: "paragraph", text: "Three" }, { type: "paragraph", text: "Four" }], code: "decision_answer_too_long", fix: /three|3/i },
   ] satisfies Array<{ blocks: BlockInput[]; code: string; fix: RegExp }>)("refuses $code in either write mode", async ({ blocks, code, fix }) => {
     const { input, directory } = fixture();
     const draft = localDoc();
@@ -444,12 +468,11 @@ describe("validation without writes", () => {
     expect(listDirectory(directory.connection.ydoc)).toHaveLength(1);
   });
 
-  it.each([
-    { reason: " \n ", displayName: "Reader", code: "reason_empty", fix: /reason/i },
-    { reason: "Reason", displayName: " \n ", code: "display_name_empty", fix: /name/i },
-  ])("refuses $code before acquiring a destination", async ({ reason, displayName, code, fix }) => {
+  it("refuses a blank display name before acquiring a destination", async () => {
     const { input } = fixture();
-    expect(await recordAlteredDecision({ ...input, reason, displayName })).toMatchObject({ ok: false, code, message: expect.stringMatching(fix) });
+    expect(await recordAlteredDecision({ ...input, displayName: " \n " })).toMatchObject({
+      ok: false, code: "display_name_empty", message: expect.stringMatching(/name/i),
+    });
     expect(acquired).toHaveLength(0);
   });
 });
@@ -519,14 +542,13 @@ describe("all-room admission and stale writes", () => {
     const { draft, input } = fixture();
     const pending = recordAlteredDecision(input);
     appendBlock(draft, { type: "paragraph", text: "A later editor change" });
-    input.reason = "";
     input.displayName = "";
     input.mode = "rfc";
     await admitAll();
     const result = await pending;
     if (!result.ok) throw new Error(result.message);
     expect(getBlocks(stored(result.decision)).map((block) => block.text)).toEqual([
-      "The current answer.", "A clearer answer is needed.",
+      "The current answer.",
     ]);
     result.release();
   });

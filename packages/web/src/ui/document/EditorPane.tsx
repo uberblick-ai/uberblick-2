@@ -26,6 +26,7 @@ import { linkAnchorFromTarget } from "../../editor/external-links.js";
 import { describeForeignBlocks } from "../../editor/palette.js";
 import type { LinkConflict } from "../../editor/palette.js";
 import { repairLinkConflict } from "../../editor/link-repair.js";
+import { writeDocument } from "../../collab/document-write.js";
 import type { LinkSurvivor } from "../../editor/link-repair.js";
 import type { HubEndpoint } from "../../config.js";
 import type { RoomConnection } from "../../collab/rooms.js";
@@ -38,12 +39,13 @@ import { statusReading } from "../status/status-reading.js";
 import { documentSyncFacts } from "../status/sync-facts.js";
 import { bindSyncAttributes } from "../status/sync-state.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
-import { isPlainClick } from "../route.js";
+import { handleDocLinkClick } from "./doc-link-click.js";
 import { BlockMenu } from "../editor-controls/BlockMenu.js";
 import { CodeLanguageControl } from "../editor-controls/CodeLanguageControl.js";
 import { CardButtonControls } from "../editor-controls/CardButtonControls.js";
 import { TableControls } from "../editor-controls/TableControls.js";
 import { MentionMenu } from "../editor-controls/MentionMenu.js";
+import { EmojiMenu } from "../editor-controls/EmojiMenu.js";
 import {
   readRoomMeta,
   useDocMeta,
@@ -63,6 +65,17 @@ import { DocMetaLine } from "./DocChrome.js";
 import type { DocumentActionProps } from "./DocChrome.js";
 import { threadIdFromActivation, threadIdFromTarget } from "../comments/threads.js";
 import type { SelectThread, ThreadView } from "../comments/threads.js";
+import { Button } from "../shadcn/button.js";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../shadcn/alert-dialog.js";
 
 /** Read the document itself, including before its React subscription answers. */
 function isDecision(connection: RoomConnection): boolean {
@@ -97,14 +110,17 @@ export function PaneNotice({
 }
 
 /**
- * Archived content stays rendered, scrollable and copyable. Restore is the
- * only write action; title, editor and comments remain read-only while the
- * directory tombstone stands.
+ * Archived content stays rendered, scrollable and copyable. Lifecycle actions
+ * write the directory; title, editor and comments remain read-only.
  */
 function ArchivedBanner({
-  actions: { onRestore = null, focusRestore = false, onRestoreFocused },
+  actions: { onRestore = null, onDelete = null, focusRestore = false, onRestoreFocused },
+  title,
+  decision,
 }: {
   actions: DocumentActionProps;
+  title: string;
+  decision: boolean;
 }): ReactElement {
   const restore = useRef<HTMLButtonElement | null>(null);
   useLayoutEffect(() => {
@@ -113,29 +129,75 @@ function ArchivedBanner({
     onRestoreFocused?.();
   }, [focusRestore, onRestoreFocused]);
   return (
-    <p className="ub-archived-banner mb-3 flex flex-wrap items-baseline gap-2 rounded-(--radius) border border-(--status-warning) bg-(--status-warning-subtle) px-3 py-[0.6rem] text-(--foreground)">
+    <div className="ub-archived-banner mb-3 flex flex-wrap items-center gap-2 rounded-(--radius) border border-(--border) bg-(--archived-background) px-3 py-[0.6rem] text-(--foreground)">
+      <svg aria-hidden="true" className="size-4 shrink-0 text-(--archived-icon)" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 9h16v11H4zM3 4h18v5H3zM10 13h4" />
+      </svg>
       <span><strong className="font-medium">Archived.</strong> Read-only and hidden from the document list.</span>
-      <button
+      <Button
         ref={restore}
         type="button"
-        className="ml-auto cursor-pointer rounded-(--radius-sm) border border-(--border) bg-(--secondary) px-[0.45rem] py-[0.15rem] font-[inherit] ub-type-caption text-(--secondary-foreground)"
+        variant="secondary"
+        size="sm"
+        className="ml-auto"
         disabled={onRestore === null}
         onClick={() => onRestore?.()}
       >
         {onRestore === null ? "Restore unavailable" : "Restore"}
-      </button>
+      </Button>
+      {!decision && (
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <button
+              type="button"
+              className="min-h-6 min-w-6 cursor-pointer rounded-(--radius-sm) bg-transparent px-2 py-1 ub-type-ui text-(--destructive-ink) disabled:opacity-50"
+              disabled={onDelete === null}
+              aria-describedby={onDelete === null ? "ub-delete-unavailable" : undefined}
+            >Delete…</button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogTitle>{`Delete "${title}"?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {onDelete === null
+                ? "Delete is unavailable while the directory is not ready to write. Nothing has been deleted."
+                : "It will be gone for everyone, with its comments and history. Links to it will show it was deleted. This can't be undone."}
+            </AlertDialogDescription>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                disabled={onDelete === null}
+                onClick={(event) => {
+                  if (onDelete === null) {
+                    event.preventDefault();
+                    return;
+                  }
+                  onDelete();
+                }}
+              >Delete</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
       {onRestore === null && (
         <span className="ub-restore-unavailable basis-full ub-type-small">
           Restore is unavailable while the directory is not ready to write.
         </span>
       )}
-    </p>
+      {!decision && onDelete === null && (
+        <span id="ub-delete-unavailable" className="basis-full ub-type-small">
+          Delete is unavailable while the directory is not ready to write.
+        </span>
+      )}
+    </div>
   );
 }
 
 /** The person-facing summary and its one in-place write surface. */
 function TldrCallout({
   connection,
+  catalogConnection,
+  canCleanupTags,
   tldr,
   editing,
   archived,
@@ -144,6 +206,8 @@ function TldrCallout({
   onEditingChange,
 }: {
   connection: RoomConnection;
+  catalogConnection: RoomConnection | null;
+  canCleanupTags: (() => boolean) | undefined;
   tldr: string | null;
   editing: boolean;
   archived: boolean;
@@ -182,7 +246,7 @@ function TldrCallout({
     // `readOnly` describes the committed render; the live connection and the
     // tombstone guard the write itself, as the title field does below.
     if (!canWriteContent(connection, archived)) return;
-    setTldr(connection.ydoc, next);
+    writeDocument(connection.ydoc, catalogConnection?.ydoc ?? null, () => setTldr(connection.ydoc, next), undefined, canCleanupTags);
     onEditingChange(false);
   };
 
@@ -316,6 +380,8 @@ export interface DocumentSyncReading {
   syncDetails?: boolean;
 }
 
+const OFFLINE_NOTE = "Offline. Changes are saved on this device.";
+
 /** The quiet edit row retains explicit refusals and truthful durability warnings. */
 export function StatusLine({
   connection,
@@ -334,6 +400,7 @@ export function StatusLine({
   statusLink,
   revision = null,
   codeChecks = [],
+  historyNav = null,
 }: {
   connection: RoomConnection;
   /**
@@ -352,6 +419,8 @@ export function StatusLine({
   statusLink?: ReactNode;
   revision?: string | null;
   codeChecks?: readonly CodeCheck[] | undefined;
+  /** History entry beside the revision chip: step back, or name this state. */
+  historyNav?: ReactNode;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const served = hubAcked !== undefined;
@@ -433,7 +502,7 @@ export function StatusLine({
           </>}
           {refusal !== null && <span className="ub-status-word">{refusal}</span>}
           {unsaved && <span className="ub-not-saved">not saved</span>}
-          {offline && <span className="ub-status-offline">Offline. Changes are saved on this device.</span>}
+          {offline && <span className="ub-status-offline" title={OFFLINE_NOTE}>{OFFLINE_NOTE}</span>}
           {Boolean(statusLink) && (updatedReading !== null || codeNote !== null || refusal !== null || unsaved || offline) &&
             <span className="ub-status-separator" aria-hidden="true"> · </span>}
           {statusLink}
@@ -443,6 +512,7 @@ export function StatusLine({
             * readPresence supplies names and resolved caret locations for hover.
          */}
         {reading.detail === null && peerStrip}
+        {historyNav}
         {revision !== null && <button type="button" className="ub-doc-rev" aria-label={`Copy revision ${revision}`} title={`Copy revision ${revision}`}
           onClick={() => { void writeToClipboard(revision).then((ok) => toast[ok ? "success" : "error"](ok ? "Revision copied" : "Couldn't copy the revision. Try again in a browser with clipboard access.", { id: "clipboard" })); }}>
           rev <span className="ub-doc-id">{revision.slice(0, 8)}</span>
@@ -460,11 +530,15 @@ export function StatusLine({
  */
 function LinkConflictRepair({
   connection,
+  catalogConnection,
+  canCleanupTags,
   contentReadOnly,
   writable,
   docLinks,
 }: {
   connection: RoomConnection;
+  catalogConnection: RoomConnection | null;
+  canCleanupTags: (() => boolean) | undefined;
   contentReadOnly: boolean;
   writable: boolean;
   docLinks: DocLinkContext | null;
@@ -473,7 +547,7 @@ function LinkConflictRepair({
   const repair = (conflict: LinkConflict, keep: LinkSurvivor): void => {
     // Guard the write too: the room can become a decision before React observes it.
     if (!canWriteContent(connection, contentReadOnly)) return;
-    repairLinkConflict(conflict, keep);
+    writeDocument(connection.ydoc, catalogConnection?.ydoc ?? null, () => repairLinkConflict(conflict, keep), undefined, canCleanupTags);
     // Unconditional: a repair changes the list, and a refusal means live state
     // has already moved on without this render hearing about it yet.
     refresh();
@@ -521,12 +595,16 @@ function LinkConflictRepair({
  */
 function ForeignFallback({
   connection,
+  catalogConnection,
+  canCleanupTags,
   summary,
   contentReadOnly,
   writable,
   docLinks,
 }: {
   connection: RoomConnection;
+  catalogConnection: RoomConnection | null;
+  canCleanupTags: (() => boolean) | undefined;
   summary: string;
   contentReadOnly: boolean;
   writable: boolean;
@@ -540,6 +618,8 @@ function ForeignFallback({
       </p>
       <LinkConflictRepair
         connection={connection}
+        catalogConnection={catalogConnection}
+        canCleanupTags={canCleanupTags}
         contentReadOnly={contentReadOnly}
         writable={writable}
         docLinks={docLinks}
@@ -563,17 +643,21 @@ function ForeignFallback({
 const BoundEditor = memo(function BoundEditor({
   connection,
   catalogConnection,
+  canCleanupTags,
   author,
   archived,
+  historyActive = false,
   contentReadOnly,
   docLinks,
   onSelectThread,
 }: {
   connection: RoomConnection;
   catalogConnection: RoomConnection | null;
+  canCleanupTags: (() => boolean) | undefined;
   author: string;
   /** Archived documents also withhold comments. */
   archived: boolean;
+  historyActive?: boolean;
   /** Title, decision line and blocks cannot change; comments may stay open. */
   contentReadOnly: boolean;
   /** See {@link EditorPane}. Must be referentially stable — it binds the editor. */
@@ -594,6 +678,7 @@ const BoundEditor = memo(function BoundEditor({
    * changes must not rebind.
    */
   const readContentReadOnly = useEffectEvent(() => contentReadOnly);
+  const readCleanupPermission = useEffectEvent(() => canCleanupTags?.() !== false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: The epoch rebinds after the synchronous guard destroys an editor that normalization immediately made bindable again.
   useEffect(() => {
@@ -608,6 +693,7 @@ const BoundEditor = memo(function BoundEditor({
       awareness: connection.provider.awareness,
       editable: canWriteContent(connection, readContentReadOnly()),
       canWrite: () => connection.status.writable,
+      canCleanupTags: () => canWriteContent(connection, readContentReadOnly()) && readCleanupPermission(),
       canNormalize: () => connection.status.writable && connection.status.synced,
       onUnbind: () => {
         setEditor(null);
@@ -631,17 +717,7 @@ const BoundEditor = memo(function BoundEditor({
       });
     };
     const activate = (event: MouseEvent): void => {
-      const docId = docLinkFromTarget(event.target);
-      if (docId !== null) {
-        // A modifier or a middle button is the browser's business — the anchor
-        // carries a real address, so cmd-click still opens a tab. Everything
-        // else navigates in-app, which is what keeps Back working.
-        if (isPlainClick(event) && docLinks !== null) {
-          event.preventDefault();
-          docLinks.open(docId);
-        }
-        return;
-      }
+      if (handleDocLinkClick(event, docLinks)) return;
       const anchor = linkAnchorFromTarget(event.target);
       if (anchor !== null) {
         // Editable links open through ProseMirror's non-moving handleClick,
@@ -670,6 +746,13 @@ const BoundEditor = memo(function BoundEditor({
       // contenteditable, outside the anchor.
       const docId = docLinkFromTarget(event.target);
       if (docId !== null) {
+        if (docLinks?.lookup(docId).state === "deleted") {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+          return;
+        }
         if (event.key !== "Enter" || docLinks === null) return;
         event.preventDefault();
         event.stopPropagation();
@@ -714,13 +797,13 @@ const BoundEditor = memo(function BoundEditor({
   useLayoutEffect(() => {
     if (editor === null || editor.isDestroyed) return;
     editor.setEditable(!contentReadOnly && !isDecision(connection) && writable);
-    if (!archived && writable) {
+    if (!archived && !historyActive && writable) {
       // A repair suppressed while the link was gone gets another plugin pass
       // as soon as the admitted room is writable again. Automatic block-id
       // maintenance remains independent of decision content permissions.
       editor.view.dispatch(editor.state.tr.setMeta("uberblick:writable", true));
     }
-  }, [editor, connection, archived, contentReadOnly, writable]);
+  }, [editor, connection, archived, contentReadOnly, historyActive, writable]);
 
   return (
     <>
@@ -749,6 +832,9 @@ const BoundEditor = memo(function BoundEditor({
           <TableControls editor={editor} host={frame} />
         )}
         {editor !== null && !contentReadOnly && writable && (
+          <EmojiMenu editor={editor} host={frame} />
+        )}
+        {editor !== null && !contentReadOnly && writable && (
           <MentionMenu
             editor={editor}
             host={frame}
@@ -761,8 +847,11 @@ const BoundEditor = memo(function BoundEditor({
         {editor !== null && !archived && writable && (
           <CommentComposer
             editor={editor}
+            hidden={historyActive}
             contentReadOnly={contentReadOnly}
             ydoc={connection.ydoc}
+            catalogConnection={catalogConnection}
+            canCleanupTags={canCleanupTags}
             author={author}
             mentions={peers.map((peer) => peer.name)}
             host={frame}
@@ -780,6 +869,7 @@ export function EditorPane({
   presence,
   author,
   catalogConnection = null,
+  canCleanupTags,
   archived,
   updatedAt,
   actions = {},
@@ -799,6 +889,8 @@ export function EditorPane({
   copyPath,
   decisionView = false,
   displayTitle,
+  historyControl,
+  historyActive = false,
 }: {
   connection: RoomConnection;
   /** The workspace as the address spells it — see {@link DocMetaLine}. */
@@ -809,6 +901,7 @@ export function EditorPane({
   author: string;
   /** The workspace settings room that owns the curated tag catalog. */
   catalogConnection?: RoomConnection | null;
+  canCleanupTags?: (() => boolean) | undefined;
   /**
    * Observe directory tombstones in both directions so remote archive and
    * restore update this pane.
@@ -846,6 +939,8 @@ export function EditorPane({
   copyPath?: string;
   /** A known decision route stays read-only while its room metadata catches up. */
   decisionView?: boolean;
+  historyControl?: ReactNode;
+  historyActive?: boolean | undefined;
 }): ReactElement {
   const pane = useRef<HTMLElement | null>(null);
   const [tldrEditorRoom, setTldrEditorRoom] = useState<string | null>(null);
@@ -869,7 +964,7 @@ export function EditorPane({
   // after mounting, so read this exact connection on the first frame too.
   const meta = observedMeta ?? readRoomMeta(connection);
   const decision = decisionView || meta?.kind === "decision";
-  const contentReadOnly = archived || decision;
+  const contentReadOnly = archived || decision || historyActive;
   const foreign = useForeignBlocks(connection);
   const { writable } = useRoomStatus(connection);
   const openThreads = threads.filter((thread) => !thread.resolved).length;
@@ -882,7 +977,8 @@ export function EditorPane({
   // The shared page pane anchors the column beside the sibling rail;
   // document controls use `ub-document-pane` to find their scroll container.
   return (
-    <section className="ub-pane ub-page-pane ub-document-pane" ref={pane}>
+    <section className="ub-pane ub-page-pane ub-document-pane" ref={pane}
+      inert={historyActive} style={historyActive ? { display: "none" } : undefined}>
       {threads.length > 0 && onToggleThreads !== undefined && (
         <button
           type="button"
@@ -896,12 +992,13 @@ export function EditorPane({
       )}
       <div className="ub-column">
         {archived && (
-          <ArchivedBanner actions={actions} />
+          <ArchivedBanner actions={actions} title={meta?.title || "Untitled"} decision={decision} />
         )}
         {/* Keep document kind, tags and revision above the title. */}
         <DocMetaLine
           connection={connection}
           catalogConnection={catalogConnection}
+          canCleanupTags={canCleanupTags}
           segment={segment}
           meta={meta === null || displayTitle === undefined ? meta : { ...meta, title: displayTitle }}
           actionTitle={actionTitle}
@@ -914,12 +1011,12 @@ export function EditorPane({
           hasTldr={meta?.tldr != null}
           onEditTldr={() => {
             if (!canWriteContent(connection, contentReadOnly)) return;
-            if (getMeta(connection.ydoc).tldrOptOut === true) setTldrOptOut(connection.ydoc, false);
+            if (getMeta(connection.ydoc).tldrOptOut === true) writeDocument(connection.ydoc, catalogConnection?.ydoc ?? null, () => setTldrOptOut(connection.ydoc, false), undefined, canCleanupTags);
             setTldrEditorRoom(connection.room);
           }}
           onRemoveTldr={() => {
             if (!canWriteContent(connection, contentReadOnly)) return;
-            setTldrOptOut(connection.ydoc, true);
+            writeDocument(connection.ydoc, catalogConnection?.ydoc ?? null, () => setTldrOptOut(connection.ydoc, true), undefined, canCleanupTags);
             setTldrEditorRoom(null);
           }}
         />
@@ -930,7 +1027,7 @@ export function EditorPane({
           // this readOnly render updates.
           onChange={(value) => {
             if (!canWriteContent(connection, contentReadOnly)) return;
-            setTitle(connection.ydoc, value);
+            writeDocument(connection.ydoc, catalogConnection?.ydoc ?? null, () => setTitle(connection.ydoc, value), undefined, canCleanupTags);
           }}
         />}
         {/* The editor draws only for a document that is here: `RoutePane` sends
@@ -945,17 +1042,20 @@ export function EditorPane({
           statusLink={statusLink}
           revision={revision}
           codeChecks={meta?.code_check}
+          historyNav={historyControl}
         />
         {beforeAnswer}
         <div className={answerClassName}>
           {!decision && <TldrCallout
             key={connection.room}
             connection={connection}
+            catalogConnection={catalogConnection}
+            canCleanupTags={canCleanupTags}
             tldr={meta?.tldr ?? null}
             editing={editingTldr}
-            archived={archived}
+            archived={archived || historyActive}
             decision={decision}
-            writable={writable}
+            writable={writable && !historyActive}
             onEditingChange={(editing) =>
               setTldrEditorRoom(editing ? connection.room : null)
             }
@@ -963,6 +1063,8 @@ export function EditorPane({
           {foreign.length > 0 ? (
             <ForeignFallback
               connection={connection}
+              catalogConnection={catalogConnection}
+              canCleanupTags={canCleanupTags}
               summary={describeForeignBlocks(foreign, { repairable: !contentReadOnly, decision })}
               contentReadOnly={contentReadOnly}
               writable={writable}
@@ -972,8 +1074,10 @@ export function EditorPane({
             <BoundEditor
               connection={connection}
               catalogConnection={catalogConnection}
+              canCleanupTags={canCleanupTags}
               author={author}
               archived={archived}
+              historyActive={historyActive}
               contentReadOnly={contentReadOnly}
               docLinks={docLinks}
               onSelectThread={onSelectThread}

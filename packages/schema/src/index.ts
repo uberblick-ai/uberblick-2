@@ -64,6 +64,20 @@ export type { InlineIconName } from "./inline-icons.js";
 export { blockRev } from "./rev.js";
 export type { RevInput } from "./rev.js";
 
+export { compareRevisions } from "./revisions.js";
+export { snapshotRevision } from "./revision-snapshot.js";
+export type { RevisionSnapshot } from "./revision-snapshot.js";
+export { encodeRevisionRequest, readRevisionRequest, encodeRevisionResponse, encodeRevisionResponseFrames,
+  readRevisionResponse, createRevisionResponseReader } from "./revision-protocol.js";
+export { validRevisionName } from "./revision-protocol.js";
+export type { RevisionEntry, RevisionName, RevisionRequest, RevisionResponse } from "./revision-protocol.js";
+export type {
+  RevisionBlockComparison, RevisionChangeKind, RevisionCollectionComparison,
+  RevisionComparison, RevisionFieldComparison, RevisionRecordComparison,
+} from "./revisions.js";
+export type { RevisionCellComparison, RevisionRowComparison } from "./revision-blocks.js";
+export type { TextSpan } from "./revision-sequence.js";
+
 export {
   COMMENT_MARK,
   addComment,
@@ -155,6 +169,7 @@ export {
   DIRECTORY_DOCS_KEY,
   DIRECTORY_DELETED_KEY,
   DIRECTORY_ARCHIVED_RECORDS_KEY,
+  DIRECTORY_RELATED_PAGES_KEY,
   compareDirectoryEntries,
   deleteDirectoryEntry,
   enforceDeletedDirectoryEntries,
@@ -181,17 +196,22 @@ export {
   EXAMPLE_TAGS,
   MAX_TAG_NAME_LENGTH,
   assignDocumentTags,
+  cleanupDeletedDocumentTags,
   createTagCatalogEntry,
+  deleteTagCatalogEntry,
   getTagCatalogEntry,
+  getTagCatalogFlags,
   getTagCatalogIdentities,
   isTagCatalogSeeded,
+  isTagDeleted,
   isTagName,
   listTagCatalog,
+  listDeletedTagCatalogEntries,
+  migrateRetiredTagCatalogEntries,
   readDirectoryTags,
   readDocumentTags,
   resolveTagAssignments,
-  restoreTagCatalogEntry,
-  retireTagCatalogEntry,
+  setTagCatalogDescription,
   seedTagCatalog,
 } from "./tags.js";
 
@@ -203,6 +223,7 @@ export {
   ConflictingLinkMarksError,
   InvalidDocumentLifecycleError,
   InvalidTagAssignmentError,
+  InvalidTagDescriptionError,
   InlineLinkRangeError,
   InvalidListAttributesError,
   InvalidWorkspaceIdError,

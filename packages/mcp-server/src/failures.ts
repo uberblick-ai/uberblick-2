@@ -4,6 +4,7 @@ import {
 } from "@uberblick/schema";
 import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
+import { RevisionClientError, type RevisionClientFailure } from "./revision-client.js";
 import { ServerShuttingDownError } from "./server-work.js";
 import { WorkspaceRemovedError } from "./store.js";
 import type { Writes } from "./tools/operation.js";
@@ -133,10 +134,6 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Correct github_ref to one owner/repo#n reference or an http(s) github.com URL naming /issues/n or /pull/n, then call find_decisions again.",
   },
-  guidance_required: {
-    recoveryClass: "reread",
-    guidance: "Read each unread guidance document with get_doc, then retry the refused tool call.",
-  },
   persistence_failed: {
     recoveryClass: "manual",
     guidance:
@@ -228,6 +225,50 @@ const RECOVERIES: Record<string, Recovery> = {
   doc_deleted: {
     recoveryClass: "manual",
     guidance: "This UUID was permanently deleted and cannot be restored or reused. Choose another document from list_docs or search. Nothing was written.",
+  },
+  revisions_local_only: {
+    recoveryClass: "manual",
+    guidance: "Automatic revisions require a team hub. Use a workspace connected to a team hub before reading revisions.",
+  },
+  revisions_unreachable: {
+    recoveryClass: "retry",
+    guidance: "Call again once the hub is reachable; sync_status reports the connection state.",
+  },
+  revisions_sign_in_required: {
+    recoveryClass: "manual",
+    guidance: "Run ub auth login to sign in, restart the MCP server, then read revisions again.",
+  },
+  revisions_forbidden: {
+    recoveryClass: "manual",
+    guidance: "Ask a workspace maintainer to grant read access before reading this document's revisions again.",
+  },
+  revisions_unsupported: {
+    recoveryClass: "manual",
+    guidance: "Ask the hub operator to update the hub to a version that serves automatic document revisions, then read revisions again.",
+  },
+  revision_stale_state: {
+    recoveryClass: "reread",
+    guidance: "Wait for synchronization, read the current document with get_doc, then name the state the person intends to review. Nothing was named.",
+  },
+  revision_invalid_name: {
+    recoveryClass: "manual",
+    guidance: "Supply a name containing 1 to 100 characters on one line. Nothing was named.",
+  },
+  revision_already_named: {
+    recoveryClass: "manual",
+    guidance: "This state already has existingName. Its namer may rename or remove that name in the web; naming it again changes nothing.",
+  },
+  revision_not_namer: {
+    recoveryClass: "manual",
+    guidance: "Ask the account that named this revision to rename or remove it in the web. Nothing changed.",
+  },
+  revision_naming_outcome_unknown: {
+    recoveryClass: "reread",
+    guidance: "Call list_revisions to check whether the hub applied the name before trying again. A missing reply does not establish that nothing changed; reason distinguishes a silent admitted hub from a lost connection.",
+  },
+  revision_not_found: {
+    recoveryClass: "reread",
+    guidance: "Call list_revisions for this document's uuid, then choose one of its revision IDs. A revision from another document cannot be read here.",
   },
   doc_not_archived: {
     recoveryClass: "manual",
@@ -325,8 +366,8 @@ const RECOVERIES: Record<string, Recovery> = {
   invalid_tag_assignment: {
     recoveryClass: "manual",
     guidance:
-      "Call list_tags for the complete active catalog, then call again with active ids or active names (case ignored). " +
-      "An existing retired or unresolved assignment can be preserved by passing the id returned by the document read.",
+      "Call list_tags for the complete existing catalog, then call again with existing ids or names (case ignored). " +
+      "Hidden references awaiting a catalog entry stay stored automatically; deleted tags cannot be assigned.",
   },
   supersedes_not_decision: {
     recoveryClass: "reread",
@@ -389,6 +430,13 @@ export function hydrationRecovery(hubStatus: string): {
           `${stub}The hub is unreachable and this replica is reconnecting on its own, so the same call succeeds ` +
           "once it is back. Call again in a moment; sync_status says whether it has returned.",
       };
+    case "local":
+      return {
+        recoveryClass: "manual",
+        recovery:
+          `${stub}This local workspace's hub runs only while \`ub open\` does, so the room arrives once someone ` +
+          "runs it. Retrying before then cannot help.",
+      };
     default:
       return {
         recoveryClass: "retry",
@@ -424,6 +472,22 @@ export const FAILURE_CODES: readonly string[] = [
   "internal_error",
 ];
 
+const REVISION_FAILURE_CODES: Record<RevisionClientFailure, string> = {
+  "local-only": "revisions_local_only",
+  unreachable: "revisions_unreachable",
+  "sign-in-required": "revisions_sign_in_required",
+  forbidden: "revisions_forbidden",
+  deleted: "doc_deleted",
+  "revision-not-found": "revision_not_found",
+  unsupported: "revisions_unsupported",
+  "stale-state": "revision_stale_state",
+  "invalid-name": "revision_invalid_name",
+  "already-named": "revision_already_named",
+  "not-namer": "revision_not_namer",
+  archived: "doc_archived",
+  "naming-outcome-unknown": "revision_naming_outcome_unknown",
+};
+
 /**
  * Bundle shared failure prose once in tool-contracts; per-tool descriptions
  * point to that help topic.
@@ -439,7 +503,8 @@ export const FAILURE_INSTRUCTIONS =
   "of the write: `applied` (everything it meant to write is durable in this server's update log), `partial` (only " +
   "some of it is — `completed` names the rooms that are) and `synced`; `applied: false, partial: false` means " +
   "nothing changed locally, and nothing is ever rolled back — a partial write is finished by following `recovery`. " +
-  "A failure of a reading tool carries none of those three: there was no write to report on. `internal_error` is " +
+  "A failure of a reading tool carries none of those three: there was no write to report on. The hub-only " +
+  "name_revision reports applied: null when a sent request has no acknowledged outcome; read list_revisions before retrying. `internal_error` is " +
   "the one code with no class and no detail — an unmapped crash cannot honestly say what it did — and arguments " +
   "that do not match a tool's input schema never reach the tool at all: the MCP layer rejects them with its own " +
   "plain-text validation error, and nothing durable changes.";
@@ -475,7 +540,7 @@ function stamped(
     ...payload,
     ...((tool.name === "insert_block" || tool.name === "move_block") && [
       "block_not_found", "doc_not_found", "doc_not_hydrated", "doc_archived", "doc_deleted",
-      "decision_read_only", "guidance_required", "server_shutting_down",
+      "decision_read_only", "server_shutting_down",
       ...(tool.name === "move_block" ? ["duplicate_block_id", "move_target_in_selection"] : []),
     ].includes(payload.error) && !/nothing was written/i.test(payload.message)
       ? { message: `${payload.message} Nothing was written.` }
@@ -490,6 +555,13 @@ export function toFailure(tool: FailedTool, error: unknown): ToolFailure {
   }
   if (error instanceof ServerShuttingDownError) {
     return stamped(tool, { error: "server_shutting_down", message: error.message });
+  }
+  if (error instanceof RevisionClientError) {
+    return stamped(tool, { error: REVISION_FAILURE_CODES[error.code], message: error.message, ...error.details,
+      ...(tool.name === "name_revision" && error.code === "forbidden"
+        ? { recovery: "Ask a workspace maintainer to grant write access before naming this document. Nothing was named." }
+        : {}),
+    });
   }
   if (error instanceof SchemaError || error instanceof DataError) {
     return stamped(tool, {

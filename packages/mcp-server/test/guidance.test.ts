@@ -1,34 +1,15 @@
-import { randomUUID } from "node:crypto";
-import { performance } from "node:perf_hooks";
-import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, expect, it, vi } from "vitest";
-import { createTagCatalogEntry, retireTagCatalogEntry, restoreTagCatalogEntry, setTags, setTitle, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
-import { PERSISTENCE_ERROR_MESSAGE } from "../src/failures.js";
-import { INTERNAL_RESOURCE_ERROR_MESSAGE } from "../src/resource-adapter.js";
-import { FailingStore, removeTempDirs, startServer, testConfig } from "./helpers.js";
+import { createTagCatalogEntry } from "@uberblick/schema";
+import { STARTUP_ORIENTATION } from "../src/help-topics.js";
+import * as tagCatalog from "../src/tag-catalog.js";
+import { removeTempDirs, startServer, testConfig } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
-const marker = "5a7808ea-1c79-4330-af35-3f67f9f38a3b";
 async function local(config = testConfig()): Promise<Rig> {
   const rig = await startServer(config);
   rigs.push(rig);
   return rig;
-}
-async function doc(rig: Rig, title: string) {
-  return rig.ok("create_doc", {
-    title, description: "Guidance test fixture.",
-    blocks: [{ type: "paragraph", text: "Read before writing." }],
-  });
-}
-function mark(rig: Rig, ...uuids: string[]) {
-  createTagCatalogEntry(rig.instance.replicas.settings().doc, "guidance", marker);
-  for (const uuid of uuids) setTags(rig.instance.replicas.replica(uuid).doc, [marker]);
-}
-/** Static product help shares resources/list without changing guidance visibility. */
-async function guidanceResources(rig: Rig) {
-  const result = await rig.client.listResources();
-  return { ...result, resources: result.resources.filter(({ uri }) => uri.startsWith("uberblick://doc/")) };
 }
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -36,165 +17,36 @@ afterEach(async () => {
   removeTempDirs();
 });
 
-it("keeps a lease through guidance changes, expires without wall-clock sleeps, and forgets it on restart", async () => {
-  let now = 100;
-  vi.spyOn(performance, "now").mockImplementation(() => now);
+it("advertises guidance from the local log once at startup, without adding resources or workspace-specific help", async () => {
   const config = testConfig();
-  const rig = await local(config);
-  const first = await doc(rig, "First");
-  const next = await doc(rig, "Next");
-  mark(rig, first.uuid);
-  await rig.ok("get_doc", { uuid: first.uuid });
-  now += 300_000;
-  await rig.ok("get_doc", { uuid: first.uuid }); // A reread must not extend the lease.
-  setTags(rig.instance.replicas.replica(next.uuid).doc, [marker]);
-  now += 299_999;
-  await rig.ok("set_metadata", { uuid: first.uuid, title: "Changed in lease" });
-  now += 1;
-  const refusal = await rig.call("set_metadata", { uuid: first.uuid, title: "After expiry" });
-  expect(refusal.payload.unread.map((item: { uuid: string }) => item.uuid).sort()).toEqual([first.uuid, next.uuid].sort());
-  // A read stops counting once its document leaves the guidance set, so re-marking makes it unread again.
-  await rig.ok("get_doc", { uuid: first.uuid });
-  setTags(rig.instance.replicas.replica(first.uuid).doc, []);
-  expect((await rig.call("set_metadata", { uuid: first.uuid, title: "While unmarked" })).payload.unread)
-    .toEqual([{ uuid: next.uuid, title: "Next" }]);
-  setTitle(rig.instance.replicas.replica(first.uuid).doc, "Revised while unmarked");
-  setTags(rig.instance.replicas.replica(first.uuid).doc, [marker]);
-  const remarked = await rig.call("set_metadata", { uuid: first.uuid, title: "After remarking" });
-  expect(remarked.payload.unread.map((item: { uuid: string }) => item.uuid).sort()).toEqual([first.uuid, next.uuid].sort());
-  await rig.ok("get_doc", { uuid: next.uuid });
-  expect((await rig.call("set_metadata", { uuid: first.uuid, title: "Only next read" })).payload.unread)
-    .toEqual([{ uuid: first.uuid, title: "Revised while unmarked" }]);
-  await rig.ok("get_doc", { uuid: first.uuid });
-  now += 600_000; // Drop the lease that completed and continue from the expired state above.
-  await rig.ok("get_doc", { uuid: first.uuid });
-  // Curation removes the last unread guide: the next write completes briefing.
-  setTags(rig.instance.replicas.replica(next.uuid).doc, []);
-  await rig.ok("set_metadata", { uuid: first.uuid, title: "Briefed again" });
-  setTags(rig.instance.replicas.replica(next.uuid).doc, [marker]);
-  await rig.ok("set_metadata", { uuid: first.uuid, title: "Still briefed" });
-  await rig.close();
-  const restarted = await local(config);
-  expect((await restarted.call("set_metadata", { uuid: first.uuid, title: "Restarted" })).payload.error).toBe("guidance_required");
-});
-
-it("lists and serves current guidance independently of leases and stale cached tags", async () => {
-  const rig = await local();
-  const first = await doc(rig, "First");
-  const next = await doc(rig, "Next");
-  mark(rig, first.uuid);
-  const replicas = rig.instance.replicas;
-  // Cached tags lie in both directions; hydrated document assignments win.
-  upsertDirectoryEntry(replicas.directory().doc, { uuid: first.uuid, title: "Stale", tags: [] });
-  upsertDirectoryEntry(replicas.directory().doc, { uuid: next.uuid, title: "Next", tags: [marker] });
-  const resources = await guidanceResources(rig);
-  expect(resources.resources).toMatchObject([{ uri: `uberblick://doc/${first.uuid}`, title: "First", name: first.uuid }]);
-  const size = rig.instance.store.logSize();
-  expect((await rig.client.readResource({ uri: `uberblick://doc/${first.uuid}` })).contents[0]).toMatchObject({ text: expect.stringContaining("Read before writing.") });
-  expect(rig.instance.store.logSize()).toBe(size);
-  expect((await rig.call("set_metadata", { uuid: next.uuid, title: "Refused" })).payload.error).toBe("guidance_required");
-  await rig.ok("get_doc", { uuid: first.uuid });
-  setTags(replicas.replica(next.uuid).doc, [marker]);
-  setTitle(replicas.replica(next.uuid).doc, "Current title");
-  expect((await guidanceResources(rig)).resources).toHaveLength(2);
-  expect((await rig.client.readResource({ uri: `uberblick://doc/${next.uuid}` })).contents[0]).toMatchObject({ text: expect.stringContaining("Current title") });
-  tombstoneDirectoryEntry(replicas.directory().doc, first.uuid);
-  expect((await guidanceResources(rig)).resources).toMatchObject([{ title: "Current title" }]);
-  await expect(rig.client.readResource({ uri: `uberblick://doc/${first.uuid}` })).rejects.toThrow("No locally readable guidance");
-  retireTagCatalogEntry(replicas.settings().doc, marker);
-  expect((await guidanceResources(rig)).resources).toEqual([]);
-  restoreTagCatalogEntry(replicas.settings().doc, marker);
-  expect((await guidanceResources(rig)).resources).toHaveLength(1);
-});
-
-it("returns the same safe quarantine sentence for guidance list/read and tools after a refused append", async () => {
-  const config = testConfig();
-  const store = new FailingStore(config.databasePath, config.workspaceId);
-  const rig = await startServer(config, store);
-  rigs.push(rig);
-  const guide = await doc(rig, "Guide");
-  mark(rig, guide.uuid);
-  await rig.ok("get_doc", { uuid: guide.uuid });
-  const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
-  store.failing = true;
-  const refused = await rig.call("set_metadata", { uuid: guide.uuid, title: "Refused" });
-  expect(refused.payload.message).toBe(
-    "The replica refused a write to its update log; check sync_status and restart the MCP server.",
-  );
-  expect(refused).toMatchObject({ isError: true, payload: {
-    error: "persistence_failed", message: PERSISTENCE_ERROR_MESSAGE,
-    applied: false, partial: false, synced: false,
-  } });
-
-  // Through a real MCP client: the client adds this prefix to the wire's fixed sentence.
-  for (const result of [
-    () => rig.client.readResource({ uri: `uberblick://doc/${guide.uuid}` }),
-    () => rig.client.listResources(),
-  ]) {
-    await expect(result()).rejects.toMatchObject({
-      code: ErrorCode.InternalError,
-      message: `MCP error ${ErrorCode.InternalError}: ${PERSISTENCE_ERROR_MESSAGE}`,
-      data: undefined,
-    });
-  }
-  const blockedRead = await rig.call("get_doc", { uuid: guide.uuid });
-  expect(blockedRead.payload.message).toBe(PERSISTENCE_ERROR_MESSAGE);
-  expect(JSON.stringify([refused.payload, blockedRead.payload])).not.toContain("simulated disk failure");
-  const diagnostic = await rig.ok("sync_status");
-  expect(diagnostic.persistence.message).toContain("simulated disk failure");
-  const log = stderr.mock.calls.flat().join("\n");
-  expect(log).toContain("failed to append to the update log");
-  expect(log).toContain("simulated disk failure");
-});
-
-it.each(["list", "read"] as const)("sanitizes an unexpected guidance %s exception and logs its cause", async (route) => {
-  const rig = await local();
-  const guide = await doc(rig, "Guide");
-  mark(rig, guide.uuid);
-  const original = new Error("private database path and SQL");
-  const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
-  vi.spyOn(rig.instance.replicas, "refresh").mockImplementation(() => { throw original; });
-  const result = route === "list"
-    ? rig.client.listResources()
-    : rig.client.readResource({ uri: `uberblick://doc/${guide.uuid}` });
-  await expect(result).rejects.toMatchObject({
-    code: ErrorCode.InternalError,
-    message: `MCP error ${ErrorCode.InternalError}: ${INTERNAL_RESOURCE_ERROR_MESSAGE}`,
-    data: undefined,
-  });
-  const log = stderr.mock.calls.flat().join("\n");
-  expect(log).toContain("resource call failed");
-  expect(log).toContain(original.stack);
-});
-
-it("is inert for absent or retired markers and for archived or unhydrated guidance", async () => {
-  const rig = await local();
-  const guide = await doc(rig, "Guide");
-  const replicas = rig.instance.replicas;
-  // An assignment may arrive before its catalog identity.
-  setTags(replicas.replica(guide.uuid).doc, [marker]);
-  await rig.ok("set_metadata", { uuid: guide.uuid, title: "Absent marker" });
-  mark(rig, guide.uuid);
-  retireTagCatalogEntry(replicas.settings().doc, marker);
-  await rig.ok("set_metadata", { uuid: guide.uuid, title: "Retired marker" });
-  restoreTagCatalogEntry(replicas.settings().doc, marker);
-  tombstoneDirectoryEntry(replicas.directory().doc, guide.uuid);
-  upsertDirectoryEntry(replicas.directory().doc, { uuid: randomUUID(), title: "Not hydrated", tags: [marker] });
-  const result = await doc(rig, "No readable guidance");
-  expect(result.applied).toBe(true);
-  expect(result).not.toHaveProperty("unread");
-  expect((await guidanceResources(rig)).resources).toEqual([]);
-});
-
-it("refreshes guidance resources from another process's durable local updates", async () => {
-  const config = testConfig();
-  const reader = await local(config);
   const writer = await local(config);
-  const guide = await doc(writer, "Another process");
-  mark(writer, guide.uuid);
-  expect((await guidanceResources(reader)).resources).toMatchObject([{ title: "Another process" }]);
-  setTitle(writer.instance.replicas.replica(guide.uuid).doc, "Updated remotely");
-  expect((await reader.client.readResource({ uri: `uberblick://doc/${guide.uuid}` })).contents[0]).toMatchObject({ text: expect.stringContaining("Updated remotely") });
-  retireTagCatalogEntry(writer.instance.replicas.settings().doc, marker);
-  expect((await guidanceResources(reader)).resources).toEqual([]);
+  const marker = createTagCatalogEntry(writer.instance.replicas.settings().doc, "guidance");
+  const guide = await writer.ok("create_doc", {
+    title: "Writing pages", description: "Not part of the startup pointer.", tags: [marker.id],
+    blocks: [{ type: "paragraph", text: "Not injected into initialization." }],
+  });
+  expect(writer.client.getInstructions()).toBe(STARTUP_ORIENTATION);
+  await writer.close();
+
+  const reader = await local(config);
+  const instructions = `${STARTUP_ORIENTATION}\n\nWorkspace guidance: before your first write, read the pages that apply to your change with \`get_doc\`: Writing pages (\`${guide.uuid}\`).`;
+  expect(reader.client.getInstructions()).toBe(instructions);
+  expect((await reader.ok("get_help", { topic: "orientation" })).text).toBe(STARTUP_ORIENTATION);
+  expect((await reader.client.listResources()).resources.every(({ uri }) => uri.startsWith("uberblick://help/"))).toBe(true);
+  expect((await reader.client.listResourceTemplates()).resourceTemplates.map(({ uriTemplate }) => uriTemplate))
+    .toEqual(["uberblick://help/{topic}"]);
+  await expect(reader.client.readResource({ uri: `uberblick://doc/${guide.uuid}` })).rejects.toMatchObject({ code: -32602 });
+  await reader.ok("set_metadata", { uuid: guide.uuid, title: "Updated without reading" });
+  expect(reader.client.getInstructions()).toBe(instructions);
+  const before = reader.instance.store.logSize();
+  await reader.ok("get_doc", { uuid: guide.uuid });
+  expect(reader.instance.store.logSize()).toBe(before);
+});
+
+it("initializes successfully with plain orientation when building guidance pointers throws", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.spyOn(tagCatalog, "activeTagCatalog").mockImplementationOnce(() => { throw new Error("local discovery failed"); });
+  const rig = await local();
+  expect(rig.client.getInstructions()).toBe(STARTUP_ORIENTATION);
+  await rig.ok("create_doc", { title: "Still writable", description: "Startup fallback." });
 });

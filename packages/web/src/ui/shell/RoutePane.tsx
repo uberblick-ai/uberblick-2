@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactElement } from "react";
-import { decisionCurrentRecord } from "@uberblick/schema";
+import { decisionCurrentRecord, isDirectoryEntryArchived, parseRoom } from "@uberblick/schema";
 import type { DecisionTopicResolution, DocMeta } from "@uberblick/schema";
 import type { RoomConnection } from "../../collab/rooms.js";
 import type { DocLinkContext } from "../../editor/doc-links.js";
@@ -31,6 +31,8 @@ export interface RoutePaneProps {
   catalogConnection?: RoomConnection | null;
   /** Whether the directory tombstones this document — see useArchived. */
   archived: boolean;
+  /** Positive permanent deletion evidence from the directory or room refusal. */
+  deleted?: boolean;
   /** The selected directory stub's edit-freshness hint, when it has one. */
   updatedAt?: number | undefined;
   /** What an inline document reference resolves against — see EditorPane. */
@@ -48,6 +50,8 @@ export interface RoutePaneProps {
   titleConnection?: RoomConnection | null;
   relatedTopics?: readonly DecisionTopicResolution[];
   onAlterDecision?: (() => void) | null;
+  historyControl?: ReactElement | null;
+  historyActive?: boolean;
 }
 
 /** Share header eligibility with the separately mounted Sync details panel. */
@@ -140,9 +144,13 @@ function editorProperties(props: RoutePaneProps, segment: string, connection: Ro
     connection, segment, presence: props.presence, syncReading: props.syncReading ?? {},
     author: props.author,
     catalogConnection: props.catalogConnection ?? null, archived: props.archived, updatedAt: props.updatedAt,
+    canCleanupTags: () => props.directoryConnection != null && connection.status.writable &&
+      !isDirectoryEntryArchived(props.directoryConnection.ydoc, parseRoom(connection.room).uuid),
     docLinks: props.docLinks, actions: props.actions ?? {},
     onSelectThread: props.onSelectThread, threads: props.threads ?? [], threadsOpen: props.threadsOpen ?? false,
     onToggleThreads: props.onToggleThreads,
+    historyControl: props.historyControl,
+    historyActive: props.historyActive,
   };
 }
 
@@ -177,7 +185,7 @@ export function RoutePane(props: RoutePaneProps): ReactElement {
   const { route } = props;
   // Hooks precede early returns so route changes retain one room-status subscription.
   const { hasAnswered, deleted } = useRoomStatus(props.connection);
-  if (deleted) return <PaneNotice documentLayout>{null}</PaneNotice>;
+  if (deleted || props.deleted) return <PaneNotice documentLayout><p className="ub-notice">This document was deleted.</p></PaneNotice>;
   if (route.kind === "no-workspace") return <NoWorkspaceNotice route={route} configured={props.configured ?? true} />;
   if (route.kind === "invalid") {
     return (

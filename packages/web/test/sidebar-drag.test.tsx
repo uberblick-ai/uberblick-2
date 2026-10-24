@@ -7,13 +7,14 @@ import type { DragDropManager } from "@dnd-kit/react";
 import { useSortable } from "@dnd-kit/react/sortable";
 import { Feedback } from "@dnd-kit/dom";
 import * as Y from "yjs";
-import { createGroup, pinDoc, readSidebar, sidebarRoom } from "@uberblick/schema";
+import { createGroup, deleteDirectoryEntry, pinDoc, readSidebar, sidebarRoom } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { SidebarDragProvider } from "../src/ui/sidebar/sidebar-drag.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const ONE = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
 const TWO = "1f77c0d9-6b42-4a18-9e35-2c8d0f6a1b73";
+const DELETED = "7c2e5a11-3f80-4d66-b1a9-8e4d2c6f0a55";
 const LIVE: RoomStatus = {
   connected: true,
   synced: true,
@@ -144,3 +145,42 @@ it.each(["hidden", "read-only"] as const)(
     expect(writes).not.toHaveBeenCalled();
   },
 );
+
+it.each(["drop", "delete"] as const)("honors deletion evidence during a sidebar %s", async (operation) => {
+  const ydoc = new Y.Doc();
+  const directory = new Y.Doc();
+  deleteDirectoryEntry(directory, DELETED);
+  const group = createGroup(ydoc, "Reading");
+  pinDoc(ydoc, group, DELETED);
+  pinDoc(ydoc, group, ONE);
+  pinDoc(ydoc, group, TWO);
+  const connection = {
+    room: sidebarRoom(WORKSPACE), ydoc, provider: { awareness: null }, status: { ...LIVE },
+    onStatusChange: (listener: (status: RoomStatus) => void) => {
+      listener(connection.status);
+      return () => {};
+    },
+  } as unknown as RoomConnection;
+  const probe: ProbeState = { manager: null, rows: new Map() };
+  await renderSettled(
+    <SidebarDragProvider connection={connection} directory={directory} active>
+      <Rows group={group} probe={probe} />
+    </SidebarDragProvider>,
+  );
+  const manager = probe.manager;
+  if (manager === null) throw new Error("public drag manager was not mounted");
+  await act(async () => {
+    manager.actions.start({ source: `doc:${ONE}`, coordinates: { x: 0, y: 0 } });
+  });
+  await act(async () => { void manager.actions.setDropTarget(`doc:${TWO}`); });
+  expect(probe.rows.get(ONE)?.index).toBe(1);
+
+  if (operation === "drop") {
+    await act(async () => { manager.actions.stop(); });
+    expect(readSidebar(ydoc)[0]?.docs).toEqual([DELETED, TWO, ONE]);
+  } else {
+    await act(async () => deleteDirectoryEntry(directory, ONE));
+    expect(manager.dragOperation.status.idle).toBe(true);
+    expect(readSidebar(ydoc)[0]?.docs).toEqual([DELETED, ONE, TWO]);
+  }
+});

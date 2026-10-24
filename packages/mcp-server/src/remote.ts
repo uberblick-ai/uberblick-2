@@ -9,6 +9,8 @@ import {
   getWorkspaceName,
   readSidebar,
   listTagCatalog,
+  listDeletedTagCatalogEntries,
+  getTagCatalogFlags,
   getAnnotationsMap,
   getBlockInline,
   findBlockElement,
@@ -387,11 +389,13 @@ export async function inspectRemote(
 }
 
 /** The corpus a hydrated replica set holds, read out of its documents. */
-function workspaceSnapshot(settings: Y.Doc, sidebar: Y.Doc, directory: Y.Doc): CorpusDoc[] {
+export function workspaceSnapshot(settings: Y.Doc, sidebar: Y.Doc, directory: Y.Doc): CorpusDoc[] {
   return [
     { uuid: "_settings", doc: settings, content: {
       name: getWorkspaceName(settings), mainRepository: getWorkspaceMainRepository(settings),
       tags: listTagCatalog(settings),
+      deletedTags: listDeletedTagCatalogEntries(settings),
+      tagFlags: getTagCatalogFlags(settings).toJSON(),
     } },
     { uuid: "_sidebar", doc: sidebar, content: readSidebar(sidebar) },
     { uuid: "_deleted", doc: directory, content: listDeletedDirectoryUuids(directory).sort() },

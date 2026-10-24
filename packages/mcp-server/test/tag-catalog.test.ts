@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Hub } from "@uberblick/hub";
-import { EXAMPLE_TAGS, isTagCatalogSeeded, retireTagCatalogEntry, seedTagCatalog, settingsRoom } from "@uberblick/schema";
+import { EXAMPLE_TAGS, deleteTagCatalogEntry, isTagCatalogSeeded, seedTagCatalog, settingsRoom } from "@uberblick/schema";
 import { cleanupTestResources, FailingStore, hubUrl, LIVE_HUB_SETTLE, peerClient, startHub, startServer, tempDatabasePath, testConfig, TEST_SECRET, waitForCorpus, waitUntil, WAIT_TIMEOUT_MS, WORKSPACE } from "./helpers.js";
 import type { PeerClient, Rig } from "./helpers.js";
 
@@ -14,7 +14,6 @@ const peers: PeerClient[] = [];
 const AUTH = {
   id: EXAMPLE_TAGS[0].id,
   name: EXAMPLE_TAGS[0].name,
-  state: "active",
 } as const;
 
 /** A catalog identity no replica in these tests has an entry for. */
@@ -106,6 +105,7 @@ describe("the workspace tag catalog", () => {
 
     const listed = await rig.ok("list_tags");
     expect(listed).toMatchObject({ complete: false, tags: [] });
+    expect(listed.catalogHint).toContain("sync_status");
     expect(isTagCatalogSeeded(rig.instance.replicas.settings().doc)).toBe(false);
     expect(listed.hub.status).not.toBe("connected");
 
@@ -125,22 +125,18 @@ describe("the workspace tag catalog", () => {
     });
     expect(refused.payload.recovery).toContain("has not reached this replica");
 
-    // A retirement this replica already holds is not waiting on the hub:
-    // hydration cannot make the value assignable, so the caller is told to
-    // correct the call rather than to repeat it.
+    // Deleted identities cannot be selected, even while the catalog is incomplete.
     seedTagCatalog(rig.instance.replicas.settings().doc);
-    retireTagCatalogEntry(rig.instance.replicas.settings().doc, AUTH.id);
+    deleteTagCatalogEntry(rig.instance.replicas.settings().doc, AUTH.id);
     const blocked = await rig.call("create_doc", {
       title: "Must not exist either",
-      description: "A retirement this replica already knows about.",
+      description: "A deletion this replica already knows about.",
       tags: [AUTH.id],
     });
     expect(blocked.payload).toMatchObject({
       error: "invalid_tag_assignment",
-      retired: [AUTH.id],
-      recoveryClass: "manual",
+      unknown: [AUTH.id],
     });
-    expect(blocked.payload.recovery).not.toContain("has not reached this replica");
 
     expect((await rig.ok("list_docs")).docs).toEqual([]);
   });
@@ -153,6 +149,10 @@ describe("the workspace tag catalog", () => {
     const listed = await rig.ok("list_tags");
     expect(listed.tags).toEqual([]);
     expect(isTagCatalogSeeded(rig.instance.replicas.settings().doc)).toBe(false);
+    if (authSecret !== null) {
+      expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS }))
+        .toMatchObject({ caughtUp: true });
+    }
     expect(rig.instance.store.pendingRooms().some(entry => entry.room === settingsRoom(WORKSPACE))).toBe(false);
   });
 
@@ -183,25 +183,21 @@ describe("the workspace tag catalog", () => {
     const curator = await peerClient(hub.port, settingsRoom(WORKSPACE));
     peers.push(curator);
     await curator.synced;
-    retireTagCatalogEntry(curator.doc, AUTH.id);
-    await waitUntil("the retired catalog entry to reach the fresh server", async () => {
+    deleteTagCatalogEntry(curator.doc, AUTH.id);
+    await waitUntil("the deleted catalog entry to reach the fresh server", async () => {
       const tags = (await fresh.ok("list_tags")).tags as { id: string }[];
       return !tags.some((tag) => tag.id === AUTH.id);
     });
 
     const converged = await fresh.ok("get_doc", { uuid: created.uuid });
-    expect(converged.tags).toEqual([{ ...AUTH, state: "retired" }]);
+    expect(converged.tags).toEqual([]);
     for (const tag of [AUTH.id, AUTH.name]) {
-      expect(
-        (await fresh.ok("search", { query: "wombat", tag })).hits[0]?.uuid,
-      ).toBe(created.uuid);
+      expect((await fresh.call("search", { query: "wombat", tag })).payload)
+        .toMatchObject({ error: "invalid_tag_assignment", unknown: [tag] });
     }
 
     fresh.instance.replicas.rebuildIndex();
-    expect(
-      (await fresh.ok("search", { query: "wombat", tag: AUTH.id })).hits[0]
-        ?.uuid,
-    ).toBe(created.uuid);
+    expect((await fresh.ok("search", { query: "wombat" })).hits[0]?.tags).toEqual([]);
     await fresh.close();
     rigs.splice(rigs.indexOf(fresh), 1);
 
@@ -210,9 +206,6 @@ describe("the workspace tag catalog", () => {
       id: AUTH.id,
       name: AUTH.name,
     });
-    expect(
-      (await offline.ok("search", { query: "wombat", tag: AUTH.id })).hits[0]
-        ?.uuid,
-    ).toBe(created.uuid);
+    expect((await offline.ok("search", { query: "wombat" })).hits[0]?.tags).toEqual([]);
   });
 });

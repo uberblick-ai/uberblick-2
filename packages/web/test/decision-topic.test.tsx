@@ -10,6 +10,7 @@ import {
   createAnnotation,
   createGroup,
   decisionDirectoryFields,
+  deleteDirectoryEntry,
   directoryRoom,
   getBlocks,
   getDirectoryEntry,
@@ -117,7 +118,7 @@ afterEach(() => {
 
 interface RecordOptions {
   supersedes?: string;
-  related?: string;
+  related?: string | string[];
   discussion?: string;
   answerer?: string;
   answerDate?: string;
@@ -138,7 +139,8 @@ function record(uuid: string, title: string, status: DecisionStatus, answer: str
   initDoc(ydoc, {
     uuid, title,
     ...(options.supersedes === undefined ? {} : { topic: FIRST, supersedes: options.supersedes }),
-    ...(options.related === undefined ? {} : { governs: options.related }),
+    ...(options.related === undefined ? {} : typeof options.related === "string"
+      ? { governs: options.related } : { related: options.related }),
   });
   setKind(ydoc, "decision");
   appendBlock(ydoc, { type: "paragraph", text: answer });
@@ -252,6 +254,34 @@ async function copy(host: HTMLElement): Promise<void> {
 }
 
 describe("decision topic navigation and history", () => {
+  it.each([RELATED_FIRST, RELATED_CURRENT])("lists a multi-page topic and header count on related page %s through its earlier record", async (uuid) => {
+    for (const related of [RELATED_FIRST, RELATED_CURRENT]) {
+      const page = room(roomForDoc(WORKSPACE, related)).ydoc;
+      initDoc(page, { uuid: related, title: "A related page" });
+      appendBlock(page, { type: "paragraph", text: "Related guidance." });
+      regular(related, "A related page");
+    }
+    regular(RFC, "Replacement related page");
+    record(FIRST, "Shared decision", "decided", "The earlier answer.", {
+      related: [RELATED_FIRST, RELATED_CURRENT], agent: true,
+    });
+    record(CURRENT, "Shared decision", "decided", "The current answer.", {
+      supersedes: FIRST, related: RFC, answerer: "Ben", answerDate: DATE, order: 1,
+    });
+    const host = (await open(docPath(WORKSPACE, uuid))).container;
+    const block = within(host).getByRole("region", { name: "Decisions" });
+    expect(within(block).getAllByRole("link")).toHaveLength(1);
+    const topic = within(block).getByRole("link", { name: "In force: Shared decision" });
+    expect(topic.getAttribute("href")).toBe(docPath(WORKSPACE, FIRST));
+    expect(topic.textContent).toContain("The current answer.");
+    expect(within(host).getByRole("link", { name: "1 decision in force" }).getAttribute("href")).toBe(`#${block.id}`);
+    await act(async () => {
+      expect(archiveDecisionRecord(directory(), room(sidebarRoom(WORKSPACE)).ydoc, FIRST)).toBe(true);
+    });
+    expect(within(host).queryByRole("region", { name: "Decisions" })).toBeNull();
+    expect(within(host).queryByRole("link", { name: "1 decision in force" })).toBeNull();
+  });
+
   it("keeps a topic usable when a malformed synced key claims to join it", async () => {
     story();
     getDirectoryMap(directory()).set("evil/key", {
@@ -668,9 +698,6 @@ describe("decision topic navigation and history", () => {
       editor.commands.setContent({ type: "doc", content: [
         { type: "paragraph", content: [{ type: "text", text: "A typed replacement answer." }] },
       ] });
-      fireEvent.change(within(dialog).getByRole("textbox", { name: /Why the change/ }), {
-        target: { value: "The old wording no longer fits." },
-      });
     });
     expect(acquired.filter((name) => name === roomForDoc(WORKSPACE, CURRENT))).toHaveLength(2);
     await act(async () => record(NEXT, "Another answer took effect", "decided", "The concurrent answer.", {
@@ -679,7 +706,6 @@ describe("decision topic navigation and history", () => {
     expect(host.querySelector('.ub-decision-history [aria-current="true"]')?.closest("li")?.getAttribute("data-record")).toBe(NEXT);
     expect(screen.getByRole("dialog", { name: "Alter decision" })).toBe(dialog);
     expect(dialog.textContent).toContain("A typed replacement answer.");
-    expect(within(dialog).getByRole("textbox", { name: /Why the change/ })).toHaveProperty("value", "The old wording no longer fits.");
     const beforeDirectory = listDirectory(directory());
     await act(async () => within(dialog).getByRole("button", { name: "Decide" }).click());
     expect(dialog.textContent).toMatch(/no longer|current answer|another answer/i);
@@ -921,6 +947,7 @@ describe("decision topic navigation and history", () => {
     const host = archivedView.container;
     expect(answer(host).textContent).toContain("Keep the original answer.");
     expect(host.querySelector(".ub-archived-banner")).not.toBeNull();
+    expect(within(host).queryByRole("button", { name: "Delete…" })).toBeNull();
     expect(host.querySelector(".ub-thread-actions")).toBeNull();
     expect(timeline(host).querySelector(`li[data-record="${FIRST}"]`)).toBeNull();
     const clipboard = copiedUrls();
@@ -973,9 +1000,11 @@ describe("decision topic navigation and history", () => {
     expect(new URL(clipboard.mock.calls[0]?.[0] as string).pathname).toBe(decisionRecordPath(WORKSPACE, FIRST, REJECTED));
     await act(async () => tombstoneDirectoryEntry(directory(), CURRENT));
     expect(host.querySelector(".ub-archived-banner")).not.toBeNull();
+    expect(within(host).queryByRole("button", { name: "Delete…" })).toBeNull();
     await act(async () => within(host).getByRole("button", { name: "Restore" }).click());
     expect(resolveDecisionTopics(directory())[0]?.archived).toBe(false);
     expect(host.querySelector(".ub-archived-banner")).not.toBeNull();
+    expect(within(host).queryByRole("button", { name: "Delete…" })).toBeNull();
     expect(timeline(host).querySelector(`li[data-record="${REJECTED}"]`)).toBeNull();
     await act(async () => restoreDirectoryEntry(directory(), REJECTED));
     expect(host.querySelector(".ub-archived-banner")).toBeNull();
@@ -1043,6 +1072,31 @@ describe("decision topic navigation and history", () => {
     />)).container;
     expect(answer(host).textContent).toContain("An answer.");
     expect(host.querySelector(".ub-decision-rfc")).toBeNull();
+  });
+
+  it("makes deleted discussion references inert in the answer and history", async () => {
+    regular(RFC, "Deleted discussion");
+    record(FIRST, "Topic with discussion", "decided", "An answer.", { discussion: RFC });
+    const host = (await open()).container;
+    await act(async () => { tombstoneDirectoryEntry(directory(), RFC); deleteDirectoryEntry(directory(), RFC); });
+    const references = host.querySelectorAll<HTMLAnchorElement>('.ub-doclink[data-doc-link-state="deleted"]');
+    expect(references).toHaveLength(2);
+    const path = window.location.pathname;
+    for (const reference of references) {
+      expect(reference.getAttribute("title")).toBe("This document was deleted.");
+      expect(reference.getAttribute("href")).toBeNull();
+      expect(reference.getAttribute("aria-disabled")).toBe("true");
+      expect(reference.tabIndex).toBe(-1);
+      await act(async () => fireEvent.click(reference));
+      await act(async () => fireEvent.click(reference, { metaKey: true }));
+      await act(async () => fireEvent.click(reference, { ctrlKey: true }));
+      await act(async () => fireEvent.click(reference, { button: 1 }));
+      await act(async () => fireEvent.keyDown(reference, { key: "Enter" }));
+    }
+    expect(window.location.pathname).toBe(path);
+    expect(acquired).not.toContain(roomForDoc(WORKSPACE, RFC));
+    expect(getMeta(room(roomForDoc(WORKSPACE, FIRST)).ydoc).discussion).toBe(RFC);
+    expect(getDirectoryEntry(directory(), FIRST)?.discussion).toBe(RFC);
   });
 });
 

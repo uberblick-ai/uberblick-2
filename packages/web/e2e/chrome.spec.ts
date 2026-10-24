@@ -54,7 +54,7 @@ import {
   getDirectoryMap,
   initDoc,
   MAX_TAG_NAME_LENGTH,
-  retireTagCatalogEntry,
+  deleteTagCatalogEntry,
   pinDoc,
   readSidebar,
   roomForDoc,
@@ -97,7 +97,7 @@ async function ensureExampleCatalog(page: Page): Promise<void> {
   );
   await expect(page.getByRole("heading", { name: "Tags", level: 1 })).toBeVisible();
   await expect(
-    page.getByRole("region", { name: "Active" }).getByRole("listitem"),
+    page.locator("[data-tag-list] tbody tr"),
   ).toHaveCount(EXAMPLE_TAGS.length);
   await page.locator(".ub-settings-back").click();
   await expect(page).toHaveURL(
@@ -1787,7 +1787,7 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
   });
   expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(touch);
   const floor = touch ? 44 : 24;
-  await expect(page.getByRole("region", { name: "Active" }).getByRole("listitem")).toHaveCount(EXAMPLE_TAGS.length);
+  await expect(page.locator("[data-tag-list] tbody tr")).toHaveCount(EXAMPLE_TAGS.length);
   await page.goto(new URL(`/${harness().workspace}`, page.url()).href);
   await expect(page.locator(".ub-docs")).toBeVisible();
   const showSidebar = page.getByRole("button", { name: "Show document list", exact: true });
@@ -2246,7 +2246,7 @@ for (const scheme of ["light", "dark"] as const) {
       readySelector: "[data-settings-page]",
     });
     expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(touch);
-    await expect(page.getByRole("region", { name: "Active" }).getByRole("listitem")).toHaveCount(EXAMPLE_TAGS.length);
+    await expect(page.locator("[data-tag-list] tbody tr")).toHaveCount(EXAMPLE_TAGS.length);
     await page.goto(new URL(`/${harness().workspace}`, page.url()).href);
     await expect(page.locator(".ub-docs")).toBeVisible();
     if (touch) await page.getByRole("button", { name: "Show document list", exact: true }).click();
@@ -2430,9 +2430,9 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
     new URL(`/${harness().workspace}/settings/tags`, page.url()).href,
   );
   for (const name of added) {
-    await page.getByLabel("Create a tag").fill(name);
+    await page.getByLabel("Name", { exact: true }).fill(name);
     await page.getByRole("button", { name: "Create", exact: true }).click();
-    await expect(page.getByRole("button", { name: `Retire ${name}` })).toBeVisible();
+    await expect(page.getByRole("button", { name: `Delete ${name}` })).toBeVisible();
   }
   await page.goto(documentUrl);
 
@@ -2487,9 +2487,9 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   await page.goto(
     new URL(`/${harness().workspace}/settings/tags`, page.url()).href,
   );
-  await page.getByLabel("Create a tag").fill(longest);
+  await page.getByLabel("Name", { exact: true }).fill(longest);
   await page.getByRole("button", { name: "Create", exact: true }).click();
-  await expect(page.getByRole("button", { name: `Retire ${longest}` })).toBeVisible();
+  await expect(page.getByRole("button", { name: `Delete ${longest}` })).toBeVisible();
   // On its own, because one name is the case: with the seeded short ones beside
   // it the oversized pill is carried onto a line of its own below the machine
   // facts, and misses them without being any better contained.
@@ -2535,11 +2535,12 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
     new URL(`/${harness().workspace}/settings/tags`, page.url()).href,
   );
   for (const name of [...added, longest]) {
-    await page.getByRole("button", { name: `Retire ${name}` }).click();
-    await expect(page.getByRole("button", { name: `Restore ${name}` })).toBeVisible();
+    await page.getByRole("button", { name: `Delete ${name}` }).click();
+    await page.getByRole("alertdialog", { name: `Delete “${name}”?` }).getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(page.getByRole("button", { name: `Delete ${name}` })).toHaveCount(0);
   }
   await expect(
-    page.getByRole("region", { name: "Active" }).getByRole("listitem"),
+    page.locator("[data-tag-list] tbody tr"),
   ).toHaveCount(EXAMPLE_TAGS.length);
 });
 
@@ -2597,9 +2598,11 @@ async function contrastDocument(
     const catalog = (await peer(settingsRoom(harness().workspaceUuid))).doc;
     seedTagCatalog(catalog);
     for (let index = 0; index < 6; index += 1) createTagCatalogEntry(catalog, `contrast-${index}`);
-    const retired = createTagCatalogEntry(catalog, `retired-${scheme}-${randomUUID().slice(0, 8)}`);
-    assignDocumentTags(doc, catalog, [retired.id]);
-    retireTagCatalogEntry(catalog, retired.id);
+    const existing = createTagCatalogEntry(catalog, "contrast-0");
+    const deleted = createTagCatalogEntry(catalog, `deleted-${scheme}-${randomUUID().slice(0, 8)}`);
+    assignDocumentTags(doc, catalog, [existing.id, deleted.id]);
+    deleteTagCatalogEntry(catalog, deleted.id);
+    await expect(page.locator(".ub-tag-name")).toHaveText("contrast-0");
     for (let index = 0; index < 4; index += 1) {
       const { provider } = await peer(`${harness().workspaceUuid}/${uuid}`);
       provider.setAwarenessField("user", { name: `Contrast peer ${index}`, color: "#0675c9" });
@@ -2791,7 +2794,7 @@ for (const scheme of ["light", "dark"] as const) {
       await confirmation.getByRole("button", { name: "Archive", exact: true }).click();
       const banner = page.locator(".ub-archived-banner");
       await expect(banner).toBeVisible();
-      expect(oklab(await paintedIn(banner, "border-left-color")).chroma).toBeGreaterThan(accentChroma);
+      expect(oklab(await paintedIn(banner, "border-left-color")).chroma).toBeLessThan(accentChroma);
     }, true);
   });
 }
@@ -3124,7 +3127,7 @@ for (const scheme of ["light"] as const) {
       await expect(page.getByPlaceholder("Search tags")).toBeVisible();
       await check(picker);
       // Include every option's neutral check box over the highlighted ground,
-      // and the retired small text, rather than only reading a panel at rest.
+      // rather than only reading a panel at rest.
       for (const option of await page.locator(`${picker} [role=option]`).all()) {
         await option.hover();
         await check(picker);

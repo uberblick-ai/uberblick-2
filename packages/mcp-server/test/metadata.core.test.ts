@@ -4,13 +4,13 @@ import { randomUUID } from "node:crypto";
 import { docRev, EXAMPLE_TAGS, getDirectoryEntry, getDirectoryMap, getMetaMap, setCodeCheck, setLinks, setTldrOptOut, upsertDirectoryEntry } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
-import { directoryStub, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
+import { directoryStub, readBlocks, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
 const DESCRIPTION = "Metadata contract fixture.";
-const AUTH = { ...EXAMPLE_TAGS[0], state: "active" };
-const MCP = { ...EXAMPLE_TAGS[2], state: "active" };
+const AUTH = { ...EXAMPLE_TAGS[0] };
+const MCP = { ...EXAMPLE_TAGS[2] };
 const COMMIT = "33086e02eb66f2e32dcce67a21c6c8ece9cf9ae4";
 const CHECK = { repository: "uberblick-ai/uberblick-2", commit: COMMIT, result: "matches" } as const;
 
@@ -91,7 +91,7 @@ describe("set_metadata", () => {
     let read = await rig.ok("get_doc", { uuid: source.uuid });
     expect(read.rev).toBe(docRev(ydoc));
     expect(read.rev).toMatch(/^[0-9a-f]{16}$/);
-    for (const original of source.blocks) {
+    for (const original of await readBlocks(rig, source.uuid, source.blocks)) {
       await rig.ok("edit_block", {
         uuid: source.uuid, block_id: original.id, old_text: original.text,
         new_text: `${original.text} edited`, rev: original.rev,
@@ -236,7 +236,7 @@ describe("set_metadata", () => {
     ]);
     const read = await rig.ok("get_doc", { uuid: source.uuid });
     expect(read.code_check).toEqual(replaced.code_check);
-    expect(read.blocks).toEqual(source.blocks);
+    expect(read.blocks).toMatchObject(source.blocks);
     expect(await rig.ok("export_markdown", { uuid: source.uuid })).toEqual(beforeExport);
     expect(directoryStub(rig.instance, source.uuid)?.code_check)
       .toEqual(replaced.code_check);
@@ -252,7 +252,7 @@ describe("set_metadata", () => {
       uuid: source.uuid, title: "Renamed page", description: "Changed descriptive fields.",
       tldr: "A summary.", tags: [MCP.id], links: [],
     });
-    const original = source.blocks[0];
+    const [original] = await readBlocks(rig, source.uuid, source.blocks);
     await rig.ok("edit_block", {
       uuid: source.uuid, block_id: original.id, old_text: original.text,
       new_text: "Changed content", rev: original.rev,
@@ -427,7 +427,7 @@ describe("set_metadata", () => {
     expect(rig.instance.store.updateCount(directory.room)).toBe(beforeDirectory + 1);
     const read = await rig.ok("get_doc", { uuid: source.uuid });
     expect(metadata(written)).toEqual(metadata(read));
-    expect(read.blocks).toEqual(source.blocks);
+    expect(read.blocks).toMatchObject(source.blocks);
     expect(getDirectoryEntry(directory.doc, source.uuid)).toMatchObject({
       title: written.title,
       description: written.description,
@@ -543,7 +543,7 @@ describe("set_metadata", () => {
       tldr: "An otherwise valid summary.",
       tags: [MCP.name, "missing-metadata-tag"],
     }, "invalid_tag_assignment", source.uuid);
-    expect(tags).toMatchObject({ field: "tags", unknown: ["missing-metadata-tag"], retired: [] });
+    expect(tags).toMatchObject({ field: "tags", unknown: ["missing-metadata-tag"] });
     const unknown = randomUUID();
     const links = await refuseUnchanged(rig, {
       uuid: source.uuid,

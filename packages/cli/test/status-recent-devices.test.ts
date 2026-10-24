@@ -2,13 +2,13 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { issueCredential } from "@uberblick/hub/test-device-credentials";
-import { afterAll, afterEach, expect, it } from "vitest";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
 import { cliVersion } from "../src/version.js";
-import { cleanUp, credentialPath, fixture, rig, seedLogin, serve, WORKSPACE } from "./auth-fixtures.js";
+import { cleanUp, credentialPath, fixture, rig, seedLogin, WORKSPACE } from "./auth-fixtures.js";
 import { removeTempDirs, sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 
-afterEach(cleanUp);
+afterEach(async () => { vi.restoreAllMocks(); await cleanUp(); });
 afterAll(removeTempDirs);
 
 it.each([cliVersion(), "0.4.5", undefined])("reports recent devices and hub version %s without consuming them, writing the login or adding requests", async hubVersion => {
@@ -90,19 +90,49 @@ it("withholds the hub version when workspace access is refused even though accou
 });
 
 it.each(["headers", "body"])("keeps an unavailable device list silent and within the status deadline (%s)", async phase => {
-  let requests = 0;
-  const server = await serve((request, response) => {
-    if (request.url !== "/auth/manage") { response.writeHead(404); response.end(); return; }
-    requests += 1;
-    if (phase === "body") { response.writeHead(200, { "Content-Type": "application/json" }); response.write('{"status":"ok",'); }
+  const deadline = new AbortController();
+  const timeout = AbortSignal.timeout;
+  const deadlines = vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => ms === 100 ? deadline.signal : timeout(ms));
+  let reached!: () => void;
+  const waiting = new Promise<void>(resolve => { reached = resolve; });
+  let requestSignal: AbortSignal | undefined;
+  let bodyAborted = false;
+  const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+    const signal = options?.signal;
+    if (signal == null) throw new Error("device request needs an abort signal");
+    requestSignal = signal;
+    if (phase === "headers") return await new Promise<Response>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      signal.throwIfAborted();
+      reached();
+    });
+    return new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"status":"ok",'));
+        signal.addEventListener("abort", () => {
+          bodyAborted = true;
+          controller.error(signal.reason);
+        }, { once: true });
+        signal.throwIfAborted();
+      },
+      pull() { reached(); },
+    }, { highWaterMark: 0 }));
   });
-  const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: server.origin.replace("http:", "ws:") },
-    credentials: { hubLogins: { [server.origin]: fixture() } } });
+  const origin = "http://127.0.0.1:1";
+  const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: origin.replace("http:", "ws:") },
+    credentials: { hubLogins: { [origin]: fixture() } } });
   const before = readFileSync(credentialPath(box));
   const started = performance.now();
-  const json = await runInProcess(["status", "--json"], box, { UB_TEST_MAX_WAIT_MS: "100.5" });
+  const running = runInProcess(["status", "--json"], box, { UB_TEST_MAX_WAIT_MS: "100.5" });
+  await waiting;
+  deadline.abort();
+  const json = await running;
   expect(performance.now() - started).toBeLessThan(1_000);
-  expect(requests).toBe(1);
+  expect(deadlines).toHaveBeenCalledWith(100);
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(fetch.mock.calls[0]?.[0]).toBe(`${origin}/auth/manage`);
+  expect(requestSignal?.aborted).toBe(true);
+  if (phase === "body") expect(bodyAborted).toBe(true);
   expect(json.status, json.stderr).toBe(0);
   expect(JSON.parse(json.stdout).recentDevices).toBeNull();
   expect(JSON.parse(json.stdout).problems.map((problem: { name: string }) => problem.name)).toEqual(["hub-unreachable"]);

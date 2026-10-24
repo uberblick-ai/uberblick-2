@@ -1,0 +1,102 @@
+import * as Y from "yjs";
+import { readRevisionResponse, snapshotRevision } from "@uberblick/schema";
+import type { RevisionEntry } from "@uberblick/schema";
+import { mintHubAuthMessage } from "../collab/rooms.js";
+import { localSessionHeaders } from "../collab/local-session.js";
+
+const unavailableMessages = {
+  "local-only": "History is unavailable in a local-only workspace.",
+  unreachable: "History is unavailable: the hub cannot be reached.",
+  "sign-in-required": "History is unavailable: sign in to the hub on this computer.",
+  forbidden: "History is unavailable: the hub refused access.",
+  deleted: "History is unavailable: this document was deleted.",
+  "revision-not-found": "History is unavailable: this revision no longer exists.",
+  unsupported: "History is unavailable: this hub does not serve revisions.",
+  "stale-state": "This document has changed or is not synced. Wait for sync, review the current content and try naming it again.",
+  "invalid-name": "Use a name of 1 to 100 characters on one line.",
+  "already-named": "This revision already has a name. Open history to see it.",
+  "not-namer": "Only the person who named this revision can change its name.",
+  archived: "Archived documents are read-only. Restore the document before changing revision names.",
+};
+
+export class DocumentHistoryError extends Error {
+  constructor(reason?: string) {
+    super(reason !== undefined && Object.hasOwn(unavailableMessages, reason)
+      ? unavailableMessages[reason as keyof typeof unavailableMessages]
+      : "History is unavailable. Try again.");
+  }
+}
+
+export interface DocumentRevisionsClient {
+  list(uuid: string, signal: AbortSignal): Promise<RevisionEntry[]>;
+  get(uuid: string, revision: string, signal: AbortSignal): Promise<Y.Doc>;
+  name(uuid: string, name: string, checksum: string, signal: AbortSignal): Promise<RevisionEntry>;
+  rename(uuid: string, revisionId: string, name: string, signal: AbortSignal): Promise<RevisionEntry>;
+  removeName(uuid: string, revisionId: string, signal: AbortSignal): Promise<RevisionEntry>;
+}
+
+/** Capture the displayed content before hashing can yield to incoming edits. */
+export async function documentRevisionChecksum(document: Y.Doc): Promise<string> {
+  const checksum = snapshotRevision(document).checksum;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(checksum));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export function createDocumentRevisionsClient(
+  workspace: string,
+  subject: string,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): DocumentRevisionsClient {
+  const headers = async () => ({ Accept: "application/json", Authorization: `Bearer ${await mintHubAuthMessage(workspace, subject)}`,
+    ...await localSessionHeaders() });
+  const request = async (uuid: string, revision: string | null, signal: AbortSignal) => {
+    const path = `/api/revisions?uuid=${encodeURIComponent(uuid)}${revision === null ? "" : `&revision=${encodeURIComponent(revision)}`}`;
+    const response = await fetchImpl(path, {
+      cache: "no-store", signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+      headers: await headers(),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new DocumentHistoryError(typeof body?.reason === "string" ? body.reason : undefined);
+    const parsed = readRevisionResponse(JSON.stringify({ ...body, type: "uberblick:revision-response", requestId: "http", ok: true }));
+    if (parsed === null || !parsed.ok) throw new DocumentHistoryError();
+    return parsed;
+  };
+  const write = async (uuid: string, operation: Record<string, string>, signal: AbortSignal): Promise<RevisionEntry> => {
+    const response = await fetchImpl("/api/revisions", {
+      method: "POST", cache: "no-store", signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+      headers: { ...await headers(), "Content-Type": "application/json" },
+      body: JSON.stringify({ uuid, ...operation }),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      if (body?.reason === "already-named" && typeof body?.existingName?.text === "string") {
+        const namer = body.existingName.namer;
+        const surface = namer?.surface?.kind === "browser" ? " in the browser"
+          : typeof namer?.surface?.name === "string" ? ` via ${namer.surface.name}` : "";
+        const by = typeof namer?.githubUsername === "string" ? ` by ${namer.githubUsername}${surface}` : "";
+        throw new Error(`This revision is already named “${body.existingName.text}”${by}. Open history to see it.`);
+      }
+      throw new DocumentHistoryError(typeof body?.reason === "string" ? body.reason : undefined);
+    }
+    const parsed = readRevisionResponse(JSON.stringify({ ...body, type: "uberblick:revision-response", requestId: "http", ok: true }));
+    if (parsed === null || !parsed.ok || !("revision" in parsed)) throw new DocumentHistoryError();
+    return parsed.revision;
+  };
+  return {
+    name: (uuid, name, checksum, signal) => write(uuid, { operation: "name", name, expectedHash: checksum }, signal),
+    rename: (uuid, revisionId, name, signal) => write(uuid, { operation: "rename", revisionId, name }, signal),
+    removeName: (uuid, revisionId, signal) => write(uuid, { operation: "remove_name", revisionId }, signal),
+    list: async (uuid, signal) => {
+      const response = await request(uuid, null, signal);
+      if (!("revisions" in response)) throw new DocumentHistoryError();
+      return response.revisions;
+    },
+    get: async (uuid, revision, signal) => {
+      const response = await request(uuid, revision, signal);
+      if (!("state" in response)) throw new DocumentHistoryError();
+      const doc = new Y.Doc();
+      try { Y.applyUpdate(doc, response.state); return doc; }
+      catch { doc.destroy(); throw new DocumentHistoryError(); }
+    },
+  };
+}

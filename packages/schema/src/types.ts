@@ -219,8 +219,10 @@ export interface DocMeta {
   kind?: DocumentKind;
   /** The lifecycle state, present only when it is legal for {@link kind}. */
   status?: DocumentStatus;
-  /** The product document this decision shapes. */
+  /** First related page, retained for older clients. */
   governs?: string;
+  /** Regular pages this decision shapes; fixed at creation. */
+  related?: string[];
   /** First record's UUID, shared by this topic; immutable after creation. */
   topic?: string;
   /** Earlier decision this decision replaces, by immutable document UUID. */
@@ -350,6 +352,7 @@ export interface DirectoryEntry {
   code_check?: CodeCheck[];
   /** Decision-only metadata caches. Other document kinds carry none of these. */
   governs?: string;
+  related?: string[];
   topic?: string;
   supersedes?: string;
   /** Explicit discussion; absence means an older client has not cached it. */
@@ -370,20 +373,12 @@ export interface TagCatalogEntry {
   id: string;
   /** Validated human-facing name. It is display data, never document identity. */
   name: string;
-  /** Retired entries remain visible on documents but cannot be newly assigned. */
-  state: "active" | "retired";
+  /** Optional one-line explanation of this workspace-specific purpose. */
+  description?: string;
 }
 
-/** A stored catalog UUID this replica cannot resolve from its current catalog. */
-export interface UnresolvedTagAssignment {
-  id: string;
-  /** No display name is available until the catalog entry hydrates. */
-  name: null;
-  state: "unresolved";
-}
-
-/** One stored tag assignment as the current catalog replica can read it. */
-export type TagAssignment = TagCatalogEntry | UnresolvedTagAssignment;
+/** Only existing catalog entries are exposed as document assignments. */
+export type TagAssignment = TagCatalogEntry;
 
 /** One group in the sidebar doc: a stable id, a name, and what it pins. */
 export interface SidebarGroup {

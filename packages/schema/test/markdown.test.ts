@@ -4,6 +4,7 @@ import {
   appendBlock,
   assignDocumentTags,
   createTagCatalogEntry,
+  deleteTagCatalogEntry,
   createAnnotation,
   COMMENT_MARK,
   exportMarkdown,
@@ -372,6 +373,13 @@ describe("markdown round-trip", () => {
       "tags: [protocol]",
     );
     expect(exportMarkdown(doc, { tagCatalog: catalog })).not.toContain(identity);
+
+    const unresolved = "22222222-2222-4222-8222-222222222222";
+    setTags(doc, [identity, unresolved]);
+    deleteTagCatalogEntry(catalog, identity);
+    const before = Y.encodeStateAsUpdate(doc);
+    expect(exportMarkdown(doc, { tagCatalog: catalog })).toContain("tags: []");
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
   });
 
   // A description is required on create, so an export that dropped it made the

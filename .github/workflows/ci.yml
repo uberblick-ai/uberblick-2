@@ -16,7 +16,7 @@ name: CI
 # there, and lint, typecheck and pure logic do not depend on the platform.
 # Browser e2e stays Linux-only until its specs hold on GitHub's macOS runners.
 #
-# No secrets: `install`, `lint`, `typecheck`, `test`, `site` and `e2e` need none.
+# No secrets: `install`, `lint`, `typecheck`, `test` and `e2e` need none.
 
 on:
   push:
@@ -37,7 +37,7 @@ permissions:
 
 jobs:
   lint:
-    name: lint, typecheck and site
+    name: lint and typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -49,7 +49,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       # Installs the toolchain pinned in mise.toml and puts `mise` on PATH.
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v4
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v4
 
       # Keyed per platform: the store holds platform-specific optional packages.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
@@ -69,10 +69,6 @@ jobs:
         run: mise run lint
       - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: mise run typecheck
-      # The website is static HTML the build script assembles; a page that
-      # fails to build must not reach main, where Pages deploys it.
-      - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: mise run site
 
   unit-tests:
     name: ${{ matrix.name }}
@@ -99,7 +95,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v4
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v4
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -136,7 +132,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v4
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v4
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -181,7 +177,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v4
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v4
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -226,7 +222,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v4
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v4
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -266,12 +262,15 @@ jobs:
     name: browser webkit (1/2)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+      options: --init --ipc=host
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v4
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v4
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -279,20 +278,10 @@ jobs:
           key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: playwright-
-
       - name: Install workspace packages
         run: mise run install
         env:
           PNPM_STORE_DIR: ~/.pnpm-store
-
-      # Browser caches omit system packages; locals never install host packages.
-      - name: Provision WebKit host libraries
-        run: mise exec -- pnpm --filter @uberblick/web exec playwright install-deps webkit
 
       - name: Download pinned browser engines
         run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
@@ -315,12 +304,15 @@ jobs:
     name: browser webkit (2/2)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+      options: --init --ipc=host
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v4
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v4
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -328,20 +320,10 @@ jobs:
           key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: playwright-
-
       - name: Install workspace packages
         run: mise run install
         env:
           PNPM_STORE_DIR: ~/.pnpm-store
-
-      # Browser caches omit system packages; locals never install host packages.
-      - name: Provision WebKit host libraries
-        run: mise exec -- pnpm --filter @uberblick/web exec playwright install-deps webkit
 
       - name: Download pinned browser engines
         run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
@@ -369,7 +351,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v4
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v4
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:

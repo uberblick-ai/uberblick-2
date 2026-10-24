@@ -30,7 +30,7 @@ const decisionAuthority = {
 };
 
 const hub = z.object({
-  status: z.enum(["disabled", "connecting", "connected", "hub-down", "auth-failed", "update-required", "quarantined"]),
+  status: z.enum(["disabled", "connecting", "connected", "hub-down", "auth-failed", "update-required", "quarantined", "local"]),
   url: z.string().nullable().describe("Configured hub endpoint; null when synchronization is disabled."),
   reason: z.string().optional(),
   recoveryClass: z.enum(["retry", "manual"]).optional(),
@@ -65,11 +65,8 @@ const multipleRoomDurability = {
   rooms: z.array(touchedRoom).describe("Each independently persisted room touched; top-level synced is their conjunction."),
 };
 
-const tag = z.union([
-  z.object({ id: z.string(), name: z.string(), state: z.enum(["active", "retired"]) }).strict(),
-  z.object({ id: z.string(), name: z.null(), state: z.literal("unresolved") }).strict(),
-]);
-const tags = z.array(tag).describe("Canonical tag identities, current names and active, retired or unresolved state.");
+const tag = z.object({ id: z.string(), name: z.string(), description: z.string().optional() }).strict();
+const tags = z.array(tag).describe("Existing catalog tags with canonical identities, names and optional descriptions.");
 const searchHitFields = { uuid, title: z.string(), description, tags, snippet: z.string() };
 const searchHit = z.union([
   z.object({
@@ -90,10 +87,10 @@ const directoryEntry = z.object({
   tags,
   description,
   deleted: z.boolean().optional().describe("Archived state. Permanently deleted documents never appear in directory results."),
-  createdAt: z.number().optional().describe("Creation epoch milliseconds on the creating replica's clock, where known."),
-  updatedAt: z.number().optional().describe("Approximate edit epoch milliseconds on the authoring replica's clock, where known."),
+  createdAt: z.string().optional().describe("Creation time as an ISO 8601 UTC string on the creating replica's clock. Absent when unknown or unrepresentable."),
+  updatedAt: z.string().optional().describe("Approximate edit time as an ISO 8601 UTC string on the authoring replica's clock. Absent when unknown or unrepresentable."),
   ...lifecycle,
-  governs: z.string().optional(),
+  related: z.array(z.string()).optional().describe("All regular page UUIDs this record relates to, fixed at creation."),
   topic: z.string().optional(),
   supersedes: z.string().optional(),
   answerPreview: z.string().nullable().optional().describe("Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown."),
@@ -106,20 +103,17 @@ const directoryEntry = z.object({
   openThreadCount: count.optional().describe("Cached count of this document's threads whose resolved is not true, including deleted anchors. Absent when unknown; each decision entry, including inForce, pending and conflicts, has its own count."),
   code_check: codeChecks.optional().describe("Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged."),
 }).strict();
-const topicResolution = {
-  topic: z.string().describe("First record's UUID identifying this decision topic."),
-  inForce: directoryEntry.nullable().describe("Record in force, or null when the topic has no answer in force."),
-  pending: z.array(directoryEntry),
-  conflicts: z.array(directoryEntry),
-  archived: z.boolean(),
+const topicRecords = {
+  inForce: z.string().nullable().describe("UUID of the record in force, or null when the topic has no answer in force."),
+  pending: z.array(z.string()).describe("UUIDs of pending records."),
+  conflicts: z.array(z.string()).describe("UUIDs of conflicting decided records."),
 };
-const decisionTopic = directoryEntry.extend(topicResolution).strict();
 const listEntry = z.object({
   uuid,
   title: z.string(),
   tags,
   description,
-  updatedAt: z.number().optional().describe("Approximate edit epoch milliseconds on the authoring replica's clock, where known."),
+  updatedAt: z.string().optional().describe("Approximate edit time as an ISO 8601 UTC string on the authoring replica's clock. Absent when unknown or unrepresentable."),
   openThreadCount: count.optional().describe("Cached count of this document's threads whose resolved is not true. Absent when unknown."),
   deleted: z.literal(true).optional().describe("Archived; only listed with include_deleted."),
   pinned: z.boolean(),
@@ -127,12 +121,17 @@ const listEntry = z.object({
 const listDecision = listEntry.extend({
   kind: z.literal("decision"),
   status: status.optional(),
+  related: z.array(z.string()).optional().describe("All regular page UUIDs related to this representative record, or this record in per-record listings."),
   topic: z.string().optional().describe("First record's UUID identifying this decision topic."),
   discussion: discussion.optional().describe("Cached RFC discussion document UUID; null when none, absent when the cache is unknown."),
   answerPreview: z.string().nullable().optional().describe("First answer paragraph or list, at most 300 characters; null when neither exists, absent when unknown."),
   inForce: z.string().nullable().optional().describe("Topic rows: UUID of the record in force, or null."),
   pending: z.array(z.string()).optional().describe("Topic rows: UUIDs of pending records."),
   conflicts: z.array(z.string()).optional().describe("Topic rows: UUIDs of conflicting decided records."),
+}).strict();
+const pageDecision = listDecision.omit({ pinned: true }).extend({
+  ...topicRecords,
+  relation: z.enum(["related", "linked"]).describe("Related page membership takes precedence over an indexed link from any record in the topic."),
 }).strict();
 
 const docLink = z.object({
@@ -148,15 +147,16 @@ const blockFields = {
 const linkRanges = {
   doc_links: z.array(docLink).optional().describe("Prose character ranges that reference documents; absent when there are none."),
 };
-function blockSchema(withLinks: boolean) {
-  const prose = { ...blockFields, ...(withLinks ? linkRanges : {}) };
+function blockSchema(withLinks: boolean, withRev = true) {
+  const fields = { id: blockFields.id, text: blockFields.text, ...(withRev ? { rev: blockFields.rev } : {}) };
+  const prose = { ...fields, ...(withLinks ? linkRanges : {}) };
   return z.union([
     z.object({ ...prose, type: z.enum(["paragraph", "quote"]) }).strict(),
     z.object({ ...prose, type: z.literal("heading"), level: z.number().int().min(1).max(6) }).strict(),
     z.object({ ...prose, type: z.literal("list-item"), list: z.enum(LIST_STYLES), indent: z.number().int().min(0).max(MAX_LIST_INDENT) }).strict(),
-    z.object({ ...blockFields, type: z.literal("code"), language: z.string() }).strict(),
-    z.object({ ...blockFields, type: z.enum(["table", "terminal", "chart", "card"]) }).strict(),
-    z.object({ ...blockFields, type: z.literal("figma"), figma: z.object({
+    z.object({ ...fields, type: z.literal("code"), language: z.string() }).strict(),
+    z.object({ ...fields, type: z.enum(["table", "terminal", "chart", "card"]) }).strict(),
+    z.object({ ...fields, type: z.literal("figma"), figma: z.object({
       kind: z.enum(["frame", "file", "prototype", "board", "slides", "community file"]),
       file: z.string(),
       fileName: z.string().optional(),
@@ -164,7 +164,7 @@ function blockSchema(withLinks: boolean) {
     }).strict().optional().describe("Read-only view identity derived from the normalized Figma link; absent when the stored link cannot be normalized.") }).strict(),
   ]);
 }
-const block = blockSchema(false);
+const writtenBlock = z.object({ id: z.string(), rev: blockFields.rev }).strict();
 const readBlocks = z.array(blockSchema(true)).describe("Visible document blocks in stored order.");
 const annotation = z.object({
   id: z.string(),
@@ -192,6 +192,7 @@ const dataSummary = z.object({
   valid: z.boolean(),
   errorCount: count,
 }).strict();
+const revisionId = z.string().describe("Hub revision ID from list_revisions, distinct from page and block rev hashes.");
 
 /**
  * The SDK requires a root object; strictInput must enforce and advertise the
@@ -199,6 +200,7 @@ const dataSummary = z.object({
  */
 const getData = strictInput({
   uuid,
+  revision: revisionId.optional().describe("Present when reading this hub revision's data instead of the live document."),
   data: dataSummary.nullable().optional(),
   collection: z.string().optional(),
   schema: z.unknown().optional().describe("Raw caller-stored schema, including missing or unsupported schemas; never normalized."),
@@ -260,13 +262,50 @@ const sidebar = {
   }).strict()).describe("Curated sidebar groups in stored order."),
 };
 
+const revisionAuthor = z.object({
+  githubUsername: z.string().describe("Current GitHub username."),
+  surface: z.object({ kind: z.string(), name: z.string() }).strict(),
+}).strict().nullable();
+const revisionName = z.object({
+  text: z.string(),
+  namer: revisionAuthor.describe("Account and surface that named the revision; separate from its author."),
+  namedAt: z.string().describe("Naming time as an ISO 8601 UTC string; renaming preserves this time."),
+  canManage: z.boolean().describe("Whether this account may rename or remove this name."),
+}).strict().nullable();
+const revisionEntry = z.object({
+  id: revisionId,
+  author: revisionAuthor.describe("Verified GitHub account and surface, or null when unknown."),
+  startedAt: z.string().nullable().describe("Start as an ISO 8601 UTC string; null only for content predating history."),
+  endedAt: z.string().nullable().describe("End as an ISO 8601 UTC string; null means this revision is still open."),
+  name: revisionName.describe("The revision's name, namer and time, or null when unnamed."),
+}).strict();
+
 /** All registered tools use these exact objects for advertisement and checking. */
 export const outputSchemas = {
   get_help: getHelp,
+  list_revisions: z.object({
+    uuid,
+    revisions: z.array(revisionEntry).describe("Hub-confirmed revisions, newest first; empty only when the hub confirms no history."),
+  }).strict(),
+  name_revision: z.object({
+    uuid,
+    revision: revisionEntry,
+    applied: z.literal(true).describe("The name was applied in the hub's revision store; no local document-log write is made."),
+    synced: z.literal(true).describe("The hub acknowledged this naming transaction."),
+    hub,
+  }).strict(),
+  get_revision: z.object({
+    uuid,
+    revision: revisionId,
+    title: z.string(),
+    blocks: z.array(blockSchema(true, false)).describe("Historical visible blocks in stored order, without edit-assertion rev hashes."),
+    data: dataSummary.nullable(),
+  }).strict(),
   list_tags: z.object({
     workspace: z.string(),
     complete: z.boolean(),
-    tags: z.array(z.object({ id: z.string(), name: z.string() }).strict()),
+    catalogHint: z.string().optional().describe("Why tags may be missing; present only when complete is false."),
+    tags,
     hub,
   }).strict(),
   create_doc: z.object({
@@ -278,19 +317,19 @@ export const outputSchemas = {
     description: z.string(),
     tags,
     ...lifecycle,
-    governs: z.string().optional(),
+    related: z.array(z.string()).optional().describe("All related regular page UUIDs, fixed at creation."),
     topic: z.string().optional(),
     supersedes: z.string().optional(),
     discussion: discussion.optional(),
     tldr: tldr.optional(),
     tldrHint: contentReview.tldrHint.optional(),
     ...decisionAuthority,
-    blocks: readBlocks,
+    blocks: z.array(writtenBlock).describe("Created blocks in order; read their content with get_doc."),
     sidebar: z.object({ group: groupIdentity, position: z.number().int() }).strict().optional(),
   }).strict(),
   get_doc: z.object({
     uuid,
-    createdAt: z.number().optional().describe("Creation epoch milliseconds on the creating replica's clock, where known. Absent when unknown."),
+    createdAt: z.string().optional().describe("Creation time as an ISO 8601 UTC string on the creating replica's clock. Absent when unknown or unrepresentable."),
     rev: z.string().describe("Revision of the page's ordered block content, identical to the web status row. Applies to regular pages and decisions; excludes metadata and comments."),
     title: z.string(),
     description,
@@ -300,19 +339,18 @@ export const outputSchemas = {
     tags,
     links: z.array(z.string()),
     ...lifecycle,
-    governs: z.string().optional(),
+    related: z.array(z.string()).optional().describe("All related regular page UUIDs, fixed at creation."),
     topic: z.string().optional(),
     supersedes: z.string().optional(),
     discussion: discussion.optional(),
     ...decisionAuthority,
     approvalFingerprint: z.string().optional(),
     room: z.string(),
-    decisions: z.array(decisionTopic.extend({
-      relation: z.enum(["related", "linked"]).describe("Related page membership takes precedence over an indexed link from any record in the topic."),
-    }).strict()),
+    decisions: z.array(pageDecision).describe("Decision topics of a regular page, one row each; get_doc a listed UUID for its record."),
     predecessors: z.array(directoryEntry).optional(),
     successors: z.array(directoryEntry).optional(),
-    resolution: decisionTopic.nullable().optional(),
+    resolution: z.object({ ...topicRecords, archived: z.boolean() }).strict().nullable().optional()
+      .describe("This record's topic state by record UUID; null when the topic cannot be resolved."),
     blocks: readBlocks,
     annotations: z.array(annotation),
     data: z.object({ collections: z.array(collectionCount), readWith: z.literal("get_data") }).strict().optional(),
@@ -326,6 +364,8 @@ export const outputSchemas = {
   }).strict(),
   list_docs: z.object({
     workspace: z.string(),
+    complete: z.boolean().describe("Whether the hub has delivered the whole document directory to this replica."),
+    directoryHint: z.string().optional().describe("Why documents may be missing; present only when complete is false."),
     docs: z.array(z.union([listEntry, listDecision])),
     hub,
   }).strict(),
@@ -343,11 +383,11 @@ export const outputSchemas = {
     github_ref: z.string(),
     decisions: z.array(z.object({ uuid, title: z.string(), status: status.nullable() }).strict()),
   }).strict(),
-  edit_block: z.object({ uuid, block: block.nullable(), ...documentDurability, ...contentReview }).strict(),
-  insert_block: z.object({ uuid, blocks: z.array(block).min(1), ...documentDurability, ...contentReview }).strict(),
+  edit_block: z.object({ uuid, block: writtenBlock.nullable(), ...documentDurability, ...contentReview }).strict(),
+  insert_block: z.object({ uuid, blocks: z.array(writtenBlock).min(1), ...documentDurability, ...contentReview }).strict(),
   move_block: z.object({
     uuid,
-    blocks: z.array(z.object({ id: z.string(), rev: z.string() }).strict()).min(1),
+    blocks: z.array(writtenBlock).min(1),
     ...documentDurability,
     ...contentReview,
   }).strict(),
@@ -404,6 +444,7 @@ export const outputSchemas = {
     workspace: z.string(),
     database: z.string(),
     hub,
+    caughtUp: z.boolean().describe("Nothing is waiting to reach or arrive from the hub; check this before reporting work as delivered."),
     unsyncedChanges: count.describe("Number of rooms with local changes not acknowledged by the hub."),
     pendingRooms: z.array(z.object({ room: z.string(), seq: count }).strict()),
     lastSync: z.string().nullable(),
@@ -413,7 +454,12 @@ export const outputSchemas = {
     persistence: z.object({ room: z.string(), message: z.string() }).strict().nullable(),
   }).strict(),
   get_sidebar: z.object({ ...sidebar, hub }).strict(),
-  pin_doc: z.object({ uuid, group: groupIdentity, moved: z.boolean(), ...sidebar, ...durability }).strict(),
-  unpin_doc: z.object({ uuid, unpinned: z.boolean(), ...sidebar, ...durability }).strict(),
+  pin_doc: z.object({ uuid, group: groupIdentity, moved: z.boolean(), ...durability }).strict(),
+  unpin_doc: z.object({
+    uuid,
+    unpinned: z.boolean(),
+    groupHint: z.string().optional().describe("Present when this unpin left its group empty: how to delete the group."),
+    ...durability,
+  }).strict(),
   sidebar_group: z.object({ action: z.enum(["rename", "delete", "move"]), group: groupIdentity, ...sidebar, ...durability }).strict(),
 } satisfies Record<string, z.ZodObject>;

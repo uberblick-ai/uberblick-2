@@ -20,7 +20,7 @@
     "./workspace-registry": "./src/workspace-registry.ts"
   },
   "scripts": {
-    "start": "tsx src/main.ts",
+    "start": "node ../cli/bin/ub.mjs mcp serve",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"

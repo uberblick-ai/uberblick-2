@@ -27,13 +27,18 @@ import {
   addComment,
   appendBlock,
   createAnnotation,
+  createTagCatalogEntry,
+  deleteTagCatalogEntry,
   directoryRoom,
   getAnnotation,
   getBlocks,
   getBlocksFragment,
+  getMeta,
   initDoc,
   roomForDoc,
   setAnnotationResolved,
+  settingsRoom,
+  setTags,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -287,6 +292,13 @@ describe("thread writes require a writable, unarchived document", () => {
 
   it("refuses Reply when the room stops being writable before the rail re-renders", async () => {
     const { host, ydoc, threadId } = await openAnnotatedDoc();
+    const catalog = room(settingsRoom(WORKSPACE)).ydoc;
+    const deleted = createTagCatalogEntry(catalog, "thread-fixture");
+    const delayed = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    await act(async () => {
+      setTags(ydoc, [deleted.id, delayed]);
+      deleteTagCatalogEntry(catalog, deleted.id);
+    });
     const item = threadCard(host);
     await act(async () => button(item, "Reply").click());
     const field = replyField(item);
@@ -314,6 +326,7 @@ describe("thread writes require a writable, unarchived document", () => {
     expect(getAnnotation(ydoc, threadId)?.comments.map(({ text }) => text)).toEqual([
       "why quick?", "Reply from the stale form",
     ]);
+    expect(getMeta(ydoc).tags).toEqual([delayed]);
   });
 });
 

@@ -4,7 +4,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { docFingerprint } from "../src/remote.js";
 import { blockText } from "../src/replica.js";
-import { removeTempDirs, startServer } from "./core-helpers.js";
+import { readBlocks, removeTempDirs, startServer } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
@@ -47,7 +47,7 @@ describe("Figma blocks through MCP", () => {
     const created = await rig.ok("create_doc", { title: "Design references", description: "Figma content stays structured and server-local.",
       blocks: [{ type: "figma", text: source }] });
     const doc = rig.instance.replicas.replica(created.uuid).doc;
-    const original = created.blocks[0];
+    const [original] = await readBlocks(rig, created.uuid, created.blocks);
     expect(original).toMatchObject({ type: "figma", text: canonical,
       figma: { kind: "frame", file: "k3Lm9QzT2x", fileName: "Checkout flow", node: "12:345" } });
     expect(findBlockElement(doc, original.id)?.getAttribute("title")).toBe("**Payment**, mobile");
@@ -60,10 +60,11 @@ describe("Figma blocks through MCP", () => {
       { text: "document", marks: { docLink: target.uuid } },
     ]);
     const inserted = await rig.ok("insert_block", { uuid: created.uuid, after_block_id: original.id, blocks: [{ type: "figma", text: source }] });
-    expect(inserted.blocks[0].text).toBe(canonical);
-    expect(inserted.blocks[0].figma).toEqual(original.figma);
-    expect(captionRuns(doc, inserted.blocks[0].id)).toEqual(captionRuns(doc, original.id));
-    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual([original, inserted.blocks[0]]);
+    const [copy] = await readBlocks(rig, created.uuid, inserted.blocks);
+    expect(copy.text).toBe(canonical);
+    expect(copy.figma).toEqual(original.figma);
+    expect(captionRuns(doc, copy.id)).toEqual(captionRuns(doc, original.id));
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual([original, copy]);
     expect((await rig.ok("export_markdown", { uuid: created.uuid, frontmatter: false })).markdown)
       .toBe(`:::figma\n${canonical}\n:::\n\n:::figma\n${canonical}\n:::\n`);
     expect(fetch).not.toHaveBeenCalled();
@@ -78,6 +79,7 @@ describe("Figma blocks through MCP", () => {
           { type: "figma", text: SOURCE }, { type: "paragraph", text: "After" }] });
       const doc = rig.instance.replicas.replica(created.uuid).doc;
       const original = created.blocks[1];
+      const seeded = (await rig.ok("get_doc", { uuid: created.uuid })).blocks;
       const element = findBlockElement(doc, original.id)!;
       if (url === undefined) element.removeAttribute("url");
       else element.setAttribute("url", url);
@@ -87,7 +89,7 @@ describe("Figma blocks through MCP", () => {
       expect(read.blocks[1]).toEqual({ id: original.id, type: "figma",
         text: SOURCE.replace(LINK, url ?? ""), rev: expect.any(String) });
       expect(read.blocks[1].rev).not.toBe(original.rev);
-      expect([read.blocks[0], ...read.blocks.slice(2)]).toEqual([created.blocks[0], ...created.blocks.slice(2)]);
+      expect([read.blocks[0], ...read.blocks.slice(2)]).toEqual([seeded[0], ...seeded.slice(2)]);
       expect(Y.encodeStateAsUpdate(doc)).toEqual(stored);
     },
   );
@@ -98,10 +100,11 @@ describe("Figma blocks through MCP", () => {
     const rig = await localRig();
     const created = await rig.ok("create_doc", { title: "Accepted Figma links", description: "Each path has one derived view identity.",
       blocks: ["figma.com", "www.figma.com"].map(host => ({ type: "figma", text: `url: https://${host}/${path}\n\n` })) });
-    expect(created.blocks[0].figma).toEqual(fields);
-    expect(created.blocks[1].figma).toEqual(fields);
-    expect(created.blocks[0].text).toBe(created.blocks[1].text);
-    expect(created.blocks[0].text).toContain("https://www.figma.com/");
+    const [first, second] = await readBlocks(rig, created.uuid, created.blocks);
+    expect(first.figma).toEqual(fields);
+    expect(second.figma).toEqual(fields);
+    expect(first.text).toBe(second.text);
+    expect(first.text).toContain("https://www.figma.com/");
   });
 
   it.each([
@@ -113,6 +116,7 @@ describe("Figma blocks through MCP", () => {
       blocks: [{ type: "figma", text: SOURCE }] });
     const doc = rig.instance.replicas.replica(created.uuid).doc;
     const listed = await rig.ok("list_docs");
+    const stored = (await rig.ok("get_doc", { uuid: created.uuid })).blocks;
     const before = Y.encodeStateAsUpdate(doc);
     const writes = rig.instance.store.logSize();
     let updates = 0;
@@ -137,7 +141,7 @@ describe("Figma blocks through MCP", () => {
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
     expect(rig.instance.store.logSize()).toBe(writes);
     expect(await rig.ok("list_docs")).toEqual(listed);
-    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual(created.blocks);
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual(stored);
   });
 
   it("preserves stale assertions before malformed replacement content", async () => {
@@ -202,12 +206,14 @@ describe("Figma blocks through MCP", () => {
     const source = SOURCE.replace("Keep the caption.", `[**Renamed**](${unknown})`);
     const edited = await rig.ok("edit_block", { uuid: created.uuid, block_id: id,
       old_text: read.text, new_text: source, rev: read.rev });
-    expect(edited.block.text).toBe(source);
+    const [written] = await readBlocks(rig, created.uuid, [edited.block]);
+    expect(written.text).toBe(source);
     expect(captionText(doc, id)).toBe(text);
     expect(captionRuns(doc, id)).toEqual([{ text: "Renamed", marks: { bold: true, docLink: unknown } }]);
     const changedHeader = source.replace("title: Payment, mobile", "title: New title");
-    expect((await rig.ok("edit_block", { uuid: created.uuid, block_id: id,
-      old_text: edited.block.text, new_text: changedHeader, rev: edited.block.rev })).block.text).toBe(changedHeader);
+    await rig.ok("edit_block", { uuid: created.uuid, block_id: id,
+      old_text: written.text, new_text: changedHeader, rev: edited.block.rev });
+    expect((await readBlocks(rig, created.uuid, [edited.block]))[0].text).toBe(changedHeader);
     expect(captionText(doc, id)).toBe(text);
   });
 

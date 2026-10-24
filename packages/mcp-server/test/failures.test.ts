@@ -14,7 +14,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { applyDocData, createTagCatalogEntry, DATA_LIMITS, DataError, InvalidDocumentLifecycleError, setTags, setTldrOptOut, upsertDirectoryEntry } from "@uberblick/schema";
+import { applyDocData, DATA_LIMITS, DataError, InvalidDocumentLifecycleError, setTldrOptOut, upsertDirectoryEntry } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   FAILURE_CODES,
@@ -23,6 +23,7 @@ import {
   hydrationRecovery,
   toFailure,
 } from "../src/failures.js";
+import { RevisionClientError } from "../src/revision-client.js";
 import { ServerShuttingDownError } from "../src/server-work.js";
 import { MirrorStore, WorkspaceRemovedError } from "../src/store.js";
 import type { SearchHit } from "../src/store.js";
@@ -39,6 +40,15 @@ import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
 const stores: MirrorStore[] = [];
+const REVISION_FAILURES = [
+  ["local-only", "revisions_local_only", "manual", "team hub"],
+  ["unreachable", "revisions_unreachable", "retry", "once the hub is reachable"],
+  ["sign-in-required", "revisions_sign_in_required", "manual", "ub auth login"],
+  ["forbidden", "revisions_forbidden", "manual", "grant read access"],
+  ["deleted", "doc_deleted", "manual", "permanently deleted"],
+  ["revision-not-found", "revision_not_found", "reread", "list_revisions"],
+  ["unsupported", "revisions_unsupported", "manual", "update the hub"],
+] as const;
 
 async function localRig(): Promise<Rig> {
   const rig = await startServer(testConfig());
@@ -154,9 +164,19 @@ const EXPECTED: Record<
   },
   doc_archived: { recoveryClass: "manual", detail: ["uuid", "archived"] },
   doc_deleted: { recoveryClass: "manual", detail: ["uuid"] },
+  revisions_local_only: { recoveryClass: "manual", detail: [] },
+  revisions_unreachable: { recoveryClass: "retry", detail: [] },
+  revisions_sign_in_required: { recoveryClass: "manual", detail: [] },
+  revisions_forbidden: { recoveryClass: "manual", detail: [] },
+  revisions_unsupported: { recoveryClass: "manual", detail: [] },
+  revision_not_found: { recoveryClass: "reread", detail: [] },
+  revision_stale_state: { recoveryClass: "reread", detail: [] },
+  revision_invalid_name: { recoveryClass: "manual", detail: [] },
+  revision_already_named: { recoveryClass: "manual", detail: ["existingName"] },
+  revision_not_namer: { recoveryClass: "manual", detail: [] },
+  revision_naming_outcome_unknown: { recoveryClass: "reread", detail: ["reason"] },
   doc_not_archived: { recoveryClass: "manual", detail: ["uuid"] },
   decision_delete_unsupported: { recoveryClass: "manual", detail: ["uuid"] },
-  guidance_required: { recoveryClass: "reread", detail: ["unread"] },
   group_not_found: { recoveryClass: "reread", detail: ["group"] },
   invalid_document_lifecycle: {
     recoveryClass: "manual",
@@ -200,7 +220,7 @@ const EXPECTED: Record<
   decision_answer_too_long: { recoveryClass: "manual", detail: ["kind", "status"] },
   invalid_tag_assignment: {
     recoveryClass: "manual",
-    detail: ["unknown", "retired"],
+    detail: ["unknown"],
   },
   supersedes_not_decision: {
     recoveryClass: "reread",
@@ -293,12 +313,13 @@ describe("the failure contract", () => {
       uuid: doc.uuid, after_block_id: doc.blockId,
       blocks: [{ type: "table", text: "| Header |\n| --- |\n| Cell |" }],
     });
+    const tableText = "| Header |\n| --- |\n| Cell |";
     record((await rig.call("edit_block", {
-      uuid: doc.uuid, block_id: table.blocks[0].id, old_text: table.blocks[0].text,
+      uuid: doc.uuid, block_id: table.blocks[0].id, old_text: tableText,
       new_text: "| Header | Added |\n| --- | --- |\n| Cell | New |",
     })).payload);
     record((await rig.call("edit_block", {
-      uuid: doc.uuid, block_id: table.blocks[0].id, old_text: table.blocks[0].text, new_text: table.blocks[0].text,
+      uuid: doc.uuid, block_id: table.blocks[0].id, old_text: tableText, new_text: tableText,
       table_mapping: { rows: [0, 2], columns: [0] },
     })).payload);
     record((await rig.call("annotate", {
@@ -564,10 +585,6 @@ describe("the failure contract", () => {
       expect(rejected, "the shared data operation must refuse this input").toBe(true);
     }
 
-    const guidanceTag = createTagCatalogEntry(rig.instance.replicas.settings().doc, "guidance");
-    setTags(rig.instance.replicas.replica(doc.uuid).doc, [guidanceTag.id]);
-    record((await rig.call("set_metadata", { uuid: doc.uuid, title: "Unbriefed" })).payload);
-
     // A handler that threw something nobody mapped, and a refused log write:
     // both need their own server, so they get one.
     const exploding = await rigWith(
@@ -594,6 +611,17 @@ describe("the failure contract", () => {
     // Valid MCP inputs cannot cross decision kinds; retain the defensive
     // mapper for shared-model lifecycle errors from an internal caller.
     record(toFailure(toolNamed("set_status"), new InvalidDocumentLifecycleError("decision", "planned")).payload);
+
+    for (const [clientCode] of REVISION_FAILURES) {
+      if (clientCode !== "deleted") {
+        record(toFailure(toolNamed("get_data"), new RevisionClientError(clientCode)).payload);
+      }
+    }
+    for (const clientCode of ["stale-state", "invalid-name", "already-named", "not-namer", "naming-outcome-unknown"] as const) {
+      record(toFailure(toolNamed("name_revision"), new RevisionClientError(clientCode,
+        clientCode === "already-named" ? { existingName: { text: "Reviewed", namer: null, namedAt: 1, canManage: false } }
+          : clientCode === "naming-outcome-unknown" ? { applied: null, reason: "unsupported" } : {})).payload);
+    }
 
     // Every code the code itself knows about was triggered above.
     expect([...failures.keys()].sort()).toEqual([...FAILURE_CODES].sort());
@@ -635,6 +663,19 @@ describe("the failure contract", () => {
     const crash = failures.get("internal_error");
     expect(crash.message).toBe(INTERNAL_ERROR_MESSAGE);
     expect(crash.message).not.toContain("exploded");
+  });
+
+  it.each(REVISION_FAILURES)("maps revision client %s to %s with actionable read recovery", (clientCode, code, recoveryClass, recovery) => {
+    const error = new RevisionClientError(clientCode);
+    expect(toFailure(toolNamed("get_data"), error)).toEqual({
+      isError: true,
+      payload: {
+        error: code,
+        message: error.message,
+        recoveryClass,
+        recovery: expect.stringContaining(recovery),
+      },
+    });
   });
 
   it("says a failed write changed nothing, and invents nothing for a read", async () => {

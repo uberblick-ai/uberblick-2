@@ -1,9 +1,14 @@
 import { randomUUID } from "node:crypto";
 import * as Y from "yjs";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDirectoryEntry, getDirectoryMap, getMetaMap, listDirectory, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
 import { type FailingStore, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
+
+vi.mock("node:crypto", async (importOriginal) => {
+  const crypto = await importOriginal<typeof import("node:crypto")>();
+  return { ...crypto, randomUUID: vi.fn(crypto.randomUUID) };
+});
 
 const rigs: Rig[] = [];
 const stores: FailingStore[] = [];
@@ -21,12 +26,98 @@ function rawDeleted(rig: Rig, uuid: string, deleted: boolean) {
 }
 
 describe("decision topics through directory stubs", () => {
+  it("creates, reads and inherits complete related sets while explicit successors replace only their own set", async () => {
+    const rig = await localRig();
+    const left = await rig.ok("create_doc", { title: "Left", description: "First owning page." });
+    const right = await rig.ok("create_doc", { title: "Right", description: "Second owning page." });
+    const third = await rig.ok("create_doc", { title: "Third", description: "Replacement owning page." });
+    const pages = [left, right, third];
+    const unchanged = pages.map(page => Y.encodeStateAsUpdate(rig.instance.replicas.replica(page.uuid).doc));
+    const first = await decision(rig, { status: "decided", related: [left.uuid.toUpperCase(), right.uuid, left.uuid] });
+    const next = await decision(rig, { supersedes: first.uuid });
+    const replacement = await decision(rig, { supersedes: next.uuid, related: [third.uuid, right.uuid] });
+    const inherited = await decision(rig, { supersedes: replacement.uuid });
+    const scalar = await decision(rig, { supersedes: first.uuid, related: third.uuid });
+    const expected = [
+      [first, [left.uuid, right.uuid]], [next, [left.uuid, right.uuid]],
+      [replacement, [third.uuid, right.uuid]], [inherited, [third.uuid, right.uuid]],
+      [scalar, [third.uuid]],
+    ] as const;
+    const records = (await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs;
+    for (const [record, related] of expected) {
+      // The stored scalar view stays out of answers: `related` names every page.
+      for (const answer of [record, await rig.ok("get_doc", { uuid: record.uuid }), records.find((row: any) => row.uuid === record.uuid)]) {
+        expect(answer).toMatchObject({ related });
+        expect(answer).not.toHaveProperty("governs");
+      }
+      const before = Y.encodeStateAsUpdate(rig.instance.replicas.replica(record.uuid).doc);
+      expect((await rig.call("set_metadata", { uuid: record.uuid, related: [third.uuid] })).payload.error).toBe("schema_validation");
+      expect(Y.encodeStateAsUpdate(rig.instance.replicas.replica(record.uuid).doc)).toEqual(before);
+    }
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([
+      { uuid: first.uuid, related: [left.uuid, right.uuid] },
+    ]);
+    for (const page of pages) {
+      expect((await rig.ok("get_doc", { uuid: page.uuid })).decisions).toMatchObject([{ topic: first.uuid, relation: "related" }]);
+      expect((await rig.ok("backlinks", { uuid: page.uuid })).backlinks.length).toBeGreaterThan(0);
+    }
+    expect(pages.map(page => Y.encodeStateAsUpdate(rig.instance.replicas.replica(page.uuid).doc))).toEqual(unchanged);
+    await rig.ok("set_status", { uuid: next.uuid, status: "rejected", answer, reason: "Another answer remains in force." });
+    await rig.ok("set_status", { uuid: inherited.uuid, status: "withdrawn" });
+    expect((await rig.ok("get_doc", { uuid: right.uuid })).decisions).toHaveLength(1);
+  });
+
+  it("refuses any invalid related target before allocating an identity or writing any room", async () => {
+    const rig = await localRig();
+    const page = await rig.ok("create_doc", { title: "Page", description: "A valid target." });
+    const archived = await rig.ok("create_doc", { title: "Archived", description: "No longer live." });
+    const deleted = await rig.ok("create_doc", { title: "Deleted", description: "Permanently removed." });
+    const record = await decision(rig);
+    await rig.ok("archive_doc", { uuid: archived.uuid });
+    await rig.ok("archive_doc", { uuid: deleted.uuid });
+    await rig.ok("delete_doc", { uuid: deleted.uuid });
+    const unhydrated = randomUUID();
+    upsertDirectoryEntry(rig.instance.replicas.directory().doc, { uuid: unhydrated, title: "Unhydrated" });
+    const cases = [
+      [record.uuid, "related_not_regular_document"], [archived.uuid, "doc_archived"],
+      [deleted.uuid, "doc_deleted"], [randomUUID(), "doc_not_found"], [unhydrated, "doc_not_hydrated"],
+    ] as const;
+    const snapshot = () => ({
+      directory: Y.encodeStateAsUpdate(rig.instance.replicas.directory().doc),
+      sidebar: Y.encodeStateAsUpdate(rig.instance.replicas.sidebar().doc),
+      settings: Y.encodeStateAsUpdate(rig.instance.replicas.settings().doc),
+      documents: [page, archived, record].map(doc => Y.encodeStateAsUpdate(rig.instance.replicas.replica(doc.uuid).doc)),
+      log: rig.instance.store.logSize(),
+    });
+    for (const [uuid, error] of cases) {
+      const before = snapshot();
+      vi.mocked(randomUUID).mockClear();
+      const refused = await rig.call("create_doc", { title: "Refused", description: "Nothing created.", kind: "decision", related: [page.uuid, uuid] });
+      expect(refused.isError).toBe(true);
+      expect(refused.payload).toMatchObject({ error, applied: false, partial: false, synced: false });
+      expect(refused.payload.message).toContain(uuid);
+      expect(randomUUID).not.toHaveBeenCalled();
+      expect(snapshot()).toEqual(before);
+    }
+    for (const related of [[], [page.uuid, "invalid-uuid"]]) {
+      const before = snapshot();
+      vi.mocked(randomUUID).mockClear();
+      expect((await rig.call("create_doc", { title: "Refused", description: "Invalid set.", kind: "decision", related })).payload.error).toBe("schema_validation");
+      expect(randomUUID).not.toHaveBeenCalled();
+      expect(snapshot()).toEqual(before);
+    }
+  });
+
   it("copies write-once topic identity and stores governing links without writing the page", async () => {
     const rig = await localRig();
     const page = await rig.ok("create_doc", { title: "Product", description: "Product direction." });
     const before = Y.encodeStateAsUpdate(rig.instance.replicas.replica(page.uuid).doc);
     const first = await decision(rig, { related: page.uuid });
+    // Released records hold only the scalar relation in their document room.
+    getMetaMap(rig.instance.replicas.replica(first.uuid).doc).delete("related");
+    expect(await rig.ok("get_doc", { uuid: first.uuid })).toMatchObject({ related: [page.uuid] });
     const next = await decision(rig, { supersedes: first.uuid });
+    expect(next.related).toEqual([page.uuid]);
     const otherPage = await rig.ok("create_doc", { title: "Other page", description: "A regular owning page." });
     const redirected = await decision(rig, { supersedes: next.uuid, related: otherPage.uuid });
     const inherited = await decision(rig, { supersedes: redirected.uuid });
@@ -76,7 +167,7 @@ describe("decision topics through directory stubs", () => {
     const read = await rig.ok("get_doc", { uuid: a.uuid });
     expect(read.successors.map((record: any) => [record.uuid, record.status]).sort()).toEqual([[b, "rejected"], [c, "decided"]].sort());
     expect(read.resolution.inForce).toBeNull();
-    expect(read.resolution.conflicts.map((record: any) => record.uuid).sort()).toEqual([c, d].sort());
+    expect([...read.resolution.conflicts].sort()).toEqual([c, d].sort());
     expect((await rig.ok("get_doc", { uuid: page.uuid })).decisions).toMatchObject([{ topic: a.uuid, inForce: null }]);
     const exported = (await rig.ok("export_markdown", { uuid: page.uuid })).markdown;
     expect(exported).toContain(c);
@@ -134,7 +225,7 @@ describe("decision topics through directory stubs", () => {
     expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ uuid: b.uuid, inForce: b.uuid }]);
     expect(getDirectoryEntry(rig.instance.replicas.directory().doc, b.uuid)).not.toHaveProperty("tldr");
     expect((await rig.ok("list_docs", { kind: "decision" })).docs[0]).not.toHaveProperty("deleted");
-    expect((await rig.ok("get_doc", { uuid: b.uuid })).resolution.inForce).toMatchObject({ uuid: b.uuid, deleted: false });
+    expect((await rig.ok("get_doc", { uuid: b.uuid })).resolution).toMatchObject({ inForce: b.uuid, archived: false });
     rawDeleted(rig, a.uuid, true);
     rawDeleted(rig, b.uuid, false);
     expect((await rig.ok("get_sidebar")).groups[0].docs).toEqual([
@@ -145,7 +236,7 @@ describe("decision topics through directory stubs", () => {
     expect((await rig.ok("get_doc", { uuid: page.uuid })).decisions).toEqual([]);
     expect((await rig.ok("search", { query: "constraints" })).hits).toEqual([]);
     expect((await rig.call("set_metadata", { uuid: b.uuid, title: "Refused" })).payload.error).toBe("doc_archived");
-    expect((await rig.ok("get_doc", { uuid: b.uuid })).resolution).toMatchObject({ inForce: { uuid: b.uuid }, archived: true });
+    expect((await rig.ok("get_doc", { uuid: b.uuid })).resolution).toMatchObject({ inForce: b.uuid, archived: true });
     const restored = await rig.ok("restore_doc", { uuid: b.uuid });
     expect(restored.records.sort()).toEqual([a.uuid, b.uuid].sort());
     expect(restored.rooms.map((room: any) => room.purpose)).toEqual(["directory"]);

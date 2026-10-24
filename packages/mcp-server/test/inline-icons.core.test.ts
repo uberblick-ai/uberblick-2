@@ -1,10 +1,10 @@
-import { importMarkdown } from "@uberblick/schema";
+import { getBlocks, importMarkdown } from "@uberblick/schema";
 import { afterAll, afterEach, expect, it } from "vitest";
 import { removeTempDirs, startServer } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
-const SOURCE = ":claude: :codex: :github: :future-icon: :rocket: 10:30:15 note:this:";
+const SOURCE = ":claude: :codex: :github: :future-icon: :rocket: :smiley: 🚀 😃 10:30:15 note:this:";
 const SEEDS = [
   { type: "paragraph", text: SOURCE },
   { type: "heading", text: SOURCE, level: 2 },
@@ -20,26 +20,25 @@ afterEach(async () => {
 });
 afterAll(removeTempDirs);
 
-it("accepts and preserves known and unknown icon source through content writes, reads, search and Markdown", async () => {
+it("preserves icon and emoji names and emoji characters through content writes, storage, reads and Markdown", async () => {
   const rig = await startServer();
   rigs.push(rig);
   const created = await rig.ok("create_doc", {
     title: "Icon source", description: "Inline icons keep their literal source.", blocks: SEEDS,
   });
-  for (const [index, seed] of SEEDS.entries()) {
-    expect(created.blocks[index]).toMatchObject(seed);
+  for (const seed of SEEDS) {
     const inserted = await rig.ok("insert_block", { uuid: created.uuid, blocks: [{ ...seed }] });
-    expect(inserted.blocks[0]).toMatchObject(seed);
     const newText = seed.text.replaceAll(":claude:", ":unknown-name:");
-    const edited = await rig.ok("edit_block", {
+    await rig.ok("edit_block", {
       uuid: created.uuid, block_id: inserted.blocks[0].id, old_text: seed.text,
       new_text: newText, rev: inserted.blocks[0].rev,
       ...(seed.type === "table" ? { table_mapping: { rows: [0, 1], columns: [0] } } : {}),
     });
-    expect(edited.block).toMatchObject({ type: seed.type, text: newText });
   }
   const read = await rig.ok("get_doc", { uuid: created.uuid });
   expect(read.blocks).toHaveLength(SEEDS.length * 2);
+  const stored = getBlocks(rig.instance.replicas.replica(created.uuid).doc);
+  expect(stored.map((block) => block.text)).toEqual(read.blocks.map((block: { text: string }) => block.text));
   for (const seed of SEEDS) {
     expect(read.blocks).toContainEqual(expect.objectContaining(seed));
     expect(read.blocks).toContainEqual(expect.objectContaining({ type: seed.type,
@@ -49,6 +48,7 @@ it("accepts and preserves known and unknown icon source through content writes, 
   const { markdown } = await rig.ok("export_markdown", { uuid: created.uuid, frontmatter: false });
   expect(markdown).toContain("[:claude: Discuss with Claude](claude://code/new?prompt=Review)");
   expect(markdown).toContain(":unknown-name:");
+  expect(markdown).toContain(":rocket: :smiley: 🚀 😃");
   expect(markdown).not.toContain("<svg");
   const imported = importMarkdown(markdown).blocks;
   expect(imported).toHaveLength(SEEDS.length * 2);

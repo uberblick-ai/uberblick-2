@@ -12,6 +12,7 @@ import type { ReactElement } from "react";
 import { addComment, getAnnotation, setAnnotationResolved } from "@uberblick/schema";
 import type { AnnotationComment } from "@uberblick/schema";
 import type { RoomConnection } from "../../collab/rooms.js";
+import { writeDocument } from "../../collab/document-write.js";
 import { CommentForm } from "./CommentForm.js";
 import {
   commentTimestamp,
@@ -167,6 +168,8 @@ function ThreadCard({
 
 export function ThreadsPane({
   connection,
+  catalogConnection = null,
+  canCleanupTags,
   threads,
   focused,
   author,
@@ -174,10 +177,13 @@ export function ThreadsPane({
   onFocus,
   narrow = false,
   open = false,
+  hidden = false,
   onOpenChange,
   onCloseAutoFocus,
 }: {
   connection: RoomConnection | null;
+  catalogConnection?: RoomConnection | null;
+  canCleanupTags?: (() => boolean) | undefined;
   /**
    * Share the shell's ordered thread list with the pane-edge count and drawer
    * gate instead of recomputing it in three observers.
@@ -191,6 +197,8 @@ export function ThreadsPane({
   onFocus: (threadId: string) => void;
   narrow?: boolean;
   open?: boolean;
+  /** Keep reply drafts while hiding the live document, including its sheet. */
+  hidden?: boolean;
   onOpenChange?: (open: boolean) => void;
   onCloseAutoFocus?: (event: Event) => void;
 }): ReactElement | null {
@@ -312,7 +320,7 @@ export function ThreadsPane({
       }}
       onReplyClose={cancelReply}
       onReply={(text) => {
-        if (!connection.status.writable) return false;
+        if (readOnly || !connection.status.writable) return false;
         // Re-read the live thread at submit; a remote resolve or deletion
         // must refuse the reply.
         if (getAnnotation(ydoc, thread.id)?.resolved === true) {
@@ -325,7 +333,7 @@ export function ThreadsPane({
         }
         // addComment performs the final lookup and returns null if the thread
         // disappeared.
-        if (addComment(ydoc, thread.id, author, text) === null) {
+        if (writeDocument(ydoc, catalogConnection?.ydoc ?? null, () => addComment(ydoc, thread.id, author, text), undefined, canCleanupTags) === null) {
           setRefusal({ id: thread.id, message: "This thread no longer exists." });
           return false;
         }
@@ -333,8 +341,8 @@ export function ThreadsPane({
         return true;
       }}
       onResolve={(next) => {
-        if (!connection.status.writable) return;
-        setAnnotationResolved(ydoc, thread.id, next);
+        if (readOnly || !connection.status.writable) return;
+        writeDocument(ydoc, catalogConnection?.ydoc ?? null, () => setAnnotationResolved(ydoc, thread.id, next), undefined, canCleanupTags);
         setReplyTo((current) => (current === thread.id ? null : current));
         setExpanded(null);
       }}
@@ -369,7 +377,7 @@ export function ThreadsPane({
     return (
       <>
         {highlights}
-        <Sheet open={open} onOpenChange={(shown) => onOpenChange?.(shown)}>
+        <Sheet open={open && !hidden} onOpenChange={(shown) => onOpenChange?.(shown)}>
           <SheetContent
             id="ub-rail"
             className="ub-rail ub-rail-open ub-type-ui"
@@ -384,7 +392,10 @@ export function ThreadsPane({
                 focusThreadCard(focused.id);
               }
             }}
-            onCloseAutoFocus={onCloseAutoFocus}
+            onCloseAutoFocus={(event) => {
+              if (hidden) event.preventDefault();
+              else onCloseAutoFocus?.(event);
+            }}
             onEscapeKeyDown={(event) => {
               // Radix receives Escape in capture, before CommentForm's handler.
               // Cancelling a visible reply is one gesture, leaving the sheet open.

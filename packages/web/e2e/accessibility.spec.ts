@@ -100,7 +100,7 @@ for (const colorScheme of ["light", "dark"] as const) {
 
       const tagsUrl = new URL(`/${harness().workspace}/settings/tags`, page.url()).href;
       await page.goto(tagsUrl);
-      await expect(page.getByRole("region", { name: "Active" }).getByRole("listitem")).toHaveCount(EXAMPLE_TAGS.length);
+      await expect(page.locator("[data-tag-list] tbody tr")).toHaveCount(EXAMPLE_TAGS.length);
       await page.goto(documentUrl);
       await page.getByRole("button", { name: "Edit tags" }).click();
       await expect(page.getByRole("option")).toHaveCount(EXAMPLE_TAGS.length);
@@ -108,9 +108,9 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.keyboard.press("Escape");
       await page.goto(tagsUrl);
       for (let index = 0; index < 5; index += 1) {
-        await page.getByLabel("Create a tag").fill(`scan-${index}`);
+        await page.getByLabel("Name", { exact: true }).fill(`scan-${index}`);
         await page.getByRole("button", { name: "Create", exact: true }).click();
-        await expect(page.getByRole("button", { name: `Retire scan-${index}` })).toBeVisible();
+        await expect(page.getByRole("button", { name: `Delete scan-${index}` })).toBeVisible();
       }
       await page.goto(documentUrl);
       await page.getByRole("button", { name: "Edit tags" }).click();

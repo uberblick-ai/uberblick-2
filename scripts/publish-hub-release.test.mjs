@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { assertImage, imageRefs, publishHubRelease, versionForTag } from "./publish-hub-release.mjs";
+import { assertImage, imageRefs, PLATFORMS, platformDigests,
+  platformImageRef, publishHubRelease, versionForTag } from "./publish-hub-release.mjs";
 
 const SHA = "a".repeat(40);
 const TAG = "hub-v1.2.3";
@@ -10,23 +15,57 @@ function input(overrides = {}) {
     repository: "uberblick-ai/uberblick-2", eventName: "push", actorType: "User", actorLogin: "bk-one",
     refType: "tag", refName: TAG, tagSha: SHA, workflowSha: SHA, ...overrides };
 }
-function image(revision = SHA) {
-  return { Os: "linux", Architecture: "amd64", Config: { Labels: {
+const REFS = imageRefs("1.2.3");
+function image(platform = "linux/amd64", ref = REFS[0], revision = SHA) {
+  return { Id: `sha256:${createHash("sha256").update(`${ref}/${platform}`).digest("hex")}`,
+    Os: "linux", Architecture: platform.split("/")[1], Config: { Labels: {
     "org.opencontainers.image.version": "1.2.3", "org.opencontainers.image.revision": revision,
     "io.uberblick.sync-protocol-version": "1",
-  } } };
+  } }, release: { version: "1.2.3", sourceCommit: revision, syncProtocolVersion: 1,
+    images: { hub: REFS[0], web: REFS[1] } } };
+}
+function uploadedRef(ref, platform) {
+  return `${ref.split(":")[0]}@sha256:${createHash("sha256").update(`uploaded/${ref}/${platform}`).digest("hex")}`;
+}
+function published(ref = REFS[0]) {
+  return Object.fromEntries(PLATFORMS.map((platform) => {
+    const inspected = image(platform, ref);
+    return [platform, { ...inspected, registryRef: uploadedRef(ref, platform) }];
+  }));
 }
 function services(overrides = {}) {
   const calls = [];
+  const indexes = new Set();
   return { calls,
     assertRemoteTag: async () => { calls.push("tag"); },
-    getImage: async (ref) => { calls.push(`read ${ref}`); return null; },
+    getImage: async (ref) => { calls.push(`read ${ref}`); return indexes.has(ref) ? published(ref) : null; },
     buildImages: async () => { calls.push("build"); },
-    inspectLocalImage: async () => { calls.push("inspect"); return image(); },
-    scanImage: async () => { calls.push("scan"); },
-    pushImage: async (ref) => { calls.push(`push ${ref}`); },
+    inspectLocalImage: async (ref, platform) => {
+      calls.push(`inspect ${ref} ${platform}`);
+      return image(platform, ref.replace(/-(amd64|arm64)$/, ""));
+    },
+    scanImage: async (id, platform) => { calls.push(`scan ${id} ${platform}`); },
+    pushImage: async (ref, id, platform) => {
+      calls.push(`push ${ref} ${id} ${platform}`);
+      return uploadedRef(ref.replace(/-(amd64|arm64)$/, ""), platform);
+    },
+    publishIndex: async (ref, digests) => {
+      calls.push(`index ${ref} ${digests.join(" ")}`);
+      indexes.add(ref);
+    },
     log: () => {}, ...overrides,
   };
+}
+
+function pushes(fake) {
+  return fake.calls.filter((call) => call.startsWith("push ") || call.startsWith("index "));
+}
+
+function localChecks() {
+  return REFS.flatMap((ref) => PLATFORMS.flatMap((platform) => [
+    `inspect ${platformImageRef(ref, platform)} ${platform}`,
+    `scan ${image(platform, ref).Id} ${platform}`,
+  ]));
 }
 
 test("hub/client version numbers and tag triggers are disjoint", () => {
@@ -46,28 +85,57 @@ test("only a person's matching tag push admits publication", async () => {
   }
 });
 
-test("both images build, pass platform/metadata and layer scans before either push", async () => {
+test("all four platform images are checked before publishing those exact images and their indexes", async () => {
   const fake = services();
-  const refs = imageRefs("1.2.3");
   assert.equal((await publishHubRelease(input(), fake)).outcome, "published");
-  assert.deepEqual(fake.calls, ["tag", ...refs.map((ref) => `read ${ref}`), "build",
-    "inspect", "scan", "inspect", "scan", "tag", ...refs.map((ref) => `read ${ref}`),
-    ...refs.map((ref) => `push ${ref}`)]);
+  const firstPush = fake.calls.findIndex((call) => call.startsWith("push "));
+  assert.deepEqual(fake.calls.slice(0, firstPush), ["tag", ...REFS.map((ref) => `read ${ref}`),
+    "build", ...localChecks(), "tag", ...REFS.map((ref) => `read ${ref}`)]);
+  assert.deepEqual(fake.calls.filter((call) => call.startsWith("push ")), REFS.flatMap((ref) =>
+    PLATFORMS.map((platform) => `push ${platformImageRef(ref, platform)} ${image(platform, ref).Id} ${platform}`)));
+  assert.deepEqual(fake.calls.filter((call) => call.startsWith("index ")), REFS.map((ref) =>
+    `index ${ref} ${PLATFORMS.map((platform) => uploadedRef(ref, platform)).join(" ")}`));
+  const firstIndex = fake.calls.findIndex((call) => call.startsWith("index "));
+  assert.deepEqual(fake.calls.slice(firstIndex - 3, firstIndex), ["tag", ...REFS.map((ref) => `read ${ref}`)]);
+  assert.deepEqual(fake.calls.slice(-2), REFS.map((ref) => `read ${ref}`));
 });
 
-test("an unchanged published version is a no-op without rebuilding or pushing", async () => {
-  const fake = services({ getImage: async () => image() });
+test("an unchanged published version scans all four platform images without rebuilding or pushing", async () => {
+  const fake = services({ getImage: async (ref) => published(ref) });
   assert.equal((await publishHubRelease(input(), fake)).outcome, "no-op");
-  assert.deepEqual(fake.calls, ["tag"]);
+  assert.deepEqual(fake.calls, ["tag", ...REFS.flatMap((ref) => PLATFORMS.map((platform) =>
+    `scan ${image(platform, ref).Id} ${platform}`))]);
 });
 
-test("moved tags and partial publications refuse before building or publishing", async () => {
-  for (const [existing, message] of [[image("b".repeat(40)), /disagrees/], [image(), /partial/]]) {
+test("mismatching platform identity and partial publications refuse before building or publishing", async () => {
+  const mismatching = published();
+  mismatching["linux/arm64"] = image("linux/arm64", REFS[0], "b".repeat(40));
+  for (const [existing, message] of [[mismatching, /disagrees/], [published(), /partial/]]) {
     let n = 0;
     const fake = services({ getImage: async () => n++ === 0 ? existing : null });
     await assert.rejects(publishHubRelease(input(), fake), message);
     assert.deepEqual(fake.calls, ["tag"]);
   }
+});
+
+test("an existing tag missing a required platform is refused in publishing and dry runs", async () => {
+  for (const dryRun of [false, true]) {
+    for (const platform of PLATFORMS) {
+      const incomplete = published();
+      delete incomplete[platform];
+      const fake = services({ getImage: async () => incomplete });
+      await assert.rejects(publishHubRelease(input({ dryRun }), fake), /missing|platform|disagrees/);
+      assert.ok(!fake.calls.includes("build"));
+      assert.deepEqual(pushes(fake), []);
+    }
+  }
+});
+
+test("a version with either tag published is never rebuilt during a dry run", async () => {
+  let reads = 0;
+  const fake = services({ getImage: async () => reads++ === 0 ? published() : null });
+  await assert.rejects(publishHubRelease(input({ dryRun: true }), fake), /partial/);
+  assert.deepEqual(fake.calls, []);
 });
 
 test("registry lookup errors never become permission to publish", async () => {
@@ -83,27 +151,212 @@ test("a moved remote tag at the push boundary publishes nothing", async () => {
   } });
   await assert.rejects(publishHubRelease(input(), fake), /tag moved/);
   assert.ok(fake.calls.includes("build"));
-  assert.ok(!fake.calls.some((call) => call.startsWith("push")));
+  assert.deepEqual(pushes(fake), []);
 });
 
-test("a failed second image scan publishes neither image", async () => {
+test("a tag appearing after the build prevents every push", async () => {
+  let reads = 0;
+  const fake = services({ getImage: async () => ++reads > 2 ? published() : null });
+  await assert.rejects(publishHubRelease(input(), fake), /appeared/);
+  assert.ok(fake.calls.includes("build"));
+  assert.deepEqual(pushes(fake), []);
+});
+
+test("a tag appearing during staging upload is never replaced by an index", async () => {
+  let reads = 0;
+  const fake = services({ getImage: async () => ++reads > 4 ? published() : null });
+  await assert.rejects(publishHubRelease(input(), fake), /appeared/);
+  assert.equal(fake.calls.filter((call) => call.startsWith("push ")).length, 4);
+  assert.ok(!fake.calls.some((call) => call.startsWith("index ")));
+});
+
+test("a failed fourth platform scan publishes nothing", async () => {
   let scans = 0;
   const fake = services({ scanImage: async () => {
-    if (++scans === 2) throw new Error("forbidden file");
+    if (++scans === 4) throw new Error("forbidden file");
   } });
   await assert.rejects(publishHubRelease(input(), fake), /forbidden file/);
-  assert.ok(!fake.calls.some((call) => call.startsWith("push")));
+  assert.equal(scans, 4);
+  assert.deepEqual(pushes(fake), []);
 });
 
-test("metadata and platform mismatches cannot be published", () => {
-  for (const bad of [{ ...image(), Architecture: "arm64" }, { ...image(), Os: "windows" },
-    { ...image(), Config: { Labels: {} } }]) assert.throws(() => assertImage(bad, input()), /disagrees/);
+test("a failed fourth platform identity check publishes nothing", async () => {
+  let inspections = 0;
+  const fake = services({ inspectLocalImage: async (ref, platform) => {
+    inspections += 1;
+    return image(platform, ref.replace(/-(amd64|arm64)$/, ""), inspections === 4 ? "b".repeat(40) : SHA);
+  } });
+  await assert.rejects(publishHubRelease(input(), fake), /disagrees/);
+  assert.equal(inspections, 4);
+  assert.deepEqual(pushes(fake), []);
 });
 
-test("a dry run builds and scans without any registry read, credential or push", async () => {
+test("each platform requires matching OS, architecture, labels and embedded release metadata", () => {
+  for (const platform of PLATFORMS) {
+    assert.doesNotThrow(() => assertImage(image(platform), input(), platform));
+    const good = image(platform);
+    for (const bad of [{ ...good, Architecture: platform === "linux/arm64" ? "amd64" : "arm64" },
+      { ...good, Os: "windows" }, { ...good, Variant: platform === "linux/arm64" ? "v9" : "v3" },
+      { ...good, Config: { Labels: {} } },
+      { ...good, release: { ...good.release, version: "1.2.4" } },
+      { ...good, release: { ...good.release, sourceCommit: "b".repeat(40) } },
+      { ...good, release: { ...good.release, syncProtocolVersion: 2 } },
+      { ...good, release: { ...good.release, images: { ...good.release.images, web: "other:1.2.3" } } },
+      { ...good, release: undefined }]) {
+      assert.throws(() => assertImage(bad, input(), platform), /disagrees/);
+    }
+  }
+});
+
+test("a published index is rechecked against all uploaded platform digests", async () => {
+  let reads = 0;
+  const fake = services({ getImage: async (ref) => {
+    if (++reads <= 6) return null;
+    const result = published(ref);
+    result["linux/arm64"].registryRef = `${ref.split(":")[0]}@sha256:${"b".repeat(64)}`;
+    return result;
+  } });
+  await assert.rejects(publishHubRelease(input(), fake), /checked|identity|disagrees/);
+});
+
+test("a dry run checks immutable destinations then builds and scans all four images without publishing", async () => {
   const fake = services();
   assert.equal((await publishHubRelease(input({dryRun: true, repository: undefined}), fake)).outcome, "dry-run");
-  assert.deepEqual(fake.calls, ["build", "inspect", "scan", "inspect", "scan"]);
+  assert.deepEqual(fake.calls, [...REFS.map((ref) => `read ${ref}`), "build", ...localChecks()]);
+  assert.deepEqual(pushes(fake), []);
+});
+
+test("dry runs validate layer contents of all four existing platform images", async () => {
+  let scans = 0;
+  const fake = services({ getImage: async (ref) => published(ref), scanImage: async () => {
+    if (++scans === 4) throw new Error("forbidden file");
+  } });
+  await assert.rejects(publishHubRelease(input({ dryRun: true }), fake), /forbidden file/);
+  assert.equal(scans, 4);
+  assert.ok(!fake.calls.includes("build"));
+  assert.deepEqual(pushes(fake), []);
+});
+
+function index() {
+  return { schemaVersion: 2, mediaType: "application/vnd.oci.image.index.v1+json",
+    manifests: PLATFORMS.map((platform, position) => ({
+      mediaType: "application/vnd.oci.image.manifest.v1+json", digest: `sha256:${String(position + 1).repeat(64)}`,
+      platform: { os: "linux", architecture: platform.split("/")[1] },
+    })) };
+}
+
+test("published platform digests come from one complete index and tolerate only recognized attestations", () => {
+  const valid = index();
+  const expected = Object.fromEntries(PLATFORMS.map((platform, position) =>
+    [platform, `sha256:${String(position + 1).repeat(64)}`]));
+  assert.deepEqual(platformDigests(valid), expected);
+  for (const variant of ["8", "v8", "v8.0"]) {
+    const explicit = index();
+    explicit.manifests[0].platform.variant = "v1";
+    explicit.manifests[1].platform.variant = variant;
+    assert.deepEqual(platformDigests(explicit), expected);
+  }
+  assert.deepEqual(platformDigests({ ...valid, mediaType: "application/vnd.docker.distribution.manifest.list.v2+json" }), expected);
+  valid.manifests.push({ digest: `sha256:${"3".repeat(64)}`, platform: { os: "unknown", architecture: "unknown" },
+    annotations: { "vnd.docker.reference.type": "attestation-manifest",
+      "vnd.docker.reference.digest": valid.manifests[0].digest } });
+  assert.deepEqual(platformDigests(valid), expected);
+  for (const invalid of [
+    { schemaVersion: 2, mediaType: "application/vnd.oci.image.manifest.v1+json", config: {} },
+    { ...index(), manifests: index().manifests.slice(0, 1) },
+    { ...index(), manifests: [...index().manifests, index().manifests[0]] },
+    { ...index(), manifests: [...index().manifests, { digest: `sha256:${"3".repeat(64)}`,
+      platform: { os: "linux", architecture: "arm", variant: "v7" } }] },
+    { ...index(), manifests: [...index().manifests, { digest: `sha256:${"3".repeat(64)}`,
+      platform: { os: "unknown", architecture: "unknown" } }] },
+  ]) assert.throws(() => platformDigests(invalid), /platform|index|manifest/);
+  for (const [position, variant] of [[0, "v3"], [1, "v9"]]) {
+    const narrowed = index();
+    narrowed.manifests[position].platform.variant = variant;
+    assert.throws(() => platformDigests(narrowed), /unsupported/,
+      "a digest pull must not hide an index variant that excludes baseline hosts");
+  }
+});
+
+test("the registry adapter pulls each platform digest and reads metadata without running images, cleaning up even invalid JSON", () => {
+  for (const malformedMetadata of [false, true]) {
+    const scratch = mkdtempSync(join(process.env.UB_AGENTS_SCRATCH ?? tmpdir(),
+      `hub-registry-adapter-${process.env.UB_AGENTS_RUN ?? "test"}-`));
+    try {
+      const log = join(scratch, "docker.jsonl");
+      const fixturePath = join(scratch, "fixture.json");
+      const manifest = index();
+      const children = Object.fromEntries(PLATFORMS.map((platform, position) =>
+        [platform, `${REFS[0].split(":")[0]}@${manifest.manifests[position].digest}`]));
+      const inspected = Object.fromEntries(PLATFORMS.map((platform) => {
+        const { release: _release, ...config } = image(platform);
+        return [children[platform], config];
+      }));
+      writeFileSync(fixturePath, JSON.stringify({ manifest, inspected,
+        metadata: Object.fromEntries(PLATFORMS.map((platform) =>
+          [platform, { ...image(platform).release, builtFor: platform }])) }));
+      const docker = join(scratch, "docker");
+      writeFileSync(docker, `#!${process.execPath}
+const { appendFileSync, readFileSync, writeFileSync } = require("node:fs");
+const args = process.argv.slice(2);
+appendFileSync(process.env.DOCKER_TEST_LOG, JSON.stringify(args) + "\\n");
+const fixture = JSON.parse(readFileSync(process.env.DOCKER_TEST_FIXTURE, "utf8"));
+if (args[0] === "manifest" && args[1] === "inspect") {
+  process.stdout.write(JSON.stringify(fixture.manifest));
+} else if (args[0] === "pull") {
+} else if (args[0] === "image" && args[1] === "inspect") {
+  if (!fixture.inspected[args[2]]) throw new Error("inspect must name a platform digest");
+  process.stdout.write(JSON.stringify([fixture.inspected[args[2]]]));
+} else if (args[0] === "create") {
+  process.stdout.write(args[2].split("/")[1] + "-container");
+} else if (args[0] === "cp") {
+  const platform = "linux/" + args[1].split("-container:")[0];
+  const bytes = process.env.DOCKER_TEST_BAD_JSON === "true" && platform === "linux/arm64"
+    ? "{" : JSON.stringify(fixture.metadata[platform]);
+  writeFileSync(args[2], bytes);
+} else if (args[0] !== "rm") {
+  throw new Error("unexpected Docker operation: " + args.join(" "));
+}
+`);
+      chmodSync(docker, 0o755);
+      const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+import { getImage } from ${JSON.stringify(new URL("./publish-hub-release.mjs", import.meta.url).href)};
+process.stdout.write(JSON.stringify(await getImage(${JSON.stringify(REFS[0])})));
+`], { env: { ...process.env, PATH: scratch, UB_AGENTS_SCRATCH: scratch,
+        DOCKER_TEST_LOG: log, DOCKER_TEST_FIXTURE: fixturePath, DOCKER_TEST_BAD_JSON: String(malformedMetadata) },
+        encoding: "utf8", timeout: 10_000 });
+      if (malformedMetadata) {
+        assert.equal(result.status, 1);
+        assert.match(result.stderr, /SyntaxError/);
+      } else {
+        assert.equal(result.status, 0, result.stderr);
+        const images = JSON.parse(result.stdout);
+        for (const platform of PLATFORMS) {
+          assert.equal(images[platform].Id, image(platform).Id);
+          assert.equal(images[platform].registryRef, children[platform]);
+          assert.equal(images[platform].release.builtFor, platform);
+        }
+      }
+      const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      assert.deepEqual(calls[0], ["manifest", "inspect", REFS[0]]);
+      for (const [position, platform] of PLATFORMS.entries()) {
+        const platformCalls = calls.slice(1 + position * 5, 6 + position * 5);
+        const container = `${platform.split("/")[1]}-container`;
+        assert.deepEqual(platformCalls.slice(0, 3), [["pull", "--platform", platform, children[platform]],
+          ["image", "inspect", children[platform]],
+          ["create", "--platform", platform, "--entrypoint", "/bin/true", image(platform).Id]]);
+        assert.deepEqual(platformCalls[3].slice(0, 2), ["cp", `${container}:/release/release.json`]);
+        assert.equal(dirname(dirname(platformCalls[3][2])), scratch);
+        assert.equal(existsSync(platformCalls[3][2]), false);
+        assert.deepEqual(platformCalls[4], ["rm", container]);
+      }
+      assert.equal(calls.length, 11);
+      assert.ok(!calls.some((args) => args[0] === "run" || args[0] === "start"));
+      assert.ok(!readdirSync(scratch).some((name) => name.startsWith("hub-metadata-")));
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }
 });
 
 test("workflow has only the human hub tag push trigger and the scoped workflow token", {

@@ -14,7 +14,6 @@ The commands that build, run and validate a change:
 | `mise run test-os` | the macOS CI job: only the suites whose behaviour can differ by OS |
 | `mise run e2e` | the browser proof, owed when the outcome is browser-observable |
 | `mise run ci` | everything GitHub CI runs, in its order, with a summary of what failed; `--skip-e2e` stops before the browser suite |
-| `mise run site` | build uberblick.ai into `site/out`; serve it with `python3 -m http.server 8000 --directory site/out` |
 | `mise run review <sha>` | the isolated review in a container, for the merged-tree gate and failure-path probes |
 | `mise exec -- pnpm run test:agent-cleanup`, `mise exec -- pnpm run test:housekeeping` | focused run-scratch cleanup and Docker housekeeping contract tests |
 | `python3 scripts/cleanup-agent-worktree.py` | ub-agents hook before private-worktree removal; uses `UB_AGENTS_RUN` and `UB_AGENTS_WORKTREE` |

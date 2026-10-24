@@ -16,8 +16,9 @@ async function local(): Promise<Rig> {
   return rig;
 }
 
+/** The created page with its stored blocks, which create_doc names only by id and rev. */
 async function create(rig: Rig, fields: Record<string, unknown> = {}) {
-  return rig.ok("create_doc", {
+  const created = await rig.ok("create_doc", {
     title: "Moving blocks", description: "Reordering retains block content and comments.",
     blocks: [
       { type: "paragraph", text: "First" }, { type: "paragraph", text: "Middle" },
@@ -25,6 +26,7 @@ async function create(rig: Rig, fields: Record<string, unknown> = {}) {
     ],
     ...fields,
   });
+  return { ...created, blocks: (await rig.ok("get_doc", { uuid: created.uuid })).blocks };
 }
 
 async function refuse(

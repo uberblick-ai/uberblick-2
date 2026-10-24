@@ -25,10 +25,10 @@ function mcpPayload(payload: object): object {
 }
 
 /**
- * Workspace operations await only their opening settle, then read and write
- * synchronously: another await could interleave writes to the same Y.Doc.
- * handler-invariants checks registered operations and collectSyncStatus's
- * delegated settle; static get_help never settles.
+ * Workspace writes stay synchronous after opening settle so another await
+ * cannot interleave writes to the same Y.Doc. Hub revision requests may await
+ * detached reads or hub-only naming, without mutating a local Y.Doc. handler-invariants checks these boundaries;
+ * static get_help never settles.
  */
 export function guarded(
   tool: Pick<Tool, "name" | "output" | "operation" | "writes">,

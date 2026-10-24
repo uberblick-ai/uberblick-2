@@ -641,9 +641,9 @@ for (const touch of [false, true]) test(`tag measurement does not widen the docu
   const tags = Array.from({ length: 8 }, (_, index) => `${tagPrefix}-${index}-long-overflow-tags`);
   const firstTag = `${tagPrefix}-0-long-overflow-tags`;
   for (const tag of tags) {
-    await settings.getByLabel("Create a tag").fill(tag);
+    await settings.getByLabel("Name", { exact: true }).fill(tag);
     await settings.getByRole("button", { name: "Create", exact: true }).click();
-    await expect(settings.getByRole("button", { name: `Retire ${tag}`, exact: true })).toBeVisible();
+    await expect(settings.getByRole("button", { name: `Delete ${tag}`, exact: true })).toBeVisible();
   }
   const title = docTitle("tagmeasurement");
   const writer = agent().open({ name: "tag-measurement-e2e" });

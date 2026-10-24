@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
 import { fireEvent, within } from "@testing-library/react";
 import * as Y from "yjs";
-import { createTagCatalogEntry, getTagCatalogIdentities, retireTagCatalogEntry } from "@uberblick/schema";
+import { createTagCatalogEntry, getTagCatalogIdentities, deleteTagCatalogEntry } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { DocumentList, INITIAL_DOCUMENT_LIST_STATE } from "../src/shell/DocumentList.js";
@@ -16,7 +16,7 @@ const FOUR = "00000000-0000-4000-8000-000000000004";
 const RELEASE = "10000000-0000-4000-8000-000000000001";
 const RELEASE_ALIAS = "10000000-0000-4000-8000-000000000002";
 const CLI = "10000000-0000-4000-8000-000000000003";
-const RETIRED = "10000000-0000-4000-8000-000000000004";
+const DELETED = "10000000-0000-4000-8000-000000000004";
 
 function connection(ydoc = new Y.Doc(), synced = true): RoomConnection {
   const status = { connected: synced, synced, hasReceivedServerState: synced } as RoomStatus;
@@ -31,8 +31,8 @@ function catalog(): RoomConnection {
   createTagCatalogEntry(room.ydoc, "release", RELEASE);
   getTagCatalogIdentities(room.ydoc).set(RELEASE_ALIAS, "release");
   createTagCatalogEntry(room.ydoc, "cli", CLI);
-  createTagCatalogEntry(room.ydoc, "old", RETIRED);
-  retireTagCatalogEntry(room.ydoc, RETIRED);
+  createTagCatalogEntry(room.ydoc, "old", DELETED);
+  deleteTagCatalogEntry(room.ydoc, DELETED);
   return room;
 }
 
@@ -254,13 +254,22 @@ it.each([null, { search: async () => { throw new Error("index unavailable"); } }
   expect(titles(container)).toEqual(["One"]);
 });
 
-it("shows named tags in stored order, omits provisional and unknown names, and offers only active choices", async () => {
-  const { container } = await renderSettled(list({ entries: [entry(ONE, "One", { tags: [CLI, RELEASE_ALIAS, RETIRED, "provisional", FOUR] })] }));
+it("shows named tags in stored order, omits provisional and unknown names, and offers only existing choices", async () => {
+  const { container } = await renderSettled(list({ entries: [entry(ONE, "One", { tags: [CLI, RELEASE_ALIAS, DELETED, "provisional", FOUR] })] }));
   const row = within(container).getByRole("rowheader").closest("tr");
   expect(row).not.toBeNull();
   const chips = within(row as HTMLElement).getAllByRole("button").filter((button) => button.classList.contains("ub-docs-tag-chip"));
-  expect(chips.map((chip) => chip.textContent)).toEqual(["cli", "release", "old (retired)"]);
+  expect(chips.map((chip) => chip.textContent)).toEqual(["cli", "release"]);
   await click(container, "Filter by tags");
   const options = within(within(document.body).getByRole("listbox", { name: "Tags" })).getAllByRole("option");
   expect(options.map((option) => option.textContent)).toEqual(["cli", "release"]);
+});
+
+
+it("ignores deleted and delayed tag selections restored from history without showing unknown labels", async () => {
+  const { container } = await renderSettled(list({ entries: [entry(ONE, "One", { tags: [CLI, DELETED] })], state: { ...INITIAL_DOCUMENT_LIST_STATE, selectedTags: [DELETED, FOUR] } }));
+  expect(titles(container)).toEqual(["One"]);
+  expect(within(container).getByRole("button", { name: "Filter by tags" }).textContent).toContain("Any");
+  expect(container.textContent).not.toContain("Unknown tag");
+  expect(container.textContent).not.toContain("retired");
 });

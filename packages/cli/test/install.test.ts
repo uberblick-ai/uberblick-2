@@ -66,6 +66,9 @@ const SECRET = "tok-must-never-be-printed-4a1f";
 
 const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
 const LOCAL_BINDING_ENV = { UB_HUB_URL: "local", UB_WORKSPACE_ID: WORKSPACE };
+// Whole words: output names temporary paths, and one like uberblick-cli-5SjPIn
+// contains the letters without mentioning a pin.
+const PIN = /\bpin(?:s|ned|ning)?\b/i;
 
 /** These installer cases start with a deliberately selected project binding. */
 function sandbox(files: SandboxFiles = {}): Sandbox {
@@ -244,7 +247,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
 
     expect(run.status, run.output).toBe(0);
     expect(run.stdout).toMatch(new RegExp(`ran\\s+${program} mcp add`));
-    expect(run.output).not.toMatch(/pin/i);
+    expect(run.output).not.toMatch(PIN);
     expect(read(stub.record).trimEnd().split("\n")).toEqual(expected);
     expect(read(stub.cwd).trim()).toBe(argv.includes("--user") ? nested.cwd : box.cwd);
     // The vendor writes the file; `ub` must not also write one behind its back.
@@ -266,7 +269,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     expect(run.stdout).toMatch(/^workspace\s+follows /m);
     expect(run.stdout).toContain(join(box.cwd, ".uberblick.json"));
     expect(run.stdout).toMatch(/restart running agents.*pick.*up/i);
-    expect(run.output).not.toMatch(/pin/i);
+    expect(run.output).not.toMatch(PIN);
   });
 
   it.each(CELLS.filter(({ argv }) => !argv.includes("--user")))("prints the entry for a failed $what without repeating its output", async ({ program, argv, file }) => {
@@ -433,7 +436,7 @@ describe("ub mcp install, and what is registered already", () => {
     expect(run.stdout).toMatch(/^workspace\s+follows /m);
     expect(run.stdout).toContain(join(box.cwd, ".uberblick.json"));
     expect(run.stdout).not.toMatch(/^ran\s+/m);
-    expect(run.output).not.toMatch(/pin/i);
+    expect(run.output).not.toMatch(PIN);
     expect(read(path)).toBe(before);
     // Not "it exited 0": the vendor was never asked, so a duplicate add cannot
     // fail and a foreign entry cannot be clobbered by one.
@@ -472,7 +475,7 @@ describe("ub mcp install, and what is registered already", () => {
     expect(run.stdout).toMatch(/already installed/);
     expect(run.stdout).toMatch(/workspace\s+follows .*nearest \.uberblick\.json.*each project/i);
     expect(run.stdout).not.toMatch(/^ran\s+/m);
-    expect(run.output).not.toMatch(/pin/i);
+    expect(run.output).not.toMatch(PIN);
     expect(read(path)).toBe(before);
     expect(existsSync(stub.record)).toBe(false);
   });
@@ -796,7 +799,8 @@ describe("binding-independent MCP registration", () => {
       }
       expect(run.output).not.toContain(SECRET);
       expect(run.output).not.toContain(OTHER);
-      expect(run.output).not.toMatch(/UB_WORKSPACE_ID|UB_HUB_URL|WORKSPACE_ID|HUB_URL|pin/i);
+      expect(run.output).not.toMatch(/UB_WORKSPACE_ID|UB_HUB_URL|WORKSPACE_ID|HUB_URL/i);
+      expect(run.output).not.toMatch(PIN);
       expect(run.stderr).toContain(target === "codex"
         ? join(box.cwd, ".codex", "config.toml")
         : join(box.cwd, ".mcp.json"));
@@ -834,7 +838,7 @@ describe("binding-independent MCP registration", () => {
       expect(run.stdout).toMatch(/workspace\s+follows .*nearest \.uberblick\.json.*each project/i);
       expect(run.stderr).toBe("");
     }
-    expect(run.output).not.toMatch(/pin/i);
+    expect(run.output).not.toMatch(PIN);
   });
 
   it("registers project scope without changing an invalid binding", async () => {

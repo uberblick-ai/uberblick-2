@@ -18,9 +18,11 @@ import * as Y from "yjs";
 import {
   DIRECTORY_DELETED_KEY,
   DIRECTORY_DOCS_KEY,
+  canonicalDocumentUuid,
   deleteDirectoryEntry,
   enforceDeletedDirectoryEntries,
   isDirectoryEntryDeleted,
+  isDirectoryEntryArchived,
   listDeletedDirectoryUuids,
   parseRoom,
   roomForDoc,
@@ -28,6 +30,7 @@ import {
 import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
 import { revokeHmacCredentials } from "./credentials-schema.js";
 import { writeDatabaseRelease } from "./database-release.js";
+import { HubRevisions } from "./revisions.js";
 
 /**
  * Retain the exact extension schema and unique index; SQLite does not enforce
@@ -85,10 +88,12 @@ export class HubDatabase implements Extension {
   private readonly onStoreFailed: (error: unknown) => void;
 
   private db: DatabaseSync | undefined;
+  private revisionStore: HubRevisions | undefined;
 
   private readonly deletedRooms = new Set<string>();
   private readonly pendingDeletedRooms = new Set<string>();
   private readonly reconcilingDirectories = new WeakSet<Y.Doc>();
+  private readonly directories = new Map<string, Y.Doc>();
   private deletionHandler: (rooms: readonly string[]) => void = () => {};
   private loadedRoom: (room: string) => boolean = () => false;
 
@@ -96,7 +101,11 @@ export class HubDatabase implements Extension {
     | { select: StatementSync; upsert: StatementSync }
     | undefined;
 
-  constructor(databasePath: string, onStoreFailed: (error: unknown) => void) {
+  constructor(
+    databasePath: string,
+    onStoreFailed: (error: unknown) => void,
+    private readonly options: { revisions?: boolean; now?: () => number } = {},
+  ) {
     this.databasePath = databasePath;
     this.onStoreFailed = onStoreFailed;
   }
@@ -132,6 +141,8 @@ export class HubDatabase implements Extension {
         select: db.prepare(SELECT_DOCUMENT),
         upsert: db.prepare(UPSERT_DOCUMENT),
       };
+      this.revisionStore = new HubRevisions(db, this.options.revisions ?? false,
+        room => this.isDeletedRoom(room), this.onStoreFailed, this.options.now);
     } catch (error) {
       db.close();
       throw error;
@@ -168,6 +179,21 @@ export class HubDatabase implements Extension {
     return this.deletedRooms.has(room);
   }
 
+  /** Loaded directory state takes precedence over its debounced persisted copy. */
+  isArchivedRoom(room: string): boolean {
+    const { workspaceId, uuid } = parseRoom(room);
+    const name = roomForDoc(workspaceId, "_directory");
+    const loaded = this.directories.get(name);
+    if (loaded !== undefined) return isDirectoryEntryArchived(loaded, uuid);
+    const data = this.prepared().select.get({ name })?.data;
+    if (!(data instanceof Uint8Array)) return false;
+    const directory = new Y.Doc();
+    try {
+      Y.applyUpdate(directory, data);
+      return isDirectoryEntryArchived(directory, uuid);
+    } finally { directory.destroy(); }
+  }
+
   requireRoom(room: string): void {
     if (this.isDeletedRoom(room)) throw { reason: DOC_DELETED_REASON };
   }
@@ -180,10 +206,15 @@ export class HubDatabase implements Extension {
     return this.db;
   }
 
+  get revisions(): HubRevisions {
+    if (this.revisionStore === undefined) throw new Error("HubDatabase.revisions: the database is not open");
+    return this.revisionStore;
+  }
+
   async onLoadDocument({
     document,
     documentName,
-  }: onLoadDocumentPayload): Promise<void> {
+  }: Pick<onLoadDocumentPayload, "document" | "documentName">): Promise<void> {
     this.requireRoom(documentName);
     if (parseRoom(documentName).isDirectory) {
       // A type first created by a remote update is replaced on its first getMap,
@@ -197,6 +228,10 @@ export class HubDatabase implements Extension {
       Y.applyUpdate(document, data);
     }
     if (parseRoom(documentName).isDirectory) {
+      this.directories.set(documentName, document);
+      document.on("destroy", () => {
+        if (this.directories.get(documentName) === document) this.directories.delete(documentName);
+      });
       this.reconcileDirectory(documentName, document);
       // This runs synchronously, before an update can be acknowledged. A
       // debounced directory store could otherwise lose its deletion evidence.
@@ -210,13 +245,16 @@ export class HubDatabase implements Extension {
           throw error;
         }
       });
+      this.revisions.observeDirectory(documentName, document);
+    } else if (canonicalDocumentUuid(parseRoom(documentName).uuid) !== null) {
+      this.revisions.observe(documentName, document);
     }
   }
 
   async onStoreDocument({
     document,
     documentName,
-  }: onStoreDocumentPayload): Promise<void> {
+  }: Pick<onStoreDocumentPayload, "document" | "documentName">): Promise<void> {
     try {
       // Queued stores retain their old document object after the room is closed.
       if (this.isDeletedRoom(documentName)) return;
@@ -240,8 +278,10 @@ export class HubDatabase implements Extension {
     }
     this.db = undefined;
     this.statements = undefined;
+    this.revisionStore = undefined;
     this.deletedRooms.clear();
     this.pendingDeletedRooms.clear();
+    this.directories.clear();
   }
 
   /**
@@ -312,7 +352,10 @@ export class HubDatabase implements Extension {
       try {
         this.prepared().upsert.run({ name: room, data: directoryState(directory) });
         const remove = database.prepare('DELETE FROM documents WHERE name = ?');
-        for (const name of deleted) remove.run(name);
+        for (const name of deleted) {
+          remove.run(name);
+          this.revisions.purge(name);
+        }
         database.exec("COMMIT");
         for (const name of deleted) this.pendingDeletedRooms.delete(name);
       } catch (error) {

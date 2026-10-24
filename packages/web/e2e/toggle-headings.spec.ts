@@ -233,7 +233,7 @@ for (const key of ["Delete", "Backspace"]) {
 
     expect(await documentContent(page)).toEqual(before);
     await expectMcp(() => session.call<StoredDoc>("get_doc", { uuid: created.uuid }),
-      document => { expect(document.blocks).toEqual(created.blocks); });
+      document => { expect(document.blocks.map(({ id, rev }) => ({ id, rev }))).toEqual(created.blocks); });
   });
 }
 

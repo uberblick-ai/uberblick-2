@@ -120,7 +120,7 @@ export async function statusReport(
       databasePath: config.databasePath,
       hub: sync.hub,
       unsyncedChanges: sync.unsyncedChanges,
-      lastSync: resolved.binding.hubUrl === null && bindingProblem === undefined ? null : sync.lastSync,
+      lastSync: sync.lastSync,
       persistence: sync.persistence,
     },
   };
@@ -171,7 +171,6 @@ export function shortStatusReport(
   report: StatusReport, workspaceName: string | null = null, recentDevices: RecentDevice[] | null = null,
 ): ShortStatusReport {
   const origin = report.binding.hubUrl === null ? null : authenticationOrigin(report.binding.hubUrl);
-  const local = origin === null && report.bindingProblem === undefined;
   const hub = report.hub;
   const state = connectionState(report);
   // The shared formatter validates the locally recorded evidence. Neither the
@@ -227,8 +226,8 @@ export function shortStatusReport(
       cause: recorded ? hub.cause ?? null : null,
       detail: recorded ? hub.detail ?? null : null,
     },
-    pending: { count: local ? 0 : report.unsyncedChanges },
-    lastSync: local ? null : report.lastSync,
+    pending: { count: report.unsyncedChanges },
+    lastSync: report.lastSync,
     recentDevices: origin === null ? null : recentDevices,
     problems,
   };

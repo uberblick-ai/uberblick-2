@@ -511,14 +511,11 @@ exports[`schema failure wire compatibility > preserves serialized tag assignment
   "partial": false,
   "synced": false,
   "recoveryClass": "manual",
-  "recovery": "Call list_tags for the complete active catalog, then call again with active ids or active names (case ignored). An existing retired or unresolved assignment can be preserved by passing the id returned by the document read.",
+  "recovery": "Call list_tags for the complete existing catalog, then call again with existing ids or names (case ignored). Hidden references awaiting a catalog entry stay stored automatically; deleted tags cannot be assigned.",
   "error": "invalid_tag_assignment",
-  "message": "Invalid tag assignment (unknown: missing; retired: retired)",
+  "message": "Invalid tag assignment (unknown: missing)",
   "unknown": [
     "missing"
-  ],
-  "retired": [
-    "retired"
   ]
 }"
 `;
@@ -529,32 +526,13 @@ exports[`schema failure wire compatibility > preserves serialized tag assignment
   "partial": false,
   "synced": false,
   "recoveryClass": "manual",
-  "recovery": "Call list_tags for the complete active catalog, then call again with active ids or active names (case ignored). An existing retired or unresolved assignment can be preserved by passing the id returned by the document read.",
+  "recovery": "Call list_tags for the complete existing catalog, then call again with existing ids or names (case ignored). Hidden references awaiting a catalog entry stay stored automatically; deleted tags cannot be assigned.",
   "error": "invalid_tag_assignment",
-  "message": "Invalid tag assignment (unknown: missing; retired: retired)",
+  "message": "Invalid tag assignment (unknown: missing)",
   "unknown": [
     "missing"
   ],
-  "retired": [
-    "retired"
-  ],
   "field": "tags"
-}"
-`;
-
-exports[`schema failure wire compatibility > preserves serialized tag assignment retired only 1`] = `
-"{
-  "applied": false,
-  "partial": false,
-  "synced": false,
-  "recoveryClass": "manual",
-  "recovery": "Call list_tags for the complete active catalog, then call again with active ids or active names (case ignored). An existing retired or unresolved assignment can be preserved by passing the id returned by the document read.",
-  "error": "invalid_tag_assignment",
-  "message": "Invalid tag assignment (retired: retired)",
-  "unknown": [],
-  "retired": [
-    "retired"
-  ]
 }"
 `;
 
@@ -564,12 +542,11 @@ exports[`schema failure wire compatibility > preserves serialized tag assignment
   "partial": false,
   "synced": false,
   "recoveryClass": "manual",
-  "recovery": "Call list_tags for the complete active catalog, then call again with active ids or active names (case ignored). An existing retired or unresolved assignment can be preserved by passing the id returned by the document read.",
+  "recovery": "Call list_tags for the complete existing catalog, then call again with existing ids or names (case ignored). Hidden references awaiting a catalog entry stay stored automatically; deleted tags cannot be assigned.",
   "error": "invalid_tag_assignment",
   "message": "Invalid tag assignment (unknown: missing)",
   "unknown": [
     "missing"
-  ],
-  "retired": []
+  ]
 }"
 `;

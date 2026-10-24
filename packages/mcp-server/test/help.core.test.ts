@@ -1,7 +1,7 @@
 import { getBlockInline, INLINE_ICONS, validateCollectionSchema } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
 
-import { type FailingStore, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
+import { readBlocks, removeTempDirs, startServer, testConfig, type FailingStore } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
@@ -33,7 +33,7 @@ it("documents the closed version-1 data vocabulary and demonstrates a schema the
   expect(() => validateCollectionSchema(JSON.parse(example!))).not.toThrow();
 });
 
-it("documents inline icon names, literal fallback, source preservation and card labels", async () => {
+it("documents inline icon names, source preservation, card labels and literal MCP emoji names", async () => {
   const rig = await local();
   const { text } = await rig.ok("get_help", { topic: "markdown" });
   for (const name of Object.keys(INLINE_ICONS)) expect(text).toContain(`\`:${name}:\``);
@@ -41,6 +41,8 @@ it("documents inline icon names, literal fallback, source preservation and card 
     "`:name:`", "lowercase kebab case", "`:rocket:`", "literal, unchanged text",
     "code, terminal and chart source never render icons", "Markdown import/export keep the literal",
     "button: [:claude: Discuss with Claude](claude://code/new?prompt=Review)",
+    "Write emoji as characters", "MCP never converts `:name:` to emoji",
+    "`:smiley:` and `:rocket:` remain literal",
   ]) expect(text, rule).toContain(rule);
 });
 
@@ -73,7 +75,7 @@ it("writes the markdown help's GitHub reference example as an ordinary external 
     uuid: created.uuid, after_block_id: created.blocks[0].id, blocks: [block],
   });
   const doc = rig.instance.replicas.replica(created.uuid).doc;
-  for (const written of [created.blocks[0], inserted.blocks[0]]) {
+  for (const written of await readBlocks(rig, created.uuid, [created.blocks[0], inserted.blocks[0]])) {
     expect(written.text).toBe("Make caret placement deterministic (app#2005).");
     expect(getBlockInline(doc, written.id)).toEqual(inline);
   }

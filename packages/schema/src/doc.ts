@@ -12,6 +12,7 @@ import {
 } from "./errors.js";
 import { canonicalDocumentUuid } from "./rooms.js";
 import { readSyncedDocId } from "./synced-doc-id.js";
+import { canonicalRelatedPages, readRelatedPages } from "./decision-related.js";
 import {
   isDocumentKind,
   isDocumentStatusForKind,
@@ -60,8 +61,10 @@ export interface InitDocOptions {
   uuid: string;
   title: string;
   tags?: string[];
-  /** Related page; its presence and target are fixed at creation. */
+  /** Legacy scalar form of the first related page. */
   governs?: string;
+  /** Related pages; the full set and its absence are fixed at creation. */
+  related?: string[];
   /** Internal creation input, copied from the predecessor; never a MCP argument. */
   topic?: string;
   /** Earlier decision this decision replaces; immutable after creation. */
@@ -74,7 +77,7 @@ export interface InitDocOptions {
 
 /**
  * Reinitialisation restates title/tags, preserves existing links and omitted
- * descriptions, and cannot add/change related page, predecessor, decision identity or topic.
+ * descriptions, and cannot add/change related pages, predecessor, decision identity or topic.
  * A successor supplies its predecessor's topic; first records own their topic.
  */
 export function initDoc(ydoc: Y.Doc, options: InitDocOptions): void {
@@ -102,14 +105,16 @@ export function initDoc(ydoc: Y.Doc, options: InitDocOptions): void {
   }
   const governs = options.governs === undefined
     ? undefined : canonicalDocumentUuid(options.governs);
+  const related = options.related === undefined ? undefined : canonicalRelatedPages(options.related);
   const topic = options.topic === undefined
     ? (initialized
       ? undefined
-      : options.governs !== undefined
+      : options.governs !== undefined || options.related !== undefined
         ? canonicalDocumentUuid(options.uuid)
         : undefined)
     : canonicalDocumentUuid(options.topic);
-  if (governs === null || topic === null) {
+  if (governs === null || related === null || topic === null ||
+    (governs !== undefined && related !== undefined && related[0] !== governs)) {
     throw new Error("Decision links must be document UUIDs");
   }
   if (!initialized && topic !== undefined && supersedes === undefined && topic !== canonicalDocumentUuid(options.uuid)) {
@@ -121,7 +126,10 @@ export function initDoc(ydoc: Y.Doc, options: InitDocOptions): void {
   // Absence is also fixed at creation: a later reinitialisation cannot add a
   // predecessor or change an adopted decision's implicit self topic.
   if (meta.has("uuid")) {
-    if (governs !== undefined && canonicalDocumentUuid(meta.get("governs")) !== governs) {
+    const existingRelated = readRelatedPages(meta.get("related"), meta.get("governs"));
+    if ((governs !== undefined && existingRelated[0] !== governs) ||
+      (related !== undefined && (existingRelated.length !== related.length ||
+        related.some((uuid) => !existingRelated.includes(uuid))))) {
       throw new Error("Decision related page is immutable after creation");
     }
     if (supersedes !== undefined && canonicalDocumentUuid(meta.get("supersedes")) !== supersedes) {
@@ -139,7 +147,13 @@ export function initDoc(ydoc: Y.Doc, options: InitDocOptions): void {
       meta.set("description", options.description);
     }
     if (!meta.has("links")) meta.set("links", []);
-    if (governs !== undefined) meta.set("governs", governs);
+    if (!initialized) {
+      const pages = related ?? (governs === undefined ? [] : [governs]);
+      if (pages.length > 0) {
+        meta.set("governs", pages[0]);
+        if (related !== undefined) meta.set("related", pages);
+      }
+    }
     if (topic !== undefined && !meta.has("topic")) meta.set("topic", topic);
     if (supersedes !== undefined && !meta.has("supersedes")) {
       meta.set("supersedes", supersedes);
@@ -233,7 +247,8 @@ export function getMeta(ydoc: Y.Doc, authoritativeUuid?: string): DocMeta & { tl
   const decision = lifecycle.kind === "decision";
   const tldr = !decision && typeof storedTldr === "string" && storedTldr !== "" ? storedTldr : null;
   const supersedes = decision ? readSupersedes(meta, uuid) : undefined;
-  const governs = decision ? canonicalDocumentUuid(meta.get("governs")) : null;
+  const related = decision ? readRelatedPages(meta.get("related"), meta.get("governs")) : [];
+  const governs = related[0];
   const discussion = decision ? canonicalDocumentUuid(meta.get("discussion")) : null;
   const topic = decision ? (canonicalDocumentUuid(meta.get("topic")) ?? canonicalDocumentUuid(uuid)) : null;
   const agentStance = meta.get("agentStance");
@@ -254,7 +269,7 @@ export function getMeta(ydoc: Y.Doc, authoritativeUuid?: string): DocMeta & { tl
     ...(!decision && tldr === null && meta.get("tldrOptOut") === true ? { tldrOptOut: true as const } : {}),
     ...lifecycle,
     ...(supersedes === undefined ? {} : { supersedes }),
-    ...(governs === null ? {} : { governs }),
+    ...(governs === undefined ? {} : { governs, related }),
     ...(decision ? { discussion } : {}),
     ...(topic === null ? {} : { topic }),
     ...(decision && typeof agentStance === "boolean" ? { agentStance } : {}),
@@ -265,7 +280,7 @@ export function getMeta(ydoc: Y.Doc, authoritativeUuid?: string): DocMeta & { tl
     ...(decision && rejectionReason !== undefined ? { rejectionReason } : {}),
     links: effectiveLinks(
       meta.get("links"),
-      [governs, supersedes, discussion].filter((link): link is string => typeof link === "string"),
+      [...related, supersedes, discussion].filter((link): link is string => typeof link === "string"),
     ),
   };
 }

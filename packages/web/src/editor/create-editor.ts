@@ -18,6 +18,7 @@ import type { DocLinkContext } from "./doc-links.js";
 import { ExternalLinks } from "./external-links.js";
 import { GitHubLinks } from "./github-links.js";
 import { InlineIcons } from "./inline-icons.js";
+import { EmojiTyping } from "./emoji-menu.js";
 import { ToggleHeadings } from "./toggle-headings.js";
 import { BlockInputRules } from "./input-rules.js";
 import { ListBlocks } from "./list-keys.js";
@@ -31,6 +32,9 @@ import { TerminalBlocks } from "./terminal.js";
 import { CardBlocks } from "./card.js";
 import { FigmaBlocks } from "./figma.js";
 import { FigmaCreation } from "./figma-creation.js";
+import { ySyncPluginKey } from "y-prosemirror";
+import { cleanupDeletedDocumentTags } from "@uberblick/schema";
+import { setEditorTagCatalog } from "./document-write.js";
 
 /**
  * Share one schema; context-dependent behavior belongs to each editor.
@@ -49,6 +53,8 @@ export interface CreateEditorOptions {
   newBlockId?: () => string;
   /** Gate for editor-side CRDT repairs while the room is not writable. */
   canWrite?: () => boolean;
+  /** Recheck document content permissions before cleaning deleted tag references. */
+  canCleanupTags?: () => boolean;
   /**
    * Per-editor directory and routing context. Null still permits references but
    * leaves them inert because there is no workspace address to navigate.
@@ -105,6 +111,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     ExternalLinks,
     GitHubLinks.configure({ settings: options.workspaceSettings ?? null }),
     InlineIcons,
+    EmojiTyping,
     ToggleHeadings,
     // Read resolved state from annotations rather than duplicating it in marks.
     CommentAnchors.configure({ ydoc: options.fragment.doc }),
@@ -122,6 +129,13 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // inserted types so the content parser cannot silently drop them.
     enableContentCheck: true,
     injectCSS: false,
+  });
+  setEditorTagCatalog(editor, options.workspaceSettings ?? null, options.canCleanupTags);
+  editor.on("update", ({ transaction }) => {
+    if (ydoc === null || options.workspaceSettings == null || !editor.isEditable || options.canWrite?.() === false || options.canCleanupTags?.() === false || !transaction.docChanged) return;
+    const sync = transaction.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean; isUndoRedoOperation?: boolean } | undefined;
+    if (sync?.isChangeOrigin === true && sync.isUndoRedoOperation !== true) return;
+    cleanupDeletedDocumentTags(ydoc, options.workspaceSettings);
   });
   ydoc?.on("beforeObserverCalls", seedParts);
   editor.on("destroy", () => ydoc?.off("beforeObserverCalls", seedParts));

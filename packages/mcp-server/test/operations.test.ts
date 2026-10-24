@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, expect, it, vi } from "vitest";
-import { GuidanceBriefing } from "../src/briefing.js";
 import type { McpConfig } from "../src/config.js";
 import { Replicas } from "../src/replica.js";
 import { MirrorStore } from "../src/store.js";
@@ -49,7 +48,7 @@ function local(databasePath?: string) {
   };
   const store = new FailingOperationStore(config.databasePath, workspaceId);
   const replicas = new Replicas(config, store);
-  const context = createToolContext(replicas, new GuidanceBriefing(replicas), new ServerWork());
+  const context = createToolContext(replicas, new ServerWork());
   close.push(async () => {
     replicas.destroy();
     await replicas.sync.waitForDeviceWork();

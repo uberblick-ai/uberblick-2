@@ -19,7 +19,7 @@
  * The other half of the file is about the *file*: a database written by
  * `@hocuspocus/extension-sqlite` and its better-sqlite3 binding must keep
  * working under the hub's own `node:sqlite` adapter, with no migration, no
- * second table and no second file — and both a fresh file and `":memory:"`
+ * document-row migration or second file — and both a fresh file and `":memory:"`
  * must store and load.
  */
 
@@ -362,8 +362,8 @@ describe("a database written by @hocuspocus/extension-sqlite", () => {
   // The migration that must not exist. The extension and its better-sqlite3
   // binding are gone; every hub database they ever wrote — local, remote, the
   // one on the machine this ships to next — is still a file the hub has to open
-  // in place, serve, and write back to. Same file, same table, same row.
-  it("is served, edited and restarted with no migration and no second table", async () => {
+  // in place, serve, and write back to. Same file, same document table and row.
+  it("is served, edited and restarted without migrating its document row", async () => {
     const databasePath = legacyDatabase();
     const before = inspect(databasePath);
     expect(before.tables).toEqual(["documents"]);
@@ -380,9 +380,11 @@ describe("a database written by @hocuspocus/extension-sqlite", () => {
 
     const edited = `${LEGACY.text}, edited by node:sqlite`;
     expect(storedText(databasePath, LEGACY.room)).toBe(edited);
-    // The same row, in the same table, in the same file: no new schema, no
-    // sibling database, nothing for an operator to reconcile afterwards.
-    expect(inspect(databasePath)).toEqual(before);
+    // Hub-private tables leave the extension's document row and file intact.
+    expect(inspect(databasePath).rows).toEqual(before.rows);
+    expect(inspect(databasePath).tables).toEqual([
+      "documents", "document_revisions", "document_revision_heads", "document_revision_documents", "document_revision_names",
+    ]);
     expect(readdirSync(dirname(databasePath))).toEqual(["hub.sqlite"]);
 
     await first.stop();
@@ -429,7 +431,9 @@ describe("database forms", () => {
     const started = await storesAndLoads(databasePath);
 
     // A file, with the extension's table in it, created by the hub itself.
-    expect(inspect(databasePath).tables).toEqual(["documents"]);
+    expect(inspect(databasePath).tables).toEqual([
+      "documents", "document_revisions", "document_revision_heads", "document_revision_documents", "document_revision_names",
+    ]);
 
     // The handle is released on stop() — asserted by reading the file after.
     await started.stop();

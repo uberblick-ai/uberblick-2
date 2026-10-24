@@ -48,7 +48,7 @@ export interface ExportMarkdownOptions {
    */
   annotations?: "html-comments" | "drop";
   /**
-   * Project current names, including retired assignments; omit unknown IDs and
+   * Project existing catalog names; omit deleted or unknown IDs and
    * provisional strings. Without a catalog, export stored assignments.
    */
   tagCatalog?: Y.Doc;

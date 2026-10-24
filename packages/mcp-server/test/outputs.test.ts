@@ -5,6 +5,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import * as Y from "yjs";
+import * as revisionClient from "../src/revision-client.js";
 import { INTERNAL_ERROR_MESSAGE } from "../src/failures.js";
 import { guarded } from "../src/tool-adapter.js";
 import { ServerWork } from "../src/server-work.js";
@@ -85,6 +87,17 @@ describe("successful MCP output contracts", () => {
     });
     const uuid = created.uuid;
     const read = await success("get_doc", { uuid });
+    vi.spyOn(revisionClient, "listDocumentRevisions").mockResolvedValue([]);
+    vi.spyOn(revisionClient, "getDocumentRevision").mockImplementation(async () => {
+      const snapshot = new Y.Doc();
+      Y.applyUpdate(snapshot, Y.encodeStateAsUpdate(rig.instance.replicas.replica(uuid).doc));
+      return snapshot;
+    });
+    await success("list_revisions", { uuid });
+    vi.spyOn(revisionClient, "mutateDocumentRevision").mockResolvedValue({ id: "fixture-revision", author: null,
+      startedAt: null, endedAt: 1, name: { text: "Reviewed", namer: null, namedAt: 1, canManage: true } });
+    await success("name_revision", { uuid, name: "Reviewed" });
+    await success("get_revision", { uuid, revision: "fixture-revision" });
     await success("list_docs");
     await success("search", { query: "Output contract" });
     await success("find_decisions", { github_ref: "uberblick-ai/uberblick-2#1429" });
@@ -163,9 +176,9 @@ describe("successful MCP output contracts", () => {
       reason: "no connection to wss://hub.example.test", recoveryClass: "retry",
       cause: "dns", detail: "ENOTFOUND hub.example.test",
     };
-    const result = await probe("list_docs", { workspace: "fixture", docs: [], hub: reading });
+    const result = await probe("list_docs", { workspace: "fixture", complete: true, docs: [], hub: reading });
     const expected = {
-      workspace: "fixture", docs: [], hub: {
+      workspace: "fixture", complete: true, docs: [], hub: {
         status: reading.status, url: reading.url, protocolVersion: reading.protocolVersion,
         reason: reading.reason, recoveryClass: reading.recoveryClass,
       },
@@ -177,10 +190,10 @@ describe("successful MCP output contracts", () => {
   });
 
   it.each([
-    ["missing field", { workspace: "fixture", docs: [] }, "hub"],
-    ["wrong field type", { workspace: "fixture", docs: "wrong", hub }, "docs"],
-    ["undeclared root key", { workspace: "fixture", docs: [], hub, extra: true }, "extra"],
-    ["undeclared nested key", { workspace: "fixture", docs: [], hub: { ...hub, extra: true } }, "extra"],
+    ["missing field", { workspace: "fixture", complete: true, docs: [] }, "hub"],
+    ["wrong field type", { workspace: "fixture", complete: true, docs: "wrong", hub }, "docs"],
+    ["undeclared root key", { workspace: "fixture", complete: true, docs: [], hub, extra: true }, "extra"],
+    ["undeclared nested key", { workspace: "fixture", complete: true, docs: [], hub: { ...hub, extra: true } }, "extra"],
   ])("answers a %s with internal_error and logs the mismatch on stderr", async (_name, payload, detail) => {
     const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
     const result = await probe("list_docs", payload);
@@ -194,7 +207,7 @@ describe("successful MCP output contracts", () => {
   it("refuses a text-only success before the SDK can produce its plain-text validation error", async () => {
     const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
     const result = await probe("list_docs", () => ({
-      content: [{ type: "text", text: JSON.stringify({ workspace: "fixture", docs: [], hub }) }],
+      content: [{ type: "text", text: JSON.stringify({ workspace: "fixture", complete: true, docs: [], hub }) }],
     }));
     expect(result.isError).toBe(true);
     expect(result).not.toHaveProperty("structuredContent");

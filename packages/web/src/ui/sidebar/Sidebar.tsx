@@ -12,6 +12,7 @@ import {
   createGroup,
   decisionTopicTitle,
   deleteGroup,
+  isDirectoryEntryDeleted,
   pinDoc,
   readSidebar,
   renameGroup,
@@ -117,6 +118,8 @@ type SidebarProps = {
   hubAdmin?: boolean;
   workspaceAdmin?: boolean;
   devicesAvailable?: boolean;
+  /** The open document's history list; while present it replaces the documents. */
+  historyPane?: ReactNode;
 };
 
 export function Sidebar(props: SidebarProps): ReactElement {
@@ -131,7 +134,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
       ref={sidebarRoot}
       className="ub-list group/sidebar overflow-clip"
       aria-label="Sidebar"
-      data-mode={props.settingsOpen ? "settings" : "documents"}
+      data-mode={props.settingsOpen ? "settings" : props.historyPane != null ? "history" : "documents"}
       onEscapeKeyDown={(event) => {
         // Radix sees Escape in capture, before the field and dnd-kit. Let those
         // existing handlers cancel their operation without dismissing the sheet.
@@ -184,6 +187,7 @@ function SidebarContent({
   hubAdmin = false,
   workspaceAdmin = false,
   devicesAvailable = false,
+  historyPane = null,
 }: SidebarProps & {
   drawer: boolean;
   sidebarRoot: RefObject<HTMLElement | null>;
@@ -208,6 +212,10 @@ function SidebarContent({
    * archived titles after leaving ordinary listings.
    */
   const stubs = useDirectory(connection, true);
+  const visibleGroups = groups.map((group) => ({
+    ...group,
+    docs: group.docs.filter((uuid) => connection === null || !isDirectoryEntryDeleted(connection.ydoc, uuid)),
+  }));
   const labels = useMemo(() => {
     const entries = new Map(stubs.map((entry) => [entry.uuid, entry]));
     for (const topic of resolveDecisionTopics(stubs)) {
@@ -215,6 +223,7 @@ function SidebarContent({
     }
     return entries;
   }, [stubs]);
+  const historyOpen = historyPane != null && !settingsOpen;
   const personalSettings = settingsPage === "preferences" || settingsPage === "devices";
   const settingsArea = settingsOpen ? personalSettings ? "personal" : "workspace" : null;
   const shownMode = useRef(settingsArea);
@@ -276,16 +285,17 @@ function SidebarContent({
       </button>
       <SidebarDragProvider
         connection={sidebar}
+        directory={connection?.ydoc ?? null}
         onDraggingChange={onDraggingChange}
-        active={!collapsed && !settingsOpen && sidebarWritable}
+        active={!collapsed && !settingsOpen && !historyOpen && sidebarWritable}
       >
       <div className="ub-sidebar-stack grid min-w-0 min-h-0 flex-1">
         <nav
-          className={`${SIDEBAR_PANE_CLASSES} ub-document-sidebar [transform:translateX(0)] opacity-100 group-data-[mode=settings]/sidebar:[transform:translateX(-25%)] group-data-[mode=settings]/sidebar:opacity-0`}
+          className={`${SIDEBAR_PANE_CLASSES} ub-document-sidebar [transform:translateX(0)] opacity-100 group-data-[mode=settings]/sidebar:[transform:translateX(-25%)] group-data-[mode=settings]/sidebar:opacity-0 group-data-[mode=history]/sidebar:[transform:translateX(-25%)] group-data-[mode=history]/sidebar:opacity-0`}
           aria-label="Documents"
           data-directory-state={connection === null ? undefined : reading.tone}
-          aria-hidden={settingsOpen || collapsed}
-          inert={settingsOpen || collapsed}
+          aria-hidden={settingsOpen || historyOpen || collapsed}
+          inert={settingsOpen || historyOpen || collapsed}
         >
           <SidebarHeader className="pr-12 [@media(any-pointer:coarse)]:pr-15">
             <WorkspaceSwitcher
@@ -307,7 +317,7 @@ function SidebarContent({
                 menu.
               </p>
             )}
-            {groups.map((group, index) => (
+            {visibleGroups.map((group, index) => (
                 <GroupSection
                   key={group.id}
                   index={index}
@@ -358,6 +368,14 @@ function SidebarContent({
               </button>
             </div>
           </SidebarScrollContent>
+        </nav>
+        <nav
+          className={`${SIDEBAR_PANE_CLASSES} ub-history-sidebar z-1 [transform:translateX(100%)] opacity-0 group-data-[mode=history]/sidebar:[transform:translateX(0)] group-data-[mode=history]/sidebar:opacity-100`}
+          aria-label="Revision history"
+          aria-hidden={!historyOpen || settingsOpen || collapsed}
+          inert={!historyOpen || settingsOpen || collapsed}
+        >
+          {historyPane}
         </nav>
         <SettingsNavigation
           workspaceLabel={workspace === null ? "workspace" : workspaceLabel(workspace, workspaceNames ?? new Map(), workspaces)}

@@ -3,11 +3,10 @@ import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv
 import { createTagCatalogEntry, setTags } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
 import { FAILURE_INSTRUCTIONS } from "../src/failures.js";
-import { GUIDANCE_INSTRUCTIONS } from "../src/briefing.js";
 import { HelpCatalog } from "../src/help.js";
 import { log } from "../src/log.js";
 import { INTERNAL_RESOURCE_ERROR_MESSAGE } from "../src/resource-adapter.js";
-import { FailingStore, removeTempDirs, startServer, TEST_SECRET, testConfig, toolNamed } from "./helpers.js";
+import { FailingStore, TEST_SECRET, readBlocks, removeTempDirs, startServer, testConfig, toolNamed } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
 const concepts = ["orientation", "edit_doc", "decisions", "workspaces", "markdown", "ablauf", "data", "tools", "tool-contracts"];
@@ -60,6 +59,16 @@ it("lists every concept and registered tool once, with the same Markdown through
       { uri, mimeType: "text/markdown", text: help.text },
     ]);
   }
+});
+
+it.each(["get_doc", "list_docs"])("describes %s timestamps as ISO 8601 UTC", async (topic) => {
+  const rig = await local();
+  const { text } = await rig.ok("get_help", { topic });
+  expect(text).toContain("ISO 8601 UTC");
+  expect(text).toContain("2026-10-21T18:36:13.213Z");
+  expect(text).not.toContain("epoch milliseconds");
+  const tool = (await rig.client.listTools()).tools.find(({ name }) => name === topic);
+  expect(tool?.description).toContain("ISO 8601 UTC");
 });
 
 it("points Markdown authors to Ablauf help and requires checking edits in the web editor", () => {
@@ -161,18 +170,17 @@ it("creates and re-indents list items using the published help examples", async 
   const inserted = await rig.ok("insert_block", {
     ...jsonSection(insertHelp.text, "Example"), uuid: created.uuid, after_block_id: seed.id,
   });
-  expect(inserted.blocks[0]).toMatchObject({ type: "list-item", list: "ordered", indent: 2 });
+  const [insertedRead] = await readBlocks(rig, created.uuid, inserted.blocks);
+  expect(insertedRead).toMatchObject({ type: "list-item", list: "ordered", indent: 2 });
 
   const editHelp = await rig.ok("get_help", { topic: "edit_block" });
   const edited = await rig.ok("edit_block", {
     ...jsonSection(editHelp.text, "Example"), uuid: created.uuid,
     block_id: inserted.blocks[0].id, rev: inserted.blocks[0].rev,
   });
-  expect(edited.block).toMatchObject({
-    id: inserted.blocks[0].id, text: inserted.blocks[0].text, list: "ordered", indent: 1,
-  });
+  expect(edited.block).toEqual({ id: inserted.blocks[0].id, rev: expect.any(String) });
   expect(edited.block.rev).not.toBe(inserted.blocks[0].rev);
-  expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual([seed, edited.block]);
+  expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual([seed, { ...insertedRead, indent: 1, rev: edited.block.rev }]);
 });
 
 it("advertises the server identity and instructions in initialize", async () => {
@@ -212,7 +220,6 @@ it("serves the short startup orientation verbatim and directs clients to the com
   for (const id of concepts) expect(instructions).toContain(id);
   expect(instructions).toContain("uberblick://help/{topic}");
   expect(instructions).not.toContain(FAILURE_INSTRUCTIONS);
-  expect(instructions).not.toContain(GUIDANCE_INSTRUCTIONS);
   expect(instructions).not.toContain("recoveryClass");
 });
 
@@ -225,14 +232,12 @@ it("keeps every topic workspace-independent and reads help without settling or o
   });
   const tag = createTagCatalogEntry(workspace.instance.replicas.settings().doc, "guidance");
   setTags(workspace.instance.replicas.replica(doc.uuid).doc, [tag.id]);
-  expect((await workspace.call("set_metadata", { uuid: doc.uuid, title: "Blocked" })).payload.error)
-    .toBe("guidance_required");
   const before = workspace.instance.store.logSize();
   const catalog = await empty.ok("get_help");
   expect(await workspace.ok("get_help")).toEqual(catalog);
 
   // Any accidental access is a hard failure, even if it would read a cached
-  // replica successfully. An unreachable hub and an unread briefing are real.
+  // replica successfully. The workspace has unread guidance.
   const spies = ["settle", "refresh", "directory", "settings", "sidebar", "replica"] as const;
   for (const rig of [empty, workspace]) {
     for (const method of spies) {
@@ -246,6 +251,8 @@ it("keeps every topic workspace-independent and reads help without settling or o
     const help = await empty.ok("get_help", { topic: id });
     expect(await workspace.ok("get_help", { topic: id })).toEqual(help);
     expect(help.text).not.toContain(secret);
+    expect(help.text).not.toContain(doc.uuid);
+    expect(help.text).not.toMatch(/guidance_required|guidance briefing|ten-minute lease|uberblick:\/\/doc\//);
     expect(await workspace.client.readResource({ uri })).toEqual(await empty.client.readResource({ uri }));
   }
   for (const rig of [empty, workspace]) {

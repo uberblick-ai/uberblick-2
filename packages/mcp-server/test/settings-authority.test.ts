@@ -7,6 +7,7 @@ import {
   getMeta,
   getWorkspaceMainRepository,
   getWorkspaceName,
+  isTagDeleted,
   listTagCatalog,
   roomForDoc,
   setTags,
@@ -75,6 +76,70 @@ async function caughtUp(rig: Rig): Promise<void> {
 function refusals(warn: { mock: { calls: unknown[][] } }): string[] {
   return warn.mock.calls.flatMap(([message]) => typeof message === "string" && message.startsWith("The hub refused changes") ? [message] : []);
 }
+
+it("hides legacy retired tags for members and migrates them only after an admin receives the hub catalog", async () => {
+  const { hub, config } = await fixture();
+  const member = await client(config);
+  await caughtUp(member);
+  const room = settingsRoom(WORKSPACE);
+  const id = crypto.randomUUID();
+  hub.readRoom(room, catalog => {
+    catalog.getMap<string>("tag-identities").set(id, "legacy");
+  });
+  await waitUntil("the legacy tag to arrive", async () => (await member.ok("list_tags")).tags.some((tag: { id: string }) => tag.id === id));
+  const created = await member.ok("create_doc", { title: "Legacy assignment", description: "Migration never rewrites documents.", tags: [id] });
+  await caughtUp(member);
+  expect(hub.readRoom(room, catalog => {
+    catalog.getMap<number>("tag-retired").set("legacy#old", 1);
+    return catalog.getMap<number>("tag-retired").get("legacy#old");
+  })).toBe(1);
+  const warning = vi.spyOn(log, "warn");
+  await member.ok("list_tags");
+  expect(member.instance.replicas.settings().doc.getMap("tag-flags").toJSON()).toEqual({});
+  await waitUntil("the member to receive the retirement", () => member.instance.replicas.settings().doc.getMap<number>("tag-retired").get("legacy#old") === 1);
+  expect((await member.ok("list_tags")).tags).toEqual([]);
+  expect((await member.ok("get_doc", { uuid: created.uuid })).tags).toEqual([]);
+  expect(isTagDeleted(member.instance.replicas.settings().doc, id)).toBe(false);
+  expect(member.instance.store.settingsReset()).toBeNull();
+  expect(refusals(warning)).toEqual([]);
+  expect(member.instance.store.pendingRooms().some(entry => entry.room === room)).toBe(false);
+
+  hub.changeRole(WORKSPACE, "admin");
+  const admin = await client({ ...config, databasePath: tempDatabasePath() });
+  await waitUntil("the admin to migrate the hub catalog", async () => {
+    await admin.ok("list_tags");
+    return isTagDeleted(admin.instance.replicas.settings().doc, id);
+  });
+  await caughtUp(admin);
+  expect(hub.readRoom(room, catalog => isTagDeleted(catalog, id))).toBe(true);
+  expect(getMeta(member.instance.replicas.replica(created.uuid).doc).tags).toEqual([id]);
+  expect(member.instance.store.settingsReset()).toBeNull();
+  expect(refusals(warning)).toEqual([]);
+});
+
+it("waits for the hub restoration before migrating an admin's stale cached retirement", async () => {
+  const { hub, config } = await fixture();
+  const member = await client(config);
+  await caughtUp(member);
+  const room = settingsRoom(WORKSPACE);
+  const id = crypto.randomUUID();
+  hub.readRoom(room, catalog => {
+    catalog.getMap<string>("tag-identities").set(id, "restored");
+    catalog.getMap<number>("tag-retired").set("restored#old", 1);
+  });
+  await waitUntil("the stale retirement to arrive", () => member.instance.replicas.settings().doc.getMap<number>("tag-retired").get("restored#old") === 1);
+  await close(member);
+  const keeper = await client({ ...config, databasePath: tempDatabasePath() });
+  await caughtUp(keeper);
+  hub.readRoom(room, catalog => catalog.getMap<number>("tag-restored").set("restored#old", 2));
+  await waitUntil("the restoration to reach the hub-connected member", async () => (await keeper.ok("list_tags")).tags.some((tag: { id: string }) => tag.id === id));
+  hub.changeRole(WORKSPACE, "admin");
+  const restarted = await client(config);
+  await caughtUp(restarted);
+  expect((await restarted.ok("list_tags")).tags).toEqual([{ id, name: "restored" }]);
+  expect(isTagDeleted(restarted.instance.replicas.settings().doc, id)).toBe(false);
+  expect(hub.readRoom(room, catalog => isTagDeleted(catalog, id))).toBe(false);
+});
 
 it("discards a member's queued settings changes and retains the restored state across restart", async () => {
   const { hub, config, env, login } = await fixture();
@@ -173,7 +238,7 @@ it("fences live demotion without disturbing document rooms and accepts fresh edi
   await caughtUp(rig);
   expect(getWorkspaceMainRepository(rig.instance.replicas.settings().doc)).toBe("hub/selected");
   expect(listTagCatalog(rig.instance.replicas.settings().doc).map(tag => tag.name)).toEqual(["curated"]);
-  expect((await rig.ok("get_doc", { uuid: created.uuid })).tags).toEqual([{ id: refusedTag, name: null, state: "unresolved" }]);
+  expect((await rig.ok("get_doc", { uuid: created.uuid })).tags).toEqual([]);
   await caughtUp(observer);
   expect(getWorkspaceName(observer.instance.replicas.settings().doc)).toBe("Hub name");
   expect(witnessedNames).not.toContain("Refused live rename");

@@ -3,7 +3,6 @@ node_modules/
 
 # build output
 dist/
-site/out/
 *.tsbuildinfo
 # CLI and MCP test process entries built once per run by global setup, so
 # spawning suites do not transpile source packages in every child
@@ -33,6 +32,9 @@ packages/*/data/
 # contributor's own local config cannot carry a secret into a commit either.
 mise.local.toml
 .mise.local.toml
+
+# Deliberate per-checkout permission for branch code to open shared replicas.
+.uberblick-use-shared-replicas
 
 # the timestamped copy `ub mcp install --force` leaves beside a config file it
 # replaces. It is there so the previous version is recoverable by hand, not so

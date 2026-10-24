@@ -83,7 +83,7 @@ export function PickerList({
           </span>
           <span className="min-w-0 truncate" title={option.label}>{option.label}</span>
           {option.detail !== undefined && (
-            <span className={`${multiple ? "ub-tag-retired " : ""}ub-picker-detail ml-auto shrink-0 text-muted-foreground`}>
+            <span className="ub-picker-detail ml-auto shrink-0 text-muted-foreground">
               {option.detail}
             </span>
           )}

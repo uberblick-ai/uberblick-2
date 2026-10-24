@@ -26,8 +26,9 @@ mise run release v0.5.0
 Choose the version explicitly; the task does not choose it or enforce ordering.
 Run from the intended main commit with GitHub authentication and permission to
 push tags. Docker must be running and meet
-[REMOTE.md's host prerequisites](REMOTE.md#host-prerequisites); Apple Silicon
-runs the `linux/amd64` dry-run images under emulation.
+[REMOTE.md's host prerequisites](REMOTE.md#host-prerequisites). The hub dry run
+builds and checks both published platforms; local launch checks use the Docker
+host's native platform.
 
 Before creating a tag, the task fetches `origin/main`, checks that both tags
 are unused on origin, that the candidate is that main commit and that the newest
@@ -58,7 +59,8 @@ the home page behind the releases.
 
 After success, the skill upgrades Homebrew, checks the installed `ub --version`
 and reports `ub doctor`. It pulls both images with an empty Docker credential
-configuration, verifies the registry copies rather than dry-run local tags,
+configuration for both `linux/amd64` and `linux/arm64`, verifies each platform's
+registry identity rather than dry-run local tags,
 and launches the release's host files in a disposable loopback Compose project.
 It reports `200` for the site and `101` for `/ws`, then removes only that
 project's containers and volumes and its disposable directory. Other deployment
@@ -117,15 +119,21 @@ recovery and never deletes a release asset automatically.
 
 ### Hub publisher
 
-A hub release publishes two images for `linux/amd64`:
+A hub release publishes two multi-platform images, each with `linux/amd64` and
+`linux/arm64` entries:
 `ghcr.io/uberblick-ai/hub:X.Y.Z` and `ghcr.io/uberblick-ai/hub-web:X.Y.Z`.
 Both are public, so an operator needs no GitHub account or registry login.
 The hub image contains its bundled runtime and `/release`: the exact-version
 Compose file, `.env` template, shared operator scripts, manuals and
 `release.json`. The web image contains Caddy and one web bundle built without
 any deployment endpoint, workspace or secret. Images contain service payloads,
-not a source checkout. The release build scans the images and refuses `.env`,
-`fnox.toml`, `mise.local.toml` or database files before publishing either one.
+not a source checkout. All four runnable images share the tag's source commit,
+version and sync protocol. The release build checks each platform's own release
+metadata and labels and scans its layers for `.env`, `fnox.toml`,
+`mise.local.toml` or database files before pushing anything for that version.
+The dry run performs the same checks without pushing. Local dry runs retain
+platform-suffixed image tags (`X.Y.Z-amd64` and `X.Y.Z-arm64`) and an unsuffixed
+alias for the Docker host's native platform, for the launch proof below.
 
 ## One-time registry setup
 
@@ -150,13 +158,19 @@ Docker credential configuration, without a login:
 mkdir -p anonymous-docker-config
 DOCKER_CONFIG="$PWD/anonymous-docker-config" docker pull --platform linux/amd64 ghcr.io/uberblick-ai/hub:0.5.0
 DOCKER_CONFIG="$PWD/anonymous-docker-config" docker pull --platform linux/amd64 ghcr.io/uberblick-ai/hub-web:0.5.0
+DOCKER_CONFIG="$PWD/anonymous-docker-config" docker pull --platform linux/arm64 ghcr.io/uberblick-ai/hub:0.5.0
+DOCKER_CONFIG="$PWD/anonymous-docker-config" docker pull --platform linux/arm64 ghcr.io/uberblick-ai/hub-web:0.5.0
 ```
 
-Use the version just published, then follow [REMOTE.md](REMOTE.md) on a Linux
-host or Docker Desktop on macOS with no checkout. Apple Silicon runs the
-`linux/amd64` images under emulation. Verify the no-Tailscale loopback launch,
-GitHub claim, installed-client login and authenticated MCP and `ub open` sync,
-then the selected HTTPS route and operator commands. Verify Tailscale daemon
+Use the version just published; releases before multi-platform support remain
+amd64-only. Then follow [REMOTE.md](REMOTE.md) on a Linux x86_64 or arm64 host
+or Docker Desktop on macOS with no checkout. Docker selects the host's native
+platform. After the first multi-platform release, perform this attended check
+on an arm64 Linux Docker host with no emulation: verify the no-Tailscale
+loopback launch, an HTTPS route and GitHub claim, then installed-client login
+and authenticated MCP and `ub open` sync from a supported client computer
+(Apple Silicon macOS or Linux x86_64). For other hosts, verify the same journey
+and operator commands. Verify Tailscale daemon
 certificate retrieval on Linux and public DNS certificate issuance on a host
 with the required DNS and TCP 443 reachability. These are attended checks;
 an image push alone does not prove anonymous deployment works.
@@ -190,6 +204,11 @@ floors, and two hub releases that ship `ub-hub` (0.4.5 or newer). It extracts
 host files into empty directories and starts an isolated, disposable project on
 loopback HTTP, then checks backup, restore, setup
 status and replacement retaining documents, private history and Caddy state.
+The newer release must use the Docker host's native `amd64` or `arm64` images.
+On an arm64 host, the older release may be amd64-only; that baseline needs
+emulation to run, while the replacement must run natively. Use a native arm64
+baseline when checking a host without emulation. Both releases' extracted host
+files are used, so the upgrade also proves removal of older platform pins.
 Crossing from HMAC to public-key device credentials must retain the credential
 rows as revoked history without keys, including after restoring the older
 backup; upgrades between public-key releases must retain credentials unchanged.
@@ -198,8 +217,9 @@ certificate issuance, GitHub approval, the Mac Mini journey or anonymous
 registry pulls; those remain attended release checks.
 
 The paired release task pushes `hub-vX.Y.Z` together with `vX.Y.Z`; each tag
-starts its own publisher. The hub workflow builds and checks both images, then
-pushes them to GHCR. A separate job verifies both published images against the
+starts its own publisher. The hub workflow builds and checks both platforms of
+both images, then pushes them to GHCR. A separate job verifies both platforms
+of both published images against the
 tag's version, commit and protocol before attaching `compose.yml`,
 `remote.env.example`, `remote.https.yml` and `remote.tailscale.yml` to this
 repository's GitHub release. Only that job holds `contents: write`; it uses
@@ -238,8 +258,9 @@ a rerun verifies the recorded source commit and reuses matching published
 images without replacing them. A tag moved to another commit is refused before
 anything is published. Fix a released version by cutting a new version,
 never by moving or deleting its tag. If only one of the two images was
-published, the rerun refuses the incomplete pair rather than rebuilding or
-overwriting it. Cut a new version; never mix images from separate attempts.
+published, or either image is missing a required platform or has mismatched
+platform identity, the rerun refuses rather than rebuilding or overwriting it.
+Cut a new version; never mix images from separate attempts.
 
 ## Protocol compatibility
 
