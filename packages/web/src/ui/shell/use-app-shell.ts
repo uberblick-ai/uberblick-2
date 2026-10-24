@@ -21,13 +21,14 @@ export function useAppShell() {
   const layout = useShellLayout(environment.settings);
   const sync = useSyncDetails(environment.route.kind);
   const rooms = useShellRooms(environment);
-  const history = useDocumentHistory(environment.documentRevisions, rooms.selected, path);
+  const readings = useShellReadings(environment, rooms);
+  const decisionPage = environment.route.kind === "decision" || rooms.topic !== null || readings.meta?.kind === "decision";
+  const history = useDocumentHistory(decisionPage ? null : environment.documentRevisions, rooms.selected, path);
   const historyBack = useRef<HTMLButtonElement | null>(null);
   const alter = useAlterDecision({ ...rooms, ...environment, navigate });
   const pins = usePinToggles(rooms);
   const archive = useArchive({ ...rooms, ...environment, navigate });
   const threads = useThreadsRail(rooms.doc);
-  const readings = useShellReadings(environment, rooms);
   const navigation = useShellNavigation(environment, rooms, navigate, layout.closeSidebarDrawer);
   const onCreate = useCreateDocument({ ...rooms, ...environment, ...navigation });
   useDocumentStubRepair(rooms);

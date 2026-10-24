@@ -44,10 +44,11 @@ import type { TeamHub as Hub } from "@uberblick/hub/team";
 import type { TeamHubConfig as HubConfig } from "@uberblick/hub/team-config";
 import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
-import { getBlocks, getWorkspaceMainRepository, getWorkspaceName, listTagCatalog, seedTagCatalog, settingsRoom } from "@uberblick/schema";
+import { directoryRoom, getBlocks, getMeta, getWorkspaceMainRepository, getWorkspaceName, listTagCatalog, repairDirectoryStub, roomForDoc, seedTagCatalog, settingsRoom } from "@uberblick/schema";
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { preview } from "vite";
 import type { PreviewServer } from "vite";
+import * as Y from "yjs";
 import { LOCAL_SESSION_KEY } from "../src/collab/local-session.js";
 import { buildAppBundle, sharedAppBundle } from "./bundle.js";
 import { activateControl } from "./input-helpers.js";
@@ -263,6 +264,8 @@ export interface Harness {
   readonly secondWorkspace: string;
   /** Present when the fixture records a second replica on its own hub. */
   readonly secondHubUrl?: string;
+  /** Seed a document and its directory entry through the fixture hub. */
+  seedDocument(source: Y.Doc): Promise<void>;
   /** Inspect public document content received by one of the fixture hubs. */
   hubText(room: string, secondary?: boolean): string | null;
   hubWorkspaceSettings(): { name: string | null; mainRepository: string | null; tags: string[] } | null;
@@ -669,6 +672,19 @@ export async function startHarness(options: {
         return principals.identify("5678", username).id;
       },
       ...(secondHubUrl === undefined ? {} : { secondHubUrl }),
+      async seedDocument(source) {
+        if (hub === null) throw new Error("e2e: document seeding needs a running hub");
+        const { uuid } = getMeta(source);
+        const document = await hub.hocuspocus.openDirectConnection(roomForDoc(workspaceUuid, uuid));
+        try { await document.transact((target) => Y.applyUpdate(target, Y.encodeStateAsUpdate(source))); }
+        finally { await document.disconnect(); }
+        const directory = await hub.hocuspocus.openDirectConnection(directoryRoom(workspaceUuid));
+        try {
+          await directory.transact((target) => repairDirectoryStub(source, target, uuid, {
+            now: Date.now(), changedAt: null, coarsenessMs: 0,
+          }));
+        } finally { await directory.disconnect(); }
+      },
       hubText(room, secondary = false) {
         const document = (secondary ? secondHub : hub)?.hocuspocus.documents.get(room);
         return document === undefined ? null : getBlocks(document).map((block) => block.text).join("\n");
