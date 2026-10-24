@@ -9,7 +9,7 @@ import { DocumentTitle } from "./DocumentTitle.js";
 import { readRoomMeta, useDocMeta, useRoomStatus } from "../hooks.js";
 import { decisionRecordPath, docPath, isPlainClick } from "../route.js";
 import type { Navigate } from "../route.js";
-import { formatTimestamp, useTimestampClock } from "../timestamps.js";
+import { formatDecisionTimestamp, useTimestampClock } from "../timestamps.js";
 import { TOPIC_STATES } from "./decision-state.js";
 import { Button } from "../shadcn/button.js";
 import { DialogTrigger } from "../shadcn/dialog.js";
@@ -126,7 +126,7 @@ function AnswerHeader({ topic, record, topicPath, navigate, docLinks, onAlterDec
   const now = useTimestampClock();
   const state = answerState(topic, record);
   const replacement = state === "superseded" ? replacementRecord(topic, record.uuid) : undefined;
-  const replacedAt = replacement?.decidedAt === undefined ? null : formatTimestamp(replacement.decidedAt, now, true);
+  const replacedAt = replacement?.decidedAt === undefined ? null : formatDecisionTimestamp(replacement.decidedAt, now);
   return <>
     <TopicNotice topic={topic} state={state} selectedInForce={topic.inForce?.uuid === record.uuid} docLinks={docLinks} />
     {(state === "superseded" || (topic.inForce !== null && topic.inForce.uuid !== record.uuid)) &&
@@ -165,7 +165,7 @@ function Timeline({ topic, selected, linkedRecord, segment, navigate, docLinks, 
     <ol className="ub-decision-timeline">
       {records.map((record, index) => {
         const date = recordDate(record);
-        const time = date === undefined ? null : formatTimestamp(date, now, true);
+        const time = date === undefined ? null : formatDecisionTimestamp(date, now);
         const chosen = record.uuid === selected;
         const state = answerState(topic, record);
         const inForce = topic.inForce?.uuid === record.uuid;

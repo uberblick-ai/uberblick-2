@@ -4,7 +4,7 @@ import type { ReactElement } from "react";
 import { TOPIC_STATES, TOPIC_STATE_ORDER } from "./decision-state.js";
 import { docPath, isPlainClick } from "../route.js";
 import type { Navigate } from "../route.js";
-import { formatShortTimestamp, useTimestampClock } from "../timestamps.js";
+import { formatDecisionTimestamp, useTimestampClock } from "../timestamps.js";
 
 export function decisionsSummary(topics: readonly DecisionTopicResolution[]): string {
   const count = topics.length;
@@ -34,7 +34,7 @@ export function DecisionsLink({ topics, id }: {
 }
 
 function Attribution({ record, now }: { record: DirectoryEntry; now: number }): ReactElement {
-  const time = record.decidedAt === undefined ? null : formatShortTimestamp(record.decidedAt, now);
+  const time = record.decidedAt === undefined ? null : formatDecisionTimestamp(record.decidedAt, now, true);
   if (!record.decidedBy && time === null) return <span className="ub-decisions-state-label">In force</span>;
   return <>
     {record.decidedBy}

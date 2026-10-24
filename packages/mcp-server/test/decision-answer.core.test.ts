@@ -5,7 +5,7 @@ import { readBlocks, removeTempDirs, startServer, testConfig } from "./core-help
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
-const attribution = { who: "A person", when: "2026-10-12", where: "A team discussion." };
+const attribution = { who: "A person", when: "2026-10-12T12:00:00.000Z", where: "A team discussion." };
 const paragraph = { type: "paragraph", text: "Use the log because replay preserves history." };
 
 async function local() {

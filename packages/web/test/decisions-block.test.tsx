@@ -105,7 +105,10 @@ describe("the compact Decisions block", () => {
     expect(date?.getAttribute("datetime")).toBe("2026-10-07T12:00:00.000Z");
     expect(date?.getAttribute("title")).toBeTruthy();
     expect(within(host).getByRole("link", { name: "In force: Answerer only" }).querySelector(".ub-decisions-row-meta")?.textContent).toBe("bk-one");
-    expect(within(host).getByRole("link", { name: "In force: Date only" }).querySelector("time")?.textContent).toBe("2d");
+    const calendarDate = within(host).getByRole("link", { name: "In force: Date only" }).querySelector("time");
+    expect(calendarDate?.textContent).toBe("Oct 10, 2026");
+    expect(calendarDate?.getAttribute("datetime")).toBe("2026-10-10");
+    expect(calendarDate?.getAttribute("title")).toBe("Oct 10, 2026");
     for (const question of ["No attribution", "Invalid date"]) {
       expect(within(host).getByRole("link", { name: `In force: ${question}` }).querySelector(".ub-decisions-row-meta")?.textContent).toBe("In force");
     }

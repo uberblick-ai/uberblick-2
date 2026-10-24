@@ -15,6 +15,7 @@ const YEAR = 365 * DAY;
 const RECENT_WINDOW = MONTH;
 
 const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+const CALENDAR_DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" });
 const DATE_TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",
@@ -23,7 +24,7 @@ const DATE_TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
 export interface FormattedTimestamp {
   label: string;
   dateTime: string;
-  /** Present only while the visible label is relative. */
+  /** Exact instant or calendar date shown on hover. */
   title?: string;
 }
 
@@ -95,6 +96,21 @@ export function formatShortTimestamp(
     dateTime: date.toISOString(),
     title: DATE_TIME_FORMAT.format(date),
   };
+}
+
+/** Legacy decision dates have no time or viewer time zone. */
+export function formatDecisionTimestamp(
+  value: string | number,
+  now: number = Date.now(),
+  compact = false,
+): FormattedTimestamp | null {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const date = timestampDate(value);
+    if (date === null) return null;
+    const label = CALENDAR_DATE_FORMAT.format(date);
+    return { label, dateTime: value, title: label };
+  }
+  return compact ? formatShortTimestamp(value, now) : formatTimestamp(value, now, true);
 }
 
 /** One minute-resolution clock, called once by each timestamp surface. */

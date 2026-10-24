@@ -18,6 +18,15 @@ afterEach(async () => {
   removeTempDirs();
 });
 
+it("documents the zoned decision-answer time and current-time guidance", async () => {
+  const rig = await local();
+  const { text } = await rig.ok("get_help", { topic: "decisions" });
+  expect(text).toContain("`when` is an ISO 8601 date-time with a time zone");
+  expect(text).toContain("`2026-10-24T10:55:00Z`");
+  expect(text).toContain("pass the current time if the answer was given just now");
+  expect(text).toContain("normalises it to UTC");
+});
+
 it("documents the closed version-1 data vocabulary and demonstrates a schema the validator accepts", async () => {
   const rig = await local();
   const { text } = await rig.ok("get_help", { topic: "data" });

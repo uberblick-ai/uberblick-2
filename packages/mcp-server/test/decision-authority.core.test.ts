@@ -6,7 +6,7 @@ import { directoryStub, removeTempDirs, startServer, testConfig } from "./core-h
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
-const answer = { who: "A workspace member", when: "2026-10-04T12:00:00Z", where: "https://example.org/team/decision" };
+const answer = { who: "A workspace member", when: "2026-10-04T12:00:00.000Z", where: "https://example.org/team/decision" };
 const body = [{ type: "paragraph", text: "Use the append-only update log because replay preserves the history." }];
 
 async function localRig(): Promise<Rig> {
@@ -53,6 +53,38 @@ afterEach(async () => {
 afterAll(removeTempDirs);
 
 describe("decision authority through MCP", () => {
+  it.each(["2026-10-24", "2026-10-24T10:55", "yesterday"])("refuses answer time %s on both tools without writing", async when => {
+    const rig = await localRig();
+    const open = await decision(rig);
+    for (const [tool, args] of [
+      ["create_doc", { title: "Invalid answer time", description: "Must never be created.", kind: "decision", status: "decided", blocks: body }],
+      ["set_status", { uuid: open.uuid, status: "decided" }],
+    ] as const) {
+      const before = state(rig, open.uuid);
+      const refused = await rig.call(tool, { ...args, answer: { ...answer, when } });
+      expect(refused).toMatchObject({ isError: true, payload: { error: "schema_validation" } });
+      expect(refused.payload.message).toContain("ISO 8601 date-time with a time zone");
+      expect(refused.payload.message).toContain("2026-10-24T10:55:00Z");
+      expect(refused.payload.message).toContain("pass the current time if the answer was given just now");
+      expect(state(rig, open.uuid)).toEqual(before);
+    }
+  });
+
+  it.each([
+    ["2026-10-24T10:55:00Z", "2026-10-24T10:55:00.000Z"],
+    ["2026-10-24T17:55:00+07:00", "2026-10-24T10:55:00.000Z"],
+    [" 2026-10-24T03:55:00.123-07:00 ", "2026-10-24T10:55:00.123Z"],
+  ])("stores answer time %s as UTC through both tools", async (when, decidedAt) => {
+    const rig = await localRig();
+    const created = await decision(rig, { status: "decided", answer: { ...answer, when } });
+    const open = await decision(rig);
+    await rig.ok("set_status", { uuid: open.uuid, status: "decided", answer: { ...answer, when } });
+    for (const record of [created, open]) {
+      expect(getMetaMap(rig.instance.replicas.replica(record.uuid).doc).get("decidedAt")).toBe(decidedAt);
+      expect(await rig.ok("get_doc", { uuid: record.uuid })).toMatchObject({ decidedAt });
+    }
+  });
+
   it("takes a first stance without Reconsidering and confirms it only with a recorded answer", async () => {
     const rig = await localRig();
     const born = await decision(rig, { status: "decided" });
@@ -225,7 +257,7 @@ describe("decision authority through MCP", () => {
     const rig = await localRig();
     const record = await legacyDecision(rig, { status: "decided", answer, tldr: "Use the update log." });
     const doc = rig.instance.replicas.replica(record.uuid).doc;
-    const changedAgain = { who: "Another workspace member", when: "2026-10-05T08:00:00Z", where: "An in-person review." };
+    const changedAgain = { who: "Another workspace member", when: "2026-10-05T08:00:00.000Z", where: "An in-person review." };
     const edits: ((offline: Y.Doc) => void)[] = [
       offline => setTldr(offline, "Use the database-backed log."),
       offline => {
