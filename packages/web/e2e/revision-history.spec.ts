@@ -1,8 +1,9 @@
+import { createHash, randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
-import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, initDoc, insertBlock, setTitle, snapshotRevision } from "@uberblick/schema";
+import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, initDoc, insertBlock, setKind, setStatus, setTitle, snapshotRevision } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import { activateControl, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
@@ -103,15 +104,23 @@ function savedState(uuid: string, title: string, text: string): string {
   }
 }
 
+/** Readable fixture names become the same UUID-shaped identities the hub serves. */
+function revisionId(name: string): string {
+  const hex = createHash("sha256").update(name).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
 async function serveHistory(page: Page, revisions: RevisionEntry[], states: Record<string, string>): Promise<string[]> {
   const snapshotReads: string[] = [];
   await page.route("**/api/revisions?**", async route => {
     const revision = new URL(route.request().url()).searchParams.get("revision");
-    if (revision !== null) snapshotReads.push(revision);
+    const name = revision === null ? null : Object.keys(states).find(name => revisionId(name) === revision) ?? revision;
+    if (name !== null) snapshotReads.push(name);
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(revision === null ? { revisions } : { state: states[revision] }),
+      body: JSON.stringify(name === null ? { revisions: revisions.map(entry => ({ ...entry, id: revisionId(entry.id) })) }
+        : { state: states[name] }),
     });
   });
   return snapshotReads;
@@ -316,6 +325,184 @@ function dataHistory(uuid: string, title: string): Record<string, string> {
 
 test.describe("document history through ub open", () => {
   const { harness, openApp } = setupHarness({ accessRole: "admin" });
+
+  test("history controls add shareable addresses and browser Back and Forward retrace every view", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const title = docTitle("Addressed history navigation");
+    const uuid = await newDocument(page, title);
+    const path = new URL(page.url()).pathname;
+    const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
+    await serveHistory(page, [
+      { id: "latest", title, author: null, startedAt: 3_000, endedAt: null },
+      { id: "middle", title, author: null, startedAt: 2_000, endedAt: 3_000 },
+      { id: "baseline", title, author: person, startedAt: 1_000, endedAt: 2_000,
+        name: { text: "Kickoff", namer: person, namedAt: 2_000, canManage: true } },
+    ], {
+      latest: savedState(uuid, title, "Latest content."),
+      middle: savedState(uuid, title, "Middle content."),
+      baseline: savedState(uuid, title, "Baseline content."),
+    });
+    const latest = `${path}/rev/${revisionId("latest")}`;
+    const middle = `${path}/rev/${revisionId("middle")}`;
+    const baseline = `${path}/rev/${revisionId("baseline")}`;
+    const comparison = `${latest}/since/${revisionId("baseline")}`;
+    const assertView = async (address: string, text: string | null): Promise<void> => {
+      await expect(page).toHaveURL(new URL(address, harness().appUrl).href);
+      if (text === null) {
+        await expect(historicalEditor(page)).toHaveCount(0);
+        await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+      } else {
+        await expect(historicalEditor(page)).toContainText(text);
+      }
+    };
+    await previous(page);
+    await assertView(latest, "Latest content.");
+    await previous(page);
+    await assertView(middle, "Middle content.");
+    let drawer = await showHistoryList(page);
+    await activateControl(historyList(page).getByRole("button", { name: /Kickoff/ }));
+    await closeHistoryList(page, drawer);
+    await assertView(baseline, "Baseline content.");
+    drawer = await showHistoryList(page);
+    await activateControl(historyList(page).getByRole("button", { name: "Changes since this name", exact: true }));
+    await closeHistoryList(page, drawer);
+    await assertView(comparison, "Latest content.");
+    await expect(history(page)).toContainText("compared with “Kickoff”");
+    await backToNow(page);
+    await assertView(path, null);
+    await previous(page);
+    await assertView(latest, "Latest content.");
+    await activateControl(history(page).getByRole("button", { name: "Next revision", exact: true }));
+    await assertView(path, null);
+
+    const visited = [
+      [path, null], [latest, "Latest content."], [middle, "Middle content."],
+      [baseline, "Baseline content."], [comparison, "Latest content."], [path, null],
+      [latest, "Latest content."], [path, null],
+    ] as const;
+    for (const [address, text] of visited.slice(0, -1).reverse()) {
+      await page.goBack();
+      await assertView(address, text);
+    }
+    for (const [address, text] of visited.slice(1)) {
+      await page.goForward();
+      await assertView(address, text);
+    }
+  });
+
+  test("copied revision and comparison addresses survive reload and newer revisions with both ends fixed", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const title = docTitle("Shared history views");
+    const uuid = await newDocument(page, title);
+    const path = new URL(page.url()).pathname;
+    expect(path).toBe(`/${harness().workspace}/${uuid}`);
+    const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
+    const revisions: RevisionEntry[] = [
+      { id: "latest", title, author: null, startedAt: 4_000, endedAt: null },
+      { id: "middle", title, author: null, startedAt: 3_000, endedAt: 4_000 },
+      { id: "earlier", title, author: null, startedAt: 2_000, endedAt: 3_000 },
+      { id: "baseline", title, author: person, startedAt: 1_000, endedAt: 2_000,
+        name: { text: "Reviewed", namer: person, namedAt: 2_000, canManage: true } },
+    ];
+    const states = {
+      newer: savedState(uuid, title, "Newer content."),
+      latest: savedState(uuid, title, "Selected content."),
+      middle: savedState(uuid, title, "Predecessor content."),
+      earlier: savedState(uuid, title, "Unnamed baseline content."),
+      baseline: savedState(uuid, title, "Named baseline content."),
+    };
+    await serveHistory(page, revisions, states);
+    await previous(page);
+    await expect(historicalEditor(page)).toContainText("Selected content.");
+    const copiedRevision = new URL(page.url()).pathname;
+    expect(copiedRevision).toBe(`${path}/rev/${revisionId("latest")}`);
+    const drawer = await showHistoryList(page);
+    await activateControl(historyList(page).getByRole("button", { name: "Changes since this name", exact: true }));
+    await closeHistoryList(page, drawer);
+    await expect(history(page)).toContainText("compared with “Reviewed”");
+    const copiedComparison = new URL(page.url()).pathname;
+    expect(copiedComparison).toBe(`${copiedRevision}/since/${revisionId("baseline")}`);
+    revisions.unshift({ id: "newer", title, author: null, startedAt: 5_000, endedAt: null });
+
+    const assertComparison = async (shared: Page, before: string): Promise<void> => {
+      await expect(historicalEditor(shared)).toContainText("Selected content.");
+      await expect(historicalEditor(shared)).not.toContainText("Newer content.");
+      await expect(earlierSide(shared)).toContainText(before);
+    };
+    const shared = await openApp(browser, copiedRevision, {
+      contextOptions: { viewport: { width: 1440, height: 900 } },
+      beforeNavigate: async opened => { await serveHistory(opened, revisions, states); },
+      readySelector: ".ub-revision-pane",
+    });
+    await assertComparison(shared, "Predecessor content.");
+    await shared.reload();
+    await assertComparison(shared, "Predecessor content.");
+    await expect(shared).toHaveURL(new URL(copiedRevision, harness().appUrl).href);
+    await shared.goto(new URL(copiedComparison, harness().appUrl).href);
+    await assertComparison(shared, "Named baseline content.");
+    await expect(history(shared)).toContainText("compared with “Reviewed”");
+    await expect(historyList(shared).getByRole("button", { name: "Changes since this name", exact: true }))
+      .not.toHaveAttribute("aria-current");
+    await shared.reload();
+    await assertComparison(shared, "Named baseline content.");
+    await expect(shared).toHaveURL(new URL(copiedComparison, harness().appUrl).href);
+    const unnamedComparison = `${copiedRevision}/since/${revisionId("earlier")}`;
+    await shared.goto(new URL(unnamedComparison, harness().appUrl).href);
+    await assertComparison(shared, "Unnamed baseline content.");
+    await expect(history(shared)).not.toContainText("compared with");
+    await shared.reload();
+    await assertComparison(shared, "Unnamed baseline content.");
+    await expect(shared).toHaveURL(new URL(unnamedComparison, harness().appUrl).href);
+  });
+
+  test("missing and reversed history addresses show a recoverable history error", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const title = docTitle("Invalid history view");
+    const uuid = await newDocument(page, title);
+    const path = new URL(page.url()).pathname;
+    await serveHistory(page, [
+      { id: "latest", title, author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", title, author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], {
+      latest: savedState(uuid, title, "Latest content."),
+      earlier: savedState(uuid, title, "Earlier content."),
+    });
+    for (const suffix of [
+      `rev/${revisionId("missing")}`,
+      `rev/${revisionId("latest")}/since/${revisionId("missing")}`,
+      `rev/${revisionId("earlier")}/since/${revisionId("latest")}`,
+      `rev/${revisionId("latest")}/since/${revisionId("latest")}`,
+    ]) {
+      const address = new URL(`${path}/${suffix}`, harness().appUrl).href;
+      await page.goto(address);
+      await expect(page.locator(".ub-revision-pane").getByRole("status")).toContainText("History is unavailable");
+      await expect(historicalEditor(page)).toHaveCount(0);
+      await expect(editor(page)).toBeHidden();
+      await expect(page).toHaveURL(address);
+      await backToNow(page);
+      await expect(page).toHaveURL(new URL(path, harness().appUrl).href);
+      await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    }
+  });
+
+  test("a decision topic history address opens the live topic at its plain address", async ({ browser }) => {
+    const uuid = randomUUID();
+    const document = new Y.Doc();
+    try {
+      initDoc(document, { uuid, title: docTitle("Decision without document history") });
+      appendBlock(document, { type: "paragraph", text: "The proposal remains on the live topic." });
+      setKind(document, "decision");
+      setStatus(document, "open");
+      await harness().seedDocument(document);
+    } finally { document.destroy(); }
+    const path = `/${harness().workspace}/${uuid}`;
+    const shared = await openApp(browser, `${path}/rev/${revisionId("latest")}/since/${revisionId("earlier")}`, {
+      readySelector: ".ub-decision-answer",
+    });
+    await expect(shared).toHaveURL(new URL(path, harness().appUrl).href);
+    await expect(history(shared)).toHaveCount(0);
+    await expect(shared.locator(".ub-revision-pane")).toHaveCount(0);
+  });
 
   test("names the reviewed state, compares since it, and lets its namer rename or remove it", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
@@ -580,7 +767,7 @@ test.describe("document history through ub open", () => {
     expect(await view.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.isEditable)).toBe(false);
     await expect(history(page)).toContainText("browser-person");
     await expect(history(page)).toContainText(/from /);
-    await expect(page).toHaveURL(new URL(path, harness().appUrl).href);
+    await expect(page).toHaveURL(new RegExp(`${path}/rev/[0-9a-f-]+$`));
     await expect(view.locator('[data-revision-change="added"]')).toContainText("blue");
     const earlier = earlierSide(page);
     const removed = earlier.locator('[data-revision-change="removed"]').filter({ hasText: "amber" });
@@ -928,7 +1115,6 @@ test.describe("document history through ub open", () => {
     await expect(page.locator(".ub-document-pane")).toHaveText("This document was deleted.");
     const title = docTitle("Historical link source");
     const uuid = await newDocument(page, title);
-    const sourceAddress = page.url();
     await page.context().route("https://example.invalid/history-link", route => route.fulfill({
       contentType: "text/html", body: "<p>Historical external link target</p>",
     }));
@@ -942,6 +1128,8 @@ test.describe("document history through ub open", () => {
     await closeHistoryList(page, drawer);
     const split = page.locator(".ub-revision-split");
     await expect(split).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/${uuid}/rev/${revisionId("latest")}$`));
+    const sourceAddress = page.url();
     for (const side of [earlierSide(page), historicalEditor(page)]) {
       const caretInLink = async (label: string): Promise<void> => {
         const paragraph = side.locator(":scope > p").filter({ hasText: `Read ${label}.` });
@@ -966,8 +1154,8 @@ test.describe("document history through ub open", () => {
         await expect(page.locator(".ub-title")).toHaveValue(targetTitle);
         await expect(split).toHaveCount(0);
         await page.goBack();
-        await expect(page.locator(".ub-title")).toHaveValue(title);
-        await previous(page);
+        await expect(page).toHaveURL(sourceAddress);
+        await expect(page.locator(".ub-revision-title")).toHaveText(title);
         await expect(split).toBeVisible();
       }
       await caretInLink("the external page");
@@ -1485,8 +1673,6 @@ test.describe("document history through ub open", () => {
     await activateControl(collapse);
     await expect(collapse).not.toBeChecked();
     await page.reload();
-    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
-    await previous(page);
     await expect(historicalEditor(page)).toContainText("Background paragraph 2");
     await expect(page.locator(".ub-revision-fold-button")).toHaveCount(0);
     await expect(historyList(page).getByRole("switch", { name: "Collapse unchanged" })).not.toBeChecked();
@@ -1982,6 +2168,19 @@ test.describe("local-only document history", () => {
     await newDocument(page, docTitle("Local document"));
     await expect(history(page)).toHaveCount(0);
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+  });
+
+  test("a local-only history address opens the live document at its plain address", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    await newDocument(page, docTitle("Local history address"));
+    const address = page.url();
+    for (const suffix of [`/rev/${revisionId("latest")}`, `/rev/${revisionId("latest")}/since/${revisionId("earlier")}`]) {
+      const shared = await openApp(browser, `${new URL(address).pathname}${suffix}`, { readySelector: ".ub-editor .ProseMirror" });
+      await expect(shared).toHaveURL(address);
+      await expect(history(shared)).toHaveCount(0);
+      await expect(shared.locator(".ub-revision-pane")).toHaveCount(0);
+      await expect(editor(shared)).toHaveAttribute("contenteditable", "true");
+    }
   });
 });
 

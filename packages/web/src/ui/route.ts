@@ -18,6 +18,12 @@ export interface Workspace {
   segment: string;
 }
 
+/** Fixed ends of a revision view, independently of later document changes. */
+export interface RevisionView {
+  revision: string;
+  since?: string;
+}
+
 /** The destinations inside workspace settings. */
 export type SettingsPage = "general" | "tags" | "members" | "preferences" | "devices" | "hub-admins" | "hub-workspaces";
 
@@ -33,7 +39,7 @@ export type Route =
   | { kind: "list"; workspace: Workspace }
   | { kind: "all"; workspace: Workspace }
   | { kind: "settings"; workspace: Workspace; page: SettingsPage }
-  | { kind: "doc"; workspace: Workspace; uuid: string }
+  | { kind: "doc"; workspace: Workspace; uuid: string; history?: RevisionView }
   | { kind: "decision"; workspace: Workspace; topic: string; record: string }
   | { kind: "invalid"; reason: string; workspace: Workspace | null };
 
@@ -66,6 +72,22 @@ function readWorkspace(segment: string): Workspace | null {
   } catch {
     return null;
   }
+}
+
+function readRevisionRoute(segments: string[], workspace: Workspace): Route | null {
+  if (segments[2]?.toLowerCase() !== "rev") return null;
+  if (segments.length !== 4 && (segments.length !== 6 || segments[4]?.toLowerCase() !== "since")) return null;
+  const uuid = canonicalDocumentUuid(segments[1] ?? "");
+  const revision = canonicalDocumentUuid(segments[3] ?? "");
+  const since = segments.length === 6 ? canonicalDocumentUuid(segments[5] ?? "") : undefined;
+  if (uuid === null || revision === null || since === null) {
+    return {
+      kind: "invalid",
+      reason: "Its document or revision is not a uuid.",
+      workspace,
+    };
+  }
+  return { kind: "doc", workspace, uuid, history: { revision, ...(since === undefined ? {} : { since }) } };
 }
 
 /**
@@ -137,6 +159,8 @@ export function parseRoute(pathname: string, configured: string | null): Route {
     }
     return { kind: "decision", workspace, topic, record };
   }
+  const revisionRoute = readRevisionRoute(segments, workspace);
+  if (revisionRoute !== null) return revisionRoute;
   if (segments.length > 2) {
     return {
       kind: "invalid",
@@ -190,6 +214,12 @@ export function docPath(segment: string, uuid: string): string {
   return `/${segment}/${uuid}`;
 }
 
+/** Both ends stay fixed when a revision comparison is shared or reopened. */
+export function revisionPath(segment: string, uuid: string, revision: string, since?: string): string {
+  const root = `${docPath(segment, uuid)}/rev/${revision}`;
+  return since === undefined ? root : `${root}/since/${since}`;
+}
+
 /** Explicit history selection keeps the first record's topic address stable. */
 export function decisionRecordPath(
   segment: string,
@@ -226,7 +256,8 @@ export function canonicalPath(route: Route): string | null {
     case "settings":
       return settingsPath(route.workspace.segment, route.page);
     case "doc":
-      return docPath(route.workspace.segment, route.uuid);
+      return route.history === undefined ? docPath(route.workspace.segment, route.uuid)
+        : revisionPath(route.workspace.segment, route.uuid, route.history.revision, route.history.since);
     case "decision":
       return decisionRecordPath(route.workspace.segment, route.topic, route.record);
     default:

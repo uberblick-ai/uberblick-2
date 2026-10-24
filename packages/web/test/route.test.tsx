@@ -45,6 +45,7 @@ import {
   docIsHydrated,
   docPath,
   parseRoute,
+  revisionPath,
   settingsPath,
   shareUrl,
   useRoutePath,
@@ -63,6 +64,7 @@ vi.mock("sonner", async (importOriginal) => ({
 
 const UUID = "3231bff4-2f1c-4a49-9f0a-6f8b2c1d7e55";
 const OTHER = "8c9a1b20-77de-4d31-bd2e-1f0f3a5c6b90";
+const EARLIER = "c7d992cb-051e-41aa-8f3e-a4eb68871d90";
 
 /** The workspace the addresses below name. A workspace id is a uuid. */
 const WS = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
@@ -97,6 +99,49 @@ describe("an address names a document, a workspace mode, or neither", () => {
     expect(canonicalPath(route(docPath(DECORATED, OTHER)))).toBe(
       docPath(DECORATED, OTHER),
     );
+  });
+
+  it("keeps a revision and both ends of a comparison in the document address", () => {
+    const selected = revisionPath(DECORATED, UUID, OTHER);
+    expect(selected).toBe(`/${DECORATED}/${UUID}/rev/${OTHER}`);
+    expect(route(selected)).toEqual({
+      kind: "doc", workspace: { uuid: WS, segment: DECORATED }, uuid: UUID,
+      history: { revision: OTHER },
+    });
+    expect(canonicalPath(route(selected))).toBe(selected);
+
+    const comparison = revisionPath(DECORATED, UUID, OTHER, EARLIER);
+    expect(comparison).toBe(`${selected}/since/${EARLIER}`);
+    expect(route(comparison)).toEqual({
+      kind: "doc", workspace: { uuid: WS, segment: DECORATED }, uuid: UUID,
+      history: { revision: OTHER, since: EARLIER },
+    });
+    expect(canonicalPath(route(comparison))).toBe(comparison);
+    expect(canonicalPath(route(docPath(DECORATED, UUID)))).toBe(docPath(DECORATED, UUID));
+  });
+
+  it("normalizes revision spelling and rejects malformed history addresses", () => {
+    expect(canonicalPath(route(`/${DECORATED}/${UUID.toUpperCase()}/REV/${OTHER.toUpperCase()}/`))).toBe(
+      revisionPath(DECORATED, UUID, OTHER),
+    );
+    expect(canonicalPath(route(`/${DECORATED}/${UUID.toUpperCase()}/REV/${OTHER.toUpperCase()}/SINCE/${EARLIER.toUpperCase()}/`))).toBe(
+      revisionPath(DECORATED, UUID, OTHER, EARLIER),
+    );
+    for (const invalid of [
+      `/${WS}/not-a-document/rev/${OTHER}`,
+      `/${WS}/${UUID}/rev/not-a-revision`,
+      `/${WS}/${UUID}/rev/${OTHER}/since/not-a-revision`,
+      `/${WS}/${UUID}/rev`,
+      `/${WS}/${UUID}/revisions/${OTHER}`,
+      `/${WS}/${UUID}/rev/${OTHER}/since`,
+      `/${WS}/${UUID}/rev/${OTHER}/before/${EARLIER}`,
+      `/${WS}/${UUID}/rev/${OTHER}/since/${EARLIER}/more`,
+      `/${WS}/${UUID}/rev/${OTHER}/more`,
+      `/${WS}/${UUID}/rev//since/${EARLIER}`,
+    ]) {
+      expect(route(invalid).kind).toBe("invalid");
+      expect(canonicalPath(route(invalid))).toBeNull();
+    }
   });
 
   it("normalizes explicit selection spelling while retaining both identities", () => {
@@ -422,6 +467,38 @@ describe("the URL and the app are two-way bound", () => {
     const reopened = render(<Probe to={topicPath} />);
     expect(within(reopened.container).getByRole("button").textContent).toBe(selectedPath);
     expect(route(selectedPath).kind).toBe("decision");
+  });
+
+  it("restores fixed revision views from copied addresses and browser history", async () => {
+    const live = docPath(DECORATED, UUID);
+    const selected = revisionPath(DECORATED, UUID, OTHER);
+    const comparison = revisionPath(DECORATED, UUID, OTHER, EARLIER);
+    window.history.replaceState(null, "", live);
+    const view = render(<Probe to={selected} />);
+    const probe = (): HTMLButtonElement => within(view.container)
+      .getByRole<HTMLButtonElement>("button", { name: /^\// });
+    const initialLength = window.history.length;
+    act(() => probe().click());
+    expect(probe().textContent).toBe(selected);
+    view.rerender(<Probe to={comparison} />);
+    act(() => probe().click());
+    expect(probe().textContent).toBe(comparison);
+    expect(window.history.length).toBe(initialLength + 2);
+
+    await act(async () => { window.history.back(); await waitForPop(); });
+    expect(probe().textContent).toBe(selected);
+    await act(async () => { window.history.back(); await waitForPop(); });
+    expect(probe().textContent).toBe(live);
+    await act(async () => { window.history.go(2); await waitForPop(); });
+    expect(probe().textContent).toBe(comparison);
+    expect(route(window.location.pathname)).toEqual({
+      kind: "doc", workspace: { uuid: WS, segment: DECORATED }, uuid: UUID,
+      history: { revision: OTHER, since: EARLIER },
+    });
+
+    view.unmount();
+    const reopened = render(<Probe to={live} />);
+    expect(within(reopened.container).getByRole("button").textContent).toBe(comparison);
   });
 });
 

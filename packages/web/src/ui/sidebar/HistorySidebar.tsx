@@ -115,7 +115,7 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
                     </button>
                     {name !== undefined && index > 0 && (
                       <button type="button" className="ub-history-since mb-1 ml-[3.25rem] border-0 bg-transparent p-0 font-[inherit] ub-type-caption text-(--sidebar-muted-foreground) underline-offset-2 hover:underline cursor-pointer aria-[current=true]:text-sidebar-foreground [@media(any-pointer:coarse)]:min-h-11"
-                        aria-current={history.selection?.comparedWith?.id === entry.id ? "true" : undefined}
+                        aria-current={history.selection?.index === 0 && history.selection.comparedWith?.id === entry.id ? "true" : undefined}
                         onClick={() => history.sinceNamed(entry.id)}>
                         Changes since this name
                       </button>

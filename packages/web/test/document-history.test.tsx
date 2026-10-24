@@ -1,10 +1,12 @@
 import { act, render, type RenderResult } from "./react-render.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import * as Y from "yjs";
 import { getMeta, initDoc, setTitle, type RevisionEntry } from "@uberblick/schema";
 import * as revisionClient from "../src/shell/document-revisions.js";
 import { DocumentHistoryError, type DocumentRevisionsClient } from "../src/shell/document-revisions.js";
 import { renamedFrom, useDocumentHistory, type DocumentHistory } from "../src/ui/document/document-history.js";
+import type { RevisionView } from "../src/ui/route.js";
 
 const UUID = "9f3c1a2b-0000-4000-8000-0123456789ab";
 const OTHER_UUID = "4a9939be-2778-442f-9278-e1517ef88335";
@@ -49,6 +51,237 @@ function mount(api: DocumentRevisionsClient | null, uuid: string | null = UUID, 
   return { view, seen, reading: () => seen.at(-1)!,
     visit: (nextApi, nextUuid, nextPath) => view.rerender(<Probe api={nextApi} uuid={nextUuid} path={nextPath} />) };
 }
+
+function mountRouted(initialApi: DocumentRevisionsClient | null, initialView: RevisionView | null, initialDocument: Y.Doc | null = null) {
+  let api = initialApi;
+  let change!: (next: RevisionView | null, nextApi: DocumentRevisionsClient | null) => void;
+  let hydrate!: (next: Y.Doc | null) => void;
+  const seen: DocumentHistory[] = [];
+  const navigate = vi.fn((next: RevisionView | null) => change(next, api));
+  function Probe(): null {
+    const [input, setInput] = useState({ api: initialApi, view: initialView, liveDocument: initialDocument });
+    change = (next, nextApi) => setInput(previous => ({ ...previous, api: nextApi, view: next }));
+    hydrate = next => setInput(previous => ({ ...previous, liveDocument: next }));
+    seen.push(useDocumentHistory(input.api, UUID, "/document/one", input.liveDocument, { view: input.view, navigate }));
+    return null;
+  }
+  const view = render(<Probe />);
+  return { view, seen, navigate, reading: () => seen.at(-1)!,
+    visit: (next: RevisionView | null, nextApi = api) => {
+      api = nextApi;
+      act(() => change(next, nextApi));
+    },
+    hydrate: (next: Y.Doc | null) => act(() => hydrate(next)),
+  };
+}
+
+describe("address-controlled history views", () => {
+  it("opens an old revision with its own predecessor even when newer revisions exist", async () => {
+    const api = client();
+    const fix = mountRouted(api, { revision: "middle" });
+    expect(fix.reading()).toMatchObject({ active: true, busy: true, selection: null });
+    await act(async () => {});
+    expect(fix.reading()).toMatchObject({ active: true, busy: false, error: null });
+    expect(fix.reading().entry?.id).toBe("middle");
+    expect(getMeta(fix.reading().selection!.after).title).toBe("middle");
+    expect(getMeta(fix.reading().selection!.before!).title).toBe("earliest");
+    expect(fix.navigate).not.toHaveBeenCalled();
+  });
+
+  it("captures a late-arriving live document before restoring a directly addressed revision", async () => {
+    const checksum = vi.spyOn(revisionClient, "documentRevisionChecksum").mockImplementation(async doc => getMeta(doc).title);
+    try {
+      const api = client();
+      vi.mocked(api.restore).mockResolvedValue({ revision: entries[0]!, applied: false });
+      const fix = mountRouted(api, { revision: "middle" });
+      await act(async () => {});
+      expect(fix.reading().entry?.id).toBe("middle");
+      await act(async () => {
+        await expect(fix.reading().restore("middle")).rejects.toThrow(/Wait for the live document to load/);
+      });
+      expect(api.restore).not.toHaveBeenCalled();
+
+      const live = document("Current synchronized document");
+      fix.hydrate(live);
+      await act(async () => {});
+      setTitle(live, "Later collaborator change");
+      await act(async () => { await expect(fix.reading().restore("middle")).resolves.toBe(false); });
+      expect(api.restore).toHaveBeenCalledWith(UUID, "middle", "Current synchronized document", expect.any(AbortSignal));
+      expect(fix.reading()).toMatchObject({ active: true, busy: false, error: null });
+      expect(fix.reading().entry?.id).toBe("middle");
+      expect(fix.navigate).not.toHaveBeenCalled();
+    } finally { checksum.mockRestore(); }
+  });
+
+  it.each([false, true])("opens fixed comparison ends with a named baseline: %s", async named => {
+    const api = client();
+    const earliest = { ...entries[2]!, ...(named ? { name: { text: "Reviewed", namer: null, namedAt: 50, canManage: false } } : {}) };
+    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, earliest]);
+    const fix = mountRouted(api, { revision: "middle", since: "earliest" });
+    await act(async () => {});
+    expect(fix.reading()).toMatchObject({ active: true, busy: false, error: null });
+    expect(getMeta(fix.reading().selection!.after).title).toBe("middle");
+    expect(getMeta(fix.reading().selection!.before!).title).toBe("earliest");
+    expect(fix.reading().selection?.comparedWith).toEqual(earliest);
+    expect(fix.navigate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { revision: "gone" },
+    { revision: "middle", since: "gone" },
+    { revision: "middle", since: "middle" },
+    { revision: "middle", since: "newest" },
+  ])("keeps an invalid address in history with an error: %j", async address => {
+    const api = client();
+    const fix = mountRouted(api, address);
+    await act(async () => {});
+    expect(fix.reading()).toMatchObject({ active: true, busy: false, selection: null });
+    expect(fix.reading().error).toBeTruthy();
+    expect(api.get).not.toHaveBeenCalled();
+    expect(fix.navigate).not.toHaveBeenCalled();
+    act(() => fix.reading().now());
+    expect(fix.navigate).toHaveBeenLastCalledWith(null);
+    expect(fix.reading()).toMatchObject({ active: false, selection: null, error: null });
+  });
+
+  it("refreshes baseline naming metadata while keeping the addressed comparison ends", async () => {
+    const api = client();
+    const earliest = { ...entries[2]!, name: { text: "Reviewed", namer: null, namedAt: 50, canManage: false } };
+    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, earliest]);
+    const fix = mountRouted(api, { revision: "middle", since: "earliest" });
+    await act(async () => {});
+    const selected = fix.reading().selection!;
+    const renamed = { ...earliest, name: { ...earliest.name, text: "Renamed review" } };
+    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, renamed]);
+    await act(async () => fix.reading().refresh());
+    expect(fix.reading().selection).toMatchObject({ after: selected.after, before: selected.before, comparedWith: renamed });
+    const unnamed = { ...earliest, name: null };
+    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, unnamed]);
+    await act(async () => fix.reading().refresh());
+    expect(fix.reading().selection).toMatchObject({ after: selected.after, before: selected.before, comparedWith: unnamed });
+    expect(fix.reading()).toMatchObject({ active: true, busy: false, error: null });
+    expect(fix.navigate).not.toHaveBeenCalled();
+  });
+
+  it("keeps a history address loading until its client becomes available", async () => {
+    const fix = mountRouted(null, { revision: "middle" });
+    expect(fix.reading()).toMatchObject({ available: false, active: true, busy: true, selection: null, error: null });
+    fix.visit({ revision: "middle" }, client());
+    await act(async () => {});
+    expect(fix.reading()).toMatchObject({ available: true, active: true, busy: false, error: null });
+    expect(fix.reading().entry?.id).toBe("middle");
+  });
+
+  it.each([
+    { address: { revision: "newest" }, remaining: entries.slice(1) },
+    { address: { revision: "middle", since: "earliest" }, remaining: entries.slice(0, 2) },
+  ])("shows an error when a refresh loses an addressed endpoint: %j", async ({ address, remaining }) => {
+    const api = client();
+    const fix = mountRouted(api, address);
+    await act(async () => {});
+    expect(fix.reading().selection).not.toBeNull();
+    vi.mocked(api.list).mockResolvedValue(remaining);
+    await act(async () => fix.reading().refresh());
+    expect(fix.reading()).toMatchObject({ active: true, busy: false, selection: null });
+    expect(fix.reading().error).toBeTruthy();
+    expect(fix.navigate).not.toHaveBeenCalled();
+  });
+
+  it("uses the latest address when browser navigation changes during the initial list read", async () => {
+    const list = deferred<RevisionEntry[]>();
+    const api = client();
+    vi.mocked(api.list).mockReturnValue(list.promise);
+    const fix = mountRouted(api, { revision: "newest" });
+    fix.visit({ revision: "middle" });
+    fix.visit({ revision: "earliest" });
+    await act(async () => list.resolve(entries));
+    expect(fix.reading()).toMatchObject({ active: true, busy: false, error: null });
+    expect(fix.reading().entry?.id).toBe("earliest");
+    expect(fix.reading().selection?.before).toBeNull();
+    expect(vi.mocked(api.get).mock.calls.map(call => call[1])).toEqual(["earliest"]);
+    expect(api.list).toHaveBeenCalledTimes(1);
+    expect(fix.navigate).not.toHaveBeenCalled();
+  });
+
+  it("discards a superseded snapshot read without replacing the newer address's view", async () => {
+    const pending = deferred<Y.Doc>();
+    const stale = document("Late middle");
+    const api = client(async (_uuid, id) => id === "middle" ? pending.promise : document(id));
+    const fix = mountRouted(api, { revision: "newest" });
+    await act(async () => {});
+    expect(fix.reading().busy).toBe(true);
+    const firstReplacement = fix.seen.length;
+    fix.visit({ revision: "earliest" });
+    expect(fix.seen[firstReplacement]).toMatchObject({ active: true, selection: null, error: null });
+    await act(async () => {});
+    const chosen = fix.reading().selection;
+    expect(fix.reading().entry?.id).toBe("earliest");
+    await act(async () => pending.resolve(stale));
+    expect(stale.isDestroyed).toBe(true);
+    expect(fix.reading().selection).toBe(chosen);
+    expect(fix.reading()).toMatchObject({ active: true, busy: false, error: null });
+  });
+
+  it("returns to now while a snapshot is pending and ignores its late result", async () => {
+    const pending = deferred<Y.Doc>();
+    const stale = document("Late newest");
+    const api = client();
+    vi.mocked(api.get).mockReturnValueOnce(pending.promise);
+    const fix = mountRouted(api, { revision: "newest" });
+    await act(async () => {});
+    act(() => fix.reading().now());
+    expect(fix.navigate).toHaveBeenLastCalledWith(null);
+    expect(fix.reading()).toMatchObject({ active: false, busy: false, selection: null });
+    await act(async () => pending.resolve(stale));
+    expect(stale.isDestroyed).toBe(true);
+    expect(fix.reading()).toMatchObject({ active: false, busy: false, selection: null, error: null });
+    fix.visit({ revision: "newest" });
+    await act(async () => {});
+    expect(fix.reading().entry?.id).toBe("newest");
+    expect(getMeta(fix.reading().selection!.after).title).toBe("newest");
+  });
+
+  it("preserves cached snapshots and the session while moving between this document's addresses", async () => {
+    const api = client();
+    const fix = mountRouted(api, { revision: "middle" });
+    await act(async () => {});
+    const first = fix.reading().selection!;
+    const signal = vi.mocked(api.list).mock.calls[0]![1];
+    fix.visit({ revision: "earliest" });
+    await act(async () => {});
+    expect(fix.reading().selection!.after).toBe(first.before);
+    fix.visit({ revision: "middle" });
+    await act(async () => {});
+    expect(fix.reading().selection).toMatchObject({ after: first.after, before: first.before });
+    expect(api.list).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.get).mock.calls.map(call => call[1])).toEqual(["middle", "earliest"]);
+    expect(signal.aborted).toBe(false);
+    expect(first.after.isDestroyed).toBe(false);
+    fix.view.unmount();
+    expect(signal.aborted).toBe(true);
+    expect(first.after.isDestroyed).toBe(true);
+    expect(first.before!.isDestroyed).toBe(true);
+  });
+
+  it("writes resolved revision and comparison ends when history controls change the view", async () => {
+    const api = client();
+    const earliest = { ...entries[2]!, name: { text: "Reviewed", namer: null, namedAt: 50, canManage: false } };
+    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, earliest]);
+    const fix = mountRouted(api, null);
+    await act(async () => {});
+    await act(async () => fix.reading().back());
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "newest" });
+    await act(async () => fix.reading().open(1));
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "middle" });
+    await act(async () => fix.reading().sinceNamed("earliest"));
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "newest", since: "earliest" });
+    expect(fix.reading().selection?.comparedWith).toEqual(earliest);
+    expect(fix.navigate).toHaveBeenCalledTimes(3);
+    act(() => fix.reading().now());
+    expect(fix.navigate).toHaveBeenLastCalledWith(null);
+    expect(fix.reading()).toMatchObject({ active: false, selection: null });
+  });
+});
 
 describe("document history navigation", () => {
   it("restores from the state when history opened, then refreshes a stale list and starting point", async () => {
