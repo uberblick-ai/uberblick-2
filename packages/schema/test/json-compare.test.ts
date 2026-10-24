@@ -38,6 +38,7 @@ describe("compareJsonSources", () => {
     ["a type change", '{"n":2}', '{"n":"2"}', ["type-changed .n"]],
     ["a container type change", '{"n":{}}', '{"n":[]}', ["type-changed .n"]],
     ["repeated keys pair by occurrence", '{"a":1,"a":2}', '{"a":1,"a":3}', ["changed .a#2"]],
+    ["literal suffix keys stay separate after reordering", '{"a":1,"a":2,"a#2":3}', '{"a#2":4,"a":1,"a":2}', ['changed .["a#2"]']],
   ])("reports %s", (_name, before, after, expected) => {
     expect(changes(compared(before, after))).toEqual(expected);
   });
@@ -45,6 +46,28 @@ describe("compareJsonSources", () => {
   it("places a removed key after its older neighbour and keeps the newer key order", () => {
     const root = compared('{"a":1,"b":2,"c":3}', '{"c":3,"a":1}');
     expect(root.children.map((child) => `${child.kind} ${child.path}`)).toEqual(["unchanged .c", "unchanged .a", "removed .b"]);
+  });
+
+  it("preserves every repeated and literal-suffix key once with distinct paths", () => {
+    const source = '{"a":1,"a":2,"a#2":3}';
+    const result = compareJsonSources(source, source);
+    expect(result.ok && result.changes).toBe(0);
+    const root = compared(source, source);
+    expect(root.children.map((child) => child.path)).toEqual([".a", ".a#2", '.["a#2"]']);
+    for (const side of ["before", "after"] as const) {
+      expect(root.children.map((child) => {
+        const value = child[side];
+        return value?.kind === "number" ? value.raw : null;
+      })).toEqual(["1", "2", "3"]);
+    }
+  });
+
+  it("matches an empty-string identity without inventing a move", () => {
+    const result = compareJsonSources('[{"id":"","state":"idle"}]', '[{"id":"","state":"busy"}]');
+    expect(result.ok && result.changes).toBe(1);
+    if (!result.ok) throw new Error(result.reason);
+    expect(changes(result.root)).toEqual(["changed [0].state"]);
+    expect(result.root.children[0]?.movedFrom).toBeUndefined();
   });
 
   it("marks only the changed characters, or words in long strings, and keeps literals", () => {
@@ -66,6 +89,30 @@ describe("compareJsonSources", () => {
     expect(compareJsonSources("{}", "[1,]")).toEqual({ ok: false, reason: "after-invalid" });
     const huge = JSON.stringify(Array.from({ length: JSON_COMPARE_MAX_NODES }, (_, index) => index));
     expect(compareJsonSources(huge, "[]")).toEqual({ ok: false, reason: "too-large" });
+  });
+
+  it("keeps a structural result with bounded marks for a large log replacement", () => {
+    const before = `prefix ${"old ".repeat(20_000)}suffix`;
+    const after = `prefix ${"new ".repeat(20_000)}suffix`;
+    const result = compareJsonSources(JSON.stringify({ log: before }), JSON.stringify({ log: after }));
+    expect(result.ok && result.changes).toBe(1);
+    if (!result.ok) throw new Error(result.reason);
+    const beforeRaw = JSON.stringify(before);
+    const afterRaw = JSON.stringify(after);
+    expect(result.root.children[0]?.marks).toEqual({
+      before: [[beforeRaw.indexOf("old"), beforeRaw.lastIndexOf("old") + 3]],
+      after: [[afterRaw.indexOf("new"), afterRaw.lastIndexOf("new") + 3]],
+    });
+  });
+
+  it("uses word marks within the work budget and one range above it", () => {
+    const before = `old ${"same ".repeat(408)}old `;
+    const after = `new ${"same ".repeat(408)}new `;
+    expect(changedRanges(before, after)).toEqual({ before: [[0, 3], [2044, 2047]], after: [[0, 3], [2044, 2047]] });
+    expect(changedRanges(`${before}x`, after)).toEqual({ before: [[0, 2049]], after: [[0, 2048]] });
+    const added = "new ".repeat(20_000);
+    expect(changedRanges("", added)).toEqual({ before: [], after: [[0, added.length]] });
+    expect(changedRanges(added, "")).toEqual({ before: [[0, added.length]], after: [] });
   });
 
   it("counts a changed subtree once and a move plus its inner change twice", () => {

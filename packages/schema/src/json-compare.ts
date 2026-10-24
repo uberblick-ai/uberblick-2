@@ -11,6 +11,8 @@ import { diffWords, matchSequence } from "./revision-sequence.js";
 export const JSON_COMPARE_MAX_NODES = 20_000;
 /** Longer strings mark changed words instead of characters. */
 export const JSON_COMPARE_WORD_LENGTH = 80;
+/** Cap exact word matching's quadratic work; larger values use one prefix/suffix range. */
+const MAX_WORD_DIFF_LENGTH = 4096;
 /** Fields that identify array elements, checked in this order. */
 const IDENTITY_FIELDS = ["id", "key", "name"] as const;
 
@@ -67,9 +69,10 @@ function scalarText(node: JsonSourceNode): string {
   return node.kind === "boolean" ? String(node.value) : "null";
 }
 
-/** Changed characters, or changed words in long strings; the common prefix and suffix stay unmarked. */
+/** Changed characters, or changed words within the matching budget; shared ends stay unmarked. */
 export function changedRanges(before: string, after: string): { before: JsonTextRange[]; after: JsonTextRange[] } {
-  if (before.length > JSON_COMPARE_WORD_LENGTH || after.length > JSON_COMPARE_WORD_LENGTH) {
+  if ((before.length > JSON_COMPARE_WORD_LENGTH || after.length > JSON_COMPARE_WORD_LENGTH)
+    && before.length + after.length <= MAX_WORD_DIFF_LENGTH) {
     const marks = { before: [] as JsonTextRange[], after: [] as JsonTextRange[] };
     let oldAt = 0;
     let newAt = 0;
@@ -109,14 +112,14 @@ function oneSided(node: JsonSourceNode, side: "before" | "after", path: string, 
 type ObjectNode = Extract<JsonSourceNode, { kind: "object" }>;
 type ArrayNode = Extract<JsonSourceNode, { kind: "array" }>;
 
-/** Each entry with its identity among repeats: `name`, then `name#2`. */
+/** Match the decoded key and occurrence independently of the display suffix. */
 function withOccurrences(node: ObjectNode) {
   const seen = new Map<string, number>();
   return node.entries.map((entry) => {
     const count = (seen.get(entry.key) ?? 0) + 1;
     seen.set(entry.key, count);
     const suffix = count > 1 ? `#${count}` : "";
-    return { entry, id: `${entry.key}${suffix}`, suffix };
+    return { entry, id: JSON.stringify([entry.key, count]), suffix };
   });
 }
 
@@ -177,7 +180,7 @@ function identityOf(item: JsonSourceNode, field: string): string {
 function compareArrays(before: ArrayNode, after: ArrayNode, path: string): JsonCompareNode[] {
   const field = identityField(before, after);
   const keys = (items: JsonSourceNode[]) => items.map((item) => ({
-    key: canonical(item), ...(field === null ? {} : { id: identityOf(item, field) }),
+    key: canonical(item), ...(field === null ? {} : { id: JSON.stringify(identityOf(item, field)) }),
   }));
   const kept = matchSequence(keys(before.items), keys(after.items));
   const keptBefore = new Set(kept.map((pair) => pair.before));
