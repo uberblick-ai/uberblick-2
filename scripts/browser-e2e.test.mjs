@@ -13,7 +13,15 @@ const absentWorkflow = existsSync(workflowPath)
 	? undefined
 	: ".github/workflows is absent from the isolated review context";
 const workflow = existsSync(workflowPath) ? readFileSync(workflowPath, "utf8") : "";
-const browserJobs = ["e2e-chromium-1", "e2e-chromium-2", "e2e-webkit-1", "e2e-webkit-2", "e2e-workload"];
+const browserJobs = [
+	"e2e-chromium-1",
+	"e2e-chromium-2",
+	"e2e-chromium-3",
+	"e2e-webkit-1",
+	"e2e-webkit-2",
+	"e2e-webkit-3",
+	"e2e-workload",
+];
 
 function job(id) {
 	const body = workflow.match(new RegExp(`^ {2}${id}:\\n((?: {4}.*\\n|\\n)*)`, "m"))?.[0];
@@ -50,7 +58,7 @@ test("WebKit images match the pinned browser package and need no host-package in
 	skip: absentWorkflow,
 }, () => {
 	const { devDependencies } = JSON.parse(readFileSync(join(root, "packages/web/package.json"), "utf8"));
-	for (const id of ["e2e-webkit-1", "e2e-webkit-2"]) {
+	for (const id of browserJobs.filter((id) => id.startsWith("e2e-webkit-"))) {
 		const body = job(id);
 		const image = body.match(/^ {6}image: mcr\.microsoft\.com\/playwright:v([^@]+)@sha256:[a-f0-9]{64}$/m)?.[1];
 		assert.equal(image, `${devDependencies["@playwright/test"]}-noble`);

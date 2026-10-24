@@ -181,11 +181,11 @@ system packages, and a missing library fails the full run. Use
 for keyboard, native selection menu and composition are in the
 [manual input checklist](packages/web/e2e/device-input.md).
 
-CI runs two Chromium jobs, two WebKit iPad shards and the workload project
-on separate Linux runners. Chromium uses a measured whole-file list in
-`packages/web/e2e/chromium-group-one.txt` and its complement, so new specs run
-without updating the list or workflow. Rebalance by measuring the longest
-browser job's full duration over repeated CI runs, including setup and teardown.
+CI runs three Chromium shards, three WebKit iPad shards and the workload
+project on separate Linux runners. Both interactive engines use Playwright's
+whole-file sharding, so new specs run without updating a list or the workflow.
+Compare layouts by measuring the longest browser job's full duration over
+repeated CI runs, including setup and teardown.
 The required `browser e2e` aggregate succeeds only
 when every job succeeds, including every shard. The workload job uses
 `--project=chromium-workload --no-deps` so it cannot rerun interactive tests.
