@@ -190,7 +190,7 @@ export function revealRevision(element: Element, direction: "older" | "newer" | 
     { duration: STEP_MOTION, easing: REVISION_EASE });
 }
 
-/** A row on screen just before folding rebuilt the sides, with a copy to fade out if it folds away. */
+/** A row on screen before folding changes, with a copy to fade out if it folds away. */
 interface RowGhost { key: string; top: number; bottom: number; copy: Node[] }
 
 /** Each row's top on screen, by its key, and copies of the rows in or near view, per side. */
@@ -221,7 +221,7 @@ function clearGhosts(side: Element): void {
   for (const ghost of side.parentElement?.querySelectorAll(":scope > .ub-revision-ghost") ?? []) ghost.remove();
 }
 
-/** Read just before folding rebuilds the sides; the sides are aligned, so the last side's tops serve both. */
+/** Read before folding changes; the sides are aligned, so the last side's tops serve both. */
 export function snapshotRows(sides: readonly Element[], viewport: Element): RowSnapshot {
   const near = nearView(viewport);
   const positions = new Map<string, number>();
@@ -287,7 +287,7 @@ function foldAway(side: Element, ghosts: readonly RowGhost[]): void {
 }
 
 /**
- * After folding or unfolding rebuilt both sides, slides each row from where it
+ * After folding or unfolding changes the rows, slides each row from where it
  * was to where it is now; rows shown again and fold bars fade in where they
  * stand, and rows that folded away close into their bar. Both sides move by
  * the same amount, so rows stay paired.

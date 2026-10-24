@@ -183,6 +183,55 @@ describe("the side-by-side revision model", () => {
     expect(revisionSplitModel(before, after).rows).toHaveLength(5);
   });
 
+  it("opens multiple runs in place, retaining surrounding drawings and read-only sides", () => {
+    const before = doc();
+    const first = appendBlock(before, { type: "paragraph", text: "Opening" });
+    appendBlock(before, { type: "code", language: "wireframe", text: 'page "Before the runs"\n  text "Context"' });
+    for (let index = 0; index < 4; index += 1) appendBlock(before, { type: "paragraph", text: `First run ${index}` });
+    const middle = appendBlock(before, { type: "paragraph", text: "Middle" });
+    for (let index = 0; index < 4; index += 1) appendBlock(before, { type: "paragraph", text: `Second run ${index}` });
+    appendBlock(before, { type: "code", language: "wireframe", text: 'page "After the runs"\n  text "Context"' });
+    const last = appendBlock(before, { type: "paragraph", text: "Closing" });
+    const after = clone(before);
+    editBlock(after, first, "Opening", "Opened");
+    editBlock(after, middle, "Middle", "Changed middle");
+    editBlock(after, last, "Closing", "Closed");
+    const left = document.body.appendChild(document.createElement("div"));
+    const right = document.body.appendChild(document.createElement("div"));
+    const split = createRevisionSplit({ beforeElement: left, afterElement: right, before, after,
+      folding: { collapse: true, expanded: new Set() } });
+    try {
+      const sides = [split.before, split.after];
+      const retained = sides.map((editor) => [...editor.view.dom.querySelectorAll(".ub-wireframe")]);
+      expect(retained.map((drawings) => drawings.length)).toEqual([2, 2]);
+      expect(split.model.runs).toEqual([2, 8]);
+      for (const run of split.model.runs) {
+        const previous = split.model;
+        split.expand(run);
+        expect(split.model).not.toBe(previous);
+        expect(split.model.rows.some((row) => row.fold?.run === run)).toBe(false);
+        sides.forEach((editor, side) => {
+          const drawings = [...editor.view.dom.querySelectorAll(".ub-wireframe")];
+          expect(drawings).toHaveLength(2);
+          drawings.forEach((drawing, index) => { expect(drawing).toBe(retained[side]?.[index]); });
+          expect([...editor.view.dom.querySelectorAll<HTMLElement>(".ub-revision-row-start")].map((element) => [element.dataset.row, element.dataset.key]))
+            .toEqual(split.model.rows.map((row, index) => [String(index), `${row.kind === "folded" ? "fold" : "row"}-${row.at}`]));
+          expect(editor.getJSON().content?.filter((node) => node.type === "code").map((node) => node.attrs?.id))
+            .toEqual([expect.stringMatching(/^revision-1-/), expect.stringMatching(/^revision-11-/)]);
+          const content = editor.state.doc;
+          editor.view.dispatch(editor.state.tr.insertText("Unwanted edit", 1));
+          expect(editor.state.doc).toBe(content);
+        });
+      }
+      expect(split.model.rows).toHaveLength(13);
+      expect(left.querySelectorAll(".ub-revision-fold-button")).toHaveLength(0);
+      expect(right.querySelectorAll(".ub-revision-fold-button")).toHaveLength(0);
+      const opened = split.model;
+      split.expand(2);
+      expect(split.model).toBe(opened);
+    } finally { split.destroy(); }
+  });
+
   it.each([1, 2] as const)("retains a level %i section boundary when its heading is folded away", (level) => {
     const before = doc();
     appendBlock(before, { type: "heading", level: 2, text: "> Details" });
