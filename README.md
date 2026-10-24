@@ -90,6 +90,6 @@ settled question next month.
 
 - [User guide](USER_GUIDE.md): commands, MCP clients, configuration, updating and local files.
 - [Contributing](CONTRIBUTING.md): source setup, development, tests and how work enters the agent workflow.
-- [Security](SECURITY.md): private vulnerability reporting and supported deployment.
+- [Security](SECURITY.md): reporting a vulnerability, scope and running your own hub safely.
 - [Remote hubs](REMOTE.md): deploy a hub and share a workspace across computers.
 - [License](LICENSE): license terms.
