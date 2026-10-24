@@ -11,7 +11,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { AllSelection, Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { EditorView } from "@tiptap/pm/view";
-import { canonicalDocumentUuid, compareRevisions, isExternalHref } from "@uberblick/schema";
+import { canonicalDocumentUuid, compareJsonSources, compareRevisions, isExternalHref } from "@uberblick/schema";
 import type { RevisionBlockComparison, RevisionComparison, TextSpan } from "@uberblick/schema";
 import type * as Y from "yjs";
 import { AblaufBlocks } from "./ablauf.js";
@@ -36,6 +36,8 @@ export interface RevisionSideCell {
   /** Captions above the block: what kind of change, fields, data. */
   labels: string[];
   filler: boolean;
+  /** The other side's block spans this cell; it carries no mark of its own. */
+  spanned?: boolean;
 }
 
 export interface RevisionRow {
@@ -166,6 +168,35 @@ function foldNode(run: number, count: number, headings: string, nodes: readonly 
   return type.create({ run, count, headings, headingLevel: levels.length === 0 ? null : Math.min(...levels) });
 }
 
+function sourceText(node: PMNode): string {
+  return typeof node.attrs.revisionSource === "string" ? node.attrs.revisionSource : node.textContent;
+}
+
+/**
+ * A changed json-tree block that is valid on both sides spans both columns: the
+ * left keeps a placeholder the aligner pads, the right draws the comparison.
+ */
+function jsonRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, newNode: PMNode | undefined, at: number):
+  { row: RevisionRow; left: PMNode; right: PMNode } | null {
+  if (oldNode === undefined || newNode === undefined || change.kind === "unchanged") return null;
+  if (oldNode.type.name !== "code" || newNode.type.name !== "code") return null;
+  if (oldNode.attrs.language !== "json-tree" || newNode.attrs.language !== "json-tree") return null;
+  const before = sourceText(oldNode);
+  const after = sourceText(newNode);
+  if (before === after || !compareJsonSources(before, after).ok) return null;
+  const compare = revisionSchema.nodes.revisionJsonCompare;
+  const placeholder = revisionSchema.nodes.revisionJsonPlaceholder;
+  if (compare === undefined || placeholder === undefined) return null;
+  return {
+    row: {
+      kind: "changed", at, changed: true,
+      before: { labels: [], filler: false, spanned: true }, after: { labels: [], filler: false, spanned: true },
+    },
+    left: placeholder.create({ before }),
+    right: compare.create({ before, after, key: `${String(newNode.attrs.id ?? "")}:${before.length}:${after.length}` }),
+  };
+}
+
 /** One comparison entry as a row and the block each side shows for it. */
 function splitRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, newNode: PMNode | undefined,
   comparison: RevisionComparison, at: number): { row: RevisionRow; left: PMNode; right: PMNode } {
@@ -202,7 +233,7 @@ export function revisionSplitModel(before: Y.Doc, after: Y.Doc,
     const oldNode = change.beforeIndex === undefined ? undefined : oldNodes[change.beforeIndex];
     const newNode = change.afterIndex === undefined ? undefined : newNodes[change.afterIndex];
     if (oldNode === undefined && newNode === undefined) throw new Error("Revision comparison refers to missing content");
-    const split = splitRow(change, oldNode, newNode, comparison, rows.length);
+    const split = jsonRow(change, oldNode, newNode, rows.length) ?? splitRow(change, oldNode, newNode, comparison, rows.length);
     rows.push(split.row);
     left.push(split.left);
     right.push(split.right);
@@ -282,7 +313,7 @@ function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docL
               const cell = row[side];
               const tint = row.kind;
               decorations.push(Decoration.node(pos, pos + node.nodeSize, {
-                class: `ub-revision-row ub-revision-row-${tint}`, "data-revision-row": tint, "data-revision-mark": cell.filler ? "" : MARK[row.kind],
+                class: `ub-revision-row ub-revision-row-${tint}`, "data-revision-row": tint, "data-revision-mark": cell.filler || cell.spanned === true ? "" : MARK[row.kind],
               }));
               decorations.push(Decoration.widget(pos, () => {
                 const start = window.document.createElement("div");

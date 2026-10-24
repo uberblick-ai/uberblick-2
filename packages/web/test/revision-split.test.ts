@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import type { JSONContent } from "@tiptap/core";
+import { DOMParser } from "@tiptap/pm/model";
 import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, moveBlocks } from "@uberblick/schema";
+import { uberblickSchema } from "../src/editor/create-editor.js";
 import { createRevisionSplit, revisionSplitModel, unchangedRuns } from "../src/editor/revision-split.js";
 
 const documents: Y.Doc[] = [];
@@ -116,6 +118,35 @@ describe("the side-by-side revision model", () => {
       expect(split.after.state.doc.textContent).toBe("Kept");
       // Projected identities never repeat the live document's block ids.
       expect(split.before.getJSON().content?.map((node) => node.attrs?.id)).toEqual([expect.stringMatching(/^revision-0-/), expect.stringMatching(/^revision-1-/)]);
+    } finally { split.destroy(); }
+  });
+
+  it("copies each revision's changed JSON with surrounding prose as plain text and authored HTML", () => {
+    const before = doc();
+    const oldJson = '{\n  "version": "old",\n  "nested": { "a": 1, "b": 2 }\n}';
+    const newJson = '{\n  "version": "new",\n  "nested": { "a": 1, "b": 2 }\n}';
+    appendBlock(before, { type: "paragraph", text: "Opening paragraph" });
+    const block = appendBlock(before, { type: "code", language: "json-tree", text: oldJson });
+    appendBlock(before, { type: "paragraph", text: "Closing paragraph" });
+    const after = clone(before);
+    editBlock(after, block, oldJson, newJson);
+    const left = document.body.appendChild(document.createElement("div"));
+    const right = document.body.appendChild(document.createElement("div"));
+    const split = createRevisionSplit({ beforeElement: left, afterElement: right, before, after });
+    try {
+      for (const [editor, source] of [[split.before, oldJson], [split.after, newJson]] as const) {
+        editor.commands.selectAll();
+        const copied = editor.view.serializeForClipboard(editor.state.selection.content());
+        expect(copied.text).toBe(`Opening paragraph\n\n${source}\n\nClosing paragraph`);
+        const pasted = DOMParser.fromSchema(uberblickSchema).parse(copied.dom);
+        expect(pasted.childCount).toBe(3);
+        expect(pasted.child(0).textContent).toBe("Opening paragraph");
+        expect(pasted.child(1).type.name).toBe("code");
+        expect(pasted.child(1).attrs.language).toBe("json-tree");
+        expect(pasted.child(1).textContent).toBe(source);
+        expect(pasted.child(2).textContent).toBe("Closing paragraph");
+        expect(copied.dom.innerHTML).not.toContain("ub-json-compare");
+      }
     } finally { split.destroy(); }
   });
 

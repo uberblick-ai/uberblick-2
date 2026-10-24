@@ -13,6 +13,7 @@ import { yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
 import type * as Y from "yjs";
 import { AblaufBlocks } from "./ablauf.js";
 import { JsonTreeBlocks } from "./json-tree.js";
+import { RevisionJsonCompare, RevisionJsonPlaceholder } from "./json-compare-view.js";
 import { CardBlocks } from "./card.js";
 import { ChartBlocks, chartBlockView } from "./chart.js";
 import { DocLinks } from "./doc-links.js";
@@ -102,7 +103,7 @@ export function revisionPalette(ydoc: Y.Doc | null, before: Y.Doc | null = null)
         };
       },
     });
-  }), Added, Removed, Filler, Fold];
+  }), Added, Removed, Filler, Fold, RevisionJsonCompare, RevisionJsonPlaceholder];
 }
 
 export const revisionSchema = getSchema(revisionPalette(null));
@@ -265,6 +266,12 @@ export function copiedContent(content: Fragment): Fragment {
   const nodes: PMNode[] = [];
   content.forEach((node) => {
     if (node.type.name === "revisionFiller" || node.type.name === "revisionFold") return;
+    if (node.type.name === "revisionJsonCompare" || node.type.name === "revisionJsonPlaceholder") {
+      const code = revisionSchema.nodes.code;
+      const text = String(node.type.name === "revisionJsonCompare" ? node.attrs.after : node.attrs.before);
+      if (code !== undefined) nodes.push(code.create({ language: "json-tree" }, text === "" ? [] : revisionSchema.text(text)));
+      return;
+    }
     const marks = node.marks.filter((mark) => mark.type.name !== "removed" && mark.type.name !== "revisionAdded");
     nodes.push(node.isText ? node.mark(marks) : node.type.create(
       { ...node.attrs, ...("id" in node.attrs ? { id: null } : {}) },

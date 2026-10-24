@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent, ReactElement } from "react";
+import { jsonChangeRows, spanningComparison } from "../../editor/json-compare-panel.js";
 import type { RevisionRow } from "../../editor/revision-split.js";
 import { FOLD_MOTION } from "./revision-motion.js";
 
@@ -53,12 +54,22 @@ function measure(scroller: HTMLElement, header: HTMLElement, side: HTMLElement, 
   const height = Math.max(40, scroller.clientHeight - headerBottom - gap - RULER_INSET);
   // A comparison shorter than the track keeps its own scale instead of stretching.
   const scale = height / Math.max(span, height);
-  const marks = starts.flatMap((_, index) => {
+  const marks = starts.flatMap((start, index) => {
     const top = tops[index] ?? 0;
     const next = tops[index + 1] ?? end;
     const row = rows[index];
     if (row === undefined) return [];
-    return [{ key: `${row.kind}-${row.at}`, kind: markKind(row), top: (top - base) * scale, height: Math.max(0, next - top) * scale }];
+    const key = `${row.kind}-${row.at}`;
+    const own = { key, kind: markKind(row), top: (top - base) * scale, height: Math.max(0, next - top) * scale };
+    // A JSON comparison marks each changed row inside it, so a small change in a long block stays small.
+    const block = row.after.spanned === true ? spanningComparison(start) : null;
+    // Hidden comparisons keep the row's mark until their toggle section opens.
+    if (block === null) return [own];
+    if (block.getClientRects().length === 0) return [{ ...own, height: Math.max(MARK_MIN[own.kind], own.height) }];
+    return [{ ...own, kind: "same" as const }, ...jsonChangeRows(block).map(({ element, kind }, inner) => {
+      const rect = element.getBoundingClientRect();
+      return { key: `${key}-${inner}`, kind, top: (scrolled(rect.top) - base) * scale, height: rect.height * scale };
+    })];
   });
   const viewTop = Math.min(span, Math.max(0, scroller.scrollTop + headerBottom - base));
   const viewBottom = Math.min(span, Math.max(viewTop, scroller.scrollTop + scroller.clientHeight - base));
@@ -123,7 +134,14 @@ export function RevisionRuler({ pane, header, side, rows }: {
     // Late drawings and images grow the sides; the pane and header resize with the window.
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedule);
     for (const element of [scroller, side, header.current]) if (element != null) observer?.observe(element);
-    return () => { cancelAnimationFrame(frame); scroller.removeEventListener("scroll", schedule); observer?.disconnect(); };
+    // Folding inside a JSON comparison moves its marks even when the block keeps its height.
+    side.addEventListener("ub-json-compare-render", schedule);
+    return () => {
+      cancelAnimationFrame(frame);
+      scroller.removeEventListener("scroll", schedule);
+      side.removeEventListener("ub-json-compare-render", schedule);
+      observer?.disconnect();
+    };
   }, [pane, header, side, update]);
   const scrollTo = (viewTop: number): void => {
     const scroller = pane.current;
