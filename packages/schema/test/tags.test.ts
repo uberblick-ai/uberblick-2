@@ -208,14 +208,14 @@ describe("workspace tag catalog", () => {
     expect(Y.encodeStateAsUpdate(fresh)).toEqual(before);
   });
 
-  it("does not add newly introduced examples to an already seeded catalog", () => {
+  it.each(["rfc", "guidance"])("does not add %s to an already seeded catalog", (newName) => {
     const older = new Y.Doc();
-    for (const example of EXAMPLE_TAGS.filter((entry) => entry.name !== "rfc")) createTagCatalogEntry(older, example.name, example.id);
+    for (const example of EXAMPLE_TAGS.filter((entry) => entry.name !== newName)) createTagCatalogEntry(older, example.name, example.id);
     getTagCatalogFlags(older).set("examples-seeded", true);
     const before = Y.encodeStateAsUpdate(older);
     seedTagCatalog(older);
     expect(Y.encodeStateAsUpdate(older)).toEqual(before);
-    expect(listTagCatalog(older).some((entry) => entry.name === "rfc")).toBe(false);
+    expect(listTagCatalog(older).some((entry) => entry.name === newName)).toBe(false);
   });
 
   it("does not write catalogs without legacy state or consume lifecycle before its identity arrives", () => {

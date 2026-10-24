@@ -71,7 +71,7 @@ Create and change documents with the fewest calls. Details live in \`decisions\`
 
 - \`create_doc\` needs a title and a description. Only agents read the description: write whatever helps \`list_docs\` and \`search\` find the page; a keyword list is fine. Tags come from \`list_tags\`.
 - \`insert_block\` adds blocks after a block id, or at the top. \`edit_block\` changes one block against the \`old_text\` and \`rev\` you read. \`move_block\` reorders existing blocks with their ids and comment anchors intact; read its help for the concurrent-edit limit. \`delete_block\` removes one. \`restore_revision\` is the whole-document exception: it restores title, blocks and data from a hub revision as a new revision, preserving history and other metadata.
-- Documents merge live (Yjs): people and other agents may edit at the same time and watch your changes. Change only the words that need changing; \`edit_block\` keeps everyone else's edits and comment anchors, while deleting and re-inserting a block drops them.
+- Documents merge live (Yjs): people and other agents may edit at the same time and watch your changes. Change only the words that need changing; \`edit_block\` keeps everyone else's edits and comment anchors, while deleting and re-inserting a block drops them. Keep the page's overall shape; reshape a section when needed instead of lengthening a paragraph.
 - A refused edit returns \`currentText\` and \`currentRev\`: apply your change to them and retry, without another read.
 - \`set_metadata\` changes title, description, tags, links and TL;DR, a regular page's code check and an open decision's \`discussion\`. Structured data uses \`get_data\` and \`update_data\`.
 

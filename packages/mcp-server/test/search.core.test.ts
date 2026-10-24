@@ -50,7 +50,7 @@ describe("search", () => {
   it("accepts tag lists by id or name, resolves every tag, and boosts distinct assignments", async () => {
     const rig = await localRig();
     const auth = EXAMPLE_TAGS[0]!;
-    const mcp = EXAMPLE_TAGS[2]!;
+    const mcp = EXAMPLE_TAGS.find((tag) => tag.name === "mcp")!;
     const first = await rig.ok("create_doc", { title: "Aardvark guide", description: "A fixture.", tags: [auth.id] });
     const both = await rig.ok("create_doc", { title: "Aardvark guide", description: "A fixture.", tags: [auth.id, mcp.id] });
     const other = await rig.ok("create_doc", { title: "Aardvark guide", description: "A fixture.", tags: [mcp.id] });
