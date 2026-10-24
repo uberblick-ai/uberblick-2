@@ -29,7 +29,7 @@ import { TerminalBlocks } from "./terminal.js";
 import { ToggleHeadings } from "./toggle-headings.js";
 import { WireframeBlocks } from "./wireframe.js";
 
-const SOURCE_NODES = new Set(["code", "terminal", "chart"]);
+export const SOURCE_NODES = new Set(["code", "terminal", "chart"]);
 const INLINE_NODES = new Set(["paragraph", "heading", "list-item", "quote", ...SOURCE_NODES]);
 
 const Added = Mark.create({
@@ -43,6 +43,30 @@ const Removed = Mark.create({
   renderHTML: () => ["s", { class: "ub-revision-removed", "data-revision-change": "removed" }, 0],
 });
 
+/** An empty cell opposite an added or removed block in the side-by-side view. */
+const Filler = TiptapNode.create({
+  name: "revisionFiller",
+  group: "block",
+  atom: true,
+  selectable: false,
+  parseHTML: () => [],
+  renderHTML: () => ["div", { class: "ub-revision-filler", "aria-hidden": "true" }],
+});
+
+/** A run of unchanged blocks shown as one bar; clicking it shows the run again. */
+const Fold = TiptapNode.create({
+  name: "revisionFold",
+  group: "block",
+  atom: true,
+  selectable: false,
+  addAttributes: () => ({ run: { default: 0 }, count: { default: 0 }, headings: { default: "" }, headingLevel: { default: null } }),
+  parseHTML: () => [],
+  renderHTML: ({ node }) => ["div", { class: "ub-revision-fold" }, ["button", {
+    type: "button", class: "ub-revision-fold-button", "data-fold": String(node.attrs.run),
+    "aria-label": `Show ${node.attrs.count} unchanged blocks${node.attrs.headings ? `: ${node.attrs.headings}` : ""}`,
+  }, `${node.attrs.count} unchanged blocks${node.attrs.headings ? ` · ${node.attrs.headings}` : ""}`]],
+});
+
 /** Drawings read the selected revision's source, while its contentDOM shows the diff. */
 function drawingNode(node: PMNode): PMNode {
   return typeof node.attrs.revisionSource === "string"
@@ -50,7 +74,7 @@ function drawingNode(node: PMNode): PMNode {
     : node;
 }
 
-function revisionPalette(ydoc: Y.Doc | null, before: Y.Doc | null = null): Extensions {
+export function revisionPalette(ydoc: Y.Doc | null, before: Y.Doc | null = null): Extensions {
   return [...paletteExtensions.map((base) => {
     const extension = base.name === "chart" ? ChartBlock.configure({ ydoc }) : base;
     if (!(extension instanceof TiptapNode) || !INLINE_NODES.has(extension.name)) return extension;
@@ -78,12 +102,12 @@ function revisionPalette(ydoc: Y.Doc | null, before: Y.Doc | null = null): Exten
         };
       },
     });
-  }), Added, Removed];
+  }), Added, Removed, Filler, Fold];
 }
 
-const revisionSchema = getSchema(revisionPalette(null));
+export const revisionSchema = getSchema(revisionPalette(null));
 
-function copyNode(node: PMNode, content: readonly PMNode[], marks = node.marks): PMNode {
+export function copyNode(node: PMNode, content: readonly PMNode[], marks = node.marks): PMNode {
   return node.type.create(node.attrs, content, marks);
 }
 
@@ -96,7 +120,7 @@ function withoutComments(node: PMNode): PMNode {
   return node.type.create(attrs, children, marks);
 }
 
-function visibleNodes(doc: Y.Doc): PMNode[] {
+export function visibleNodes(doc: Y.Doc): PMNode[] {
   const fragment = getBlocksFragment(doc);
   if (findForeignBlocks(fragment).length > 0) throw new Error("This revision contains unsupported content");
   const parsed = yXmlFragmentToProseMirrorRootNode(fragment, revisionSchema);
@@ -113,7 +137,7 @@ function visibleNodes(doc: Y.Doc): PMNode[] {
   return nodes;
 }
 
-function markTree(node: PMNode, kind: "added" | "removed"): PMNode {
+export function markTree(node: PMNode, kind: "added" | "removed"): PMNode {
   if (node.isText) {
     const mark = revisionSchema.marks[kind === "added" ? "revisionAdded" : "removed"];
     if (mark === undefined) throw new Error("Revision mark is missing");
@@ -184,7 +208,7 @@ export interface RevisionViewModel {
   blocks: RevisionBlockDetails[];
 }
 
-function chartCollections(node: PMNode, comparison: RevisionComparison | null): string[] {
+export function chartCollections(node: PMNode, comparison: RevisionComparison | null): string[] {
   if (node.type.name !== "chart" || comparison === null) return [];
   try {
     const mapping: unknown = JSON.parse(node.attrs.revisionSource ?? node.textContent);
@@ -237,9 +261,10 @@ export function revisionViewModel(before: Y.Doc | null, after: Y.Doc): RevisionV
   return { content, comparison, blocks };
 }
 
-function copiedContent(content: Fragment): Fragment {
+export function copiedContent(content: Fragment): Fragment {
   const nodes: PMNode[] = [];
   content.forEach((node) => {
+    if (node.type.name === "revisionFiller" || node.type.name === "revisionFold") return;
     const marks = node.marks.filter((mark) => mark.type.name !== "removed" && mark.type.name !== "revisionAdded");
     nodes.push(node.isText ? node.mark(marks) : node.type.create(
       { ...node.attrs, ...("id" in node.attrs ? { id: null } : {}) },

@@ -3,6 +3,7 @@ import type * as Y from "yjs";
 import type { RevisionEntry } from "@uberblick/schema";
 import { DocumentHistoryError } from "../../shell/document-revisions.js";
 import type { DocumentRevisionsClient } from "../../shell/document-revisions.js";
+import { useStoredFlag } from "../hooks.js";
 
 interface Selection { index: number; before: Y.Doc | null; after: Y.Doc; comparedWith?: RevisionEntry }
 interface HistoryState {
@@ -12,6 +13,8 @@ interface HistoryState {
   active: boolean;
   busy: boolean;
   error: string | null;
+  /** Only the opted-in list supplies markers, including when snapshots are cached. */
+  titles: Readonly<Record<string, string>>;
 }
 interface Session {
   client: DocumentRevisionsClient;
@@ -23,7 +26,7 @@ interface Session {
   retryTarget: Target | null;
   state: HistoryState;
 }
-const initial: HistoryState = { entries: null, selection: null, active: false, busy: true, error: null };
+const initial: HistoryState = { entries: null, selection: null, active: false, busy: true, error: null, titles: {} };
 type Target = { index: number } | { step: -1 | 1 } | { since: string | null } | { id: string };
 function destroyDocuments(documents: Map<string, Y.Doc>): void {
   for (const doc of documents.values()) doc.destroy();
@@ -37,11 +40,22 @@ function targetIndex(target: Target, selection: Selection | null, entries: reado
   return "index" in target ? target.index : (selection?.index ?? 0) + target.step;
 }
 
-function replaceEntries(owner: Session, entries: RevisionEntry[]): Pick<HistoryState, "entries" | "selection"> {
+function listedTitles(entries: readonly RevisionEntry[]): Record<string, string> {
+  return Object.fromEntries(entries.flatMap(entry => entry.title === undefined ? [] : [[entry.id, entry.title]]));
+}
+
+/** Rename attribution always follows adjacent revisions, including named comparisons. */
+export function renamedFrom(entries: readonly RevisionEntry[], titles: Readonly<Record<string, string>>, index: number): string | null {
+  const title = titles[entries[index]?.id ?? ""];
+  const previous = titles[entries[index + 1]?.id ?? ""];
+  return title === undefined || previous === undefined || title === previous ? null : previous;
+}
+
+function replaceEntries(owner: Session, entries: RevisionEntry[]): Pick<HistoryState, "entries" | "selection" | "titles"> {
   const selection = owner.state.selection;
   const id = selection === null ? undefined : owner.state.entries?.[selection.index]?.id;
   const index = entries.findIndex(entry => entry.id === id);
-  return { entries, selection: selection === null || index < 0 ? null : index === selection.index ? selection : { ...selection, index } };
+  return { entries, titles: listedTitles(entries), selection: selection === null || index < 0 ? null : index === selection.index ? selection : { ...selection, index } };
 }
 
 function resolvedTarget(target: Target, entries: readonly RevisionEntry[], index: number): Target {
@@ -55,6 +69,8 @@ function namedBaseline(entries: readonly RevisionEntry[], since: string | null):
 
 export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid: string | null, path: string) {
   const current = useRef<Session | null>(null);
+  // A per-browser reading preference, shared by the sidebar switch and the comparison.
+  const [collapseUnchanged, setCollapseUnchanged] = useStoredFlag("uberblick.history.collapse-unchanged", true);
   const [view, setView] = useState<{ session: Session; state: HistoryState } | null>(null);
   const update = useCallback((session: Session, changes: Partial<HistoryState>): void => {
     if (current.current !== session || session.signal.aborted) return;
@@ -73,7 +89,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
     current.current = session;
     setView({ session, state: initial });
     void client.list(uuid, controller.signal).then(
-      (entries) => update(session, { entries, busy: false }),
+      (entries) => update(session, { entries, titles: listedTitles(entries), busy: false }),
       (error: unknown) => fail(session, error),
     );
     return () => {
@@ -114,7 +130,9 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
       const selection = owner.state.selection;
       const entries = named || relist || selection === null ? await owner.client.list(owner.uuid, owner.signal) : owner.state.entries ?? [];
       if (owner.operation !== operation) return;
-      if (selection === null && fresh === null) destroyDocuments(owner.documents);
+      if (selection === null) {
+        if (fresh === null) destroyDocuments(owner.documents);
+      }
       const index = targetIndex(target, selection, entries);
       if ("id" in target && index < 0) throw new DocumentHistoryError("revision-not-found");
       owner.retryTarget = resolvedTarget(target, entries, index);
@@ -129,7 +147,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
         adopted = true;
       }
       owner.retryTarget = null;
-      update(owner, { entries, selection: next, busy: false });
+      update(owner, { entries, selection: next, busy: false, titles: listedTitles(entries) });
     } catch (error) { if (owner.operation === operation) fail(owner, error); }
     finally { if (fresh !== null && !adopted) destroyDocuments(fresh); }
   };
@@ -143,7 +161,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
       if (owner.operation !== operation) return;
       const entries = owner.state.entries ?? [];
       const existing = entries.some(entry => entry.id === revision.id);
-      const next = existing ? entries.map(entry => entry.id === revision.id ? revision : entry) : [revision, ...entries];
+      const next = existing ? entries.map(entry => entry.id === revision.id ? { ...entry, ...revision } : entry) : [revision, ...entries];
       const replacement = replaceEntries(owner, next);
       const selection = replacement.selection;
       update(owner, { busy: false, ...replacement,
@@ -162,6 +180,8 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
   return {
     ...state,
     available: client !== null && uuid !== null,
+    collapseUnchanged,
+    setCollapseUnchanged,
     entry: state.selection === null ? null : state.entries?.[state.selection.index] ?? null,
     back: () => { void select({ step: 1 }); },
     forward: () => { void select({ step: -1 }); },

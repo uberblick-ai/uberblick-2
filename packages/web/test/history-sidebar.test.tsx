@@ -30,7 +30,7 @@ const entries: RevisionEntry[] = [
 
 function fakeHistory(overrides: Partial<DocumentHistory> = {}): DocumentHistory {
   return {
-    entries, selection: null, busy: false, error: null, available: true, active: true, entry: null,
+    entries, selection: null, busy: false, error: null, titles: {}, collapseUnchanged: true, setCollapseUnchanged: vi.fn(), available: true, active: true, entry: null,
     back: vi.fn(), forward: vi.fn(), open: vi.fn(), sinceLastNamed: vi.fn(), sinceNamed: vi.fn(),
     name: vi.fn(), rename: vi.fn(), removeName: vi.fn(), now: vi.fn(), retry: vi.fn(), refresh: vi.fn(),
     ...overrides,
@@ -69,7 +69,8 @@ describe("history sidebar", () => {
     expect(screen.getByText("Auth plan · 6 revisions")).toBeTruthy();
     const rows = screen.getAllByRole("listitem");
     expect(rows).toHaveLength(6);
-    expect(within(rows[0]!).getByText("in progress")).toBeTruthy();
+    expect(rows[0]!.textContent).toContain("Current version");
+    expect(rows[1]!.textContent).not.toContain("Current version");
     const selected = within(rows[2]!).getAllByRole("button")[0]!;
     expect(selected.getAttribute("aria-current")).toBe("true");
     expect(screen.getAllByRole("button").filter(button => button.getAttribute("aria-current") === "true")).toHaveLength(1);
@@ -86,10 +87,26 @@ describe("history sidebar", () => {
     expect(history.sinceNamed).toHaveBeenCalledWith("reviewed");
   });
 
+  it.each([null, NOW - 30 * 60_000])("keeps the current caption, time and rename marker together when the head ends at %s", (endedAt) => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+    const head = { ...entries[0]!, endedAt, name: named("Current draft") };
+    const history = fakeHistory({ entries: [head, entries[1]!], titles: { head: "New title", reviewed: "Old title" } });
+    render(<HistorySidebar history={history} title="New title" />);
+    const rows = screen.getAllByRole("listitem");
+    const caption = rows[0]!.querySelector(".ub-history-renamed-tag")!.parentElement!;
+    expect(caption.textContent).toBe(endedAt === null ? "Current version · renamed" : "Current version · 30 minutes ago · renamed");
+    expect(caption.querySelector("time")?.getAttribute("dateTime") ?? null).toBe(endedAt === null ? null : new Date(endedAt).toISOString());
+    expect(rows[1]!.querySelector("time")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Named" }));
+    expect(screen.getAllByText(/Current version/)).toHaveLength(1);
+    expect(screen.queryByText("in progress")).toBeNull();
+  });
+
   it("filters to named revisions and says so when there are none", () => {
     const { unmount } = render(<HistorySidebar history={fakeHistory()} title="Auth plan" />);
     fireEvent.click(screen.getByRole("button", { name: "Named" }));
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.queryByText(/Current version/)).toBeNull();
     expect(screen.getByRole("button", { name: "Named" }).getAttribute("aria-pressed")).toBe("true");
     unmount();
     render(<HistorySidebar history={fakeHistory({ entries: entries.filter(entry => entry.name == null) })} title="Auth plan" />);

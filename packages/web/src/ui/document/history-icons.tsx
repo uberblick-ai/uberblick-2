@@ -16,6 +16,14 @@ export function NextIcon(): ReactElement {
   return <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" {...STROKE} strokeWidth="1.7"><path d="M6 3.5 10.5 8 6 12.5" /></svg>;
 }
 
+export function UpIcon(): ReactElement {
+  return <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" {...STROKE} strokeWidth="1.7"><path d="M3.5 10 8 5.5l4.5 4.5" /></svg>;
+}
+
+export function DownIcon(): ReactElement {
+  return <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" {...STROKE} strokeWidth="1.7"><path d="M3.5 6 8 10.5 12.5 6" /></svg>;
+}
+
 export function ClockIcon(): ReactElement {
   return <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" {...STROKE} strokeWidth="1.4">
     <path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v2.2h2.2M8 5v3l2 1.3" />
