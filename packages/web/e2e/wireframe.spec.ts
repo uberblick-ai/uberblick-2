@@ -309,6 +309,10 @@ function wideSource(buttons: number, labelLength = 12): string {
   return ["banner", "  text Wide screen", "  row", ...Array.from({ length: buttons }, (_, index) => `    button ${String(index).padStart(2, "0")}${"x".repeat(labelLength)}`)].join("\n");
 }
 
+function pageSource(root: string): string {
+  return `${root}\n  text.title Document library\n  text ${"A full screen keeps its titles, metadata and list rows at the declared width. ".repeat(6)}`;
+}
+
 async function expectContained(page: Page): Promise<void> {
   expect(await page.evaluate(() => {
     const pane = document.querySelector<HTMLElement>(".ub-pane");
@@ -318,6 +322,19 @@ async function expectContained(page: Page): Promise<void> {
 
 async function fitScale(page: Page): Promise<number> {
   return preview(page).evaluate((element) => new DOMMatrixReadOnly(getComputedStyle(element).transform).a);
+}
+
+async function expectPageFit(page: Page, width: number): Promise<void> {
+  await expect.poll(() => preview(page).locator(".wf-page").evaluate((element) => (element as HTMLElement).offsetWidth)).toBe(width);
+  const expectedScale = await page.locator(".ub-wireframe-viewport").evaluate((element, width) => {
+    const root = element.querySelector(".wf-root");
+    if (root === null) throw new Error("e2e: page root is missing");
+    const style = getComputedStyle(root);
+    const padding = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
+    return Math.max(0.6, Math.min(1, element.clientWidth / (width + padding)));
+  }, width);
+  await expect.poll(() => fitScale(page)).toBeCloseTo(expectedScale, 4);
+  await expectContained(page);
 }
 
 async function evidence(page: Page, info: TestInfo, name: string): Promise<void> {
@@ -331,7 +348,7 @@ test("desktop and iPad wireframes fit inside their column and follow both appear
   const uuid = await wireframeDoc(session, "Wireframe fit and appearance");
   const touch = info.project.use.hasTouch === true;
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-    contextOptions: { colorScheme: "light" },
+    contextOptions: { colorScheme: "light", ...(touch ? {} : { viewport: { width: 1440, height: 900 } }) },
   });
   await waitForDocumentDraw(page, session, uuid);
   await expect(preview(page).locator(".wf-root")).toBeVisible();
@@ -363,11 +380,62 @@ test("desktop and iPad wireframes fit inside their column and follow both appear
   await expect(source(page)).toBeVisible();
   await activateControl(neighbor(page), { touch });
   await evidence(page, info, `wireframe-${touch ? "ipad" : "desktop"}-dark`);
+  const viewport = page.locator(".ub-wireframe-viewport");
+  const sized = pageSource("page width=1080 width=400");
+  await editSource(session, uuid, sized);
+  await waitForDocumentDraw(page, session, uuid, { source: sized });
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  const paragraph = preview(page).locator(".wf-page > .wf-text").last();
+  const paragraphHeight = await paragraph.evaluate((element) => (element as HTMLElement).offsetHeight);
+  for (const appearance of ["light", "dark"]) {
+    await page.evaluate((theme) => document.documentElement.setAttribute("data-theme", theme), appearance);
+    await expectPageFit(page, 1080);
+    expect(await fitScale(page)).toBeGreaterThan(0.6);
+    expect(await fitScale(page)).toBeLessThan(1);
+    expect(await paragraph.evaluate((element) => (element as HTMLElement).offsetHeight)).toBe(paragraphHeight);
+    await evidence(page, info, `wireframe-page-${touch ? "ipad" : "desktop"}-${appearance}`);
+  }
+  const sizedRoot = await preview(page).locator(".wf-root").elementHandle();
+  if (sizedRoot === null) throw new Error("e2e: sized wireframe is missing");
+  const invalid = "page width=1400\n text Broken indentation";
+  await editSource(session, uuid, invalid);
+  await waitForDocumentDraw(page, session, uuid, { source: invalid, outcome: "error" });
+  await expect(page.locator(".ub-wireframe-stale")).toBeVisible();
+  const originalWidth = await viewport.evaluate((element) => element.clientWidth);
+  await viewport.evaluate((element) => { (element as HTMLElement).style.width = `${element.clientWidth - 80}px`; });
+  await expect.poll(() => viewport.evaluate((element) => element.clientWidth)).toBe(originalWidth - 80);
+  await expectPageFit(page, 1080);
+  expect(await sizedRoot.evaluate((element) => element === document.querySelector(".ub-wireframe-drawing > .wf-root"))).toBe(true);
+  expect(await paragraph.evaluate((element) => (element as HTMLElement).offsetHeight)).toBe(paragraphHeight);
+  const narrow = pageSource("page width=400");
+  await editSource(session, uuid, narrow);
+  await waitForDocumentDraw(page, session, uuid, { source: narrow });
+  await expect(page.locator(".ub-wireframe-stale")).toBeHidden();
+  await expectPageFit(page, 400);
+  expect(await fitScale(page)).toBe(1);
+  await viewport.evaluate((element) => { (element as HTMLElement).style.removeProperty("width"); });
+  await expect.poll(() => viewport.evaluate((element) => element.clientWidth)).toBe(originalWidth);
+  const oversized = pageSource("page width=1400");
+  await editSource(session, uuid, oversized);
+  await waitForDocumentDraw(page, session, uuid, { source: oversized });
+  await expectPageFit(page, 1400);
+  expect(await fitScale(page)).toBeCloseTo(0.6, 4);
+  await expect.poll(() => viewport.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  await viewport.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+  expect(await viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  for (const firstRoot of ["page", "page width=240px width=1080", "banner\n  text First root\npage width=1080"]) {
+    const fluid = pageSource(firstRoot);
+    await editSource(session, uuid, fluid);
+    await waitForDocumentDraw(page, session, uuid, { source: fluid });
+    await expect.poll(() => fitScale(page)).toBe(1);
+    expect(await preview(page).locator(".wf-page").evaluate((element) => (element as HTMLElement).offsetWidth)).toBeLessThan(1080);
+    expect(await viewport.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await expectContained(page);
+  }
   await editSource(session, uuid, wideSource(12));
   await waitForDocumentDraw(page, session, uuid, { source: wideSource(12) });
   await expect(preview(page).locator(".wf-button")).toHaveCount(12);
   await expect.poll(() => fitScale(page)).toBeCloseTo(0.6, 2);
-  const viewport = page.locator(".ub-wireframe-viewport");
   await expect.poll(() => viewport.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
   await viewport.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
   expect(await viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);

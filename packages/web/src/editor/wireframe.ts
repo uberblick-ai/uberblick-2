@@ -20,6 +20,7 @@ export function wireframeBlockView(): NodeViewRenderer {
     let pending: ReturnType<typeof setTimeout> | null = null;
     let destroyed = false;
     let hasDrawing = false;
+    let pageWidth = 0;
     const dom = document.createElement("div");
     dom.className = "ub-code ub-wireframe ub-block-frame";
     const header = blockCaption("");
@@ -71,11 +72,15 @@ export function wireframeBlockView(): NodeViewRenderer {
 
     const resize = (): void => {
       if (destroyed || !hasDrawing || viewport.clientWidth === 0) return;
-      // Measure unscaled content at the column width first. Package rows can
-      // overflow that width; let them fit before applying the 0.6 floor.
       const available = viewport.clientWidth;
-      drawing.style.width = `${available}px`;
-      const natural = Math.max(available, drawing.scrollWidth);
+      let measured = available;
+      if (pageWidth > available && drawing.firstElementChild !== null) {
+        // The page's width is capped by the renderer root's content box.
+        const style = getComputedStyle(drawing.firstElementChild);
+        measured = pageWidth + Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
+      }
+      drawing.style.width = `${measured}px`;
+      const natural = Math.max(measured, drawing.scrollWidth);
       const scale = Math.max(0.6, Math.min(1, available / natural));
       drawing.style.width = `${natural}px`;
       drawing.style.transform = `scale(${scale})`;
@@ -99,6 +104,11 @@ export function wireframeBlockView(): NodeViewRenderer {
         if (rendered !== null) {
           drawing.replaceChildren(rendered);
           drawing.setAttribute("aria-label", renderer.summarizeWireframe(result));
+          const first = result.nodes[0];
+          const width = first?.kind === "page" ? first.attributes.find(attribute => attribute.key === "width")?.value : undefined;
+          const pixels = Number(width);
+          // Match the renderer's width rule, and retain it with the last good drawing.
+          pageWidth = width !== undefined && /^[0-9]+$/.test(width) && pixels >= 1 && pixels <= 9999 ? pixels : 0;
           hasDrawing = true;
         }
         viewport.hidden = !hasDrawing;
