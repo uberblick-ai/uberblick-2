@@ -267,6 +267,16 @@
   background: var(--page-ground);
   background-attachment: fixed;
 }
+/* Cover the block gutter and rail gap without moving the header's controls. */
+.ub-revision-header::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline: calc(-1 * var(--block-gutter)) calc(-1 * var(--document-rail-gap));
+  z-index: -1;
+  background: inherit;
+  pointer-events: none;
+}
 /* The line under the title is the header's bottom edge; ↑ ↓ end on it. */
 .ub-revision-header { margin-bottom: 1rem; }
 .ub-revision-heading {
