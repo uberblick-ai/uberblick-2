@@ -285,15 +285,15 @@ async function pillStyle(pill: Locator, pseudo = ""): Promise<Record<string, str
 async function answerHeader(page: Page, label: string, state: string): Promise<void> {
   const header = page.locator(".ub-decision-answer-header");
   await expect(header).toHaveCount(1);
-  await expect(header.getByText("ANSWER", { exact: true })).toBeVisible();
+  await expect(header).toHaveText(new RegExp(`^${label}\\s*(Alter decision)?$`));
+  await expect(header.locator(".ub-decision-answer-caption, .ub-decision-attribution, time")).toHaveCount(0);
   await expect(header.locator(".ub-decision-answer-state")).toHaveText(label);
   await expect(header.locator(".ub-decision-answer-state")).toHaveAttribute("data-state", state);
   await expect(page.locator(".ub-decision-topic-state, .ub-decision-answer-label")).toHaveCount(0);
   const styles = await header.evaluate((element) => {
     const pill = element.querySelector(".ub-decision-answer-state");
     const mark = pill?.querySelector(".ub-decisions-mark");
-    const caption = element.querySelector(".ub-decision-answer-caption");
-    if (pill === null || mark === null || mark === undefined || caption === null) throw new Error("e2e: missing answer state mark");
+    if (pill === null || mark === null || mark === undefined) throw new Error("e2e: missing answer state mark");
     const probe = document.createElement("span");
     probe.style.position = "absolute";
     probe.style.visibility = "hidden";
@@ -309,7 +309,7 @@ async function answerHeader(page: Page, label: string, state: string): Promise<v
         ink: pillStyle.color, fill: pillStyle.backgroundColor, border: pillStyle.borderTopColor, outline: pillStyle.borderTopStyle,
         markFill: markStyle.backgroundColor, markBorder: markStyle.borderTopColor, markImage: markStyle.backgroundImage,
         markBorderWidth: markStyle.borderTopWidth, markRadius: markStyle.borderRadius,
-        font: getComputedStyle(caption).fontFamily, timeFont: getComputedStyle(element.querySelector("time") ?? caption).fontFamily,
+        font: pillStyle.fontFamily,
         uiFont: token("font-family", "var(--font-sans)"), neutral: token("color", "var(--muted-foreground)"),
         success: token("color", "var(--status-success)"), destructive: token("color", "var(--destructive)"),
         half: token("background-image", "linear-gradient(90deg, var(--muted-foreground) 50%, transparent 50%)"),
@@ -318,7 +318,6 @@ async function answerHeader(page: Page, label: string, state: string): Promise<v
     } finally { probe.remove(); }
   });
   expect(styles.font).toBe(styles.uiFont);
-  expect(styles.timeFont).toBe(styles.uiFont);
   for (const color of [styles.ink, styles.fill, styles.border, styles.markFill, styles.markBorder]) expect(styles.amber).not.toContain(color);
   if (state === "in-force") expect([styles.markFill, styles.markBorder]).toEqual([styles.success, styles.success]);
   if (state === "under-review") expect(styles.markImage).toBe(styles.half);
@@ -332,44 +331,25 @@ async function answerHeader(page: Page, label: string, state: string): Promise<v
   if (state === "not-yet-decided" || state === "open-proposal") expect(styles.outline).toBe("dashed");
 }
 
-async function relativeAttribution(page: Page, who: string, when: string): Promise<void> {
-  const attribution = page.locator(".ub-decision-answer-header .ub-decision-attribution");
-  const time = attribution.locator("time");
-  await expect(time).toHaveAttribute("datetime", when);
-  await expect(time).toHaveText(/^(just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
-  await expect(attribution).toHaveText(`${who} · ${await time.innerText()}`);
-  await expect(time).toHaveAttribute("title", await page.evaluate((value) =>
-    new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)), when));
-}
-
-async function headerLayout(page: Page, wrapped: boolean | null): Promise<void> {
+async function headerLayout(page: Page): Promise<void> {
   const layout = await page.locator(".ub-decision-answer-header").evaluate((element) => {
     const state = element.querySelector(".ub-decision-answer-state");
-    const attribution = element.querySelector(".ub-decision-attribution");
     const pane = element.closest(".ub-document-pane");
-    if (state === null || attribution === null || pane === null) throw new Error("e2e: missing answer header layout");
+    if (state === null || pane === null) throw new Error("e2e: missing answer header layout");
     const pill = state.getBoundingClientRect();
-    const meta = attribution.getBoundingClientRect();
     const alter = element.querySelector("button")?.getBoundingClientRect() ?? null;
     return {
-      pillTop: pill.top, pillBottom: pill.bottom, attributionTop: meta.top, attributionBottom: meta.bottom,
-      attributionRight: meta.right, headerRight: element.getBoundingClientRect().right,
+      pillTop: pill.top, pillBottom: pill.bottom, pillRight: pill.right,
+      headerRight: element.getBoundingClientRect().right,
       alter: alter === null ? null : { left: alter.left, right: alter.right, top: alter.top, bottom: alter.bottom },
       headerWidth: element.clientWidth, headerScroll: element.scrollWidth,
       paneWidth: pane.clientWidth, paneScroll: pane.scrollWidth,
       pageWidth: document.documentElement.clientWidth, pageScroll: document.documentElement.scrollWidth,
     };
   });
-  if (wrapped === true) expect(layout.attributionTop).toBeGreaterThanOrEqual(layout.pillBottom);
-  else if (wrapped === false) {
-    expect(layout.attributionTop).toBeLessThan(layout.pillBottom);
-    if (layout.alter === null) expect(Math.abs(layout.headerRight - layout.attributionRight)).toBeLessThanOrEqual(2);
-    else {
-      expect(Math.abs(layout.headerRight - layout.alter.right)).toBeLessThanOrEqual(2);
-      expect(layout.attributionRight).toBeLessThanOrEqual(layout.alter.left);
-      expect(layout.alter.top).toBeLessThan(layout.attributionBottom);
-      expect(layout.alter.bottom).toBeGreaterThan(layout.attributionTop);
-    }
+  if (layout.alter !== null) {
+    expect(Math.abs(layout.headerRight - layout.alter.right)).toBeLessThanOrEqual(2);
+    expect(layout.alter.top >= layout.pillBottom || layout.alter.left >= layout.pillRight).toBe(true);
   }
   expect(layout.headerScroll).toBeLessThanOrEqual(layout.headerWidth + 1);
   expect(layout.paneScroll).toBeLessThanOrEqual(layout.paneWidth + 1);
@@ -474,13 +454,27 @@ async function timelineLayout(page: Page, selectedUuid: string, touch: boolean, 
         const date = row.querySelector(".ub-decision-record-date");
         const count = row.querySelector(".ub-decision-record-comments");
         const preview = row.querySelector(".ub-decision-preview");
-        if (record === null || date === null) throw new Error("e2e: incomplete timeline row");
+        const event = row.querySelector(".ub-decision-event");
+        const linked = row.querySelector(".ub-decision-linked");
+        const dot = row.querySelector(".ub-decision-rail-dot");
+        const pill = row.querySelector(".ub-decision-record-state");
+        if (record === null || date === null || dot === null || pill === null) throw new Error("e2e: incomplete timeline row");
         const style = getComputedStyle(row);
+        const box = (element: Element) => {
+          const rect = element.getBoundingClientRect();
+          return {
+            left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+            width: element.clientWidth, scrollWidth: element.scrollWidth, height: element.clientHeight, scrollHeight: element.scrollHeight,
+          };
+        };
+        const eventText = document.createRange();
+        if (event !== null) eventText.selectNodeContents(event);
         const lines = [...row.querySelectorAll(".ub-decision-record-line, .ub-decision-preview, .ub-decision-record-rfc .ub-doclink, .ub-decision-rfc-title")].map((line) => ({
           whiteSpace: getComputedStyle(line).whiteSpace,
           flexWrap: getComputedStyle(line).flexWrap,
           height: line.getBoundingClientRect().height,
           rfc: line.matches(".ub-doclink"),
+          record: line.matches(".ub-decision-record-line"),
           left: line.getBoundingClientRect().left, right: line.getBoundingClientRect().right,
         }));
         return {
@@ -492,6 +486,12 @@ async function timelineLayout(page: Page, selectedUuid: string, touch: boolean, 
           dateFigures: getComputedStyle(date).fontVariantNumeric,
           countFont: count === null ? null : getComputedStyle(count).fontFamily,
           countFigures: count === null ? null : getComputedStyle(count).fontVariantNumeric,
+          dot: box(dot), pill: box(pill), date: box(date),
+          count: count === null ? null : box(count), linked: linked === null ? null : box(linked),
+          event: event === null ? null : {
+            ...box(event), color: getComputedStyle(event).color, font: getComputedStyle(event).fontFamily,
+            fragments: [...eventText.getClientRects()].map((rect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom })),
+          },
           nestedLinks: record.querySelectorAll("a").length,
           width: row.clientWidth, scroll: row.scrollWidth, lines,
         };
@@ -499,6 +499,7 @@ async function timelineLayout(page: Page, selectedUuid: string, touch: boolean, 
       return {
         rows, accent: getComputedStyle(probe).backgroundColor, muted: getComputedStyle(probe).color,
         font: getComputedStyle(probe).fontFamily,
+        wide: element.clientWidth > 34 * Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
         width: element.clientWidth, scroll: element.scrollWidth,
         left: element.getBoundingClientRect().left, right: element.getBoundingClientRect().right,
         paneWidth: pane.clientWidth, paneScroll: pane.scrollWidth,
@@ -514,6 +515,12 @@ async function timelineLayout(page: Page, selectedUuid: string, touch: boolean, 
   expect(chosen?.outline).toBe("none");
   for (const row of layout.rows) {
     expect(row.nestedLinks).toBe(0);
+    const pillCenter = (row.pill.top + row.pill.bottom) / 2;
+    expect(Math.abs((row.dot.top + row.dot.bottom) / 2 - pillCenter)).toBeLessThanOrEqual(1);
+    if (layout.wide) {
+      expect(Math.abs((row.date.top + row.date.bottom) / 2 - pillCenter)).toBeLessThanOrEqual(1);
+      if (row.count !== null) expect(Math.abs((row.count.top + row.count.bottom) / 2 - pillCenter)).toBeLessThanOrEqual(1);
+    }
     expect(row.dateFont).toBe(layout.font);
     expect(row.dateFigures).toBe("tabular-nums");
     if (row.countFont !== null) {
@@ -522,9 +529,34 @@ async function timelineLayout(page: Page, selectedUuid: string, touch: boolean, 
     }
     if (touch) expect(row.rowHeight).toBeGreaterThanOrEqual(44);
     if (["superseded", "rejected", "withdrawn"].includes(row.state ?? "") && row.previewColor !== null) expect(row.previewColor).toBe(layout.muted);
+    if (row.event !== null) {
+      expect(row.event.color).toBe(layout.muted);
+      expect(row.event.font).toBe(layout.font);
+      expect(row.event.scrollWidth).toBeLessThanOrEqual(row.event.width + 1);
+      expect(row.event.scrollHeight).toBeLessThanOrEqual(row.event.height + 1);
+      expect(row.event.fragments.length).toBeGreaterThan(0);
+      for (const fragment of row.event.fragments) {
+        expect(fragment.left).toBeGreaterThanOrEqual(row.event.left - 1);
+        expect(fragment.right).toBeLessThanOrEqual(row.event.right + 1);
+        expect(fragment.top).toBeGreaterThanOrEqual(row.event.top - 1);
+        expect(fragment.bottom).toBeLessThanOrEqual(row.event.bottom + 1);
+      }
+      expect(Math.abs((row.event.fragments.at(-1)?.right ?? 0) - row.event.right)).toBeLessThanOrEqual(2);
+      for (const other of [row.count, row.linked]) {
+        if (other === null) continue;
+        expect(other.right).toBeGreaterThan(other.left);
+        expect(other.bottom).toBeGreaterThan(other.top);
+        expect(other.scrollWidth).toBeLessThanOrEqual(other.width + 1);
+        expect(other.scrollHeight).toBeLessThanOrEqual(other.height + 1);
+        expect(other.left).toBeGreaterThanOrEqual(layout.left - 1);
+        expect(other.right).toBeLessThanOrEqual(layout.right + 1);
+        expect(row.event.right <= other.left || row.event.left >= other.right || row.event.bottom <= other.top || row.event.top >= other.bottom).toBe(true);
+      }
+    }
     expect(row.scroll).toBeLessThanOrEqual(row.width + 1);
     for (const line of row.lines) {
       if (line.rfc) expect(line.flexWrap).toBe("nowrap");
+      else if (line.record) expect(line.flexWrap).toBe("wrap");
       else expect(line.whiteSpace).toBe("nowrap");
       if (touch && line.rfc) expect(line.height).toBeGreaterThanOrEqual(44);
       expect(line.left).toBeGreaterThanOrEqual(layout.left - 1);
@@ -532,6 +564,7 @@ async function timelineLayout(page: Page, selectedUuid: string, touch: boolean, 
     }
   }
   if (truncated) {
+    expect(layout.rows.some((row) => row.event !== null && row.event.fragments.length > 1)).toBe(true);
     const preview = entry(page, selectedUuid).locator(".ub-decision-preview");
     const rfc = entry(page, selectedUuid).locator(".ub-decision-rfc-title");
     await expect(preview).toHaveCSS("text-overflow", "ellipsis");
@@ -818,13 +851,14 @@ for (const { touch, appearance } of [
 
   test(`decision topic history, links and comments on ${touch ? "iPad touch @webkit-touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
     const writer = session();
+    const longRecordedName = "Alexandra Margaret ConstantinopoulosSzymanskiVanderbergMontgomeryFeatherstone (alexandra-workspace-member)";
     const formerOwner = await create(writer, "Former related page", "Previous guidance.");
     const owner = await create(writer, "Current related page", "Current guidance remains readable when archived.");
     const firstRfc = await create(writer, "Original answer RFC", "Discuss the original answer here.");
     const currentRfc = await create(writer, "Current answer RFC", "Discuss the current answer here.");
     const rfc = await create(writer, "Replacement RFC", "Discuss the proposed replacement here.");
     const first = await create(writer, "Initial topic title", "Earlier answer remains available as history.", {
-      kind: "decision", status: "decided", related: formerOwner.uuid, discussion: firstRfc.uuid, answer: answer("Earlier answerer"),
+      kind: "decision", status: "decided", related: formerOwner.uuid, discussion: firstRfc.uuid, answer: answer(longRecordedName),
     });
     await writer.call("pin_doc", { uuid: first.uuid, group: "Reading" });
     const current = await create(writer, undefined, "Current answer stays in force during review. Keep the embedded database in the hub process so each workspace remains portable, backups remain straightforward, and readers can inspect the same durable answer while the proposed replacement is discussed.", {
@@ -879,16 +913,17 @@ for (const { touch, appearance } of [
     await expect.poll(() => topicPins(writer, topicRecords)).toEqual([first.uuid]);
     await selectedTopicPin(page, touch);
     const currentColor = await editor(page).locator("p").evaluate((element) => getComputedStyle(element).color);
-    await relativeAttribution(page, "Recorded answerer", "2026-10-04T12:00:00.000Z");
-    await headerLayout(page, touch ? null : false);
+    await headerLayout(page);
     await expect(entry(page, first.uuid)).toContainText("Linked record");
     await expect(page.locator(".ub-decision-timeline > li")).toHaveCount(5);
     await expect(page.locator(".ub-decision-record-state")).toHaveText(["Under review", "Withdrawn", "Rejected", "In force", "Superseded"]);
     await expect(entry(page, rejected.uuid).getByLabel("1 comment", { exact: true })).toHaveText("1");
     await expect(entry(page, pending.uuid).locator(".ub-decision-record-comments")).toHaveCount(0);
-    await expect(entry(page, rejected.uuid).locator(".ub-decision-event")).toHaveText(/^Recorded rejecter rejected the proposal from (just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
-    await expect(entry(page, current.uuid).locator(".ub-decision-event")).toHaveText("Recorded answerer decided");
-    await expect(entry(page, first.uuid).locator(".ub-decision-event")).toHaveText("Earlier answerer decided");
+    await expect(entry(page, rejected.uuid).locator(".ub-decision-event")).toHaveText("Recorded rejecter");
+    await expect(entry(page, current.uuid).locator(".ub-decision-event")).toHaveText("Recorded answerer");
+    await expect(entry(page, first.uuid).locator(".ub-decision-event")).toHaveText(longRecordedName);
+    await expect(entry(page, first.uuid).getByRole("link", { name: longRecordedName })).toHaveAttribute("href", firstPath);
+    await expect(entry(page, rejected.uuid).getByRole("link", { name: "Recorded rejecter" })).toHaveAttribute("href", rejectedPath);
     await expect(entry(page, pending.uuid).locator(".ub-decision-event")).toHaveCount(0);
     await expect(entry(page, withdrawn.uuid).locator(".ub-decision-event")).toHaveCount(0);
     await expect(entry(page, current.uuid).locator("time")).toHaveAttribute("datetime", "2026-10-04T12:00:00.000Z");
@@ -916,7 +951,7 @@ for (const { touch, appearance } of [
     });
     const column = page.locator(".ub-document-pane > .ub-column");
     await column.evaluate((element) => { (element as HTMLElement).style.inlineSize = "18rem"; });
-    await headerLayout(page, true);
+    await headerLayout(page);
     await rfcLayout(page);
     await timelineLayout(page, current.uuid, touch, true);
     await page.screenshot({
@@ -971,7 +1006,7 @@ for (const { touch, appearance } of [
     await expect(page.getByRole("menuitem", { name: "Unpin from sidebar", exact: true })).toBeEnabled();
     await page.keyboard.press("Escape");
     await answerHeader(page, "Superseded", "superseded");
-    await headerLayout(page, touch ? null : false);
+    await headerLayout(page);
     const replacementAge = await entry(page, current.uuid).locator("time").textContent();
     await expect(page.locator(".ub-decision-earlier-answer")).toContainText(`Earlier answer. Replaced ${replacementAge}; it no longer applies.`);
     await expect(page.getByRole("link", { name: "Go to the current answer", exact: true })).toBeVisible();
@@ -999,7 +1034,6 @@ for (const { touch, appearance } of [
     await selected(page, rejected.uuid, answerText(rejected));
     await selectedRfc(page, firstRfc, "Original answer RFC");
     await answerHeader(page, "Rejected", "rejected");
-    await relativeAttribution(page, "Recorded rejecter", "2026-10-04T12:00:00.000Z");
     await expect(page.locator(".ub-decision-rejection")).toHaveText("Rejection reason: The proposal does not meet the constraint.");
     await readThread(page, "Conversation about the rejection.", touch);
     await closeThreadDrawer(page, touch);
@@ -1016,7 +1050,6 @@ for (const { touch, appearance } of [
     await selectedRfc(page, rfc, "Replacement RFC");
     await answerHeader(page, "Under review", "under-review");
     await expect(page.locator(".ub-decision-notice")).toHaveCount(0);
-    await expect(page.locator(".ub-decision-attribution")).toHaveText(/^Opened (just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
     await expect(page.locator(".ub-decision-answer-history")).toBeVisible();
     await activateControl(page.getByRole("link", { name: "Go to the current answer", exact: true }), { touch });
     await selected(page, current.uuid, answerText(current));
@@ -1025,7 +1058,6 @@ for (const { touch, appearance } of [
     await selected(page, withdrawn.uuid, answerText(withdrawn));
     await selectedRfc(page, null);
     await answerHeader(page, "Withdrawn", "withdrawn");
-    await expect(page.locator(".ub-decision-attribution")).toHaveText(/^Opened (just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
     await expect(page.locator(".ub-decision-answer-history")).toBeVisible();
     await activateControl(page.getByRole("link", { name: "Go to the current answer", exact: true }), { touch });
     await selected(page, current.uuid, answerText(current));
@@ -1083,7 +1115,6 @@ test("undecided proposals, agent stances and conflicting answers show selected-r
   await answerHeader(page, "Not yet decided", "not-yet-decided");
   await timelineRail(page, ["not-yet-decided"], null);
   await expect(page.locator(".ub-decision-notice")).toHaveText("Open proposal");
-  await expect(page.locator(".ub-decision-attribution")).toHaveText(/^Opened (just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
   await expect(page.locator(".ub-decision-answer-history")).toBeVisible();
   await activateControl(page.locator(".ub-decision-notice a"));
   await expect(editor(page)).toHaveText(answerText(rfc));
@@ -1096,7 +1127,6 @@ test("undecided proposals, agent stances and conflicting answers show selected-r
   await timelineRail(page, ["agent-stance"], 0);
   await expect(entry(page, stance.uuid).locator(".ub-decision-event")).toHaveCount(0);
   await expect(entry(page, stance.uuid).locator("time")).toHaveCount(1);
-  await expect(page.locator(".ub-decision-attribution")).toHaveText(/^(just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
   await expect(page.locator(".ub-decision-answer-header").getByText("Agent stance", { exact: true })).toHaveCount(1);
   const left = await create(writer, undefined, "The first conflicting answer.", {
     kind: "decision", status: "decided", supersedes: stance.uuid, discussion: rfc.uuid, answer: answer("First answerer"),

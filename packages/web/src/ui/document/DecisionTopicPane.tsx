@@ -78,23 +78,6 @@ function AnswerPill({ state, timeline = false }: { state: AnswerState; timeline?
   </span>;
 }
 
-function RecordedAttribution({ record, state, now }: {
-  record: DirectoryEntry; state: AnswerState; now: number;
-}): ReactElement | null {
-  const opened = record.status === "open" || record.status === "withdrawn";
-  const date = recordDate(record);
-  const time = date === undefined ? null : formatTimestamp(date, now, true);
-  const label = opened ? (time === null ? null : "Opened")
-    : record.agentStance ? (state === "agent-stance" ? null : "Agent stance")
-    : record.decidedBy?.trim() ? record.decidedBy : null;
-  if (!label && time === null) return null;
-  return <span className="ub-decision-attribution">
-    {label}
-    {label && time !== null && (opened ? " " : " · ")}
-    {time !== null && <time dateTime={time.dateTime} title={time.title}>{time.label}</time>}
-  </span>;
-}
-
 function TopicNotice({ topic, state: selectedState, selectedInForce, docLinks }: {
   topic: DecisionTopicResolution; state: AnswerState; selectedInForce: boolean; docLinks: DocLinkContext | null;
 }): ReactElement | null {
@@ -157,23 +140,16 @@ function AnswerHeader({ topic, record, topicPath, navigate, docLinks, onAlterDec
         </>}
       </div>}
     <div className="ub-decision-answer-header">
-      <div className="ub-decision-answer-heading">
-        <span className="ub-decision-answer-caption">ANSWER</span>
-        <AnswerPill state={state} />
-      </div>
-      <RecordedAttribution record={record} state={state} now={now} />
+      <AnswerPill state={state} />
       {onAlterDecision !== null && <DialogTrigger asChild><Button size="sm" variant="outline" className="ms-auto" onClick={onAlterDecision}>Alter decision</Button></DialogTrigger>}
     </div>
   </>;
 }
 
-function recordEvent(record: DirectoryEntry, inForce: boolean, now: number): string | null {
+function recordEvent(record: DirectoryEntry, inForce: boolean): string | null {
   if (record.agentStance) return inForce ? null : "Agent stance, never confirmed";
   if (!record.decidedBy?.trim()) return null;
-  if (record.status === "decided") return `${record.decidedBy} decided`;
-  if (record.status !== "rejected") return null;
-  const created = record.createdAt === undefined ? null : formatTimestamp(record.createdAt, now, true);
-  return `${record.decidedBy} rejected the proposal${created === null ? "" : ` from ${created.label}`}`;
+  return record.status === "decided" || record.status === "rejected" ? record.decidedBy : null;
 }
 
 function Timeline({ topic, selected, linkedRecord, segment, navigate, docLinks, directoryConnection }: {
@@ -193,7 +169,7 @@ function Timeline({ topic, selected, linkedRecord, segment, navigate, docLinks, 
         const chosen = record.uuid === selected;
         const state = answerState(topic, record);
         const inForce = topic.inForce?.uuid === record.uuid;
-        const event = recordEvent(record, inForce, now);
+        const event = recordEvent(record, inForce);
         const rfcTitle = !record.discussion || directoryConnection === null ? undefined
           : getDirectoryEntry(directoryConnection.ydoc, record.discussion)?.title || undefined;
         return <li key={record.uuid} data-record={record.uuid} data-selected={chosen} data-state={state}

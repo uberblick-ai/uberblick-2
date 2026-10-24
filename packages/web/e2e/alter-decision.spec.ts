@@ -257,10 +257,15 @@ test("Decide records a successor at the topic address and RFC opens its new page
   await expect(page).toHaveURL(new RegExp(`/${source.uuid}$`));
   await expect(editor(page)).toContainText("Use the replacement answer.");
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-  await expect(page.locator(".ub-decision-answer-header")).toContainText("Browser decision maker");
-  await expect(page.locator(".ub-decision-answer-header .ub-decision-answer-state")).toHaveText("In force");
+  const header = page.locator(".ub-decision-answer-header");
+  await expect(header).toHaveText(/^In force\s*Alter decision$/);
+  await expect(header.locator(".ub-decision-answer-caption, .ub-decision-attribution, time")).toHaveCount(0);
+  const newest = page.locator(".ub-decision-timeline > li").first();
+  await expect(newest.locator(".ub-decision-record-state")).toHaveText("In force");
+  await expect(newest.locator(".ub-decision-event")).toHaveText("Browser decision maker");
+  await expect(newest.getByRole("link", { name: "Browser decision maker" })).toHaveAttribute("aria-current", "true");
+  await expect(newest.locator("time")).toHaveAttribute("datetime", /^\d{4}-/);
   await expect(page.locator(`.ub-decision-timeline > li[data-record="${source.uuid}"]`)).toContainText("Superseded");
-  await expect(page.locator(".ub-decision-answer-header time")).toHaveAttribute("datetime", /^\d{4}-/);
   let decided: string | undefined;
   await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: source.uuid }), (stored) => {
     decided = stored.resolution?.inForce ?? undefined;
