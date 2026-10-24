@@ -439,8 +439,8 @@ describe("historical reads through the MCP boundary", () => {
     const rig = await server();
     const advertised = (await rig.client.listTools()).tools;
     const revisionProperties = {
-      startedAt: { anyOf: [{ type: "string" }, { type: "null" }] },
-      endedAt: { anyOf: [{ type: "string" }, { type: "null" }] },
+      startedAt: { type: ["string", "null"] },
+      endedAt: { type: ["string", "null"] },
       name: { anyOf: [{ properties: { namedAt: { type: "string" } } }, { type: "null" }] },
     };
     expect(advertised.find(tool => tool.name === "list_revisions")?.outputSchema).toMatchObject({
