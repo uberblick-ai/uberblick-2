@@ -2,8 +2,9 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
-import { roomForDoc } from "@uberblick/schema";
+import { getMetaMap, roomForDoc } from "@uberblick/schema";
 import { activateControl, editor, setupHarness } from "./app-helpers.js";
+import { legacyDecisionPeer } from "./legacy-decision-peer.js";
 import { McpAgent } from "./mcp-agent.js";
 import { expectMcp, proveMcpArrival } from "./settle.js";
 import type { McpSession } from "./mcp-agent.js";
@@ -33,8 +34,8 @@ function session(): McpSession {
   return agent.open({ name: "decisions-block-e2e" });
 }
 
-function answer(who = "Ben (@bk-one)", when = new Date(Date.now() - 5 * 86_400_000).toISOString()) {
-  return { who, when, where: "https://example.org/team/decision" };
+function answer(who = "Ben (@bk-one)") {
+  return { who, when: new Date(Date.now() - 5 * 86_400_000).toISOString(), where: "https://example.org/team/decision" };
 }
 
 async function create(writer: McpSession, title: string | undefined, text: string, fields: Record<string, unknown> = {}): Promise<StoredDoc> {
@@ -227,8 +228,16 @@ for (const touch of [false, true]) {
       kind: "decision", status: "decided", related: owner.uuid, answer: recordedAnswer,
     });
     const zulu = await create(writer, "Zulu settled question", "A second settled answer.", {
-      kind: "decision", status: "decided", related: owner.uuid, answer: answer("bk-one", "An unparseable recorded date"),
+      kind: "decision", status: "decided", related: owner.uuid, answer: answer("bk-one"),
     });
+    const legacy = await legacyDecisionPeer(harness(), zulu.uuid);
+    try {
+      getMetaMap(legacy.doc).set("decidedAt", "An unparseable recorded date");
+      legacy.decide("decided");
+      await expectMcp(() => writer.call<{ decidedAt?: string }>("get_doc", { uuid: zulu.uuid }), (stored) => {
+        expect(stored.decidedAt).toBe("An unparseable recorded date");
+      });
+    } finally { legacy.close(); }
     const stance = await create(writer, "Agent question", "An agent answer is labelled as a stance.", {
       kind: "decision", status: "decided", related: owner.uuid,
     });
