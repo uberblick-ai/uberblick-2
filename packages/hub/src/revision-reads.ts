@@ -79,7 +79,11 @@ export class RevisionReads implements Extension<HubContext> {
 
   private write(request: RevisionRequest, document: onStatelessPayload["document"], room: string, principalId: string): RevisionResponse {
     const { revisions } = this.options.database;
-    const result = request.operation === "name"
+    const result = request.operation === "restore"
+      ? this.options.database.restoreRevision(room, document, request.checksum ?? "", request.revisionId ?? "", {
+        principalId, surface: request.surface ?? { kind: "unknown", name: "unknown" },
+      })
+      : request.operation === "name"
       ? revisions.name(room, document, request.checksum ?? "", request.name ?? "", {
         principalId, surface: request.surface ?? { kind: "unknown", name: "unknown" },
       })
@@ -87,11 +91,12 @@ export class RevisionReads implements Extension<HubContext> {
         ? revisions.rename(room, request.revisionId ?? "", request.name ?? "", principalId)
         : revisions.removeName(room, request.revisionId ?? "", principalId);
     if (!result.ok) return { requestId: request.requestId, ok: false, error: result.error,
-      ...(result.name === undefined ? {} : { name: this.name(result.name, principalId) }) };
+      ...(!("name" in result) || result.name === undefined ? {} : { name: this.name(result.name, principalId) }) };
     const revision = revisions.list(room).find(entry => entry.id === result.id);
-    if (revision === undefined) throw new Error("named revision missing");
+    if (revision === undefined) throw new Error("written revision missing");
     return { requestId: request.requestId, ok: true, revision: this.entry(revision,
-      revisions.names(room).get(result.id), principalId, true) };
+      revisions.names(room).get(result.id), principalId, true),
+      ...("applied" in result && typeof result.applied === "boolean" ? { applied: result.applied } : {}) };
   }
 
   private author(author: UpdateAuthor | null): RevisionEntry["author"] {

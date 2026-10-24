@@ -248,7 +248,7 @@ const RECOVERIES: Record<string, Recovery> = {
   },
   revision_stale_state: {
     recoveryClass: "reread",
-    guidance: "Wait for synchronization, read the current document with get_doc, then name the state the person intends to review. Nothing was named.",
+    guidance: "Wait for synchronization, read the current document with get_doc, review the newer changes, then try again. Nothing was changed.",
   },
   revision_invalid_name: {
     recoveryClass: "manual",
@@ -265,6 +265,10 @@ const RECOVERIES: Record<string, Recovery> = {
   revision_naming_outcome_unknown: {
     recoveryClass: "reread",
     guidance: "Call list_revisions to check whether the hub applied the name before trying again. A missing reply does not establish that nothing changed; reason distinguishes a silent admitted hub from a lost connection.",
+  },
+  revision_restore_outcome_unknown: {
+    recoveryClass: "reread",
+    guidance: "Read list_revisions and get_doc before retrying: the restore may have committed even though its reply was lost. Update the hub if reason is unsupported.",
   },
   revision_not_found: {
     recoveryClass: "reread",
@@ -486,6 +490,7 @@ const REVISION_FAILURE_CODES: Record<RevisionClientFailure, string> = {
   "not-namer": "revision_not_namer",
   archived: "doc_archived",
   "naming-outcome-unknown": "revision_naming_outcome_unknown",
+  "restore-outcome-unknown": "revision_restore_outcome_unknown",
 };
 
 /**
@@ -504,7 +509,7 @@ export const FAILURE_INSTRUCTIONS =
   "some of it is — `completed` names the rooms that are) and `synced`; `applied: false, partial: false` means " +
   "nothing changed locally, and nothing is ever rolled back — a partial write is finished by following `recovery`. " +
   "A failure of a reading tool carries none of those three: there was no write to report on. The hub-only " +
-  "name_revision reports applied: null when a sent request has no acknowledged outcome; read list_revisions before retrying. `internal_error` is " +
+  "name_revision and restore_revision report applied: null when a sent request has no acknowledged outcome; read list_revisions and get_doc before retrying. `internal_error` is " +
   "the one code with no class and no detail — an unmapped crash cannot honestly say what it did — and arguments " +
   "that do not match a tool's input schema never reach the tool at all: the MCP layer rejects them with its own " +
   "plain-text validation error, and nothing durable changes.";
@@ -560,6 +565,9 @@ export function toFailure(tool: FailedTool, error: unknown): ToolFailure {
     return stamped(tool, { error: REVISION_FAILURE_CODES[error.code], message: error.message, ...error.details,
       ...(tool.name === "name_revision" && error.code === "forbidden"
         ? { recovery: "Ask a workspace maintainer to grant write access before naming this document. Nothing was named." }
+        : {}),
+      ...(tool.name === "restore_revision" && error.code === "forbidden"
+        ? { recovery: "Ask a workspace maintainer to grant write access before restoring this revision. Nothing was changed." }
         : {}),
     });
   }

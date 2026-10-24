@@ -37,6 +37,7 @@ import { inputSchema as listTagsInput, listTagsOperation } from "./tools/list-ta
 import { inputSchema as listRevisionsInput, listRevisionsOperation } from "./tools/list-revisions.js";
 import { inputSchema as moveBlockInput, moveBlockOperation } from "./tools/move-block.js";
 import { inputSchema as nameRevisionInput, nameRevisionOperation } from "./tools/name-revision.js";
+import { inputSchema as restoreRevisionInput, restoreRevisionOperation } from "./tools/restore-revision.js";
 import type { Operation, ToolOperation, Writes } from "./tools/operation.js";
 import { inputSchema as restoreDocInput, restoreDocOperation } from "./tools/restore-doc.js";
 import { inputSchema as searchInput, searchOperation } from "./tools/search.js";
@@ -175,7 +176,7 @@ export const tools: readonly Tool[] = [
     title: "List document revisions",
     description:
       "List hub revisions newest first, including archived documents, with names, namers and times or null. " +
-      "IDs work with get_revision/get_data. Empty means hub-confirmed no history.",
+      "IDs work with get_revision/get_data/restore_revision. Empty means hub-confirmed no history.",
     input: listRevisionsInput,
     operation: listRevisionsOperation,
     example: { uuid },
@@ -194,6 +195,19 @@ export const tools: readonly Tool[] = [
     example: { uuid, name: "Reviewed after auth rewrite" },
     related: documentContracts,
     details: toolHelpDetails.name_revision,
+  }),
+  tool({
+    name: "restore_revision",
+    title: "Restore a document revision",
+    description:
+      "Restore title, blocks and data from a hub revision as a new revision. Requires synchronized write access " +
+      "to a live document; history and other metadata stay. An identical state writes nothing.",
+    input: restoreRevisionInput,
+    operation: restoreRevisionOperation,
+    hints: { destructive: true, idempotent: true },
+    example: { uuid, revision: "revision-id-from-list_revisions" },
+    related: documentContracts,
+    details: toolHelpDetails.restore_revision,
   }),
   tool({
     name: "get_revision",

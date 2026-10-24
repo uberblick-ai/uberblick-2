@@ -290,8 +290,8 @@ function authorName(entry: RevisionEntry | undefined, earliest: boolean): string
   return entry === undefined ? "Unknown author" : revisionAuthor(entry, earliest).name;
 }
 
-export function RevisionPane({ history, docLinks, workspaceSettings, writable = false }: {
-  history: DocumentHistory; docLinks: DocLinkContext | null; workspaceSettings: Y.Doc | null; writable?: boolean;
+export function RevisionPane({ history, docLinks, workspaceSettings, writable = false, archived = false }: {
+  history: DocumentHistory; docLinks: DocLinkContext | null; workspaceSettings: Y.Doc | null; writable?: boolean; archived?: boolean;
 }): ReactElement | null {
   const { selection, entries, collapseUnchanged } = history;
   const pane = useRef<HTMLElement | null>(null);
@@ -382,18 +382,29 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   const total = entries?.length ?? 0;
   const before = editors.find((entry) => entry.side === "before")?.editor;
   const after = editors.find((entry) => entry.side === "after")?.editor;
+  const restoreUnavailable = archived ? "This document is archived. Restore the document first, then restore a revision."
+    : !writable ? "Read-only access. Write access is required to restore a revision."
+    : history.busy ? "Wait for history to load." : entry === undefined ? "Choose a revision to restore." : null;
+  const restore = async (): Promise<void> => {
+    if (restoreUnavailable !== null || entry === undefined) return;
+    try {
+      const applied = await history.restore(entry.id);
+      toast.success(applied ? "Document restored to this version" : "The document already has this version. Nothing changed.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't restore this version. Refresh history and try again.");
+    }
+  };
   return <section ref={pane} className={`ub-pane ub-page-pane ub-document-pane ub-revision-pane${split ? " ub-revision-split-pane" : ""}`}>
     <div className="ub-column">
       {/* Stays in view while the comparison scrolls; revisions keep no tags. */}
       <header ref={header} className="ub-revision-header">
         <div className="ub-revision-heading">
           <RevisionTitle title={selection === null ? live?.title?.text ?? "" : title} index={selection?.index ?? -1} />
-          {/* Restore lands later; the control shows where it will be. */}
-          <Button variant="secondary" size="sm" aria-disabled="true" aria-describedby={restoreReason}
-            title="Restore is not available yet" className="ub-revision-restore" onClick={(event) => event.preventDefault()}>
+          <Button variant="secondary" size="sm" disabled={restoreUnavailable !== null} aria-describedby={restoreUnavailable === null ? undefined : restoreReason}
+            title={restoreUnavailable ?? undefined} className="ub-revision-restore" onClick={() => { void restore(); }}>
             Restore this version
           </Button>
-          <span id={restoreReason} className="sr-only">Restore is not available yet</span>
+          {restoreUnavailable !== null && <span id={restoreReason} className="sr-only">{restoreUnavailable}</span>}
         </div>
         {selection === null ? <p role="status" className="ub-history-controls ub-type-small">Loading history…</p>
           : <RevisionStatus history={history} writable={writable} />}

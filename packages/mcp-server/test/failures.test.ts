@@ -175,6 +175,7 @@ const EXPECTED: Record<
   revision_already_named: { recoveryClass: "manual", detail: ["existingName"] },
   revision_not_namer: { recoveryClass: "manual", detail: [] },
   revision_naming_outcome_unknown: { recoveryClass: "reread", detail: ["reason"] },
+  revision_restore_outcome_unknown: { recoveryClass: "reread", detail: ["reason"] },
   doc_not_archived: { recoveryClass: "manual", detail: ["uuid"] },
   decision_delete_unsupported: { recoveryClass: "manual", detail: ["uuid"] },
   group_not_found: { recoveryClass: "reread", detail: ["group"] },
@@ -622,6 +623,8 @@ describe("the failure contract", () => {
         clientCode === "already-named" ? { existingName: { text: "Reviewed", namer: null, namedAt: 1, canManage: false } }
           : clientCode === "naming-outcome-unknown" ? { applied: null, reason: "unsupported" } : {})).payload);
     }
+    record(toFailure(toolNamed("restore_revision"), new RevisionClientError("restore-outcome-unknown",
+      { applied: null, reason: "unsupported" })).payload);
 
     // Every code the code itself knows about was triggered above.
     expect([...failures.keys()].sort()).toEqual([...FAILURE_CODES].sort());

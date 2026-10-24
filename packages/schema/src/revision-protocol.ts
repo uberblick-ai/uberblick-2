@@ -19,7 +19,7 @@ export interface RevisionName {
 
 export interface RevisionRequest {
   requestId: string;
-  operation: "list" | "get" | "name" | "rename" | "remove-name";
+  operation: "list" | "get" | "name" | "rename" | "remove-name" | "restore";
   revisionId?: string;
   includeNames?: true;
   includeTitles?: true;
@@ -30,7 +30,7 @@ export interface RevisionRequest {
 
 export type RevisionResponse = { requestId: string; ok: true; revisions: RevisionEntry[] }
   | { requestId: string; ok: true; state: Uint8Array }
-  | { requestId: string; ok: true; revision: RevisionEntry }
+  | { requestId: string; ok: true; revision: RevisionEntry; applied?: boolean }
   | { requestId: string; ok: false; error: "unsupported" | "deleted" | "revision-not-found" | "forbidden" | "unavailable"
     | "stale-state" | "invalid-name" | "already-named" | "not-namer" | "archived"; name?: RevisionName };
 
@@ -73,10 +73,11 @@ export function readRevisionRequest(raw: string): RevisionRequest | null {
     return { requestId, operation: "rename", revisionId: value.revisionId,
       ...(typeof value.name === "string" ? { name: value.name } : {}) };
   }
-  return value.operation === "name" && typeof value.checksum === "string" &&
+  return (value.operation === "name" || (value.operation === "restore" && identifier(value.revisionId))) && typeof value.checksum === "string" &&
     /^[a-f0-9]{64}$/.test(value.checksum) && object(value.surface) &&
     identifier(value.surface.kind) && identifier(value.surface.name)
-    ? { requestId, operation: "name", ...(typeof value.name === "string" ? { name: value.name } : {}), checksum: value.checksum,
+    ? { requestId, operation: value.operation, ...(value.operation === "restore" ? { revisionId: value.revisionId as string }
+      : typeof value.name === "string" ? { name: value.name } : {}), checksum: value.checksum,
       surface: { kind: value.surface.kind, name: value.surface.name } } : null;
 }
 
@@ -139,7 +140,11 @@ export function readRevisionResponse(raw: string): RevisionResponse | null {
   }
   if (value.ok !== true) return null;
   if (Array.isArray(value.revisions) && value.revisions.every(entry)) return { requestId, ok: true, revisions: value.revisions };
-  if (entry(value.revision)) return { requestId, ok: true, revision: value.revision };
+  if (entry(value.revision)) {
+    if (value.applied !== undefined && typeof value.applied !== "boolean") return null;
+    return { requestId, ok: true, revision: value.revision,
+      ...(value.applied === undefined ? {} : { applied: value.applied }) };
+  }
   if (typeof value.state !== "string") return null;
   try {
     return { requestId, ok: true, state: Uint8Array.from(atob(value.state), character => character.charCodeAt(0)) };

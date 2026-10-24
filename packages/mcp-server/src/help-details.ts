@@ -131,7 +131,7 @@ export const toolHelpDetails = {
     "null `startedAt` means an unknown start for content from before history began, " +
     "and null `endedAt` means the revision is still open.\n\n" +
     "Pass an entry's `id` as `revision` to get_revision or get_data. It is a hub revision ID, distinct from " +
-    "get_doc's page and block `rev` content hashes. Writing tools do not accept revision IDs. " +
+    "get_doc's page and block `rev` content hashes. restore_revision accepts the same revision IDs. " +
     "A UUID unknown to this workspace refuses with doc_not_found before contacting the hub; a permanently " +
     "deleted document refuses with doc_deleted. See tool-contracts for hub history failures and recovery.",
   name_revision:
@@ -147,6 +147,23 @@ export const toolHelpDetails = {
     "refusal reports applied: false. If a sent request loses its reply, revision_naming_outcome_unknown " +
     "reports applied: null, partial: false and synced: false. Read list_revisions before retrying; " +
     "reason unsupported means an admitted hub stayed silent, while unreachable means transport failed.",
+  restore_revision:
+    "Restore a live team-hub document's title, visible blocks and structured data from a revision ID returned " +
+    "by list_revisions. The hub closes the current revision and records the restore as its own closed revision, " +
+    "authored by the restoring GitHub account and MCP client. Later edits start another revision. All history " +
+    "stays readable; restoring the revision before the restore undoes it. An already identical state writes " +
+    "nothing and returns applied: false with the current revision. Success otherwise returns the new revision " +
+    "in list_revisions form, applied: true, synced: true and hub. Content reaches clients through normal sync.\n\n" +
+    "Requires write access, a non-archived document and a copy matching the hub with nothing pending; otherwise " +
+    "revisions_forbidden, doc_archived or revision_stale_state refuses without writing. Review current content " +
+    "and synchronize before retrying stale state. restore_doc instead makes an archived document live.\n\n" +
+    "Unchanged blocks retain ids, edit revs and comment anchors. Threads and replies, tags, pins, code checks, " +
+    "description and TL;DR stay. Threads in replaced or removed text lose their anchors; restoring the text " +
+    "again does not reattach them. Edits another replica makes inside replaced or removed blocks before " +
+    "receiving the restore are dropped, including offline edits; edits elsewhere land on top.\n\n" +
+    "A sent request whose reply is lost reports revision_restore_outcome_unknown with applied: null, " +
+    "partial: false and synced: false. Read list_revisions and get_doc before retrying: the restore may have " +
+    "committed. reason unsupported means an admitted hub stayed silent; unreachable means transport failed.",
   get_revision:
     "Read a known document as it was at the hub revision ID from list_revisions, including an archived document. " +
     "The result returns `uuid`, `revision`, `title`, visible `blocks` and `data`. Blocks use get_doc's shape " +

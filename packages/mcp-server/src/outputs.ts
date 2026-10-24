@@ -294,6 +294,13 @@ export const outputSchemas = {
     synced: z.literal(true).describe("The hub acknowledged this naming transaction."),
     hub,
   }).strict(),
+  restore_revision: z.object({
+    uuid,
+    revision: revisionEntry,
+    applied: z.boolean().describe("True when restored; false when the live title, blocks and data already match, with no new revision."),
+    synced: z.literal(true).describe("The hub acknowledged this restore result; content arrives through normal sync."),
+    hub,
+  }).strict(),
   get_revision: z.object({
     uuid,
     revision: revisionId,

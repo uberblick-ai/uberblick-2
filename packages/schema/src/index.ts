@@ -66,6 +66,7 @@ export type { RevInput } from "./rev.js";
 
 export { compareRevisions } from "./revisions.js";
 export { snapshotRevision } from "./revision-snapshot.js";
+export { restoreRevisionContent } from "./revision-restore.js";
 export type { RevisionSnapshot } from "./revision-snapshot.js";
 export { encodeRevisionRequest, readRevisionRequest, encodeRevisionResponse, encodeRevisionResponseFrames,
   readRevisionResponse, createRevisionResponseReader } from "./revision-protocol.js";

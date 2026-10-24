@@ -7,7 +7,7 @@ import {
   readRevisionRequest, roomForDoc, setTitle, tombstoneDirectoryEntry, type RevisionRequest, type RevisionResponse,
 } from "@uberblick/schema";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
-import { documentRevisionChecksum, getDocumentRevision, listDocumentRevisions, mutateDocumentRevision } from "../src/revision-client.js";
+import { documentRevisionChecksum, getDocumentRevision, listDocumentRevisions, mutateDocumentRevision, restoreDocumentRevision } from "../src/revision-client.js";
 import { HubSync } from "../src/sync.js";
 import { openWorkspaceReplicas, type WorkspaceReplicaSet } from "../src/workspace-replicas.js";
 import { cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, startHub, tempDir, testConfig, TEST_SECRET } from "./helpers.js";
@@ -124,6 +124,27 @@ it("does not claim a sent naming request made no change when its reply is lost o
     .rejects.toMatchObject({ code: "naming-outcome-unknown", details: { applied: null, reason: "unreachable" } });
   fixture.reply((request, send) => send({ requestId: request.requestId, ok: false, error: "stale-state" }));
   await expect(mutateDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation))
+    .rejects.toMatchObject({ code: "stale-state", details: {} });
+});
+
+it("preserves restore no-op results and treats missing restore acknowledgements as unknown outcomes", async () => {
+  const fixture = await admitted();
+  const mutation = { operation: "restore" as const, revisionId: "earlier", checksum: documentRevisionChecksum(fixture.replica.doc),
+    surface: { kind: "mcp", name: "Codex" } };
+  const entry = { id: "current", author: null, startedAt: 100, endedAt: 200, name: null };
+  fixture.reply((request, send) => send({ requestId: request.requestId, ok: true, revision: entry, applied: false }));
+  await expect(restoreDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation))
+    .resolves.toEqual({ revision: entry, applied: false });
+  const requests: RevisionRequest[] = [];
+  fixture.reply(request => { requests.push(request); });
+  await expect(restoreDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation, { timeoutMs: 100 }))
+    .rejects.toMatchObject({ code: "restore-outcome-unknown", details: { applied: null, reason: "unsupported" } });
+  expect(requests).toMatchObject([mutation]);
+  fixture.reply((request, send) => send({ requestId: request.requestId, ok: false, error: "unavailable" }));
+  await expect(restoreDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation))
+    .rejects.toMatchObject({ code: "restore-outcome-unknown", details: { applied: null, reason: "unreachable" } });
+  fixture.reply((request, send) => send({ requestId: request.requestId, ok: false, error: "stale-state" }));
+  await expect(restoreDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation))
     .rejects.toMatchObject({ code: "stale-state", details: {} });
 });
 

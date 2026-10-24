@@ -322,7 +322,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "List hub revisions newest first, including archived documents, with names, namers and times or null. IDs work with get_revision/get_data. Empty means hub-confirmed no history.\n\nHelp: list_revisions, workspaces, tool-contracts.",
+    "description": "List hub revisions newest first, including archived documents, with names, namers and times or null. IDs work with get_revision/get_data/restore_revision. Empty means hub-confirmed no history.\n\nHelp: list_revisions, workspaces, tool-contracts.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -358,6 +358,40 @@
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "restore_revision",
+    "title": "Restore a document revision",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uuid": {
+          "description": "Document UUID.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "A hub revision id from list_revisions."
+        }
+      },
+      "required": [
+        "uuid",
+        "revision"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false
+    },
+    "description": "Restore title, blocks and data from a hub revision as a new revision. Requires synchronized write access to a live document; history and other metadata stay. An identical state writes nothing.\n\nHelp: restore_revision, workspaces, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
       "idempotentHint": true,
       "openWorldHint": false
     }
