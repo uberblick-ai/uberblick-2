@@ -15,6 +15,12 @@ function pinnedTitles(page: Page): Locator {
 test("the docked sidebar shares the pane's top edge and transfers focus", async ({ browser }) => {
   const page = await openApp(browser);
   await expect(page.getByRole("button", { name: "+ New page" })).toBeEnabled();
+  const allDocuments = page.getByRole("button", { name: "All documents", exact: true });
+  await allDocuments.hover();
+  await expect(allDocuments).toHaveCSS("cursor", "pointer");
+  const dashboard = page.getByRole("button", { name: "Dashboard", exact: true });
+  await expect(dashboard).toHaveAttribute("aria-disabled", "true");
+  await expect(dashboard).toHaveCSS("cursor", "default");
   const path = new URL(page.url()).pathname;
   const sidebar = page.locator(".ub-list");
   const pane = page.locator(".ub-pane");

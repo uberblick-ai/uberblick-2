@@ -136,7 +136,7 @@ function GeneralSettings({
       </section>
       <Collapsible key={`connection-${workspace.uuid}`} className="mt-8">
         <h2 className="mt-0 mb-4 ub-type-h2 font-semibold">
-          <CollapsibleTrigger className="group flex max-w-full items-center gap-2 border-0 bg-transparent p-0 text-left font-[inherit] text-inherit cursor-pointer [@media(any-pointer:coarse)]:min-h-11">
+          <CollapsibleTrigger className="group flex max-w-full items-center gap-2 border-0 bg-transparent p-0 text-left font-[inherit] text-inherit [@media(any-pointer:coarse)]:min-h-11">
             Connection details
             <svg className="size-4 shrink-0 group-data-[state=open]:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
           </CollapsibleTrigger>

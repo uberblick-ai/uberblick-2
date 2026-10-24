@@ -169,7 +169,7 @@ export function CaretMenu({
                 tabIndex={-1}
                 aria-label={option.label}
                 aria-selected={index === active}
-                className={`flex min-h-6 w-full cursor-pointer items-center gap-2 rounded-(--radius-sm) border px-[0.4rem] py-[0.3rem] text-left ub-type-ui [font-family:inherit] [@media(pointer:coarse)]:min-h-11 ${index === active ? "border-(--border) bg-(--card-accent) text-(--accent-foreground)" : "border-transparent bg-transparent text-card-foreground"}`}
+                className={`flex min-h-6 w-full items-center gap-2 rounded-(--radius-sm) border px-[0.4rem] py-[0.3rem] text-left ub-type-ui [font-family:inherit] [@media(pointer:coarse)]:min-h-11 ${index === active ? "border-(--border) bg-(--card-accent) text-(--accent-foreground)" : "border-transparent bg-transparent text-card-foreground"}`}
                 // A pick must run against the prose selection, before focus
                 // can leave it. Touch clicks still reach the same command.
                 onMouseDown={(event) => event.preventDefault()}

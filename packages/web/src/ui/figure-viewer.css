@@ -39,8 +39,8 @@
   color: var(--foreground);
   text-decoration: none;
   font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
-  cursor: pointer;
 }
+a.ub-figure-viewer-action { cursor: pointer; }
 .ub-figure-viewer-action:hover { background: var(--accent); }
 .ub-figure-viewer-zoom { min-width: 3.5rem; text-align: center; font-variant-numeric: tabular-nums; }
 .ub-ablauf-viewer-viewport { position: relative; flex: 1; min-height: 0; overflow: hidden; }
@@ -76,8 +76,8 @@
   color: inherit;
   font: inherit;
   text-decoration: none;
-  cursor: pointer;
 }
+.ub-figure-toolbar > a { cursor: pointer; }
 .ub-figure-toolbar > :is(button, a):hover { background: var(--accent); }
-.ub-figure-toolbar > :disabled { opacity: 0.5; cursor: default; }
+.ub-figure-toolbar > :disabled { opacity: 0.5; }
 .ub-figure-toolbar > [hidden] { display: none; }

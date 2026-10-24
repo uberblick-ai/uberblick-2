@@ -420,7 +420,7 @@ export function BlockMenu({
         ref={gutterButton}
         className={`absolute z-[1] flex items-center justify-center rounded-(--radius-sm) border border-transparent bg-transparent p-0 ub-type-body text-(--muted-foreground) [font-family:inherit] transition-opacity duration-[120ms] ease-out motion-reduce:transition-none ${
           anchor?.touch ? "left-[-44px] size-11" : "left-[calc(-1*var(--block-gutter))] size-6"
-        } ${visible ? "pointer-events-auto cursor-pointer opacity-100 hover:bg-secondary hover:border-(--border) hover:text-foreground" : "pointer-events-none opacity-0"}`}
+        } ${visible ? "pointer-events-auto opacity-100 hover:bg-secondary hover:border-(--border) hover:text-foreground" : "pointer-events-none opacity-0"}`}
         style={{ top: `${anchor?.top ?? 0}px` }}
         aria-label="Insert block below"
         title="Insert block below"

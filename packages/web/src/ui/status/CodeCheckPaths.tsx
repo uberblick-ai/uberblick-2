@@ -71,7 +71,7 @@ export function CodeCheckPaths({ paths }: { paths: readonly string[] }): ReactEl
     </div> : <div className="flex min-w-0 items-center gap-2">
       <CodeCheckPath path={paths[0] ?? ""} />
       {paths.length > 1 && <button type="button"
-        className="min-h-6 shrink-0 cursor-pointer whitespace-nowrap border-0 bg-transparent p-0 font-sans text-foreground underline [@media(any-pointer:coarse)]:min-h-11"
+        className="min-h-6 shrink-0 whitespace-nowrap border-0 bg-transparent p-0 font-sans text-foreground underline [@media(any-pointer:coarse)]:min-h-11"
         onClick={() => setExpanded(true)}>+{paths.length - 1} more</button>}
     </div>}
   </TooltipProvider>;
