@@ -43,7 +43,12 @@ export type HubStatus =
   | "hub-down"
   | "auth-failed"
   | "update-required"
-  | "quarantined";
+  | "quarantined"
+  | "local";
+
+export const LOCAL_HUB_REASON =
+  "Local workspace: changes are saved on this computer, so nothing needs retrying. " +
+  "They reach the web editor when `ub open` runs.";
 
 export interface HubState {
   status: HubStatus;
@@ -1352,7 +1357,19 @@ export class HubSync {
     return this.isRoomQuiet(room) && this.providers.get(room)?.authorizedScope === "read-write";
   }
 
-  /** A correlated, bounded read over the room's existing authenticated connection. */
+  private revisionAdmissionFailure(room: string): ConstructorParameters<typeof RevisionClientError>[0] | null {
+    if (this.deletedRooms.has(room)) return "deleted";
+    const state = this.state();
+    if (state.authRecovery === "sign-in-required") return "sign-in-required";
+    if (state.authRecovery === "no-workspace-access") return "forbidden";
+    if (state.status === "auth-failed" && !this.checkingDeviceRefusal) return "forbidden";
+    if (state.status === "update-required") return "unsupported";
+    if (this.stopped || state.status === "disabled" || state.status === "quarantined" ||
+      (state.status === "hub-down" && !this.checkingDeviceRefusal)) return "unreachable";
+    return null;
+  }
+
+  /** A correlated, bounded request over the room's existing authenticated connection. */
   requestRevisions(
     room: string,
     operation: Omit<RevisionRequest, "requestId">,
@@ -1378,21 +1395,17 @@ export class HubSync {
       };
       const fail = (code: ConstructorParameters<typeof RevisionClientError>[0]) => {
         cleanup();
+        if (sent && operation.operation !== "list" && operation.operation !== "get") {
+          reject(new RevisionClientError("naming-outcome-unknown", { applied: null, reason: code }));
+          return;
+        }
         reject(new RevisionClientError(code));
       };
       const evaluate = () => {
         queued = false;
         if (finished) return;
-        if (this.deletedRooms.has(room)) { fail("deleted"); return; }
-        const state = this.state();
-        if (state.authRecovery === "sign-in-required") { fail("sign-in-required"); return; }
-        if (state.authRecovery === "no-workspace-access") { fail("forbidden"); return; }
-        if (state.status === "auth-failed" && !this.checkingDeviceRefusal) { fail("forbidden"); return; }
-        if (state.status === "update-required") { fail("unsupported"); return; }
-        if (this.stopped || state.status === "disabled" || state.status === "quarantined" ||
-            (state.status === "hub-down" && !this.checkingDeviceRefusal)) {
-          fail("unreachable"); return;
-        }
+        const refusal = this.revisionAdmissionFailure(room);
+        if (refusal !== null) { fail(refusal); return; }
         const provider = this.providers.get(room);
         if (sent) {
           if (generation !== this.socketGeneration && !this.checkingDeviceRefusal) fail("unreachable");
@@ -1401,6 +1414,10 @@ export class HubSync {
         // Admission is sufficient for a read-only client; update acknowledgements
         // and queued writes are unrelated to whether it may request history.
         if (provider?.hasCurrentSync() !== true) return;
+        if (operation.operation !== "list" && operation.operation !== "get") {
+          if (!this.isRoomQuiet(room)) { fail("stale-state"); return; }
+          if (!this.canWriteRoom(room)) { fail("forbidden"); return; }
+        }
         sent = true;
         generation = this.socketGeneration;
         try {

@@ -4,17 +4,35 @@ export interface RevisionEntry {
   author: { githubUsername: string; surface: { kind: string; name: string } } | null;
   startedAt: number | null;
   endedAt: number | null;
+  /** Only sent in response to a list request that opts in to names. */
+  name?: RevisionName | null;
+  /** Only sent when requested in a list and the stored snapshot title can be read. */
+  title?: string;
+}
+
+export interface RevisionName {
+  text: string;
+  namer: RevisionEntry["author"];
+  namedAt: number;
+  canManage: boolean;
 }
 
 export interface RevisionRequest {
   requestId: string;
-  operation: "list" | "get";
+  operation: "list" | "get" | "name" | "rename" | "remove-name";
   revisionId?: string;
+  includeNames?: true;
+  includeTitles?: true;
+  name?: string;
+  checksum?: string;
+  surface?: { kind: string; name: string };
 }
 
 export type RevisionResponse = { requestId: string; ok: true; revisions: RevisionEntry[] }
   | { requestId: string; ok: true; state: Uint8Array }
-  | { requestId: string; ok: false; error: "unsupported" | "deleted" | "revision-not-found" | "forbidden" | "unavailable" };
+  | { requestId: string; ok: true; revision: RevisionEntry }
+  | { requestId: string; ok: false; error: "unsupported" | "deleted" | "revision-not-found" | "forbidden" | "unavailable"
+    | "stale-state" | "invalid-name" | "already-named" | "not-namer" | "archived"; name?: RevisionName };
 
 const REQUEST = "uberblick:revision-request";
 const RESPONSE = "uberblick:revision-response";
@@ -41,12 +59,30 @@ export function encodeRevisionRequest(request: RevisionRequest): string {
 }
 
 export function readRevisionRequest(raw: string): RevisionRequest | null {
-  if (raw.length > 1024) return null;
+  if (raw.length > 4096) return null;
   const value = json(raw);
   if (value?.type !== REQUEST || !identifier(value.requestId)) return null;
-  if (value.operation === "list") return { requestId: value.requestId, operation: "list" };
-  return value.operation === "get" && identifier(value.revisionId)
-    ? { requestId: value.requestId, operation: "get", revisionId: value.revisionId } : null;
+  const requestId = value.requestId;
+  if (value.operation === "list") return { requestId, operation: "list",
+    ...(value.includeNames === true ? { includeNames: true } : {}),
+    ...(value.includeTitles === true ? { includeTitles: true } : {}) };
+  if ((value.operation === "get" || value.operation === "remove-name") && identifier(value.revisionId)) {
+    return { requestId, operation: value.operation, revisionId: value.revisionId };
+  }
+  if (value.operation === "rename" && identifier(value.revisionId)) {
+    return { requestId, operation: "rename", revisionId: value.revisionId,
+      ...(typeof value.name === "string" ? { name: value.name } : {}) };
+  }
+  return value.operation === "name" && typeof value.checksum === "string" &&
+    /^[a-f0-9]{64}$/.test(value.checksum) && object(value.surface) &&
+    identifier(value.surface.kind) && identifier(value.surface.name)
+    ? { requestId, operation: "name", ...(typeof value.name === "string" ? { name: value.name } : {}), checksum: value.checksum,
+      surface: { kind: value.surface.kind, name: value.surface.name } } : null;
+}
+
+export function validRevisionName(value: string): boolean {
+  const length = [...value].length;
+  return length >= 1 && length <= 100 && !/[\r\n\u2028\u2029]/u.test(value);
 }
 
 function encodeBytes(state: Uint8Array): string {
@@ -77,20 +113,33 @@ function timestamp(value: unknown): value is number | null {
 
 function entry(value: unknown): value is RevisionEntry {
   if (!object(value) || !identifier(value.id) || !timestamp(value.startedAt) || !timestamp(value.endedAt)) return false;
-  const author = value.author;
-  return author === null || (object(author) && typeof author.githubUsername === "string" &&
-    object(author.surface) && typeof author.surface.kind === "string" && typeof author.surface.name === "string");
+  return author(value.author) && (value.name === undefined || value.name === null || revisionName(value.name)) &&
+    (value.title === undefined || typeof value.title === "string");
+}
+
+function author(value: unknown): boolean {
+  return value === null || (object(value) && typeof value.githubUsername === "string" &&
+    object(value.surface) && typeof value.surface.kind === "string" && typeof value.surface.name === "string");
+}
+
+function revisionName(value: unknown): value is RevisionName {
+  return object(value) && typeof value.text === "string" && validRevisionName(value.text) && author(value.namer) &&
+    typeof value.namedAt === "number" && Number.isFinite(value.namedAt) && typeof value.canManage === "boolean";
 }
 
 export function readRevisionResponse(raw: string): RevisionResponse | null {
   const value = json(raw);
   if (value?.type !== RESPONSE || !identifier(value.requestId)) return null;
   const requestId = value.requestId;
-  if (value.ok === false && ["unsupported", "deleted", "revision-not-found", "forbidden", "unavailable"].includes(String(value.error))) {
-    return { requestId, ok: false, error: value.error as Extract<RevisionResponse, { ok: false }>["error"] };
+  if (value.ok === false && ["unsupported", "deleted", "revision-not-found", "forbidden", "unavailable",
+    "stale-state", "invalid-name", "already-named", "not-namer", "archived"].includes(String(value.error))) {
+    if (value.name !== undefined && !revisionName(value.name)) return null;
+    return { requestId, ok: false, error: value.error as Extract<RevisionResponse, { ok: false }>["error"],
+      ...(value.name === undefined ? {} : { name: value.name as RevisionName }) };
   }
   if (value.ok !== true) return null;
   if (Array.isArray(value.revisions) && value.revisions.every(entry)) return { requestId, ok: true, revisions: value.revisions };
+  if (entry(value.revision)) return { requestId, ok: true, revision: value.revision };
   if (typeof value.state !== "string") return null;
   try {
     return { requestId, ok: true, state: Uint8Array.from(atob(value.state), character => character.charCodeAt(0)) };

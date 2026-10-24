@@ -9,9 +9,8 @@ import type { Workspace } from "../route.js";
 import { servesWorkspace } from "./hub-administration.js";
 import { Button } from "../shadcn/button.js";
 import { Input } from "../shadcn/input.js";
+import { NativeSelect } from "../shadcn/native-select.js";
 import { CELL, ConfirmAction, FeedbackLine, ROW_HEADER, SettingsPage, TableHead, acknowledged, askHub, loginFailure, useHubMutation } from "./settings-kit.js";
-
-const SELECT = "min-h-9 [@media(any-pointer:coarse)]:min-h-11 rounded-(--radius-sm) border border-input bg-card px-2 ub-type-ui";
 
 function roleName(role: AccessRole): string {
   return role === "admin" ? "Admin" : "Member";
@@ -35,10 +34,10 @@ function failure(status: string, hub: string | null): string {
 function RoleSelect({ value, onChange, label, disabled }: {
   value: AccessRole; onChange: (role: AccessRole) => void; label: string; disabled: boolean;
 }): ReactElement {
-  return <select className={SELECT} aria-label={label} value={value} disabled={disabled}
+  return <NativeSelect aria-label={label} value={value} disabled={disabled}
     onChange={(event) => onChange(event.currentTarget.value === "admin" ? "admin" : "member")}>
     <option value="member">Member</option><option value="admin">Admin</option>
-  </select>;
+  </NativeSelect>;
 }
 
 function MemberRow({ member, current, disabled, change, remove }: {

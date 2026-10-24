@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  encodeRevisionResponseFrames, getMeta, getMetaMap, readRevisionRequest, roomForDoc,
+  encodeRevisionResponseFrames, getMeta, getMetaMap, readRevisionRequest, readRevisionResponse, roomForDoc,
   snapshotRevision, tombstoneDirectoryEntry, upsertDirectoryEntry,
   type RevisionRequest, type RevisionResponse,
 } from "@uberblick/schema";
@@ -10,6 +10,7 @@ import { createTeamHub } from "@uberblick/hub/team";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { writeHubLogin } from "../src/auth-store.js";
+import { RevisionClientError } from "../src/revision-client.js";
 import { tools } from "../src/tool-table.js";
 import {
   cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, startHub, startServer,
@@ -113,7 +114,24 @@ describe("historical reads through the MCP boundary", () => {
     const before = await rig.ok("list_revisions", { uuid });
     expect(before.revisions).toHaveLength(1);
     const id = before.revisions[0].id;
-    expect(before.revisions[0]).toMatchObject({ author: { githubUsername: "revision-author", surface: { kind: "mcp" } }, startedAt: expect.any(Number), endedAt: null });
+    expect(before.revisions[0]).toMatchObject({ author: { githubUsername: "revision-author", surface: { kind: "mcp" } }, startedAt: expect.any(String), endedAt: null });
+    expect(before.revisions[0].name).toBeNull();
+    const currentState = Y.encodeStateAsUpdate(rig.instance.replicas.replica(uuid).doc);
+    const logSize = rig.instance.store.logSize();
+    const named = await rig.ok("name_revision", { uuid, name: "Reviewed after auth rewrite" });
+    expect(named).toMatchObject({ uuid, applied: true, synced: true, revision: {
+      id, author: before.revisions[0].author, endedAt: expect.any(String), name: {
+        text: "Reviewed after auth rewrite", namer: { githubUsername: "revision-author", surface: { kind: "mcp" } },
+        namedAt: expect.any(String), canManage: true,
+      },
+    } });
+    expect(named.revision.endedAt).toBe(named.revision.name.namedAt);
+    expect(Y.encodeStateAsUpdate(rig.instance.replicas.replica(uuid).doc)).toEqual(currentState);
+    expect(rig.instance.store.logSize()).toBe(logSize);
+    expect(await rig.call("name_revision", { uuid, name: "Duplicate name" })).toMatchObject({ isError: true,
+      payload: { error: "revision_already_named", applied: false, partial: false, synced: false,
+        existingName: { text: "Reviewed after auth rewrite", namer: { githubUsername: "revision-author" } } } });
+    expect((await rig.ok("list_revisions", { uuid })).revisions[0]).toEqual(named.revision);
     await rig.ok("archive_doc", { uuid });
     expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
     await rig.ok("restore_doc", { uuid });
@@ -126,9 +144,9 @@ describe("historical reads through the MCP boundary", () => {
     expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
     const listed = await rig.ok("list_revisions", { uuid });
     expect(listed.revisions).toHaveLength(2);
-    expect(listed.revisions[0]).toMatchObject({ endedAt: null, startedAt: expect.any(Number) });
-    expect(listed.revisions[1]).toMatchObject({ id, endedAt: expect.any(Number) });
-    expect(listed.revisions[0].startedAt).toBeGreaterThanOrEqual(listed.revisions[1].startedAt);
+    expect(listed.revisions[0]).toMatchObject({ endedAt: null, startedAt: expect.any(String) });
+    expect(listed.revisions[1]).toMatchObject({ id, endedAt: expect.any(String) });
+    expect(Date.parse(listed.revisions[0].startedAt)).toBeGreaterThanOrEqual(Date.parse(listed.revisions[1].startedAt));
     expect(await rig.ok("get_revision", { uuid, revision: id })).toMatchObject({ title: "Earlier team title",
       blocks: [{ text: "Earlier team prose" }], data: { collections: [{ name: "observations", recordCount: 1 }] } });
     expect((await rig.ok("get_data", { uuid, revision: id, collection: "observations" })).records)
@@ -151,6 +169,31 @@ describe("historical reads through the MCP boundary", () => {
     expect(await fresh.ok("get_revision", { uuid, revision: id })).toMatchObject({ title: "Earlier team title", blocks: [{ text: "Earlier team prose" }] });
     expect((await fresh.ok("get_data", { uuid, revision: id, collection: "observations" })).records)
       .toMatchObject([{ id: "earlier", value: { text: "earlier team data" } }]);
+
+    await rig.ok("restore_doc", { uuid });
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
+    let droppedReply = false;
+    const dropped = hub.hocuspocus.documents.get(roomForDoc(WORKSPACE, uuid))!.getConnections().map(connection => {
+      const send = connection.sendStateless.bind(connection);
+      return vi.spyOn(connection, "sendStateless").mockImplementation(frame => {
+        const response = readRevisionResponse(frame);
+        if (response?.ok === true && "revision" in response) {
+          droppedReply = true;
+          queueMicrotask(() => hub.hocuspocus.closeConnections());
+          return;
+        }
+        send(frame);
+      });
+    });
+    expect(await rig.call("name_revision", { uuid, name: "Committed before the reply was lost" }))
+      .toMatchObject({ isError: true, payload: { error: "revision_naming_outcome_unknown", applied: null,
+        partial: false, synced: false, reason: "unreachable", recoveryClass: "reread" } });
+    expect(droppedReply).toBe(true);
+    for (const spy of dropped) spy.mockRestore();
+    const afterLoss = await startServer(config());
+    clients.push(() => afterLoss.close());
+    expect((await afterLoss.ok("list_revisions", { uuid })).revisions[0])
+      .toMatchObject({ name: { text: "Committed before the reply was lost" } });
   });
 
   it("reads hub history in get_doc block shapes and pages historical data independently of live content", async () => {
@@ -195,7 +238,11 @@ describe("historical reads through the MCP boundary", () => {
         : { requestId: request.requestId, ok: true, state: snapshot });
     });
     const liveState = Y.encodeStateAsUpdate(document);
-    expect(await rig.ok("list_revisions", { uuid })).toEqual({ uuid, revisions: entries });
+    expect(await rig.ok("list_revisions", { uuid })).toEqual({ uuid, revisions: [
+      { ...entries[0], startedAt: "1970-01-01T00:00:00.200Z", name: null },
+      { ...entries[1], startedAt: "1970-01-01T00:00:00.100Z", endedAt: "1970-01-01T00:00:00.200Z", name: null },
+      { ...entries[2], endedAt: "1970-01-01T00:00:00.100Z", name: null },
+    ] });
     const historical = await rig.ok("get_revision", { uuid, revision });
     expect(historical).toEqual({ uuid, revision, title: "Earlier title", blocks: expectedBlocks, data: earlierData.data });
     expect(historical.blocks.find((block: { type: string }) => block.type === "paragraph" && "doc_links" in block)?.doc_links)
@@ -232,6 +279,76 @@ describe("historical reads through the MCP boundary", () => {
     expect(requests).toBe(1);
   });
 
+  it("projects both revision tools' declared fields and ISO times while preserving nulls", async () => {
+    const fixture = await admitted();
+    const { rig, uuid } = fixture;
+    const entries = [
+      {
+        id: "named-revision", title: "Historical title", futureField: "entry",
+        author: { githubUsername: "author", futureField: "author",
+          surface: { kind: "web", name: "Browser", futureField: "author surface" } },
+        startedAt: 0, endedAt: 100,
+        name: { text: "Named state", futureField: "name",
+          namer: { githubUsername: "namer", futureField: "namer",
+            surface: { kind: "mcp", name: "Codex", futureField: "namer surface" } },
+          namedAt: Date.parse("2026-10-21T18:36:13.213Z"), canManage: true },
+      },
+      { id: "unknown-author", author: null, startedAt: null, endedAt: null,
+        name: { text: "Unknown attribution", namer: null, namedAt: -1, canManage: false } },
+      { id: "unnamed-revision", author: null, startedAt: null, endedAt: 0, name: null },
+      { id: "legacy-revision", author: null, startedAt: null, endedAt: 0 },
+    ];
+    const expected = [
+      { id: "named-revision", author: { githubUsername: "author", surface: { kind: "web", name: "Browser" } },
+        startedAt: "1970-01-01T00:00:00.000Z", endedAt: "1970-01-01T00:00:00.100Z",
+        name: { text: "Named state", namer: { githubUsername: "namer", surface: { kind: "mcp", name: "Codex" } },
+          namedAt: "2026-10-21T18:36:13.213Z", canManage: true } },
+      { id: "unknown-author", author: null, startedAt: null, endedAt: null,
+        name: { text: "Unknown attribution", namer: null, namedAt: "1969-12-31T23:59:59.999Z", canManage: false } },
+      { id: "unnamed-revision", author: null, startedAt: null, endedAt: "1970-01-01T00:00:00.000Z", name: null },
+      { id: "legacy-revision", author: null, startedAt: null, endedAt: "1970-01-01T00:00:00.000Z", name: null },
+    ];
+    fixture.reply((request, send) => {
+      if (request.operation === "list") {
+        expect(request).toMatchObject({ includeNames: true });
+        expect(request).not.toHaveProperty("includeTitles");
+      }
+      send(request.operation === "list"
+        ? { requestId: request.requestId, ok: true, revisions: entries }
+        : { requestId: request.requestId, ok: true,
+          revision: request.name === "Named state" ? entries[0]! : entries[1]! });
+    });
+    expect(await rig.ok("list_revisions", { uuid })).toEqual({ uuid, revisions: expected });
+    for (const entry of expected.slice(0, 2)) {
+      const named = await rig.ok("name_revision", { uuid, name: entry.name!.text });
+      expect(named).toMatchObject({ uuid, applied: true, synced: true });
+      expect(named.revision).toEqual(entry);
+    }
+  });
+
+  it("fails rather than changing unrepresentable revision times into null or another time", async () => {
+    const fixture = await admitted();
+    const base = { id: revision, author: null, startedAt: 0, endedAt: 100,
+      name: { text: "Named state", namer: null, namedAt: 100, canManage: true } };
+    let entry = base;
+    fixture.reply((request, send) => send(request.operation === "list"
+      ? { requestId: request.requestId, ok: true, revisions: [entry] }
+      : { requestId: request.requestId, ok: true, revision: entry }));
+    for (const stamp of [Number.MAX_VALUE, 100.5]) {
+      for (const field of ["startedAt", "endedAt", "namedAt"]) {
+        entry = field === "namedAt" ? { ...base, name: { ...base.name, namedAt: stamp } }
+          : { ...base, [field]: stamp };
+        for (const [tool, args] of [
+          ["list_revisions", { uuid: fixture.uuid }],
+          ["name_revision", { uuid: fixture.uuid, name: "Named state" }],
+        ] as const) {
+          expect(await fixture.rig.call(tool, args), `${tool} accepted unrepresentable ${field}: ${stamp}`)
+            .toMatchObject({ isError: true, payload: { error: "internal_error" } });
+        }
+      }
+    }
+  });
+
   it("refuses unknown and permanently deleted UUIDs before joining a room or requesting hub history", async () => {
     const fixture = await admitted();
     const { rig, uuid } = fixture;
@@ -241,7 +358,13 @@ describe("historical reads through the MCP boundary", () => {
     const open = vi.spyOn(rig.instance.replicas, "replica");
     const unknown = randomUUID();
     for (const [tool, args] of calls(unknown)) refusal(await rig.call(tool, args), "doc_not_found");
-    for (const [tool, args] of calls(uuid)) refusal(await rig.call(tool, args), "doc_deleted");
+    for (const [tool, args] of calls(uuid)) {
+      const result = await rig.call(tool, args);
+      refusal(result, "doc_deleted");
+      expect(result.payload).toHaveProperty("uuid", uuid);
+    }
+    expect(await rig.call("name_revision", { uuid, name: "Deleted state" })).toMatchObject({ isError: true,
+      payload: { error: "doc_deleted", uuid, applied: false, partial: false, synced: false } });
     expect(request).not.toHaveBeenCalled();
     expect(open.mock.calls.some(([id]) => id === unknown || id === uuid)).toBe(false);
   });
@@ -273,7 +396,28 @@ describe("historical reads through the MCP boundary", () => {
   ] as const)("maps the hub's %s refusal for every historical read", async (error, code) => {
     const fixture = await admitted();
     fixture.reply((request, send) => send({ requestId: request.requestId, ok: false, error }));
-    for (const [tool, args] of calls(fixture.uuid)) refusal(await fixture.rig.call(tool, args), code);
+    for (const [tool, args] of calls(fixture.uuid)) {
+      const result = await fixture.rig.call(tool, args);
+      refusal(result, code);
+      if (error === "deleted") expect(result.payload).toHaveProperty("uuid", fixture.uuid);
+    }
+    if (error === "deleted") {
+      expect(await fixture.rig.call("name_revision", { uuid: fixture.uuid, name: "Deleted state" }))
+        .toMatchObject({ isError: true,
+          payload: { error: "doc_deleted", uuid: fixture.uuid, applied: false, partial: false, synced: false } });
+    }
+  });
+
+  it("keeps the UUID when the hub refuses permanent deletion during room admission", async () => {
+    const { rig, uuid } = await admitted();
+    vi.spyOn(rig.instance.replicas.sync, "requestRevisions").mockRejectedValue(new RevisionClientError("deleted"));
+    for (const [tool, args] of calls(uuid)) {
+      const result = await rig.call(tool, args);
+      refusal(result, "doc_deleted");
+      expect(result.payload).toHaveProperty("uuid", uuid);
+    }
+    expect(await rig.call("name_revision", { uuid, name: "Deleted state" })).toMatchObject({ isError: true,
+      payload: { error: "doc_deleted", uuid, applied: false, partial: false, synced: false } });
   });
 
   it("distinguishes a local-only workspace from missing sign-in for all historical reads", async () => {
@@ -294,6 +438,20 @@ describe("historical reads through the MCP boundary", () => {
   it("advertises the read-only contract, revision-specific help and no historical writing surface", async () => {
     const rig = await server();
     const advertised = (await rig.client.listTools()).tools;
+    const revisionProperties = {
+      startedAt: { anyOf: [{ type: "string" }, { type: "null" }] },
+      endedAt: { anyOf: [{ type: "string" }, { type: "null" }] },
+      name: { anyOf: [{ properties: { namedAt: { type: "string" } } }, { type: "null" }] },
+    };
+    expect(advertised.find(tool => tool.name === "list_revisions")?.outputSchema).toMatchObject({
+      properties: { revisions: { items: { properties: revisionProperties } } },
+    });
+    expect(advertised.find(tool => tool.name === "name_revision")?.outputSchema).toMatchObject({
+      properties: { revision: { properties: revisionProperties } },
+    });
+    for (const name of ["list_revisions", "name_revision"]) {
+      expect(JSON.stringify(advertised.find(tool => tool.name === name)?.outputSchema)).not.toContain("epoch milliseconds");
+    }
     for (const name of ["list_revisions", "get_revision", "get_data"]) {
       expect(advertised.find(tool => tool.name === name)?.annotations)
         .toEqual({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
@@ -301,8 +459,15 @@ describe("historical reads through the MCP boundary", () => {
       expect(help.text).toContain(name);
       expect(help.text).toContain("revision");
       expect(help.text).toContain("Example");
+      if (name === "list_revisions") {
+        expect(help.text).toContain("ISO 8601 UTC");
+        expect(help.text).not.toContain("epoch milliseconds");
+      }
     }
     const contracts = await rig.ok("get_help", { topic: "tool-contracts" });
+    expect(advertised.find(tool => tool.name === "name_revision")?.annotations)
+      .toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+    expect((await rig.ok("get_help", { topic: "name_revision" })).text).toContain("only when a person asks");
     for (const code of ["revisions_local_only", "revisions_unreachable", "revisions_sign_in_required", "revisions_forbidden", "revisions_unsupported", "revision_not_found", "doc_deleted"]) {
       expect(contracts.text).toContain(code);
     }

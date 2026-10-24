@@ -1,4 +1,4 @@
-import { createGroup, deleteGroup, moveGroup, readSidebar, renameGroup, unpinDoc } from "@uberblick/schema";
+import { createGroup, deleteGroup, isDirectoryEntryDeleted, moveGroup, readSidebar, renameGroup, unpinDoc } from "@uberblick/schema";
 import { z } from "zod";
 import { ToolError } from "./failures.js";
 import { strictInput } from "./inputs.js";
@@ -47,7 +47,7 @@ export const getSidebarOperation = operation(READ, getSidebarInput, (context, _a
   const sidebar = replicas.sidebar();
   return ({
     ...sidebarPayload(replicas, sidebar),
-    hub: replicas.sync.state(),
+    hub: replicas.hubState(),
   });
 });
 
@@ -68,7 +68,6 @@ export const pinDocOperation = sidebarOperation({ requireStub: true }, pinDocInp
     uuid,
     group: { id: groupId, name: target?.name ?? group },
     moved,
-    ...sidebarPayload(replicas, sidebar),
   });
 });
 
@@ -81,14 +80,20 @@ export const unpinDocInput = strictInput({
 export const unpinDocOperation = sidebarOperation({ requireStub: false }, unpinDocInput, (context, { uuid }, _request, sidebar) => {
   const { replicas } = context;
 
-  const wasPinned = readSidebar(sidebar.doc).some((group) =>
+  const from = readSidebar(sidebar.doc).find((group) =>
     group.docs.includes(uuid),
   );
   unpinDoc(sidebar.doc, uuid);
+  // Count pins as get_sidebar shows them: permanently deleted documents are hidden.
+  const directory = replicas.directory().doc;
+  const left = readSidebar(sidebar.doc).find((group) => group.id === from?.id);
   return ({
     uuid,
-    unpinned: wasPinned,
-    ...sidebarPayload(replicas, sidebar),
+    unpinned: from !== undefined,
+    ...(left?.docs.every((pinned) => isDirectoryEntryDeleted(directory, pinned)) ? {
+      groupHint: `Sidebar group "${left.name}" is now empty and stays in the sidebar; to remove it, call ` +
+        `sidebar_group with action "delete" and group "${left.id}".`,
+    } : {}),
   });
 });
 

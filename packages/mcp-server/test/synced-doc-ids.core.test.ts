@@ -126,7 +126,7 @@ it("filters invalid sidebar and curated references while resolving uppercase too
     title: "Should pears stay?", description: "Uppercase related and discussion arguments identify existing rooms.",
     kind: "decision", related: page.uuid.toUpperCase(), discussion: other.uuid.toUpperCase(),
   });
-  expect((await rig.ok("get_doc", { uuid: decision.uuid }))).toMatchObject({ governs: page.uuid, discussion: other.uuid });
+  expect((await rig.ok("get_doc", { uuid: decision.uuid }))).toMatchObject({ related: [page.uuid], discussion: other.uuid });
   await rig.ok("set_metadata", { uuid: decision.uuid.toUpperCase(), discussion: page.uuid.toUpperCase() });
   await rig.ok("pin_doc", { uuid: other.uuid.toUpperCase(), group });
   await rig.ok("unpin_doc", { uuid: other.uuid.toUpperCase() });

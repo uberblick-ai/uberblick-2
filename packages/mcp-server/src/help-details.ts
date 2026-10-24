@@ -2,6 +2,19 @@
 import { BLOCK_TYPES } from "@uberblick/schema";
 
 export const toolHelpDetails = {
+  list_tags:
+    "The existing workspace tag catalog is returned in deterministic name order. Each entry carries the stable canonical " +
+    "`id` documents store, its current display `name` and its optional `description`. Documents show only existing catalog tags. MCP cannot curate this catalog.\n\n" +
+    "`complete` says whether this is the whole workspace vocabulary. It is false while a configured hub has " +
+    "not delivered the catalog room to this replica: what is listed is then a local copy that may be missing " +
+    "curated entries, and a tag value this replica has never seen is refused rather than assigned. `hub` says " +
+    "where that connection stands.",
+  get_help:
+    "Read bundled, version-matched product help by topic or exact registered tool name. Omit topic to list " +
+    "every topic with its id, title, description and URI. The returned text is the same Markdown as " +
+    "uberblick://help/{topic}. Help is workspace-agnostic and never opens or settles a replica; it remains " +
+    "available offline and while the replica store is quarantined. Unknown topics refuse with " +
+    "unknown_help_topic and list valid topic ids; choose one and retry.",
   create_doc:
     "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
     "search. Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
@@ -25,15 +38,14 @@ export const toolHelpDetails = {
     "the document stores canonical ids and the answer resolves each id beside its current name. An unknown or " +
     "deleted selection refuses the whole call before a document exists; list_tags is the existing vocabulary.\n\n" +
     "A `description` is REQUIRED; `title` is also required except for a successor with `supersedes`. " +
-    "A missing required field creates nothing. A title cannot be empty or whitespace: an untitled document cannot be picked out of a listing, " +
+    "A missing required field creates nothing. Titles need not be unique, and every successful call creates a new page with its own UUID: " +
+    "after a lost answer, search for the title before retrying. A title cannot be empty or whitespace: an untitled document cannot be picked out of a listing, " +
     "and set_metadata with `title` is the repair for the untitled ones the web UI creates.\n\n" +
     "Pass `kind: decision` to create a decision record. Its `status` defaults to `open`; `status` " +
     "without `kind` is refused before a document is created. A decision " +
     "may pass `related` as one UUID or a non-empty list of UUIDs of live, locally readable regular pages. " +
     "Every target is validated; a refusal names the offending UUID and a decision target refuses with " +
-    "related_not_regular_document. The set is fixed at creation. Existing `governs` values stay related " +
-    "pages without migration; `governs` still returns one page for compatibility, while `related` returns " +
-    "the whole set. Any other " +
+    "related_not_regular_document. The set is fixed at creation and answers return it as `related`. Any other " +
     "use of `related` is refused before a UUID is allocated or a room is written. A decision may also pass " +
     "`supersedes`, the UUID of a hydrated decision in a live topic it replaces. The reference is immutable, " +
     "and its predecessor's topic is copied forward; a successor without related inherits its whole set. " +
@@ -81,75 +93,60 @@ export const toolHelpDetails = {
     "`uuid`, the rooms already `completed`, the `failed` room, `rolledBack: false`, and a stage-aware " +
     "`recovery` line — the earlier rooms stay durable, and recovery never risks creating the decision twice.",
   get_doc:
-    "Read a document's metadata — including `description` and the person-facing `tldr`, each null when nobody " +
-    "has written one, with tldr always null for decisions, which have no TL;DR — its blocks and its annotation threads. " +
-    "A thread's `blockId` names the block containing its `range`: its recorded block while that block carries " +
-    "its mark, otherwise the first marked visible block in document order. With no mark anywhere, `range` is " +
-    "null and `blockId` keeps the recorded id. A regular page with a deliberate TL;DR removal " +
-    "returns `tldr: null` and `tldrOptOut: true`; content writes give no TL;DR hints. Opt back in through the " +
-    "web's Add TL;DR, or set_metadata with `tldr_opt_in: true` and a non-null `tldr`. Summary text takes " +
-    "precedence over the mark, including after concurrent or older-client writes. Unmarked pages and " +
-    "decision records omit `tldrOptOut`. Lifecycle documents include `kind` and their " +
-    "compatible `status`; ordinary documents omit both. When structured data exists, `data` lists collection " +
-    "names and record counts and names `get_data` for deliberate reads. It contains no schemas or record " +
-    "values; documents without data omit it.\n\n" +
-    "`createdAt` is the creation time as an ISO 8601 UTC string on the creating replica's clock, " +
-    "like `2026-10-21T18:36:13.213Z`. Decision directory entries return `createdAt` and `updatedAt` in the same format. " +
-    "These stamps are omitted when unknown or unrepresentable as a date. " +
-    "Every document returns a page-level `rev`, identical to the web status row's full revision of its ordered block content. Metadata and comments do not affect it. " +
-    "Regular documents return `code_check`: the latest comparison per repository, or [] when never checked. " +
-    "Each entry has repository (owner/name), commit, checked_at (writer's UTC recording time) and result: " +
-    "matches means agreement, ahead means intentionally undelivered behavior, drift means unintended " +
-    "disagreement. Each entry may also carry `rev`, the page revision the comparison read, and `paths`, the repo-relative files or folders looked at. Paths are hints, not a complete dependency list; an absent rev means the compared text is unknown. Earlier entries and entries rewritten by older clients can omit either field. Decision records omit code_check. Content edits and other metadata writes leave these " +
-    "entries unchanged; they never appear in blocks or Markdown export.\n\n" +
-    "Regular-page `decisions` resolve live topics without opening decision rooms: related topics first, " +
-    "then other topics found in backlinks, marked `relation: \"related\"` or `relation: \"linked\"`. Any " +
-    "record can establish either relation, including superseded, rejected or withdrawn history. Each group " +
-    "is oldest-topic-first, deduplicated, with archived topics omitted; indexed links can lag content. " +
-    "Decision-record metadata returns `discussion` as the connected RFC UUID or null. Every decision " +
-    "directory entry, including page decisions, predecessors, successors, inForce, pending and conflicts, " +
-    "caches it: null means no reference, absent means unknown until stub repair. The discussion is a " +
-    "derived outbound edge in effective links, separately from curated links and recorded answer " +
-    "attribution. The backlinks tool on the RFC lists its records; reading the RFC returns their topic marked " +
-    "linked unless it is also the topic's related page. Renaming or archiving the RFC preserves each " +
-    "reference, and an archived RFC remains readable. Decision entries include a cached answerPreview: " +
-    "the first answer paragraph/list as plain " +
-    "text, list items joined by `; `, whitespace collapsed, at most 300 characters with `…` when cut. " +
-    "It is null without a paragraph or list, or absent when the cache is unknown. For decision answers, " +
-    "see [Decision records](uberblick://help/decisions). " +
-    "Recorded `answer: {who, when, where}` is attribution, not the answer content.\n\n" +
-    "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read. " +
-    "These page and block hashes differ from the hub revision IDs returned by list_revisions; use get_revision to read an earlier state.\n\n" +
-    "For a table, `text` is canonical GFM with cell formatting as inline markdown, literal punctuation and " +
-    "pipes escaped, and every row padded to the widest row; `rev` includes that formatting. Card text is " +
-    "canonical container content with inline Markdown prose parts and repeated `button: [Text](destination)` " +
-    "lines after footer in authored order. Each button has nonempty plain text and an https URL or exactly " +
-    "claude://code/new, claude-cli://open or codex://new, alone or followed by ?query. Optional style outline/filled " +
-    "and color neutral/blue/green/violet default to outline neutral; output puts style before color and omits " +
-    "the defaults. Its rev includes every button's text, destination, appearance and order, and prose formatting. Card thread " +
-    "ranges name their anchored part. Figma text is canonical :::figma content without delimiters: url, " +
-    "optional plain title and height, a blank line and inline-Markdown caption. URL normalization keeps " +
-    "only path kind, key/id, name and node-id, starting-point-node-id and version-id on https://www.figma.com. " +
-    "Its formatting-sensitive rev includes the caption, and thread ranges use part caption with offsets in " +
-    "caption text. The read-only figma field returns kind (frame, file, prototype, board, slides or community " +
-    "file), file and optional percent-decoded fileName with dashes read as spaces, plus optional node in " +
-    "colon form. See markdown for accepted paths and container validation. For other blocks " +
-    "`text` is plain text and `rev` ignores marks. A prose block that carries inline references to other " +
-    "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
-    "link_range speak in, and absent where there are none. Table cell links count toward backlinks but do not " +
-    "have block-level `doc_links` ranges.",
+    "`get_doc` reads one document by UUID: its metadata, blocks and comment threads. Read a document before editing it; its blocks carry the ids and revisions an edit asserts.\n" +
+    "\n" +
+    "## Read, then edit\n" +
+    "\n" +
+    "```text\n" +
+    "get_doc({uuid: \"<document-uuid>\"})\n" +
+    "→ blocks: [{id: \"<block-id>\", type: \"paragraph\", text: \"Review on Friday.\", rev: \"<rev>\"}], …\n" +
+    "\n" +
+    "edit_block({uuid: \"<document-uuid>\", block_id: \"<block-id>\",\n" +
+    "  old_text: \"Review on Friday.\", new_text: \"Review on Monday.\", rev: \"<rev>\"})\n" +
+    "```\n" +
+    "\n" +
+    "Copy the returned text and rev into the edit. A block's rev checks this replica's current text at call time; it is not a lock. The page-level rev covers the whole text and matches the “rev …” the web shows below the title; code checks record it. These hashes differ from the hub revision IDs returned by list_revisions. Read an earlier state with get_revision; its blocks carry no edit rev.\n" +
+    "\n" +
+    "## What comes back\n" +
+    "\n" +
+    "- Metadata: `title`, `description` and `tldr` (null when unwritten), `tags`, `links` and, when known, `createdAt`: the creation time as an ISO 8601 UTC string on the creating replica's clock, such as `2026-10-21T18:36:13.213Z`. It is omitted when unknown or outside the supported date range. A regular page whose TL;DR a person removed on purpose returns `tldrOptOut: true`; set_metadata explains opting back in.\n" +
+    "- Blocks with `id`, `type`, `text` and `rev`. Prose text is plain; tables return GFM, and cards and embeds return their container content; see markdown. Prose that links other documents carries `doc_links` ranges.\n" +
+    "- Comment threads with their anchors, for annotate to reply to, resolve or move. A thread's `blockId` names the block holding its `range`; with no anchor left, `range` is null.\n" +
+    "- `code_check` on regular pages: the latest comparison per repository, or [] when never checked.\n" +
+    "- Decision context: a regular page lists the topics it owns (related) and the topics that link to it (linked), one list_docs topic row each that names the topic's records by UUID in `inForce`, `pending` and `conflicts`. A decision record returns its status, related pages in `related` (omitted when it has none), discussion, predecessors, successors and `resolution`: its topic's `inForce`, `pending` and `conflicts` as record UUIDs, plus `archived`. Predecessor and successor entries carry `createdAt` and `updatedAt`, topic rows `updatedAt`, when known, as ISO 8601 UTC strings; timestamps outside the supported date range are omitted. It is context, not permission to act; see decisions.\n" +
+    "- `data`, when the document has structured data: collection names and record counts. Read records with get_data.\n" +
+    "\n" +
+    "## Constraints\n" +
+    "\n" +
+    "Archived and decided documents stay readable. A permanently deleted UUID refuses with doc_deleted. A missing or unavailable document refuses with recovery guidance, never an empty document.",
   list_revisions:
     "List a known document's automatic revisions from the hub, newest first, including an archived document. " +
     "The whole list is returned without paging. An empty list means the hub confirmed there are no revisions; " +
     "unavailable history is a failure, never an empty list.\n\n" +
-    "Each entry has `id`, `author`, `startedAt` and `endedAt`. The author is " +
+    "Each entry has `id`, `author`, `startedAt`, `endedAt` and `name`. A name is null or " +
+    "`{text, namer, namedAt, canManage}`; its namer has the same account/surface shape as author. " +
+    "`canManage` identifies whether this account may manage the name in the web. The author is " +
     "`{githubUsername, surface: {kind, name}}`, using the author's current GitHub username, or null when unknown. " +
-    "Times are epoch milliseconds: null `startedAt` means an unknown start for content from before history began, " +
+    "`startedAt`, `endedAt` and `name.namedAt` are ISO 8601 UTC strings, such as `2026-10-21T18:36:13.213Z`: " +
+    "null `startedAt` means an unknown start for content from before history began, " +
     "and null `endedAt` means the revision is still open.\n\n" +
     "Pass an entry's `id` as `revision` to get_revision or get_data. It is a hub revision ID, distinct from " +
     "get_doc's page and block `rev` content hashes. Writing tools do not accept revision IDs. " +
     "A UUID unknown to this workspace refuses with doc_not_found before contacting the hub; a permanently " +
     "deleted document refuses with doc_deleted. See tool-contracts for hub history failures and recovery.",
+  name_revision:
+    "Call only when a person asks to name the current document state. Supply `uuid` and a `name` of " +
+    "1 to 100 characters on one line. The hub verifies that this client's displayed title, visible blocks " +
+    "and structured data match its current state. Pending local changes or unseen remote content refuse " +
+    "with revision_stale_state; synchronize and reread before naming. Requires write access to a live " +
+    "team-hub document. Naming closes the current stretch without changing its author or document content, " +
+    "and records the naming account, MCP client surface and hub time. An already named state refuses " +
+    "with revision_already_named and existingName. Renaming and removal are available to the namer in the web.\n\n" +
+    "Success returns the named `revision`, `applied: true` and `synced: true`: the hub applied and " +
+    "acknowledged its naming transaction. This hub-only metadata writes no local document log. A known " +
+    "refusal reports applied: false. If a sent request loses its reply, revision_naming_outcome_unknown " +
+    "reports applied: null, partial: false and synced: false. Read list_revisions before retrying; " +
+    "reason unsupported means an admitted hub stayed silent, while unreachable means transport failed.",
   get_revision:
     "Read a known document as it was at the hub revision ID from list_revisions, including an archived document. " +
     "The result returns `uuid`, `revision`, `title`, visible `blocks` and `data`. Blocks use get_doc's shape " +
@@ -203,7 +200,8 @@ export const toolHelpDetails = {
     "true` returns one row per record, with predicates applied per record and no topic UUID lists. Permanently deleted UUIDs are always excluded. `include_deleted` admits archived topics " +
     "but is not a predicate and does not lift the default omission, so an archived decision needs it together " +
     "with a matching predicate. A fresh replica can list the whole corpus once the directory room has " +
-    "synced. See [Decision records](uberblick://help/decisions) for decision answer guidance.\n\n" +
+    "synced; until then `complete` is false and `directoryHint` says why. A local workspace's listing is " +
+    "always complete, because every replica on this computer shares one log. See [Decision records](uberblick://help/decisions) for decision answer guidance.\n\n" +
     "A decision row's `discussion` caches the record's RFC UUID, null when none or absent when unknown until a " +
     "newer client repairs the stub. Listed with `include_superseded: true`, each pending proposal therefore names " +
     "its own discussion without opening its room. The reference is distinct from curated links and recorded " +
@@ -299,8 +297,8 @@ export const toolHelpDetails = {
     "its style and depth in place, together with a text edit or alone. To re-indent without changing text, " +
     "pass the same read text as `old_text` and `new_text`, the read `rev`, and the new `indent`. " +
     "Omitted list fields keep their existing values. The same old_text/rev assertions guard both text " +
-    "and attribute changes in one write; failures change neither. The result returns the new list fields " +
-    "and rev. Attribute-only changes keep the block id, text, inline formatting and comment threads, " +
+    "and attribute changes in one write; failures change neither. The result returns the block's id and new " +
+    "rev; get_doc reads the stored fields. Attribute-only changes keep the block id, text, inline formatting and comment threads, " +
     "and concurrent text edits from another replica survive the merge. These fields refuse on any " +
     "other block type; they do not convert blocks or move an item.\n\n" +
     "Marks anchor to positions in the block's text, not to the words they cover, and this tool writes text " +
@@ -530,7 +528,7 @@ export const toolHelpDetails = {
     "Links replace the curated UUID array and update backlinks. A newly added target unknown to this " +
     "replica's directory produces `doclink_target_not_known_locally` with `field: \"links\"`; archived " +
     "targets are accepted and an existing curated target can be retained unchanged. Passing get_doc's " +
-    "effective links back stores derived governs, supersedes and discussion UUIDs in the curated array too; " +
+    "effective links back stores derived related-page, supersedes and discussion UUIDs in the curated array too; " +
     "get_doc " +
     "deduplicates the resulting edges. Empty arrays clear existing tags or curated links.\n\n" +
     "An open decision accepts `discussion` as a live, locally readable regular document UUID, " +
@@ -662,7 +660,8 @@ export const toolHelpDetails = {
     "What this replica holds and what the hub has acknowledged.\n\n" +
     "`hub.status` distinguishes `hub-down`, a retryable connection or renewal failure, from `auth-failed`, an " +
     "authentication problem that needs human action. `disabled` means sync is disabled, so this server is " +
-    "local-only. Every reading carries `hub.recoveryClass`: `retry` means a missing room can still arrive as " +
+    "local-only. `local` means a local workspace whose hub runs only while `ub open` does: changes are saved " +
+    "on this computer, nothing needs retrying, and `ub open` syncs them as it starts. Every hub reading carries `hub.recoveryClass`: `retry` means a missing room can still arrive as " +
     "the connection recovers; `manual` means a person must act before sync can resume. This also applies to " +
     "shared-secret readings. `hub.authRecovery`, when present on `auth-failed`, distinguishes " +
     "`sign-in-required`, `no-workspace-access`, `credential-store` and `renewal-unavailable`; `hub.reason` " +
@@ -671,11 +670,16 @@ export const toolHelpDetails = {
     "replica's and `hub.hubProtocolVersion` the hub's, and `hub.reason` says which side is older; nothing " +
     "syncs until that side is updated, and no amount of waiting changes it. Every tool still works locally " +
     "throughout.\n\n" +
+    "`caughtUp` is the one field to check before reporting work as delivered: true when the replica is " +
+    "connected, has no pending room or attach drain, and every attached room is acknowledged. A local " +
+    "workspace is caught up once its writes are saved, because every replica on this computer shares one " +
+    "log. The counters below explain a false.\n\n" +
     "The two counts here are in different units, so they are not expected to agree. `unsyncedChanges` counts " +
     "ROOMS, not updates: the rooms holding local changes the hub has not acknowledged, the ones " +
     "`pendingRooms` names. It is read from the durable pending set, so it survives a restart and is non-zero " +
     "in local-only mode: work that never left this machine is unsynced, whether or not a connection was ever " +
-    "attempted. `inFlightUpdates` counts provider SYNC MESSAGES awaiting acknowledgement on the current " +
+    "attempted. A local workspace reports no pending rooms, `inFlightUpdates` 0 and `lastSync` null, as `ub " +
+    "status` does. `inFlightUpdates` counts provider SYNC MESSAGES awaiting acknowledgement on the current " +
     "connection, which is not a count of Yjs updates: the provider merges a batch of updates into one " +
     "message, counts a message before it goes out, and resets the backlog to the single sync-handshake " +
     "message on every reconnect — so it can read 1 for a whole document's worth of unsent work. It is in " +

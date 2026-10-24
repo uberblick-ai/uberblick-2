@@ -383,7 +383,7 @@ describe("a database written by @hocuspocus/extension-sqlite", () => {
     // Hub-private tables leave the extension's document row and file intact.
     expect(inspect(databasePath).rows).toEqual(before.rows);
     expect(inspect(databasePath).tables).toEqual([
-      "documents", "document_revisions", "document_revision_heads", "document_revision_documents",
+      "documents", "document_revisions", "document_revision_heads", "document_revision_documents", "document_revision_names",
     ]);
     expect(readdirSync(dirname(databasePath))).toEqual(["hub.sqlite"]);
 
@@ -432,7 +432,7 @@ describe("database forms", () => {
 
     // A file, with the extension's table in it, created by the hub itself.
     expect(inspect(databasePath).tables).toEqual([
-      "documents", "document_revisions", "document_revision_heads", "document_revision_documents",
+      "documents", "document_revisions", "document_revision_heads", "document_revision_documents", "document_revision_names",
     ]);
 
     // The handle is released on stop() — asserted by reading the file after.

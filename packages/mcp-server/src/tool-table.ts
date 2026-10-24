@@ -36,6 +36,7 @@ import { inputSchema as listDocsInput, listDocsOperation } from "./tools/list-do
 import { inputSchema as listTagsInput, listTagsOperation } from "./tools/list-tags.js";
 import { inputSchema as listRevisionsInput, listRevisionsOperation } from "./tools/list-revisions.js";
 import { inputSchema as moveBlockInput, moveBlockOperation } from "./tools/move-block.js";
+import { inputSchema as nameRevisionInput, nameRevisionOperation } from "./tools/name-revision.js";
 import type { Operation, ToolOperation, Writes } from "./tools/operation.js";
 import { inputSchema as restoreDocInput, restoreDocOperation } from "./tools/restore-doc.js";
 import { inputSchema as searchInput, searchOperation } from "./tools/search.js";
@@ -122,30 +123,26 @@ export const tools: readonly Tool[] = [
     name: "list_tags",
     title: "List assignable tags",
     description:
-      "The existing workspace tag catalog, in deterministic name order. Each entry carries the stable canonical " +
-      "`id` documents store, its current display `name` and its optional `description`. Documents show only existing catalog tags. MCP cannot curate this catalog.\n\n" +
-      "`complete` says whether this is the whole workspace vocabulary. It is false while a configured hub has " +
-      "not delivered the catalog room to this replica: what is listed is then a local copy that may be missing " +
-      "curated entries, and a tag value this replica has never seen is refused rather than assigned. `hub` says " +
-      "where that connection stands.",
+      "List existing tag ids, names and descriptions in name order. complete:false means the hub catalog " +
+      "has not arrived. MCP cannot curate tags; people add them in Workspace settings.",
     input: listTagsInput,
     operation: listTagsOperation,
     example: {},
     related: ["workspaces", "tool-contracts"],
+    details: toolHelpDetails.list_tags,
   }),
   tool({
     name: "create_doc",
     title: "Create a document",
     description:
-      "Create doc/stub with optional blocks or regular-page TL;DR. Nonblank description required; title required except successors. " +
-      "Decision topic title lives on its first record; successor title must be omitted or match. " +
-      "Decisions: open/decided only; deciding needs supported nonblank blocks, no TL;DR/data. Decided successors require human answer attribution. " +
-      "related: UUID or non-empty list of live readable regular pages; fixed at creation. Successor: omit to inherit whole set; supply to replace. " +
-      "supersedes: hydrated decision in live topic. Validate targets before allocation/writes. " +
-      "discussion: one live readable RFC UUID, never inherited; correct/clear only while open. Referenced pages untouched. " +
-      "sidebar: existing get_sidebar group id; omit for unpinned. " +
-      "persistence_failed reports uuid, completed/failed rooms and duplicate-safe recovery. " +
-      "Answer guidance: decisions; links: markdown.",
+      "Create a regular page or a decision record, optionally with starting blocks, tags, a TL;DR (regular " +
+      "pages only) and a sidebar pin. A description is always required, and so is a title except on a " +
+      "decision successor, which takes its topic's title. Every reference (tags, related pages, supersedes, " +
+      "discussion and sidebar group) is checked before anything is written, so a refusal creates nothing. A " +
+      "decision is created open or decided: deciding needs supported answer blocks and no TL;DR or data, " +
+      "and a decided successor also needs a recorded person's answer. The document, directory and sidebar " +
+      "are separate writes; if one fails, persistence_failed names the completed rooms and gives a recovery " +
+      "that cannot create a duplicate.",
     input: createDocInput,
     operation: createDocOperation,
     // Adds a fresh document and optional pin; repeating adds another document.
@@ -177,13 +174,26 @@ export const tools: readonly Tool[] = [
     name: "list_revisions",
     title: "List document revisions",
     description:
-      "List hub revisions newest first, including archived documents. IDs differ from get_doc rev hashes; " +
-      "use them with get_revision or get_data. Empty means hub-confirmed no history.",
+      "List hub revisions newest first, including archived documents, with names, namers and times or null. " +
+      "IDs work with get_revision/get_data. Empty means hub-confirmed no history.",
     input: listRevisionsInput,
     operation: listRevisionsOperation,
     example: { uuid },
     related: documentContracts,
     details: toolHelpDetails.list_revisions,
+  }),
+  tool({
+    name: "name_revision",
+    title: "Name the current document revision",
+    description:
+      "Name the current synchronized state only when a person asks. Requires team-hub write access; " +
+      "closes its stretch. One name per revision; manage it in the web.",
+    input: nameRevisionInput,
+    operation: nameRevisionOperation,
+    hints: { destructive: false, idempotent: true },
+    example: { uuid, name: "Reviewed after auth rewrite" },
+    related: documentContracts,
+    details: toolHelpDetails.name_revision,
   }),
   tool({
     name: "get_revision",
@@ -214,21 +224,18 @@ export const tools: readonly Tool[] = [
     name: "update_data",
     title: "Update document data",
     description:
-      "Apply one validated batch through applyDocData, naming each touched collection once. " +
-      "Within each collection, set `schema`, optionally `replaceRecords`, then `deleteRecords`, then `upsert` " +
-      "whole `{id, value}` records. `deleteCollection: true` excludes other changes. Schema and value JSON " +
-      "reach validation unaltered; unsupported schemas and invalid retained records refuse before mutation. " +
-      "The batch is one local transaction; identical refreshes return `changed: false` without an update. " +
-      "The result summarizes touched collection names, counts and deletion with durability, without values.\n\n" +
-      "Refresh producer-owned collections by upsert or full-set replacement. Keep human " +
-      "dispositions in a separate collection keyed by producer record ids. Split changes above the 1 MiB " +
-      "schema/value budget across calls; they are not atomic together and supply no CAS or distributed lock. " +
-      "Read with get_data; get_doc summarizes collections. " +
-      "Decisions refuse data with decision_data_unsupported; decided records " +
-      "keep decision_read_only, and legacy data stays readable. Decision answer guidance is in decisions. Their " +
-      "directory answerPreview uses the first answer paragraph/list; decisions have no TL;DR. get_doc page " +
-      "decisions are marked related or linked. Recorded attribution {who, when, where} is separate from " +
-      "the answer's content blocks.",
+      "Apply one validated batch of changes to a document's structured data, naming each touched collection " +
+      "once. Within a collection the steps run in order: set `schema`, optionally `replaceRecords`, then " +
+      "`deleteRecords`, then `upsert` whole `{id, value}` records; `deleteCollection: true` excludes other " +
+      "changes. Schema and value JSON are validated as sent, and unsupported schemas or invalid retained " +
+      "records refuse before anything changes. The batch is one local transaction; an identical refresh " +
+      "returns `changed: false` without writing. The result summarizes touched collections, record counts " +
+      "and deletions with durability, without values.\n\n" +
+      "Refresh producer-owned collections by upsert or full-set replacement, and keep human dispositions in " +
+      "a separate collection keyed by producer record ids. Split changes above the 1 MiB schema/value " +
+      "budget across calls; separate calls are not atomic together and offer no compare-and-swap or lock. " +
+      "Read records with get_data. Decision records refuse data with decision_data_unsupported, decided " +
+      "records refuse it with decision_read_only, and legacy data stays readable.",
     input: updateDataInput,
     operation: updateDataOperation,
     // Replaces, upserts and deletes data; an identical repeat reports changed: false.
@@ -258,13 +265,14 @@ export const tools: readonly Tool[] = [
     name: "list_docs",
     title: "List documents",
     description:
-      "List documents from synced directory stubs without opening rooms: uuid, title, tags, description, " +
-      "updatedAt (ISO 8601 UTC when known and representable), openThreadCount (absent means unknown) and pinned. Unfiltered omits decisions; " +
-      "kind/status/tag/has_open_threads predicates include them. A decision topic row shows the record in force, " +
-      "else pending, else first, with status, topic, discussion, answerPreview and inForce/pending/conflicts UUIDs. " +
-      "include_superseded returns one row per record; include_deleted admits archived rows (deleted: true). " +
-      "Filters combine; unknown tags refuse; has_open_threads accepts only true. get_doc reads code checks, " +
-      "threads and lifecycle details.",
+      "List documents from this replica's directory, including local writes the hub has not acknowledged " +
+      "yet, without opening document rooms. Rows carry uuid, title, tags, description, updatedAt (ISO 8601 " +
+      "UTC when known and representable), openThreadCount (absent when unknown) and pinned. Unfiltered " +
+      "listings omit decisions; kind, status, tag and has_open_threads include them. A decision topic row " +
+      "shows the record in force, else pending, else first, with status, topic, discussion, answerPreview " +
+      "and inForce/pending/conflicts UUIDs. include_superseded lists every record; include_deleted adds " +
+      "archived rows (`deleted: true`). Filters combine; unknown tags refuse; has_open_threads accepts only " +
+      "true. get_doc reads code checks, threads and lifecycle details.",
     input: listDocsInput,
     operation: listDocsOperation,
     example: { kind: "decision", status: "open" },
@@ -326,23 +334,16 @@ export const tools: readonly Tool[] = [
     name: "edit_block",
     title: "Edit one block",
     description:
-      "Splice block text, preserving edits elsewhere; list-item list/indent can change in place. " +
-      "Assert old_text and preferably rev from get_doc; " +
-      "stale_block or old_text_mismatch returns currentText/currentRev. Assertions are replica-local. " +
-      "Prose marks can shift at splice edges; verify formatting with export_markdown. " +
-      "open_thread_anchored refuses loss of an open thread's last anchor; resolve it or move its anchor " +
-      "with annotate. Tables require GFM old/new text and table_mapping for " +
-      "structural/multi-cell edits. Cards take :::card content: inline-Markdown prose, repeated button: " +
-      "[Text](destination) lines after footer in authored order. Buttons use nonempty plain labels, " +
-      "https or supported app routes, optional style/color; " +
-      "invalid_card refuses bad input; unchanged " +
-      "parts, buttons and anchors survive. Rev includes each button's text, destination, appearance and " +
-      "order. Figma takes :::figma content: url, optional plain title and height 240–960, blank line " +
-      "and marked caption. Accepted Figma view URLs retain only the path and node-id, " +
-      "starting-point-node-id, version-id on www.figma.com. invalid_figma refuses without writing. " +
-      "Changed headers update their fields; unchanged caption marks/anchors survive. Figma rev includes " +
-      "caption formatting. Card/Figma conversions and table_mapping are refused; new document targets " +
-      "must be known locally. Link and GitHub reference syntax: markdown.",
+      "Change one block's text by diff-and-splice, so concurrent edits elsewhere in the block survive; a " +
+      "list item's `list` and `indent` can also change in place. Assert `old_text` and preferably the `rev` " +
+      "from get_doc: a mismatch refuses with stale_block or old_text_mismatch and returns currentText and " +
+      "currentRev to re-diff against. The assertion checks this replica only. A splice that touches a " +
+      "formatting mark's edge can re-anchor the mark, so check formatted text with export_markdown " +
+      "afterwards. An edit that would remove an open thread's last anchor refuses with " +
+      "open_thread_anchored; resolve the thread or move its anchor with annotate first. Tables take GFM and " +
+      "need `table_mapping` for structural or multi-cell edits. Card and Figma blocks take their `:::` " +
+      "content and cannot be converted to or from other types. New document-link targets must be known to " +
+      "this replica.",
     input: editBlockInput,
     operation: editBlockOperation,
     // Replaces text; table_mapping can replace rows again under identical text and rev.
@@ -422,20 +423,13 @@ export const tools: readonly Tool[] = [
     name: "set_metadata",
     title: "Set document metadata together",
     description:
-      "Set title/description/tldr/tags/links/code_check or decision discussion; require one. Omissions stay; " +
-      "refusals write nothing and field failures name field. " +
-      "Title/description cannot be cleared. tldr: null clears but preserves deliberate absence; replacing a marked TL;DR requires tldr_opt_in: true with non-null tldr. Tags/links " +
-      "replace; [] clears existing tags or links. list_tags ids/names (case ignored); hidden pending tag references stay stored. New " +
-      "links: directory-known; archived/unchanged accepted. Regular-only code_check replaces one repository's entry " +
-      "(case-insensitive); {repository, commit, result, rev, paths?}. rev must match get_doc's page rev; on refusal reread and compare before recording. paths are hints, not complete dependencies. Writer sets UTC checked_at. Content edits preserve checks; " +
-      "decisions refuse. Only open decisions accept discussion: live, readable non-decision RFC UUID/null. " +
-      "Reuse/create RFC first; RFC/page/approval untouched. " +
-      "Separate from curated links/recorded answer; fixed after open. Decisions have no TL;DR; non-null refuses " +
-      "decision_tldr_unsupported, open null accepted. Decided records refuse tldr/discussion. " +
-      "Title on any live record renames its decision topic; successors inherit it. Title renames preserve approval. " +
-      "answerPreview: first answer paragraph/list; get_doc marks related/linked. " +
-      "See decisions. " +
-      "Archived metadata refuses; lifecycle: set_status.",
+      "Change one or more of a document's title, description, TL;DR, tags, curated links and code check, or " +
+      "an open decision's discussion RFC. Name at least one field; omitted fields keep their values. The " +
+      "call is all or nothing: a refusal writes none of the named fields and names the failing `field`. " +
+      "Tags and links replace the whole set, and `[]` clears it. Title and description cannot be cleared; " +
+      "`tldr: null` clears the TL;DR. Decision records take no TL;DR or code check, and decided records " +
+      "also refuse discussion. Archived documents refuse every field; lifecycle status belongs to " +
+      "set_status.",
     input: setMetadataInput,
     operation: setMetadataOperation,
     // Replaces named fields and sets; repeating a code check records a new time.
@@ -584,22 +578,13 @@ export const tools: readonly Tool[] = [
     name: "export_markdown",
     title: "Export a document as markdown",
     description:
-      "Render a Markdown projection: code, terminal and chart keep source fences; tables write " +
-      "padded GFM with inline cell marks. Cards export separate :::card containers with inline-Markdown " +
-      "prose and button: [Text](destination) lines after footer in authored order. Each exported " +
-      "button's plain label links to https or exact claude://code/new, claude-cli://open, codex://new, " +
-      "optionally with ?query. Style outline/filled and color neutral/blue/green/violet default to " +
-      "outline neutral; export writes style before color and omits defaults. Import restores buttons " +
-      "and appearances. Figma exports separate :::figma containers: url, optional literal title and " +
-      "height, blank line and marked caption. Normalized HTTPS www.figma.com links retain " +
-      "design/file/proto/board/slides/community/file path, key/id, optional name and node-id, " +
-      "starting-point-node-id, version-id; other query values and fragments were dropped at save. " +
-      "Absent keys are omitted; header newlines fold to spaces and prose lines starting ::: are " +
-      "escaped. Import restores caption marks and adjacent containers; invalid/unclosed containers " +
-      "remain literal paragraphs. MCP refuses bad Figma content with invalid_figma; get_doc derives " +
-      "kind/file/fileName/node. Markdown help owns height 240–960 and accepted links. Export contacts " +
-      "no Figma service. Chart/data records are omitted with a notice; Markdown is never storage and " +
-      "MCP has no import tool.",
+      "Render one document as read-only Markdown for reading, review or checking formatting. Markdown is " +
+      "never how documents are stored, and MCP has no Markdown import. The default frontmatter carries " +
+      "uuid, title, tags and, when set, description, kind and status; the TL;DR is not exported. Document " +
+      "links export as `[label](document-uuid)`. Comments are dropped unless `annotations` is " +
+      "`html-comments`, and structured data records are left out with a notice. Source blocks keep their " +
+      "fences, tables export as GFM, and cards and Figma blocks export as `:::` containers whose syntax " +
+      "markdown help gives.",
     input: exportMarkdownInput,
     operation: exportMarkdownOperation,
     example: { uuid, frontmatter: true, annotations: "drop" },
@@ -610,7 +595,7 @@ export const tools: readonly Tool[] = [
     title: "Sync status",
     description:
       "Inspect local replica state, pending rooms and hub connection/acknowledgements. hub.status distinguishes " +
-      "disabled, retryable hub-down, auth-failed requiring action, and update-required protocol mismatch. " +
+      "local, disabled, retryable hub-down, auth-failed requiring action, and update-required protocol mismatch. " +
       "hub.recoveryClass, authRecovery and reason explain recovery; protocolVersion and hubProtocolVersion " +
       "identify the incompatible side. Tools still work locally. unsyncedChanges counts durable pending rooms; " +
       "inFlightUpdates counts provider sync messages on the current connection, resetting on reconnect. " +
@@ -657,11 +642,11 @@ export const tools: readonly Tool[] = [
     name: "unpin_doc",
     title: "Unpin a document",
     description:
-      "Remove a document from the sidebar, wherever it sits. The document itself is untouched: unpinning is a " +
-      "navigation act. archive_doc hides a document; delete_doc permanently deletes an archived regular document.\n\n" +
-      "An unpin beats a move made concurrently on another replica, so a document does not reappear because " +
-      "somebody was dragging it at the time. It takes no group: one pin per document means there is only ever " +
-      "one place to remove it from. `unpinned` is false when the document was not pinned to begin with.",
+      "Remove a document from the sidebar, wherever it sits; the document itself is untouched. archive_doc " +
+      "hides a document; delete_doc permanently deletes an archived regular document.\n\n" +
+      "An unpin beats a concurrent move on another replica, so a dragged document does not reappear. It takes " +
+      "no group: a document has at most one pin. `unpinned` is false when the document was not pinned. A group " +
+      "left empty stays until sidebar_group deletes it; `groupHint` names that call.",
     input: unpinDocInput,
     operation: unpinDocOperation,
     // Removes a pin; repeating reports unpinned: false.
@@ -692,14 +677,12 @@ export const tools: readonly Tool[] = [
     name: "get_help",
     title: "Read product help",
     description:
-      "Read bundled, version-matched product help by topic or exact registered tool name. Omit topic to list " +
-      "every topic with its id, title, description and URI. The returned text is the same Markdown as " +
-      "uberblick://help/{topic}. Help is workspace-agnostic and never opens or " +
-      "settles a replica; it remains available offline and while the replica store is quarantined. " +
-      "Unknown topics refuse with unknown_help_topic and list valid topic ids; choose one and retry.",
+      "Read version-matched product help by topic/tool name; omit topic for the catalog. " +
+      "Workspace-agnostic; available offline and during quarantine.",
     input: getHelpInput,
     operation: getHelpOperation,
     example: { topic: "get_doc" },
     related: ["orientation", "tools", "tool-contracts"],
+    details: toolHelpDetails.get_help,
   }),
 ];

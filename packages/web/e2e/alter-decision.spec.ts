@@ -27,8 +27,8 @@ interface StoredDoc {
   approvalChanged?: boolean;
   discussion?: string | null;
   related?: string[];
-  blocks: Array<{ type: string; text: string }>;
-  resolution?: { inForce: { uuid: string } | null; pending: Array<{ uuid: string }> };
+  blocks: Array<{ id: string; rev: string; type: string; text: string }>;
+  resolution?: { inForce: string | null; pending: string[] };
   tags?: Array<{ name: string }>;
 }
 
@@ -66,8 +66,9 @@ async function unchanged(writer: McpSession, source: StoredDoc, page: Page): Pro
   await page.getByRole("textbox", { name: "Document title", exact: true }).fill(marker);
   await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: source.uuid }), (stored) => {
     expect(stored.title).toBe(marker);
-    expect(stored.blocks.map(({ type, text }) => ({ type, text }))).toEqual(source.blocks.map(({ type, text }) => ({ type, text })));
-    expect(stored.resolution?.inForce?.uuid).toBe(source.uuid);
+    // create_doc names blocks by id and rev; an unchanged rev means unchanged content.
+    expect(stored.blocks.map(({ id, rev }) => ({ id, rev }))).toEqual(source.blocks.map(({ id, rev }) => ({ id, rev })));
+    expect(stored.resolution?.inForce).toBe(source.uuid);
     expect(stored.resolution?.pending).toEqual([]);
   });
   await expectMcp(() => writer.call<{ docs: Array<{ uuid: string; title: string }> }>("list_docs", { kind: "decision", include_superseded: true }), (listed) => {
@@ -262,7 +263,7 @@ test("Decide records a successor at the topic address and RFC opens its new page
   await expect(page.locator(".ub-decision-answer-header time")).toHaveAttribute("datetime", /^\d{4}-/);
   let decided: string | undefined;
   await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: source.uuid }), (stored) => {
-    decided = stored.resolution?.inForce?.uuid;
+    decided = stored.resolution?.inForce ?? undefined;
     expect(decided).toBeDefined();
     expect(decided).not.toBe(source.uuid);
   });
@@ -300,7 +301,7 @@ test("Decide records a successor at the topic address and RFC opens its new page
   let proposal: string | undefined;
   await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: source.uuid }), (stored) => {
     expect(stored.resolution?.pending).toHaveLength(1);
-    proposal = stored.resolution?.pending[0]?.uuid;
+    proposal = stored.resolution?.pending[0];
     expect(proposal).toBeDefined();
   });
   await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: proposal }), (stored) => {
@@ -354,7 +355,7 @@ test("a remote answer replacement preserves the open draft and refuses a stale D
   await expect(page.locator(".ub-decision-timeline > li")).toHaveCount(2);
   await dialog(page).getByRole("button", { name: "Cancel", exact: true }).click();
   await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: source.uuid }), (stored) => {
-    expect(stored.resolution?.inForce?.uuid).toBe(successor.uuid);
+    expect(stored.resolution?.inForce).toBe(successor.uuid);
     expect(stored.resolution?.pending).toEqual([]);
   });
 });

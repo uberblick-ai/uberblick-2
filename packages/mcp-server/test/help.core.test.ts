@@ -1,7 +1,7 @@
 import { getBlockInline, INLINE_ICONS, validateCollectionSchema } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
 
-import { type FailingStore, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
+import { readBlocks, removeTempDirs, startServer, testConfig, type FailingStore } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
@@ -75,7 +75,7 @@ it("writes the markdown help's GitHub reference example as an ordinary external 
     uuid: created.uuid, after_block_id: created.blocks[0].id, blocks: [block],
   });
   const doc = rig.instance.replicas.replica(created.uuid).doc;
-  for (const written of [created.blocks[0], inserted.blocks[0]]) {
+  for (const written of await readBlocks(rig, created.uuid, [created.blocks[0], inserted.blocks[0]])) {
     expect(written.text).toBe("Make caret placement deterministic (app#2005).");
     expect(getBlockInline(doc, written.id)).toEqual(inline);
   }

@@ -112,15 +112,15 @@ test("Linux jobs partition every workspace package exactly once, including packa
 	for (const manifest of manifests) assert.ok(manifest.scripts?.test, `${manifest.name} runs its unit suite`);
 });
 
-test("lint, typecheck and site still run after an earlier check fails, and macOS keeps test-os", {
+test("lint and typecheck still run after an earlier check fails, and macOS keeps test-os", {
 	skip: absentWorkflow,
 }, () => {
 	const lint = job("lint");
-	assert.match(lint, /^ {4}name: lint, typecheck and site$/m);
+	assert.match(lint, /^ {4}name: lint and typecheck$/m);
 	assert.match(lint, /^ {4}runs-on: ubuntu-latest$/m);
 	assert.doesNotMatch(lint, /^ {4}(?:needs|if|continue-on-error):/m);
 	const steps = lint.split(/^ {6}- /m).slice(1);
-	for (const command of ["lint", "typecheck", "site"]) {
+	for (const command of ["lint", "typecheck"]) {
 		const step = steps.find((entry) => new RegExp(`^ {8}run: mise run ${command}$`, "m").test(entry));
 		assert.ok(step, `${command} stays in the shared lint job`);
 		assert.match(step, /if: \$\{\{ !cancelled\(\) && steps\.install\.outcome == 'success' \}\}/);

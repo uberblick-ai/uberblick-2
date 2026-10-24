@@ -54,7 +54,7 @@ import { log } from "./log.js";
 import { collectReplicaSyncState } from "./status.js";
 import type { MirrorStore, UpdateOrigin } from "./store.js";
 import { SettingsResetError, WorkspaceRemovedError } from "./store.js";
-import { HubSync, type SyncWaitResult } from "./sync.js";
+import { HubSync, LOCAL_HUB_REASON, type HubState, type SyncWaitResult } from "./sync.js";
 import { readDeviceLogin } from "./device-login.js";
 
 /** Replayed updates are already durable; the update observer must skip them. */
@@ -1312,6 +1312,33 @@ export class Replicas {
   /** Whether a room's local changes are known to have reached the hub. */
   isRoomQuiet(room: string): boolean {
     return this.sync.isRoomQuiet(room);
+  }
+
+  /**
+   * Whether this replica holds everything known of a room. Every replica on
+   * this computer shares one update log, so a local workspace's rooms are
+   * complete once replayed; a hub workspace's need the hub's delivery and
+   * acknowledgement. With sync disabled the local copy is all there is.
+   */
+  roomComplete(room: string): boolean {
+    return !this.sync.enabled || this.config.localWorkspace === true || this.isRoomQuiet(room);
+  }
+
+  /**
+   * The hub reading agents receive. A local workspace's hub runs only while
+   * `ub open` does, so its absence is the normal state rather than an outage.
+   * `ub open` itself reads `sync.state()` to supervise the hub it starts.
+   */
+  hubState(): HubState {
+    const state = this.sync.state();
+    if (this.config.localWorkspace !== true || state.status !== "hub-down") return state;
+    return {
+      protocolVersion: state.protocolVersion,
+      recoveryClass: "manual",
+      status: "local",
+      url: state.url,
+      reason: LOCAL_HUB_REASON,
+    };
   }
 
   attachedReplicas(): Replica[] {

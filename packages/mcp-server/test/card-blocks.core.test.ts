@@ -4,7 +4,7 @@ import type { CardPart } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { docFingerprint } from "../src/remote.js";
-import { removeTempDirs, startServer } from "./core-helpers.js";
+import { readBlocks, removeTempDirs, startServer } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
@@ -56,6 +56,7 @@ describe("cards through MCP", () => {
       blocks: [{ type: "card", text: SOURCE }] });
     const doc = rig.instance.replicas.replica(created.uuid).doc;
     const listed = await rig.ok("list_docs");
+    const stored = (await rig.ok("get_doc", { uuid: created.uuid })).blocks;
     const before = Y.encodeStateAsUpdate(doc);
     const writes = rig.instance.store.logSize();
     let updates = 0;
@@ -76,7 +77,7 @@ describe("cards through MCP", () => {
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
     expect(rig.instance.store.logSize()).toBe(writes);
     expect(await rig.ok("list_docs")).toEqual(listed);
-    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual(created.blocks);
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual(stored);
   });
 
   it("keeps stale assertions ahead of malformed replacement content", async () => {
@@ -156,7 +157,8 @@ describe("cards through MCP", () => {
     const source = sourceWithPart(part, `[**Renamed**](${unknown})`);
     const edited = await rig.ok("edit_block", { uuid: created.uuid, block_id: id,
       old_text: read.text, new_text: source, rev: read.rev });
-    expect(edited.block.text).toBe(source);
+    const [written] = await readBlocks(rig, created.uuid, [edited.block]);
+    expect(written).toMatchObject({ text: source, rev: edited.block.rev });
     expect(partText(doc, id, part)).toBe(text);
 
     const copied = part === "body"
@@ -165,7 +167,7 @@ describe("cards through MCP", () => {
     const before = Y.encodeStateAsUpdate(doc);
     const writes = rig.instance.store.logSize();
     expect(await rig.call("edit_block", { uuid: created.uuid, block_id: id,
-      old_text: edited.block.text, new_text: copied, rev: edited.block.rev })).toMatchObject({ isError: true, payload: {
+      old_text: written.text, new_text: copied, rev: edited.block.rev })).toMatchObject({ isError: true, payload: {
       error: "doclink_target_not_known_locally", applied: false, partial: false,
     } });
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
@@ -182,7 +184,7 @@ describe("cards through MCP", () => {
     const read = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
     const edited = await rig.ok("edit_block", { uuid: created.uuid, block_id: read.id,
       old_text: read.text, new_text: SOURCE, rev: read.rev });
-    expect(edited.block.text).toBe(SOURCE);
+    expect((await readBlocks(rig, created.uuid, [edited.block]))[0].text).toBe(SOURCE);
     expect(partText(doc, read.id, "title")).toBe(text);
   });
 

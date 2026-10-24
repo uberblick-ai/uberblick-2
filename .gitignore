@@ -3,7 +3,6 @@ node_modules/
 
 # build output
 dist/
-site/out/
 *.tsbuildinfo
 # CLI and MCP test process entries built once per run by global setup, so
 # spawning suites do not transpile source packages in every child

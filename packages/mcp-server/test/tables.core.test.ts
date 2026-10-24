@@ -4,7 +4,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import type { TableMapping } from "@uberblick/schema";
 import { blockText } from "../src/replica.js";
-import { WORKSPACE, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
+import { WORKSPACE, readBlocks, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
@@ -145,7 +145,7 @@ describe("structured tables through MCP", () => {
       title: "Cells", description: "Structured cells over GFM.",
       blocks: [{ type: "table", text: "| Name | Value |\n| :--- | ---: |\n| **Alpha** | A\\|B |" }],
     });
-    const table = created.blocks[0];
+    const [table] = await readBlocks(rig, created.uuid, created.blocks);
     expect(table.text).toBe("| Name | Value |\n| --- | --- |\n| **Alpha** | A\\|B |");
     const doc = rig.instance.replicas.replica(created.uuid).doc;
     const element = findBlockElement(doc, table.id)!;
@@ -156,7 +156,7 @@ describe("structured tables through MCP", () => {
     expect(cell(doc, table.id, 1, 0).toDelta()).toEqual([{ insert: "Alpha", attributes: { bold: {} } }]);
     expect((await rig.ok("search", { query: "Alpha" })).hits.map((hit: { uuid: string }) => hit.uuid)).toContain(created.uuid);
     const inserted = await rig.ok("insert_block", { uuid: created.uuid, blocks: [{ type: "table", text: GFM }] });
-    expect(inserted.blocks[0].text).toBe(GFM);
+    expect((await readBlocks(rig, created.uuid, inserted.blocks))[0].text).toBe(GFM);
     expect(blockText(doc, inserted.blocks[0].id)).toBe(cell(doc, inserted.blocks[0].id, 1, 1));
     const cursor = rig.instance.replicas.replica(created.uuid).awareness.getLocalState()!.cursor;
     const position = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(cursor.head), doc);
@@ -183,7 +183,7 @@ describe("structured tables through MCP", () => {
       blocks: [{ type: "table", text: "| **Formats** |\n| --- |\n| placeholder |" }],
     });
     const { block } = await rig.ok("edit_block", { uuid: created.uuid, block_id: created.blocks[0].id,
-      old_text: created.blocks[0].text, new_text: source, rev: created.blocks[0].rev });
+      old_text: "| **Formats** |\n| --- |\n| placeholder |", new_text: source, rev: created.blocks[0].rev });
     const doc = rig.instance.replicas.replica(created.uuid).doc;
     expect(cellRuns(doc, block.id, 0, 0)).toEqual([{ text: "Formats", marks: { bold: true } }]);
     expect(cellRuns(doc, block.id, 1, 0)).toEqual([
@@ -231,7 +231,7 @@ describe("structured tables through MCP", () => {
     expect(updates).toBe(0);
     expect(Y.encodeStateAsUpdate(doc)).toEqual(state);
     expect(rig.instance.store.logSize()).toBe(writes);
-    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual(created.blocks);
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toMatchObject(created.blocks);
   });
 
   it.each(["no-op", "neighbour", "label", "format", "row", "column"])("keeps an existing unresolved cell link editable through a %s edit", async (change) => {
@@ -267,7 +267,7 @@ describe("structured tables through MCP", () => {
       uuid: created.uuid, block_id: id, old_text: read.text, new_text: writeGfmTable(rows), rev: read.rev,
       ...(mapping === undefined ? {} : { table_mapping: mapping }),
     });
-    expect(changed.block.text).toBe(writeGfmTable(rows));
+    expect((await readBlocks(rig, created.uuid, [changed.block]))[0].text).toBe(writeGfmTable(rows));
     const row = change === "row" ? 2 : 1;
     const column = change === "column" ? 1 : 0;
     expect(cell(doc, id, row, column)).toBe(alpha);
@@ -343,7 +343,7 @@ describe("structured tables through MCP", () => {
     });
     expect(edited.payload).toMatchObject({ error: "invalid_table", applied: false, partial: false });
     expect(Y.encodeStateVector(replica.doc)).toEqual(state);
-    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual(created.blocks);
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toMatchObject(created.blocks);
   });
 
   it("normalizes persisted and late legacy writes, including decided records, and subsequent reads write nothing", async () => {
