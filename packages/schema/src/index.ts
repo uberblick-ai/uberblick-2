@@ -278,3 +278,10 @@ export { encodeOriginUpdate, readOriginUpdate, encodeOriginAck, readOriginAck } 
 export type { UpdateSurface, UpdateOriginMetadata, OriginUpdate, OriginUpdateAck } from "./origin.js";
 export { parseJsonSource, formatJsonSource, jsonPathStep, JSON_SOURCE_MAX_DEPTH } from "./json-source.js";
 export type { JsonSourceNode, JsonSourceEntry, JsonSourceResult } from "./json-source.js";
+export {
+  compareJsonSources, changedRanges, jsonComparisonOpenPaths, jsonComparisonRows,
+  JSON_COMPARE_FIRST_VIEW_ROWS, JSON_COMPARE_MAX_NODES, JSON_COMPARE_WORD_LENGTH,
+} from "./json-compare.js";
+export type {
+  JsonChangeKind, JsonCompareNode, JsonComparePiece, JsonCompareRow, JsonCompareRowOptions, JsonComparison, JsonTextRange,
+} from "./json-compare.js";
