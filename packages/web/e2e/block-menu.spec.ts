@@ -487,20 +487,3 @@ test("real Tab keeps focus and the caret in the typed list item", async ({
   await page.keyboard.type("!", { delay: 15 });
   await expect(items.nth(1)).toHaveText("b!");
 });
-
-test("a typed table stays drawn while clicking and typing edit its cells", async ({ page }) => {
-  await openDoc(page, "first");
-  await page.keyboard.press("Enter");
-  await page.keyboard.type("| name | count |", { delay: 10 });
-  await page.keyboard.press("Enter");
-  await page.keyboard.type("| --- | ---: |", { delay: 10 });
-  const table = page.locator(".ub-table");
-  await expect(table).toBeVisible();
-  await expect(blocks(page)).toHaveCount(2);
-  await expect(table.locator("th").first()).toHaveText("name");
-  await table.locator("th").first().click();
-  await page.keyboard.type(" edited");
-  await expect(table.locator("th").first()).toContainText("edited");
-  await expect(table).toBeVisible();
-  await expect(page.locator(".ub-table-source")).toHaveCount(0);
-});

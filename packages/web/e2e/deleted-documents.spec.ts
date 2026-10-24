@@ -61,6 +61,12 @@ async function deletedPage(page: Page): Promise<void> {
 async function calmBanner(page: Page, touch: boolean): Promise<void> {
   const banner = page.locator(".ub-archived-banner");
   await expect(banner).toContainText("Archived. Read-only and hidden from the document list.");
+  // Shared controls animate theme changes; contrast needs the settled palette.
+  await banner.evaluate(async element => {
+    await Promise.all(element.getAnimations({ subtree: true })
+      .filter(animation => animation instanceof CSSTransition)
+      .map(animation => animation.finished.catch(() => undefined)));
+  });
   const paint = await banner.evaluate(element => {
     const icon = element.querySelector("svg");
     const message = element.querySelector(":scope > span");
@@ -102,16 +108,13 @@ async function calmBanner(page: Page, touch: boolean): Promise<void> {
   }
 }
 
-for (const { touch, appearance } of [
-  { touch: false, appearance: "light" }, { touch: false, appearance: "dark" },
-  { touch: true, appearance: "light" }, { touch: true, appearance: "dark" },
-] as const) {
-  test(`archived deletion is calm, cancellable and permanent on ${touch ? "iPad touch @webkit-touch" : "desktop"} in ${appearance}`, async ({ browser }) => {
+for (const touch of [false, true]) {
+  test(`archived deletion is calm, cancellable and permanent on ${touch ? "iPad touch @webkit-touch" : "desktop"} in both appearances`, async ({ browser }) => {
     const writer = session();
-    const title = `Delete acceptance ${appearance} ${touch ? "touch" : "desktop"}`;
+    const title = `Delete acceptance ${touch ? "touch" : "desktop"}`;
     const target = await create(writer, title);
     const page = await openApp(browser, `/${harness().workspace}/${target.uuid}`, {
-      contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1440, height: 1000 } }), colorScheme: appearance },
+      contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1440, height: 1000 } }), colorScheme: "light" },
     });
     await expect(editor(page)).toContainText("Content that permanent deletion must remove.");
     await activateControl(page.getByRole("button", { name: "Document actions", exact: true }), { touch });
@@ -119,43 +122,46 @@ for (const { touch, appearance } of [
     await activateControl(page.getByRole("alertdialog").getByRole("button", { name: "Archive", exact: true }), { touch });
     const banner = page.locator(".ub-archived-banner");
     await expect(banner.getByRole("button", { name: "Restore", exact: true })).toBeFocused();
-    await calmBanner(page, touch);
     const trigger = banner.getByRole("button", { name: "Delete…", exact: true });
     const dialog = page.getByRole("alertdialog", { name: `Delete “${title}”?`, exact: true });
+    for (const appearance of ["light", "dark"] as const) {
+      await test.step(`${appearance} banner and confirmation`, async () => {
+        await page.emulateMedia({ colorScheme: appearance });
+        expect(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(appearance === "dark");
+        await calmBanner(page, touch);
+        await activateControl(trigger, { touch });
+        await expect(dialog).toContainText("It will be gone for everyone, with its comments and history. Links to it will show it was deleted. This can't be undone.");
+        await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
+        const remove = dialog.getByRole("button", { name: "Delete", exact: true });
+        const deletePaint = await remove.evaluate(element => {
+          const probe = document.createElement("span");
+          probe.style.backgroundColor = "var(--destructive)";
+          element.append(probe);
+          try { return { fill: getComputedStyle(element).backgroundColor, destructive: getComputedStyle(probe).backgroundColor }; }
+          finally { probe.remove(); }
+        });
+        expect(deletePaint.fill).toBe(deletePaint.destructive);
+        await activateControl(dialog.getByRole("button", { name: "Cancel", exact: true }), { touch });
+        await expect(dialog).toHaveCount(0);
+        await expect(banner).toBeVisible();
+        await activateControl(trigger, { touch });
+        await page.keyboard.press("Escape");
+        await expect(dialog).toHaveCount(0);
+        await expect(editor(page)).toContainText("Content that permanent deletion must remove.");
+      });
+    }
     await activateControl(trigger, { touch });
-    await expect(dialog).toContainText("It will be gone for everyone, with its comments and history. Links to it will show it was deleted. This can't be undone.");
-    await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
-    await activateControl(dialog.getByRole("button", { name: "Cancel", exact: true }), { touch });
-    await expect(dialog).toHaveCount(0);
-    await expect(banner).toBeVisible();
-    await activateControl(trigger, { touch });
-    await page.keyboard.press("Escape");
-    await expect(dialog).toHaveCount(0);
-    await expect(editor(page)).toContainText("Content that permanent deletion must remove.");
-    await activateControl(trigger, { touch });
-    const remove = dialog.getByRole("button", { name: "Delete", exact: true });
-    const deletePaint = await remove.evaluate(element => {
-      const probe = document.createElement("span");
-      probe.style.backgroundColor = "var(--destructive)";
-      element.append(probe);
-      try { return { fill: getComputedStyle(element).backgroundColor, destructive: getComputedStyle(probe).backgroundColor }; }
-      finally { probe.remove(); }
-    });
-    expect(deletePaint.fill).toBe(deletePaint.destructive);
-    await activateControl(remove, { touch });
+    await activateControl(dialog.getByRole("button", { name: "Delete", exact: true }), { touch });
     await deletedPage(page);
     await page.reload();
     await deletedPage(page);
   });
 }
 
-for (const { touch, appearance } of [
-  { touch: false, appearance: "light" }, { touch: false, appearance: "dark" },
-  { touch: true, appearance: "light" }, { touch: true, appearance: "dark" },
-] as const) {
-  test(`archived topic deletion includes every record on ${touch ? "iPad touch @webkit-touch" : "desktop"} in ${appearance}`, async ({ browser }) => {
+for (const touch of [false, true]) {
+  test(`archived topic deletion includes every record on ${touch ? "iPad touch @webkit-touch" : "desktop"} in both appearances`, async ({ browser }) => {
     const writer = session();
-    const title = `Delete topic acceptance ${appearance} ${touch ? "touch" : "desktop"}`;
+    const title = `Delete topic acceptance ${touch ? "touch" : "desktop"}`;
     const owner = await create(writer, "Owner of a permanently deleted topic");
     const first = await create(writer, title, { kind: "decision", status: "decided", related: owner.uuid });
     const current = await create(writer, undefined, {
@@ -175,7 +181,7 @@ for (const { touch, appearance } of [
     try {
       expect(archiveDecisionRecord(directory.doc, sidebar.doc, proposal.uuid)).toBe(true);
       const page = await openApp(browser, `/${harness().workspace}/${first.uuid}/record/${proposal.uuid}`, {
-        contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1440, height: 1000 } }), colorScheme: appearance },
+        contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1440, height: 1000 } }), colorScheme: "light" },
       });
       const banner = page.locator(".ub-archived-banner");
       await expect(banner).toBeVisible();
@@ -187,17 +193,23 @@ for (const { touch, appearance } of [
         await page.goto(new URL(`/${harness().workspace}/${first.uuid}/record/${uuid}`, page.url()).href);
         await expect(trigger).toBeVisible();
       }
-      await calmBanner(page, touch);
       const dialog = page.getByRole("alertdialog", { name: `Delete topic “${title}”?`, exact: true });
-      await activateControl(trigger, { touch });
-      await expect(dialog).toContainText("The topic and all its records will be deleted for everyone, with their comments and history.");
-      await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
-      await activateControl(dialog.getByRole("button", { name: "Cancel", exact: true }), { touch });
-      await expect(dialog).toHaveCount(0);
-      await activateControl(trigger, { touch });
-      await page.keyboard.press("Escape");
-      await expect(dialog).toHaveCount(0);
-      await expect(editor(page)).toBeVisible();
+      for (const appearance of ["light", "dark"] as const) {
+        await test.step(`${appearance} topic banner and confirmation`, async () => {
+          await page.emulateMedia({ colorScheme: appearance });
+          expect(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(appearance === "dark");
+          await calmBanner(page, touch);
+          await activateControl(trigger, { touch });
+          await expect(dialog).toContainText("The topic and all its records will be deleted for everyone, with their comments and history.");
+          await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
+          await activateControl(dialog.getByRole("button", { name: "Cancel", exact: true }), { touch });
+          await expect(dialog).toHaveCount(0);
+          await activateControl(trigger, { touch });
+          await page.keyboard.press("Escape");
+          await expect(dialog).toHaveCount(0);
+          await expect(editor(page)).toBeVisible();
+        });
+      }
       const references = await openApp(browser, `/${harness().workspace}/${source.uuid}`);
       await expect(editor(references).locator(".ub-doclink")).toHaveCount(2);
       await activateControl(trigger, { touch });

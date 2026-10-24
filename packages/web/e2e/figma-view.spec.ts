@@ -308,43 +308,6 @@ test("caption, local and remote text, undo, fields and theme preserve both clien
   }
 });
 
-test("Expand enters browser fullscreen with the same iframe and browser exit preserves it", { tag: "@webkit" }, async ({ browser }) => {
-  const created = await create(writer());
-  const visits: string[] = [];
-  // Playwright mobile WebKit hides both fullscreen entry methods. Keep iPad's
-  // viewport, user agent and touch input while enabling its browser fullscreen API.
-  const page = await open(browser, created.uuid, visits, { fullscreen: true });
-  const frame = page.locator(".ub-figma");
-  const iframe = frame.locator("iframe");
-  await expect(iframe).toHaveCount(1);
-  const identity = await iframe.elementHandle();
-  const articleIdentity = await frame.elementHandle();
-  await frame.getByRole("button", { name: "Expand", exact: true }).focus();
-  await frame.getByRole("button", { name: "Expand", exact: true }).click();
-  await expect.poll(() => frame.evaluate((element) => document.fullscreenElement === element)).toBe(true);
-  await unchanged(frame, identity, visits);
-  expect(await articleIdentity?.evaluate((element) => element.isConnected)).toBe(true);
-  const bar = frame.locator(".ub-figure-viewer-bar");
-  await expect(bar).toBeVisible();
-  await expect(bar).toContainText("Payment, mobile");
-  await expect(bar.getByRole("link", { name: "Open in Figma", exact: true })).toHaveAttribute("href", LINK);
-  await expect(bar.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
-  await page.evaluate(() => document.exitFullscreen());
-  await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
-  await unchanged(frame, identity, visits);
-  expect(await articleIdentity?.evaluate((element) => element.isConnected)).toBe(true);
-  await expect(frame.locator(".ub-figma-shield")).toBeFocused();
-  await frame.getByRole("button", { name: "Expand", exact: true }).focus();
-  await frame.getByRole("button", { name: "Expand", exact: true }).click();
-  await expect.poll(() => frame.evaluate((element) => document.fullscreenElement === element)).toBe(true);
-  // Headless Chromium delivers trusted Escape to a bare fullscreen article
-  // without exiting. WebKit handles that browser action before DOM key events.
-  if (browser.browserType().name() === "webkit") await page.keyboard.press("Escape");
-  else await page.evaluate(() => document.exitFullscreen());
-  await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
-  await unchanged(frame, identity, visits);
-});
-
 for (const touch of [false, true]) {
   test(`a refused fullscreen request keeps the preview and exposes working fallback actions — ${touch ? "touch" : "pointer"}`, { tag: "@webkit" }, async ({ browser }) => {
     const created = await create(writer());
@@ -396,23 +359,35 @@ test("fullscreen close, browser exit and Back retain history state, focus and th
   await page.goto(new URL(`/${harness().workspace}/${created.uuid}`, page.url()).href);
   const frame = page.locator(".ub-figma");
   await expect(frame.locator("iframe").contentFrame().locator("#canvas")).toBeAttached();
+  await expect(frame.locator("iframe")).toHaveCount(1);
   const identity = await frame.locator("iframe").elementHandle();
+  const articleIdentity = await frame.elementHandle();
   await page.evaluate(() => history.replaceState({ ...history.state, figmaTest: "retain document state" }, ""));
   const before = await page.evaluate(() => history.state);
   const navigations = visits.length;
-  for (const close of ["browser", "button", "back"] as const) {
+  for (const close of ["browser", "escape", "button", "back"] as const) {
     await frame.getByRole("button", { name: "Expand", exact: true }).focus();
     await page.keyboard.press("Enter");
     await expect.poll(() => frame.evaluate((element) => document.fullscreenElement === element)).toBe(true);
     const bar = frame.locator(".ub-figure-viewer-bar");
     await expect(bar).toBeVisible();
+    await expect(bar).toContainText("Payment, mobile");
+    await expect(bar.getByRole("link", { name: "Open in Figma", exact: true })).toHaveAttribute("href", LINK);
+    await expect(bar.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
+    await unchanged(frame, identity, visits, navigations);
+    expect(await articleIdentity?.evaluate((element) => element.isConnected)).toBe(true);
     if (close === "browser") await page.evaluate(() => document.exitFullscreen());
-    else if (close === "button") await bar.getByRole("button", { name: "Close Figma viewer", exact: true }).click();
+    else if (close === "escape") {
+      // WebKit handles Escape before DOM events; headless Chromium needs the API.
+      if (browser.browserType().name() === "webkit") await page.keyboard.press("Escape");
+      else await page.evaluate(() => document.exitFullscreen());
+    } else if (close === "button") await bar.getByRole("button", { name: "Close Figma viewer", exact: true }).click();
     else await page.goBack();
     await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
     await expect(frame.locator(".ub-figma-shield")).toBeFocused();
     await expect.poll(() => page.evaluate(() => history.state)).toEqual(before);
     await unchanged(frame, identity, visits, navigations);
+    expect(await articleIdentity?.evaluate((element) => element.isConnected)).toBe(true);
   }
   await frame.getByRole("button", { name: "Expand", exact: true }).focus();
   await page.keyboard.press("Enter");

@@ -13,6 +13,8 @@ settle the risk. Hunt explicitly for overengineering and overtesting. Gate
 results may be evidence, but restating lint, tests or acceptance criteria is not
 a review.
 Follow KISS/YAGNI: tests defend contracts and invariants rather than implementation trivia.
+Use [test ownership](../development.md#test-ownership) to challenge duplicated
+browser permutations and verify that moving coverage preserves each guarantee.
 
 ## Reviewer assignment and task
 
