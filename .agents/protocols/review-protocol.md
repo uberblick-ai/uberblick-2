@@ -44,10 +44,10 @@ issue's Pointers cite wherever the change touches its product meaning, under
 for each changed command, tool or screen by name; a missing rewrite for a claim
 the change makes wrong or for behavior no page describes, one that misstates
 the change, or one that removes intent the code does not yet deliver, is a
-finding. So is a rewrite that breaks the ownership or editing guidance in the
-`Writing pages` guidance page, found through the
-[corpus writing pointer](corpus-writing.md): a fact written on a page that
-doesn't own it, or a page grown past the reshape signs without being reshaped.
+finding. So is a rewrite that breaks a rule in the `Writing pages` guidance
+page, found through the [corpus writing pointer](corpus-writing.md): for
+example, a fact written on a page that doesn't own it, or a page grown past
+the reshape signs without being reshaped.
 
 A corrections review asks a narrower question: for each finding id the
 revision lists, does the corrected head resolve it, or is the implementer's
