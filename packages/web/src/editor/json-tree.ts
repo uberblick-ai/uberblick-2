@@ -228,6 +228,7 @@ function treeKeys(tree: HTMLElement, toggle: (path: string, subtree: boolean) =>
 function followingCopyValue(tree: HTMLElement, itemAt: (path: string) => JsonTreeItem | null): void {
   const copyValue = button("Copy value", "Copy this value");
   copyValue.className = "ub-json-copy-value";
+  let copying = false;
   const place = (row: HTMLElement | null): void => {
     if (row === null || row.dataset.form === "close" || row.dataset.path === undefined) { copyValue.remove(); return; }
     copyValue.dataset.path = row.dataset.path;
@@ -242,7 +243,8 @@ function followingCopyValue(tree: HTMLElement, itemAt: (path: string) => JsonTre
     if (event.target instanceof HTMLElement && event.target.classList.contains("ub-json-row")) place(event.target);
   });
   tree.addEventListener("focusout", (event) => {
-    if (event.relatedTarget instanceof Node && tree.contains(event.relatedTarget)) return;
+    // Selection-copy briefly focuses a textarea before restoring this button.
+    if (copying || (event.relatedTarget instanceof Node && tree.contains(event.relatedTarget))) return;
     if (!tree.matches(":hover")) copyValue.remove();
   });
   copyValue.addEventListener("click", (event) => {
@@ -250,7 +252,10 @@ function followingCopyValue(tree: HTMLElement, itemAt: (path: string) => JsonTre
     event.stopPropagation();
     const item = itemAt(copyValue.dataset.path ?? "");
     if (item === null) return;
+    copying = true;
     void writeToClipboard(valueText(item), undefined, tree).then((copied) => {
+      copying = false;
+      if (!tree.contains(document.activeElement) && !tree.matches(":hover")) copyValue.remove();
       toast[copied ? "success" : "error"](copied ? "Value copied" : "Couldn't copy the value.", { id: "clipboard" });
     });
   });

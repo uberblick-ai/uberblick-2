@@ -242,15 +242,17 @@ describe("JSON tree block", () => {
     Reflect.deleteProperty(navigator, "clipboard");
   });
 
-  it("drops Copy value when focus leaves the tree", () => {
+  it("drops Copy value when focus leaves the tree", async () => {
     const fix = fixture();
     const limits = row(fix.element, ".limits");
     limits.focus();
     limits.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     expect(tree(fix.element).querySelector(".ub-json-copy-value")).not.toBeNull();
-    limits.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: row(fix.element, ".name") }));
+    row(fix.element, ".name").focus();
+    await Promise.resolve();
     expect(tree(fix.element).querySelector(".ub-json-copy-value")).not.toBeNull();
-    limits.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: null }));
+    button(fix.element, "Edit JSON").focus();
+    await Promise.resolve();
     expect(tree(fix.element).querySelector(".ub-json-copy-value")).toBeNull();
     fix.editor.destroy();
   });
