@@ -276,3 +276,5 @@ export type {
 } from "./types.js";
 export { encodeOriginUpdate, readOriginUpdate, encodeOriginAck, readOriginAck } from "./origin.js";
 export type { UpdateSurface, UpdateOriginMetadata, OriginUpdate, OriginUpdateAck } from "./origin.js";
+export { parseJsonSource, formatJsonSource, jsonPathStep, JSON_SOURCE_MAX_DEPTH } from "./json-source.js";
+export type { JsonSourceNode, JsonSourceEntry, JsonSourceResult } from "./json-source.js";

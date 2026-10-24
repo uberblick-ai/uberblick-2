@@ -150,6 +150,8 @@ Blocks of the retired Mermaid block type are deleted automatically, including in
 
 The document model is flat: one list item is one block, nested to at most four levels (indent 0–3). Markdown import does not read continuation lines or nested block content inside a list item. Consecutive quote lines form one quote block. HTML comments are skipped on import. Frontmatter can carry document identity and metadata; without a frontmatter title, a leading level-1 heading becomes the title.
 
+A \`json-tree\` fence is an ordinary code block that the web editor shows as a foldable JSON tree. Use it for API responses, tool results and settings files; keep small snippets in a \`json\` fence. Import, export and MCP preserve its literal source.
+
 Prose supports \`**bold**\`, \`*italic*\`, \`~~strikethrough~~\`, inline code, \`[label](https://example.com)\` and \`[label](document-uuid)\` document links. Underscore emphasis (\`__bold__\` and \`_italic_\`) is also read; export uses asterisks. Source blocks keep literal text. Tables read inline Markdown inside cells and escape literal punctuation and pipes. Alignment markers are accepted but not stored. Table rows are projected to the widest row with virtual empty padding.
 
 ### GitHub references

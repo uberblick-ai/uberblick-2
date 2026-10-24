@@ -1,0 +1,100 @@
+/* A json-tree block is frameless: the rows read like formatted JSON. */
+.ub-json-tree { --json-row: 1.7em; position: relative; margin: 0.7em 0; min-width: 0; max-width: 100%; white-space: normal; }
+.ub-json-tree-panel { position: relative; }
+.ub-json-key { color: var(--syntax-name); }
+.ub-json-string { color: var(--syntax-string); }
+.ub-json-number { color: var(--syntax-number); }
+.ub-json-literal { color: var(--syntax-keyword); }
+.ub-json-punct, .ub-json-preview, .ub-json-group { color: var(--muted-foreground); }
+.ub-json-string { cursor: pointer; }
+.ub-json-toggle {
+  position: absolute;
+  left: calc(var(--json-depth, 0) * 2ch);
+  width: 2ch;
+  color: var(--muted-foreground);
+  text-align: center;
+  user-select: none;
+}
+.ub-json-tree-rows { overflow-x: auto; overscroll-behavior-x: contain; padding: 0.15rem 0; }
+.ub-json-row {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  min-width: fit-content;
+  height: var(--json-row);
+  padding-inline: calc((var(--json-depth, 0) + 1) * 2ch) 0.5rem;
+  border-radius: var(--radius-sm);
+  white-space: pre;
+  cursor: default;
+}
+.ub-json-row:hover { background: color-mix(in oklch, var(--foreground) 5%, transparent); }
+.ub-json-row:focus { outline: none; }
+.ub-json-row:focus-visible { box-shadow: inset 0 0 0 2px var(--ring); }
+.ub-json-row:is([data-form="open"], [data-form="closed"]) { cursor: pointer; }
+.ub-json-row[data-wrapped="true"] { height: auto; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ub-json-row:not([data-wrapped="true"]) > .ub-json-string { min-width: 0; overflow: hidden; text-overflow: ellipsis; max-width: 60ch; }
+.ub-json-row:hover > .ub-json-toggle { color: var(--foreground); }
+.ub-json-preview > .ub-json-key, .ub-json-preview > .ub-json-string, .ub-json-preview > .ub-json-number, .ub-json-preview > .ub-json-literal { opacity: 0.8; }
+.ub-json-count {
+  margin-left: 0.6rem;
+  color: var(--muted-foreground);
+  font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
+  user-select: none;
+}
+.ub-json-more {
+  padding: 0 0.3rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
+  cursor: pointer;
+}
+.ub-json-more:hover { background: var(--accent); color: var(--foreground); }
+.ub-json-copy-value {
+  position: sticky;
+  right: 0.25rem;
+  align-self: center;
+  margin-left: auto;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
+  cursor: pointer;
+}
+.ub-json-copy-value:hover { background: var(--accent); }
+.ub-json-tree-note:not([hidden]) {
+  display: block;
+  margin: 0.3rem 0 0;
+  color: var(--muted-foreground);
+  font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
+}
+
+/* Toolbar: Copy and Edit on hover or keyboard focus. */
+.ub-json-tree:where(:hover, :focus-within, [data-annotated="true"]) .ub-figure-toolbar { opacity: 1; pointer-events: auto; }
+@media (pointer: coarse) { .ub-json-tree .ub-figure-toolbar, .ub-json-copy-value { display: none; } }
+
+/* Keep the last tree during typing; show invalid source after the pause. */
+.ub-json-tree-source-frame { display: none; }
+.ub-json-tree:is(.ub-json-tree-editing, [data-annotated="true"], [data-json="invalid"]) > .ub-json-tree-source-frame { display: block; }
+.ub-json-tree:is(.ub-json-tree-editing, [data-json="invalid"]) > .ub-json-tree-panel { display: none; }
+.ub-json-tree:not(.ub-json-tree-editing) .ub-json-tree-source-frame .ub-block-caption { display: none; }
+.ub-json-tree-source {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  font: var(--type-small-size)/1.7 var(--font-mono);
+  white-space: pre;
+}
+/* Reserve the line wherever live source is visible, including beside a comment. */
+.ub-json-tree-validity {
+  min-height: var(--type-caption-leading);
+  margin: 0.3rem 0 0;
+  color: var(--muted-foreground);
+  font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
+  overflow-wrap: anywhere;
+}
