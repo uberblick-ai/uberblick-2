@@ -46,6 +46,19 @@ test("the one required browser gate rejects failure, cancellation and skips", { 
 	}
 });
 
+test("WebKit images match the pinned browser package and need no host-package installation", {
+	skip: absentWorkflow,
+}, () => {
+	const { devDependencies } = JSON.parse(readFileSync(join(root, "packages/web/package.json"), "utf8"));
+	for (const id of ["e2e-webkit-1", "e2e-webkit-2"]) {
+		const body = job(id);
+		const image = body.match(/^ {6}image: mcr\.microsoft\.com\/playwright:v([^@]+)@sha256:[a-f0-9]{64}$/m)?.[1];
+		assert.equal(image, `${devDependencies["@playwright/test"]}-noble`);
+		assert.doesNotMatch(body, /install-deps|apt-get|apt install/);
+		assert.doesNotMatch(body, /path: ~\/\.cache\/ms-playwright/);
+	}
+});
+
 test("failed browser suites upload isolated attempt output without changing their result", { skip: absentWorkflow }, () => {
 	for (const id of browserJobs) {
 		const body = job(id);

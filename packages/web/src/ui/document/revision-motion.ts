@@ -1,7 +1,6 @@
 /**
- * Motion in the revision view. Every animation here is a transient transform
- * or fade over a layout that is already final: none fills, so an interrupted
- * or skipped animation leaves exactly the instant state.
+ * Motion runs over the final document layout. Only the removed ghost copies
+ * fill; cancelling or skipping motion leaves exactly the instant state.
  */
 
 export const REVISION_EASE = "cubic-bezier(0.2, 0.7, 0.2, 1)";
@@ -57,6 +56,64 @@ export function takeLiveHeader(): LiveHeader | null {
 }
 
 const MORPH = 450;
+
+interface RevisionHeader {
+  title: (Box & { fontSize: number }) | null;
+  status: Box | null;
+  body: Box | null;
+}
+
+const returning = new WeakMap<Element, RevisionHeader>();
+
+/** Read the visible revision before returning hides it, including an interrupted arrival. */
+export function rememberRevisionHeader(control: Element | null): void {
+  const pane = control?.closest(".ub-document-pane");
+  if (pane == null) return;
+  returning.delete(pane);
+  const revision = pane.parentElement?.querySelector(".ub-revision-pane");
+  const header = revision?.querySelector(".ub-revision-header");
+  if (header == null) return;
+  const title = header.querySelector<HTMLElement>(".ub-revision-title");
+  const titleBox = box(title);
+  returning.set(pane, {
+    title: title === null || titleBox === null ? null : {
+      ...titleBox,
+      fontSize: Number.parseFloat(getComputedStyle(title).fontSize) * titleBox.height / (title.offsetHeight || 1),
+    },
+    status: box(header.querySelector(".ub-history-controls")),
+    body: box(header.nextElementSibling),
+  });
+}
+
+/** The live layout and focus return immediately; only their appearance moves from history. */
+export function morphToLive(control: Element): () => void {
+  const pane = control.closest(".ub-document-pane");
+  if (pane === null) return () => {};
+  const previous = returning.get(pane);
+  returning.delete(pane);
+  if (previous === undefined || reducedMotion()) return () => {};
+  const animations: (Animation | null)[] = [];
+  const run = (element: Element | null, keyframes: Keyframe[]): void => {
+    if (element !== null) animations.push(animate(element, keyframes, { duration: MORPH, easing: REVISION_EASE }));
+  };
+  const title = pane.querySelector(".ub-column > .ub-title");
+  if (title !== null && previous.title !== null) {
+    const target = title.getBoundingClientRect();
+    const size = Number.parseFloat(getComputedStyle(title).fontSize) || 1;
+    const scale = previous.title.fontSize / size;
+    run(title, [
+      { transformOrigin: "0 0", transform: `translate(${previous.title.left - target.left}px, ${previous.title.top - target.top}px) scale(${scale})` },
+      { transformOrigin: "0 0", transform: "none" },
+    ]);
+  }
+  const status = control.closest(".ub-status");
+  for (const [element, start] of [[status, previous.status], [status?.nextElementSibling ?? null, previous.body]] as const) {
+    if (element === null || start === null) continue;
+    run(element, [{ transform: `translateY(${start.top - element.getBoundingClientRect().top}px)`, opacity: 0.2 }, { transform: "none", opacity: 1 }]);
+  }
+  run(pane.querySelector(".ub-column > .ub-doc-meta"), [{ transform: "translateY(-6px)", opacity: 0 }, { transform: "none", opacity: 1 }]);
+  return () => { for (const animation of animations) animation?.cancel(); };
+}
 
 /** A header morph in progress; parts that arrive with the first revision join it. */
 export interface HeaderMorph {

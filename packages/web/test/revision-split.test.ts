@@ -151,4 +151,36 @@ describe("the side-by-side revision model", () => {
     expect(open.rows.map((row) => row.at)).toEqual([0, 1, 2, 3, 4]);
     expect(revisionSplitModel(before, after).rows).toHaveLength(5);
   });
+
+  it.each([1, 2] as const)("retains a level %i section boundary when its heading is folded away", (level) => {
+    const before = doc();
+    appendBlock(before, { type: "heading", level: 2, text: "> Details" });
+    const inside = appendBlock(before, { type: "paragraph", text: "Inside section" });
+    appendBlock(before, { type: "paragraph", text: "Context after first change" });
+    appendBlock(before, { type: "heading", level, text: "Outside section" });
+    appendBlock(before, { type: "heading", level: 3, text: "Deeper heading" });
+    appendBlock(before, { type: "paragraph", text: "Quiet block" });
+    appendBlock(before, { type: "paragraph", text: "Context before second change" });
+    const outside = appendBlock(before, { type: "paragraph", text: "Outside section change" });
+    appendBlock(before, { type: "paragraph", text: "Tail" });
+    const after = clone(before);
+    editBlock(after, inside, "Inside section", "Inside section changed");
+    editBlock(after, outside, "Outside section change", "Outside section change changed");
+    const left = document.body.appendChild(document.createElement("div"));
+    const right = document.body.appendChild(document.createElement("div"));
+    const split = createRevisionSplit({ beforeElement: left, afterElement: right, before, after,
+      folding: { collapse: true, expanded: new Set() } });
+    try {
+      for (const side of [left, right]) {
+        expect(side.querySelector(".ub-revision-fold-button")?.textContent).toBe("3 unchanged blocks · Outside section, Deeper heading");
+        expect(side.textContent).not.toContain("Quiet block");
+        expect(side.querySelector(".ub-revision-fold")?.hasAttribute("data-toggle-folded")).toBe(false);
+        const changed = [...side.querySelectorAll("p")].find((node) => node.textContent?.startsWith("Outside section change"));
+        expect(changed).toBeDefined();
+        expect(changed?.hasAttribute("data-toggle-folded")).toBe(false);
+        const hidden = [...side.querySelectorAll("p")].find((node) => node.textContent?.startsWith("Inside section"));
+        expect(hidden?.getAttribute("data-toggle-folded")).toBe("true");
+      }
+    } finally { split.destroy(); }
+  });
 });

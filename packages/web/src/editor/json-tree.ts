@@ -2,13 +2,15 @@
 import { Extension } from "@tiptap/core";
 import type { NodeViewRenderer, NodeViewRendererProps } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { AllSelection, Selection, TextSelection } from "@tiptap/pm/state";
+import { AllSelection, Plugin, PluginKey, Selection, TextSelection } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { NodeView } from "@tiptap/pm/view";
 import { formatJsonSource, parseJsonSource } from "@uberblick/schema";
 import type { JsonSourceResult } from "@uberblick/schema";
+import { ySyncPluginKey } from "y-prosemirror";
 import { endUndoCapture } from "./blocks.js";
 import {
-  blockCaption, carriesComment, chromeFilters, codeBlockChrome, copyButton, selectedBlock, sourceEditingPlugin,
+  blockCaption, carriesComment, chromeFilters, codeBlockChrome, copyButton, selectedBlock,
 } from "./source-chrome.js";
 import { jsonTreePanel, jsonTreeViewState, span } from "./json-tree-panel.js";
 import type { JsonTreeViewState } from "./json-tree-panel.js";
@@ -21,6 +23,7 @@ import type { JsonTreeViewerHandle } from "./json-tree-viewer.js";
 const RENDER_DELAY = 200;
 /** Say the JSON is invalid only once typing has paused this long. */
 const NOTE_DELAY = 1500;
+const editingKey = new PluginKey<boolean>("jsonTreeEditing");
 
 /** What a reader opened, per block, for the life of the tab. */
 const viewStates = new Map<string, JsonTreeViewState>();
@@ -103,7 +106,7 @@ function replaceSource(editor: NodeViewRendererProps["editor"], pos: number, nod
 function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): NodeView {
   let current: PMNode = node;
   let parsed: JsonSourceResult = parseJsonSource(current.textContent);
-  /** The last valid tree, kept while the text is invalid. */
+  /** The last valid tree, kept for the next typing pause. */
   let shown: { root: JsonTreeItem; duplicates: boolean } | null = null;
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
   let noteTimer: ReturnType<typeof setTimeout> | null = null;
@@ -111,7 +114,13 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
   const chrome = jsonTreeChrome(() => current.textContent, viewState(node.attrs.id));
   const { dom, tree, note } = chrome;
 
-  const editing = (): boolean => selectedBlock(editor.state, "code")?.pos === getPos();
+  const editing = (): boolean => editingKey.getState(editor.state) === true && selectedBlock(editor.state, "code")?.pos === getPos();
+
+  const syncDisplay = (): void => {
+    const stale = shown !== null && (noteTimer !== null || editing());
+    dom.dataset.json = parsed.ok ? "valid" : stale ? "stale" : "invalid";
+  };
+
   const render = (): void => {
     if (parsed.ok && shown?.root.node !== parsed.value) {
       const root = rootItem(parsed.value);
@@ -119,17 +128,14 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
       tree.show(root, firstView(root));
       viewer?.update(root, editor.isEditable);
     }
-    dom.dataset.json = parsed.ok ? "valid" : shown === null ? "invalid" : "stale";
+    syncDisplay();
     chrome.duplicates.hidden = shown?.duplicates !== true;
   };
 
-  const showNote = (): void => {
-    note.textContent = parsed.ok ? "" : `Not valid JSON: line ${parsed.line}, column ${parsed.column} (${parsed.message})`;
-  };
   const syncNote = (): void => {
-    // Typing is debounced into calm; an invalid block nobody is editing says so at once.
-    if (parsed.ok) note.textContent = "";
-    else if (!editing() && editor.isEditable) showNote();
+    // Local and remote text edits share the pause; initially invalid source has no pending edit.
+    note.textContent = parsed.ok || !editor.isEditable || noteTimer !== null ? ""
+      : `Not valid JSON: line ${parsed.line}, column ${parsed.column} (${parsed.message})`;
   };
   const reparse = (): void => {
     if (renderTimer !== null) clearTimeout(renderTimer);
@@ -182,11 +188,20 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
     if ((event instanceof PointerEvent && event.pointerType === "touch") || matchMedia("(pointer: coarse)").matches) openViewer();
   });
 
+  let wasEditing = false;
   const sync = (): void => {
+    const isEditing = editing();
+    if (wasEditing && !isEditing) {
+      if (renderTimer !== null) reparse();
+      // Leaving this view's source settles invalid text immediately.
+      if (!parsed.ok) { shown = null; tree.show(null); render(); }
+    }
+    wasEditing = isEditing;
     codeBlockChrome.sync(current, dom);
     chrome.edit.hidden = !editor.isEditable;
     chrome.done.hidden = !editor.isEditable;
     dom.dataset.annotated = String(carriesComment(current));
+    syncDisplay();
     syncNote();
   };
   editor.on("transaction", sync);
@@ -209,7 +224,8 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
         noteTimer = setTimeout(() => {
           noteTimer = null;
           if (renderTimer !== null) reparse();
-          showNote();
+          syncDisplay();
+          syncNote();
         }, NOTE_DELAY);
       }
       sync();
@@ -229,5 +245,31 @@ function jsonTreeNodeView({ node, editor, getPos }: NodeViewRendererProps): Node
 
 export const JsonTreeBlocks = Extension.create({
   name: "uberblickJsonTreeBlocks",
-  addProseMirrorPlugins() { return [sourceEditingPlugin("code", "ub-json-tree-editing")]; },
+  addProseMirrorPlugins() {
+    return [new Plugin<boolean>({
+      key: editingKey,
+      state: {
+        init: () => false,
+        apply(transaction, editing, oldState, state) {
+          const block = selectedBlock(state, "code");
+          if (block?.node.attrs.language !== "json-tree") return false;
+          // Initial content and remote edits can put the default caret in this
+          // block; only a local selection or edit opens its source.
+          const sync = transaction.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined;
+          const textChanged = transaction.docChanged && block.node.textContent !== selectedBlock(oldState, "code")?.node.textContent;
+          return editing || (sync?.isChangeOrigin !== true && (transaction.selectionSet || textChanged));
+        },
+      },
+      props: {
+        decorations(state) {
+          if (editingKey.getState(state) !== true) return null;
+          const block = selectedBlock(state, "code");
+          if (block === null) return null;
+          return DecorationSet.create(state.doc, [Decoration.node(block.pos, block.pos + block.node.nodeSize, {
+            class: "ub-json-tree-editing",
+          })]);
+        },
+      },
+    })];
+  },
 });

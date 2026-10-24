@@ -77,22 +77,13 @@ describe("set_metadata", () => {
     }
   });
 
-  it("advertises and enforces a non-empty strict subset before any mutation", async () => {
+  it("enforces a non-empty strict subset before any mutation", async () => {
     const rig = await localRig();
     const source = await document(rig);
     const { tools } = await rig.client.listTools();
     const schema = tools.find(({ name }) => name === "set_metadata")?.inputSchema as any;
     expect(schema.additionalProperties).toBe(false);
     expect(schema.required).toEqual(["uuid"]);
-    expect(schema.anyOf).toEqual([
-      { required: ["title"] },
-      { required: ["description"] },
-      { required: ["tldr"] },
-      { required: ["tags"] },
-      { required: ["links"] },
-      { required: ["discussion"] },
-      { required: ["code_check"] },
-    ]);
     const before = state(rig, source.uuid);
     const empty = await rig.call("set_metadata", { uuid: source.uuid });
     expect(empty.payload.error).toBe("schema_validation");

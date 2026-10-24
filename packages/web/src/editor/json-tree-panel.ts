@@ -156,7 +156,7 @@ export function jsonTreeMatches(root: JsonTreeItem, query: string): JsonTreeMatc
   return matches;
 }
 
-/** ARIA tree keys: arrows move and fold, Home and End jump, Enter and Space toggle. */
+/** ARIA tree keys: arrows move and fold; Enter and Space toggle folds or string wrapping. */
 function treeKeys(tree: HTMLElement, toggle: (path: string, subtree: boolean) => void, focused: (path: string) => void) {
   return (event: KeyboardEvent): void => {
     const elements = [...tree.querySelectorAll<HTMLElement>(".ub-json-row[role=treeitem]")];
@@ -192,7 +192,7 @@ function treeKeys(tree: HTMLElement, toggle: (path: string, subtree: boolean) =>
         break;
       case "Enter":
       case " ":
-        if (expanded !== null) toggle(path, event.altKey);
+        toggle(path, event.altKey);
         break;
       default: return;
     }
@@ -207,18 +207,24 @@ function followingCopyValue(tree: HTMLElement, itemAt: (path: string) => JsonTre
   copyValue.textContent = "Copy value";
   copyValue.setAttribute("aria-label", "Copy this value");
   copyValue.className = "ub-json-copy-value";
-  copyValue.tabIndex = -1;
+  let copying = false;
   const place = (row: HTMLElement | null): void => {
     if (row === null || row.dataset.path === undefined) { copyValue.remove(); return; }
     copyValue.dataset.path = row.dataset.path;
     if (copyValue.parentElement !== row) row.append(copyValue);
   };
   tree.addEventListener("mouseover", (event) => {
+    if (document.activeElement === copyValue) return;
     place(event.target instanceof Element ? event.target.closest<HTMLElement>(".ub-json-row") : null);
   });
   tree.addEventListener("mouseleave", () => { if (!tree.contains(document.activeElement)) copyValue.remove(); });
   tree.addEventListener("focusin", (event) => {
     if (event.target instanceof HTMLElement && event.target.classList.contains("ub-json-row")) place(event.target);
+  });
+  tree.addEventListener("focusout", (event) => {
+    // Selection-copy briefly focuses a textarea before restoring this button.
+    if (copying || (event.relatedTarget instanceof Node && tree.contains(event.relatedTarget))) return;
+    if (!tree.matches(":hover")) copyValue.remove();
   });
   copyValue.addEventListener("mousedown", (event) => event.preventDefault());
   copyValue.addEventListener("click", (event) => {
@@ -226,7 +232,10 @@ function followingCopyValue(tree: HTMLElement, itemAt: (path: string) => JsonTre
     event.stopPropagation();
     const item = itemAt(copyValue.dataset.path ?? "");
     if (item === null) return;
-    void writeToClipboard(valueText(item)).then((copied) => {
+    copying = true;
+    void writeToClipboard(valueText(item), undefined, tree).then((copied) => {
+      copying = false;
+      if (!tree.contains(document.activeElement) && !tree.matches(":hover")) copyValue.remove();
       toast[copied ? "success" : "error"](copied ? "Value copied" : "Couldn't copy the value.", { id: "clipboard" });
     });
   });
@@ -287,9 +296,14 @@ export function jsonTreePanel(state: JsonTreeViewState): JsonTreePanel {
   };
   const toggle = (path: string, subtree: boolean): void => {
     const item = itemAt(path);
-    if (item === null || !foldable(item)) return;
-    const next = !isOpen(path);
-    for (const each of subtree ? subtreePaths(item) : [path]) state.open.set(each, next);
+    if (item === null) return;
+    if (item.type === "value" && item.node.kind === "string") {
+      if (!state.wrapped.delete(path)) state.wrapped.add(path);
+    } else {
+      if (!foldable(item)) return;
+      const next = !isOpen(path);
+      for (const each of subtree ? subtreePaths(item) : [path]) state.open.set(each, next);
+    }
     active = path;
     render();
   };
@@ -302,8 +316,7 @@ export function jsonTreePanel(state: JsonTreeViewState): JsonTreePanel {
     const path = row.dataset.path ?? "";
     active = path;
     if (row.dataset.form === "leaf" && target?.closest(".ub-json-string") != null) {
-      if (!state.wrapped.delete(path)) state.wrapped.add(path);
-      render();
+      toggle(path, false);
     } else if (row.dataset.form === "open" || row.dataset.form === "closed") toggle(path, event.altKey);
   });
   tree.addEventListener("keydown", treeKeys(tree, toggle, (path) => { active = path; }));

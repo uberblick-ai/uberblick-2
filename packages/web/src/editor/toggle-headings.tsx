@@ -26,12 +26,16 @@ function sections(doc: PMNode): Section[] {
   const result: Section[] = [];
   const open: Section[] = [];
   doc.forEach((node, pos) => {
-    if (node.type.name !== "heading") return;
-    const level = Number(node.attrs.level);
+    const heading = node.type.name === "heading";
+    // A revision bar retains the section boundaries of the headings it replaced.
+    const foldedLevel = node.type.name === "revisionFold" ? node.attrs.headingLevel : null;
+    if (!heading && foldedLevel === null) return;
+    const level = Number(heading ? node.attrs.level : foldedLevel);
     while (open.length > 0 && Number(open[open.length - 1]?.node.attrs.level) >= level) {
       const previous = open.pop();
       if (previous !== undefined) previous.to = pos;
     }
+    if (!heading) return;
     const section = { node, pos, from: pos + node.nodeSize, to: doc.content.size };
     open.push(section);
     if (node.textContent.startsWith("> ")) result.push(section);

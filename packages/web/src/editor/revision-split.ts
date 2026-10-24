@@ -11,7 +11,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { AllSelection, Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { EditorView } from "@tiptap/pm/view";
-import { compareJsonSources, compareRevisions } from "@uberblick/schema";
+import { canonicalDocumentUuid, compareJsonSources, compareRevisions, isExternalHref } from "@uberblick/schema";
 import type { RevisionBlockComparison, RevisionComparison, TextSpan } from "@uberblick/schema";
 import type * as Y from "yjs";
 import { AblaufBlocks } from "./ablauf.js";
@@ -161,10 +161,11 @@ export function unchangedRuns(rows: readonly Pick<RevisionRow, "changed">[]): { 
   return runs.filter((run) => run.end > run.start);
 }
 
-function foldNode(run: number, count: number, headings: string): PMNode {
+function foldNode(run: number, count: number, headings: string, nodes: readonly PMNode[]): PMNode {
   const type = revisionSchema.nodes.revisionFold;
   if (type === undefined) throw new Error("Revision fold is missing");
-  return type.create({ run, count, headings });
+  const levels = nodes.filter((node) => node.type.name === "heading").map((node) => Number(node.attrs.level));
+  return type.create({ run, count, headings, headingLevel: levels.length === 0 ? null : Math.min(...levels) });
 }
 
 function sourceText(node: PMNode): string {
@@ -259,8 +260,8 @@ function foldRows(rows: readonly RevisionRow[], left: readonly PMNode[], right: 
     const headings = rows.slice(current.start, current.end + 1).flatMap((entry) => entry.heading === undefined ? [] : [entry.heading]).join(", ");
     shown.rows.push({ kind: "folded", at: current.start, changed: false, fold: { run: current.start, count },
       before: { labels: [], filler: false }, after: { labels: [], filler: false } });
-    shown.left.push(foldNode(current.start, count, headings));
-    shown.right.push(foldNode(current.start, count, headings));
+    shown.left.push(foldNode(current.start, count, headings, left.slice(current.start, current.end + 1)));
+    shown.right.push(foldNode(current.start, count, headings, right.slice(current.start, current.end + 1)));
     index = current.end;
     run += 1;
   }
@@ -269,15 +270,40 @@ function foldRows(rows: readonly RevisionRow[], left: readonly PMNode[], right: 
 
 const MARK: Record<RevisionRowKind, string> = { unchanged: "", changed: "~", added: "+", removed: "−", folded: "" };
 
-/** Row widgets: an end spacer the aligner sizes, and the captions above each block. */
-function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide): Extension {
+/** Side-scoped interaction and row widgets: captions and the spacers the aligner sizes. */
+function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docLinks: DocLinkContext | null): Extension {
   return Extension.create({
     name: "revisionSide",
     priority: 2000,
+    addKeyboardShortcuts() {
+      return {
+        "Mod-a": () => this.editor.commands.selectAll(),
+        Enter: () => {
+          const { selection } = this.editor.state;
+          if (!selection.empty) return false;
+          const marks = selection.$from.marks();
+          const docId = canonicalDocumentUuid(marks.find((mark) => mark.type.name === "docLink")?.attrs.docId);
+          if (docId !== null && docLinks !== null) {
+            if (docLinks.lookup(docId).state !== "deleted") docLinks.open(docId);
+            return true;
+          }
+          const href = marks.find((mark) => mark.type.name === "link")?.attrs.href;
+          if (!isExternalHref(href)) return false;
+          window.open(href, "_blank", "noopener,noreferrer");
+          return true;
+        },
+      };
+    },
     addProseMirrorPlugins() {
       return [new Plugin({
         filterTransaction: (transaction) => !transaction.docChanged,
         props: {
+          handleDOMEvents: {
+            // Leave focus navigation and fold-button activation to the browser.
+            keydown: (_view, event) => event.key === "Tab" ||
+              event.target instanceof Element && event.target.closest(".ub-revision-fold-button") !== null,
+            keypress: (_view, event) => event.target instanceof Element && event.target.closest(".ub-revision-fold-button") !== null,
+          },
           transformCopied: (slice) => new Slice(copiedContent(slice.content), slice.openStart, slice.openEnd),
           decorations(state) {
             const decorations: Decoration[] = [];
@@ -326,17 +352,23 @@ function sideEditor(element: Element, content: JSONContent, data: Y.Doc, rows: r
     element,
     extensions: [
       // Each side binds its charts to its own document; no predecessor override is needed.
-      ...revisionPalette(data), sidePresentation(rows, side),
+      ...revisionPalette(data), sidePresentation(rows, side, docLinks),
       CodeHighlighting, ListBlocks, CardBlocks, TerminalBlocks, ChartBlocks, WireframeBlocks, AblaufBlocks,
       DocLinks.configure({ context: docLinks }), ExternalLinks,
       GitHubLinks.configure({ settings: workspaceSettings }), InlineIcons, ToggleHeadings,
     ],
     content,
+    // Native editing hosts contain selection; Tiptap's read-only renderers and transaction guard prevent editing.
     editable: false,
+    enableCoreExtensions: { editable: false },
+    editorProps: {
+      editable: () => true,
+      attributes: { role: "textbox", "aria-label": side === "before" ? "Before this revision" : "This revision", "aria-readonly": "true", "aria-multiline": "true", inputmode: "none" },
+      handleDOMEvents: { beforeinput: (_view, event) => { event.preventDefault(); return true; } },
+    },
     enableContentCheck: true,
     injectCSS: false,
   });
-  editor.setOptions({ editorProps: { attributes: { "aria-label": side === "before" ? "Before this revision" : "This revision" } } });
   // A default text caret in the first chart would open its source on arrival.
   editor.view.dispatch(editor.state.tr.setSelection(new AllSelection(editor.state.doc)));
   return editor;
