@@ -1137,8 +1137,15 @@ test.describe("document history through ub open", () => {
         await setPointerSelection(paragraph, () => paragraph.click({ position: { x: 2, y: 10 } }));
         for (let step = 0; step < 6; step += 1) await page.keyboard.press("ArrowRight");
         await expect.poll(() => paragraph.locator("a").evaluate(element => {
-          const selection = document.getSelection();
-          return selection?.isCollapsed && element.contains(selection.anchorNode);
+          const root = element.closest(".ProseMirror") as HTMLElement & { editor: Editor };
+          return new Promise<boolean>(resolve => requestAnimationFrame(() => {
+            const selection = document.getSelection();
+            if (selection?.anchorNode == null || selection.focusNode === null || !selection.isCollapsed ||
+              !element.contains(selection.anchorNode) || !root.contains(document.activeElement)) { resolve(false); return; }
+            const view = root.editor.view;
+            resolve(view.state.selection.anchor === view.posAtDOM(selection.anchorNode, selection.anchorOffset) &&
+              view.state.selection.head === view.posAtDOM(selection.focusNode, selection.focusOffset));
+          }));
         })).toBe(true);
       };
       for (const open of ["click", "Enter"] as const) {
