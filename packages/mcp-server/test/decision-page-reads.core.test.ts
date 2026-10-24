@@ -57,12 +57,12 @@ describe("decision context on page reads", () => {
       [relatedOld.uuid, "related"], [relatedMiddle.uuid, "related"], [relatedNew.uuid, "related"],
       [linkedOld.uuid, "linked"], [linkedNew.uuid, "linked"],
     ]);
-    expect(read.decisions[0].inForce).toMatchObject({ uuid: relatedOld.uuid, answerPreview: "Old related answer" });
-    expect(read.decisions[1]).toMatchObject({ uuid: relatedCurrent.uuid, answerPreview: "Current related answer", inForce: { uuid: relatedCurrent.uuid } });
-    expect(read.decisions[2]).toMatchObject({ uuid: relatedPending.uuid, answerPreview: null, inForce: null, pending: [{ uuid: relatedPending.uuid, answerPreview: null }] });
+    expect(read.decisions[0]).toMatchObject({ uuid: relatedOld.uuid, answerPreview: "Old related answer", inForce: relatedOld.uuid });
+    expect(read.decisions[1]).toMatchObject({ uuid: relatedCurrent.uuid, answerPreview: "Current related answer", inForce: relatedCurrent.uuid });
+    expect(read.decisions[2]).toMatchObject({ uuid: relatedPending.uuid, answerPreview: null, inForce: null, pending: [relatedPending.uuid] });
+    expect(read.decisions[3]).toMatchObject({ uuid: linkedOld.uuid, inForce: linkedOld.uuid });
     expect(read.decisions[3]).not.toHaveProperty("answerPreview");
-    expect(read.decisions[3].inForce).not.toHaveProperty("answerPreview");
-    expect(read.decisions[4]).toMatchObject({ uuid: linkedPending.uuid, pending: [{ answerPreview: "Pending linked answer" }] });
+    expect(read.decisions[4]).toMatchObject({ uuid: linkedPending.uuid, answerPreview: "Pending linked answer", pending: [linkedPending.uuid] });
     for (const entry of [relatedOld, relatedMiddle, relatedCurrent, relatedNew, relatedPending, linkedOld, linkedRejected, linkedNew, linkedPending, archived, regularBacklink]) {
       expect(rig.instance.replicas.hydrated(entry.uuid)).toBe(false);
     }
@@ -79,11 +79,11 @@ describe("decision context on page reads", () => {
     expect(topics).toMatchObject([{ uuid: next.uuid, answerPreview: "Replacement answer.", inForce: null, pending: [next.uuid], conflicts: [conflictA.uuid, conflictB.uuid] }]);
     const records = (await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs;
     const readNext = await rig.ok("get_doc", { uuid: next.uuid });
-    for (const row of [...topics, ...records, ...readNext.resolution.pending, ...readNext.resolution.conflicts]) expect(row.title).toBe("Actual topic");
+    for (const row of [...topics, ...records]) expect(row.title).toBe("Actual topic");
     expect(records.find((entry: any) => entry.uuid === first.uuid)).toMatchObject({ answerPreview: "First answer." });
     expect(records.find((entry: any) => entry.uuid === conflictB.uuid)).toMatchObject({ answerPreview: null });
     expect(readNext.predecessors).toMatchObject([{ uuid: first.uuid, answerPreview: "First answer." }]);
-    expect(readNext.resolution).toMatchObject({ answerPreview: "Replacement answer.", pending: [{ uuid: next.uuid, answerPreview: "Replacement answer." }], conflicts: [{ uuid: conflictA.uuid, answerPreview: "Conflict answer A" }, { uuid: conflictB.uuid, answerPreview: null }] });
+    expect(readNext.resolution).toEqual({ inForce: null, pending: [next.uuid], conflicts: [conflictA.uuid, conflictB.uuid], archived: false });
     const readFirst = await rig.ok("get_doc", { uuid: first.uuid });
     expect(readFirst.decisions).toEqual([]);
     expect(readFirst.successors.find((entry: any) => entry.uuid === next.uuid)).toMatchObject({ answerPreview: "Replacement answer." });
@@ -120,18 +120,13 @@ describe("decision context on page reads", () => {
     const firstRead = await rig.ok("get_doc", { uuid: first.uuid });
     const nextRead = await rig.ok("get_doc", { uuid: next.uuid });
     expect(pageRead.decisions).toHaveLength(2);
-    expect(pageRead.decisions.find((topic: any) => topic.topic === inForce.uuid).inForce.uuid).toBe(inForce.uuid);
+    expect(pageRead.decisions.find((topic: any) => topic.topic === inForce.uuid).inForce).toBe(inForce.uuid);
     expect(nextRead.predecessors).toHaveLength(1);
     expect(firstRead.successors).toHaveLength(3);
     expect(nextRead.resolution.pending).toHaveLength(1);
     expect(nextRead.resolution.conflicts).toHaveLength(2);
 
-    const entries = [
-      ...pageRead.decisions.flatMap((topic: any) => [topic, ...(topic.inForce === null ? [] : [topic.inForce]), ...topic.pending, ...topic.conflicts]),
-      ...firstRead.successors, ...nextRead.predecessors,
-      nextRead.resolution, ...nextRead.resolution.pending, ...nextRead.resolution.conflicts,
-    ];
-    for (const entry of entries) {
+    for (const entry of [...firstRead.successors, ...nextRead.predecessors]) {
       if (iso === undefined) {
         expect(entry).not.toHaveProperty("createdAt");
         expect(entry).not.toHaveProperty("updatedAt");
@@ -139,9 +134,10 @@ describe("decision context on page reads", () => {
         expect(entry).toMatchObject({ createdAt: iso, updatedAt: iso });
       }
     }
+    // Topic rows, as in list_docs, carry updatedAt without createdAt.
     for (const include_superseded of [false, true]) {
       const listed = await rig.ok("list_docs", { kind: "decision", include_superseded });
-      for (const entry of listed.docs) {
+      for (const entry of [...listed.docs, ...pageRead.decisions]) {
         if (iso === undefined) expect(entry).not.toHaveProperty("updatedAt");
         else expect(entry.updatedAt).toBe(iso);
       }

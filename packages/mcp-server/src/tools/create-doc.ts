@@ -1,4 +1,4 @@
-import { DECISION_STATUSES, InvalidDocumentLifecycleError, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionAnswerFailure, decisionAnswerShapeFailure, decisionDirectoryFields, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setDiscussion, setKind, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
+import { DECISION_STATUSES, InvalidDocumentLifecycleError, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionAnswerFailure, decisionAnswerShapeFailure, decisionDirectoryFields, getBlocks, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setDiscussion, setKind, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
 import type { DocumentKind, DocumentStatus } from "@uberblick/schema";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -14,15 +14,9 @@ import { DOCUMENT_WRITE, operation } from "./operation.js";
 import type { ToolContext } from "./context.js";
 import { discussionTarget } from "./discussion.js";
 
-const DECISION_GUIDANCE =
-  "A decision topic has one title, stored on its first record, naming the question rather than the answer. " +
-  "A rename through any record renames the topic. Successors take the topic's title; omit title or supply that same title. " +
-  "For decision answers, see lifecycle's Decision answers and topics section. " +
-  "Answer blocks are distinct from recorded answer: {who, when, where}.";
-
 const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
   {
-    title: `A decision document (\`kind: decision\`). ${DECISION_GUIDANCE}`,
+    title: "A decision document (`kind: decision`). Decisions help covers topics, titles and answers.",
     when: { field: "kind", is: "decision" },
   },
   {
@@ -84,13 +78,19 @@ const RECOVERY: Record<string, string> & { other: string } = {
 // Refuse unknown keys at the root and throughout nested placement objects.
 export const inputSchema = strictInput(
   {
-    title: titleArg.optional().describe(`Display title; required except on a successor. Identity is the document's UUID, never this. ${DECISION_GUIDANCE}`),
+    title: titleArg.optional().describe(
+      "Display title; identity is the document's UUID, never this. Required except on a decision successor. " +
+        "A decision topic has one title, stored on its first record and naming the question rather than the " +
+        "answer; a successor omits title or repeats that exact title.",
+    ),
     description: descriptionArg,
     tldr: tldrArg.optional(),
     answer: decisionAnswerArg.optional().describe(
       "Record a person's answer, not the agent's own approval; MCP does not verify its provenance. Accepted only with `kind: decision`.",
     ),
-    tags: z.array(z.string().min(1)).optional(),
+    tags: z.array(z.string().min(1)).optional().describe(
+      "Existing catalog tag ids or names, case ignored. An unknown or deleted tag refuses before anything is created.",
+    ),
     kind: documentKindArg.optional(),
     status: documentStatusArg.optional().describe("The initial lifecycle state. Accepted only with `kind: decision`."),
     related: z.union([uuidArg, z.array(uuidArg).min(1)])
@@ -164,7 +164,7 @@ export const createDocOperation = operation(DOCUMENT_WRITE, inputSchema, (contex
       blocks,
       sidebar,
     }, _request) => {
-  const { replicas, requireWritableDoc, tagCatalog, recordAnswer, documentTags, decisionAuthorityJson, blocksJson, durabilityAcross, tldrReview } = context;
+  const { replicas, requireWritableDoc, tagCatalog, recordAnswer, documentTags, decisionAuthorityJson, durabilityAcross, tldrReview } = context;
 
   const lifecycle =
     kind === undefined ? null : { kind, status: status ?? DECISION_STATUSES[0] };
@@ -353,14 +353,15 @@ export const createDocOperation = operation(DOCUMENT_WRITE, inputSchema, (contex
     description,
     tags: documentTags(replica),
     ...(lifecycle === null ? {} : lifecycle),
-    ...(relatedSet === undefined ? {} : { governs: relatedSet[0], related: relatedSet }),
+    ...(relatedSet === undefined ? {} : { related: relatedSet }),
     ...(lifecycle?.kind === "decision" ? { topic: getMeta(replica.doc, replica.id).topic, discussion: getMeta(replica.doc, replica.id).discussion } : {}),
     ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
     ...(tldr === undefined ? {} : { tldr: getMeta(replica.doc, replica.id).tldr }),
     ...decisionAuthorityJson(replica),
-    blocks: blocksJson(replica),
+    blocks: getBlocks(replica.doc).map(({ id, rev }) => ({ id, rev })),
     ...(placement === null ? {} : { sidebar: placement }),
     ...durabilityAcross(replica, completed),
-    ...(inputs.length === 0 || lifecycle?.status === "decided" ? {} : tldrReview(replica)),
+    // A TL;DR written with the content needs no review prompt.
+    ...(inputs.length === 0 || tldr !== undefined || lifecycle?.status === "decided" ? {} : tldrReview(replica)),
   };
 });

@@ -65,8 +65,10 @@ describe("building a sidebar through the tools", () => {
       uuid: overview,
       group: "Start here",
     });
-    expect(shape(first)).toEqual([["Start here", ["Overview"]]]);
-    expect(first.applied).toBe(true);
+    // The answer names the pin's group; get_sidebar is the full read.
+    expect(first).toEqual({ uuid: overview, group: { id: expect.any(String), name: "Start here" }, moved: false,
+      applied: true, synced: false, hub: expect.any(Object) });
+    expect(shape(await rig.ok("get_sidebar"))).toEqual([["Start here", ["Overview"]]]);
     // Offline by construction in this suite: applied is not synced.
     expect(first.synced).toBe(false);
 
@@ -85,7 +87,7 @@ describe("building a sidebar through the tools", () => {
       index: 0,
     });
     expect(moved.moved).toBe(true);
-    expect(shape(moved)).toEqual([
+    expect(shape(await rig.ok("get_sidebar"))).toEqual([
       ["Start here", ["Install and run", "Overview"]],
       ["Reference", ["Architecture"]],
     ]);
@@ -144,11 +146,17 @@ describe("building a sidebar through the tools", () => {
     await rig.ok("pin_doc", { uuid: install, group: "Start here" });
 
     const unpinned = await rig.ok("unpin_doc", { uuid: overview });
-    expect(unpinned.unpinned).toBe(true);
-    expect(unpinned.applied).toBe(true);
-    expect(shape(unpinned)).toEqual([["Start here", ["Install and run"]]]);
+    expect(unpinned).toEqual({ uuid: overview, unpinned: true, applied: true, synced: false, hub: expect.any(Object) });
+    expect(shape(await rig.ok("get_sidebar"))).toEqual([["Start here", ["Install and run"]]]);
     // Unpinning what is not pinned is not an error; it just changes nothing.
     expect((await rig.ok("unpin_doc", { uuid: overview })).unpinned).toBe(false);
+
+    // The last unpin leaves its group in place, and the answer names the delete.
+    const emptied = await rig.ok("unpin_doc", { uuid: install });
+    const [group] = (await rig.ok("get_sidebar")).groups;
+    expect(group).toMatchObject({ name: "Start here", docs: [] });
+    expect(emptied.groupHint).toBe(`Sidebar group "Start here" is now empty and stays in the sidebar; to remove it, ` +
+      `call sidebar_group with action "delete" and group "${group.id}".`);
 
     const deleted = await rig.ok("sidebar_group", {
       action: "delete",
@@ -222,7 +230,8 @@ describe("resolving what the sidebar pins", () => {
     // …but one that got in anyway can always be removed, which is why it is
     // shown rather than dropped.
     const cleaned = await rig.ok("unpin_doc", { uuid: orphan });
-    expect(cleaned.groups[0].docs.map((doc: any) => doc.uuid)).toEqual([
+    expect(cleaned).not.toHaveProperty("groupHint");
+    expect((await rig.ok("get_sidebar")).groups[0].docs.map((doc: any) => doc.uuid)).toEqual([
       archived,
       remote,
     ]);

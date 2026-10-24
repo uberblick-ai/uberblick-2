@@ -18,7 +18,7 @@ export type ModeSelector =
 
 /** One valid shape of a tool that multiplexes several actions over one name. */
 export interface ToolMode {
-  /** How the shape names itself in a rejection and in its advertised branch. */
+  /** How the shape names itself in a rejection. */
   title: string;
   /** Which calls are this shape. */
   when: ModeSelector;

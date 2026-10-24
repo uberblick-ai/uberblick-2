@@ -255,3 +255,13 @@ export function toolNamed(name: string): Tool {
   if (tool === undefined) throw new Error(`Unknown tool: ${name}`);
   return tool;
 }
+
+/** Block writes answer with ids and revs only; read the stored blocks back in written order. */
+export async function readBlocks(
+  rig: { ok(name: string, args?: Record<string, unknown>): Promise<any> },
+  uuid: string,
+  written: readonly { id: string }[],
+): Promise<any[]> {
+  const { blocks } = await rig.ok("get_doc", { uuid });
+  return written.map(({ id }) => blocks.find((block: { id: string }) => block.id === id));
+}

@@ -1,4 +1,5 @@
 import { Document } from "@hocuspocus/server";
+import { createHash } from "node:crypto";
 import {
   compareRevisions,
   deleteDirectoryEntry,
@@ -11,6 +12,7 @@ import {
   sidebarRoom,
   tombstoneDirectoryEntry,
   tombstoneDecisionRecord,
+  snapshotRevision,
 } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
@@ -55,6 +57,10 @@ function revision(db: HubDatabase, id: string, room = ROOM): Y.Doc {
   return result;
 }
 
+function checksum(doc: Y.Doc): string {
+  return createHash("sha256").update(snapshotRevision(doc).checksum).digest("hex");
+}
+
 afterEach(() => {
   for (const doc of documents.splice(0)) doc.destroy();
   for (const db of databases.splice(0)) db.close();
@@ -63,6 +69,99 @@ afterEach(() => {
 });
 
 describe("automatic hub revisions", () => {
+  it("names and freezes another surface's open stretch, independently of naming attribution", async () => {
+    const db = database();
+    const doc = await load(db);
+    title(doc, "Reviewed", claude);
+    const id = db.revisions.list(ROOM)[0]!.id;
+    const content = db.revisions.get(ROOM, id);
+    clock = MINUTE;
+    expect(db.revisions.name(ROOM, doc, checksum(doc), "Reviewed after auth rewrite", browser)).toEqual({ ok: true, id });
+    expect(db.revisions.list(ROOM)[0]).toEqual({ id, author: claude, startedAt: 0, endedAt: MINUTE });
+    expect(db.revisions.names(ROOM).get(id)).toEqual({ text: "Reviewed after auth rewrite", namer: browser, namedAt: MINUTE });
+    clock = 2 * MINUTE;
+    title(doc, "Later", claude);
+    expect(db.revisions.list(ROOM)).toHaveLength(2);
+    expect(db.revisions.list(ROOM)[0]!.id).not.toBe(id);
+    expect(db.revisions.get(ROOM, id)).toEqual(content);
+  });
+
+  it("materializes history predating revisions once and preserves reverted stretches when named", async () => {
+    const db = database();
+    const existing = new Y.Doc();
+    documents.push(existing);
+    title(existing, "Before recording");
+    db.connection.prepare("INSERT INTO documents (name, data) VALUES (?, ?)").run(ROOM, Y.encodeStateAsUpdate(existing));
+    const doc = await load(db);
+    expect(db.revisions.name(ROOM, doc, checksum(doc), "Original", browser).ok).toBe(true);
+    const original = db.revisions.list(ROOM)[0]!;
+    expect(original).toMatchObject({ author: null, startedAt: null, endedAt: 0 });
+    title(doc, "Temporary", claude);
+    title(doc, "Before recording", claude);
+    expect(db.revisions.list(ROOM)).toHaveLength(1);
+    const reverted = db.connection.prepare("SELECT id FROM document_revision_heads WHERE room = ?").get(ROOM)!.id;
+    clock = 1;
+    expect(db.revisions.name(ROOM, doc, checksum(doc), "Reviewed revert", browser)).toEqual({ ok: true, id: reverted });
+    expect(db.revisions.list(ROOM)).toEqual([
+      { id: reverted, author: claude, startedAt: 0, endedAt: 1 }, original,
+    ]);
+    expect(db.revisions.removeName(ROOM, reverted as string, browser.principalId).ok).toBe(true);
+    title(doc, "Next", claude);
+    expect(db.revisions.list(ROOM)).toHaveLength(3);
+    expect(db.revisions.get(ROOM, reverted as string)).not.toBeNull();
+  });
+
+  it("refuses stale state and duplicate names, and only lets the namer's account manage text", async () => {
+    const db = database();
+    const doc = await load(db);
+    title(doc, "Seen");
+    const seen = checksum(doc);
+    title(doc, "Unseen");
+    expect(db.revisions.name(ROOM, doc, seen, "Stale", browser)).toEqual({ ok: false, error: "stale-state" });
+    expect(db.revisions.names(ROOM).size).toBe(0);
+    expect(db.revisions.list(ROOM)[0]!.endedAt).toBeNull();
+    clock = 50;
+    const named = db.revisions.name(ROOM, doc, checksum(doc), "Accepted", browser);
+    if (!named.ok) throw new Error("name refused");
+    const original = db.revisions.list(ROOM)[0];
+    const bytes = db.revisions.get(ROOM, named.id);
+    expect(db.revisions.name(ROOM, doc, checksum(doc), "Duplicate", claude)).toMatchObject({ ok: false, error: "already-named",
+      name: { text: "Accepted", namer: browser, namedAt: 50 } });
+    for (const action of [() => db.revisions.rename(ROOM, named.id, "Other", "someone-else"),
+      () => db.revisions.removeName(ROOM, named.id, "someone-else")]) {
+      expect(action()).toEqual({ ok: false, error: "not-namer" });
+    }
+    clock = 100;
+    expect(db.revisions.rename(ROOM, named.id, "Renamed", claude.principalId)).toEqual({ ok: true, id: named.id });
+    expect(db.revisions.names(ROOM).get(named.id)).toEqual({ text: "Renamed", namer: browser, namedAt: 50 });
+    expect(db.revisions.removeName(ROOM, named.id, claude.principalId)).toEqual({ ok: true, id: named.id });
+    expect(db.revisions.names(ROOM).size).toBe(0);
+    expect(db.revisions.list(ROOM)[0]).toEqual(original);
+    expect(db.revisions.get(ROOM, named.id)).toEqual(bytes);
+    clock = 150;
+    title(doc, "After removal");
+    expect(db.revisions.list(ROOM)).toHaveLength(2);
+  });
+
+  it("enforces one-line Unicode names and rolls back the stretch boundary if name storage fails", async () => {
+    const failures: unknown[] = [];
+    const db = database(true, error => failures.push(error));
+    const doc = await load(db);
+    title(doc, "One");
+    for (const name of ["", "x".repeat(101), "line\nline", "line\rline", "line\u2028line", "line\u2029line"]) {
+      expect(db.revisions.name(ROOM, doc, checksum(doc), name, browser)).toEqual({ ok: false, error: "invalid-name" });
+    }
+    db.connection.exec(`CREATE TRIGGER fail_revision_name BEFORE INSERT ON document_revision_names
+      BEGIN SELECT RAISE(ABORT, 'name failed'); END`);
+    expect(() => db.revisions.name(ROOM, doc, checksum(doc), "A name", browser)).toThrow("name failed");
+    expect(failures).toHaveLength(1);
+    expect(db.revisions.names(ROOM).size).toBe(0);
+    expect(db.revisions.list(ROOM)[0]!.endedAt).toBeNull();
+    expect(db.connection.prepare("SELECT id FROM document_revisions WHERE room = ?").all(ROOM)).toEqual([]);
+    db.connection.exec("DROP TRIGGER fail_revision_name");
+    expect(db.revisions.name(ROOM, doc, checksum(doc), "🦊".repeat(100), browser).ok).toBe(true);
+  });
+
   it("records exactly the three example stretches and freezes the preceding author's bytes", async () => {
     const db = database();
     const doc = await load(db);
@@ -180,9 +279,12 @@ describe("automatic hub revisions", () => {
     directory.getMap("docs").set(TOPIC, { title: "Topic", tags: [], kind: "decision", topic: TOPIC, status: "open" });
     directory.getMap("docs").set(UUID, { title: "Record", tags: [], kind: "decision", topic: TOPIC, status: "rejected" });
     title(doc, "One");
+    expect(db.revisions.name(ROOM, doc, checksum(doc), "Before archive", browser).ok).toBe(true);
+    const names = db.revisions.names(ROOM);
     clock = 10;
     tombstoneDirectoryEntry(directory, TOPIC);
-    expect(db.revisions.list(ROOM)[0]!.endedAt).toBe(10);
+    expect(db.revisions.list(ROOM)[0]!.endedAt).toBe(0);
+    expect(db.revisions.names(ROOM)).toEqual(names);
     clock = 20;
     restoreDirectoryEntry(directory, TOPIC);
     title(doc, "Two");
@@ -202,6 +304,7 @@ describe("automatic hub revisions", () => {
     const doc = await load(db);
     const directory = await load(db, directoryRoom(WORKSPACE));
     title(doc, "Stored");
+    expect(db.revisions.name(ROOM, doc, checksum(doc), "Before deletion", browser).ok).toBe(true);
     db.connection.prepare("INSERT INTO documents (name, data) VALUES (?, ?)").run(ROOM, Y.encodeStateAsUpdate(doc));
     tombstoneDirectoryEntry(directory, UUID);
     db.connection.exec(`CREATE TRIGGER fail_revision_purge BEFORE DELETE ON document_revisions
@@ -209,10 +312,12 @@ describe("automatic hub revisions", () => {
     expect(() => deleteDirectoryEntry(directory, UUID)).toThrow("purge failed");
     expect(db.connection.prepare("SELECT name FROM documents WHERE name = ?").get(ROOM)).toBeDefined();
     expect(db.revisions.list(ROOM)).toHaveLength(1);
+    expect(db.revisions.names(ROOM).size).toBe(1);
     expect(failures).toHaveLength(1);
     db.connection.exec("DROP TRIGGER fail_revision_purge");
     directory.getMap("docs").set(TOPIC, { title: "Retry", tags: [] });
     expect(db.revisions.list(ROOM)).toEqual([]);
+    expect(db.revisions.names(ROOM).size).toBe(0);
     expect(db.connection.prepare("SELECT name FROM documents WHERE name = ?").get(ROOM)).toBeUndefined();
     title(doc, "Must not return");
     await db.onStoreDocument({ document: doc, documentName: ROOM });
@@ -299,10 +404,12 @@ describe("automatic hub revisions", () => {
     databases.push(db);
     const doc = await load(db);
     title(doc, "First");
+    expect(db.revisions.name(ROOM, doc, checksum(doc), "Backed up", browser).ok).toBe(true);
     clock = 100;
     title(doc, "Second", claude);
     await db.onStoreDocument({ document: doc, documentName: ROOM });
     const expected = db.revisions.list(ROOM);
+    const names = db.revisions.names(ROOM);
     const bytes = expected.map(row => db.revisions.get(ROOM, row.id));
     const loop = setInterval(() => {}, 10);
     try {
@@ -316,6 +423,7 @@ describe("automatic hub revisions", () => {
       restored.open();
       databases.push(restored);
       expect(restored.revisions.list(ROOM)).toEqual(expected);
+      expect(restored.revisions.names(ROOM)).toEqual(names);
       expect(expected.map(row => restored.revisions.get(ROOM, row.id))).toEqual(bytes);
       expect(getMeta(await load(restored)).title).toBe("Second");
     } finally {

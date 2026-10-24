@@ -41,8 +41,9 @@ export const editBlockOperation = documentOperation({ content: true, contentDura
     ...(table_mapping === undefined ? {} : { tableMapping: table_mapping }),
   }));
   replicas.publishCursor(replica, block_id, new_text.length);
+  const edited = getBlock(replica.doc, block_id);
   return {
     uuid,
-    block: getBlock(replica.doc, block_id),
+    block: edited === null ? null : { id: edited.id, rev: edited.rev },
   };
 });

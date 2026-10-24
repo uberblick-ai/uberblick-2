@@ -106,9 +106,9 @@ function start(args: string[], box: Fixture): HubProcess {
 
 function checkoutArgs(): string[] { return hubCheckoutInvocation().args; }
 
-async function authenticate(hub: HubProcess, secret: string): Promise<void> {
+async function authenticate(hub: HubProcess, secret: string, room = testRoom()): Promise<void> {
   const port = await hub.listening;
-  const client = createClient({ port, room: testRoom(), token: await token("read-write", { secret }) });
+  const client = createClient({ port, room, token: await token("read-write", { secret }) });
   let closing: Promise<void> | undefined;
   const close = () => closing ??= closeHubSocket(client.provider.configuration.websocketProvider.webSocket, () => client.destroy());
   clients.push(close);
@@ -212,7 +212,7 @@ it("bundles the same main entry without the checkout credential preload", async 
   writeFileSync(join(box.root, "project", ".uberblick.json"), "{ invalid project JSON");
   box.env.HUB_AUTH_TOKEN = OVERRIDE_SECRET;
   const released = start([bundle], box);
-  await authenticate(released, OVERRIDE_SECRET);
-  expect(released.stderr()).not.toMatch(/invalid JSON|credentials\.json|\.uberblick\.json|0600/);
+  await authenticate(released, OVERRIDE_SECRET, `${WORKSPACE}/0c3c2727-a833-450c-b71c-ae8180aa0600`);
+  expect(released.stderr()).not.toMatch(/invalid JSON|credentials\.json|\.uberblick\.json|hub\.config\.warning/);
   expect(await released.stop()).toBe(0);
 });

@@ -6,6 +6,7 @@ import { clampToken, importRootSecret, verifyToken } from "@uberblick/schema/tok
 import * as Y from "yjs";
 import { readAccessAction, requestAccess, type AccessBinding } from "./open-access.js";
 import { requestAccount, requestDeviceLogin } from "./open-account.js";
+import { serveRevisionMutation } from "./open-revisions.js";
 import { serveBundleRequest } from "./open-bundle.js";
 import { respond } from "./open-response.js";
 import { hasSession, serveSessionRequest, type BrowserAccess } from "./open-session.js";
@@ -127,7 +128,7 @@ async function serveRevisions(
   }
   try {
     if (revision === null) {
-      reply(200, { revisions: await listDocumentRevisions(engine.replicas, uuid) });
+      reply(200, { revisions: await listDocumentRevisions(engine.replicas, uuid, { includeNames: true, includeTitles: true }) });
     } else {
       const snapshot = await getDocumentRevision(engine.replicas, uuid, revision);
       try {
@@ -217,6 +218,15 @@ async function serveApiRequest(context: ApiRequestContext): Promise<void> {
       request.off("aborted", abort);
       response.off("close", abort);
     }
+    return;
+  }
+
+  if (target.pathname === REVISIONS_PATH && request.method === "POST") {
+    if (request.headers.origin !== expectedOrigin) {
+      apiResponse(request, response, 403, { status: "origin-refused" });
+      return;
+    }
+    await serveRevisionMutation(engine, request, reply);
     return;
   }
 

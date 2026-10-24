@@ -146,6 +146,14 @@ const pairs: Pair[] = [
   ...["slate", "rose", "green", "blue"].flatMap((hue) =>
     ["--muted-foreground", "--foreground", "--prose-text"].map((ink) =>
       text("framed caption, actions and content", ink, `--block-${hue}-tint`))),
+  // Revision comparison: prose and captions on row tints and word highlights,
+  // and the gutter marks on the page.
+  ...["--revision-added-row", "--revision-removed-row", "--revision-added-background", "--revision-removed-background"]
+    .flatMap((ground) => ["--foreground", "--prose-text"].map((ink) => text("revision comparison text", ink, ground))),
+  ...["--revision-added-row", "--revision-removed-row"].map((ground) => text("revision caption ink", "--muted-foreground", ground)),
+  text("revision word highlight on its row", "--foreground", "--revision-added-background", "--revision-added-row"),
+  ...["--revision-added-ink", "--revision-removed-ink"].flatMap((ink) =>
+    ["--background", "--page-ground[0]", "--page-ground[1]"].map((ground) => text("revision gutter mark", ink, ground))),
   ...["comment", "keyword", "name", "string", "number"].map((syntax) =>
     text("syntax on code tint", `--syntax-${syntax}`, "--block-slate-tint")),
 ];
@@ -204,6 +212,20 @@ it.each(["light", "dark"] as const)("source-token contrast — %s", (scheme) => 
     if (!(focused >= resting)) failures.push(`focused orphaned chip step: ${focused} < resting ${resting}`);
   } catch (error) {
     failures.push(`orphaned chip relation: ${String(error)}`);
+  }
+  try {
+    // Ruler marks stay visible on the page, and in dark mode quieter than the prose they map.
+    for (const ground of ["--page-ground[0]", "--page-ground[1]"]) {
+      const backing = resolve(tokens, ground, scheme);
+      const prose = contrast(resolve(tokens, "--prose-text", scheme), backing);
+      for (const mark of ["--revision-ruler-added", "--revision-ruler-removed", "--revision-ruler-changed"]) {
+        const value = contrast(resolve(tokens, mark, scheme), backing);
+        if (!(value >= 2)) failures.push(`ruler mark ${mark} on ${ground}: ${value} < 2`);
+        if (scheme === "dark" && !(value < prose / 2)) failures.push(`dark ruler mark ${mark} on ${ground}: ${value} outshines prose ${prose}`);
+      }
+    }
+  } catch (error) {
+    failures.push(`ruler marks: ${String(error)}`);
   }
   expect(failures, failures.join("\n")).toEqual([]);
 });

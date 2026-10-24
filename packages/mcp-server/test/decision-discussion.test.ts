@@ -98,7 +98,7 @@ describe("explicit decision discussion references", () => {
     const recorded = await decision(rig, { status: "decided", supersedes: stance.uuid, discussion: otherRfc.uuid, answer });
     expect(stance).toMatchObject({ discussion: rfc.uuid, agentStance: true });
     expect(recorded).toMatchObject({ discussion: otherRfc.uuid, decidedBy: answer.who, approvalChanged: false });
-    for (const record of [next, without]) expect(record).toMatchObject({ topic: first.uuid, governs: related.uuid });
+    for (const record of [next, without]) expect(record).toMatchObject({ topic: first.uuid, related: [related.uuid] });
     expect(without.discussion).toBeNull();
     for (const record of [first, next, without, stance, recorded]) {
       expect((await rig.ok("get_doc", { uuid: record.uuid })).discussion).toBe(record.discussion);
@@ -246,15 +246,15 @@ describe("explicit decision discussion references", () => {
     expect(records.find((entry: any) => entry.uuid === unknown.uuid)).not.toHaveProperty("discussion");
     const readNext = await rig.ok("get_doc", { uuid: next.uuid });
     expect(readNext.predecessors).toMatchObject([{ uuid: first.uuid, discussion: firstRfc.uuid }]);
-    expect(references(readNext.resolution.pending)).toEqual(stubReferences(rig, topic.pending));
-    expect(references(readNext.resolution.conflicts)).toEqual(expectedConflicts);
+    expect(stubReferences(rig, readNext.resolution.pending)).toEqual(stubReferences(rig, topic.pending));
+    expect(stubReferences(rig, readNext.resolution.conflicts)).toEqual(expectedConflicts);
     const readFirst = await rig.ok("get_doc", { uuid: first.uuid });
     expect(references(readFirst.successors)).toEqual([[next.uuid, nextRfc.uuid], [noDiscussion.uuid, null], ...expectedConflicts].sort());
     const pageTopic = (await rig.ok("get_doc", { uuid: owner.uuid })).decisions[0];
     expect(pageTopic).toMatchObject({ topic: first.uuid, relation: "related" });
     expect(pageTopic).toHaveProperty("discussion");
-    expect(references(pageTopic.pending)).toEqual(stubReferences(rig, topic.pending));
-    expect(references(pageTopic.conflicts)).toEqual(expectedConflicts);
+    expect(stubReferences(rig, pageTopic.pending)).toEqual(stubReferences(rig, topic.pending));
+    expect(stubReferences(rig, pageTopic.conflicts)).toEqual(expectedConflicts);
     for (const entry of [conflict, absent, unknown]) expect(rig.instance.replicas.hydrated(entry.uuid)).toBe(false);
   });
 
@@ -338,7 +338,7 @@ describe("explicit decision discussion references", () => {
       proposals.push(await decision(rig, { supersedes: first.uuid, discussion: proposalRfc.uuid }));
       expect(proposals.slice(0, -1).map(record => Y.encodeStateAsUpdate(rig.instance.replicas.replica(record.uuid).doc))).toEqual(before);
     }
-    expect((await rig.ok("get_doc", { uuid: first.uuid })).resolution).toMatchObject({ inForce: { uuid: first.uuid }, pending: expect.any(Array) });
+    expect((await rig.ok("get_doc", { uuid: first.uuid })).resolution).toMatchObject({ inForce: first.uuid, pending: expect.any(Array) });
     await refuse(rig, "set_status", { uuid: proposals[0].uuid, status: "decided" }, "decision_answer_required", [first.uuid, ...proposals.map(record => record.uuid)]);
     const transitions = [
       { status: "decided", answer },
@@ -354,7 +354,8 @@ describe("explicit decision discussion references", () => {
     }
     const read = await rig.ok("get_doc", { uuid: first.uuid });
     expect(read).toMatchObject({ discussion: earlierRfc.uuid, approvalChanged: false });
-    expect(read.resolution).toMatchObject({ inForce: { uuid: proposals[0].uuid, discussion: proposalRfc.uuid }, pending: [{ uuid: proposals[3].uuid, discussion: proposalRfc.uuid }] });
+    expect(read.resolution).toMatchObject({ inForce: proposals[0].uuid, pending: [proposals[3].uuid] });
+    expect(stubReferences(rig, [proposals[0].uuid, proposals[3].uuid])).toEqual([[proposals[0].uuid, proposalRfc.uuid], [proposals[3].uuid, proposalRfc.uuid]].sort());
     expect((await rig.ok("get_doc", { uuid: proposalRfc.uuid })).tags).toEqual([]);
   });
 });

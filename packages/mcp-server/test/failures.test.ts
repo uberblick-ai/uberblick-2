@@ -170,6 +170,11 @@ const EXPECTED: Record<
   revisions_forbidden: { recoveryClass: "manual", detail: [] },
   revisions_unsupported: { recoveryClass: "manual", detail: [] },
   revision_not_found: { recoveryClass: "reread", detail: [] },
+  revision_stale_state: { recoveryClass: "reread", detail: [] },
+  revision_invalid_name: { recoveryClass: "manual", detail: [] },
+  revision_already_named: { recoveryClass: "manual", detail: ["existingName"] },
+  revision_not_namer: { recoveryClass: "manual", detail: [] },
+  revision_naming_outcome_unknown: { recoveryClass: "reread", detail: ["reason"] },
   doc_not_archived: { recoveryClass: "manual", detail: ["uuid"] },
   decision_delete_unsupported: { recoveryClass: "manual", detail: ["uuid"] },
   group_not_found: { recoveryClass: "reread", detail: ["group"] },
@@ -308,12 +313,13 @@ describe("the failure contract", () => {
       uuid: doc.uuid, after_block_id: doc.blockId,
       blocks: [{ type: "table", text: "| Header |\n| --- |\n| Cell |" }],
     });
+    const tableText = "| Header |\n| --- |\n| Cell |";
     record((await rig.call("edit_block", {
-      uuid: doc.uuid, block_id: table.blocks[0].id, old_text: table.blocks[0].text,
+      uuid: doc.uuid, block_id: table.blocks[0].id, old_text: tableText,
       new_text: "| Header | Added |\n| --- | --- |\n| Cell | New |",
     })).payload);
     record((await rig.call("edit_block", {
-      uuid: doc.uuid, block_id: table.blocks[0].id, old_text: table.blocks[0].text, new_text: table.blocks[0].text,
+      uuid: doc.uuid, block_id: table.blocks[0].id, old_text: tableText, new_text: tableText,
       table_mapping: { rows: [0, 2], columns: [0] },
     })).payload);
     record((await rig.call("annotate", {
@@ -610,6 +616,11 @@ describe("the failure contract", () => {
       if (clientCode !== "deleted") {
         record(toFailure(toolNamed("get_data"), new RevisionClientError(clientCode)).payload);
       }
+    }
+    for (const clientCode of ["stale-state", "invalid-name", "already-named", "not-namer", "naming-outcome-unknown"] as const) {
+      record(toFailure(toolNamed("name_revision"), new RevisionClientError(clientCode,
+        clientCode === "already-named" ? { existingName: { text: "Reviewed", namer: null, namedAt: 1, canManage: false } }
+          : clientCode === "naming-outcome-unknown" ? { applied: null, reason: "unsupported" } : {})).payload);
     }
 
     // Every code the code itself knows about was triggered above.
