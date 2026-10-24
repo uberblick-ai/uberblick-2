@@ -61,6 +61,12 @@ async function deletedPage(page: Page): Promise<void> {
 async function calmBanner(page: Page, touch: boolean): Promise<void> {
   const banner = page.locator(".ub-archived-banner");
   await expect(banner).toContainText("Archived. Read-only and hidden from the document list.");
+  // Shared controls animate theme changes; contrast needs the settled palette.
+  await banner.evaluate(async element => {
+    await Promise.all(element.getAnimations({ subtree: true })
+      .filter(animation => animation instanceof CSSTransition)
+      .map(animation => animation.finished.catch(() => undefined)));
+  });
   const paint = await banner.evaluate(element => {
     const icon = element.querySelector("svg");
     const message = element.querySelector(":scope > span");
