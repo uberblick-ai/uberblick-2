@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import {
-  appendBlock, compareRevisions, deleteDirectoryEntry, encodeRevisionResponseFrames, getMeta, initDoc,
-  readRevisionRequest, roomForDoc, setTitle, tombstoneDirectoryEntry, type RevisionRequest, type RevisionResponse,
+  appendBlock, compareRevisions, deleteDirectoryEntry, encodeRevisionResponseFrames, getMeta, getMetaMap, initDoc,
+  readRevisionRequest, roomForDoc, setTitle, tombstoneDirectoryEntry, upsertDirectoryEntry, type RevisionRequest, type RevisionResponse,
 } from "@uberblick/schema";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import { documentRevisionChecksum, getDocumentRevision, listDocumentRevisions, mutateDocumentRevision, restoreDocumentRevision } from "../src/revision-client.js";
@@ -15,6 +15,7 @@ import { cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, startHub, tempDir, testC
 const clients: Array<() => unknown> = [];
 const hubs: Array<() => unknown> = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   await cleanupTestResources({ clients: clients.splice(0), hubs: hubs.splice(0) });
 });
 
@@ -82,6 +83,30 @@ it("returns an empty list only when the hub confirms there are no revisions", as
   const fixture = await admitted();
   fixture.reply((request, send) => send({ requestId: request.requestId, ok: true, revisions: [] }));
   await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid)).resolves.toEqual([]);
+});
+
+it.each(["directory", "document"] as const)("refuses decision history known through the %s before sending any client request", async source => {
+  const opened = workspace();
+  const uuid = randomUUID();
+  const topic = randomUUID();
+  if (source === "directory") {
+    upsertDirectoryEntry(opened.replicas.directory().doc, { uuid, title: "Decision", kind: "decision", topic, status: "open" });
+  } else {
+    const doc = opened.replicas.replica(uuid).doc;
+    initDoc(doc, { uuid, title: "Decision" });
+    getMetaMap(doc).set("kind", "decision");
+    getMetaMap(doc).set("topic", topic);
+  }
+  const request = vi.spyOn(opened.replicas.sync, "requestRevisions");
+  const expected = { code: "decision-no-history", details: { uuid, topic } };
+  await expect(listDocumentRevisions(opened.replicas, uuid)).rejects.toMatchObject(expected);
+  await expect(getDocumentRevision(opened.replicas, uuid, "earlier")).rejects.toMatchObject(expected);
+  await expect(mutateDocumentRevision(opened.replicas, uuid, { operation: "name", name: "Reviewed", checksum: "unused" }))
+    .rejects.toMatchObject(expected);
+  await expect(restoreDocumentRevision(opened.replicas, uuid, { operation: "restore", revisionId: "earlier",
+    checksum: "unused", surface: { kind: "mcp", name: "Codex" } })).rejects.toMatchObject(expected);
+  expect(request).not.toHaveBeenCalled();
+  expect(opened.replicas.hydrated(uuid)).toBe(source === "document");
 });
 
 it("opts in to names and titles independently without changing legacy list requests or replies", async () => {

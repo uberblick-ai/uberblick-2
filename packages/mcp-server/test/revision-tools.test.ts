@@ -73,6 +73,13 @@ function calls(uuid: string): Array<[string, Record<string, unknown>]> {
   ];
 }
 
+function writeCalls(uuid: string): Array<[string, Record<string, unknown>]> {
+  return [
+    ["name_revision", { uuid, name: "Reviewed" }],
+    ["restore_revision", { uuid, revision }],
+  ];
+}
+
 function refusal(result: ToolCall, code: string) {
   expect(result).toMatchObject({ isError: true, payload: {
     error: code, message: expect.any(String),
@@ -444,10 +451,61 @@ describe("historical reads through the MCP boundary", () => {
       refusal(result, "doc_deleted");
       expect(result.payload).toHaveProperty("uuid", uuid);
     }
-    expect(await rig.call("name_revision", { uuid, name: "Deleted state" })).toMatchObject({ isError: true,
-      payload: { error: "doc_deleted", uuid, applied: false, partial: false, synced: false } });
+    for (const [target, code] of [[unknown, "doc_not_found"], [uuid, "doc_deleted"]] as const) {
+      for (const [tool, args] of writeCalls(target)) {
+        expect(await rig.call(tool, args)).toMatchObject({ isError: true,
+          payload: { error: code, uuid: target, applied: false, partial: false, synced: false } });
+      }
+    }
     expect(request).not.toHaveBeenCalled();
     expect(open.mock.calls.some(([id]) => id === unknown || id === uuid)).toBe(false);
+  });
+
+  it("refuses every decision state and archived record uniformly without hydration, hub requests or writes", async () => {
+    const rig = await server();
+    const replicas = rig.instance.replicas;
+    const request = vi.spyOn(replicas.sync, "requestRevisions");
+    for (const status of ["open", "decided", "rejected", "withdrawn"] as const) {
+      for (const archived of [false, true]) {
+        const uuid = randomUUID();
+        const topic = randomUUID();
+        upsertDirectoryEntry(replicas.directory().doc, { uuid, title: "Decision elsewhere", kind: "decision", topic, status });
+        if (archived) tombstoneDirectoryEntry(replicas.directory().doc, uuid);
+        expect(replicas.hydrated(uuid)).toBe(false);
+        const logged = rig.instance.store.logSize();
+        for (const [tool, args] of [...calls(uuid), ["get_data", { uuid, revision }] as const, ...writeCalls(uuid)]) {
+          const result = await rig.call(tool, args);
+          expect(result).toMatchObject({ isError: true, payload: {
+            error: "decision_no_history", message: expect.stringContaining("Decision records have no history"),
+            uuid, topic, recoveryClass: "manual", recovery: expect.stringContaining("topic's records"),
+          } });
+          if (tool === "name_revision" || tool === "restore_revision") {
+            expect(result.payload).toMatchObject({ applied: false, partial: false, synced: false });
+          } else {
+            refusal(result, "decision_no_history");
+          }
+        }
+        expect(rig.instance.store.logSize()).toBe(logged);
+        expect(replicas.hydrated(uuid)).toBe(false);
+      }
+    }
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("prefers no-history to the decided content lock while preserving live decision data reads", async () => {
+    const rig = await server();
+    const { uuid } = await rig.ok("create_doc", { title: "Why this choice?", description: "A settled decision.",
+      kind: "decision", status: "decided", blocks: [{ type: "paragraph", text: "Use the existing primitive." }] });
+    const request = vi.spyOn(rig.instance.replicas.sync, "requestRevisions");
+    const logged = rig.instance.store.logSize();
+    for (const [tool, args] of writeCalls(uuid)) {
+      expect(await rig.call(tool, args)).toMatchObject({ isError: true, payload: {
+        error: "decision_no_history", uuid, topic: uuid, applied: false, partial: false, synced: false,
+      } });
+    }
+    expect(await rig.ok("get_data", { uuid })).toEqual({ uuid, data: null });
+    expect(rig.instance.store.logSize()).toBe(logged);
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("reads a known archived document without depending on live room hydration", async () => {
@@ -552,7 +610,10 @@ describe("historical reads through the MCP boundary", () => {
       .toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
     expect((await rig.ok("get_help", { topic: "restore_revision" })).text).toContain("revision_restore_outcome_unknown");
     expect((await rig.ok("get_help", { topic: "name_revision" })).text).toContain("only when a person asks");
-    for (const code of ["revisions_local_only", "revisions_unreachable", "revisions_sign_in_required", "revisions_forbidden", "revisions_unsupported", "revision_not_found", "doc_deleted"]) {
+    for (const name of ["list_revisions", "get_revision", "get_data", "name_revision", "restore_revision"]) {
+      expect((await rig.ok("get_help", { topic: name })).text).toContain("decision_no_history");
+    }
+    for (const code of ["revisions_local_only", "revisions_unreachable", "revisions_sign_in_required", "revisions_forbidden", "revisions_unsupported", "revision_not_found", "doc_deleted", "decision_no_history"]) {
       expect(contracts.text).toContain(code);
     }
     for (const tool of tools.filter(tool => tool.writes !== null && tool.name !== "restore_revision")) {

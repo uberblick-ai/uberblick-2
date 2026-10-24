@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { strictInput } from "../inputs.js";
-import { documentRevisionChecksum, restoreDocumentRevision } from "../revision-client.js";
+import { documentRevisionChecksum, requireDocumentHistory, restoreDocumentRevision } from "../revision-client.js";
 import { revisionOutput } from "../revision-output.js";
 import { DOCUMENT_WRITE, operation } from "./operation.js";
 import { uuidArg } from "./schemas.js";
@@ -11,6 +11,8 @@ export const inputSchema = strictInput({
 });
 
 export const restoreRevisionOperation = operation(DOCUMENT_WRITE, inputSchema, async (context, { uuid, revision }) => {
+  context.requireKnownDoc(uuid);
+  requireDocumentHistory(context.replicas, uuid);
   const replica = context.requireWritableDoc(uuid, true);
   const result = await restoreDocumentRevision(context.replicas, uuid, {
     operation: "restore", revisionId: revision, checksum: documentRevisionChecksum(replica.doc),

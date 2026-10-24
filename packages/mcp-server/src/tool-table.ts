@@ -176,7 +176,8 @@ export const tools: readonly Tool[] = [
     title: "List document revisions",
     description:
       "List hub revisions newest first, including archived documents, with names, namers and times or null. " +
-      "IDs work with get_revision/get_data/restore_revision. Empty means hub-confirmed no history.",
+      "IDs work with get_revision/get_data/restore_revision. Empty means hub-confirmed no history. " +
+      "Listing a decision record refuses with decision_no_history.",
     input: listRevisionsInput,
     operation: listRevisionsOperation,
     example: { uuid },
@@ -188,7 +189,8 @@ export const tools: readonly Tool[] = [
     title: "Name the current document revision",
     description:
       "Name the current synchronized state only when a person asks. Requires team-hub write access; " +
-      "closes its stretch. One name per revision; manage it in the web.",
+      "closes its stretch. One name per revision; manage it in the web. " +
+      "Naming a decision record refuses with decision_no_history.",
     input: nameRevisionInput,
     operation: nameRevisionOperation,
     hints: { destructive: false, idempotent: true },
@@ -201,7 +203,8 @@ export const tools: readonly Tool[] = [
     title: "Restore a document revision",
     description:
       "Restore title, blocks and data from a hub revision as a new revision. Requires synchronized write access " +
-      "to a live document; history and other metadata stay. An identical state writes nothing.",
+      "to a live document; history and other metadata stay. An identical state writes nothing. " +
+      "Restoring a decision record refuses with decision_no_history.",
     input: restoreRevisionInput,
     operation: restoreRevisionOperation,
     hints: { destructive: true, idempotent: true },
@@ -214,7 +217,8 @@ export const tools: readonly Tool[] = [
     title: "Read a document revision",
     description:
       "Read a hub revision from list_revisions: title, visible blocks without rev, and data summary. " +
-      "Archived documents work. Page records with get_data and the same revision.",
+      "Archived documents work. Page records with get_data and the same revision. " +
+      "Reading a decision record's revision refuses with decision_no_history.",
     input: getRevisionInput,
     operation: getRevisionOperation,
     example: { uuid, revision: "revision-id-from-list_revisions" },
@@ -227,7 +231,8 @@ export const tools: readonly Tool[] = [
     description:
       "Read a data summary, or name collection for bounded records and diagnostics. limit: 0 reads schema; " +
       "follow next_after until complete. Optional revision uses a hub ID from list_revisions, including " +
-      "archived documents; omission reads live data. Live data and open revisions can change between calls.",
+      "archived documents; omission reads live data. Live data and open revisions can change between calls. " +
+      "Historical decision data refuses with decision_no_history.",
     input: getDataInput,
     operation: getDataOperation,
     example: { uuid, collection: "tasks", limit: 20 },

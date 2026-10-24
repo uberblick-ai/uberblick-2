@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import * as Y from "yjs";
-import { isDocId, snapshotRevision, type RevisionEntry, type RevisionRequest } from "@uberblick/schema";
+import { getDirectoryEntry, getMeta, isDocId, snapshotRevision, type RevisionEntry, type RevisionRequest } from "@uberblick/schema";
 import type { Replicas } from "./replica.js";
 
 export type RevisionClientFailure =
@@ -9,6 +9,7 @@ export type RevisionClientFailure =
   | "sign-in-required"
   | "forbidden"
   | "deleted"
+  | "decision-no-history"
   | "revision-not-found"
   | "unsupported"
   | "stale-state"
@@ -25,6 +26,7 @@ const failureMessages: Record<RevisionClientFailure, string> = {
   "sign-in-required": "Sign in to read document revisions.",
   forbidden: "The hub refused access to document revisions.",
   deleted: "The document was permanently deleted.",
+  "decision-no-history": "Decision records have no history; the topic's record timeline is their history.",
   "revision-not-found": "The revision does not belong to this document or does not exist.",
   unsupported: "This hub does not serve automatic document revisions.",
   "stale-state": "The displayed document differs from the hub or has changes awaiting synchronization. Nothing was changed.",
@@ -50,10 +52,20 @@ export interface RevisionReadOptions {
   includeTitles?: boolean;
 }
 
+/** Refuse history before hydration, writable-state checks or hub requests. */
+export function requireDocumentHistory(replicas: Replicas, uuid: string): void {
+  if (replicas.isDeleted(uuid)) throw new RevisionClientError("deleted", { uuid });
+  const stub = getDirectoryEntry(replicas.directory().doc, uuid);
+  const meta = replicas.hydrated(uuid) ? getMeta(replicas.replica(uuid).doc) : undefined;
+  if (stub?.kind === "decision" || meta?.kind === "decision") {
+    throw new RevisionClientError("decision-no-history", { uuid, topic: meta?.topic ?? stub?.topic ?? uuid });
+  }
+}
+
 function room(replicas: Replicas, uuid: string): string {
   if (!isDocId(uuid)) throw new TypeError("A canonical document UUID is required.");
+  requireDocumentHistory(replicas, uuid);
   if (replicas.config.localWorkspace === true) throw new RevisionClientError("local-only");
-  if (replicas.isDeleted(uuid)) throw new RevisionClientError("deleted", { uuid });
   return replicas.replica(uuid).room;
 }
 

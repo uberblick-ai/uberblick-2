@@ -22,7 +22,6 @@ import {
   settingsRoom,
   sidebarRoom,
   tombstoneDirectoryEntry,
-  tombstoneDecisionRecord,
   snapshotRevision,
 } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
@@ -431,29 +430,89 @@ describe("automatic hub revisions", () => {
     expect(rows[2]!.author).toBeNull();
   });
 
-  it("closes for archive and restore through a decision topic and an individual record", async () => {
+  it.each(["open", "decided", "rejected", "withdrawn"] as const)("records no first content or later title, blocks or data for %s decisions", async status => {
+    const db = database();
+    const doc = await load(db);
+    doc.transact(() => {
+      getMetaMap(doc).set("kind", "decision");
+      getMetaMap(doc).set("status", status);
+      title(doc, "First answer");
+      appendBlock(doc, { type: "paragraph", text: "First content" });
+      doc.getMap("data").set("collection", { records: [1] });
+    }, { attribution: { author: browser } });
+    expect(db.revisions.list(ROOM)).toEqual([]);
+    const directory = await load(db, directoryRoom(WORKSPACE));
+    directory.getMap("docs").set(UUID, { title: "Record", tags: [], kind: "decision", topic: UUID, status });
+    for (const archived of [false, true]) {
+      if (archived) tombstoneDirectoryEntry(directory, UUID);
+      title(doc, `Changed title, archived: ${archived}`);
+      doc.transact(() => appendBlock(doc, { type: "paragraph", text: `Changed blocks, archived: ${archived}` }),
+        { attribution: { author: claude } });
+      doc.transact(() => doc.getMap("data").set("collection", { archived }), { attribution: { author: browser } });
+      expect(db.revisions.list(ROOM)).toEqual([]);
+      expect(db.connection.prepare("SELECT room FROM document_revision_heads WHERE room = ?").all(ROOM)).toEqual([]);
+      expect(db.connection.prepare("SELECT room FROM document_revisions WHERE room = ?").all(ROOM)).toEqual([]);
+    }
+  });
+
+  it("retains a converted page's earlier revisions and names without recording decision changes, then purges them on deletion", async () => {
     const db = database();
     const doc = await load(db);
     const directory = await load(db, directoryRoom(WORKSPACE));
-    directory.getMap("docs").set(TOPIC, { title: "Topic", tags: [], kind: "decision", topic: TOPIC, status: "open" });
-    directory.getMap("docs").set(UUID, { title: "Record", tags: [], kind: "decision", topic: TOPIC, status: "rejected" });
-    title(doc, "One");
+    title(doc, "Named regular page");
+    expect(db.revisions.name(ROOM, doc, checksum(doc), "Before conversion", browser).ok).toBe(true);
+    clock = 10;
+    title(doc, "Regular page's latest edit");
+    const rows = db.revisions.list(ROOM);
+    const content = rows.map(row => db.revisions.get(ROOM, row.id));
+    const names = db.revisions.names(ROOM);
+    doc.transact(() => {
+      getMetaMap(doc).set("kind", "decision");
+      getMetaMap(doc).set("status", "open");
+      title(doc, "Converted decision");
+      appendBlock(doc, { type: "paragraph", text: "Decision answer" });
+      doc.getMap("data").set("collection", { records: [1] });
+    }, { attribution: { author: claude } });
+    directory.getMap("docs").set(UUID, { title: "Converted decision", tags: [], kind: "decision", topic: UUID, status: "open" });
+    await db.onStoreDocument({ document: doc, documentName: ROOM });
+    const reloaded = await load(db);
+    title(reloaded, "Later decision title", claude);
+    expect(db.revisions.list(ROOM)).toEqual(rows);
+    expect(rows.map(row => db.revisions.get(ROOM, row.id))).toEqual(content);
+    expect(db.revisions.names(ROOM)).toEqual(names);
+    tombstoneDirectoryEntry(directory, UUID);
+    expect(db.revisions.list(ROOM).map(row => row.id)).toEqual(rows.map(row => row.id));
+    expect(rows.map(row => db.revisions.get(ROOM, row.id))).toEqual(content);
+    expect(db.revisions.names(ROOM)).toEqual(names);
+    deleteDirectoryEntry(directory, UUID);
+    expect(db.revisions.list(ROOM)).toEqual([]);
+    expect(db.revisions.names(ROOM).size).toBe(0);
+    expect(db.connection.prepare("SELECT room FROM document_revision_heads WHERE room = ?").all(ROOM)).toEqual([]);
+    expect(db.connection.prepare("SELECT name FROM documents WHERE name = ?").get(ROOM)).toBeUndefined();
+  });
+
+  it("closes regular-page heads for archive and restore without losing names", async () => {
+    const db = database();
+    const doc = await load(db);
+    const directory = await load(db, directoryRoom(WORKSPACE));
+    directory.getMap("docs").set(UUID, { title: "Regular page", tags: [] });
+    title(doc, "Named state");
     expect(db.revisions.name(ROOM, doc, checksum(doc), "Before archive", browser).ok).toBe(true);
     const names = db.revisions.names(ROOM);
+    clock = 5;
+    title(doc, "One");
     clock = 10;
-    tombstoneDirectoryEntry(directory, TOPIC);
-    expect(db.revisions.list(ROOM)[0]!.endedAt).toBe(0);
+    tombstoneDirectoryEntry(directory, UUID);
+    expect(db.revisions.list(ROOM)[0]!.endedAt).toBe(10);
     expect(db.revisions.names(ROOM)).toEqual(names);
     clock = 20;
-    restoreDirectoryEntry(directory, TOPIC);
     title(doc, "Two");
     clock = 30;
-    expect(tombstoneDecisionRecord(directory, UUID)).toBe(true);
+    restoreDirectoryEntry(directory, UUID);
     expect(db.revisions.list(ROOM)[0]!.endedAt).toBe(30);
     clock = 40;
-    restoreDirectoryEntry(directory, UUID);
     title(doc, "Three");
-    expect(db.revisions.list(ROOM)).toHaveLength(3);
+    expect(db.revisions.list(ROOM)).toHaveLength(4);
     expect(db.revisions.list(ROOM)[0]!.startedAt).toBe(40);
   });
 

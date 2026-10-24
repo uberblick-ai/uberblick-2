@@ -133,7 +133,8 @@ export const toolHelpDetails = {
     "Pass an entry's `id` as `revision` to get_revision or get_data. It is a hub revision ID, distinct from " +
     "get_doc's page and block `rev` content hashes. restore_revision accepts the same revision IDs. " +
     "A UUID unknown to this workspace refuses with doc_not_found before contacting the hub; a permanently " +
-    "deleted document refuses with doc_deleted. See tool-contracts for hub history failures and recovery.",
+    "deleted document refuses with doc_deleted. Decision records, including archived records, refuse with " +
+    "decision_no_history before any hub request; read the topic's records instead. See tool-contracts for hub history failures and recovery.",
   name_revision:
     "Call only when a person asks to name the current document state. Supply `uuid` and a `name` of " +
     "1 to 100 characters on one line. The hub verifies that this client's displayed title, visible blocks " +
@@ -146,7 +147,8 @@ export const toolHelpDetails = {
     "acknowledged its naming transaction. This hub-only metadata writes no local document log. A known " +
     "refusal reports applied: false. If a sent request loses its reply, revision_naming_outcome_unknown " +
     "reports applied: null, partial: false and synced: false. Read list_revisions before retrying; " +
-    "reason unsupported means an admitted hub stayed silent, while unreachable means transport failed.",
+    "reason unsupported means an admitted hub stayed silent, while unreachable means transport failed. " +
+    "Decision records in every state, including archived records, refuse with decision_no_history before any hub request; read the topic's records instead.",
   restore_revision:
     "Restore a live team-hub document's title, visible blocks and structured data from a revision ID returned " +
     "by list_revisions. The hub closes the current revision and records the restore as its own closed revision, " +
@@ -163,7 +165,8 @@ export const toolHelpDetails = {
     "receiving the restore are dropped, including offline edits; edits elsewhere land on top.\n\n" +
     "A sent request whose reply is lost reports revision_restore_outcome_unknown with applied: null, " +
     "partial: false and synced: false. Read list_revisions and get_doc before retrying: the restore may have " +
-    "committed. reason unsupported means an admitted hub stayed silent; unreachable means transport failed.",
+    "committed. reason unsupported means an admitted hub stayed silent; unreachable means transport failed. " +
+    "Decision records in every state, including archived records, refuse with decision_no_history before any hub request; read the topic's records instead.",
   get_revision:
     "Read a known document as it was at the hub revision ID from list_revisions, including an archived document. " +
     "The result returns `uuid`, `revision`, `title`, visible `blocks` and `data`. Blocks use get_doc's shape " +
@@ -176,7 +179,8 @@ export const toolHelpDetails = {
     "changes the live document. Revision IDs are distinct from get_doc's page and block `rev` content hashes. " +
     "An unknown revision, including one belonging to another document, refuses with revision_not_found. " +
     "Unknown document UUIDs refuse with doc_not_found before contacting the hub, and permanently deleted " +
-    "documents refuse with doc_deleted. See tool-contracts for other hub history failures and recovery.",
+    "documents refuse with doc_deleted. Decision records, including archived records, refuse with " +
+    "decision_no_history before any hub request; read the topic's records instead. See tool-contracts for other hub history failures and recovery.",
   get_data:
     "Read structured data deliberately. Without `collection`, return `data: null` for none, or an area " +
     "summary of collection names, record counts, validity and invalid-record counts, canonical UTF-8 bytes, " +
@@ -200,7 +204,8 @@ export const toolHelpDetails = {
     "to keep reading that revision; an open revision can still change between calls. For example, `get_data({uuid, revision, collection: \"observations\", " +
     "limit: 100})` pages that revision's observations. An unknown revision, including one from another " +
     "document, refuses with revision_not_found; it never falls back to live data. See tool-contracts for " +
-    "hub history failures and recovery.\n\n" +
+    "hub history failures and recovery. Decision records in every state, including archived records, refuse " +
+    "historical reads with decision_no_history before any hub request; read the topic's records instead.\n\n" +
     "Merged invalidity is observed through the shared reader without dropping, repairing or writing values.",
   list_docs:
     "Documents in the workspace, from the synced directory document — never from locally observed creations. " +
