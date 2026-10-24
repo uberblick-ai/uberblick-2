@@ -16,7 +16,8 @@ export type RevisionClientFailure =
   | "already-named"
   | "not-namer"
   | "archived"
-  | "naming-outcome-unknown";
+  | "naming-outcome-unknown"
+  | "restore-outcome-unknown";
 
 const failureMessages: Record<RevisionClientFailure, string> = {
   "local-only": "Automatic revisions are unavailable in a local-only workspace.",
@@ -26,12 +27,13 @@ const failureMessages: Record<RevisionClientFailure, string> = {
   deleted: "The document was permanently deleted.",
   "revision-not-found": "The revision does not belong to this document or does not exist.",
   unsupported: "This hub does not serve automatic document revisions.",
-  "stale-state": "The displayed document differs from the hub or has changes awaiting synchronization. Nothing was named.",
+  "stale-state": "The displayed document differs from the hub or has changes awaiting synchronization. Nothing was changed.",
   "invalid-name": "A revision name must contain 1 to 100 characters on one line.",
   "already-named": "This document state already has a name.",
   "not-namer": "Only the account that named this revision may change or remove its name.",
-  archived: "Archived documents are read-only and cannot be named.",
+  archived: "Archived documents are read-only; restore the archived document before changing its revisions.",
   "naming-outcome-unknown": "The hub did not acknowledge the naming request; its outcome is unknown.",
+  "restore-outcome-unknown": "The hub did not acknowledge the revision restore request; its outcome is unknown.",
 };
 
 export class RevisionClientError extends Error {
@@ -106,6 +108,26 @@ export async function mutateDocumentRevision(
     throw new RevisionClientError("naming-outcome-unknown", { applied: null, reason: "unsupported" });
   }
   return response.revision;
+}
+
+/** Restore is hub-owned; normal synchronization delivers the restored content. */
+export async function restoreDocumentRevision(
+  replicas: Replicas,
+  uuid: string,
+  mutation: { operation: "restore"; revisionId: string; checksum: string; surface: { kind: string; name: string } },
+  options: RevisionReadOptions = {},
+): Promise<{ revision: RevisionEntry; applied: boolean }> {
+  const response = await requestRevisions(replicas, uuid, mutation, options);
+  if (!response.ok) {
+    if (response.error === "unavailable") {
+      throw new RevisionClientError("restore-outcome-unknown", { applied: null, reason: "unreachable" });
+    }
+    throw new RevisionClientError(response.error, response.error === "deleted" ? { uuid } : {});
+  }
+  if (!("revision" in response) || !("applied" in response) || typeof response.applied !== "boolean") {
+    throw new RevisionClientError("restore-outcome-unknown", { applied: null, reason: "unsupported" });
+  }
+  return { revision: response.revision, applied: response.applied };
 }
 
 /** The checksum covers exactly the title, visible blocks and data shown to this client. */

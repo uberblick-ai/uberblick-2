@@ -32,7 +32,7 @@ export type { SeedDoc, SeedImport, StarterSeed } from "./seed.js";
 export { fillWorkspaceMainRepository, storeWorkspaceName } from "./workspace-settings.js";
 export { readWorkspaceFork, writeWorkspaceFork } from "./workspace-fork.js";
 export type { WorkspaceForkSnapshot } from "./workspace-fork.js";
-export { getDocumentRevision, listDocumentRevisions, mutateDocumentRevision, documentRevisionChecksum, RevisionClientError } from "./revision-client.js";
+export { getDocumentRevision, listDocumentRevisions, mutateDocumentRevision, restoreDocumentRevision, documentRevisionChecksum, RevisionClientError } from "./revision-client.js";
 export type { RevisionClientFailure, RevisionReadOptions } from "./revision-client.js";
 export { inspectExistingStore, readStoredSyncStatus, readWorkspaceName } from "./store.js";
 export { createMcpServer } from "./server.js";

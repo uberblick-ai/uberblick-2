@@ -27,7 +27,7 @@ Document tools use the workspace selected when this MCP server starts. Project b
 
 ## Discover, read, edit
 
-Start with \`get_sidebar({})\` for curated entry points, \`list_docs({})\` for discovery, or \`search({query: "release plan"})\` for relevant content. Read a discovered UUID with \`get_doc\` before changing it. A document's UUID is its identity; its title is display text. Blocks have their own ids, types, text and revisions. Edit one block against the returned \`old_text\` and \`rev\`; there is no whole-document replacement. A revision checks this replica's current content at call time and is not a distributed lock. Read \`markdown\` for block syntax and \`data\` for dedicated collection reads.
+Start with \`get_sidebar({})\` for curated entry points, \`list_docs({})\` for discovery, or \`search({query: "release plan"})\` for relevant content. Read a discovered UUID with \`get_doc\` before changing it. A document's UUID is its identity; its title is display text. Blocks have their own ids, types, text and revisions. Edit one block against the returned \`old_text\` and \`rev\`; whole-document restoration is available only through \`restore_revision\` with a hub revision ID. A revision checks this replica's current content at call time and is not a distributed lock. Read \`markdown\` for block syntax and \`data\` for dedicated collection reads.
 
 ## Metadata
 
@@ -70,7 +70,7 @@ Create and change documents with the fewest calls. Details live in \`decisions\`
 ## Create and change
 
 - \`create_doc\` needs a title and a description. Only agents read the description: write whatever helps \`list_docs\` and \`search\` find the page; a keyword list is fine. Tags come from \`list_tags\`.
-- \`insert_block\` adds blocks after a block id, or at the top. \`edit_block\` changes one block against the \`old_text\` and \`rev\` you read. \`move_block\` reorders existing blocks with their ids and comment anchors intact; read its help for the concurrent-edit limit. \`delete_block\` removes one. There is no whole-document replace.
+- \`insert_block\` adds blocks after a block id, or at the top. \`edit_block\` changes one block against the \`old_text\` and \`rev\` you read. \`move_block\` reorders existing blocks with their ids and comment anchors intact; read its help for the concurrent-edit limit. \`delete_block\` removes one. \`restore_revision\` is the whole-document exception: it restores title, blocks and data from a hub revision as a new revision, preserving history and other metadata.
 - Documents merge live (Yjs): people and other agents may edit at the same time and watch your changes. Change only the words that need changing; \`edit_block\` keeps everyone else's edits and comment anchors, while deleting and re-inserting a block drops them.
 - A refused edit returns \`currentText\` and \`currentRev\`: apply your change to them and retry, without another read.
 - \`set_metadata\` changes title, description, tags, links and TL;DR, a regular page's code check and an open decision's \`discussion\`. Structured data uses \`get_data\` and \`update_data\`.
@@ -583,7 +583,8 @@ Failures are marked \`isError: true\` and omit structuredContent, so success-sch
 | \`revisions_forbidden\` | Ask a workspace maintainer to grant read access before repeating the read. |
 | \`revisions_unsupported\` | Ask the hub operator to update to a version that serves automatic revisions. |
 | \`revision_not_found\` | List this document's revisions again and select an ID belonging to it. |
-| \`revision_stale_state\` | Synchronize and read the current state before naming it. |
+| \`revision_stale_state\` | Synchronize, read and review the current state before naming or restoring. |
+| \`revision_restore_outcome_unknown\` | Read list_revisions and get_doc before retrying a restore whose reply was lost. |
 | \`revision_invalid_name\` | Supply 1 to 100 characters on one line. |
 | \`revision_already_named\` | Read existingName; its namer can rename or remove it in the web. |
 | \`revision_not_namer\` | Ask the naming account to manage the name in the web. |
@@ -595,9 +596,9 @@ Unknown help topics through get_help are manual refusals and name all valid topi
 
 ## Write durability and synced
 
-Successful writes report \`applied\`, \`synced\` and \`hub\`. Applied means this server's local update log holds the write. Hub describes the connection, not remote storage. Calls touching multiple rooms report each room independently; aggregate synced is true only when every touched room is acknowledged. There is no rollback or cross-room remote atomicity. The hub-only \`name_revision\` operation is separate: applied means the hub applied its revision-store transaction and synced means it acknowledged that transaction; no local document log is written. A sent naming request whose reply is lost reports \`applied: null\` and \`synced: false\`; check list_revisions before retrying.
+Successful writes report \`applied\`, \`synced\` and \`hub\`. Applied means this server's local update log holds the write. Hub describes the connection, not remote storage. Calls touching multiple rooms report each room independently; aggregate synced is true only when every touched room is acknowledged. There is no rollback or cross-room remote atomicity. Hub-only \`name_revision\` and \`restore_revision\` are separate: applied means the hub applied the operation and synced means it acknowledged it. Restore persists content and history before acknowledgement; normal sync delivers the content. An identical restore writes nothing, returning applied: false. A sent naming or restore request whose reply is lost reports \`applied: null\` and \`synced: false\`; check list_revisions and get_doc before retrying.
 
-\`synced: true\` means the hub acknowledged this update: it is in the hub's memory, and a healthy hub has scheduled the write on its store debounce — by default 2s after the last change to the document, 10s at the outside. It does NOT mean the hub has stored it: the write is still ahead of the hub's disk, and the store itself can fail. A hub that dies abruptly inside that window (SIGKILL, a crash, power loss) loses its volatile copy of the update. That is recoverable rather than fatal: \`applied: true\` is the durable half — this server's append-only update log holds the write before the tool returns and re-sends it on reconnect — so losing it for good takes the crash plus no replica holding that update ever coming back.
+For ordinary replica writes, \`synced: true\` means the hub acknowledged this update: it is in the hub's memory, and a healthy hub has scheduled the write on its store debounce — by default 2s after the last change to the document, 10s at the outside. It does NOT mean the hub has stored it: the write is still ahead of the hub's disk, and the store itself can fail. A hub that dies abruptly inside that window (SIGKILL, a crash, power loss) loses its volatile copy of the update. That is recoverable rather than fatal: \`applied: true\` is the durable half — this server's append-only update log holds the write before the tool returns and re-sends it on reconnect — so losing it for good takes the crash plus no replica holding that update ever coming back.
 
 ## Related
 

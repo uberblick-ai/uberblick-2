@@ -117,16 +117,44 @@ describe("ub open automatic revisions", () => {
         startedAt: namedRevision.startedAt, endedAt: namedRevision.endedAt, name: null } });
       expect(getMeta(document).title).toBe("Historical title");
 
+      document.transact(() => {
+        document.getMap("meta").set("title", "Latest browser title");
+        appendBlock(document, { type: "paragraph", text: "Latest browser text" });
+      });
+      await waitUntil("the newer browser state to reach the hub", () =>
+        getMeta(hub.hocuspocus.documents.get(roomForDoc(WORKSPACE, uuid))!).title === "Latest browser title");
+      const restoreRequest = { uuid, operation: "restore", revisionId: namedRevision.id,
+        expectedHash: createHash("sha256").update(snapshotRevision(document).checksum).digest("hex") };
+      expect((await fetch(path, { method: "POST", headers: mutationHeaders,
+        body: JSON.stringify({ ...restoreRequest, surface: { kind: "mcp", name: "forged" } }) })).status).toBe(400);
+      const staleRestore = await fetch(path, { method: "POST", headers: mutationHeaders,
+        body: JSON.stringify({ ...restoreRequest, expectedHash: nameRequest.expectedHash }) });
+      expect(staleRestore.status).toBe(409);
+      expect(await staleRestore.json()).toMatchObject({ error: "revision_restore_failed", reason: "stale-state" });
+      const restored = await fetch(path, { method: "POST", headers: mutationHeaders, body: JSON.stringify(restoreRequest) });
+      expect(restored.status).toBe(200);
+      const { revision: restoredRevision, applied } = await restored.json() as { revision: RevisionEntry; applied: boolean };
+      expect(applied).toBe(true);
+      expect(restoredRevision).toMatchObject({ endedAt: expect.any(Number), name: null,
+        author: { githubUsername: "revision-person", surface: { kind: "browser", name: "browser" } } });
+      await waitUntil("the restore to reach the open browser", () => getMeta(document).title === "Historical title");
+      expect(getBlocks(document)).toMatchObject([{ text: "Historical text" }]);
+      const unchanged = await fetch(path, { method: "POST", headers: mutationHeaders,
+        body: JSON.stringify({ ...restoreRequest, expectedHash: nameRequest.expectedHash }) });
+      expect(await unchanged.json()).toEqual({ revision: restoredRevision, applied: false });
+
       const connection = hub.hocuspocus.documents.get(roomForDoc(WORKSPACE, uuid))?.getConnections()[0];
       if (connection === undefined) throw new Error("Missing revision connection");
       const original = connection.callbacks.statelessCallback;
       let error: Extract<RevisionResponse, { ok: false }>["error"] = "unsupported";
       let listRequest: RevisionRequest | null = null;
+      let sentRestore: RevisionRequest | null = null;
       const legacyEntry = { id: namedRevision.id, author: namedRevision.author, startedAt: namedRevision.startedAt,
         endedAt: namedRevision.endedAt, name: null };
       connection.onStatelessCallback(async payload => {
         const request = readRevisionRequest(payload.payload);
         if (request === null) { await original(payload); return; }
+        if (request.operation === "restore") { sentRestore = request; return; }
         if (request.operation === "list") {
           listRequest = request;
           for (const frame of encodeRevisionResponseFrames({ requestId: request.requestId, ok: true,
@@ -139,6 +167,12 @@ describe("ub open automatic revisions", () => {
       expect(legacyList.status).toBe(200);
       expect(await legacyList.json()).toEqual({ revisions: [legacyEntry] });
       expect(listRequest).toMatchObject({ operation: "list", includeNames: true, includeTitles: true });
+      const lostRestoreReply = await fetch(path, { method: "POST", headers: mutationHeaders,
+        body: JSON.stringify({ ...restoreRequest, expectedHash: nameRequest.expectedHash }) });
+      expect(sentRestore).toMatchObject({ operation: "restore", revisionId: namedRevision.id });
+      expect(lostRestoreReply.status).toBe(409);
+      expect(await lostRestoreReply.json()).toEqual({ error: "revision_restore_failed",
+        reason: "restore-outcome-unknown", cause: "unsupported", applied: null });
       for (const [failure, reason] of [["unsupported", "unsupported"], ["forbidden", "forbidden"],
         ["deleted", "deleted"], ["revision-not-found", "revision-not-found"], ["unavailable", "unreachable"]] as const) {
         error = failure;

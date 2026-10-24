@@ -91,6 +91,37 @@ async function request(reads: RevisionReads, connection: Connection<HubContext>,
 }
 
 describe("revision replies on admitted document rooms", () => {
+  it("restores by revision ID under current write authority and returns the closed attributed entry", async () => {
+    const db = database();
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const saved = seed(db, room, "Past title");
+    const checksum = () => createHash("sha256").update(snapshotRevision(saved.doc).checksum).digest("hex");
+    expect(db.revisions.name(room, saved.doc, checksum(), "Past", {
+      principalId: "ben", surface: { kind: "mcp", name: "Claude Code" },
+    }).ok).toBe(true);
+    getMetaMap(saved.doc).set("title", "Present title");
+    const reads = new RevisionReads({ database: db, assertCurrent() {}, username: id => id });
+    const writer = receiver();
+    const readOnly = receiver(true);
+    const restore = { operation: "restore" as const, revisionId: saved.id, checksum: checksum(),
+      surface: { kind: "browser", name: "browser" } };
+    expect(await request(reads, readOnly.connection, room, restore, readOnly.sent, saved.doc))
+      .toMatchObject({ ok: false, error: "forbidden" });
+    expect(await request(reads, writer.connection, room, { ...restore, checksum: "0".repeat(64) }, writer.sent, saved.doc))
+      .toMatchObject({ ok: false, error: "stale-state" });
+    expect(await request(reads, writer.connection, room, { ...restore, revisionId: "foreign" }, writer.sent, saved.doc))
+      .toMatchObject({ ok: false, error: "revision-not-found" });
+    const restored = await request(reads, writer.connection, room, restore, writer.sent, saved.doc);
+    expect(restored).toMatchObject({ ok: true, applied: true, revision: { author: {
+      githubUsername: "reader", surface: { kind: "browser", name: "browser" },
+    }, startedAt: 1_000, endedAt: 1_000, name: null } });
+    expect(getMeta(saved.doc).title).toBe("Past title");
+    if (!("revision" in restored)) throw new Error("expected restore entry");
+    expect(restored.revision.id).not.toBe(saved.id);
+    expect(await request(reads, writer.connection, room, { ...restore, checksum: checksum() }, writer.sent, saved.doc))
+      .toEqual({ ...restored, requestId: expect.any(String), applied: false });
+  });
+
   it("reads titles from active and closed snapshots only when a list opts in", async () => {
     const db = database();
     const room = `${WORKSPACE}/${randomUUID()}`;
@@ -210,7 +241,7 @@ describe("revision replies on admitted document rooms", () => {
     const uuid = room.split("/")[1]!;
     getDirectoryMap(directory).set(uuid, { title: "Archived", tags: [] });
     tombstoneDirectoryEntry(directory, uuid);
-    for (const operation of ["name", "rename", "remove-name"] as const) {
+    for (const operation of ["name", "rename", "remove-name", "restore"] as const) {
       expect(await request(reads, reader.connection, room, { ...naming, operation, revisionId: saved.id }, reader.sent, saved.doc))
         .toMatchObject({ ok: false, error: "archived" });
     }

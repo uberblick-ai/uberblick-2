@@ -23,7 +23,7 @@ export function useAppShell() {
   const rooms = useShellRooms(environment);
   const readings = useShellReadings(environment, rooms);
   const decisionPage = environment.route.kind === "decision" || rooms.topic !== null || readings.meta?.kind === "decision";
-  const history = useDocumentHistory(decisionPage ? null : environment.documentRevisions, rooms.selected, path);
+  const history = useDocumentHistory(decisionPage ? null : environment.documentRevisions, rooms.selected, path, rooms.doc?.ydoc ?? null);
   const historyBack = useRef<HTMLButtonElement | null>(null);
   const alter = useAlterDecision({ ...rooms, ...environment, navigate });
   const pins = usePinToggles(rooms);

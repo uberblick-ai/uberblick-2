@@ -19,6 +19,10 @@ function historicalEditor(page: Page): Locator {
   return page.locator('.ub-revision-pane .ProseMirror:not([aria-label="Before this revision"])');
 }
 
+async function liveText(page: Page): Promise<string> {
+  return editor(page).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.textContent);
+}
+
 /** Where removals show: the left side of a side-by-side comparison, or the single column. */
 function earlierSide(page: Page): Locator {
   return page.locator('.ub-revision-pane .ProseMirror:not([aria-label="This revision"])');
@@ -443,6 +447,102 @@ test.describe("document history through ub open", () => {
     await expect(editor(page)).toContainText("Later collaborator change:");
   });
 
+  test("restores a past version, syncs open clients, reports no-op and restores the pre-restore state", { tag: "@webkit-touch" }, async ({ browser, browserName }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    await page.emulateMedia({ colorScheme: browserName === "webkit" ? "dark" : "light" });
+    const title = docTitle("Restore baseline");
+    const uuid = await newDocument(page, title);
+    const room = `${harness().workspaceUuid}/${uuid}`;
+    const nameCurrent = async (name: string): Promise<void> => {
+      await activateControl(history(page).getByRole("button", { name: "Name current revision", exact: true }));
+      const input = history(page).getByRole("textbox", { name: "Revision name", exact: true });
+      await input.fill(name);
+      await input.press("Enter");
+      await expect(input).toHaveCount(0);
+    };
+    await activateControl(editor(page));
+    await page.keyboard.type("The earlier document content.");
+    await expect.poll(() => harness().hubText(room)).toBe("The earlier document content.");
+    await nameCurrent("Baseline to restore");
+    await page.locator(".ub-title").fill(`${title} newer`);
+    await selectPositions(editor(page), 1, 30);
+    await page.keyboard.type("The newer document content.");
+    await expect.poll(() => harness().hubText(room)).toBe("The newer document content.");
+    await nameCurrent("Before the restore");
+    const peer = await openApp(browser, new URL(page.url()).pathname, { readySelector: ".ub-editor .ProseMirror" });
+    await expect.poll(() => liveText(peer)).toBe("The newer document content.");
+    await previous(page);
+    await previous(page);
+    await expect(history(page).getByRole("button", { name: /Copy revision/ })).toHaveText("Baseline to restore");
+    const restore = page.getByRole("button", { name: "Restore this version", exact: true });
+    await expect(restore).toBeEnabled();
+    if (browserName === "chromium") {
+      await restore.focus();
+      await page.keyboard.press("Enter");
+    } else await activateControl(restore);
+    await expect(page.getByText("Document restored to this version", { exact: true })).toBeVisible();
+    await expect.poll(() => liveText(peer)).toBe("The earlier document content.");
+    await expect(peer.locator(".ub-title")).toHaveValue(title);
+    await backToNow(page);
+    await expect.poll(() => liveText(page)).toBe("The earlier document content.");
+    await expect(page.locator(".ub-title")).toHaveValue(title);
+    await previous(page);
+    await expect(history(page)).toContainText("browser-person in the browser");
+    const drawer = await showHistoryList(page);
+    const count = await historyList(page).getByRole("listitem").count();
+    await closeHistoryList(page, drawer);
+    await activateControl(restore);
+    await expect(page.getByText("The document already has this version. Nothing changed.", { exact: true })).toBeVisible();
+    const noOpDrawer = await showHistoryList(page);
+    await expect(historyList(page).getByRole("listitem")).toHaveCount(count);
+    await closeHistoryList(page, noOpDrawer);
+    await previous(page);
+    await expect(history(page).getByRole("button", { name: /Copy revision/ })).toHaveText("Before the restore");
+    await activateControl(restore);
+    await expect.poll(() => liveText(peer)).toBe("The newer document content.");
+    await expect(peer.locator(".ub-title")).toHaveValue(`${title} newer`);
+    await backToNow(page);
+    await expect.poll(() => liveText(page)).toBe("The newer document content.");
+    // Archived history remains readable, with an explanation on the visible restore control.
+    await activateControl(page.getByRole("button", { name: "Document actions", exact: true }));
+    await activateControl(page.getByRole("menuitem", { name: "Archive document", exact: true }));
+    await activateControl(page.getByRole("alertdialog", { name: `Archive “${title} newer”?` }).getByRole("button", { name: "Archive", exact: true }));
+    await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
+    await previous(page);
+    await expect(restore).toBeDisabled();
+    await expect(restore).toHaveAccessibleDescription("This document is archived. Restore the document first, then restore a revision.");
+    const reason = page.getByText("This document is archived. Restore the document first, then restore a revision.", { exact: true });
+    await expect(reason).toBeVisible();
+    expect((await reason.boundingBox())?.height).toBeGreaterThan(10);
+  });
+
+  test("refuses restore after a collaborator changes the live document and refreshes the history list", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const title = docTitle("Stale restore");
+    const uuid = await newDocument(page, title);
+    const room = `${harness().workspaceUuid}/${uuid}`;
+    await activateControl(editor(page));
+    await page.keyboard.type("State reviewed when history opens.");
+    await expect.poll(() => harness().hubText(room)).toBe("State reviewed when history opens.");
+    const peer = await openApp(browser, new URL(page.url()).pathname, { readySelector: ".ub-editor .ProseMirror" });
+    await expect.poll(() => liveText(peer)).toBe("State reviewed when history opens.");
+    await previous(page);
+    await expect(page.getByRole("button", { name: "Restore this version", exact: true })).toBeEnabled();
+    await peer.locator(".ub-title").fill(`${title} collaborator`);
+    await selectPositions(editor(peer), 1);
+    await peer.keyboard.type("Newer changes: ");
+    await expect.poll(() => harness().hubText(room)).toBe("Newer changes: State reviewed when history opens.");
+    await activateControl(page.getByRole("button", { name: "Restore this version", exact: true }));
+    await expect(page.getByText("This document changed. Review the newer changes in history and try again.", { exact: true })).toBeVisible();
+    await expect(historicalEditor(page)).toContainText("Newer changes: State reviewed when history opens.");
+    await expect(page.locator(".ub-revision-title")).toHaveText(`${title} collaborator`);
+    await showHistoryList(page);
+    await expect(historyList(page).getByRole("button", { name: /Current version/ })).toHaveAttribute("aria-current", "true");
+    await backToNow(page);
+    await expect.poll(() => liveText(page)).toBe("Newer changes: State reviewed when history opens.");
+    await expect(page.locator(".ub-title")).toHaveValue(`${title} collaborator`);
+  });
+
   test("real hub revisions navigate, keep removed text selectable and isolate the live editor", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
     await page.emulateMedia({ colorScheme: browserName === "webkit" ? "dark" : "light" });
@@ -664,8 +764,7 @@ test.describe("document history through ub open", () => {
     await expect(page.locator(".ub-revision-title")).toHaveText(title);
     await expect(history(page).locator(".ub-history-renamed s")).toHaveText("Kickoff notes");
     const restore = page.getByRole("button", { name: "Restore this version", exact: true });
-    await expect(restore).toHaveAttribute("aria-disabled", "true");
-    await expect(restore).toHaveAccessibleDescription("Restore is not available yet");
+    await expect(restore).toBeEnabled();
     await expect(page.locator(".ub-revision-header")).toHaveCSS("position", "sticky");
     await showHistoryList(page);
     await expect(reviewed).toContainText("renamed");

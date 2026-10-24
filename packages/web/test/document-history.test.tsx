@@ -1,7 +1,8 @@
 import { act, render, type RenderResult } from "./react-render.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
-import { getMeta, initDoc, type RevisionEntry } from "@uberblick/schema";
+import { getMeta, initDoc, setTitle, type RevisionEntry } from "@uberblick/schema";
+import * as revisionClient from "../src/shell/document-revisions.js";
 import { DocumentHistoryError, type DocumentRevisionsClient } from "../src/shell/document-revisions.js";
 import { renamedFrom, useDocumentHistory, type DocumentHistory } from "../src/ui/document/document-history.js";
 
@@ -30,10 +31,10 @@ function deferred<T>() {
 }
 
 function client(read: DocumentRevisionsClient["get"] = async (_uuid, id) => document(id)): DocumentRevisionsClient {
-  return { list: vi.fn(async () => entries), get: vi.fn(read), name: vi.fn(), rename: vi.fn(), removeName: vi.fn() };
+  return { list: vi.fn(async () => entries), get: vi.fn(read), name: vi.fn(), rename: vi.fn(), removeName: vi.fn(), restore: vi.fn() };
 }
 
-function mount(api: DocumentRevisionsClient | null, uuid: string | null = UUID, path = "/document/one"): {
+function mount(api: DocumentRevisionsClient | null, uuid: string | null = UUID, path = "/document/one", liveDocument: Y.Doc | null = null): {
   view: RenderResult;
   reading: () => DocumentHistory;
   seen: DocumentHistory[];
@@ -41,7 +42,7 @@ function mount(api: DocumentRevisionsClient | null, uuid: string | null = UUID, 
 } {
   const seen: DocumentHistory[] = [];
   function Probe({ api, uuid, path }: { api: DocumentRevisionsClient | null; uuid: string | null; path: string }): null {
-    seen.push(useDocumentHistory(api, uuid, path));
+    seen.push(useDocumentHistory(api, uuid, path, liveDocument));
     return null;
   }
   const view = render(<Probe api={api} uuid={uuid} path={path} />);
@@ -50,6 +51,56 @@ function mount(api: DocumentRevisionsClient | null, uuid: string | null = UUID, 
 }
 
 describe("document history navigation", () => {
+  it("restores from the state when history opened, then refreshes a stale list and starting point", async () => {
+    const checksum = vi.spyOn(revisionClient, "documentRevisionChecksum").mockImplementation(async doc => getMeta(doc).title);
+    try {
+      const api = client();
+      const live = document("State when history opened");
+      const fix = mount(api, UUID, "/document/one", live);
+      await act(async () => {});
+      await act(async () => fix.reading().open(1));
+      const displayed = fix.reading().selection?.after;
+      setTitle(live, "New collaborator changes");
+      const newer: RevisionEntry = { ...entries[0]!, id: "newer", title: "New collaborator changes" };
+      vi.mocked(api.list).mockResolvedValue([newer, ...entries]);
+      vi.mocked(api.restore).mockRejectedValueOnce(new DocumentHistoryError("stale-state"));
+      await act(async () => {
+        await expect(fix.reading().restore("middle")).rejects.toBeInstanceOf(DocumentHistoryError);
+      });
+      expect(api.restore).toHaveBeenLastCalledWith(UUID, "middle", "State when history opened", expect.any(AbortSignal));
+      expect(fix.reading().entries?.[0]).toEqual(newer);
+      expect(fix.reading().selection?.after).toBe(displayed);
+      expect(fix.reading().entry?.id).toBe("middle");
+      vi.mocked(api.restore).mockResolvedValue({ revision: newer, applied: true });
+      await act(async () => { await expect(fix.reading().restore("middle")).resolves.toBe(true); });
+      expect(api.restore).toHaveBeenLastCalledWith(UUID, "middle", "New collaborator changes", expect.any(AbortSignal));
+      expect(fix.reading().busy).toBe(false);
+      fix.view.unmount();
+    } finally { checksum.mockRestore(); }
+  });
+
+  it("reopens and refreshes history with a fresh starting point and reports a restore no-op", async () => {
+    const checksum = vi.spyOn(revisionClient, "documentRevisionChecksum").mockImplementation(async doc => getMeta(doc).title);
+    try {
+      const api = client();
+      vi.mocked(api.restore).mockResolvedValue({ revision: entries[0]!, applied: false });
+      const live = document("First opening");
+      const fix = mount(api, UUID, "/document/one", live);
+      await act(async () => {});
+      await act(async () => fix.reading().back());
+      await act(async () => fix.reading().now());
+      setTitle(live, "Reopened history");
+      await act(async () => fix.reading().back());
+      await act(async () => { await expect(fix.reading().restore("newest")).resolves.toBe(false); });
+      expect(api.restore).toHaveBeenLastCalledWith(UUID, "newest", "Reopened history", expect.any(AbortSignal));
+      setTitle(live, "Refreshed history");
+      await act(async () => fix.reading().refresh());
+      await act(async () => fix.reading().restore("middle"));
+      expect(api.restore).toHaveBeenLastCalledWith(UUID, "middle", "Refreshed history", expect.any(AbortSignal));
+      fix.view.unmount();
+    } finally { checksum.mockRestore(); }
+  });
+
   it("compares the newest revision with the most recent named state, skipping intervening revisions", async () => {
     const api = client();
     const named: RevisionEntry = { ...entries[2]!, name: {
@@ -434,8 +485,11 @@ describe("document history navigation", () => {
     expect(fix.reading().error).toBeNull();
     expect(selected!.after.isDestroyed).toBe(false);
     await act(async () => fix.reading().refresh());
-    expect(fix.reading().selection).toBe(selected);
-    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(getMeta(fix.reading().selection!.after).title).toBe("newest");
+    expect(fix.reading().selection?.before).toBe(selected?.before);
+    expect(selected?.after.isDestroyed).toBe(true);
+    // Refresh re-reads the selected open revision, without scanning old snapshots for titles.
+    expect(api.get).toHaveBeenCalledTimes(3);
     expect(fix.reading().titles.earliest).toBeUndefined();
     expect(fix.reading().error).toBeNull();
   });

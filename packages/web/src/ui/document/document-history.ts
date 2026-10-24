@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type * as Y from "yjs";
 import type { RevisionEntry } from "@uberblick/schema";
-import { DocumentHistoryError } from "../../shell/document-revisions.js";
+import { documentRevisionChecksum, DocumentHistoryError } from "../../shell/document-revisions.js";
 import type { DocumentRevisionsClient } from "../../shell/document-revisions.js";
 import { useStoredFlag } from "../hooks.js";
 
@@ -24,6 +24,7 @@ interface Session {
   signal: AbortSignal;
   documents: Map<string, Y.Doc>;
   retryTarget: Target | null;
+  startingHash: Promise<string | Error> | null;
   state: HistoryState;
 }
 const initial: HistoryState = { entries: null, selection: null, active: false, busy: true, error: null, titles: {} };
@@ -67,7 +68,36 @@ function namedBaseline(entries: readonly RevisionEntry[], since: string | null):
   return entries.find(entry => entry.name != null && (since === null || entry.id === since));
 }
 
-export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid: string | null, path: string) {
+function refreshesList(target: Target, relist: boolean, active: boolean): boolean {
+  return "since" in target || relist || !active;
+}
+
+async function getRevision(owner: Session, id: string, operation: number, documents: Map<string, Y.Doc>): Promise<Y.Doc> {
+  const cached = documents.get(id);
+  if (cached !== undefined) return cached;
+  const doc = await owner.client.get(owner.uuid, id, owner.signal);
+  if (owner.signal.aborted || owner.operation !== operation) { doc.destroy(); throw new DOMException("Cancelled", "AbortError"); }
+  documents.set(id, doc);
+  return doc;
+}
+
+async function readSelection(owner: Session, entries: RevisionEntry[], index: number, operation: number,
+  documents: Map<string, Y.Doc>, comparedWith?: RevisionEntry): Promise<Selection | null> {
+  const entry = entries[index];
+  if (entry === undefined) return null;
+  const previous = comparedWith ?? entries[index + 1];
+  const after = await getRevision(owner, entry.id, operation, documents);
+  const before = previous === undefined ? null : await getRevision(owner, previous.id, operation, documents);
+  return { index, before, after, ...(comparedWith === undefined ? {} : { comparedWith }) };
+}
+
+function captureStartingPoint(owner: Session, document: Y.Doc | null, needed = true): void {
+  if (!needed) return;
+  owner.startingHash = document === null ? null : documentRevisionChecksum(document)
+    .catch(() => new Error("Couldn't read this document's state. Refresh history and try again."));
+}
+
+export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid: string | null, path: string, liveDocument: Y.Doc | null = null) {
   const current = useRef<Session | null>(null);
   // A per-browser reading preference, shared by the sidebar switch and the comparison.
   const [collapseUnchanged, setCollapseUnchanged] = useStoredFlag("uberblick.history.collapse-unchanged", true);
@@ -85,7 +115,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
   useEffect(() => {
     if (client === null || uuid === null) { current.current = null; setView(null); return; }
     const controller = new AbortController();
-    const session: Session = { client, uuid, path, operation: 0, signal: controller.signal, documents: new Map(), retryTarget: null, state: initial };
+    const session: Session = { client, uuid, path, operation: 0, signal: controller.signal, documents: new Map(), retryTarget: null, startingHash: null, state: initial };
     current.current = session;
     setView({ session, state: initial });
     void client.list(uuid, controller.signal).then(
@@ -100,28 +130,12 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
   }, [client, uuid, path, update, fail]);
   const session = view?.session;
   const state = view !== null && session?.client === client && session.uuid === uuid && session.path === path && current.current === session ? view.state : initial;
-  const get = async (owner: Session, id: string, operation: number, documents = owner.documents): Promise<Y.Doc> => {
-    const cached = documents.get(id);
-    if (cached !== undefined) return cached;
-    const doc = await owner.client.get(owner.uuid, id, owner.signal);
-    if (owner.signal.aborted || owner.operation !== operation) { doc.destroy(); throw new DOMException("Cancelled", "AbortError"); }
-    documents.set(id, doc);
-    return doc;
-  };
-  const readSelection = async (owner: Session, entries: RevisionEntry[], index: number, operation: number,
-    documents: Map<string, Y.Doc>, comparedWith?: RevisionEntry): Promise<Selection | null> => {
-    const entry = entries[index];
-    if (entry === undefined) return null;
-    const previous = comparedWith ?? entries[index + 1];
-    const after = await get(owner, entry.id, operation, documents);
-    const before = previous === undefined ? null : await get(owner, previous.id, operation, documents);
-    return { index, before, after, ...(comparedWith === undefined ? {} : { comparedWith }) };
-  };
   const select = async (target: Target, relist = false): Promise<void> => {
     const owner = current.current;
     if (owner === null || owner.state.busy) return;
     const operation = ++owner.operation;
     const named = "since" in target;
+    captureStartingPoint(owner, liveDocument, refreshesList(target, relist, owner.state.active));
     const fresh = named ? new Map<string, Y.Doc>() : null;
     let adopted = false;
     owner.retryTarget = target;
@@ -168,14 +182,68 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
         ...(selection?.comparedWith?.id === revision.id ? (revision.name == null ? { selection: null, active: false } : { selection: { ...selection, comparedWith: revision } }) : {}) });
     } catch (error) { if (owner.operation === operation) update(owner, { busy: false }); throw error; }
   };
+  const reload = async (owner: Session, operation: number): Promise<void> => {
+    const entries = await owner.client.list(owner.uuid, owner.signal);
+    if (owner.operation !== operation) return;
+    // A still-open revision can have changed since its detached copy was read.
+    const fresh = new Map(owner.documents);
+    for (const entry of owner.state.entries ?? []) if (entry.endedAt === null) fresh.delete(entry.id);
+    let adopted = false;
+    try {
+      const replacement = replaceEntries(owner, entries);
+      const selected = replacement.selection;
+      if (selected !== null) {
+        const next = await readSelection(owner, entries, selected.index, operation, fresh, selected.comparedWith);
+        if (owner.operation !== operation) return;
+        if (next?.after !== selected.after || next?.before !== selected.before) replacement.selection = next;
+      }
+      for (const [id, doc] of owner.documents) if (fresh.get(id) !== doc) doc.destroy();
+      owner.documents = fresh;
+      adopted = true;
+      update(owner, { busy: false, ...replacement });
+    } finally {
+      if (!adopted) for (const [id, doc] of fresh) if (owner.documents.get(id) !== doc) doc.destroy();
+    }
+  };
   const refresh = (): void => {
     const owner = current.current;
     if (owner === null || owner.state.busy) return;
     const operation = ++owner.operation;
+    captureStartingPoint(owner, liveDocument);
     update(owner, { busy: true, error: null });
-    void owner.client.list(owner.uuid, owner.signal).then((entries) => {
-      if (owner.operation === operation) update(owner, { busy: false, ...replaceEntries(owner, entries) });
-    }, (error: unknown) => { if (owner.operation === operation) fail(owner, error); });
+    void reload(owner, operation).catch((error: unknown) => { if (owner.operation === operation) fail(owner, error); });
+  };
+  const refreshRefusedRestore = async (owner: Session, operation: number, error: unknown): Promise<void> => {
+    if (owner.operation !== operation) return;
+    if (error instanceof DocumentHistoryError && ["stale-state", "restore-outcome-unknown", "unreachable"].includes(error.reason ?? "")) {
+      captureStartingPoint(owner, liveDocument);
+      try { await reload(owner, operation); }
+      catch (refreshError) { if (owner.operation === operation) fail(owner, refreshError); }
+    }
+    update(owner, { busy: false });
+  };
+  const restore = async (revisionId: string): Promise<boolean> => {
+    const owner = current.current;
+    if (owner === null || owner.state.busy) throw new Error("Wait for history to load and try again.");
+    const startingHash = owner.startingHash;
+    if (startingHash === null) throw new Error("Wait for the live document to load, then reopen history and try again.");
+    const operation = ++owner.operation;
+    update(owner, { busy: true, error: null });
+    let applied: boolean | null = null;
+    try {
+      const checksum = await startingHash;
+      if (checksum instanceof Error) throw checksum;
+      if (owner.signal.aborted || owner.operation !== operation) throw new DOMException("Cancelled", "AbortError");
+      const result = await owner.client.restore(owner.uuid, revisionId, checksum, owner.signal);
+      applied = result.applied;
+      captureStartingPoint(owner, liveDocument);
+      await reload(owner, operation);
+      return applied;
+    } catch (error) {
+      await refreshRefusedRestore(owner, operation, error);
+      if (applied !== null) throw new Error("The document was restored, but history couldn't refresh. Refresh history to see the result.");
+      throw error;
+    }
   };
   return {
     ...state,
@@ -191,6 +259,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
     name: (name: string, checksum: string) => mutate(owner => owner.client.name(owner.uuid, name, checksum, owner.signal)),
     rename: (revisionId: string, name: string) => mutate(owner => owner.client.rename(owner.uuid, revisionId, name, owner.signal)),
     removeName: (revisionId: string) => mutate(owner => owner.client.removeName(owner.uuid, revisionId, owner.signal)),
+    restore,
     now: () => {
       const owner = current.current;
       if (owner !== null) { owner.operation++; owner.retryTarget = null; update(owner, { selection: null, active: false, error: null, busy: false }); }
