@@ -22,7 +22,7 @@ interface Session {
   uuid: string;
   key: string;
   requestedView: RevisionView | null;
-  listing: Promise<RevisionEntry[]>;
+  listing: Promise<RevisionEntry[]> | null;
   operation: number;
   signal: AbortSignal;
   documents: Map<string, Y.Doc>;
@@ -116,8 +116,8 @@ function captureStartingPoint(owner: Session, document: Y.Doc | null, needed = t
 type Update = (owner: Session, changes: Partial<HistoryState>) => void;
 type Fail = (owner: Session, error: unknown) => void;
 
-async function selectionEntries(owner: Session, target: Target, relist: boolean): Promise<RevisionEntry[]> {
-  if (owner.state.entries === null && !relist) return owner.listing;
+async function selectionEntries(owner: Session, target: Target, relist: boolean, fromRoute: boolean): Promise<RevisionEntry[]> {
+  if (fromRoute && owner.listing !== null && owner.state.entries === null && !relist) return owner.listing;
   return "since" in target || relist || owner.state.selection === null
     ? owner.client.list(owner.uuid, owner.signal) : owner.state.entries ?? [];
 }
@@ -140,7 +140,7 @@ async function selectTarget(owner: Session | null, target: Target, liveDocument:
   owner.retryTarget = target;
   update(owner, { busy: true, error: null, active: true });
   try {
-    const entries = await selectionEntries(owner, target, relist);
+    const entries = await selectionEntries(owner, target, relist, fromRoute);
     if (owner.operation !== operation) return;
     if (owner.state.selection === null && fresh === null) destroyDocuments(owner.documents);
     const index = targetIndex(target, owner.state.selection, entries);
@@ -226,8 +226,8 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
     current.current = session;
     setView({ session, state: initial });
     void listing.then(
-      (entries) => { if (session.operation === 0) update(session, { entries, titles: listedTitles(entries), busy: false }); },
-      (error: unknown) => { if (session.operation === 0) fail(session, error); },
+      (entries) => { session.listing = null; if (session.operation === 0) update(session, { entries, titles: listedTitles(entries), busy: false }); },
+      (error: unknown) => { session.listing = null; if (session.operation === 0) fail(session, error); },
     );
     return () => {
       controller.abort();

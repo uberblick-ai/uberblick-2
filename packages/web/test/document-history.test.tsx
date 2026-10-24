@@ -144,6 +144,46 @@ describe("address-controlled history views", () => {
     expect(fix.reading()).toMatchObject({ active: false, selection: null, error: null });
   });
 
+  it.each(["control", "browser"])("reads the current list when reopening history by %s after an invalid address", async navigation => {
+    const api = client();
+    const fix = mountRouted(api, { revision: "gone" });
+    await act(async () => {});
+    expect(fix.reading().error).toBeTruthy();
+    act(() => fix.reading().now());
+
+    const later: RevisionEntry = { ...entries[0]!, id: "later", title: "Later changes" };
+    const currentEntries = [later, { ...entries[0]!, endedAt: 150 }, ...entries.slice(1)];
+    vi.mocked(api.list).mockResolvedValue(currentEntries);
+    if (navigation === "control") await act(async () => fix.reading().back());
+    else {
+      fix.visit({ revision: "later" });
+      await act(async () => {});
+    }
+
+    expect(fix.reading()).toMatchObject({ active: true, busy: false, error: null, entries: currentEntries });
+    expect(fix.reading().entry?.id).toBe("later");
+    expect(getMeta(fix.reading().selection!.after).title).toBe("later");
+    if (navigation === "control") expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "later" });
+  });
+
+  it.each([null, { revision: "newest" }])("recovers from an initial list failure when entering history again from %j", async address => {
+    const api = client();
+    vi.mocked(api.list).mockRejectedValueOnce(new DocumentHistoryError("unreachable"));
+    const fix = mountRouted(api, address);
+    await act(async () => {});
+    expect(fix.reading().error).toMatch(/hub cannot be reached/);
+
+    if (address === null) await act(async () => fix.reading().back());
+    else {
+      act(() => fix.reading().now());
+      fix.visit(address);
+      await act(async () => {});
+    }
+
+    expect(fix.reading()).toMatchObject({ active: true, busy: false, error: null, entries });
+    expect(fix.reading().entry?.id).toBe("newest");
+  });
+
   it("refreshes baseline naming metadata while keeping the addressed comparison ends", async () => {
     const api = client();
     const earliest = { ...entries[2]!, name: { text: "Reviewed", namer: null, namedAt: 50, canManage: false } };
