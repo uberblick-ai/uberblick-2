@@ -42,6 +42,14 @@ export class InvalidListAttributesError extends SchemaError {
   }
 }
 
+/** A callout attribute is invalid or applied to another block type. */
+export class InvalidCalloutError extends SchemaError {
+  constructor(reason: string) {
+    super("invalid_callout", `Invalid callout: ${reason}`);
+    this.name = "InvalidCalloutError";
+  }
+}
+
 /** A table write did not contain exactly one supported GFM table. */
 export class InvalidTableError extends SchemaError {
   constructor() {

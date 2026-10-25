@@ -85,7 +85,7 @@ const figma: BlockInput = {
 test("workspace and every block render, load Figma and sync edits without CSP violations", { tag: "@webkit" }, async ({ browser }, info) => {
   if (agent === null) throw new Error("e2e: the CSP MCP agent is not configured");
   const writer = agent.open({ name: "csp-e2e" });
-  expect([...new Set([...blocks, figma].map((block) => block.type))].sort()).toEqual([...BLOCK_TYPES].sort());
+  expect([...new Set([...blocks, figma].map((block) => block.type))].sort()).toEqual(BLOCK_TYPES.filter((type) => type !== "callout").sort());
   const allTypes = await writer.call<{ uuid: string }>("create_doc", {
     title: "CSP every block type", description: "Includes the live Figma view.", blocks: [...blocks, figma],
   });
