@@ -100,6 +100,37 @@ describe("JSON comparison panel", () => {
     expect(shown.grid.children).toHaveLength(0);
   });
 
+  it.each(["before", "after"])("restores the %s revision during composition and after commit or cancellation", (side) => {
+    const shown = panel();
+    shown.show(BEFORE, AFTER);
+    shown.grid.querySelector<HTMLElement>('.ub-json-compare-after .ub-json-toggle[data-key=".nested"]')?.click();
+    shown.search("draft");
+    const original = shown.grid.innerHTML;
+    for (const ending of ["日本", ""]) {
+      const pane = (): HTMLElement => {
+        const found = shown.grid.querySelector<HTMLElement>(`.ub-json-compare-pane[data-side="${side}"]`);
+        if (found === null) throw new Error("The comparison pane is missing");
+        return found;
+      };
+      pane().dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      for (const text of ["に", "にほん"]) {
+        pane().dispatchEvent(new CompositionEvent("compositionupdate", { bubbles: true, data: text }));
+        const input = new InputEvent("beforeinput", { bubbles: true, inputType: "insertCompositionText", data: text, isComposing: true });
+        pane().dispatchEvent(input);
+        expect(input.defaultPrevented).toBe(false);
+        // IMEs can replace existing text or add nodes despite beforeinput's preventDefault.
+        if (text === "に") pane().querySelector(".ub-json-key")?.replaceChildren(text);
+        else pane().append(document.createTextNode(text));
+        pane().dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertCompositionText", data: text, isComposing: true }));
+        expect(shown.grid.innerHTML).toBe(original);
+      }
+      pane().dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: ending }));
+      pane().append(document.createTextNode(ending));
+      pane().dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertCompositionText", data: ending }));
+      expect(shown.grid.innerHTML).toBe(original);
+    }
+  });
+
   it.each(["before", "after"])("clips copied text to selected boundaries in the %s pane", (side) => {
     const shown = panel();
     shown.show(JSON.stringify({ version: "alpha old omega", nested: { a: 1 }, tail: "ending" }),
