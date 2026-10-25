@@ -263,13 +263,13 @@ describe("automatic hub revisions", () => {
     expect(db.revisions.list(ROOM)).toEqual([
       { id: reverted, author: claude, startedAt: 0, endedAt: 1 }, original,
     ]);
-    expect(db.revisions.removeName(ROOM, reverted as string, browser.principalId).ok).toBe(true);
+    expect(db.revisions.removeName(ROOM, reverted as string).ok).toBe(true);
     title(doc, "Next", claude);
     expect(db.revisions.list(ROOM)).toHaveLength(3);
     expect(db.revisions.get(ROOM, reverted as string)).not.toBeNull();
   });
 
-  it("refuses stale state and duplicate names, and only lets the namer's account manage text", async () => {
+  it("refuses stale state and duplicate names, and records the account, surface and time that rename text", async () => {
     const db = database();
     const doc = await load(db);
     title(doc, "Seen");
@@ -285,14 +285,13 @@ describe("automatic hub revisions", () => {
     const bytes = db.revisions.get(ROOM, named.id);
     expect(db.revisions.name(ROOM, doc, checksum(doc), "Duplicate", claude)).toMatchObject({ ok: false, error: "already-named",
       name: { text: "Accepted", namer: browser, namedAt: 50 } });
-    for (const action of [() => db.revisions.rename(ROOM, named.id, "Other", "someone-else"),
-      () => db.revisions.removeName(ROOM, named.id, "someone-else")]) {
-      expect(action()).toEqual({ ok: false, error: "not-namer" });
-    }
+    const other = { principalId: "someone-else", surface: { kind: "mcp", name: "Other client" } };
     clock = 100;
-    expect(db.revisions.rename(ROOM, named.id, "Renamed", claude.principalId)).toEqual({ ok: true, id: named.id });
-    expect(db.revisions.names(ROOM).get(named.id)).toEqual({ text: "Renamed", namer: browser, namedAt: 50 });
-    expect(db.revisions.removeName(ROOM, named.id, claude.principalId)).toEqual({ ok: true, id: named.id });
+    expect(db.revisions.rename(ROOM, named.id, "Renamed", other)).toEqual({ ok: true, id: named.id });
+    expect(db.revisions.names(ROOM).get(named.id)).toEqual({ text: "Renamed", namer: other, namedAt: 100 });
+    expect(db.revisions.list(ROOM)[0]).toEqual(original);
+    expect(db.revisions.get(ROOM, named.id)).toEqual(bytes);
+    expect(db.revisions.removeName(ROOM, named.id)).toEqual({ ok: true, id: named.id });
     expect(db.revisions.names(ROOM).size).toBe(0);
     expect(db.revisions.list(ROOM)[0]).toEqual(original);
     expect(db.revisions.get(ROOM, named.id)).toEqual(bytes);
@@ -318,6 +317,26 @@ describe("automatic hub revisions", () => {
     expect(db.connection.prepare("SELECT id FROM document_revisions WHERE room = ?").all(ROOM)).toEqual([]);
     db.connection.exec("DROP TRIGGER fail_revision_name");
     expect(db.revisions.name(ROOM, doc, checksum(doc), "🦊".repeat(100), browser).ok).toBe(true);
+  });
+
+  it("preserves name text and attribution when rename storage fails", async () => {
+    const failures: unknown[] = [];
+    const db = database(true, error => failures.push(error));
+    const doc = await load(db);
+    title(doc, "Named content");
+    clock = 50;
+    const named = db.revisions.name(ROOM, doc, checksum(doc), "Accepted", browser);
+    if (!named.ok) throw new Error("name refused");
+    db.connection.exec(`CREATE TRIGGER fail_revision_rename BEFORE UPDATE ON document_revision_names
+      BEGIN SELECT RAISE(ABORT, 'rename failed'); END`);
+    const other = { principalId: "someone-else", surface: { kind: "mcp", name: "Other client" } };
+    clock = 100;
+    expect(() => db.revisions.rename(ROOM, named.id, "Renamed", other)).toThrow("rename failed");
+    expect(failures).toHaveLength(1);
+    expect(db.revisions.names(ROOM).get(named.id)).toEqual({ text: "Accepted", namer: browser, namedAt: 50 });
+    db.connection.exec("DROP TRIGGER fail_revision_rename");
+    expect(db.revisions.rename(ROOM, named.id, "Renamed", other)).toEqual({ ok: true, id: named.id });
+    expect(db.revisions.names(ROOM).get(named.id)).toEqual({ text: "Renamed", namer: other, namedAt: 100 });
   });
 
   it("records exactly the three example stretches and freezes the preceding author's bytes", async () => {

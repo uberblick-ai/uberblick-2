@@ -43,7 +43,7 @@ export class RevisionReads implements Extension<HubContext> {
         const names = request.includeNames ? database.revisions.names(documentName) : undefined;
         const canWrite = !connection.readOnly && !database.isArchivedRoom(documentName);
         response = { requestId: request.requestId, ok: true, revisions: database.revisions.list(documentName).map(revision => ({
-          ...this.entry(revision, names?.get(revision.id), connection.context.principalId, request.includeNames === true, canWrite),
+          ...this.entry(revision, names?.get(revision.id), request.includeNames === true, canWrite),
           ...(request.includeTitles ? this.title(documentName, revision.id) : {}),
         })) };
       } else if (request.operation === "get") {
@@ -88,14 +88,16 @@ export class RevisionReads implements Extension<HubContext> {
         principalId, surface: request.surface ?? { kind: "unknown", name: "unknown" },
       })
       : request.operation === "rename"
-        ? revisions.rename(room, request.revisionId ?? "", request.name ?? "", principalId)
-        : revisions.removeName(room, request.revisionId ?? "", principalId);
+        ? revisions.rename(room, request.revisionId ?? "", request.name ?? "", {
+          principalId, surface: request.surface ?? { kind: "unknown", name: "unknown" },
+        })
+        : revisions.removeName(room, request.revisionId ?? "");
     if (!result.ok) return { requestId: request.requestId, ok: false, error: result.error,
-      ...(!("name" in result) || result.name === undefined ? {} : { name: this.name(result.name, principalId) }) };
+      ...(!("name" in result) || result.name === undefined ? {} : { name: this.name(result.name) }) };
     const revision = revisions.list(room).find(entry => entry.id === result.id);
     if (revision === undefined) throw new Error("written revision missing");
     return { requestId: request.requestId, ok: true, revision: this.entry(revision,
-      revisions.names(room).get(result.id), principalId, true),
+      revisions.names(room).get(result.id), true),
       ...("applied" in result && typeof result.applied === "boolean" ? { applied: result.applied } : {}) };
   }
 
@@ -104,14 +106,14 @@ export class RevisionReads implements Extension<HubContext> {
     return username === null || author === null ? null : { githubUsername: username, surface: author.surface };
   }
 
-  private name(name: StoredRevisionName, principalId: string, canWrite = true): RevisionName {
+  private name(name: StoredRevisionName, canWrite = true): RevisionName {
     return { text: name.text, namer: this.author(name.namer), namedAt: name.namedAt,
-      canManage: canWrite && name.namer.principalId === principalId };
+      canManage: canWrite };
   }
 
-  private entry(revision: StoredRevision, name: StoredRevisionName | undefined, principalId: string,
+  private entry(revision: StoredRevision, name: StoredRevisionName | undefined,
     includeNames: boolean, canWrite = true): RevisionEntry {
     return { ...revision, author: this.author(revision.author),
-      ...(includeNames ? { name: name === undefined ? null : this.name(name, principalId, canWrite) } : {}) };
+      ...(includeNames ? { name: name === undefined ? null : this.name(name, canWrite) } : {}) };
   }
 }

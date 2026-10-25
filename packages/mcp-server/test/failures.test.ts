@@ -176,7 +176,6 @@ const EXPECTED: Record<
   revision_stale_state: { recoveryClass: "reread", detail: [] },
   revision_invalid_name: { recoveryClass: "manual", detail: [] },
   revision_already_named: { recoveryClass: "manual", detail: ["existingName"] },
-  revision_not_namer: { recoveryClass: "manual", detail: [] },
   revision_naming_outcome_unknown: { recoveryClass: "reread", detail: ["reason"] },
   revision_restore_outcome_unknown: { recoveryClass: "reread", detail: ["reason"] },
   doc_not_archived: { recoveryClass: "manual", detail: ["uuid"] },
@@ -625,7 +624,7 @@ describe("the failure contract", () => {
         record(toFailure(toolNamed("get_data"), new RevisionClientError(clientCode)).payload);
       }
     }
-    for (const clientCode of ["stale-state", "invalid-name", "already-named", "not-namer", "naming-outcome-unknown"] as const) {
+    for (const clientCode of ["stale-state", "invalid-name", "already-named", "naming-outcome-unknown"] as const) {
       record(toFailure(toolNamed("name_revision"), new RevisionClientError(clientCode,
         clientCode === "already-named" ? { existingName: { text: "Reviewed", namer: null, namedAt: 1, canManage: false } }
           : clientCode === "naming-outcome-unknown" ? { applied: null, reason: "unsupported" } : {})).payload);

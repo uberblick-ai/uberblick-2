@@ -121,7 +121,7 @@ function RevisionStatus({ history, writable }: { history: DocumentHistory; writa
         onClick={() => { if (selection.index === 0) history.now(); else { focus.current = "forward"; history.open(selection.index - 1); } }}><NextIcon /></Button>
     </span>
     <span className="ub-history-position">{selection.index + 1} of {total} ·</span>
-    {/* A named revision shows its name where the id would be; the tag renames it when its namer may. */}
+    {/* A named revision shows its name where the id would be; writers can rename it with the tag. */}
     {entry.name != null && !(writable && entry.name.canManage) && <TagIcon />}
     <RevisionNameControls history={history} liveDocument={null} writable={writable} />
     <Button variant="plain" size="custom" type="button" className={`shrink-0 min-w-0 rounded-(--radius-sm) border-0 bg-transparent px-0 py-1 whitespace-nowrap focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 ub-history-rev${entry.name != null ? " inline-flex max-w-44 -ml-[0.35rem] text-foreground font-medium [&>span]:min-w-0 [&>span]:overflow-hidden [&>span]:text-ellipsis ub-history-named" : " text-inherit"}`} aria-label={`Copy revision ${entry.id}`}

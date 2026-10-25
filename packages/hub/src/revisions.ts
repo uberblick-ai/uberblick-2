@@ -31,7 +31,7 @@ export interface StoredRevisionName {
 }
 
 export type NameRevisionResult = { ok: true; id: string }
-  | { ok: false; error: "stale-state" | "invalid-name" | "already-named" | "revision-not-found" | "not-namer"; name?: StoredRevisionName };
+  | { ok: false; error: "stale-state" | "invalid-name" | "already-named" | "revision-not-found"; name?: StoredRevisionName };
 
 export type RestoreRevisionResult = { ok: true; id: string; applied: boolean }
   | { ok: false; error: "stale-state" | "revision-not-found" };
@@ -273,24 +273,24 @@ export class HubRevisions {
     });
   }
 
-  rename(room: string, id: string, text: string, principalId: string): NameRevisionResult {
+  rename(room: string, id: string, text: string, namer: UpdateAuthor): NameRevisionResult {
     if (!validRevisionName(text)) return { ok: false, error: "invalid-name" };
-    return this.changeName(room, id, principalId, () => {
-      this.db.prepare("UPDATE document_revision_names SET text = ? WHERE room = ? AND revision_id = ?").run(text, room, id);
+    return this.changeName(room, id, () => {
+      this.db.prepare(`UPDATE document_revision_names SET text = ?, principal_id = ?, surface = ?, named_at = ?
+        WHERE room = ? AND revision_id = ?`).run(text, namer.principalId, JSON.stringify(namer.surface), this.now(), room, id);
     });
   }
 
-  removeName(room: string, id: string, principalId: string): NameRevisionResult {
-    return this.changeName(room, id, principalId, () => {
+  removeName(room: string, id: string): NameRevisionResult {
+    return this.changeName(room, id, () => {
       this.db.prepare("DELETE FROM document_revision_names WHERE room = ? AND revision_id = ?").run(room, id);
     });
   }
 
-  private changeName(room: string, id: string, principalId: string, change: () => void): NameRevisionResult {
+  private changeName(room: string, id: string, change: () => void): NameRevisionResult {
     return this.writeName(() => {
       const name = this.names(room).get(id);
       if (name === undefined) return { ok: false, error: "revision-not-found" };
-      if (name.namer.principalId !== principalId) return { ok: false, error: "not-namer" };
       change();
       return { ok: true, id };
     });

@@ -647,7 +647,7 @@ test.describe("document history through ub open", () => {
     await expect(shared.locator(".ub-revision-pane")).toHaveCount(0);
   });
 
-  test("names the reviewed state, compares since it, and lets its namer rename or remove it", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
+  test("names the reviewed state, compares since it, and renames or removes it inline", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
     await page.emulateMedia({ colorScheme: browserName === "webkit" ? "dark" : "light" });
     const title = docTitle("Named review state");
@@ -745,6 +745,42 @@ test.describe("document history through ub open", () => {
     await backToNow(page);
     await expect(live).toHaveAttribute("contenteditable", "true");
     await expect(live).toContainText("The blue fox stays.");
+  });
+
+  test("a writer renames another account's revision name from the history header", { tag: "@webkit" }, async ({ browser, browserName }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    await page.emulateMedia({ colorScheme: browserName === "webkit" ? "dark" : "light" });
+    const uuid = await newDocument(page, docTitle("Teammate review name"));
+    await activateControl(editor(page));
+    await page.keyboard.type("A state reviewed by another teammate.");
+    await expect.poll(() => harness().hubText(`${harness().workspaceUuid}/${uuid}`)).toBe("A state reviewed by another teammate.");
+    const named = await harness().nameRevisionAsOther(uuid, "Reviewed by teammate");
+    expect(named.name?.namer).toMatchObject({ githubUsername: "other-admin", surface: { kind: "mcp", name: "Review client" } });
+    await previous(page);
+    await expect(history(page)).toContainText("“Reviewed by teammate”, named by other-admin via Review client at ");
+    const trigger = history(page).getByRole("button", { name: "Rename revision", exact: true });
+    const input = history(page).getByRole("textbox", { name: "Revision name", exact: true });
+    await activateControl(trigger);
+    await expect(input).toHaveValue("Reviewed by teammate");
+    await input.fill("Cancelled rename");
+    await input.press("Escape");
+    await expect(input).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await expect(history(page)).toContainText("“Reviewed by teammate”, named by other-admin via Review client at ");
+    await trigger.press("Enter");
+    await expect(input).toHaveValue("Reviewed by teammate");
+    await input.fill("Reviewed together");
+    await input.press("Enter");
+    await expect(input).toHaveCount(0);
+    await expect(history(page)).toContainText("“Reviewed together”, named by browser-person in the browser at ");
+    await expect(history(page)).not.toContainText("named by other-admin");
+    await activateControl(trigger);
+    await input.fill("");
+    await input.press("Enter");
+    await expect(input).toHaveCount(0);
+    await expect(history(page)).not.toContainText("Reviewed together");
+    await expect(trigger).toHaveCount(0);
+    await expect(historicalEditor(page)).toContainText("A state reviewed by another teammate.");
   });
 
   test("refuses naming if the displayed state changes after opening the naming dialog", async ({ browser }) => {

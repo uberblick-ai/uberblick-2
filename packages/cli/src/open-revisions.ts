@@ -35,7 +35,7 @@ export async function serveRevisionMutation(
     const mutation = body.operation === "name"
       ? { operation: "name" as const, checksum: body.expectedHash as string, name: body.name as string, surface: { kind: "browser" as const, name: "browser" } }
       : body.operation === "rename"
-        ? { operation: "rename" as const, revisionId: body.revisionId as string, name: body.name as string }
+        ? { operation: "rename" as const, revisionId: body.revisionId as string, name: body.name as string, surface: { kind: "browser" as const, name: "browser" } }
         : { operation: "remove-name" as const, revisionId: body.revisionId as string };
     reply(200, { revision: await mutateDocumentRevision(engine.replicas, body.uuid, mutation) });
   } catch (error) {

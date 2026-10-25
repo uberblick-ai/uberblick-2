@@ -59,7 +59,7 @@ describe("document revision reads", () => {
 
   it.each([
     ["stale-state", /review the current content/], ["invalid-name", /1 to 100/],
-    ["already-named", /already has a name/], ["not-namer", /Only the person/], ["archived", /Archived documents/],
+    ["already-named", /already has a name/], ["archived", /Archived documents/],
   ])("explains a refused %s naming write", async (reason, message) => {
     await expect(client({ reason }, 409).api.name(UUID, "Reviewed", "hash", new AbortController().signal)).rejects.toThrow(message);
   });

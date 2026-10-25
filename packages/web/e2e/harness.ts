@@ -27,7 +27,7 @@
  * restarted upstream rather than a fresh one.
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -38,13 +38,17 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { expect } from "@playwright/test";
 import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } from "@playwright/test";
+import { HocuspocusProvider } from "@hocuspocus/provider";
 import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub } from "@uberblick/hub/team";
 import type { TeamHub as Hub } from "@uberblick/hub/team";
 import type { TeamHubConfig as HubConfig } from "@uberblick/hub/team-config";
 import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
-import { directoryRoom, getBlocks, getMeta, getWorkspaceMainRepository, getWorkspaceName, listTagCatalog, repairDirectoryStub, roomForDoc, seedTagCatalog, settingsRoom } from "@uberblick/schema";
+import { createRevisionResponseReader, directoryRoom, encodeRevisionRequest, getBlocks, getMeta, getWorkspaceMainRepository, getWorkspaceName, listTagCatalog, repairDirectoryStub, roomForDoc, seedTagCatalog, settingsRoom, snapshotRevision } from "@uberblick/schema";
+import type { RevisionEntry, RevisionResponse } from "@uberblick/schema";
+import { wrapToken } from "@uberblick/schema/protocol";
+import { importCredentialKey, mintToken } from "@uberblick/schema/token";
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { preview } from "vite";
 import type { PreviewServer } from "vite";
@@ -239,6 +243,8 @@ export interface Harness {
   removeCurrentHubAdmin(): void;
   changeCurrentWorkspaceRole(role: "member" | "admin"): void;
   changeOtherMemberUsername(username: string): string;
+  /** Name the current state through the other account's authenticated hub connection. */
+  nameRevisionAsOther(uuid: string, name: string): Promise<RevisionEntry>;
   /** Where the browser goes. This run's real `ub open` address. */
   readonly appUrl: string;
   /** The address the latest `ub open` start printed; its launch secret is unused after a restart. */
@@ -534,6 +540,7 @@ export async function startHarness(options: {
     const credentials = join(configDir, "credentials.json");
     let storedCredentials: unknown = { signingSecret: SECRET };
     let access: Harness["access"];
+    let otherAccount: { principalId: string; credentialId: string; keyBytes: Uint8Array } | undefined;
     if (accessRole !== undefined) {
       const { principals, memberships, credentials: registry, hubAdmins } = hub;
       if (principals === undefined || memberships === undefined || registry === undefined) {
@@ -555,6 +562,7 @@ export async function startHarness(options: {
       const other = issue(principal.id, deviceName);
       const legacy = issue(principal.id);
       const foreignDevice = issue(foreign.id, "private-foreign-device");
+      otherAccount = { principalId: foreign.id, credentialId: foreignDevice.record.id, keyBytes: foreignDevice.keyBytes };
       const { replacedAt: _replaced, ...record } = current.record;
       storedCredentials = { hubLogins: { [`http://127.0.0.1:${port}`]: {
         identity: principal, credential: { record, key: Buffer.from(current.keyBytes).toString("base64url") },
@@ -670,6 +678,34 @@ export async function startHarness(options: {
         const { principals } = hub ?? {};
         if (principals === undefined) throw new Error("Workspace member fixture is missing");
         return principals.identify("5678", username).id;
+      },
+      async nameRevisionAsOther(uuid, name) {
+        if (otherAccount === undefined) throw new Error("Other account fixture is missing");
+        const account = otherAccount;
+        const key = await importCredentialKey(account.keyBytes);
+        const document = new Y.Doc();
+        const requestId = randomUUID();
+        const read = createRevisionResponseReader(requestId);
+        const reply: { value: RevisionResponse | null } = { value: null };
+        const provider = new HocuspocusProvider({
+          url: hubUrl, name: roomForDoc(workspaceUuid, uuid), document, awareness: null,
+          token: async () => wrapToken(await mintToken(key, {
+            typ: "room", sub: account.principalId, workspace: workspaceUuid, scope: "read-write",
+            kid: account.credentialId, lifetimeSeconds: 60,
+          })),
+          onStateless: ({ payload }) => { reply.value = read(payload) ?? reply.value; },
+        });
+        try {
+          await expect.poll(() => provider.isSynced).toBe(true);
+          provider.sendStateless(encodeRevisionRequest({ requestId, operation: "name", name,
+            checksum: createHash("sha256").update(snapshotRevision(document).checksum).digest("hex"),
+            surface: { kind: "mcp", name: "Review client" } }));
+          await expect.poll(() => reply.value).not.toBeNull();
+          if (reply.value === null || !reply.value.ok || !("revision" in reply.value)) {
+            throw new Error("Other account could not name the revision");
+          }
+          return reply.value.revision;
+        } finally { provider.destroy(); document.destroy(); }
       },
       ...(secondHubUrl === undefined ? {} : { secondHubUrl }),
       async seedDocument(source) {
