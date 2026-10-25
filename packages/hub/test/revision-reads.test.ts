@@ -48,8 +48,8 @@ function document(): Y.Doc {
   return doc;
 }
 
-function database(revisions = true): HubDatabase {
-  const db = new HubDatabase(":memory:", error => { throw error; }, { revisions, now: () => 1_000 });
+function database(revisions = true, now: () => number = () => 1_000): HubDatabase {
+  const db = new HubDatabase(":memory:", error => { throw error; }, { revisions, now });
   db.open();
   databases.push(db);
   return db;
@@ -176,8 +176,9 @@ describe("revision replies on admitted document rooms", () => {
     expect(destroy).toHaveBeenCalledTimes(3);
   });
 
-  it("opts into naming metadata and enforces write authority and account-owned management", async () => {
-    const db = database();
+  it("opts into naming metadata and lets any writer rename and remove names with current attribution", async () => {
+    let clock = 1_000;
+    const db = database(true, () => clock);
     const room = `${WORKSPACE}/${randomUUID()}`;
     const saved = seed(db, room, "Reviewed content");
     const reads = new RevisionReads({ database: db, assertCurrent() {}, username: id => id });
@@ -209,16 +210,25 @@ describe("revision replies on admitted document rooms", () => {
     const other = receiver();
     (other.connection.context as { principalId: string }).principalId = "other-account";
     expect(await request(reads, other.connection, room, { operation: "list", includeNames: true }, other.sent))
-      .toMatchObject({ revisions: [{ name: { canManage: false } }] });
+      .toMatchObject({ revisions: [{ name: { canManage: true } }] });
     for (const operation of ["rename", "remove-name"] as const) {
-      expect(await request(reads, other.connection, room, { operation, revisionId: saved.id, name: "Other" }, other.sent))
-        .toMatchObject({ ok: false, error: "not-namer" });
       expect(await request(reads, readOnly.connection, room, { operation, revisionId: saved.id, name: "Other" }, readOnly.sent))
         .toMatchObject({ ok: false, error: "forbidden" });
     }
-    expect(await request(reads, namer.connection, room, { operation: "rename", revisionId: saved.id, name: "Renamed" }, namer.sent))
-      .toMatchObject({ revision: { name: { ...name, text: "Renamed" } } });
-    expect(await request(reads, namer.connection, room, { operation: "remove-name", revisionId: saved.id }, namer.sent))
+    expect(db.revisions.names(room).get(saved.id)?.text).toBe("Reviewed");
+    clock = 2_000;
+    expect(await request(reads, other.connection, room, { operation: "rename", revisionId: saved.id, name: "Renamed",
+      surface: { kind: "browser", name: "browser" } }, other.sent))
+      .toMatchObject({ ok: true, revision: { name: { text: "Renamed", namedAt: 2_000, canManage: true,
+        namer: { githubUsername: "other-account", surface: { kind: "browser", name: "browser" } } } } });
+    expect(await request(reads, namer.connection, room, { operation: "list", includeNames: true }, namer.sent))
+      .toMatchObject({ revisions: [{ name: { text: "Renamed", namedAt: 2_000, canManage: true,
+        namer: { githubUsername: "other-account", surface: { kind: "browser", name: "browser" } } } }] });
+    clock = 3_000;
+    expect(await request(reads, namer.connection, room, { operation: "rename", revisionId: saved.id, name: "Legacy" }, namer.sent))
+      .toMatchObject({ ok: true, revision: { name: { text: "Legacy", namedAt: 3_000,
+        namer: { githubUsername: "reader", surface: { kind: "unknown", name: "unknown" } } } } });
+    expect(await request(reads, other.connection, room, { operation: "remove-name", revisionId: saved.id }, other.sent))
       .toMatchObject({ revision: { id: saved.id, endedAt: 1_000, name: null } });
     const fetched = await request(reads, namer.connection, room, { operation: "get", revisionId: saved.id }, namer.sent);
     if (!("state" in fetched)) throw new Error("expected historical state");
@@ -521,6 +531,8 @@ it("records and serves team-hub history to read-only members with current userna
       canManage: true, namedAt: expect.any(Number) }, endedAt: expect.any(Number) } });
   expect(await read({ operation: "list", includeNames: true, includeTitles: true }))
     .toMatchObject({ revisions: [{ title: "Team historical content", name: { canManage: false } }] });
-  expect(await read({ operation: "rename", revisionId: id, name: "Renamed across surfaces" }, 0))
-    .toMatchObject({ revision: { id, name: { text: "Renamed across surfaces", namer: { surface: { kind: "browser" } } } } });
+  expect(await read({ operation: "rename", revisionId: id, name: "Renamed across surfaces",
+    surface: { kind: "mcp", name: "Claude Code" } }, 0))
+    .toMatchObject({ revision: { id, name: { text: "Renamed across surfaces",
+      namer: { surface: { kind: "mcp", name: "Claude Code" } } } } });
 });

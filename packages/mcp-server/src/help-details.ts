@@ -124,8 +124,9 @@ export const toolHelpDetails = {
     "The whole list is returned without paging. An empty list means the hub confirmed there are no revisions; " +
     "unavailable history is a failure, never an empty list.\n\n" +
     "Each entry has `id`, `author`, `startedAt`, `endedAt` and `name`. A name is null or " +
-    "`{text, namer, namedAt, canManage}`; its namer has the same account/surface shape as author. " +
-    "`canManage` identifies whether this account may manage the name in the web. The author is " +
+    "`{text, namer, namedAt, canManage}`; its namer has the same account/surface shape as author and identifies who set its current text. " +
+    "`canManage` is true when this account has write access and the document is not archived, whoever named it. " +
+    "A rename records the renaming account, surface and hub time as `namer` and `namedAt`. The author is " +
     "`{githubUsername, surface: {kind, name}}`, using the author's current GitHub username, or null when unknown. " +
     "`startedAt`, `endedAt` and `name.namedAt` are ISO 8601 UTC strings, such as `2026-10-21T18:36:13.213Z`: " +
     "null `startedAt` means an unknown start for content from before history began, " +
@@ -142,7 +143,7 @@ export const toolHelpDetails = {
     "with revision_stale_state; synchronize and reread before naming. Requires write access to a live " +
     "team-hub document. Naming closes the current stretch without changing its author or document content, " +
     "and records the naming account, MCP client surface and hub time. An already named state refuses " +
-    "with revision_already_named and existingName. Renaming and removal are available to the namer in the web.\n\n" +
+    "with revision_already_named and existingName. Anyone with write access can rename or remove the name in the web while the document is not archived.\n\n" +
     "Success returns the named `revision`, `applied: true` and `synced: true`: the hub applied and " +
     "acknowledged its naming transaction. This hub-only metadata writes no local document log. A known " +
     "refusal reports applied: false. If a sent request loses its reply, revision_naming_outcome_unknown " +

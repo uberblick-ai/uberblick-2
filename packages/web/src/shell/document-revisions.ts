@@ -15,7 +15,6 @@ const unavailableMessages = {
   "stale-state": "This document has changed or is not synced. Wait for sync, review the current content and try naming it again.",
   "invalid-name": "Use a name of 1 to 100 characters on one line.",
   "already-named": "This revision already has a name. Open history to see it.",
-  "not-namer": "Only the person who named this revision can change its name.",
   archived: "Archived documents are read-only. Restore the document before changing revision names.",
   "restore-outcome-unknown": "The restore may have completed. Review the latest document and history before trying again.",
 };

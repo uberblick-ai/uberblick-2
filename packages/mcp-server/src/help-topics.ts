@@ -629,8 +629,7 @@ Failures are marked \`isError: true\` and omit structuredContent, so success-sch
 | \`revision_stale_state\` | Synchronize, read and review the current state before naming or restoring. |
 | \`revision_restore_outcome_unknown\` | Read list_revisions and get_doc before retrying a restore whose reply was lost. |
 | \`revision_invalid_name\` | Supply 1 to 100 characters on one line. |
-| \`revision_already_named\` | Read existingName; its namer can rename or remove it in the web. |
-| \`revision_not_namer\` | Ask the naming account to manage the name in the web. |
+| \`revision_already_named\` | Read existingName; anyone with write access can rename or remove it in the web while the document is not archived. |
 | \`revision_naming_outcome_unknown\` | A sent request may have applied. Read list_revisions before retrying; applied is null. |
 
 An empty history is returned only when the hub confirms it has no revisions. Archived documents remain readable.

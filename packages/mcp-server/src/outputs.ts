@@ -269,8 +269,8 @@ const revisionAuthor = z.object({
 }).strict().nullable();
 const revisionName = z.object({
   text: z.string(),
-  namer: revisionAuthor.describe("Account and surface that named the revision; separate from its author."),
-  namedAt: z.string().describe("Naming time as an ISO 8601 UTC string; renaming preserves this time."),
+  namer: revisionAuthor.describe("Account and surface that set the name's current text; separate from the revision's author."),
+  namedAt: z.string().describe("Hub time when the name's current text was set, as an ISO 8601 UTC string; updated on rename."),
   canManage: z.boolean().describe("Whether this account may rename or remove this name."),
 }).strict().nullable();
 const revisionEntry = z.object({
