@@ -1,6 +1,23 @@
 import { expect, it } from "vitest";
-import { createRevisionResponseReader, encodeRevisionRequest, encodeRevisionResponseFrames,
-  readRevisionRequest, readRevisionResponse, validRevisionName, type RevisionResponse } from "../src/index.js";
+import { createRevisionResponseReader, encodeRevisionCatalogChanged, encodeRevisionRequest, encodeRevisionResponseFrames,
+  readOriginAck, readRevisionCatalogChanged, readRevisionRequest, readRevisionResponse, validRevisionName,
+  type RevisionResponse } from "../src/index.js";
+
+it("encodes only a catalog change and keeps it separate from addressed traffic", () => {
+  const notice = encodeRevisionCatalogChanged();
+  expect(notice).toBe('{"type":"uberblick:revision-catalog-changed"}');
+  expect(readRevisionCatalogChanged(notice)).toEqual({ type: "uberblick:revision-catalog-changed" });
+  expect(readRevisionRequest(notice)).toBeNull();
+  expect(readRevisionResponse(notice)).toBeNull();
+  expect(createRevisionResponseReader("one")(notice)).toBeNull();
+  expect(readOriginAck(notice)).toBeNull();
+  for (const raw of ["", "{", "null", "[]", '"uberblick:revision-catalog-changed"', "{}",
+    '{"type":null}', '{"type":"settings-generation","generation":1}',
+    encodeRevisionRequest({ requestId: "one", operation: "list" }),
+    encodeRevisionResponseFrames({ requestId: "one", ok: true, revisions: [] })[0]!]) {
+    expect(readRevisionCatalogChanged(raw)).toBeNull();
+  }
+});
 
 it("accepts only bounded, addressed revision requests", () => {
   expect(readRevisionRequest(encodeRevisionRequest({ requestId: "one", operation: "get", revisionId: "revision" })))
@@ -158,6 +175,7 @@ it("reassembles large snapshots and lists without exceeding the WebSocket frame 
     let result: RevisionResponse | null = null;
     for (const frame of frames.toReversed()) {
       expect(other(frame)).toBeNull();
+      expect(read(encodeRevisionCatalogChanged())).toBeNull();
       result = read(frame);
     }
     if ("state" in response) {

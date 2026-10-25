@@ -12,6 +12,7 @@ import {
   getMeta,
   getMetaMap,
   readOriginAck,
+  readRevisionCatalogChanged,
   type RevisionRequest,
   type RevisionResponse,
   snapshotRevision,
@@ -44,8 +45,8 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-function document(): Y.Doc {
-  const doc = new Y.Doc();
+function document(): Document {
+  const doc = new Document(randomUUID());
   documents.push(doc);
   return doc;
 }
@@ -284,6 +285,7 @@ describe("revision replies on admitted document rooms", () => {
   });
 
   it("restores by revision ID under current write authority and returns the closed attributed entry", async () => {
+    const broadcast = vi.spyOn(Document.prototype, "broadcastStateless");
     const db = database();
     const room = `${WORKSPACE}/${randomUUID()}`;
     const saved = seed(db, room, "Past title");
@@ -312,6 +314,7 @@ describe("revision replies on admitted document rooms", () => {
     expect(restored.revision.id).not.toBe(saved.id);
     expect(await request(reads, writer.connection, room, { ...restore, checksum: checksum() }, writer.sent, saved.doc))
       .toEqual({ ...restored, requestId: expect.any(String), applied: false });
+    expect(broadcast).not.toHaveBeenCalled();
   });
 
   it("reads titles from active and closed snapshots only when a list opts in", async () => {
@@ -383,6 +386,7 @@ describe("revision replies on admitted document rooms", () => {
   });
 
   it("opts into naming metadata and lets any writer rename and remove names with current attribution", async () => {
+    const broadcast = vi.spyOn(Document.prototype, "broadcastStateless");
     let clock = 1_000;
     const db = database(true, () => clock);
     const room = `${WORKSPACE}/${randomUUID()}`;
@@ -399,6 +403,11 @@ describe("revision replies on admitted document rooms", () => {
       .toMatchObject({ ok: false, error: "stale-state" });
     expect(await request(reads, namer.connection, room, { ...naming, name: "" }, namer.sent, saved.doc))
       .toMatchObject({ ok: false, error: "invalid-name" });
+    for (const operation of ["rename", "remove-name"] as const) {
+      expect(await request(reads, namer.connection, room, { operation, revisionId: "missing", name: "New" }, namer.sent, saved.doc))
+        .toMatchObject({ ok: false, error: "revision-not-found" });
+    }
+    expect(broadcast).not.toHaveBeenCalled();
     const named = await request(reads, namer.connection, room, naming, namer.sent, saved.doc);
     const name = { text: "Reviewed", namer: { githubUsername: "reader", surface: { kind: "browser", name: "browser" } },
       namedAt: 1_000, canManage: true };
@@ -406,6 +415,7 @@ describe("revision replies on admitted document rooms", () => {
       author: { githubUsername: "ben", surface: { kind: "mcp", name: "Claude Code" } } } });
     expect(await request(reads, namer.connection, room, naming, namer.sent, saved.doc))
       .toMatchObject({ ok: false, error: "already-named", name });
+    expect(broadcast).toHaveBeenCalledTimes(1);
     const legacy = await request(reads, namer.connection, room, { operation: "list" }, namer.sent);
     if (!("revisions" in legacy)) throw new Error("expected list");
     expect(Object.keys(legacy.revisions[0]!).sort()).toEqual(["author", "checksum", "endedAt", "final", "id", "startedAt"]);
@@ -421,6 +431,7 @@ describe("revision replies on admitted document rooms", () => {
       expect(await request(reads, readOnly.connection, room, { operation, revisionId: saved.id, name: "Other" }, readOnly.sent))
         .toMatchObject({ ok: false, error: "forbidden" });
     }
+    expect(broadcast).toHaveBeenCalledTimes(1);
     expect(db.revisions.names(room).get(saved.id)?.text).toBe("Reviewed");
     clock = 2_000;
     expect(await request(reads, other.connection, room, { operation: "rename", revisionId: saved.id, name: "Renamed",
@@ -436,9 +447,61 @@ describe("revision replies on admitted document rooms", () => {
         namer: { githubUsername: "reader", surface: { kind: "unknown", name: "unknown" } } } } });
     expect(await request(reads, other.connection, room, { operation: "remove-name", revisionId: saved.id }, other.sent))
       .toMatchObject({ revision: { id: saved.id, endedAt: 1_000, name: null } });
+    expect(broadcast).toHaveBeenCalledTimes(4);
     const fetched = await request(reads, namer.connection, room, { operation: "get", revisionId: saved.id }, namer.sent);
     if (!("state" in fetched)) throw new Error("expected historical state");
     expect(fetched.state).toEqual(db.revisions.get(room, saved.id));
+  });
+
+  it.each(["name", "rename", "remove-name"] as const)("sends no notice when %s storage rolls back", async operation => {
+    const db = database();
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const saved = seed(db, room, "Unchanged content");
+    const checksum = createHash("sha256").update(snapshotRevision(saved.doc).checksum).digest("hex");
+    if (operation !== "name") {
+      db.revisions.name(room, saved.doc, checksum, "Original", {
+        principalId: "ben", surface: { kind: "browser", name: "browser" },
+      });
+    }
+    const before = db.revisions.list(room);
+    const names = db.revisions.names(room);
+    const sqlOperation = operation === "name" ? "INSERT" : operation === "rename" ? "UPDATE" : "DELETE";
+    db.connection.exec(`CREATE TRIGGER fail_name BEFORE ${sqlOperation} ON document_revision_names
+      BEGIN SELECT RAISE(ABORT, 'name storage failed'); END`);
+    const broadcast = vi.spyOn(saved.doc, "broadcastStateless");
+    const reads = new RevisionReads({ database: db, assertCurrent() {}, username: id => id });
+    const writer = receiver();
+    expect(await request(reads, writer.connection, room, { operation, checksum, revisionId: saved.id, name: "New",
+      surface: { kind: "browser", name: "browser" } }, writer.sent, saved.doc))
+      .toMatchObject({ ok: false, error: "unavailable" });
+    expect(db.revisions.names(room)).toEqual(names);
+    expect(db.revisions.list(room)).toEqual(before);
+    expect(broadcast).not.toHaveBeenCalled();
+  });
+
+  it.each(["name", "rename", "remove-name"] as const)("notifies after %s commits even if its reply fails", async operation => {
+    const db = database();
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const saved = seed(db, room, "Committed content");
+    const checksum = createHash("sha256").update(snapshotRevision(saved.doc).checksum).digest("hex");
+    if (operation !== "name") {
+      db.revisions.name(room, saved.doc, checksum, "Original", {
+        principalId: "ben", surface: { kind: "browser", name: "browser" },
+      });
+    }
+    const observed: Array<{ payload: string; text: string | undefined; inTransaction: boolean }> = [];
+    vi.spyOn(saved.doc, "broadcastStateless").mockImplementation(payload => {
+      observed.push({ payload, text: db.revisions.names(room).get(saved.id)?.text, inTransaction: db.connection.isTransaction });
+    });
+    vi.spyOn(db.revisions, "list").mockImplementation(() => { throw new Error("reply unavailable"); });
+    const reads = new RevisionReads({ database: db, assertCurrent() {}, username: id => id });
+    const writer = receiver();
+    expect(await request(reads, writer.connection, room, { operation, checksum, revisionId: saved.id, name: "New",
+      surface: { kind: "browser", name: "browser" } }, writer.sent, saved.doc))
+      .toMatchObject({ ok: false, error: "unavailable" });
+    expect(observed).toEqual([{ payload: '{"type":"uberblick:revision-catalog-changed"}',
+      text: operation === "remove-name" ? undefined : "New", inTransaction: false }]);
+    expect(db.revisions.names(room).get(saved.id)?.text).toBe(operation === "remove-name" ? undefined : "New");
   });
 
   it("refuses writes to archived documents from live and stored directory state while keeping names readable", async () => {
@@ -451,6 +514,7 @@ describe("revision replies on admitted document rooms", () => {
       checksum: createHash("sha256").update(snapshotRevision(saved.doc).checksum).digest("hex"),
       surface: { kind: "browser", name: "browser" } };
     expect(await request(reads, reader.connection, room, naming, reader.sent, saved.doc)).toMatchObject({ ok: true });
+    const broadcast = vi.spyOn(Document.prototype, "broadcastStateless");
     const directory = new Document(directoryRoom(WORKSPACE));
     documents.push(directory);
     await db.onLoadDocument({ document: directory, documentName: directoryRoom(WORKSPACE) });
@@ -466,6 +530,7 @@ describe("revision replies on admitted document rooms", () => {
     await db.onStoreDocument({ document: directory, documentName: directoryRoom(WORKSPACE) });
     directory.destroy();
     expect(await request(reads, reader.connection, room, naming, reader.sent, saved.doc)).toMatchObject({ ok: false, error: "archived" });
+    expect(broadcast).not.toHaveBeenCalled();
   });
 
   it("serves read-only readers newest first, resolving current usernames and preserving unknown authors", async () => {
@@ -528,6 +593,7 @@ describe("revision replies on admitted document rooms", () => {
   });
 
   it("checks current authority before reading or resolving historical authors", async () => {
+    const broadcast = vi.spyOn(Document.prototype, "broadcastStateless");
     const db = database();
     const room = `${WORKSPACE}/${randomUUID()}`;
     const saved = seed(db, room, "Never disclosed");
@@ -545,11 +611,15 @@ describe("revision replies on admitted document rooms", () => {
     const getSnapshot = vi.spyOn(db.revisions, "getSnapshot");
     for (const value of [{ operation: "list" as const, includeTitles: true as const },
       { operation: "list" as const, includeTitles: true as const, ifVersion: cached.version },
-      { operation: "get" as const, revisionId: saved.id }]) {
+      { operation: "get" as const, revisionId: saved.id },
+      { operation: "name" as const, checksum: "a".repeat(64), name: "Denied", surface: { kind: "browser", name: "browser" } },
+      { operation: "rename" as const, revisionId: saved.id, name: "Denied" },
+      { operation: "remove-name" as const, revisionId: saved.id }]) {
       expect(await request(reads, reader.connection, room, value, reader.sent))
         .toMatchObject({ ok: false, error: "forbidden" });
     }
-    expect(assertCurrent).toHaveBeenCalledTimes(3);
+    expect(assertCurrent).toHaveBeenCalledTimes(6);
+    expect(broadcast).not.toHaveBeenCalled();
     expect(list).not.toHaveBeenCalled();
     expect(get).not.toHaveBeenCalled();
     expect(getSnapshot).not.toHaveBeenCalled();
@@ -558,6 +628,7 @@ describe("revision replies on admitted document rooms", () => {
   });
 
   it("distinguishes signed-out and unsupported rooms from empty history", async () => {
+    const broadcast = vi.spyOn(Document.prototype, "broadcastStateless");
     const db = database(false);
     const reads = new RevisionReads({ database: db, assertCurrent() {}, username: () => "ben" });
     const room = `${WORKSPACE}/${randomUUID()}`;
@@ -570,9 +641,16 @@ describe("revision replies on admitted document rooms", () => {
     const enabled = new RevisionReads({ database: database(), assertCurrent() {}, username: () => "ben" });
     expect(await request(enabled, signedIn.connection, directoryRoom(WORKSPACE), { operation: "list" }, signedIn.sent))
       .toMatchObject({ ok: false, error: "unsupported" });
+    const naming = { operation: "name" as const, checksum: "a".repeat(64), name: "Denied",
+      surface: { kind: "browser", name: "browser" } };
+    expect(await request(reads, local.connection, room, naming, local.sent)).toMatchObject({ error: "forbidden" });
+    expect(await request(reads, signedIn.connection, room, naming, signedIn.sent)).toMatchObject({ error: "unsupported" });
+    expect(await request(enabled, signedIn.connection, directoryRoom(WORKSPACE), naming, signedIn.sent)).toMatchObject({ error: "unsupported" });
+    expect(broadcast).not.toHaveBeenCalled();
   });
 
   it.each(["open", "decided", "rejected", "withdrawn"] as const)("refuses every revision operation for %s decisions before directory updates and while archived", async status => {
+    const broadcast = vi.spyOn(Document.prototype, "broadcastStateless");
     const db = database();
     const uuid = randomUUID();
     const room = `${WORKSPACE}/${uuid}`;
@@ -622,9 +700,11 @@ describe("revision replies on admitted document rooms", () => {
       }
     }
     for (const access of accesses) expect(access).not.toHaveBeenCalled();
+    expect(broadcast).not.toHaveBeenCalled();
   });
 
   it("keeps archived history readable, then returns deleted without a stale snapshot", async () => {
+    const broadcast = vi.spyOn(Document.prototype, "broadcastStateless");
     const db = database();
     const uuid = randomUUID();
     const room = `${WORKSPACE}/${uuid}`;
@@ -642,11 +722,15 @@ describe("revision replies on admitted document rooms", () => {
     reader.sent.length = 0;
     deleteDirectoryEntry(directory, uuid);
     expect(db.isDeletedRoom(room)).toBe(true);
-    for (const value of [{ operation: "list" as const }, { operation: "get" as const, revisionId: saved.id }]) {
+    for (const value of [{ operation: "list" as const }, { operation: "get" as const, revisionId: saved.id },
+      { operation: "name" as const, checksum: "a".repeat(64), name: "Denied", surface: { kind: "browser", name: "browser" } },
+      { operation: "rename" as const, revisionId: saved.id, name: "Denied" },
+      { operation: "remove-name" as const, revisionId: saved.id }]) {
       expect(await request(reads, reader.connection, room, value, reader.sent))
         .toMatchObject({ ok: false, error: "deleted" });
     }
     expect(reader.sent.join("")).not.toContain("Deleted historical content");
+    expect(broadcast).not.toHaveBeenCalled();
   });
 
   it("chunks a large snapshot below the frame ceiling and assembles its exact bytes", async () => {
@@ -664,7 +748,7 @@ describe("revision replies on admitted document rooms", () => {
   });
 });
 
-it("records and serves team-hub history to read-only members with current usernames and private replies", async () => {
+it("notifies only the page's connections after naming and revalidates each reader's catalog while replies stay private", async () => {
   const hub = await createTeamHub({
     address: "127.0.0.1", port: 0, databasePath: ":memory:",
     github: { clientId: "Iv1.0123456789abcdef", fetch: vi.fn(() => { throw new Error("unexpected GitHub request"); }) },
@@ -677,24 +761,25 @@ it("records and serves team-hub history to read-only members with current userna
   memberships.grant({ workspaceId: WORKSPACE, principalId: author.id, role: "admin" });
   const issued = issueCredential(credentials, { principalId: author.id, deviceId: "computer", workspaces: [WORKSPACE] });
   const room = `${WORKSPACE}/${randomUUID()}`;
+  const otherRoom = `${WORKSPACE}/${randomUUID()}`;
   const key = await importCredentialKey(issued.keyBytes);
   const tokens = await Promise.all((["read-write", "read-only"] as const).map(scope => mintToken(key, {
     typ: "room", sub: author.id, workspace: WORKSPACE, scope, kid: issued.record.id, lifetimeSeconds: 60,
   })));
-  const arrivals: string[][] = [[], []];
+  const arrivals: string[][] = [[], [], [], []];
   const clients = arrivals.map((received, index) => {
     const doc = document();
     const provider = new HocuspocusProvider({
-      url: `ws://127.0.0.1:${hub.port}`, name: room, document: doc,
-      token: wrapToken(tokens[index] ?? "", SYNC_PROTOCOL_VERSION), awareness: null,
+      url: `ws://127.0.0.1:${hub.port}`, name: index === 3 ? otherRoom : room, document: doc,
+      token: wrapToken(tokens[index === 1 ? 1 : 0] ?? "", SYNC_PROTOCOL_VERSION), awareness: null,
       onStateless: ({ payload }) => { received.push(payload); },
     });
     providers.push(provider);
     return provider;
   });
-  await waitUntil("both admitted rooms to synchronize", () => clients.every(client => client.synced));
+  await waitUntil("all admitted rooms to synchronize", () => clients.every(client => client.synced));
   const connections = [...(hub.hocuspocus.documents.get(room)?.getConnections() ?? [])];
-  expect(connections).toHaveLength(2);
+  expect(connections).toHaveLength(3);
   expect(connections.filter(connection => connection.readOnly)).toHaveLength(1);
   const authored = document();
   getMetaMap(authored).set("title", "Team historical content");
@@ -736,18 +821,51 @@ it("records and serves team-hub history to read-only members with current userna
   expect(getMeta(revision).title).toBe("Team historical content");
   expect(compareRevisions(authored, revision).changed).toBe(false);
   expect(arrivals[0]).toEqual([]);
+  expect(arrivals[2]).toEqual([]);
+  expect(arrivals[3]).toEqual([]);
   const naming: Omit<RevisionRequest, "requestId"> = { operation: "name", name: "Reviewed in browser",
     checksum: createHash("sha256").update(snapshotRevision(authored).checksum).digest("hex"),
     surface: { kind: "browser", name: "browser" } };
   expect(await read(naming)).toMatchObject({ ok: false, error: "forbidden" });
-  expect(await read(naming, 0)).toMatchObject({ ok: true, revision: { id,
+  expect(arrivals.flat().filter(frame => readRevisionCatalogChanged(frame) !== null)).toEqual([]);
+  async function change(value: Omit<RevisionRequest, "requestId">, name: string | null): Promise<RevisionResponse> {
+    const cached = await Promise.all([0, 1, 2].map(index => read({ operation: "list", includeNames: true, includeTitles: true }, index)));
+    const counts = arrivals.map(received => received.filter(frame => readRevisionCatalogChanged(frame) !== null).length);
+    const response = await read(value, 0);
+    await waitUntil("one catalog notice on every connection of this page", () => [0, 1, 2].every(index =>
+      arrivals[index]?.filter(frame => readRevisionCatalogChanged(frame) !== null).length === (counts[index] ?? 0) + 1));
+    for (const [index, previous] of cached.entries()) {
+      if (!("revisions" in previous) || previous.version === undefined) throw new Error("missing catalog version");
+      const fresh = await read({ operation: "list", includeNames: true, includeTitles: true, ifVersion: previous.version }, index);
+      expect(fresh).toMatchObject({ ok: true, revisions: [{ id, title: "Team historical content",
+        name: name === null ? null : { text: name, canManage: index !== 1 } }] });
+      if (!("revisions" in fresh)) throw new Error("expected changed catalog");
+      expect(fresh.version).not.toBe(previous.version);
+    }
+    expect(arrivals[3]).toEqual([]);
+    for (const received of arrivals) {
+      for (const frame of received.filter(frame => readRevisionCatalogChanged(frame) !== null)) {
+        expect(JSON.parse(frame)).toEqual({ type: "uberblick:revision-catalog-changed" });
+      }
+    }
+    return response;
+  }
+  expect(await change(naming, "Reviewed in browser")).toMatchObject({ ok: true, revision: { id,
     author: { githubUsername: "after-rename", surface: { kind: "mcp", name: "Claude Code" } },
     name: { text: "Reviewed in browser", namer: { githubUsername: "after-rename", surface: { kind: "browser", name: "browser" } },
       canManage: true, namedAt: expect.any(Number) }, endedAt: expect.any(Number) } });
   expect(await read({ operation: "list", includeNames: true, includeTitles: true }))
     .toMatchObject({ revisions: [{ title: "Team historical content", name: { canManage: false } }] });
-  expect(await read({ operation: "rename", revisionId: id, name: "Renamed across surfaces",
-    surface: { kind: "mcp", name: "Claude Code" } }, 0))
+  expect(await change({ operation: "rename", revisionId: id, name: "Renamed across surfaces",
+    surface: { kind: "mcp", name: "Claude Code" } }, "Renamed across surfaces"))
     .toMatchObject({ revision: { id, name: { text: "Renamed across surfaces",
       namer: { surface: { kind: "mcp", name: "Claude Code" } } } } });
+  expect(await change({ operation: "remove-name", revisionId: id }, null)).toMatchObject({ revision: { id, name: null } });
+  expect(await read({ operation: "remove-name", revisionId: id }, 0)).toMatchObject({ error: "revision-not-found" });
+  // A reply on each socket is a barrier for all preceding stateless frames.
+  await Promise.all([0, 1, 2, 3].map(index => read({ operation: "list" }, index)));
+  for (const received of arrivals.slice(0, 3)) {
+    expect(received.filter(frame => readRevisionCatalogChanged(frame) !== null)).toHaveLength(3);
+  }
+  expect(arrivals[3]?.filter(frame => readRevisionCatalogChanged(frame) !== null)).toEqual([]);
 });
