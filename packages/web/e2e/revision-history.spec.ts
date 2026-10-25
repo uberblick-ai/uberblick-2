@@ -799,9 +799,19 @@ test.describe("document history through ub open", () => {
     const peer = await openApp(browser, new URL(page.url()).pathname, { readySelector: ".ub-editor .ProseMirror" });
     await expect.poll(() => liveText(peer)).toBe("The newer document content.");
     await previous(page);
+    const restore = page.getByRole("button", { name: "Restore this version", exact: true });
+    await expect(restore).toBeDisabled();
+    await expect(restore).toHaveAccessibleDescription("This is the current version.");
+    const sinceDrawer = await showHistoryList(page);
+    await activateControl(historyList(page).getByRole("listitem").filter({ hasText: "Baseline to restore" })
+      .getByRole("button", { name: "Changes since this name", exact: true }));
+    await closeHistoryList(page, sinceDrawer);
+    await expect(history(page)).toContainText("compared with “Baseline to restore”");
+    await expect(restore).toBeDisabled();
+    await expect(restore).toHaveAccessibleDescription("This is the current version.");
+    const fixedComparison = new URL(page.url()).pathname;
     await previous(page);
     await expect(history(page).getByRole("button", { name: /Copy revision/ })).toHaveText("Baseline to restore");
-    const restore = page.getByRole("button", { name: "Restore this version", exact: true });
     await expect(restore).toBeEnabled();
     if (browserName === "chromium") {
       await restore.focus();
@@ -815,16 +825,25 @@ test.describe("document history through ub open", () => {
     await expect(page.locator(".ub-title")).toHaveValue(title);
     await previous(page);
     await expect(history(page)).toContainText("browser-person in the browser");
+    await expect(restore).toBeDisabled();
+    await expect(restore).toHaveAccessibleDescription("This is the current version.");
     const drawer = await showHistoryList(page);
     const count = await historyList(page).getByRole("listitem").count();
+    await activateControl(historyList(page).getByRole("button", { name: /Baseline to restore/ }));
     await closeHistoryList(page, drawer);
+    await expect(restore).toBeEnabled();
     await activateControl(restore);
     await expect(page.getByText("The document already has this version. Nothing changed.", { exact: true })).toBeVisible();
     const noOpDrawer = await showHistoryList(page);
     await expect(historyList(page).getByRole("listitem")).toHaveCount(count);
     await closeHistoryList(page, noOpDrawer);
-    await previous(page);
+    // This shared comparison still names its original After, even after the restore added a newer revision.
+    await page.goto(new URL(fixedComparison, harness().appUrl).href);
     await expect(history(page).getByRole("button", { name: /Copy revision/ })).toHaveText("Before the restore");
+    await expect(history(page)).toContainText("compared with “Baseline to restore”");
+    await expect(historicalEditor(page).locator('[data-revision-change="added"]').filter({ hasText: "newer" })).toHaveText("newer");
+    await expect(earlierSide(page).locator('[data-revision-change="removed"]').filter({ hasText: "earlier" })).toHaveText("earlier");
+    await expect(restore).toBeEnabled();
     await activateControl(restore);
     await expect.poll(() => liveText(peer)).toBe("The newer document content.");
     await expect(peer.locator(".ub-title")).toHaveValue(`${title} newer`);
@@ -851,23 +870,127 @@ test.describe("document history through ub open", () => {
     await activateControl(editor(page));
     await page.keyboard.type("State reviewed when history opens.");
     await expect.poll(() => harness().hubText(room)).toBe("State reviewed when history opens.");
+    await activateControl(history(page).getByRole("button", { name: "Name current revision", exact: true }));
+    const name = history(page).getByRole("textbox", { name: "Revision name", exact: true });
+    await name.fill("Reviewed restore target");
+    await name.press("Enter");
+    await expect(name).toHaveCount(0);
+    await selectPositions(editor(page), 1);
+    await page.keyboard.type("Current state: ");
+    await expect.poll(() => harness().hubText(room)).toBe("Current state: State reviewed when history opens.");
     const peer = await openApp(browser, new URL(page.url()).pathname, { readySelector: ".ub-editor .ProseMirror" });
-    await expect.poll(() => liveText(peer)).toBe("State reviewed when history opens.");
+    await expect.poll(() => liveText(peer)).toBe("Current state: State reviewed when history opens.");
     await previous(page);
+    await previous(page);
+    await expect(history(page).getByRole("button", { name: /Copy revision/ })).toHaveText("Reviewed restore target");
     await expect(page.getByRole("button", { name: "Restore this version", exact: true })).toBeEnabled();
     await peer.locator(".ub-title").fill(`${title} collaborator`);
     await selectPositions(editor(peer), 1);
     await peer.keyboard.type("Newer changes: ");
-    await expect.poll(() => harness().hubText(room)).toBe("Newer changes: State reviewed when history opens.");
+    await expect.poll(() => harness().hubText(room)).toBe("Newer changes: Current state: State reviewed when history opens.");
     await activateControl(page.getByRole("button", { name: "Restore this version", exact: true }));
     await expect(page.getByText("This document changed. Review the newer changes in history and try again.", { exact: true })).toBeVisible();
-    await expect(historicalEditor(page)).toContainText("Newer changes: State reviewed when history opens.");
+    const drawer = await showHistoryList(page);
+    const current = historyList(page).getByRole("button", { name: /Current version/ });
+    await activateControl(current);
+    await expect(current).toHaveAttribute("aria-current", "true");
+    await closeHistoryList(page, drawer);
+    await expect(historicalEditor(page)).toContainText("Newer changes: Current state: State reviewed when history opens.");
     await expect(page.locator(".ub-revision-title")).toHaveText(`${title} collaborator`);
-    await showHistoryList(page);
-    await expect(historyList(page).getByRole("button", { name: /Current version/ })).toHaveAttribute("aria-current", "true");
     await backToNow(page);
-    await expect.poll(() => liveText(page)).toBe("Newer changes: State reviewed when history opens.");
+    await expect.poll(() => liveText(page)).toBe("Newer changes: Current state: State reviewed when history opens.");
     await expect(page.locator(".ub-title")).toHaveValue(`${title} collaborator`);
+  });
+
+  test("restore stays on the After label with compact geometry, touch reach and native keyboard order", { tag: "@webkit-touch" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane",
+      contextOptions: { viewport: { width: 1440, height: 640 }, reducedMotion: "reduce" } });
+    const title = docTitle("Restore comparison placement");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "newest", title, author: null, startedAt: 3_000, endedAt: null },
+      { id: "latest", title, author: null, startedAt: 2_000, endedAt: 3_000 },
+      { id: "earlier", title, author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], { ...toggleNavigationHistory(uuid, title, false), newest: savedState(uuid, title, "Current live version.") });
+    await previous(page);
+    const restore = page.getByRole("button", { name: "Restore this version", exact: true });
+    const header = page.locator(".ub-revision-header");
+    const split = page.locator(".ub-revision-split");
+    await expect(split).toBeVisible();
+    await expect(split.getByRole("button", { name: "Restore this version", exact: true })).toBeDisabled();
+    await expect(restore).toHaveAccessibleDescription("This is the current version.");
+    await expect(header.getByRole("button", { name: "Restore this version", exact: true })).toHaveCount(0);
+    const currentReason = page.getByText("This is the current version.", { exact: true });
+    expect((await currentReason.boundingBox())?.height).toBeLessThanOrEqual(1);
+    const currentHeaderHeight = (await header.boundingBox())?.height;
+    // Disabling the current version also holds in the one-column header fallback.
+    await page.setViewportSize({ width: 860, height: 640 });
+    await expect(split).toHaveCount(0);
+    await expect(header.getByRole("button", { name: "Restore this version", exact: true })).toBeDisabled();
+    await expect(restore).toHaveAccessibleDescription("This is the current version.");
+    expect((await currentReason.boundingBox())?.height).toBeLessThanOrEqual(1);
+    await page.setViewportSize({ width: 1440, height: 640 });
+    await expect(split).toBeVisible();
+    await previous(page);
+    await expect(restore).toBeEnabled();
+    expect((await header.boundingBox())?.height).toBeCloseTo(currentHeaderHeight ?? 0, 0);
+    const drawer = await showHistoryList(page);
+    const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true });
+    if (await collapse.getAttribute("aria-checked") === "true") await activateControl(collapse);
+    await closeHistoryList(page, drawer);
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      const geometry = await restore.evaluate(button => {
+        const labels = [...document.querySelectorAll<HTMLElement>(".ub-revision-side-label")];
+        const [before, after] = labels;
+        const sides = [...document.querySelectorAll<HTMLElement>(".ub-revision-split .ProseMirror")];
+        if (before === undefined || after === undefined || sides.length !== 2) throw new Error("Both comparison columns must be shown");
+        const left = before.getBoundingClientRect();
+        const right = after.getBoundingClientRect();
+        const control = button.getBoundingClientRect();
+        const text = getComputedStyle(before);
+        const style = getComputedStyle(button);
+        return { beforeHeight: left.height, afterHeight: right.height, labelTopDifference: right.top - left.top,
+          editorTopDifference: (sides[1]?.getBoundingClientRect().top ?? 0) - (sides[0]?.getBoundingClientRect().top ?? 0),
+          rightInset: right.right - control.right, controlTop: control.top - right.top, controlBottom: right.bottom - control.bottom,
+          font: style.fontSize, labelFont: text.fontSize, lineHeight: style.lineHeight, labelLineHeight: text.lineHeight,
+          touch: matchMedia("(any-pointer: coarse)").matches,
+          hitArea: [-21.5, 21.5].map(offset => button.contains(document.elementFromPoint(control.x + control.width / 2, control.y + control.height / 2 + offset))) };
+      });
+      expect(geometry.afterHeight).toBeCloseTo(geometry.beforeHeight, 1);
+      expect(Math.abs(geometry.labelTopDifference)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry.editorTopDifference)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry.rightInset)).toBeLessThanOrEqual(1);
+      expect(geometry.controlTop).toBeGreaterThanOrEqual(-1);
+      expect(geometry.controlBottom).toBeGreaterThanOrEqual(-1);
+      expect(geometry.font).toBe(geometry.labelFont);
+      expect(geometry.lineHeight).toBe(geometry.labelLineHeight);
+      if (geometry.touch) expect(geometry.hitArea).toEqual([true, true]);
+    }
+    const nextChange = page.getByRole("button", { name: "Next change", exact: true });
+    await expect(nextChange).toBeEnabled();
+    await nextChange.focus();
+    await page.keyboard.press("Tab");
+    await expect(restore).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(earlierSide(page)).toBeFocused();
+    // Native editor focus may scroll its selection into view; start this proof at the pinned header.
+    await page.locator(".ub-revision-pane").evaluate(pane => { pane.scrollTop = 20; });
+    const start = await page.locator(".ub-revision-side-label").last().boundingBox();
+    const headerStart = await header.boundingBox();
+    await page.locator(".ub-revision-pane").evaluate(pane => { pane.scrollTop = 170; });
+    await expect.poll(async () => (await page.locator(".ub-revision-side-label").last().boundingBox())?.y ?? 0)
+      .toBeLessThan((start?.y ?? 0) - 100);
+    expect((await header.boundingBox())?.y).toBeCloseTo(headerStart?.y ?? 0, 0);
+    // An older comparison uses the header again when the pane narrows or has no predecessor.
+    await page.setViewportSize({ width: 860, height: 640 });
+    await expect(split).toHaveCount(0);
+    await expect(header.getByRole("button", { name: "Restore this version", exact: true })).toBeEnabled();
+    await page.setViewportSize({ width: 1440, height: 640 });
+    await expect(split).toBeVisible();
+    await previous(page);
+    await expect(split).toHaveCount(0);
+    await expect(header.getByRole("button", { name: "Restore this version", exact: true })).toBeEnabled();
   });
 
   test("real hub revisions navigate, keep removed text selectable and isolate the live editor", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
