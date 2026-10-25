@@ -138,6 +138,21 @@
   --block-blue-tint: light-dark(oklch(0.97 0.006 240), oklch(0.22 0.012 240));
   --block-teal-bar: light-dark(oklch(0.55 0.07 185), oklch(0.7 0.07 185));
   --block-teal-tint: light-dark(oklch(0.97 0.006 185), oklch(0.22 0.012 185));
+  --block-note-bar: light-dark(oklch(0.58 0.12 245), oklch(0.72 0.11 245));
+  --block-note-tint: light-dark(oklch(0.965 0.02 245), oklch(0.235 0.03 245));
+  --block-note-ink: light-dark(oklch(0.47 0.13 245), oklch(0.82 0.10 245));
+  --block-tip-bar: light-dark(oklch(0.58 0.12 150), oklch(0.72 0.11 150));
+  --block-tip-tint: light-dark(oklch(0.965 0.02 150), oklch(0.235 0.03 150));
+  --block-tip-ink: light-dark(oklch(0.47 0.13 150), oklch(0.82 0.10 150));
+  --block-important-bar: light-dark(oklch(0.58 0.12 300), oklch(0.72 0.11 300));
+  --block-important-tint: light-dark(oklch(0.965 0.02 300), oklch(0.235 0.03 300));
+  --block-important-ink: light-dark(oklch(0.47 0.13 300), oklch(0.82 0.10 300));
+  --block-warning-bar: light-dark(oklch(0.58 0.12 75), oklch(0.72 0.11 75));
+  --block-warning-tint: light-dark(oklch(0.965 0.02 75), oklch(0.235 0.03 75));
+  --block-warning-ink: light-dark(oklch(0.47 0.13 75), oklch(0.82 0.10 75));
+  --block-caution-bar: light-dark(oklch(0.58 0.12 25), oklch(0.72 0.11 25));
+  --block-caution-tint: light-dark(oklch(0.965 0.02 25), oklch(0.235 0.03 25));
+  --block-caution-ink: light-dark(oklch(0.47 0.13 25), oklch(0.82 0.10 25));
 
   /* Ablauf diagrams take their palette from these --ab-* properties, so a
      figure reads like the blocks above. Light tone ink sits at L 0.53, a
@@ -1426,6 +1441,31 @@ h6.ub-heading {
 .ub-quote { --block-bar: var(--block-rose-bar); --block-tint: var(--block-rose-tint); }
 .ub-terminal { --block-bar: var(--block-green-bar); --block-tint: var(--block-green-tint); }
 .ub-chart { --block-bar: var(--block-blue-bar); --block-tint: var(--block-blue-tint); }
+.ub-callout {
+  --block-bar: var(--block-note-bar);
+  --block-tint: var(--block-note-tint);
+  --callout-ink: var(--block-note-ink);
+}
+.ub-callout[data-variant="tip"] {
+  --block-bar: var(--block-tip-bar);
+  --block-tint: var(--block-tip-tint);
+  --callout-ink: var(--block-tip-ink);
+}
+.ub-callout[data-variant="important"] {
+  --block-bar: var(--block-important-bar);
+  --block-tint: var(--block-important-tint);
+  --callout-ink: var(--block-important-ink);
+}
+.ub-callout[data-variant="warning"] {
+  --block-bar: var(--block-warning-bar);
+  --block-tint: var(--block-warning-tint);
+  --callout-ink: var(--block-warning-ink);
+}
+.ub-callout[data-variant="caution"] {
+  --block-bar: var(--block-caution-bar);
+  --block-tint: var(--block-caution-tint);
+  --callout-ink: var(--block-caution-ink);
+}
 
 .ub-block-frame:not([data-view="table"]) {
   position: relative;
@@ -1461,6 +1501,19 @@ h6.ub-heading {
   text-overflow: ellipsis;
 }
 .ub-block-label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ub-callout > .ub-block-caption { color: var(--callout-ink); font-weight: 500; }
+.ub-callout-body { font-style: normal; white-space: pre-wrap; }
+.ub-callout .ub-callout-icon {
+  display: inline-flex;
+  flex: none;
+  width: 1em;
+  height: 1em;
+  font-size: var(--type-body-size);
+  line-height: 1;
+  align-items: center;
+  justify-content: center;
+}
+.ub-callout-icon > svg { width: 100%; height: 100%; }
 .ub-block-actions { display: flex; flex: none; gap: 0.3rem; }
 .ub-block-actions > button,
 .ub-figma-placeholder > button {

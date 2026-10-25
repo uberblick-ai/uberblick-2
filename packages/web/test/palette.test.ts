@@ -42,6 +42,7 @@ import { mountEditor } from "./helpers.js";
 describe("the editor palette and stored block types", () => {
   it("declares the schema's block nodes, seven marks, and nothing else", () => {
     expect(Object.keys(uberblickSchema.nodes).sort()).toEqual([
+      "callout",
       "card",
       "cardBody",
       "cardFooter",
@@ -83,7 +84,6 @@ describe("the editor palette and stored block types", () => {
       "hardBreak",
       "image",
       "mermaid",
-      "callout",
     ]) {
       expect(uberblickSchema.nodes[absent]).toBeUndefined();
     }
@@ -95,7 +95,7 @@ describe("the editor palette and stored block types", () => {
   it("allows the comment mark inside source blocks, and nothing else there", () => {
     // A `marks: ""` node spec would make y-prosemirror throw while building the
     // node — and its catch block deletes the Y.XmlText from the document.
-    for (const name of BLOCK_TYPES.filter((name) => name !== "table" && name !== "card" && name !== "figma" && name !== "callout")) {
+    for (const name of BLOCK_TYPES.filter((name) => name !== "table" && name !== "card" && name !== "figma")) {
       const type = uberblickSchema.nodes[name];
       expect(type).toBeDefined();
       expect(type?.allowsMarkType(uberblickSchema.marks[COMMENT_MARK]!)).toBe(true);
@@ -105,7 +105,7 @@ describe("the editor palette and stored block types", () => {
     // prose vs source, which is why a list item and a quote take the whole set.
     for (const mark of INLINE_MARKS) {
       const type = uberblickSchema.marks[mark]!;
-      for (const prose of PROSE_BLOCK_TYPES.filter((name) => name !== "callout")) {
+      for (const prose of PROSE_BLOCK_TYPES) {
         expect(uberblickSchema.nodes[prose]?.allowsMarkType(type), mark).toBe(true);
       }
       expect(uberblickSchema.nodes.code?.allowsMarkType(type), mark).toBe(false);
@@ -298,9 +298,8 @@ describe("foreign blocks already in the document", () => {
     initDoc(ydoc, { uuid: "doc-1", title: "Has a stranger" });
     appendBlock(ydoc, { type: "paragraph", text: "known" });
 
-    // Callouts are schema-owned but outside this client's editor palette.
     const foreignId = "foreign-block-id";
-    const element = new Y.XmlElement("callout");
+    const element = new Y.XmlElement("future-block");
     element.setAttribute("id", foreignId);
     element.setAttribute("variant", "warning");
     element.setAttribute("icon", "🚀");
@@ -313,10 +312,10 @@ describe("foreign blocks already in the document", () => {
     const { ydoc, foreignId } = docWithForeignBlock();
     const foreign = findForeignBlocks(getBlocksFragment(ydoc));
     expect(foreign).toHaveLength(1);
-    expect(foreign[0]?.nodeName).toBe("callout");
+    expect(foreign[0]?.nodeName).toBe("future-block");
     expect(foreign[0]?.id).toBe(foreignId);
     expect(foreign[0]?.index).toBe(1);
-    expect(describeForeignBlocks(foreign)).toContain("callout");
+    expect(describeForeignBlocks(foreign)).toContain("future-block");
     expect(describeForeignBlocks(foreign)).toMatch(/unsupported type/i);
 
     // A bare Y.XmlText at the top level is foreign too — the document is a list
@@ -380,12 +379,12 @@ describe("foreign blocks already in the document", () => {
     expect((stored as Y.XmlElement).getAttribute("variant")).toBe("warning");
     expect((stored as Y.XmlElement).getAttribute("icon")).toBe("🚀");
 
-    // Schema readers still expose the callout with its text and attributes.
+    // Older schema readers expose a future block's text as a paragraph.
     const blocks = getBlocks(ydoc);
     expect(blocks).toHaveLength(2);
     expect(blocks[1]?.id).toBe(foreignId);
     expect(blocks[1]?.text).toBe("from the future");
-    expect(blocks[1]).toMatchObject({ type: "callout", variant: "warning", icon: "🚀" });
+    expect(blocks[1]).toMatchObject({ type: "paragraph" });
     binding.destroy();
   });
 
@@ -413,7 +412,7 @@ describe("foreign blocks already in the document", () => {
     expect(binding.editor).not.toBeNull();
 
     // A remote client writes a block type this palette does not know.
-    const foreign = new Y.XmlElement("callout");
+    const foreign = new Y.XmlElement("future-block");
     foreign.setAttribute("id", "arrived-later");
     foreign.setAttribute("variant", "warning");
     foreign.setAttribute("icon", ":codex:");
@@ -426,7 +425,7 @@ describe("foreign blocks already in the document", () => {
     expect(getBlocksFragment(ydoc).length).toBe(2);
     const stored = getBlocksFragment(ydoc).get(1);
     expect(stored instanceof Y.XmlElement).toBe(true);
-    expect((stored as Y.XmlElement).nodeName).toBe("callout");
+    expect((stored as Y.XmlElement).nodeName).toBe("future-block");
     expect((stored as Y.XmlElement).getAttribute("id")).toBe("arrived-later");
     expect((stored as Y.XmlElement).getAttribute("variant")).toBe("warning");
     expect((stored as Y.XmlElement).getAttribute("icon")).toBe(":codex:");

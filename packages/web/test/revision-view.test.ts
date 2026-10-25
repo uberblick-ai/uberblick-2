@@ -30,6 +30,61 @@ function mount(before: Y.Doc | null, after: Y.Doc) {
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("the detached revision view", () => {
+  it.each([
+    { field: "variant", options: { variant: "tip" as const }, label: "Tip", icon: "💡" },
+    { field: "icon", options: { icon: ":claude:" }, label: "Note", icon: null },
+  ])("shows a callout's changed $field above its After appearance", ({ field, options, label, icon }) => {
+    const before = new Y.Doc();
+    const id = appendBlock(before, { type: "callout", variant: "note", icon: "💡", text: "Unchanged body" });
+    const after = clone(before);
+    editBlock(after, id, "Unchanged body", "Unchanged body", options);
+    const view = mount(before, after);
+    try {
+      expect(view.element.querySelector(".ub-revision-fields")?.textContent).toBe(`Changed: ${field}`);
+      const callout = view.element.querySelector('[role="note"]');
+      expect(callout?.getAttribute("aria-label")).toBe(label);
+      expect(callout?.querySelector(".ub-block-caption")?.textContent).toContain(label);
+      if (icon === null) expect(callout?.querySelector(".ub-block-caption .ub-inline-icon")).not.toBeNull();
+      else expect(callout?.querySelector(".ub-block-caption")?.textContent).toContain(icon);
+      expect(callout?.querySelector(".ub-callout-body")?.textContent).toBe("Unchanged body");
+      expect(callout?.querySelector("[data-revision-change]")).toBeNull();
+    } finally { view.destroy(); before.destroy(); after.destroy(); }
+  });
+
+  it.each(["quote", "callout"] as const)("marks only changed callout words when the predecessor is a %s", (type) => {
+    const before = new Y.Doc();
+    const id = appendBlock(before, type === "quote" ? { type, text: "Keep old words." }
+      : { type, variant: "note", text: "Keep old words." });
+    ((getBlocksFragment(before).get(0) as Y.XmlElement).firstChild as Y.XmlText).format(0, 4, { bold: {} });
+    createAnnotation(before, id, 0, 4, "Ben", "hidden comment");
+    const after = clone(before);
+    if (type === "quote") {
+      const fragment = getBlocksFragment(after);
+      const old = fragment.get(0) as Y.XmlElement;
+      const callout = new Y.XmlElement("callout");
+      callout.setAttribute("id", id);
+      callout.setAttribute("variant", "note");
+      callout.insert(0, [(old.firstChild as Y.XmlText).clone()]);
+      after.transact(() => { fragment.delete(0, 1); fragment.insert(0, [callout]); });
+    }
+    editBlock(after, id, "Keep old words.", "Keep new words.");
+    const oldState = Y.encodeStateAsUpdate(before);
+    const newState = Y.encodeStateAsUpdate(after);
+    const view = mount(before, after);
+    try {
+      const callout = view.element.querySelector('[role="note"]');
+      expect(callout?.getAttribute("aria-label")).toBe("Note");
+      expect(callout?.querySelector('[data-revision-change="removed"]')?.textContent).toBe("old");
+      expect(callout?.querySelector('[data-revision-change="added"]')?.textContent).toBe("new");
+      expect(callout?.querySelector("strong")?.textContent).toBe("Keep");
+      expect(view.editor.state.doc.childCount).toBe(1);
+      expect(view.editor.state.doc.firstChild?.textContent).toBe("Keep oldnew words.");
+      expect(callout?.querySelector(".ub-comment, [data-comment-thread]")).toBeNull();
+      expect(Y.encodeStateAsUpdate(before)).toEqual(oldState);
+      expect(Y.encodeStateAsUpdate(after)).toEqual(newState);
+    } finally { view.destroy(); before.destroy(); after.destroy(); }
+  });
+
   it("keeps selectable removed text and removed blocks in reading order without changing either revision", () => {
     const before = new Y.Doc();
     const sentence = appendBlock(before, { type: "paragraph", text: "Keep old words here." });

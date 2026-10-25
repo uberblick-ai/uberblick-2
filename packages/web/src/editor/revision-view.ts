@@ -31,7 +31,7 @@ import { ToggleHeadings } from "./toggle-headings.js";
 import { WireframeBlocks } from "./wireframe.js";
 
 export const SOURCE_NODES = new Set(["code", "terminal", "chart"]);
-const INLINE_NODES = new Set(["paragraph", "heading", "list-item", "quote", ...SOURCE_NODES]);
+const INLINE_NODES = new Set(["paragraph", "heading", "list-item", "quote", "callout", ...SOURCE_NODES]);
 
 const Added = Mark.create({
   name: "revisionAdded",
