@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,6 +48,20 @@ async function assertAsset(asset, name, bytes, tag, services) {
   if (!bytes.equals(published)) fail(`${name} differs from this commit; refusing to replace it`);
 }
 
+function assertDraftAsset(asset, name, bytes) {
+  if (asset.state !== "uploaded") fail(`${name} is incompletely uploaded; refusing to replace it`);
+  if (asset.name !== name || asset.size !== bytes.length ||
+      asset.digest !== `sha256:${createHash("sha256").update(bytes).digest("hex")}`) {
+    fail(`${name} differs from this commit; refusing to replace it`);
+  }
+}
+
+function assertRelease(release, tag) {
+  if (release.tag_name !== tag || typeof release.draft !== "boolean" || release.prerelease !== false) {
+    fail("existing release disagrees with this stable tag");
+  }
+}
+
 export async function downloadAsset(url) {
   const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
   if (response.status === 404) return null;
@@ -76,23 +91,38 @@ export async function publishHubReleaseAssets(input, services) {
 
   let release = await services.getRelease(input.tag);
   const missing = [];
-  if (release !== null && (release.tag_name !== input.tag ||
-      release.draft !== false || release.prerelease !== false)) {
-    fail("existing release disagrees with this stable tag");
-  }
+  if (release !== null) assertRelease(release, input.tag);
   // Validate the complete existing set before recovering a missing upload. A
   // mismatch or an interrupted upload must never authorize replacing an asset.
   for (const [name, bytes] of Object.entries(input.assets)) {
     const existing = (release?.assets ?? []).filter((asset) => asset.name === name);
     if (existing.length > 1) fail(`release has duplicate ${name} assets`);
     if (existing.length === 0) missing.push([name, bytes]);
+    else if (release.draft) assertDraftAsset(existing[0], name, bytes);
     else await assertAsset(existing[0], name, bytes, input.tag, services);
+  }
+  if (release?.draft === false && missing.length > 0) {
+    fail(`published release is missing ${missing[0][0]}; recover with a new version`);
   }
   await services.assertRemoteTag(input.tag, input.headSha);
   release ??= await services.createRelease(input.tag, input.headSha);
+  assertRelease(release, input.tag);
+  const publishing = release.draft;
   for (const [name, bytes] of missing) {
+    if (!release.draft) fail(`published release is missing ${name}; recover with a new version`);
     const uploaded = await services.uploadAsset(release.upload_url, name, bytes);
-    await assertAsset(uploaded, name, bytes, input.tag, services);
+    assertDraftAsset(uploaded, name, bytes);
+  }
+  if (publishing) {
+    await services.assertRemoteTag(input.tag, input.headSha);
+    release = await services.publishRelease(release.id);
+    assertRelease(release, input.tag);
+    if (release.draft) fail("release is still a draft after publication");
+    for (const [name, bytes] of Object.entries(input.assets)) {
+      const assets = release.assets.filter((asset) => asset.name === name);
+      if (assets.length !== 1) fail(`published release does not have exactly one ${name}; recover with a new version`);
+      await assertAsset(assets[0], name, bytes, input.tag, services);
+    }
   }
 
   // The workflow serializes this job across hub tags. Publish latest only after
@@ -105,12 +135,11 @@ export async function publishHubReleaseAssets(input, services) {
       return assets.length === 1 && assets[0].state === "uploaded";
     }));
   if (!newer) await services.markLatest(release.id);
-  services.log(`Hub ${version} release assets ${missing.length === 0 ? "already match" : "published"}.`);
-  return { outcome: missing.length === 0 ? "no-op" : "published" };
+  services.log(`Hub ${version} release assets ${publishing ? "published" : "already match"}.`);
+  return { outcome: publishing ? "published" : "no-op" };
 }
 
-function productionServices() {
-  const token = process.env.GITHUB_TOKEN;
+export function productionServices(token = process.env.GITHUB_TOKEN) {
   if (!token) fail("GITHUB_TOKEN is required");
   async function request(path, options = {}) {
     const response = await fetch(`https://api.github.com/repos/${REPOSITORY}${path}`, {
@@ -136,15 +165,20 @@ function productionServices() {
     assertRemoteTag,
     getImage,
     getRelease: async (tag) => {
-      const release = await request(`/releases/tags/${tag}`, { notFound: true });
+      const matches = (await list("/releases")).filter((release) => release.tag_name === tag);
+      if (matches.length > 1) fail(`more than one release has tag ${tag}; refusing to choose`);
+      const release = matches[0] ?? null;
       if (release !== null) release.assets = await list(`/releases/${release.id}/assets`);
       return release;
     },
     downloadAsset,
     wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     createRelease: (tag, sha) => request("/releases", { method: "POST", body: {
-      tag_name: tag, target_commitish: sha, name: tag, draft: false, prerelease: false,
+      tag_name: tag, target_commitish: sha, name: tag, draft: true, prerelease: false,
       generate_release_notes: false, make_latest: "false",
+    } }),
+    publishRelease: (id) => request(`/releases/${id}`, { method: "PATCH", body: {
+      draft: false, make_latest: "false",
     } }),
     uploadAsset: async (uploadUrl, name, bytes) => {
       const url = new URL(uploadUrl.replace(/\{.*$/, ""));
