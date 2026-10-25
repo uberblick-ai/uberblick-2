@@ -643,7 +643,7 @@
         "query": {
           "type": "string",
           "minLength": 1,
-          "description": "Match any word in title, description, content or assigned tag names, including English word forms. Case and accents fold; `list_docs` matches adjacent `list docs`, and a trailing * matches stem prefixes. A prefix past the stem can miss: `decisi*` can miss `decision`; search the whole word or a shorter prefix, `decis*`. Results use title-weighted bm25 relevance."
+          "description": "Match any word in title, description, content or assigned tag names, including English word forms. Case and accents fold; `release_plan` matches adjacent `release plan`, and a trailing * matches stem prefixes. A prefix past the stem can miss: `decisi*` can miss `decision`; search the whole word or a shorter prefix, `decis*`. Results use title-weighted bm25 relevance."
         },
         "limit": {
           "description": "Maximum hits, from 1 to 100; defaults to 20 after filters.",
