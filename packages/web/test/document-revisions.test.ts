@@ -69,6 +69,21 @@ describe("document revision reads", () => {
       .api.name(UUID, "Reviewed", "hash", new AbortController().signal)).rejects.toThrow("This revision is already named “Previously accepted” by alice. Open history to see it.");
   });
 
+  it.each([
+    [{ kind: "browser", name: "Browser" }, "in the browser"],
+    [{ kind: "mcp", name: "CLAUDE Desktop" }, "via Claude"],
+    [{ kind: "mcp", name: "codex" }, "via Codex"],
+    [{ kind: "Claude", name: "Other client" }, "via Claude"],
+    [{ kind: "CODEX", name: "Other client" }, "via Codex"],
+    [{ kind: "mcp", name: "Review client" }, "via Review client"],
+    [{ kind: "unknown", name: "" }, "via unknown"],
+  ])("names the existing revision's namer surface %j as %s", async (surface, label) => {
+    await expect(client({ reason: "already-named", existingName: {
+      text: "Previously accepted", namer: { githubUsername: "alice", surface },
+    } }, 409).api.name(UUID, "Reviewed", "hash", new AbortController().signal))
+      .rejects.toThrow(`This revision is already named “Previously accepted” by alice ${label}. Open history to see it.`);
+  });
+
   it.each([true, false])("restores by revision id with the reviewed live checksum and reports applied=%s", async applied => {
     const { api, fetchImpl } = client({ revision: entries[0], applied });
     await expect(api.restore(UUID, "earlier", "history-open-sha", new AbortController().signal))

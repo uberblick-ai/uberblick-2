@@ -3,6 +3,7 @@ import { readRevisionResponse, snapshotRevision } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import { mintHubAuthMessage } from "../collab/rooms.js";
 import { localSessionHeaders } from "../collab/local-session.js";
+import { revisionSurface } from "../revision-attribution.js";
 
 const unavailableMessages = {
   "local-only": "History is unavailable in a local-only workspace.",
@@ -80,9 +81,11 @@ export function createDocumentRevisionsClient(
       }
       if (body?.reason === "already-named" && typeof body?.existingName?.text === "string") {
         const namer = body.existingName.namer;
-        const surface = namer?.surface?.kind === "browser" ? " in the browser"
-          : typeof namer?.surface?.name === "string" ? ` via ${namer.surface.name}` : "";
-        const by = typeof namer?.githubUsername === "string" ? ` by ${namer.githubUsername}${surface}` : "";
+        const surface = revisionSurface({
+          kind: typeof namer?.surface?.kind === "string" ? namer.surface.kind : undefined,
+          name: typeof namer?.surface?.name === "string" ? namer.surface.name : undefined,
+        }, "namer");
+        const by = typeof namer?.githubUsername === "string" ? ` by ${[namer.githubUsername, surface].filter(Boolean).join(" ")}` : "";
         throw new Error(`This revision is already named “${body.existingName.text}”${by}. Open history to see it.`);
       }
       throw new DocumentHistoryError(typeof body?.reason === "string" ? body.reason : undefined);

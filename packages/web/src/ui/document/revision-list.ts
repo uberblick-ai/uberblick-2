@@ -1,11 +1,12 @@
 import type { RevisionEntry } from "@uberblick/schema";
+import { revisionSurface } from "../../revision-attribution.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 const MONTH = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
 
 export interface RevisionAuthor {
   name: string;
-  /** "in the browser", "via Claude Code", or empty when nothing is known. */
+  /** Edit attribution, or empty when nothing is known. */
   surface: string;
   /** Agent surfaces draw a rounded square avatar; people a circle. */
   agent: boolean;
@@ -20,7 +21,7 @@ export function revisionAuthor(entry: RevisionEntry, earliest: boolean): Revisio
   const browser = author.surface.kind === "browser";
   return {
     name: author.githubUsername,
-    surface: browser ? "in the browser" : `via ${author.surface.name || author.surface.kind}`,
+    surface: revisionSurface(author.surface, "author"),
     agent: !browser,
     initial: author.githubUsername.slice(0, 1).toUpperCase() || "?",
   };

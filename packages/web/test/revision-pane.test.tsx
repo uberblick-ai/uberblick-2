@@ -51,6 +51,28 @@ function description(button: HTMLButtonElement): HTMLElement {
   return element;
 }
 
+describe("revision attribution", () => {
+  it.each([
+    [{ kind: "browser", name: "Browser" }, "written by hand 👏", "in the browser"],
+    [{ kind: "mcp", name: "Claude Desktop" }, "via Claude", "via Claude"],
+    [{ kind: "CODEX", name: "Other client" }, "via Codex", "via Codex"],
+    [{ kind: "mcp", name: "Review client" }, "via Review client", "via Review client"],
+  ])("uses the same attribution in the visible, tooltip and screen-reader header for %j", (surface, authorLabel, namerLabel) => {
+    const history = historyAt(1);
+    history.entry = { ...history.entry!, author: { ...person, surface }, name: {
+      text: "Accepted", namer: { githubUsername: "alice", surface }, namedAt: 40, canManage: false,
+    } };
+    history.entries = [entries[0]!, history.entry, entries[2]!, entries[3]!];
+    const view = render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} />);
+    const header = view.container.querySelector(".ub-history-who")!;
+    expect(header.querySelector(".ub-history-author")?.textContent).toBe(`ben ${authorLabel}`);
+    const label = header.getAttribute("title");
+    expect(label).toContain(`ben ${authorLabel}, `);
+    expect(label).toContain(`“Accepted”, named by alice ${namerLabel} at `);
+    expect(header.querySelector(".sr-only")?.textContent).toBe(label);
+  });
+});
+
 describe("revision restore control states", () => {
   it("disables the current After revision without a visible reason line outside since comparisons", async () => {
     const history = historyAt(0);

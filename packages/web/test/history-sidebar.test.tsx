@@ -55,10 +55,25 @@ describe("revision list model", () => {
   });
 
   it("says who and where when known, and never invents an author", () => {
-    expect(revisionAuthor(entries[0]!, false)).toEqual({ name: "ben", surface: "via Claude Code", agent: true, initial: "B" });
-    expect(revisionAuthor(entries[1]!, false)).toEqual({ name: "ben", surface: "in the browser", agent: false, initial: "B" });
+    expect(revisionAuthor(entries[0]!, false)).toEqual({ name: "ben", surface: "via Claude", agent: true, initial: "B" });
+    expect(revisionAuthor(entries[1]!, false)).toEqual({ name: "ben", surface: "written by hand 👏", agent: false, initial: "B" });
     expect(revisionAuthor(entries[3]!, false)).toMatchObject({ name: "Unknown author", initial: "?" });
     expect(revisionAuthor(entries[5]!, true)).toMatchObject({ name: "Earlier content", surface: "" });
+  });
+
+  it.each([
+    [{ kind: "mcp", name: "claude-code" }, "via Claude"],
+    [{ kind: "mcp", name: "Claude Desktop" }, "via Claude"],
+    [{ kind: "mcp", name: "My CLAUDE client" }, "via Claude"],
+    [{ kind: "CLAUDE", name: "Other client" }, "via Claude"],
+    [{ kind: "mcp", name: "OpenAI CoDeX" }, "via Codex"],
+    [{ kind: "codex-cli", name: "Other client" }, "via Codex"],
+    [{ kind: "mcp", name: "Cursor" }, "via Cursor"],
+    [{ kind: "cli", name: "ub data" }, "via ub data"],
+    [{ kind: "unknown", name: "" }, "via unknown"],
+  ])("names the agent surface %j as %s", (surface, label) => {
+    const entry = { ...entries[0]!, author: { ...agent, surface } };
+    expect(revisionAuthor(entry, false)).toEqual({ name: "ben", surface: label, agent: true, initial: "B" });
   });
 });
 
@@ -70,6 +85,8 @@ describe("history sidebar", () => {
     expect(screen.getByText("Auth plan · 6 revisions")).toBeTruthy();
     const rows = screen.getAllByRole("listitem");
     expect(rows).toHaveLength(6);
+    expect(within(rows[0]!).getByRole("button", { name: /via Claude/ }).querySelector(".ub-history-avatar-agent")).not.toBeNull();
+    expect(within(rows[1]!).getByRole("button", { name: /written by hand 👏/ }).querySelector(".ub-history-avatar-agent")).toBeNull();
     expect(rows[0]!.textContent).toContain("Current version");
     expect(rows[1]!.textContent).not.toContain("Current version");
     const selected = within(rows[2]!).getAllByRole("button")[0]!;
