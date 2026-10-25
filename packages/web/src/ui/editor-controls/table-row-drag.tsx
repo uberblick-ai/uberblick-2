@@ -4,7 +4,6 @@ import type { CSSProperties, MouseEvent, ReactElement } from "react";
 import { useDraggable } from "@dnd-kit/react";
 import { PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
 import type { TableColumnTarget, TableRowTarget } from "../../editor/table-controls.js";
-import { Button } from "../shadcn/button.js";
 import { DropdownMenuTrigger } from "../shadcn/dropdown-menu.js";
 
 export const tableRowSensors = [PointerSensor.configure({
@@ -49,9 +48,9 @@ export function TableHandle({ data, dragKey, disabled, axis, label, style, revea
   }, []);
   return (
     <DropdownMenuTrigger asChild>
-      {/* Mouse geometry owns a narrow gutter; touch geometry widens it to 44px. */}
-      <Button variant="plain" size="custom" ref={attach} {...position}
-        type="button" className={`ub-table-control ub-table-handle ub-table-${axis}-handle absolute flex min-w-0 items-center justify-center pointer-events-auto rounded-(--radius-sm) border-0 bg-transparent p-0 text-(--muted-foreground) ub-type-small select-none [-webkit-touch-callout:none] ${axis === "row" ? "[.ub-table-controls:not([data-touch=true])_&]:justify-start [.ub-table-controls:not([data-touch=true])_&]:pl-px" : ""}`}
+      {/* Native: 12px mouse handles straddle borders; shared target floors would cover cell input. */}
+      <button ref={attach} {...position}
+        type="button" className={`ub-table-control ub-table-handle ub-table-${axis}-handle absolute flex items-center justify-center pointer-events-auto rounded-(--radius-sm) border-0 bg-transparent p-0 text-(--muted-foreground) ub-type-small select-none [-webkit-touch-callout:none] ${axis === "row" ? "[.ub-table-controls:not([data-touch=true])_&]:justify-start [.ub-table-controls:not([data-touch=true])_&]:pl-px" : ""}`}
         data-revealed={revealed} style={style}
         aria-label={label}
         title={disabled ? `${axis === "row" ? "Row" : "Column"} actions` : `${axis === "row" ? "Row" : "Column"} actions · drag to move`}
@@ -59,7 +58,7 @@ export function TableHandle({ data, dragKey, disabled, axis, label, style, revea
         onPointerDownCapture={resetGuard} onKeyDownCapture={resetGuard}
         onClickCapture={clickGuard} onClick={open}>
         <span aria-hidden="true" />
-      </Button>
+      </button>
     </DropdownMenuTrigger>
   );
 }
