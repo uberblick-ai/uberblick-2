@@ -238,8 +238,8 @@ test("split history draws each caption and keeps callout links keyboard reachabl
     await setPointerSelection(body, () => body.click({ position: { x: 2, y: 10 } }));
     for (let step = 0; step <= prefix.length; step += 1) await page.keyboard.press("ArrowRight");
     await expect.poll(() => external.evaluate(element => {
-      const selection = document.getSelection();
-      return selection !== null && selection.isCollapsed && element.contains(selection.anchorNode);
+      const selection = window.getSelection();
+      return selection?.isCollapsed && element.contains(selection.anchorNode);
     })).toBe(true);
     await followExternal(page, () => page.keyboard.press("Enter"));
     await expect(side.getByRole("note")).toBeVisible();
