@@ -1446,14 +1446,18 @@ test.describe("document history through ub open", () => {
 
     await previous(page);
     await assertView(latestAddress, "latest", "reviewed");
-    await setFilter("Named");
-    await assertView(latestAddress, "latest", "reviewed");
     let drawer = await showHistoryList(page);
-    await expect(list.getByRole("listitem")).toHaveCount(2);
     await reviewed.focus();
     await page.keyboard.press("Enter");
-    await expect(reviewed).toHaveAttribute("aria-current", "true");
+    await assertView(reviewedAddress, "reviewed", "draft");
     await expect(reviewed).toBeFocused();
+    const namedFilter = list.getByRole("button", { name: "Named", exact: true });
+    await namedFilter.focus();
+    await page.keyboard.press("Enter");
+    await assertView(namedAddress, "reviewed", "kickoff");
+    await expect(namedFilter).toBeFocused();
+    await expect(list.getByRole("listitem")).toHaveCount(2);
+    await expect(reviewed).toHaveAttribute("aria-current", "true");
     await expect(list.locator('[aria-current="true"]')).toHaveCount(1);
     for (const scheme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme: scheme });
@@ -1488,8 +1492,13 @@ test.describe("document history through ub open", () => {
     await activateControl(forward);
     await assertView(namedAddress, "reviewed", "kickoff");
 
-    await setFilter("All");
+    drawer = await showHistoryList(page);
+    const allFilter = list.getByRole("button", { name: "All", exact: true });
+    await allFilter.focus();
+    await page.keyboard.press("Enter");
     await assertView(reviewedAddress, "reviewed", "draft");
+    await expect(allFilter).toBeFocused();
+    await closeHistoryList(page, drawer);
     await page.goBack();
     await assertView(namedAddress, "reviewed", "kickoff");
     await page.goForward();

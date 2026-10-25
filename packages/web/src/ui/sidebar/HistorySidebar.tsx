@@ -47,7 +47,7 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
         </div>
         <fieldset className="ub-history-filter mx-2 mt-1 mb-0 flex min-w-0 rounded-(--radius-sm) border-0 bg-(--sidebar-accent) p-0.5" aria-label="Show revisions">
           {(["all", "named"] as const).map((value) => (
-            <Button variant="plain" size="custom" key={value} type="button" aria-pressed={filter === value} disabled={history.busy}
+            <Button variant="plain" size="custom" key={value} type="button" aria-pressed={filter === value}
               className="flex-1 rounded-[calc(var(--radius-sm)-2px)] px-2.5 py-1 ub-type-caption font-medium text-(--sidebar-muted-foreground) aria-pressed:bg-background aria-pressed:text-sidebar-foreground"
               onClick={() => setFilter(value)}>
               {value === "all" ? "All" : "Named"}
