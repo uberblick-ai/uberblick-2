@@ -123,7 +123,8 @@ test("custom rows keep their left alignment, wrapping and normal weight", async 
   const page = await openFixture(browser, false, 1280);
   const row = page.getByRole("button", { name: "A full width row keeps its own layout", exact: true });
   await expect(row).toHaveCSS("display", "flex");
-  await expect(row).toHaveCSS("justify-content", "flex-start");
+  await expect(row).toHaveCSS("justify-content", "normal");
+  await expect(row).toHaveCSS("text-align", "left");
   await expect(row).toHaveCSS("white-space", "normal");
   await expect(row).toHaveCSS("font-weight", "400");
 });

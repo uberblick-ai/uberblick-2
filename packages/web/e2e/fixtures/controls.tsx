@@ -4,7 +4,7 @@ import { Button } from "../../src/ui/shadcn/button.js";
 import { Input } from "../../src/ui/shadcn/input.js";
 import { Textarea } from "../../src/ui/shadcn/textarea.js";
 import "../../src/ui/styles.css";
-import "./controls.css";
+import "../../src/ui/tailwind.css";
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("no fixture root");
@@ -19,7 +19,7 @@ createRoot(root).render(
           </Button>
         )),
       )}
-      <Button variant="plain" size="custom" className="flex w-full justify-start whitespace-normal font-normal">
+      <Button variant="plain" size="custom" className="flex w-full text-left font-normal">
         A full width row keeps its own layout
       </Button>
       <Button variant="tool" size="custom">Quiet tool</Button>
