@@ -48,6 +48,7 @@ export function TableHandle({ data, dragKey, disabled, axis, label, style, revea
   }, []);
   return (
     <DropdownMenuTrigger asChild>
+      {/* Native: 12px mouse handles straddle borders; shared target floors would cover cell input. */}
       <button ref={attach} {...position}
         type="button" className={`ub-table-control ub-table-handle ub-table-${axis}-handle`}
         data-revealed={revealed} style={style}

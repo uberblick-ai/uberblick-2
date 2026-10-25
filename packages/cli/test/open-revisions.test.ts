@@ -108,9 +108,17 @@ describe("ub open automatic revisions", () => {
       expect(namedRevision.endedAt).toBe(namedRevision.name!.namedAt);
       const duplicate = await fetch(path, { method: "POST", headers: mutationHeaders, body: JSON.stringify(nameRequest) });
       expect(await duplicate.json()).toMatchObject({ reason: "already-named", existingName: { text: "Reviewed in the browser" } });
+      const renameStartedAt = Date.now();
+      expect((await fetch(path, { method: "POST", headers: mutationHeaders,
+        body: JSON.stringify({ uuid, operation: "rename", revisionId: namedRevision.id, name: "Review accepted",
+          surface: { kind: "mcp", name: "forged" } }) })).status).toBe(400);
       const renamed = await fetch(path, { method: "POST", headers: mutationHeaders,
         body: JSON.stringify({ uuid, operation: "rename", revisionId: namedRevision.id, name: "Review accepted" }) });
-      expect(await renamed.json()).toMatchObject({ revision: { name: { text: "Review accepted", namedAt: namedRevision.name!.namedAt } } });
+      const { revision: renamedRevision } = await renamed.json() as { revision: RevisionEntry };
+      expect(renamedRevision.name).toMatchObject({ text: "Review accepted",
+        namer: { githubUsername: "revision-person", surface: { kind: "browser", name: "browser" } } });
+      expect(renamedRevision.name!.namedAt).toBeGreaterThanOrEqual(renameStartedAt);
+      expect(renamedRevision.name!.namedAt).toBeLessThanOrEqual(Date.now());
       const removed = await fetch(path, { method: "POST", headers: mutationHeaders,
         body: JSON.stringify({ uuid, operation: "remove_name", revisionId: namedRevision.id }) });
       expect(await removed.json()).toMatchObject({ revision: { id: namedRevision.id, author: namedRevision.author,

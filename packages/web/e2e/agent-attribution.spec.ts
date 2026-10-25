@@ -179,10 +179,14 @@ for (const settings of [
           }
           const button = circle.closest("button");
           if (button === null) throw new Error("e2e: an avatar has no labelled control");
+          const backing = circle.parentElement;
+          if (backing === null || !button.contains(backing)) {
+            throw new Error("e2e: an avatar has no backing disc inside its labelled control");
+          }
           return {
             borderStyle: style.borderLeftStyle,
             ink: style.color,
-            ground: getComputedStyle(button).backgroundColor,
+            ground: getComputedStyle(backing).backgroundColor,
             opacity,
           };
         });

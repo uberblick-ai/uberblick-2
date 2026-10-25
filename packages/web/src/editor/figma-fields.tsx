@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import type { ReactElement } from "react";
 import { normalizeFigmaLink, parseFigmaHeight } from "@uberblick/schema";
 import { Input } from "../ui/shadcn/input.js";
+import { Button } from "../ui/shadcn/button.js";
 
 export interface FigmaFieldValues { url: string; title: string | null; height: string | null }
 
@@ -49,7 +50,7 @@ export function FigmaFields({ url, title, height, onSave, onDone, focusLink = fa
         <Input id={`${fieldId}-height`} value={size} inputMode="numeric" placeholder="480" onChange={(event) => setSize(event.target.value)} onBlur={blur} />
       </label>
       {error !== "" && <p role="alert">{error}</p>}
-      <button type="submit" hidden>Done</button>
+      <Button variant="plain" size="custom" type="submit" hidden>Done</Button>
     </form>
   );
 }

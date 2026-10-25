@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
-import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, initDoc, insertBlock, setKind, setStatus, setTitle, snapshotRevision } from "@uberblick/schema";
+import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, initDoc, insertBlock, setKind, setStatus, setTitle, snapshotRevision, tableRows } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import { activateControl, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
@@ -11,6 +11,8 @@ import { assertNoViolations, WCAG_TAGS } from "./accessibility-assertions.js";
 import { waitForAcknowledged } from "./settle.js";
 import { setPointerSelection } from "./native-selection.js";
 import { mockFigmaLookup } from "./figma-fixtures.js";
+import { renderedText } from "./contrast-helpers.js";
+import { alphaOf } from "../test/colour.js";
 
 function history(page: Page): Locator {
   return page.getByRole("group", { name: "Document history", exact: true });
@@ -150,6 +152,68 @@ function splitHistory(uuid: string, title: string): Record<string, string> {
   }
 }
 
+function rowEdgesHistory(uuid: string, title: string): Record<string, string> {
+  const document = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title });
+    const paragraph = appendBlock(document, { type: "paragraph", text: "The amber paragraph changes." });
+    const removed = appendBlock(document, { type: "paragraph", text: "A removed paragraph." });
+    const bullet = appendBlock(document, { type: "list-item", text: "The amber bullet changes." });
+    appendBlock(document, { type: "list-item", text: "An unchanged bullet." });
+    const ordered = appendBlock(document, { type: "list-item", list: "ordered", text: "The amber numbered item changes." });
+    appendBlock(document, { type: "list-item", list: "ordered", text: "An unchanged numbered item." });
+    for (let index = 1; index <= 6; index += 1) {
+      appendBlock(document, { type: "paragraph", text: `Unchanged context ${index}.` });
+    }
+    const table = appendBlock(document, { type: "table", text: "| Day | Latency |\n| --- | --- |\n| Mon | 10 |" });
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    editBlock(document, paragraph, "The amber paragraph changes.", "The blue paragraph changes.");
+    editBlock(document, bullet, "The amber bullet changes.", "The blue bullet changes.");
+    editBlock(document, ordered, "The amber numbered item changes.", "The blue numbered item changes.");
+    deleteBlock(document, removed);
+    insertBlock(document, paragraph, { type: "paragraph", text: "An added paragraph." });
+    const rows = getBlock(document, table)?.text ?? "";
+    editBlock(document, table, rows, rows.replace("10", "12"));
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+  }
+}
+
+function tableWidthHistory(uuid: string, title: string): Record<string, string> {
+  const document = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title });
+    const only = appendBlock(document, { type: "table", text: "| Day | Latency |\n| --- | --- |\n| Mon | 10 |" });
+    for (let index = 1; index <= 18; index += 1) {
+      appendBlock(document, { type: "paragraph", text: `Unchanged context ${index} separates the two table changes.` });
+    }
+    const mixed = appendBlock(document, { type: "table", text: "| Stage | Duration |\n| --- | --- |\n| Build | 10 |" });
+    appendBlock(document, { type: "paragraph", text: "The closing context stays." });
+    const widths = (id: string, values: number[]): void => {
+      const table = getBlocksFragment(document).toArray().find(node => node instanceof Y.XmlElement && node.getAttribute("id") === id);
+      if (!(table instanceof Y.XmlElement)) throw new Error("The width comparison fixture table is missing");
+      for (const row of tableRows(table)) {
+        for (const [column, width] of values.entries()) {
+          const cell = row[column];
+          if (cell === undefined) throw new Error("The width comparison fixture cell is missing");
+          (cell as unknown as { setAttribute(name: string, value: unknown): void }).setAttribute("colwidth", [width]);
+        }
+      }
+    };
+    widths(only, [160, 180]);
+    widths(mixed, [160, 180]);
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    widths(only, [240, 180]);
+    const source = getBlock(document, mixed)?.text ?? "";
+    editBlock(document, mixed, source, source.replace("10", "12"));
+    widths(mixed, [240, 180]);
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+  }
+}
+
 /** The first block is removed, then a tall wireframe is added before the same long tail. */
 function coveredHeaderHistory(uuid: string, title: string): Record<string, string> {
   const document = new Y.Doc();
@@ -186,6 +250,58 @@ function jsonHistory(uuid: string, title: string, sources?: { before: string; af
   } finally {
     document.destroy();
   }
+}
+
+function ablaufHistory(uuid: string, title: string, drawings: { before?: string; after?: string }[]): Record<string, string> {
+  const document = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title });
+    const blocks = drawings.map(({ before }) => before === undefined ? null
+      : appendBlock(document, { type: "code", language: "ablauf", text: before }));
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    drawings.forEach(({ before, after }, index) => {
+      const block = blocks[index];
+      if (block == null && after !== undefined) appendBlock(document, { type: "code", language: "ablauf", text: after });
+      else if (block != null && after === undefined) deleteBlock(document, block);
+      else if (block != null && before !== undefined && after !== undefined && before !== after) editBlock(document, block, before, after);
+    });
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally { document.destroy(); }
+}
+
+function historyFlow(columns: number, rows: number): string {
+  return `flow v0\ncolumns ${Array.from({ length: columns }, (_, index) => `c${index}`).join(" ")}\n${
+    Array.from({ length: columns }, (_, index) => `box n${index} col=c${index}${index === 0 ? "" : " row=n0"} "Step ${index + 1}"`).join("\n")}\n${
+    Array.from({ length: rows }, (_, index) => `box tail${index} col=c0 "Later step ${index + 1}"`).join("\n")}\n${
+    Array.from({ length: columns - 1 }, (_, index) => `n${index} --> n${index + 1}`).join("\n")}`;
+}
+
+function ablaufViewer(page: Page): Locator { return page.getByRole("dialog", { name: "Ablauf diagram", exact: true }); }
+
+async function diagramTransform(viewer: Locator): Promise<{ a: number; d: number; e: number; f: number }> {
+  return viewer.locator("svg").evaluate(element => {
+    const matrix = (element as SVGSVGElement).getScreenCTM();
+    if (matrix === null) throw new Error("The displayed diagram has no screen transform");
+    return { a: matrix.a, d: matrix.d, e: matrix.e, f: matrix.f };
+  });
+}
+
+async function expectDiagramAt(viewer: Locator, before: Awaited<ReturnType<typeof diagramTransform>>): Promise<void> {
+  await expect.poll(async () => {
+    const after = await diagramTransform(viewer);
+    return Math.max(...Object.keys(before).map(key => Math.abs(after[key as keyof typeof after] - before[key as keyof typeof before])));
+  }).toBeLessThan(0.1);
+}
+
+async function expectDiagramFits(viewer: Locator): Promise<void> {
+  await expect.poll(async () => {
+    const viewport = await viewer.locator(".ub-ablauf-viewer-viewport").boundingBox();
+    const svg = await viewer.locator("svg").boundingBox();
+    return viewport !== null && svg !== null && svg.x >= viewport.x - 1 && svg.y >= viewport.y - 1
+      && svg.x + svg.width <= viewport.x + viewport.width + 1 && svg.y + svg.height <= viewport.y + viewport.height + 1
+      && Math.abs(svg.x + svg.width / 2 - viewport.x - viewport.width / 2) <= 1
+      && Math.abs(svg.y + svg.height / 2 - viewport.y - viewport.height / 2) <= 1;
+  }).toBe(true);
 }
 
 /** A long json-tree block with a change at each end and one inside a nested object in the middle, then a changed paragraph. */
@@ -538,6 +654,9 @@ test.describe("document history through ub open", () => {
     await shared.goto(new URL(unnamedComparison, harness().appUrl).href);
     await assertComparison(shared, "Unnamed baseline content.");
     await expect(history(shared)).not.toContainText("compared with");
+    await expect(shared.locator(".ub-revision-side-label").first()
+      .getByRole("button", { name: "Restore this version", exact: true })).toBeEnabled();
+    await expect(shared.locator(".ub-revision-side-label").last().getByRole("button")).toHaveCount(0);
     await shared.reload();
     await assertComparison(shared, "Unnamed baseline content.");
     await expect(shared).toHaveURL(new URL(unnamedComparison, harness().appUrl).href);
@@ -592,7 +711,7 @@ test.describe("document history through ub open", () => {
     await expect(shared.locator(".ub-revision-pane")).toHaveCount(0);
   });
 
-  test("names the reviewed state, compares since it, and lets its namer rename or remove it", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
+  test("names the reviewed state, compares since it, and renames or removes it inline", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
     await page.emulateMedia({ colorScheme: browserName === "webkit" ? "dark" : "light" });
     const title = docTitle("Named review state");
@@ -692,6 +811,42 @@ test.describe("document history through ub open", () => {
     await expect(live).toContainText("The blue fox stays.");
   });
 
+  test("a writer renames another account's revision name from the history header", { tag: "@webkit" }, async ({ browser, browserName }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    await page.emulateMedia({ colorScheme: browserName === "webkit" ? "dark" : "light" });
+    const uuid = await newDocument(page, docTitle("Teammate review name"));
+    await activateControl(editor(page));
+    await page.keyboard.type("A state reviewed by another teammate.");
+    await expect.poll(() => harness().hubText(`${harness().workspaceUuid}/${uuid}`)).toBe("A state reviewed by another teammate.");
+    const named = await harness().nameRevisionAsOther(uuid, "Reviewed by teammate");
+    expect(named.name?.namer).toMatchObject({ githubUsername: "other-admin", surface: { kind: "mcp", name: "Review client" } });
+    await previous(page);
+    await expect(history(page)).toContainText("“Reviewed by teammate”, named by other-admin via Review client at ");
+    const trigger = history(page).getByRole("button", { name: "Rename revision", exact: true });
+    const input = history(page).getByRole("textbox", { name: "Revision name", exact: true });
+    await activateControl(trigger);
+    await expect(input).toHaveValue("Reviewed by teammate");
+    await input.fill("Cancelled rename");
+    await input.press("Escape");
+    await expect(input).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await expect(history(page)).toContainText("“Reviewed by teammate”, named by other-admin via Review client at ");
+    await trigger.press("Enter");
+    await expect(input).toHaveValue("Reviewed by teammate");
+    await input.fill("Reviewed together");
+    await input.press("Enter");
+    await expect(input).toHaveCount(0);
+    await expect(history(page)).toContainText("“Reviewed together”, named by browser-person in the browser at ");
+    await expect(history(page)).not.toContainText("named by other-admin");
+    await activateControl(trigger);
+    await input.fill("");
+    await input.press("Enter");
+    await expect(input).toHaveCount(0);
+    await expect(history(page)).not.toContainText("Reviewed together");
+    await expect(trigger).toHaveCount(0);
+    await expect(historicalEditor(page)).toContainText("A state reviewed by another teammate.");
+  });
+
   test("refuses naming if the displayed state changes after opening the naming dialog", async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
     const uuid = await newDocument(page, docTitle("Stale review state"));
@@ -747,14 +902,29 @@ test.describe("document history through ub open", () => {
     const peer = await openApp(browser, new URL(page.url()).pathname, { readySelector: ".ub-editor .ProseMirror" });
     await expect.poll(() => liveText(peer)).toBe("The newer document content.");
     await previous(page);
-    await previous(page);
-    await expect(history(page).getByRole("button", { name: /Copy revision/ })).toHaveText("Baseline to restore");
     const restore = page.getByRole("button", { name: "Restore this version", exact: true });
-    await expect(restore).toBeEnabled();
+    await expect(restore).toBeDisabled();
+    await expect(restore).toHaveAccessibleDescription("This is the current version.");
+    const sinceDrawer = await showHistoryList(page);
+    await activateControl(historyList(page).getByRole("listitem").filter({ hasText: "Baseline to restore" })
+      .getByRole("button", { name: "Changes since this name", exact: true }));
+    await closeHistoryList(page, sinceDrawer);
+    await expect(history(page)).toContainText("compared with “Baseline to restore”");
+    const restoreBaseline = page.getByRole("button", { name: "Restore “Baseline to restore”", exact: true });
+    await expect(restoreBaseline).toBeEnabled();
+    await expect(restoreBaseline).toHaveText("Restore “Baseline to restore”");
+    if (await page.locator(".ub-revision-split").isVisible()) {
+      await expect(page.locator(".ub-revision-side-label").first().getByRole("button")).toHaveAccessibleName("Restore “Baseline to restore”");
+      await expect(page.locator(".ub-revision-side-label").last().getByRole("button")).toHaveCount(0);
+    } else {
+      await expect(page.locator(".ub-revision-header").getByRole("button", { name: "Restore “Baseline to restore”", exact: true })).toBeEnabled();
+    }
+    const fixedComparison = new URL(page.url()).pathname;
+    const selectedAfter = fixedComparison.split("/since/")[0] ?? "";
     if (browserName === "chromium") {
-      await restore.focus();
+      await restoreBaseline.focus();
       await page.keyboard.press("Enter");
-    } else await activateControl(restore);
+    } else await activateControl(restoreBaseline);
     await expect(page.getByText("Document restored to this version", { exact: true })).toBeVisible();
     await expect.poll(() => liveText(peer)).toBe("The earlier document content.");
     await expect(peer.locator(".ub-title")).toHaveValue(title);
@@ -763,16 +933,29 @@ test.describe("document history through ub open", () => {
     await expect(page.locator(".ub-title")).toHaveValue(title);
     await previous(page);
     await expect(history(page)).toContainText("browser-person in the browser");
+    await expect(restore).toBeDisabled();
+    await expect(restore).toHaveAccessibleDescription("This is the current version.");
     const drawer = await showHistoryList(page);
     const count = await historyList(page).getByRole("listitem").count();
+    await activateControl(historyList(page).getByRole("button", { name: /Baseline to restore/ }));
     await closeHistoryList(page, drawer);
+    await expect(restore).toBeEnabled();
     await activateControl(restore);
     await expect(page.getByText("The document already has this version. Nothing changed.", { exact: true })).toBeVisible();
     const noOpDrawer = await showHistoryList(page);
     await expect(historyList(page).getByRole("listitem")).toHaveCount(count);
     await closeHistoryList(page, noOpDrawer);
-    await previous(page);
+    // This shared comparison still names its original After, even after the restore added a newer revision.
+    await page.goto(new URL(fixedComparison, harness().appUrl).href);
     await expect(history(page).getByRole("button", { name: /Copy revision/ })).toHaveText("Before the restore");
+    await expect(history(page)).toContainText("compared with “Baseline to restore”");
+    await expect(historicalEditor(page).locator('[data-revision-change="added"]').filter({ hasText: "newer" })).toHaveText("newer");
+    await expect(earlierSide(page).locator('[data-revision-change="removed"]').filter({ hasText: "earlier" })).toHaveText("earlier");
+    await expect(restoreBaseline).toBeEnabled();
+    // Step to the original After itself to restore the state just before the first restore.
+    await page.goto(new URL(selectedAfter, harness().appUrl).href);
+    await expect(history(page).getByRole("button", { name: /Copy revision/ })).toHaveText("Before the restore");
+    await expect(restore).toBeEnabled();
     await activateControl(restore);
     await expect.poll(() => liveText(peer)).toBe("The newer document content.");
     await expect(peer.locator(".ub-title")).toHaveValue(`${title} newer`);
@@ -799,23 +982,182 @@ test.describe("document history through ub open", () => {
     await activateControl(editor(page));
     await page.keyboard.type("State reviewed when history opens.");
     await expect.poll(() => harness().hubText(room)).toBe("State reviewed when history opens.");
+    await activateControl(history(page).getByRole("button", { name: "Name current revision", exact: true }));
+    const name = history(page).getByRole("textbox", { name: "Revision name", exact: true });
+    await name.fill("Reviewed restore target");
+    await name.press("Enter");
+    await expect(name).toHaveCount(0);
+    await selectPositions(editor(page), 1);
+    await page.keyboard.type("Current state: ");
+    await expect.poll(() => harness().hubText(room)).toBe("Current state: State reviewed when history opens.");
     const peer = await openApp(browser, new URL(page.url()).pathname, { readySelector: ".ub-editor .ProseMirror" });
-    await expect.poll(() => liveText(peer)).toBe("State reviewed when history opens.");
+    await expect.poll(() => liveText(peer)).toBe("Current state: State reviewed when history opens.");
     await previous(page);
+    await previous(page);
+    await expect(history(page).getByRole("button", { name: /Copy revision/ })).toHaveText("Reviewed restore target");
     await expect(page.getByRole("button", { name: "Restore this version", exact: true })).toBeEnabled();
     await peer.locator(".ub-title").fill(`${title} collaborator`);
     await selectPositions(editor(peer), 1);
     await peer.keyboard.type("Newer changes: ");
-    await expect.poll(() => harness().hubText(room)).toBe("Newer changes: State reviewed when history opens.");
+    await expect.poll(() => harness().hubText(room)).toBe("Newer changes: Current state: State reviewed when history opens.");
     await activateControl(page.getByRole("button", { name: "Restore this version", exact: true }));
     await expect(page.getByText("This document changed. Review the newer changes in history and try again.", { exact: true })).toBeVisible();
-    await expect(historicalEditor(page)).toContainText("Newer changes: State reviewed when history opens.");
+    const drawer = await showHistoryList(page);
+    const current = historyList(page).getByRole("button", { name: /Current version/ });
+    await activateControl(current);
+    await expect(current).toHaveAttribute("aria-current", "true");
+    await closeHistoryList(page, drawer);
+    await expect(historicalEditor(page)).toContainText("Newer changes: Current state: State reviewed when history opens.");
     await expect(page.locator(".ub-revision-title")).toHaveText(`${title} collaborator`);
-    await showHistoryList(page);
-    await expect(historyList(page).getByRole("button", { name: /Current version/ })).toHaveAttribute("aria-current", "true");
     await backToNow(page);
-    await expect.poll(() => liveText(page)).toBe("Newer changes: State reviewed when history opens.");
+    await expect.poll(() => liveText(page)).toBe("Newer changes: Current state: State reviewed when history opens.");
     await expect(page.locator(".ub-title")).toHaveValue(`${title} collaborator`);
+  });
+
+  test("restore follows its column with compact geometry, touch reach and native keyboard order", { tag: "@webkit-touch" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane",
+      contextOptions: { viewport: { width: 1440, height: 640 }, reducedMotion: "reduce" } });
+    const title = docTitle("Restore comparison placement");
+    const uuid = await newDocument(page, title);
+    const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
+    const baselineName = "Reviewed after the auth rewrite with Lena and the entire release team before the final launch review";
+    await serveHistory(page, [
+      { id: "newest", title, author: null, startedAt: 3_000, endedAt: null },
+      { id: "latest", title, author: { ...person, githubUsername: "W".repeat(39) }, startedAt: 2_000, endedAt: 3_000 },
+      { id: "earlier", title, author: null, startedAt: 1_000, endedAt: 2_000,
+        name: { text: baselineName, namer: person, namedAt: 2_000, canManage: true } },
+    ], { ...toggleNavigationHistory(uuid, title, false), newest: savedState(uuid, title, "Current live version.") });
+    await previous(page);
+    const restore = page.getByRole("button", { name: "Restore this version", exact: true });
+    const header = page.locator(".ub-revision-header");
+    const split = page.locator(".ub-revision-split");
+    await expect(split).toBeVisible();
+    await expect(split.getByRole("button", { name: "Restore this version", exact: true })).toBeDisabled();
+    await expect(restore).toHaveAccessibleDescription("This is the current version.");
+    await expect(header.getByRole("button", { name: "Restore this version", exact: true })).toHaveCount(0);
+    const currentReason = page.getByText("This is the current version.", { exact: true });
+    expect((await currentReason.boundingBox())?.height).toBeLessThanOrEqual(1);
+    const currentHeaderHeight = (await header.boundingBox())?.height;
+    // Disabling the current version also holds in the one-column header fallback.
+    await page.setViewportSize({ width: 860, height: 640 });
+    await expect(split).toHaveCount(0);
+    await expect(header.getByRole("button", { name: "Restore this version", exact: true })).toBeDisabled();
+    await expect(restore).toHaveAccessibleDescription("This is the current version.");
+    expect((await currentReason.boundingBox())?.height).toBeLessThanOrEqual(1);
+    await page.setViewportSize({ width: 1440, height: 640 });
+    await expect(split).toBeVisible();
+    await previous(page);
+    await expect(restore).toBeEnabled();
+    expect((await header.boundingBox())?.height).toBeCloseTo(currentHeaderHeight ?? 0, 0);
+    const drawer = await showHistoryList(page);
+    const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true });
+    if (await collapse.getAttribute("aria-checked") === "true") await activateControl(collapse);
+    await closeHistoryList(page, drawer);
+    const assertCompactGeometry = async (control: Locator): Promise<void> => {
+      for (const scheme of ["light", "dark"] as const) {
+        await page.emulateMedia({ colorScheme: scheme });
+        const geometry = await control.evaluate(button => {
+          const labels = [...document.querySelectorAll<HTMLElement>(".ub-revision-side-label")];
+          const [before, after] = labels;
+          const sides = [...document.querySelectorAll<HTMLElement>(".ub-revision-split .ProseMirror")];
+          if (before === undefined || after === undefined || sides.length !== 2) throw new Error("Both comparison columns must be shown");
+          const left = before.getBoundingClientRect();
+          const right = after.getBoundingClientRect();
+          const box = button.getBoundingClientRect();
+          const owner = button.closest(".ub-revision-side-label")?.getBoundingClientRect();
+          if (owner === undefined) throw new Error("Restore must belong to a column label");
+          const text = getComputedStyle(before);
+          const style = getComputedStyle(button);
+          return { beforeHeight: left.height, afterHeight: right.height, labelTopDifference: right.top - left.top,
+            editorTopDifference: (sides[1]?.getBoundingClientRect().top ?? 0) - (sides[0]?.getBoundingClientRect().top ?? 0),
+            rightInset: owner.right - box.right, controlTop: box.top - owner.top, controlBottom: owner.bottom - box.bottom,
+            font: style.fontSize, labelFont: text.fontSize, lineHeight: style.lineHeight, labelLineHeight: text.lineHeight,
+            touch: matchMedia("(any-pointer: coarse)").matches,
+            hitArea: [-21.5, 21.5].map(offset => button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2 + offset))) };
+        });
+        expect(geometry.afterHeight).toBeCloseTo(geometry.beforeHeight, 1);
+        expect(Math.abs(geometry.labelTopDifference)).toBeLessThanOrEqual(1);
+        expect(Math.abs(geometry.editorTopDifference)).toBeLessThanOrEqual(1);
+        expect(Math.abs(geometry.rightInset)).toBeLessThanOrEqual(1);
+        expect(geometry.controlTop).toBeGreaterThanOrEqual(-1);
+        expect(geometry.controlBottom).toBeGreaterThanOrEqual(-1);
+        expect(geometry.font).toBe(geometry.labelFont);
+        expect(geometry.lineHeight).toBe(geometry.labelLineHeight);
+        if (geometry.touch) expect(geometry.hitArea).toEqual([true, true]);
+      }
+    };
+    await expect(page.locator(".ub-revision-side-label").first().getByRole("button")).toHaveCount(0);
+    await expect(page.locator(".ub-revision-side-label").last().getByRole("button")).toHaveAccessibleName("Restore this version");
+    await assertCompactGeometry(restore);
+    expect(await restore.locator("span").evaluate(label => label.scrollWidth > label.clientWidth)).toBe(false);
+    const nextChange = page.getByRole("button", { name: "Next change", exact: true });
+    await expect(nextChange).toBeEnabled();
+    await nextChange.focus();
+    await page.keyboard.press("Tab");
+    await expect(restore).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(earlierSide(page)).toBeFocused();
+    // Native editor focus may scroll its selection into view; start this proof at the pinned header.
+    await page.locator(".ub-revision-pane").evaluate(pane => { pane.scrollTop = 20; });
+    const start = await page.locator(".ub-revision-side-label").last().boundingBox();
+    const headerStart = await header.boundingBox();
+    await page.locator(".ub-revision-pane").evaluate(pane => { pane.scrollTop = 170; });
+    await expect.poll(async () => (await page.locator(".ub-revision-side-label").last().boundingBox())?.y ?? 0)
+      .toBeLessThan((start?.y ?? 0) - 100);
+    expect((await header.boundingBox())?.y).toBeCloseTo(headerStart?.y ?? 0, 0);
+    const selectedAddress = new URL(page.url()).pathname;
+    await page.goto(new URL(`${selectedAddress}/since/${revisionId("earlier")}`, harness().appUrl).href);
+    const restoreNamed = page.getByRole("button", { name: `Restore “${baselineName}”`, exact: true });
+    await expect(split).toBeVisible();
+    await expect(restoreNamed).toBeEnabled();
+    await expect(page.locator(".ub-revision-side-label").first().getByRole("button")).toHaveAccessibleName(`Restore “${baselineName}”`);
+    await expect(page.locator(".ub-revision-side-label").last().getByRole("button")).toHaveCount(0);
+    await expect(header.locator(".ub-revision-restore")).toHaveCount(0);
+    await assertCompactGeometry(restoreNamed);
+    expect(await page.locator(".ub-revision-side-label").first().locator("span").first()
+      .evaluate(label => label.scrollWidth > label.clientWidth)).toBe(false);
+    await expect(restoreNamed).toHaveText(`Restore “${baselineName}”`);
+    const clipped = await restoreNamed.locator("span").evaluate(label => ({
+      overflow: getComputedStyle(label).textOverflow, clipped: label.scrollWidth > label.clientWidth,
+    }));
+    expect(clipped).toEqual({ overflow: "ellipsis", clipped: true });
+    await expect(nextChange).toBeEnabled();
+    await nextChange.focus();
+    await page.keyboard.press("Tab");
+    await expect(restoreNamed).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(earlierSide(page)).toBeFocused();
+    await page.setViewportSize({ width: 860, height: 640 });
+    await expect(split).toHaveCount(0);
+    await expect(header.getByRole("button", { name: `Restore “${baselineName}”`, exact: true })).toBeEnabled();
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      const geometry = await header.locator(".ub-revision-heading").evaluate(heading => {
+        const title = heading.querySelector(".ub-revision-title-text:not([aria-hidden])");
+        const button = heading.querySelector("button");
+        const label = button?.querySelector("span");
+        if (title === null || button === null || label == null) throw new Error("Revision title and restore must be shown");
+        const titleBox = title.getBoundingClientRect();
+        const buttonBox = button.getBoundingClientRect();
+        return { headingWidth: heading.getBoundingClientRect().width, titleWidth: titleBox.width,
+          titleRight: titleBox.right, buttonLeft: buttonBox.left,
+          clipped: label.scrollWidth > label.clientWidth, overflow: getComputedStyle(label).textOverflow };
+      });
+      expect(geometry.titleWidth).toBeGreaterThan(geometry.headingWidth * 0.4);
+      expect(geometry.titleRight).toBeLessThanOrEqual(geometry.buttonLeft);
+      expect(geometry.clipped).toBe(true);
+      expect(geometry.overflow).toBe("ellipsis");
+      await expect(restoreNamed).toHaveAccessibleName(`Restore “${baselineName}”`);
+    }
+    // Ordinary revision views keep their generic header action when narrow or without a predecessor.
+    await page.goto(new URL(selectedAddress, harness().appUrl).href);
+    await expect(split).toHaveCount(0);
+    await expect(header.getByRole("button", { name: "Restore this version", exact: true })).toBeEnabled();
+    await page.setViewportSize({ width: 1440, height: 640 });
+    await expect(split).toBeVisible();
+    await previous(page);
+    await expect(split).toHaveCount(0);
+    await expect(header.getByRole("button", { name: "Restore this version", exact: true })).toBeEnabled();
   });
 
   test("real hub revisions navigate, keep removed text selectable and isolate the live editor", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
@@ -1106,6 +1448,11 @@ test.describe("document history through ub open", () => {
             const row = element.getBoundingClientRect(), band = header.getBoundingClientRect();
             return row.top < band.bottom - 8 && row.bottom > band.bottom && pane.scrollTop > 0;
           })).toBe(true);
+          if (split) {
+            // Geometry settles before the controls' frame update; the only change now starts behind the header.
+            await expect(header.getByRole("button", { name: "Previous change", exact: true })).toBeEnabled();
+            await expect(header.getByRole("button", { name: "Next change", exact: true })).toBeDisabled();
+          }
           const geometry = () => header.evaluate(element => {
             const rect = (target: Element) => {
               const box = target.getBoundingClientRect();
@@ -1269,6 +1616,242 @@ test.describe("document history through ub open", () => {
     await expect(split).toBeVisible();
   });
 
+  test("comparison tints, fillers and folds share text edges and list markers keep document styling", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane",
+      contextOptions: { viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" } });
+    const title = docTitle("Comparison row edges");
+    const uuid = await newDocument(page, title);
+    await editor(page).evaluate(element => {
+      (element as HTMLElement & { editor: Editor }).editor.commands.setContent({ type: "doc", content: [
+        ...["bullet", "ordered"].flatMap(list => [1, 2].map(number => ({
+          type: "list-item", attrs: { list }, content: [{ type: "text", text: `${list} item ${number}` }],
+        }))),
+      ] });
+    });
+    const markerStyles = (view: Locator) => view.locator(":scope > .ub-list-item").evaluateAll(items => items.map(item => {
+      const style = getComputedStyle(item, "::before");
+      return { content: style.content, color: style.color, font: style.font, left: style.left, width: style.width };
+    }));
+    const documentMarkers = new Map<"light" | "dark", Awaited<ReturnType<typeof markerStyles>>>();
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      const markers = await markerStyles(editor(page));
+      expect(markers).toHaveLength(4);
+      expect(markers[0]?.content).toContain("•");
+      expect(markers[1]?.content).toContain("•");
+      expect(markers[2]?.content).toMatch(/1.*\./);
+      expect(markers[3]?.content).toMatch(/2.*\./);
+      documentMarkers.set(scheme, markers);
+    }
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], rowEdgesHistory(uuid, title));
+    await previous(page);
+    await expect(page.locator(".ub-revision-split")).toBeVisible();
+    const before = earlierSide(page), after = historicalEditor(page);
+    const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true });
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      for (const folding of [true, false]) {
+        await collapse.setChecked(folding);
+        await expect(page.locator(".ub-revision-ghost")).toHaveCount(0);
+        for (const [side, tint] of [[before, "removed"], [after, "added"]] as const) {
+          await expect(side.locator(".ub-revision-fold-button")).toHaveCount(Number(folding));
+          await expect(side.locator("[data-revision-mark]")).toHaveCount(0);
+          await expect(side.locator(`:scope > p.ub-revision-row-${tint}`)).toHaveCount(1);
+          await expect(side.locator(".ub-revision-fields")).toContainText(tint === "removed" ? "Removed block" : "Added block");
+          const geometry = await side.evaluate((element, kind) => {
+            const edges = (target: Element) => {
+              const box = target.getBoundingClientRect();
+              return { left: box.left, right: box.right };
+            };
+            const filler = element.querySelector(".ub-revision-row-end.ub-revision-row-filler");
+            const paragraph = element.querySelector("p.ub-revision-row-changed");
+            if (filler === null || paragraph?.firstChild == null) throw new Error("The comparison geometry fixture is missing");
+            const text = document.createRange();
+            text.setStart(paragraph.firstChild, 0);
+            text.setEnd(paragraph.firstChild, 1);
+            const rows = [...element.querySelectorAll(`:scope > .ub-revision-row-${kind}, :scope > .ub-revision-row-changed`)];
+            const fold = element.querySelector(".ub-revision-fold-button");
+            return { filler: edges(filler), fold: fold === null ? null : edges(fold), text: text.getBoundingClientRect().left,
+              rows: rows.map(row => ({ ...edges(row), shadow: getComputedStyle(row).boxShadow,
+                tint: getComputedStyle(row).backgroundColor, mark: getComputedStyle(row, "::before").content,
+                list: row.classList.contains("ub-list-item") })) };
+          }, tint);
+          expect(geometry.rows.length).toBeGreaterThan(3);
+          for (const row of geometry.rows) {
+            expect(row.left).toBeCloseTo(geometry.filler.left, 0);
+            expect(row.right).toBeCloseTo(geometry.filler.right, 0);
+            // Box geometry alone cannot detect paint extending through a shadow.
+            expect(row.shadow).toBe("none");
+            expect(alphaOf(row.tint)).toBeGreaterThan(0);
+            if (!row.list) expect(["none", "normal"]).toContain(row.mark);
+          }
+          expect(geometry.text).toBeCloseTo(geometry.filler.left, 0);
+          if (geometry.fold !== null) {
+            expect(geometry.fold.left).toBeCloseTo(geometry.filler.left, 0);
+            expect(geometry.fold.right).toBeCloseTo(geometry.filler.right, 0);
+          }
+          expect(await markerStyles(side)).toEqual(documentMarkers.get(scheme));
+          await expect(side.locator('.ub-list-item[data-revision-row="changed"]')).toHaveCount(2);
+          await expect(side.locator('.ub-list-item[data-revision-row="unchanged"]')).toHaveCount(2);
+        }
+      }
+    }
+  });
+
+  test("opaque drawings retain visible row tint inside comparison edges", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane",
+      contextOptions: { viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" } });
+    const title = docTitle("Opaque comparison surfaces");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], ablaufHistory(uuid, title, [
+      { before: historyFlow(6, 0), after: historyFlow(7, 0) },
+      { before: historyFlow(3, 0) },
+      { after: historyFlow(4, 0) },
+      { before: historyFlow(2, 0), after: historyFlow(2, 0) },
+    ]));
+    await previous(page);
+    await expect(page.locator(".ub-revision-split")).toBeVisible();
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      for (const side of [earlierSide(page), historicalEditor(page)]) {
+        const rows = side.locator(":scope > .ub-ablauf:is(.ub-revision-row-changed, .ub-revision-row-added, .ub-revision-row-removed)");
+        await expect(rows).toHaveCount(2);
+        for (const row of await rows.all()) {
+          const tint = await row.evaluate(element => getComputedStyle(element).backgroundColor);
+          expect(alphaOf(tint)).toBe(1);
+          await expect(row).toHaveCSS("box-shadow", "none");
+          await expect(row.locator(".ub-ablauf-viewport")).toHaveCSS("background-color", tint);
+          await expect(row.locator("svg")).toHaveCSS("background-color", tint);
+          const screenshot = await row.screenshot({ animations: "disabled", scale: "css" });
+          const paint = await page.evaluate(async ({ bytes, tint }) => {
+            const image = await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: "image/png" }));
+            const canvas = document.createElement("canvas");
+            canvas.width = image.width; canvas.height = image.height;
+            const context = canvas.getContext("2d");
+            if (context === null) throw new Error("Canvas pixel readback is unavailable");
+            context.fillStyle = tint; context.fillRect(0, 0, 1, 1);
+            const expected = context.getImageData(0, 0, 1, 1).data;
+            context.drawImage(image, 0, 0);
+            image.close();
+            const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+            let tinted = 0;
+            for (let offset = 0; offset < pixels.length; offset += 4) {
+              if (expected.every((value, channel) => Math.abs(value - (pixels[offset + channel] ?? -255)) <= 1)) tinted += 1;
+            }
+            return { tinted, width: canvas.width };
+          }, { bytes: [...screenshot], tint });
+          expect(paint.tinted, "The row tint must be visible inside the block, even when its content has an opaque surface").toBeGreaterThan(paint.width);
+        }
+        const unchanged = side.locator(":scope > .ub-ablauf.ub-revision-row-unchanged .ub-ablauf-viewport");
+        await expect(unchanged).not.toHaveCSS("background-color", await rows.first().evaluate(element => getComputedStyle(element).backgroundColor));
+      }
+    }
+  });
+
+  test("table width changes explain themselves while keeping widths, tint and change navigation", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 640 } } });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const title = docTitle("Table column widths in history");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], tableWidthHistory(uuid, title));
+    await previous(page);
+    await expect(page.locator(".ub-revision-split")).toBeVisible();
+    const before = earlierSide(page);
+    const after = historicalEditor(page);
+    const note = after.getByText("Only column widths changed", { exact: true });
+    await expect(note).toBeVisible();
+    await expect(before.locator(".ub-revision-fields")).toHaveText("Changed: column widths");
+    await expect(after.locator(".ub-revision-fields")).toHaveText(["Only column widths changed", "Changed: column widths"]);
+    await expect(page.locator(".ub-revision-pane")).not.toContainText("columnWidths");
+    const widthTable = (side: Locator): Locator => side.locator(".ub-table").filter({ hasText: "Latency" });
+    const mixedTable = (side: Locator): Locator => side.locator(".ub-table").filter({ hasText: "Duration" });
+    await expect(widthTable(before).locator("[data-revision-change]")).toHaveCount(0);
+    await expect(widthTable(after).locator("[data-revision-change]")).toHaveCount(0);
+    await expect(mixedTable(before).locator('[data-revision-change="removed"]')).toHaveText("10");
+    await expect(mixedTable(after).locator('[data-revision-change="added"]')).toHaveText("12");
+    for (const [side, expected] of [[before, [160, 180]], [after, [240, 180]]] as const) {
+      await expect.poll(() => widthTable(side).locator("th").evaluateAll(cells => cells.map(cell => Math.round(cell.getBoundingClientRect().width))))
+        .toEqual(expected);
+      await expect(side.locator("[data-revision-mark]")).toHaveCount(0);
+    }
+    // The widths-only table remains visible with the unchanged middle folded.
+    await expect(after.locator(".ub-revision-fold-button")).toHaveCount(1);
+    await expect(after.locator(".ub-table")).toHaveCount(2);
+    const changeMarks = async () => (await rulerGeometry(page)).marks.filter(mark => mark.kind !== "same" && mark.kind !== "fold");
+    await expect.poll(async () => (await changeMarks()).length).toBe(2);
+    await activateControl(historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true }));
+    await expect(after.locator(".ub-revision-fold-button")).toHaveCount(0);
+    await expect.poll(async () => (await changeMarks()).length).toBe(2);
+    const nextChange = page.getByRole("button", { name: "Next change", exact: true });
+    const previousChange = page.getByRole("button", { name: "Previous change", exact: true });
+    await expect(nextChange).toBeEnabled();
+    await activateControl(nextChange);
+    const pane = page.locator(".ub-revision-pane");
+    await expect.poll(() => pane.evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThan(2);
+    await expect(previousChange).toBeEnabled();
+    await activateControl(previousChange);
+    await expect.poll(() => pane.evaluate(element => element.scrollTop)).toBeLessThan(40);
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      const paints = [];
+      for (const side of [before, after]) {
+        const row = side.locator(':scope > [data-revision-row="changed"]').first();
+        const paint = await row.evaluate(element => ({ background: getComputedStyle(element).backgroundColor, mark: getComputedStyle(element, "::before").content }));
+        expect(alphaOf(paint.background)).toBeGreaterThan(0);
+        expect(["none", "normal"]).toContain(paint.mark);
+        paints.push(paint.background);
+      }
+      expect(paints[0]).not.toBe(paints[1]);
+      const typography = await after.locator(".ub-revision-fields").evaluateAll(labels => labels.map(label => {
+        const style = getComputedStyle(label);
+        return [style.fontFamily, style.fontSize, style.lineHeight, style.color];
+      }));
+      expect(typography[0]).toEqual(typography[1]);
+      const readings = await renderedText(page, ".ub-revision-side-after .ub-revision-fields");
+      expect(readings.length).toBeGreaterThan(0);
+      for (const reading of readings) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
+      await expect.poll(async () => {
+        const label = await note.boundingBox();
+        const table = await widthTable(after).boundingBox();
+        return label !== null && table !== null && label.y + label.height <= table.y
+          && Math.abs(label.x + label.width - table.x - table.width) <= 1;
+      }).toBe(true);
+    }
+    expect(await after.ariaSnapshot()).toContain("Only column widths changed");
+    expect(await note.evaluate(element => [...element.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent === "Only column widths changed"))).toBe(true);
+    // The same label and marked words survive the one-column projection.
+    await page.setViewportSize({ width: 860, height: 640 });
+    await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+    const single = page.getByLabel("Document revision", { exact: true });
+    const singleNote = single.getByText("Only column widths changed", { exact: true });
+    await expect(single.locator(".ub-revision-fields")).toHaveText(["Only column widths changed", "Changed: column widths"]);
+    await expect(single).not.toContainText("columnWidths");
+    await expect(mixedTable(single).locator('[data-revision-change="removed"]')).toHaveText("10");
+    await expect(mixedTable(single).locator('[data-revision-change="added"]')).toHaveText("12");
+    expect(await single.ariaSnapshot()).toContain("Only column widths changed");
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await expect(singleNote).toBeVisible();
+      await expect.poll(async () => {
+        const label = await singleNote.boundingBox();
+        const table = await widthTable(single).boundingBox();
+        return label !== null && table !== null && label.y + label.height <= table.y;
+      }).toBe(true);
+      const readings = await renderedText(page, ".ub-revision-view .ub-revision-fields");
+      expect(readings.length).toBeGreaterThan(0);
+      for (const reading of readings) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
   test("each comparison side follows document links by click and Enter, and Tab leaves lists and tables", { tag: "@webkit" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 900 } } });
     const targetTitle = docTitle("Historical link target");
@@ -1406,6 +1989,197 @@ test.describe("document history through ub open", () => {
       await expect(side.getByText("Quiet block", { exact: true })).toBeVisible();
       await expect(side.locator("p").filter({ hasText: "Outside section change" })).toBeVisible();
     }
+  });
+
+  test("changed Ablauf viewers open either state and keep diagram coordinates when switching after zoom and pan", { tag: "@webkit" }, async ({ browser }, info) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+      viewport: { width: 1440, height: 900 }, hasTouch: false, isMobile: false,
+    }, beforeNavigate: async page => { await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", { configurable: true,
+        value: { writeText: async (text: string) => document.documentElement.setAttribute("data-copied-source", text) } });
+    }); } });
+    const title = docTitle("Ablauf history coordinates");
+    const uuid = await newDocument(page, title);
+    const sources = { before: historyFlow(6, 0), after: historyFlow(12, 50) };
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], ablaufHistory(uuid, title, [sources]));
+    await previous(page);
+    await expect(page).toHaveURL(/\/rev\//);
+    const dialog = ablaufViewer(page);
+    const address = page.url();
+    const sides = [[earlierSide(page), "Before", sources.before], [historicalEditor(page), "After", sources.after]] as const;
+    // The scaled drawing and Expand share the comparison behavior from either side.
+    for (const [side, state, source] of sides) {
+      const preview = side.getByRole("region", { name: "Ablauf preview", exact: true });
+      await expect(preview.locator("svg")).toBeVisible();
+      await expect(preview).toHaveAttribute("data-zoomable", "true");
+      for (const opening of ["drawing", "Expand", "keyboard"] as const) {
+        if (opening === "drawing") await preview.click();
+        else {
+          const expand = side.getByRole("button", { name: "Expand ablauf diagram", exact: true });
+          await expand.focus();
+          if (opening === "keyboard") await page.keyboard.press("Enter");
+          else await expand.click();
+        }
+        await expect(dialog.getByRole("tab", { name: state, exact: true })).toHaveAttribute("aria-selected", "true");
+        await expectDiagramFits(dialog);
+        await dialog.getByRole("button", { name: "Copy ablauf source", exact: true }).click();
+        await expect(page.locator("html")).toHaveAttribute("data-copied-source", source);
+        await expect(dialog.getByRole("button", { name: "Open ablauf source", exact: true })).toHaveCount(0);
+        await page.keyboard.press("Escape");
+        await expect(dialog).toHaveCount(0);
+        await expect(preview).toBeFocused();
+        await expect(page).toHaveURL(address);
+      }
+    }
+    const preview = earlierSide(page).getByRole("region", { name: "Ablauf preview", exact: true });
+    await preview.click();
+    await dialog.getByRole("button", { name: "Zoom in", exact: true }).click();
+    await expect(dialog.getByLabel("Zoom level", { exact: true })).toHaveText("125%");
+    const viewport = await dialog.locator(".ub-ablauf-viewer-viewport").boundingBox();
+    if (viewport === null) throw new Error("The diagram viewport is missing");
+    const beforePan = await diagramTransform(dialog);
+    await page.mouse.move(viewport.x + viewport.width / 2, viewport.y + viewport.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(viewport.x + viewport.width / 2 + 80, viewport.y + viewport.height / 2 + 45, { steps: 4 });
+    await page.mouse.up();
+    await expect.poll(async () => (await diagramTransform(dialog)).e).not.toBe(beforePan.e);
+    const position = await diagramTransform(dialog);
+    const zoom = await dialog.getByLabel("Zoom level", { exact: true }).textContent();
+    const before = dialog.getByRole("tab", { name: "Before", exact: true });
+    const after = dialog.getByRole("tab", { name: "After", exact: true });
+    await before.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(after).toHaveAttribute("aria-selected", "true");
+    await expect(after).toBeFocused();
+    await expect(dialog.locator("svg")).toContainText("Later step 50");
+    await expectDiagramAt(dialog, position);
+    await expect(dialog.getByLabel("Zoom level", { exact: true })).toHaveText(zoom ?? "");
+    await page.keyboard.press("ArrowLeft");
+    await expect(before).toHaveAttribute("aria-selected", "true");
+    await expect(before).toBeFocused();
+    await expect(dialog.locator("svg")).not.toContainText("Later step 50");
+    await expectDiagramAt(dialog, position);
+    await after.click();
+    await dialog.getByRole("button", { name: "Copy ablauf source", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-copied-source", sources.after);
+    await dialog.getByRole("button", { name: "Fit", exact: true }).click();
+    await expectDiagramFits(dialog);
+    await expect.poll(async () => Number((await dialog.getByLabel("Zoom level", { exact: true }).textContent())?.replace("%", ""))).toBeLessThan(25);
+    const fitted = await diagramTransform(dialog);
+    await before.click();
+    await expectDiagramAt(dialog, fitted);
+    await dialog.getByRole("button", { name: "Fit", exact: true }).click();
+    await expectDiagramFits(dialog);
+    await expect(dialog.getByLabel("Zoom level", { exact: true })).toHaveText("100%");
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      const screenshot = info.outputPath(`ablauf-comparison-viewer-${scheme}.png`);
+      await dialog.screenshot({ path: screenshot });
+      await info.attach(`ablauf-comparison-viewer-${scheme}`, { path: screenshot, contentType: "image/png" });
+    }
+    await page.goBack();
+    await expect(dialog).toHaveCount(0);
+    await expect(preview).toBeFocused();
+    await expect(page).toHaveURL(address);
+  });
+
+  test("iPad taps open either fan-out state and switch without losing its position", { tag: "@webkit-touch" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+      ...devices["iPad Pro 11"], viewport: { width: 1366, height: 1024 },
+    } });
+    const title = docTitle("Touch fan-out comparison");
+    const uuid = await newDocument(page, title);
+    const before = 'fan-out v0\nstep "Before approval"\noutcome "Accepted" reason="Approved" destination="Start" tone="done"';
+    const after = before.replace("Before approval", "After approval")
+      + '\noutcome "Deferred" reason="Needs review" destination="Wait" tone="stop"';
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], ablaufHistory(uuid, title, [{ before, after }]));
+    await previous(page);
+    const dialog = ablaufViewer(page);
+    for (const [side, state, opposite] of [[earlierSide(page), "Before", "After"], [historicalEditor(page), "After", "Before"]] as const) {
+      const preview = side.getByRole("region", { name: "Ablauf preview", exact: true });
+      await expect(preview.locator("svg")).toBeVisible();
+      await preview.tap({ position: { x: 30, y: 30 } });
+      await expect(dialog.getByRole("tab", { name: state, exact: true })).toHaveAttribute("aria-selected", "true");
+      await expect(dialog.locator("svg")).toContainText(`${state} approval`);
+      const fitted = await diagramTransform(dialog);
+      await dialog.getByRole("button", { name: "Zoom in", exact: true }).tap();
+      await expect.poll(async () => (await diagramTransform(dialog)).a).toBeGreaterThan(fitted.a);
+      const position = await diagramTransform(dialog);
+      const other = dialog.getByRole("tab", { name: opposite, exact: true });
+      const bounds = await other.boundingBox();
+      if (bounds === null) throw new Error("The comparison switch is missing");
+      expect(bounds.width).toBeGreaterThanOrEqual(44);
+      expect(bounds.height).toBeGreaterThanOrEqual(44);
+      await other.tap();
+      await expect(other).toHaveAttribute("aria-selected", "true");
+      await expect(dialog.locator("svg")).toContainText(`${opposite} approval`);
+      await expectDiagramAt(dialog, position);
+      await dialog.getByRole("button", { name: "Close diagram viewer", exact: true }).tap();
+      await expect(dialog).toHaveCount(0);
+      await expect(preview).toBeFocused();
+    }
+  });
+
+  test("unchanged, added, removed and unrenderable comparison drawings keep the ordinary viewer, as does one column", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 900 } },
+      beforeNavigate: async page => { await page.addInitScript(() => {
+        const measure = CanvasRenderingContext2D.prototype.measureText;
+        CanvasRenderingContext2D.prototype.measureText = function (text) {
+          if (text.includes("Unrenderable")) throw new Error("Injected text measurement failure");
+          return measure.call(this, text);
+        };
+      }); } });
+    const title = docTitle("Ordinary history drawing viewers");
+    const uuid = await newDocument(page, title);
+    const drawing = (name: string) => `flow v0\ncolumns main\nbox first title="${name}"`;
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], ablaufHistory(uuid, title, [
+      { before: drawing("Unchanged drawing"), after: drawing("Unchanged drawing") },
+      { before: drawing("Removed drawing") },
+      { after: drawing("Added drawing") },
+      { before: drawing("Invalid after drawing"), after: drawing("Unrenderable drawing") },
+      { before: drawing("Unrenderable drawing"), after: drawing("Invalid before drawing") },
+      { before: drawing("Changed before drawing"), after: drawing("Changed after drawing") },
+    ]));
+    await previous(page);
+    const drawer = await showHistoryList(page);
+    await historyList(page).getByRole("switch", { name: "Collapse unchanged" }).uncheck();
+    await closeHistoryList(page, drawer);
+    const dialog = ablaufViewer(page);
+    for (const side of [earlierSide(page), historicalEditor(page)]) {
+      await expect(side.locator(".ub-ablauf-diagnostics").filter({ hasText: "Injected text measurement failure" })).toBeVisible();
+    }
+    for (const [side, name] of [[earlierSide(page), "Unchanged drawing"], [historicalEditor(page), "Unchanged drawing"],
+      [earlierSide(page), "Removed drawing"], [historicalEditor(page), "Added drawing"],
+      [earlierSide(page), "Invalid after drawing"], [historicalEditor(page), "Invalid before drawing"]] as const) {
+      const block = side.locator(".ub-ablauf").filter({ hasText: name });
+      await expect(block.locator("svg")).toBeVisible();
+      const expand = block.getByRole("button", { name: "Expand ablauf diagram", exact: true });
+      await expand.focus();
+      await page.keyboard.press("Enter");
+      await expect(dialog.locator("svg")).toContainText(name);
+      await expect(dialog.getByRole("tab", { name: /Before|After/ })).toHaveCount(0);
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+    }
+    await page.setViewportSize({ width: 860, height: 900 });
+    await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+    const changed = historicalEditor(page).locator(".ub-ablauf").filter({ hasText: "Changed after drawing" });
+    await expect(changed.locator("svg")).toBeVisible();
+    await changed.getByRole("button", { name: "Expand ablauf diagram", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(dialog.locator("svg")).toContainText("Changed after drawing");
+    await expect(dialog.getByRole("tab", { name: /Before|After/ })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
   });
 
   test("a changed json-tree block spans both columns with paired rows and its own Collapse unchanged switch", async ({ browser }, info) => {
@@ -1572,6 +2346,59 @@ test.describe("document history through ub open", () => {
       await nested.click();
     }
     await info.attach("JSON comparison interactions", { body: await compare.screenshot(), contentType: "image/png" });
+  });
+
+  test("JSON comparison rejects IME text inline and full screen while search accepts it", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 1000 } } });
+    const title = docTitle("Read-only JSON composition");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], jsonHistory(uuid, title, {
+      before: JSON.stringify({ version: "日本 old", nested: { a: 1 } }),
+      after: JSON.stringify({ version: "日本 new", nested: { a: 2 } }),
+    }));
+    await previous(page);
+    const compare = page.locator(".ub-json-compare");
+    await expect(compare).toBeVisible();
+    const session = await page.context().newCDPSession(page);
+    try {
+      for (const expanded of [false, true]) {
+        if (expanded) await compare.getByRole("button", { name: "Expand JSON comparison" }).click();
+        const panel = expanded ? page.getByRole("dialog", { name: "JSON comparison", exact: true }) : compare;
+        await expect(panel).toBeVisible();
+        for (const side of ["Before", "After"]) {
+          const pane = panel.getByRole("textbox", { name: `${side} JSON`, exact: true });
+          for (const commit of [true, false]) {
+            await pane.focus();
+            await pane.evaluate((element, commit) => {
+              const text = element.querySelector(".ub-json-string")?.firstChild;
+              if (text == null) throw new Error("Missing JSON composition target");
+              document.getSelection()?.setBaseAndExtent(text, 1, text, commit ? 1 : (text.textContent?.length ?? 1));
+            }, commit);
+            const original = await pane.innerHTML();
+            await session.send("Input.imeSetComposition", { text: "に", selectionStart: 1, selectionEnd: 1 });
+            expect(await pane.innerHTML()).toBe(original);
+            await session.send("Input.imeSetComposition", { text: "にほん", selectionStart: 3, selectionEnd: 3 });
+            expect(await pane.innerHTML()).toBe(original);
+            if (commit) await session.send("Input.insertText", { text: "日本" });
+            else await session.send("Input.imeSetComposition", { text: "", selectionStart: 0, selectionEnd: 0 });
+            expect(await pane.innerHTML()).toBe(original);
+            if (expanded) await expect(panel.getByRole("searchbox", { name: "Search keys and values" })).toHaveValue("");
+          }
+        }
+      }
+      const search = page.getByRole("searchbox", { name: "Search keys and values" });
+      await search.focus();
+      await session.send("Input.imeSetComposition", { text: "にほん", selectionStart: 3, selectionEnd: 3 });
+      await expect(search).toHaveValue("にほん");
+      await session.send("Input.insertText", { text: "日本" });
+      await expect(search).toHaveValue("日本");
+      await expect(page.locator(".ub-json-tree-count")).toHaveText("1 of 1");
+    } finally {
+      await session.detach();
+    }
   });
 
   test("JSON comparison copies only selected authored text inline and full screen", { tag: "@webkit" }, async ({ browser }) => {
@@ -2309,6 +3136,8 @@ test.describe("document history through ub open", () => {
     if (await page.locator(".ub-revision-split").isVisible()) {
       // Side by side, the predecessor draws its own numbers with the same mapping.
       const earlier = earlierSide(page);
+      await expect(earlier.locator(".ub-revision-fields")).toHaveText(["Data changed: measurements", "Data changed: measurements"]);
+      await expect(page.locator(".ub-revision-split [data-revision-mark]")).toHaveCount(0);
       await expect(earlier.getByRole("table", { name: "Historical measurements", exact: true }).locator("tbody tr")).toHaveText(["2026-10-2010 ms", "2026-10-2120 ms"]);
       await expect(earlier.locator(".ub-chart").filter({ has: page.getByRole("img", { name: "Historical latency", exact: true }) })
         .locator(".ub-chart-description")).toContainText("Latest values: Latency: 20 ms.");

@@ -69,6 +69,7 @@ const blocks: BlockInput[] = [
   { type: "code", language: "wireframe", text: "dialog Preview\n  text A same-origin renderer.\n  button Continue" },
   { type: "list-item", text: "A list entry" },
   { type: "quote", text: "Quoted prose" },
+  { type: "callout", variant: "note", text: "Callout prose" },
   { type: "table", text: "| Name | Count |\n| --- | --- |\n| Example | 2 |" },
   { type: "terminal", text: "$ ub init\nworkspace ready" },
   { type: "chart", text: JSON.stringify({
@@ -130,7 +131,7 @@ test("workspace and every block render, load Figma and sync edits without CSP vi
   for (const selector of [
     ".ub-code > code", ".ub-wireframe-drawing .wf-root",
     ".ProseMirror h2", ".ProseMirror li", ".ProseMirror blockquote",
-    ".ProseMirror table", ".ub-terminal-screen", ".ub-chart canvas", ".ub-card",
+    ".ProseMirror table", ".ub-terminal-screen", ".ub-chart canvas", ".ub-card", ".ub-callout",
   ]) await expect(page.locator(selector).first()).toBeVisible();
   await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "ready");
   await page.getByRole("button", { name: "Document actions", exact: true }).click();

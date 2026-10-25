@@ -42,7 +42,14 @@ export function strictInput<Shape extends z.ZodRawShape>(
   shape: Shape,
   modes: readonly ToolMode[] = [],
 ): z.ZodObject<Shape, z.core.$strict> {
-  const object = z.object(shape).strict();
+  const accepted = Object.keys(shape).join(", ") || "none";
+  const object = z.object(shape, {
+    error: (issue) => {
+      if (issue.code !== "unrecognized_keys" || issue.path?.length) return undefined;
+      const keys = issue.keys.map((key) => JSON.stringify(key)).join(", ");
+      return `Unrecognized key${issue.keys.length === 1 ? "" : "s"}: ${keys}. Accepted arguments: ${accepted}.`;
+    },
+  }).strict();
   if (modes.length === 0) return object;
   return object
     .superRefine((value, ctx) => {

@@ -124,6 +124,10 @@ const RECOVERIES: Record<string, Recovery> = {
     recoveryClass: "manual",
     guidance: "Supply list or indent only when editing a list-item block, with list bullet or ordered and indent an integer from 0 to 3. Nothing was written.",
   },
+  invalid_callout: {
+    recoveryClass: "manual",
+    guidance: "Supply variant note, tip, important, warning or caution and an optional icon: one emoji character or a curated :name: icon. On edit_block, use these fields only on a callout; an empty icon restores the default. Nothing was written.",
+  },
   annotation_cell: {
     recoveryClass: "manual",
     guidance:
@@ -260,11 +264,7 @@ const RECOVERIES: Record<string, Recovery> = {
   },
   revision_already_named: {
     recoveryClass: "manual",
-    guidance: "This state already has existingName. Its namer may rename or remove that name in the web; naming it again changes nothing.",
-  },
-  revision_not_namer: {
-    recoveryClass: "manual",
-    guidance: "Ask the account that named this revision to rename or remove it in the web. Nothing changed.",
+    guidance: "This state already has existingName. Anyone with write access to this document can rename or remove that name in the web while the document is not archived; naming it again changes nothing.",
   },
   revision_naming_outcome_unknown: {
     recoveryClass: "reread",
@@ -492,7 +492,6 @@ const REVISION_FAILURE_CODES: Record<RevisionClientFailure, string> = {
   "stale-state": "revision_stale_state",
   "invalid-name": "revision_invalid_name",
   "already-named": "revision_already_named",
-  "not-namer": "revision_not_namer",
   archived: "doc_archived",
   "naming-outcome-unknown": "revision_naming_outcome_unknown",
   "restore-outcome-unknown": "revision_restore_outcome_unknown",

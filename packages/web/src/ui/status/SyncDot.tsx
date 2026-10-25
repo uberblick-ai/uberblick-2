@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { createPortal } from "react-dom";
 import type { CodeCheck } from "@uberblick/schema";
+import { Button } from "../shadcn/button.js";
 import { PopoverTrigger } from "../shadcn/popover.js";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../shadcn/tooltip.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
@@ -72,10 +73,10 @@ export function SyncDot({ offline, error, confirmed, lastConfirmedAt, pulse, syn
   return <>
     {syncDetails ? <TooltipProvider><Tooltip>
       <TooltipTrigger asChild><PopoverTrigger asChild>
-        <button type="button" className={`ub-status-sync ub-sync-toggle${oldestCheckAge === null ? "" : " ub-status-sync--code"}`} aria-label={label} title={label}>
+        <Button variant="plain" size="custom" type="button" className={`ub-status-sync ub-sync-toggle inline-flex h-6 flex-none items-center justify-center rounded-(--radius-sm) border-0 bg-transparent p-0 text-inherit [font:inherit] hover:bg-(--card-accent) focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring focus-visible:outline-offset-2 [@media(any-pointer:coarse)]:w-11 ${oldestCheckAge === null ? "w-6" : "ub-status-sync--code w-11 gap-x-1"}`} aria-label={label} title={label}>
           {dot}
           {oldestCheckAge !== null && <span className="ub-sync-code-mark" aria-hidden="true">{"</>"}</span>}
-        </button>
+        </Button>
       </PopoverTrigger></TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip></TooltipProvider> : <span className="ub-status-sync-slot" title={label}>{dot}</span>}

@@ -96,7 +96,7 @@ describe("omitted arguments", () => {
 });
 
 describe("unknown fields", () => {
-  it("are refused by every tool, and cost the log nothing", async () => {
+  it("name every unknown field and the tool's accepted arguments without writing", async () => {
     const rig = await localRig();
     const doc = await seeded(rig);
     const store = rig.instance.replicas.store;
@@ -104,6 +104,8 @@ describe("unknown fields", () => {
     // The rule is advertised, so a client reads it before it sends anything —
     // over the whole tool set, because one tool left stripping is the one a
     // caller will hit.
+    const logged = store.logSize();
+    const before = (await rig.ok("list_docs")).docs.length;
     const { tools } = await rig.client.listTools();
     for (const tool of tools) {
       expect(
@@ -111,10 +113,14 @@ describe("unknown fields", () => {
         `${tool.name} strips unknown fields instead of refusing them`,
       ).toBe(false);
       expect((tool.inputSchema as any).properties, tool.name).not.toHaveProperty("answerPreview");
+      expect((tool.inputSchema as any).properties, tool.name).not.toHaveProperty("bogus");
+      const refused = await rig.call(tool.name, { answerPreview: "Injected", bogus: true });
+      expect(refused.isError, tool.name).toBe(true);
+      expect(refused.payload.error, tool.name).toBe("schema_validation");
+      expect(refused.payload.message, tool.name).toContain('Unrecognized keys: "answerPreview", "bogus".');
+      const accepted = Object.keys(tool.inputSchema.properties ?? {});
+      expect(refused.payload.message.endsWith(`Accepted arguments: ${accepted.length === 0 ? "none" : accepted.join(", ")}.`), tool.name).toBe(true);
     }
-
-    const logged = store.logSize();
-    const before = (await rig.ok("list_docs")).docs.length;
 
     // Placement implies pinning, so `pinned` is a field this
     // input deliberately cannot express — and creating an UNPINNED document
@@ -125,16 +131,7 @@ describe("unknown fields", () => {
       pinned: true,
     });
     expect(created.isError).toBe(true);
-
-    // Strictness has to reach the nested objects an input declares, or the
-    // guarantee stops at the first array: a block carrying a key the schema
-    // does not know would otherwise be created with that key discarded.
-    const nested = await rig.call("create_doc", {
-      title: "Rejected",
-      description: "A test document.",
-      blocks: [{ type: "paragraph", text: "x", bogus: 1 }],
-    });
-    expect(nested.isError).toBe(true);
+    expect(created.payload.message).toContain('Unrecognized key: "pinned". Accepted arguments:');
 
     // A mutation field with a typo in it. The write it asked for is the one
     // that must not happen quietly under a different field.
@@ -155,6 +152,62 @@ describe("unknown fields", () => {
     // No uuid, no room update, nothing durable: the handlers never ran.
     expect((await rig.ok("list_docs")).docs).toHaveLength(before);
     expect(store.logSize()).toBe(logged);
+  });
+
+  it("never offers top-level arguments for an unknown nested field", async () => {
+    const rig = await localRig();
+    const doc = await seeded(rig);
+    const logged = rig.instance.store.logSize();
+    const calls: [string, Record<string, unknown>, string][] = [
+      ["create_doc", {
+        title: "Rejected",
+        description: "A test document.",
+        blocks: [{ type: "paragraph", text: "x", bogus: 1 }],
+      }, "blocks[0]"],
+      ["update_data", {
+        uuid: doc.uuid,
+        operations: [{ collection: "records", deleteCollection: true, bogus: 1 }],
+      }, "operations[0]"],
+      ["update_data", {
+        uuid: doc.uuid,
+        operations: [{ collection: "records", upsert: [{ id: "one", value: {}, bogus: 1 }] }],
+      }, "operations[0].upsert[0]"],
+    ];
+
+    for (const [name, args, path] of calls) {
+      const refused = await rig.call(name, args);
+      expect(refused.isError, path).toBe(true);
+      expect(refused.payload, path).toEqual({
+        error: "schema_validation",
+        message: `MCP error -32602: Input validation error: Invalid arguments for tool ${name}: Unrecognized key: "bogus" at ${path}`,
+      });
+      expect(rig.instance.store.logSize(), path).toBe(logged);
+    }
+    expect((await rig.ok("list_docs")).docs.map((entry: any) => entry.uuid)).toEqual([doc.uuid]);
+  });
+});
+
+describe("other validation messages", () => {
+  it("preserves wrong-type, missing-field and mode-conflict refusals", async () => {
+    const rig = await localRig();
+    const logged = rig.instance.store.logSize();
+    const calls: [string, Record<string, unknown>, string][] = [
+      ["search", { query: 7 }, "Invalid input: expected string, received number at query"],
+      ["search", {}, "Invalid input: expected string, received undefined at query"],
+      ["sidebar_group", {
+        action: "rename", group: "Unused", name: "Renamed", index: 0,
+      }, "rename does not take `index` at index"],
+    ];
+
+    for (const [name, args, message] of calls) {
+      const refused = await rig.call(name, args);
+      expect(refused.isError, message).toBe(true);
+      expect(refused.payload).toEqual({
+        error: "schema_validation",
+        message: `MCP error -32602: Input validation error: Invalid arguments for tool ${name}: ${message}`,
+      });
+    }
+    expect(rig.instance.store.logSize()).toBe(logged);
   });
 });
 

@@ -2,8 +2,8 @@ import type { ReactElement } from "react";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
-export function TagIcon(): ReactElement {
-  return <svg className="ub-history-tag" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" {...STROKE} strokeWidth="1.5">
+export function TagIcon({ className = "text-(--brand-ink)" }: { className?: string }): ReactElement {
+  return <svg className={`ub-history-tag ${className}`} viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" {...STROKE} strokeWidth="1.5">
     <path d="M2.5 2.5h5l6 6-5 5-6-6zM5.25 5.25h.01" />
   </svg>;
 }

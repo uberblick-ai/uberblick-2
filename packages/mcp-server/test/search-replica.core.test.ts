@@ -2,7 +2,7 @@
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { createTagCatalogEntry, deleteTagCatalogEntry, getMeta, getMetaMap, getTagCatalogIdentities, setTags } from "@uberblick/schema";
+import { createTagCatalogEntry, deleteTagCatalogEntry, getMeta, getMetaMap, getTagCatalogIdentities, insertBlock, setTags } from "@uberblick/schema";
 import type { MirrorStore } from "../src/store.js";
 import { removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
@@ -23,6 +23,16 @@ afterEach(async () => {
 afterAll(removeTempDirs);
 
 describe("replica search derivation", () => {
+  it("indexes callout prose without its variant or icon", async () => {
+    const rig = await local();
+    const created = await rig.ok("create_doc", { title: "Passage", description: "A prose fixture." });
+    const document = rig.instance.replicas.replica(created.uuid).doc;
+    insertBlock(document, null, { type: "callout", variant: "warning", icon: ":claude:", text: "Orchard harvest" });
+
+    expect((await rig.ok("search", { query: "harvest" })).hits).toMatchObject([{ uuid: created.uuid }]);
+    expect((await rig.ok("search", { query: "warning claude callout" })).hits).toEqual([]);
+  });
+
   it("reindexes every record after renaming only the first record", async () => {
     const rig = await local();
     const first = await rig.ok("create_doc", {

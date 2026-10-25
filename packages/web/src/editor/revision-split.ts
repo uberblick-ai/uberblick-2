@@ -23,7 +23,7 @@ import { ExternalLinks } from "./external-links.js";
 import { GitHubLinks } from "./github-links.js";
 import { InlineIcons } from "./inline-icons.js";
 import { ListBlocks } from "./list-keys.js";
-import { chartCollections, copiedContent, copyNode, markTree, revisionPalette, revisionSchema, visibleNodes } from "./revision-view.js";
+import { chartCollections, columnWidthsCaption, copiedContent, copyNode, isColumnWidthsOnly, markTree, revisionFields, revisionPalette, revisionSchema, visibleNodes } from "./revision-view.js";
 import { CodeHighlighting } from "./syntax-highlighting.js";
 import { TerminalBlocks } from "./terminal.js";
 import { ToggleHeadings } from "./toggle-headings.js";
@@ -35,8 +35,9 @@ export type RevisionRowKind = "unchanged" | "changed" | "added" | "removed" | "f
 export interface RevisionSideCell {
   /** Captions above the block: what kind of change, fields, data. */
   labels: string[];
+  widthsOnly?: boolean;
   filler: boolean;
-  /** The other side's block spans this cell; it carries no mark of its own. */
+  /** The other side's block spans this cell. */
   spanned?: boolean;
 }
 
@@ -107,16 +108,6 @@ function sideTable(node: PMNode, change: RevisionBlockComparison, side: Revision
     rows.push(copyNode(current, cells));
   }
   return copyNode(node, rows);
-}
-
-function cellFields(change: RevisionBlockComparison): string[] {
-  const fields = [...change.fields];
-  for (const row of change.rows ?? []) {
-    for (const cell of row.cells ?? []) {
-      for (const field of cell.fields) fields.push(`row ${(row.afterIndex ?? row.beforeIndex ?? 0) + 1}, column ${cell.column + 1}: ${field}`);
-    }
-  }
-  return fields;
 }
 
 function sideNode(node: PMNode, change: RevisionBlockComparison, side: RevisionSide): PMNode {
@@ -200,13 +191,22 @@ function jsonRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, n
 /** One comparison entry as a row and the block each side shows for it. */
 function splitRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, newNode: PMNode | undefined,
   comparison: RevisionComparison, at: number): { row: RevisionRow; left: PMNode; right: PMNode } {
-  const fields = cellFields(change);
+  const fields = revisionFields(change);
+  const widthsOnly = oldNode?.type.name === "table" && newNode?.type.name === "table" && isColumnWidthsOnly(change);
   const data = (node: PMNode | undefined): string[] => node === undefined ? [] : chartCollections(node, comparison).map((name) => `Data changed: ${name}`);
   const changedLabel = fields.length > 0 ? [`Changed: ${fields.join(", ")}`] : [];
   const kind: RevisionRowKind = newNode === undefined ? "removed" : oldNode === undefined ? "added" : change.kind === "unchanged" ? "unchanged" : "changed";
-  const beforeLabels = oldNode === undefined ? [] : [...(kind === "removed" ? ["Removed block"] : changedLabel), ...data(oldNode)];
-  const afterLabels = newNode === undefined ? [] : [...(kind === "added" ? ["Added block"] : changedLabel), ...data(newNode)];
+  const beforeLabels = oldNode === undefined || widthsOnly ? [] : [...(kind === "removed" ? ["Removed block"] : changedLabel), ...data(oldNode)];
+  const afterLabels = newNode === undefined ? [] : widthsOnly ? ["Only column widths changed"] : [...(kind === "added" ? ["Added block"] : changedLabel), ...data(newNode)];
   const shown = newNode ?? oldNode;
+  const pairedAblauf = oldNode?.type.name === "code" && newNode?.type.name === "code"
+    && oldNode.attrs.language === "ablauf" && newNode.attrs.language === "ablauf" && sourceText(oldNode) !== sourceText(newNode);
+  const drawingSide = (node: PMNode, side: RevisionSide): PMNode => {
+    const own = sideNode(node, change, side);
+    if (!pairedAblauf) return own;
+    return own.type.create({ ...own.attrs, revisionSide: side,
+      revisionOtherSource: sourceText(side === "before" ? newNode : oldNode) }, own.content, own.marks);
+  };
   return {
     row: {
       kind,
@@ -214,10 +214,10 @@ function splitRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, 
       ...(shown?.type.name === "heading" && shown.textContent !== "" ? { heading: shown.textContent } : {}),
       changed: kind !== "unchanged" || fields.length > 0 || change.spans.length > 0 || beforeLabels.length > 0 || afterLabels.length > 0,
       before: { labels: beforeLabels, filler: oldNode === undefined },
-      after: { labels: afterLabels, filler: newNode === undefined },
+      after: { labels: afterLabels, filler: newNode === undefined, widthsOnly },
     },
-    left: oldNode === undefined ? filler() : kind === "removed" ? markTree(oldNode, "removed") : sideNode(oldNode, change, "before"),
-    right: newNode === undefined ? filler() : kind === "added" ? markTree(newNode, "added") : sideNode(newNode, change, "after"),
+    left: oldNode === undefined ? filler() : kind === "removed" ? markTree(oldNode, "removed") : drawingSide(oldNode, "before"),
+    right: newNode === undefined ? filler() : kind === "added" ? markTree(newNode, "added") : drawingSide(newNode, "after"),
   };
 }
 
@@ -268,7 +268,6 @@ function foldRows(rows: readonly RevisionRow[], left: readonly PMNode[], right: 
   return shown;
 }
 
-const MARK: Record<RevisionRowKind, string> = { unchanged: "", changed: "~", added: "+", removed: "−", folded: "" };
 const revisionRows = new PluginKey<readonly RevisionRow[]>("revisionSideRows");
 
 /** Side-scoped interaction and row widgets: captions and the spacers the aligner sizes. */
@@ -319,7 +318,7 @@ function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docL
               const cell = row[side];
               const tint = row.kind;
               decorations.push(Decoration.node(pos, pos + node.nodeSize, {
-                class: `ub-revision-row ub-revision-row-${tint}`, "data-revision-row": tint, "data-revision-mark": cell.filler || cell.spanned === true ? "" : MARK[row.kind],
+                class: `ub-revision-row ub-revision-row-${tint}`, "data-revision-row": tint,
               }));
               decorations.push(Decoration.widget(pos, () => {
                 const start = window.document.createElement("div");
@@ -328,9 +327,12 @@ function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docL
                 // Stable across folding, so motion can match a row before and after.
                 start.dataset.key = `${row.kind === "folded" ? "fold" : "row"}-${row.at}`;
                 if (cell.labels.length > 0) {
-                  const label = start.appendChild(window.document.createElement("span"));
-                  label.className = "ub-revision-fields";
-                  label.textContent = cell.labels.join(" · ");
+                  if (cell.widthsOnly) start.appendChild(columnWidthsCaption(node));
+                  else {
+                    const label = start.appendChild(window.document.createElement("span"));
+                    label.className = "ub-revision-fields";
+                    label.textContent = cell.labels.join(" · ");
+                  }
                 }
                 return start;
               }, { side: -1, key: `revision-row-start:${index}:${row.kind}:${row.at}:${cell.labels.join("|")}`, ignoreSelection: true }));

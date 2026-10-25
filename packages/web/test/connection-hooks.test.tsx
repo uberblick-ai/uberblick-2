@@ -97,7 +97,7 @@ function fixture(room: string, title?: string): Fixture {
       link: { href: "https://example.test/link" },
       docLink: { docId: OTHER_UUID },
     });
-    const foreign = new Y.XmlElement("callout");
+    const foreign = new Y.XmlElement("future-block");
     foreign.insert(0, [new Y.XmlText(title)]);
     getBlocksFragment(ydoc).push([foreign]);
     publish(fix, {

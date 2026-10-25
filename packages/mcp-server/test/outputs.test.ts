@@ -3,6 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { appendBlock, CALLOUT_VARIANTS } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import * as Y from "yjs";
@@ -55,6 +56,38 @@ afterEach(async () => {
 afterAll(removeTempDirs);
 
 describe("successful MCP output contracts", () => {
+  it("delivers callout prose, attributes and document links in current and historical reads", async () => {
+    const rig = await startServer();
+    close.push(() => rig.close());
+    const created = textPayload(await rig.client.callTool({ name: "create_doc", arguments: {
+      title: "Callout reads", description: "Current and historical callouts use the declared output shape.",
+    } }) as CallToolResult);
+    const docId = randomUUID();
+    const document = rig.instance.replicas.replica(created.uuid).doc;
+    const expected = CALLOUT_VARIANTS.map((variant, index) => {
+      const icon = [undefined, "🚀", "⏱️", ":codex:", ":claude:"][index];
+      const id = appendBlock(document, { type: "callout", variant, ...(icon === undefined ? {} : { icon }), inline: [
+        { text: "Read ", marks: {} }, { text: "the page", marks: { docLink: docId } },
+      ] });
+      return { id, type: "callout", text: "Read the page", variant, ...(icon === undefined ? {} : { icon }),
+        doc_links: [{ start: 5, end: 13, docId }] };
+    });
+    vi.spyOn(revisionClient, "getDocumentRevision").mockImplementation(async () => {
+      const snapshot = new Y.Doc();
+      Y.applyUpdate(snapshot, Y.encodeStateAsUpdate(document));
+      return snapshot;
+    });
+    for (const name of ["get_doc", "get_revision"]) {
+      const result = await rig.client.callTool({ name, arguments: { uuid: created.uuid,
+        ...(name === "get_revision" ? { revision: "callout-revision" } : {}) } }) as CallToolResult;
+      expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+      const payload = textPayload(result);
+      expect(result.structuredContent).toEqual(payload);
+      expect(payload.blocks).toEqual(expected.map(block => ({ ...block,
+        ...(name === "get_doc" ? { rev: expect.any(String) } : {}) })));
+    }
+  });
+
   it("advertises the validating definition and mirrors a client-accepted success from every tool", async () => {
     const rig = await startServer();
     close.push(() => rig.close());

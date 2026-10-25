@@ -453,15 +453,15 @@ function TagSettings({
               </th>
               <td className={`${CELL} wrap-anywhere`}>{entry.description ?? <span className="text-muted-foreground">No description</span>}</td>
               <td className={`${CELL} whitespace-nowrap`}>
-                <button className={ROW_ACTION} type="button" aria-label={`Edit ${entry.name}`} disabled={!writable}
+                <Button variant="plain" size="custom" className={ROW_ACTION} type="button" aria-label={`Edit ${entry.name}`} disabled={!writable}
                   onClick={(event) => {
                     editTrigger.current = event.currentTarget;
                     setEditing(entry);
                     setEditDraft(entry.description ?? "");
                     setEditError(null);
-                  }}>Edit</button>
-                <button className={ROW_ACTION} type="button" data-tag-entry={entry.id} aria-label={`Delete ${entry.name}`} disabled={!writable}
-                  onClick={(event) => { deleteTrigger.current = event.currentTarget; setDeleting(entry); }}>Delete</button>
+                  }}>Edit</Button>
+                <Button variant="plain" size="custom" className={ROW_ACTION} type="button" data-tag-entry={entry.id} aria-label={`Delete ${entry.name}`} disabled={!writable}
+                  onClick={(event) => { deleteTrigger.current = event.currentTarget; setDeleting(entry); }}>Delete</Button>
               </td>
             </tr>)}</tbody>
           </table>

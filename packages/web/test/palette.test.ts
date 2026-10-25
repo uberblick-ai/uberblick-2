@@ -42,6 +42,7 @@ import { mountEditor } from "./helpers.js";
 describe("the editor palette and stored block types", () => {
   it("declares the schema's block nodes, seven marks, and nothing else", () => {
     expect(Object.keys(uberblickSchema.nodes).sort()).toEqual([
+      "callout",
       "card",
       "cardBody",
       "cardFooter",
@@ -297,12 +298,11 @@ describe("foreign blocks already in the document", () => {
     initDoc(ydoc, { uuid: "doc-1", title: "Has a stranger" });
     appendBlock(ydoc, { type: "paragraph", text: "known" });
 
-    // Written the way a future schema version (or another client) would: a node
-    // name outside this client's palette.
     const foreignId = "foreign-block-id";
-    const element = new Y.XmlElement("callout");
+    const element = new Y.XmlElement("future-block");
     element.setAttribute("id", foreignId);
-    element.setAttribute("tone", "warning");
+    element.setAttribute("variant", "warning");
+    element.setAttribute("icon", "🚀");
     element.insert(0, [new Y.XmlText("from the future")]);
     getBlocksFragment(ydoc).insert(1, [element]);
     return { ydoc, foreignId };
@@ -312,10 +312,10 @@ describe("foreign blocks already in the document", () => {
     const { ydoc, foreignId } = docWithForeignBlock();
     const foreign = findForeignBlocks(getBlocksFragment(ydoc));
     expect(foreign).toHaveLength(1);
-    expect(foreign[0]?.nodeName).toBe("callout");
+    expect(foreign[0]?.nodeName).toBe("future-block");
     expect(foreign[0]?.id).toBe(foreignId);
     expect(foreign[0]?.index).toBe(1);
-    expect(describeForeignBlocks(foreign)).toContain("callout");
+    expect(describeForeignBlocks(foreign)).toContain("future-block");
     expect(describeForeignBlocks(foreign)).toMatch(/unsupported type/i);
 
     // A bare Y.XmlText at the top level is foreign too — the document is a list
@@ -376,14 +376,15 @@ describe("foreign blocks already in the document", () => {
     const stored = getBlocksFragment(ydoc).get(1);
     expect(stored instanceof Y.XmlElement).toBe(true);
     expect((stored as Y.XmlElement).getAttribute("id")).toBe(foreignId);
-    expect((stored as Y.XmlElement).getAttribute("tone")).toBe("warning");
+    expect((stored as Y.XmlElement).getAttribute("variant")).toBe("warning");
+    expect((stored as Y.XmlElement).getAttribute("icon")).toBe("🚀");
 
-    // And the schema package still reads it — as a paragraph, by its own
-    // forward-compatibility rule, with its text and id intact.
+    // Older schema readers expose a future block's text as a paragraph.
     const blocks = getBlocks(ydoc);
     expect(blocks).toHaveLength(2);
     expect(blocks[1]?.id).toBe(foreignId);
     expect(blocks[1]?.text).toBe("from the future");
+    expect(blocks[1]).toMatchObject({ type: "paragraph" });
     binding.destroy();
   });
 
@@ -411,9 +412,10 @@ describe("foreign blocks already in the document", () => {
     expect(binding.editor).not.toBeNull();
 
     // A remote client writes a block type this palette does not know.
-    const foreign = new Y.XmlElement("callout");
+    const foreign = new Y.XmlElement("future-block");
     foreign.setAttribute("id", "arrived-later");
-    foreign.setAttribute("tone", "warning");
+    foreign.setAttribute("variant", "warning");
+    foreign.setAttribute("icon", ":codex:");
     foreign.insert(0, [new Y.XmlText("arrived mid-session")]);
     getBlocksFragment(ydoc).insert(1, [foreign]);
 
@@ -423,9 +425,11 @@ describe("foreign blocks already in the document", () => {
     expect(getBlocksFragment(ydoc).length).toBe(2);
     const stored = getBlocksFragment(ydoc).get(1);
     expect(stored instanceof Y.XmlElement).toBe(true);
-    expect((stored as Y.XmlElement).nodeName).toBe("callout");
+    expect((stored as Y.XmlElement).nodeName).toBe("future-block");
     expect((stored as Y.XmlElement).getAttribute("id")).toBe("arrived-later");
-    expect((stored as Y.XmlElement).getAttribute("tone")).toBe("warning");
+    expect((stored as Y.XmlElement).getAttribute("variant")).toBe("warning");
+    expect((stored as Y.XmlElement).getAttribute("icon")).toBe(":codex:");
+    expect((stored as Y.XmlElement).firstChild?.toString()).toBe("arrived mid-session");
     expect(findForeignBlocks(getBlocksFragment(ydoc))).toHaveLength(1);
 
     binding.destroy();

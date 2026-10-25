@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
-import { downloadAsset, publishHubReleaseAssets } from "./publish-hub-release-assets.mjs";
+import { downloadAsset, productionServices, publishHubReleaseAssets } from "./publish-hub-release-assets.mjs";
 import { imageRefs, PLATFORMS } from "./publish-hub-release.mjs";
 
 const SHA = "a".repeat(40);
@@ -31,8 +32,16 @@ function published(revision = SHA) {
 
 function asset(name, overrides = {}) {
   return { name, state: "uploaded", size: ASSETS[name].length,
+    digest: `sha256:${createHash("sha256").update(ASSETS[name]).digest("hex")}`,
     browser_download_url: `https://github.com/uberblick-ai/uberblick-2/releases/download/${TAG}/${name}`,
     ...overrides };
+}
+
+function draftAsset(name, overrides = {}) {
+  return asset(name, {
+    browser_download_url: `https://github.com/uberblick-ai/uberblick-2/releases/download/untagged-123/${name}`,
+    ...overrides,
+  });
 }
 
 function release(overrides = {}) {
@@ -49,8 +58,9 @@ function services(overrides = {}) {
     getRelease: async () => { calls.push("release"); return null; },
     downloadAsset: async (url) => { calls.push(`download ${url.split("/").at(-1)}`); return ASSETS[url.split("/").at(-1)]; },
     wait: async (ms) => { calls.push(`wait ${ms}`); },
-    createRelease: async () => { calls.push("create"); return release({ assets: [] }); },
-    uploadAsset: async (_url, name) => { calls.push(`upload ${name}`); return asset(name); },
+    createRelease: async () => { calls.push("create"); return release({ draft: true, assets: [] }); },
+    uploadAsset: async (_url, name) => { calls.push(`upload ${name}`); return draftAsset(name); },
+    publishRelease: async () => { calls.push("publish"); return release(); },
     listReleases: async () => { calls.push("list"); return []; },
     markLatest: async () => { calls.push("latest"); },
     log: () => {}, ...overrides,
@@ -58,7 +68,7 @@ function services(overrides = {}) {
 }
 
 function mutations(fake) {
-  return fake.calls.filter((call) => call === "create" || call === "latest" || call.startsWith("upload "));
+  return fake.calls.filter((call) => call === "create" || call === "publish" || call === "latest" || call.startsWith("upload "));
 }
 
 test("assets publish only for a person's matching immutable hub tag push", async () => {
@@ -77,7 +87,9 @@ test("both platforms of both registry images match before any release is created
   assert.equal((await publishHubReleaseAssets(input(), fake)).outcome, "published");
   assert.deepEqual(fake.calls.slice(0, 4), ["tag", "image ghcr.io/uberblick-ai/hub:1.2.3",
     "image ghcr.io/uberblick-ai/hub-web:1.2.3", "release"]);
-  assert.deepEqual(mutations(fake), ["create", ...Object.keys(ASSETS).map((name) => `upload ${name}`), "latest"]);
+  assert.deepEqual(mutations(fake), ["create", ...Object.keys(ASSETS).map((name) => `upload ${name}`), "publish", "latest"]);
+  assert.ok(fake.calls.indexOf("publish") > fake.calls.indexOf("upload remote.tailscale.yml"));
+  assert.ok(fake.calls.indexOf("download compose.yml") > fake.calls.indexOf("publish"));
   assert.ok(fake.calls.indexOf("latest") > fake.calls.indexOf("download remote.tailscale.yml"));
 });
 
@@ -125,12 +137,27 @@ test("stored release target metadata may name a branch when the existing tag and
   assert.deepEqual(mutations(fake), ["latest"]);
 });
 
-test("a missing asset is recovered only after every existing asset is validated", async () => {
+test("a draft resumes missing uploads after every existing digest is validated", async () => {
+  const fake = services({ getRelease: async () => release({ draft: true, assets: [draftAsset("remote.env.example"),
+    draftAsset("remote.https.yml"), draftAsset("remote.tailscale.yml")] }) });
+  assert.equal((await publishHubReleaseAssets(input(), fake)).outcome, "published");
+  assert.deepEqual(mutations(fake), ["upload compose.yml", "publish", "latest"]);
+  assert.ok(fake.calls.indexOf("download compose.yml") > fake.calls.indexOf("publish"));
+});
+
+test("a complete draft publishes without any upload or draft download", async () => {
+  const fake = services({ getRelease: async () => release({ draft: true,
+    assets: Object.keys(ASSETS).map((name) => draftAsset(name)) }) });
+  assert.equal((await publishHubReleaseAssets(input(), fake)).outcome, "published");
+  assert.deepEqual(mutations(fake), ["publish", "latest"]);
+  assert.ok(fake.calls.indexOf("download compose.yml") > fake.calls.indexOf("publish"));
+});
+
+test("a published release missing an asset refuses with new-version recovery and never uploads", async () => {
   const fake = services({ getRelease: async () => release({ assets: [asset("remote.env.example"),
     asset("remote.https.yml"), asset("remote.tailscale.yml")] }) });
-  assert.equal((await publishHubReleaseAssets(input(), fake)).outcome, "published");
-  assert.deepEqual(mutations(fake), ["upload compose.yml", "latest"]);
-  assert.ok(fake.calls.indexOf("upload compose.yml") > fake.calls.indexOf("download remote.tailscale.yml"));
+  await assert.rejects(publishHubReleaseAssets(input(), fake), /missing compose\.yml.*new version/);
+  assert.deepEqual(mutations(fake), []);
 });
 
 test("differing, duplicate or incomplete existing assets refuse without recovering even an earlier missing asset", async () => {
@@ -148,9 +175,21 @@ test("differing, duplicate or incomplete existing assets refuse without recoveri
   assert.deepEqual(mutations(fake), []);
 });
 
-test("a release for another tag, a draft or a prerelease is not reused", async () => {
+test("differing, missing digest, duplicate or incomplete draft assets refuse before any write", async () => {
+  for (const assets of [[draftAsset("remote.env.example", { state: "starter" })],
+    [draftAsset("remote.env.example", { size: 999 })],
+    [draftAsset("remote.env.example", { digest: "sha256:wrong" })],
+    [draftAsset("remote.env.example", { digest: undefined })],
+    [draftAsset("remote.env.example"), draftAsset("remote.env.example")]]) {
+    const fake = services({ getRelease: async () => release({ draft: true, assets }) });
+    await assert.rejects(publishHubReleaseAssets(input(), fake), /incompletely|differs|duplicate/);
+    assert.deepEqual(mutations(fake), []);
+  }
+});
+
+test("a release for another tag or a prerelease is not reused", async () => {
   for (const override of [{ tag_name: "hub-v1.2.2" },
-    { draft: true }, { prerelease: true }]) {
+    { prerelease: true }, { draft: true, prerelease: true }]) {
     const fake = services({ getRelease: async () => release(override) });
     await assert.rejects(publishHubReleaseAssets(input(), fake), /existing release disagrees/);
     assert.deepEqual(mutations(fake), []);
@@ -166,14 +205,24 @@ test("a moved tag at the write boundary stops all publication", async () => {
   assert.deepEqual(mutations(fake), []);
 });
 
+test("a tag moved during draft uploads refuses at the publication boundary", async () => {
+  let reads = 0;
+  const fake = services({ assertRemoteTag: async () => {
+    if (++reads === 3) throw new Error("remote tag moved");
+  } });
+  await assert.rejects(publishHubReleaseAssets(input(), fake), /remote tag moved/);
+  assert.deepEqual(mutations(fake), ["create", ...Object.keys(ASSETS).map((name) => `upload ${name}`)]);
+});
+
 test("a failed or incomplete upload is never promoted to latest and is not overwritten", async () => {
   for (const uploadAsset of [async () => { throw new Error("upload interrupted"); },
     async (_url, name) => asset(name, { state: "starter" }),
     async (_url, name) => asset(name, { size: 999 }),
-    async (_url, name) => asset(name, { browser_download_url: "https://example.org/compose.yml" })]) {
+    async (_url, name) => asset(name, { digest: "sha256:wrong" })]) {
     const fake = services({ uploadAsset });
-    await assert.rejects(publishHubReleaseAssets(input(), fake), /upload interrupted|incompletely|disagrees/);
+    await assert.rejects(publishHubReleaseAssets(input(), fake), /upload interrupted|incompletely|differs/);
     assert.ok(!fake.calls.includes("latest"));
+    assert.ok(!fake.calls.includes("publish"));
     assert.ok(!fake.calls.some((call) => call.startsWith("download ") || call.startsWith("wait ")));
   }
 });
@@ -189,10 +238,10 @@ test("all four new assets can recover from anonymous 404s on the final attempt b
   } });
   assert.equal((await publishHubReleaseAssets(input(), fake)).outcome, "published");
   assert.deepEqual([...attempts], Object.keys(ASSETS).map((name) => [name, 4]));
-  assert.deepEqual(mutations(fake), ["create", ...Object.keys(ASSETS).map((name) => `upload ${name}`), "latest"]);
+  assert.deepEqual(mutations(fake), ["create", ...Object.keys(ASSETS).map((name) => `upload ${name}`), "publish", "latest"]);
   for (const name of Object.keys(ASSETS)) {
-    const start = fake.calls.indexOf(`upload ${name}`);
-    assert.deepEqual(fake.calls.slice(start, start + 8), [`upload ${name}`, `download ${name}`,
+    const start = fake.calls.indexOf(`download ${name}`);
+    assert.deepEqual(fake.calls.slice(start, start + 7), [`download ${name}`,
       "wait 5000", `download ${name}`, "wait 10000", `download ${name}`, "wait 20000", `download ${name}`]);
   }
   assert.ok(fake.calls.indexOf("latest") > fake.calls.lastIndexOf("download remote.tailscale.yml"));
@@ -209,7 +258,7 @@ test("a persistent 404 names the asset and stops before latest within the four-a
   }, wait: async (ms) => { waited += ms; } });
   await assert.rejects(publishHubReleaseAssets(input(), fake), /remote\.tailscale\.yml.*404/);
   assert.deepEqual([...attempts], Object.keys(ASSETS).map((name) => [name, 4]));
-  assert.deepEqual(mutations(fake), ["create", ...Object.keys(ASSETS).map((name) => `upload ${name}`)]);
+  assert.deepEqual(mutations(fake), ["create", ...Object.keys(ASSETS).map((name) => `upload ${name}`), "publish"]);
   assert.ok(!fake.calls.includes("list"));
   const downloadBudget = [...attempts.values()].reduce((sum, count) => sum + count * 30_000, 0);
   const uploadBudget = Object.keys(ASSETS).length * 30_000;
@@ -226,7 +275,7 @@ test("different bytes fail immediately even after a 404 recovers", async () => {
     await assert.rejects(publishHubReleaseAssets(input(), fake), /compose\.yml differs/);
     assert.equal(attempts, initial404 ? 2 : 1);
     assert.deepEqual(fake.calls.filter((call) => call.startsWith("wait ")), initial404 ? ["wait 5000"] : []);
-    assert.deepEqual(mutations(fake), ["create", "upload compose.yml"]);
+    assert.deepEqual(mutations(fake), ["create", ...Object.keys(ASSETS).map((name) => `upload ${name}`), "publish"]);
   }
 });
 
@@ -257,7 +306,7 @@ for (const failure of [403, 429, 500, new TypeError("network unavailable"),
         typeof failure === "number" ? error.message.includes(`returned ${failure}`) : error === failure);
       assert.equal(attempts, initial404 ? 2 : 1);
       assert.deepEqual(fake.calls.filter((call) => call.startsWith("wait ")), initial404 ? ["wait 5000"] : []);
-      assert.deepEqual(mutations(fake), ["create", "upload compose.yml"]);
+      assert.deepEqual(mutations(fake), ["create", ...Object.keys(ASSETS).map((name) => `upload ${name}`), "publish"]);
       fetchMock.mock.restore();
     }
   });
@@ -278,6 +327,71 @@ test("latest follows the greatest stable hub version, never a later lower versio
     await publishHubReleaseAssets(input(), fake);
     assert.equal(fake.calls.includes("latest"), promote, candidate.tag_name);
   }
+});
+
+test("publishing a lower draft never promotes it ahead of a complete higher version", async () => {
+  const fake = services({ getRelease: async () => release({ draft: true,
+    assets: Object.keys(ASSETS).map((name) => draftAsset(name)) }),
+    listReleases: async () => [release({ tag_name: "hub-v1.2.10" })] });
+  await publishHubReleaseAssets(input(), fake);
+  assert.deepEqual(mutations(fake), ["publish"]);
+});
+
+test("a failed publication leaves a resumable draft and never downloads or promotes", async () => {
+  const fake = services({ publishRelease: async () => { throw new Error("publication interrupted"); } });
+  await assert.rejects(publishHubReleaseAssets(input(), fake), /publication interrupted/);
+  assert.ok(!fake.calls.includes("latest"));
+  assert.ok(!fake.calls.some((call) => call.startsWith("download ")));
+});
+
+test("the GitHub adapter discovers drafts and duplicate tags across release pages and pages assets", async (t) => {
+  for (const duplicate of [false, true]) {
+    const calls = [];
+    const draft = release({ draft: true });
+    t.mock.method(globalThis, "fetch", async (url, options) => {
+      calls.push(url);
+      assert.equal(options.headers.authorization, "Bearer test-token");
+      const path = new URL(url).pathname + new URL(url).search;
+      const payload = {
+        "/repos/uberblick-ai/uberblick-2/releases?per_page=100&page=1":
+          [...Array.from({ length: 99 }, () => release({ tag_name: "v0.0.1" })), draft],
+        "/repos/uberblick-ai/uberblick-2/releases?per_page=100&page=2": duplicate ? [release()] : [],
+        "/repos/uberblick-ai/uberblick-2/releases/1/assets?per_page=100&page=1":
+          Array.from({ length: 100 }, () => draftAsset("compose.yml")),
+        "/repos/uberblick-ai/uberblick-2/releases/1/assets?per_page=100&page=2": [draftAsset("remote.https.yml")],
+      }[path];
+      assert.notEqual(payload, undefined, path);
+      return Response.json(payload);
+    });
+    if (duplicate) {
+      await assert.rejects(productionServices("test-token").getRelease(TAG), /more than one release.*hub-v1.2.3/);
+      assert.equal(calls.length, 2);
+    } else {
+      const result = await productionServices("test-token").getRelease(TAG);
+      assert.equal(result.draft, true);
+      assert.equal(result.assets.length, 101);
+      assert.equal(calls.length, 4);
+    }
+  }
+});
+
+test("the GitHub adapter creates a draft and explicitly suppresses latest during publication", async (t) => {
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    calls.push({ url, method: options.method, body: JSON.parse(options.body) });
+    return Response.json(release({ draft: options.method === "POST" }));
+  });
+  const github = productionServices("test-token");
+  await github.createRelease(TAG, SHA);
+  await github.publishRelease(1);
+  assert.deepEqual(calls, [
+    { url: "https://api.github.com/repos/uberblick-ai/uberblick-2/releases", method: "POST", body: {
+      tag_name: TAG, target_commitish: SHA, name: TAG, draft: true, prerelease: false,
+      generate_release_notes: false, make_latest: "false",
+    } },
+    { url: "https://api.github.com/repos/uberblick-ai/uberblick-2/releases/1", method: "PATCH",
+      body: { draft: false, make_latest: "false" } },
+  ]);
 });
 
 test("only the serialized post-image job has contents write, without package installation or image execution", {
