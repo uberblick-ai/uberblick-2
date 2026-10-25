@@ -264,7 +264,7 @@
   gap: 0.75rem;
   min-width: 0;
 }
-.ub-revision-restore { min-width: 0; max-width: 100%; flex-shrink: 1; }
+.ub-revision-restore { min-width: 0; max-width: 50%; }
 .ub-revision-restore > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ub-revision-title {
   flex: 1;

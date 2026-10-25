@@ -920,10 +920,10 @@ test.describe("document history through ub open", () => {
     const title = docTitle("Restore comparison placement");
     const uuid = await newDocument(page, title);
     const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
-    const baselineName = "Reviewed after the auth rewrite with Lena and the entire release team";
+    const baselineName = "Reviewed after the auth rewrite with Lena and the entire release team before the final launch review";
     await serveHistory(page, [
       { id: "newest", title, author: null, startedAt: 3_000, endedAt: null },
-      { id: "latest", title, author: null, startedAt: 2_000, endedAt: 3_000 },
+      { id: "latest", title, author: { ...person, githubUsername: "W".repeat(39) }, startedAt: 2_000, endedAt: 3_000 },
       { id: "earlier", title, author: null, startedAt: 1_000, endedAt: 2_000,
         name: { text: baselineName, namer: person, namedAt: 2_000, canManage: true } },
     ], { ...toggleNavigationHistory(uuid, title, false), newest: savedState(uuid, title, "Current live version.") });
@@ -989,6 +989,7 @@ test.describe("document history through ub open", () => {
     await expect(page.locator(".ub-revision-side-label").first().getByRole("button")).toHaveCount(0);
     await expect(page.locator(".ub-revision-side-label").last().getByRole("button")).toHaveAccessibleName("Restore this version");
     await assertCompactGeometry(restore);
+    expect(await restore.locator("span").evaluate(label => label.scrollWidth > label.clientWidth)).toBe(false);
     const nextChange = page.getByRole("button", { name: "Next change", exact: true });
     await expect(nextChange).toBeEnabled();
     await nextChange.focus();
@@ -1013,6 +1014,8 @@ test.describe("document history through ub open", () => {
     await expect(page.locator(".ub-revision-side-label").last().getByRole("button")).toHaveCount(0);
     await expect(header.locator(".ub-revision-restore")).toHaveCount(0);
     await assertCompactGeometry(restoreNamed);
+    expect(await page.locator(".ub-revision-side-label").first().locator("span").first()
+      .evaluate(label => label.scrollWidth > label.clientWidth)).toBe(false);
     await expect(restoreNamed).toHaveText(`Restore “${baselineName}”`);
     const clipped = await restoreNamed.locator("span").evaluate(label => ({
       overflow: getComputedStyle(label).textOverflow, clipped: label.scrollWidth > label.clientWidth,
@@ -1027,6 +1030,25 @@ test.describe("document history through ub open", () => {
     await page.setViewportSize({ width: 860, height: 640 });
     await expect(split).toHaveCount(0);
     await expect(header.getByRole("button", { name: `Restore “${baselineName}”`, exact: true })).toBeEnabled();
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      const geometry = await header.locator(".ub-revision-heading").evaluate(heading => {
+        const title = heading.querySelector(".ub-revision-title-text:not([aria-hidden])");
+        const button = heading.querySelector("button");
+        const label = button?.querySelector("span");
+        if (title === null || button === null || label == null) throw new Error("Revision title and restore must be shown");
+        const titleBox = title.getBoundingClientRect();
+        const buttonBox = button.getBoundingClientRect();
+        return { headingWidth: heading.getBoundingClientRect().width, titleWidth: titleBox.width,
+          titleRight: titleBox.right, buttonLeft: buttonBox.left,
+          clipped: label.scrollWidth > label.clientWidth, overflow: getComputedStyle(label).textOverflow };
+      });
+      expect(geometry.titleWidth).toBeGreaterThan(geometry.headingWidth * 0.4);
+      expect(geometry.titleRight).toBeLessThanOrEqual(geometry.buttonLeft);
+      expect(geometry.clipped).toBe(true);
+      expect(geometry.overflow).toBe("ellipsis");
+      await expect(restoreNamed).toHaveAccessibleName(`Restore “${baselineName}”`);
+    }
     // Ordinary revision views keep their generic header action when narrow or without a predecessor.
     await page.goto(new URL(selectedAddress, harness().appUrl).href);
     await expect(split).toHaveCount(0);
