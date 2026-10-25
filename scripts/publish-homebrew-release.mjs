@@ -111,18 +111,50 @@ function sha256(bytes) {
 }
 
 function assertRelease(release, tag, expectedAssetName, headSha) {
-	if (release.tag_name !== tag || release.draft === true || release.prerelease === true) {
+	if (
+		release.tag_name !== tag ||
+		typeof release.draft !== "boolean" ||
+		release.prerelease !== false
+	) {
 		fail(`release ${tag} disagrees with the immutable stable-tag contract`);
 	}
 	const publishedFrom = sourceCommitOf(release);
 	if (publishedFrom !== headSha) {
 		fail(
-			`release ${tag} was published from source commit ${publishedFrom ?? "(none recorded)"}, not ${headSha}`,
+			`release ${tag} records source commit ${publishedFrom ?? "(none recorded)"}, not ${headSha}`,
 		);
 	}
 	const assets = release.assets.filter((asset) => asset.name === expectedAssetName);
 	if (assets.length > 1) fail(`release ${tag} has more than one ${expectedAssetName} asset`);
 	return assets[0] ?? null;
+}
+
+async function verifiedAssetBytes(release, asset, tag, version, services, expectedBytes = null) {
+	const name = assetName(version);
+	const recovery = release.draft
+		? "delete the unpublished draft and re-run"
+		: "recover with a new version";
+	if (asset.name !== name || asset.state !== "uploaded") {
+		fail(`release ${tag}'s ${name} asset is not completely uploaded; ${recovery}`);
+	}
+	if (!release.draft && asset.browser_download_url !== assetUrl(tag, version)) {
+		fail(`release ${tag}'s asset URL disagrees with the public formula URL`);
+	}
+	const bytes = await services.downloadAsset(asset);
+	if (
+		asset.size !== bytes.length ||
+		(asset.digest != null && asset.digest !== `sha256:${sha256(bytes)}`) ||
+		(expectedBytes !== null && !bytes.equals(expectedBytes))
+	) {
+		fail(`release ${tag}'s ${name} asset differs from the intended payload; ${recovery}`);
+	}
+	if (expectedBytes === null) {
+		const reportedVersion = await services.publishedArchiveVersion(bytes, name, version);
+		if (reportedVersion !== version) {
+			fail(`published payload reports ${JSON.stringify(reportedVersion)}, expected ${version}`);
+		}
+	}
+	return bytes;
 }
 
 function assertTagContext({ tag, dryRun, repository, refType, refName, headSha, tagSha, workflowSha }) {
@@ -155,29 +187,17 @@ export async function publishHomebrewRelease(input, services) {
 		}
 	}
 
-	const release = input.dryRun ? null : await services.getRelease(input.tag);
+	let release = input.dryRun ? null : await services.getRelease(input.tag);
 	const existingAsset =
 		release === null ? null : assertRelease(release, input.tag, name, input.headSha);
+	if (release !== null && !release.draft && existingAsset === null) {
+		fail(`published release ${input.tag} is missing ${name}; recover with a new version`);
+	}
 	const existingFormula = input.dryRun ? null : await services.getTapFormula();
 
 	let bytes;
-	let published = false;
 	if (existingAsset !== null) {
-		if (existingAsset.state !== "uploaded") {
-			fail(
-				`release ${input.tag}'s ${name} asset is not completely uploaded; delete the incomplete asset before re-running`,
-			);
-		}
-		if (existingAsset.browser_download_url !== assetUrl(input.tag, version)) {
-			fail(`release ${input.tag}'s asset URL disagrees with the public formula URL`);
-		}
-		bytes = await services.downloadAsset(existingAsset.browser_download_url);
-		const reportedVersion = await services.publishedArchiveVersion(bytes, name, version);
-		if (reportedVersion !== version) {
-			fail(`published payload reports ${JSON.stringify(reportedVersion)}, expected ${version}`);
-		}
-		await services.assertPublicAsset(existingAsset.browser_download_url);
-		published = true;
+		bytes = await verifiedAssetBytes(release, existingAsset, input.tag, version, services);
 	} else {
 		if (release !== null && release.assets.length > 0) {
 			fail(`release ${input.tag} has assets, but not ${name}`);
@@ -204,28 +224,42 @@ export async function publishHomebrewRelease(input, services) {
 		return { outcome: "dry-run", formula };
 	}
 
-	if (published) {
+	if (existingAsset !== null) {
 		const currentVersion =
 			existingFormula === null ? null : formulaVersion(existingFormula.content);
 		if (
-			existingFormula === null ||
-			(currentVersion !== null && compareVersions(currentVersion, version) < 0)
+			existingFormula !== null &&
+			!(currentVersion !== null && compareVersions(currentVersion, version) < 0) &&
+			existingFormula.content !== formula
 		) {
-			await services.putTapFormula(formula, existingFormula?.sha ?? null, version);
-			return { outcome: "recovered-formula", formula };
-		}
-		if (existingFormula.content !== formula) {
 			fail(`published asset ${name} and the tap formula disagree`);
 		}
+	}
+
+	const wasPublished = release !== null && !release.draft;
+	if (!wasPublished) {
+		release ??= await services.createRelease(input.tag, releaseBody(version, input.headSha));
+		if (!release.draft) fail(`new release ${input.tag} must be an unpublished draft`);
+		if (assertRelease(release, input.tag, name, input.headSha) !== null && existingAsset === null) {
+			fail(`new draft ${input.tag} already has ${name}`);
+		}
+		if (existingAsset === null) {
+			const uploaded = await services.uploadAsset(release.upload_url, name, bytes);
+			await verifiedAssetBytes(release, uploaded, input.tag, version, services, bytes);
+		}
+		release = await services.publishRelease(release.id);
+		if (release.draft !== false) fail(`release ${input.tag} was not published`);
+		if (assertRelease(release, input.tag, name, input.headSha) === null) {
+			fail(`published release ${input.tag} is missing ${name}; recover with a new version`);
+		}
+	}
+	await services.assertPublicAsset(assetUrl(input.tag, version));
+	if (existingFormula?.content === formula) {
 		services.log(`Release ${input.tag} and the tap formula already match; no changes.`);
 		return { outcome: "no-op", formula };
 	}
-
-	const targetRelease =
-		release ?? (await services.createRelease(input.tag, releaseBody(version, input.headSha)));
-	await services.uploadAsset(targetRelease.upload_url, name, bytes);
-	await services.assertPublicAsset(assetUrl(input.tag, version));
 	await services.putTapFormula(formula, existingFormula?.sha ?? null, version);
+	if (wasPublished) return { outcome: "recovered-formula", formula };
 	services.log(`Published ${input.tag} and committed ${TAP_FORMULA_PATH} to ${TAP_REPOSITORY}.`);
 	return { outcome: "published", formula };
 }
@@ -300,8 +334,7 @@ async function githubRequest(path, token, options = {}) {
 	return response.status === 204 ? null : response.json();
 }
 
-function productionServices() {
-	const tapToken = process.env.HOMEBREW_TAP_TOKEN;
+export function productionServices(tapToken = process.env.HOMEBREW_TAP_TOKEN) {
 	if (tapToken === undefined || tapToken === "") {
 		fail("HOMEBREW_TAP_TOKEN is required outside --dry-run");
 	}
@@ -316,10 +349,30 @@ function productionServices() {
 			);
 			return { visibility: tap.visibility, initialized: branch !== null };
 		},
-		getRelease: (tag) =>
-			githubRequest(`/repos/${TAP_REPOSITORY}/releases/tags/${tag}`, tapToken, {
-				notFound: true,
-			}),
+		getRelease: async (tag) => {
+			const matches = [];
+			for (let page = 1; ; page += 1) {
+				const releases = await githubRequest(
+					`/repos/${TAP_REPOSITORY}/releases?per_page=100&page=${page}`,
+					tapToken,
+				);
+				matches.push(...releases.filter((release) => release.tag_name === tag));
+				if (releases.length < 100) break;
+			}
+			if (matches.length > 1) fail(`tag ${tag} has more than one release, including drafts`);
+			if (matches.length === 0) return null;
+			const release = matches[0];
+			const assets = [];
+			for (let page = 1; ; page += 1) {
+				const entries = await githubRequest(
+					`/repos/${TAP_REPOSITORY}/releases/${release.id}/assets?per_page=100&page=${page}`,
+					tapToken,
+				);
+				assets.push(...entries);
+				if (entries.length < 100) break;
+			}
+			return { ...release, assets };
+		},
 		getTapFormula: async () => {
 			const entry = await githubRequest(
 				`/repos/${TAP_REPOSITORY}/contents/${TAP_FORMULA_PATH}`,
@@ -330,9 +383,14 @@ function productionServices() {
 				? null
 				: { sha: entry.sha, content: Buffer.from(entry.content, "base64").toString("utf8") };
 		},
-		downloadAsset: async (url) => {
-			const response = await fetch(url, {
-				headers: { authorization: `Bearer ${tapToken}` },
+		downloadAsset: async (asset) => {
+			if (!Number.isSafeInteger(asset.id) || asset.id <= 0) fail("release asset has no valid ID");
+			const response = await fetch(`${process.env.GITHUB_API_URL ?? "https://api.github.com"}/repos/${TAP_REPOSITORY}/releases/assets/${asset.id}`, {
+				headers: {
+					accept: "application/octet-stream",
+					authorization: `Bearer ${tapToken}`,
+					"x-github-api-version": "2022-11-28",
+				},
 			});
 			if (!response.ok) fail(`published asset download returned ${response.status}`);
 			return Buffer.from(await response.arrayBuffer());
@@ -350,9 +408,14 @@ function productionServices() {
 					tag_name: tag,
 					name: tag,
 					body,
-					draft: false,
+					draft: true,
 					prerelease: false,
 				},
+			}),
+		publishRelease: (id) =>
+			githubRequest(`/repos/${TAP_REPOSITORY}/releases/${id}`, tapToken, {
+				method: "PATCH",
+				body: { draft: false },
 			}),
 		uploadAsset: (uploadUrl, name, bytes) => {
 			const url = `${uploadUrl.replace("{?name,label}", "")}?name=${encodeURIComponent(name)}`;
@@ -416,6 +479,7 @@ function productionServicesForDryRun() {
 		assertPublicAsset: async () => fail("dry-run cannot probe a published asset"),
 		createRelease: async () => fail("dry-run cannot create a release"),
 		uploadAsset: async () => fail("dry-run cannot upload an asset"),
+		publishRelease: async () => fail("dry-run cannot publish a release"),
 		putTapFormula: async () => fail("dry-run cannot update the tap"),
 	};
 }

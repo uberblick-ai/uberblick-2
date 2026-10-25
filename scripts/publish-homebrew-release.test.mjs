@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   formulaFor,
+  productionServices,
   publishHomebrewRelease,
   releaseBody,
   versionForTag,
@@ -80,10 +81,15 @@ function services(overrides = {}) {
     },
     createRelease: async () => {
       calls.push("create release");
-      return { upload_url: "https://uploads.github.test/assets{?name,label}" };
+      return { ...release(), draft: true, assets: [] };
     },
     uploadAsset: async () => {
       calls.push("upload");
+      return release().assets[0];
+    },
+    publishRelease: async () => {
+      calls.push("publish release");
+      return release();
     },
     putTapFormula: async (_formula, sha) => {
       calls.push(`put formula ${sha ?? "new"}`);
@@ -96,6 +102,7 @@ function services(overrides = {}) {
 
 function release() {
   return {
+    id: 123,
     tag_name: TAG,
     body: releaseBody(VERSION, HEAD_SHA),
     draft: false,
@@ -103,8 +110,11 @@ function release() {
     upload_url: "https://uploads.github.test/assets{?name,label}",
     assets: [
       {
+        id: 456,
         name: `uberblick-${VERSION}.tar.gz`,
         state: "uploaded",
+        size: BYTES.length,
+        digest: `sha256:${DIGEST}`,
         browser_download_url: ASSET_URL,
       },
     ],
@@ -129,7 +139,7 @@ test("a new tag builds, verifies, publishes, then commits the generated formula"
     createRelease: async (_tag, body) => {
       fake.calls.push("create release");
       createdBody = body;
-      return { upload_url: "https://uploads.github.test/assets{?name,label}" };
+      return { ...release(), draft: true, assets: [] };
     },
   });
 
@@ -145,6 +155,8 @@ test("a new tag builds, verifies, publishes, then commits the generated formula"
     "read",
     "create release",
     "upload",
+    "download",
+    "publish release",
     "public asset",
     "put formula old-sha",
   ]);
@@ -205,7 +217,6 @@ test("a published payload refuses a disagreeing formula without mutating either 
     "get formula",
     "download",
     "published version",
-    "public asset",
   ]);
 });
 
@@ -226,8 +237,8 @@ test("a published release stays bound to the source commit it was published from
   // release body. Both a moved tag and a release that records no source commit
   // are refused before the formula is even read, so nothing is mutated.
   for (const [body, expected] of [
-    [releaseBody(VERSION, "b".repeat(40)), /published from source commit b{40}, not a{40}/],
-    ["Uberblick 1.2.3", /published from source commit \(none recorded\), not a{40}/],
+    [releaseBody(VERSION, "b".repeat(40)), /records source commit b{40}, not a{40}/],
+    ["Uberblick 1.2.3", /records source commit \(none recorded\), not a{40}/],
   ]) {
     const fake = services({
       getRelease: async () => {
@@ -290,6 +301,220 @@ test("a partial publication advances an older formula from the verified asset", 
     "public asset",
     "put formula old-formula-sha",
   ]);
+});
+
+test("a draft missing its payload uploads, verifies, publishes, then commits the formula", async () => {
+  const fake = services({
+    getRelease: async () => {
+      fake.calls.push("get release");
+      return { ...release(), draft: true, assets: [] };
+    },
+  });
+
+  const result = await publishHomebrewRelease(input(), fake);
+
+  assert.equal(result.outcome, "published");
+  assert.deepEqual(fake.calls, [
+    "get tap", "get release", "get formula", "build", "version", "read",
+    "upload", "download", "publish release", "public asset", "put formula new",
+  ]);
+});
+
+test("a draft reuses its verified payload without requiring a public draft URL or rebuilding", async () => {
+  const draft = { ...release(), draft: true };
+  draft.assets[0].browser_download_url =
+    "https://github.com/uberblick-ai/homebrew-tap/releases/download/untagged-abc/uberblick-1.2.3.tar.gz";
+  const fake = services({
+    getRelease: async () => {
+      fake.calls.push("get release");
+      return draft;
+    },
+    downloadAsset: async (asset) => {
+      fake.calls.push("download");
+      assert.equal(asset.id, draft.assets[0].id);
+      return BYTES;
+    },
+  });
+
+  const result = await publishHomebrewRelease(input(), fake);
+
+  assert.equal(result.outcome, "published");
+  assert.equal(result.formula, formulaFor(TAG, VERSION, DIGEST));
+  assert.deepEqual(fake.calls, [
+    "get tap", "get release", "get formula", "download", "published version",
+    "publish release", "public asset", "put formula new",
+  ]);
+});
+
+test("a published release missing its required payload is never repaired", async () => {
+  for (const assets of [[], [{ ...release().assets[0], name: "unexpected.tar.gz" }]]) {
+    const fake = services({
+      getRelease: async () => {
+        fake.calls.push("get release");
+        return { ...release(), assets };
+      },
+    });
+    await assert.rejects(
+      () => publishHomebrewRelease(input(), fake),
+      /published release v1\.2\.3 is missing uberblick-1\.2\.3\.tar\.gz; recover with a new version/,
+    );
+    assert.deepEqual(fake.calls, ["get tap", "get release"]);
+  }
+});
+
+test("a draft refuses incomplete, duplicate, or differing payloads before publication", async () => {
+  for (const [assets, expected] of [
+    [[{ ...release().assets[0], state: "starter" }], /not completely uploaded/],
+    [[release().assets[0], release().assets[0]], /more than one .* asset/],
+    [[{ ...release().assets[0], size: BYTES.length + 1 }], /differs from the intended payload/],
+    [[{ ...release().assets[0], digest: `sha256:${"f".repeat(64)}` }], /differs from the intended payload/],
+    [[{ ...release().assets[0], name: "unexpected.tar.gz" }], /has assets, but not uberblick/],
+  ]) {
+    const fake = services({
+      getRelease: async () => ({ ...release(), draft: true, assets }),
+    });
+    await assert.rejects(() => publishHomebrewRelease(input(), fake), expected);
+    assert.ok(!fake.calls.includes("publish release"));
+    assert.ok(!fake.calls.some((call) => call.startsWith("put formula")));
+  }
+});
+
+test("a newly uploaded payload must hold the exact prepared bytes before publication", async () => {
+  const fake = services({
+    uploadAsset: async () => {
+      fake.calls.push("upload");
+      return { ...release().assets[0], digest: null };
+    },
+    downloadAsset: async () => {
+      fake.calls.push("download");
+      return Buffer.alloc(BYTES.length, "x");
+    },
+  });
+
+  await assert.rejects(() => publishHomebrewRelease(input(), fake), /differs from the intended payload/);
+  assert.equal(fake.calls.at(-1), "download");
+  assert.ok(!fake.calls.includes("publish release"));
+});
+
+test("draft payload version, recorded source, and formula disagreements refuse before publication", async () => {
+  for (const [overrides, expected] of [
+    [{ publishedArchiveVersion: async () => "1.2.4" }, /published payload reports "1\.2\.4"/],
+    [{ getRelease: async () => ({ ...release(), draft: true, body: releaseBody(VERSION, "b".repeat(40)) }) }, /records source commit/],
+    [{ getTapFormula: async () => ({ sha: "formula-sha", content: formulaFor(TAG, VERSION, "c".repeat(64)) }) }, /asset .* and the tap formula disagree/],
+  ]) {
+    const fake = services({
+      getRelease: async () => ({ ...release(), draft: true }),
+      ...overrides,
+    });
+    await assert.rejects(() => publishHomebrewRelease(input(), fake), expected);
+    assert.ok(!fake.calls.includes("publish release"));
+    assert.ok(!fake.calls.some((call) => call.startsWith("put formula")));
+  }
+});
+
+test("a release for another tag or a prerelease is not reused, including drafts", async () => {
+  for (const overrides of [
+    { tag_name: "v1.2.4" },
+    { prerelease: true },
+    { draft: true, prerelease: true },
+  ]) {
+    const fake = services({
+      getRelease: async () => ({ ...release(), ...overrides }),
+    });
+    await assert.rejects(() => publishHomebrewRelease(input(), fake), /immutable stable-tag contract/);
+    assert.deepEqual(fake.calls, ["get tap"]);
+  }
+});
+
+test("a failed or invalid publication never probes publicly or commits the formula", async () => {
+  for (const publishRelease of [
+    async () => { throw new Error("publish refused"); },
+    async () => ({ ...release(), draft: true }),
+    async () => ({ ...release(), prerelease: true }),
+    async () => ({ ...release(), assets: [] }),
+  ]) {
+    const fake = services({ publishRelease });
+    await assert.rejects(() => publishHomebrewRelease(input(), fake));
+    assert.ok(!fake.calls.includes("public asset"));
+    assert.ok(!fake.calls.some((call) => call.startsWith("put formula")));
+  }
+});
+
+test("the production adapter discovers drafts across every release page and refuses ambiguous tags", async (t) => {
+  const draft = { ...release(), draft: true };
+  const calls = [];
+  const pages = [
+    Array.from({ length: 100 }, () => ({ tag_name: "v0.0.1" })),
+    [draft],
+    draft.assets,
+  ];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    calls.push({ url, options });
+    return Response.json(pages.shift());
+  });
+  const adapter = productionServices("fixture-tap-token");
+
+  assert.deepEqual(await adapter.getRelease(TAG), draft);
+  assert.equal(calls.length, 3);
+  assert.match(calls[0].url, /\/releases\?per_page=100&page=1$/);
+  assert.match(calls[1].url, /\/releases\?per_page=100&page=2$/);
+  assert.match(calls[2].url, /\/releases\/123\/assets\?per_page=100&page=1$/);
+  assert.equal(calls[0].options.headers.authorization, "Bearer fixture-tap-token");
+  pages.push([release(), draft]);
+  await assert.rejects(() => adapter.getRelease(TAG), /more than one release, including drafts/);
+  pages.push([]);
+  assert.equal(await adapter.getRelease(TAG), null);
+});
+
+test("the production adapter checks required assets beyond the first full asset page", async (t) => {
+  const pages = [];
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url) => {
+    calls.push(url);
+    return Response.json(pages.shift());
+  });
+  const adapter = productionServices("fixture-tap-token");
+  const unrelated = Array.from({ length: 100 }, (_, id) => ({ id, name: `other-${id}` }));
+  for (const [firstPage, finalAsset, expected] of [
+    [[release().assets[0], ...unrelated.slice(1)], release().assets[0], /more than one .* asset/],
+    [unrelated, { ...release().assets[0], state: "starter" }, /not completely uploaded/],
+  ]) {
+    pages.push([{ ...release(), draft: true, assets: [] }], firstPage, [finalAsset]);
+    const fake = services({ getRelease: adapter.getRelease });
+    await assert.rejects(() => publishHomebrewRelease(input(), fake), expected);
+    assert.ok(!fake.calls.includes("upload"));
+    assert.ok(!fake.calls.includes("publish release"));
+    assert.match(calls.at(-1), /\/releases\/123\/assets\?per_page=100&page=2$/);
+  }
+});
+
+test("the production adapter creates drafts, reads asset bytes by authenticated ID, and publishes before public probing", async (t) => {
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    calls.push({ url, options });
+    if (url.endsWith("/releases/assets/456")) return new Response(BYTES);
+    if (options.method === "HEAD") return new Response(null);
+    return Response.json(release());
+  });
+  const adapter = productionServices("fixture-tap-token");
+
+  await adapter.createRelease(TAG, releaseBody(VERSION, HEAD_SHA));
+  assert.deepEqual(await adapter.downloadAsset(release().assets[0]), BYTES);
+  await adapter.publishRelease(123);
+  await adapter.assertPublicAsset(ASSET_URL);
+
+  const create = JSON.parse(calls[0].options.body);
+  assert.equal(create.draft, true);
+  assert.equal(create.prerelease, false);
+  assert.equal(create.tag_name, TAG);
+  assert.equal(calls[1].options.headers.accept, "application/octet-stream");
+  assert.equal(calls[1].options.headers.authorization, "Bearer fixture-tap-token");
+  assert.match(calls[2].url, /\/releases\/123$/);
+  assert.equal(calls[2].options.method, "PATCH");
+  assert.deepEqual(JSON.parse(calls[2].options.body), { draft: false });
+  assert.equal(calls[3].url, ASSET_URL);
+  assert.deepEqual(calls[3].options, { method: "HEAD" });
+  await assert.rejects(() => adapter.downloadAsset({ id: "456" }), /no valid ID/);
 });
 
 test("a dry run builds the payload but reaches no repository API", async () => {
@@ -356,6 +581,8 @@ test("an anonymously unreachable uploaded asset never reaches the public tap", a
     "read",
     "create release",
     "upload",
+    "download",
+    "publish release",
     "public asset",
   ]);
 });
