@@ -50,6 +50,10 @@ function blockAllowsMark(blockName: string, mark: string): boolean {
   return node !== undefined && type !== undefined && node.allowsMarkType(type);
 }
 
+function isEditorBlockType(name: string): boolean {
+  return isBlockType(name) && name !== "callout";
+}
+
 /**
  * Allow only string-inserting Y.XmlText children with valid marks permitted by
  * the parent block; known block names alone are insufficient.
@@ -101,7 +105,7 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
       continue;
     }
     const id = child.getAttribute("id") ?? null;
-    if (!isBlockType(child.nodeName)) {
+    if (!isEditorBlockType(child.nodeName)) {
       foreign.push({ index, nodeName: child.nodeName, id, preview: previewOf(child) });
       continue;
     }

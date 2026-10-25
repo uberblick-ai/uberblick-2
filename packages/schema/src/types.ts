@@ -7,6 +7,7 @@ export const BLOCK_TYPES = [
   "code",
   "list-item",
   "quote",
+  "callout",
   "table",
   "terminal",
   "chart",
@@ -31,6 +32,7 @@ export const PROSE_BLOCK_TYPES = [
   "heading",
   "list-item",
   "quote",
+  "callout",
 ] as const;
 
 export type ProseBlockType = (typeof PROSE_BLOCK_TYPES)[number];
@@ -38,6 +40,10 @@ export type ProseBlockType = (typeof PROSE_BLOCK_TYPES)[number];
 export function isProseBlockType(value: string): value is ProseBlockType {
   return (PROSE_BLOCK_TYPES as readonly string[]).includes(value);
 }
+
+export const CALLOUT_VARIANTS = ["note", "tip", "important", "warning", "caution"] as const;
+
+export type CalloutVariant = (typeof CALLOUT_VARIANTS)[number];
 
 /**
  * A list is adjacent flat list-item blocks; no list container node is stored.
@@ -92,7 +98,7 @@ export interface InlineRun {
 
 /**
  * Read attributes appear only for their type: heading level, code language
- * (empty if unset), or list-item list/indent.
+ * (empty if unset), list-item list/indent, or callout variant/icon.
  */
 export interface Block {
   id: string;
@@ -112,6 +118,10 @@ export interface Block {
   list?: ListStyle;
   /** List items only: nesting depth, 0–3. */
   indent?: ListIndent;
+  /** Callouts only: the display variant, defaulting to note. */
+  variant?: CalloutVariant;
+  /** Callouts only: a valid stored override of the variant's default icon. */
+  icon?: string;
   /** Figma blocks only: read-only view identity derived from the stored link. */
   figma?: FigmaFields;
 }
@@ -128,6 +138,10 @@ export interface BlockInput {
   list?: ListStyle;
   /** List items only. Clamped to 0–3, defaults to 0. Ignored for other types. */
   indent?: number;
+  /** Callouts only. Defaults to note. Ignored for other types. */
+  variant?: CalloutVariant;
+  /** Callouts only: one emoji or a curated :name: icon. Ignored for other types. */
+  icon?: string;
   /**
    * Overrides text for prose only; callers setting both must keep them consistent.
    * Source blocks ignore it. Tables, cards and Figma blocks use Markdown from text instead.

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { expect, test } from "@playwright/test";
-import { findBlockElement, getMeta, roomForDoc } from "@uberblick/schema";
+import { appendBlock, findBlockElement, getMeta, roomForDoc } from "@uberblick/schema";
 import { wrapToken } from "@uberblick/schema/protocol";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import * as Y from "yjs";
@@ -122,3 +122,55 @@ test("an unsupported Figma shape still names the block and makes the document re
     await expect(page.locator("iframe")).toHaveCount(0);
   } finally { provider.destroy(); doc.destroy(); }
 });
+
+for (const arrivesWhileBound of [false, true]) {
+  test(`a callout ${arrivesWhileBound ? "arriving during editing" : "already stored"} preserves its attributes and text in the read-only fallback`, async ({ browser }) => {
+    if (agent === null) throw new Error("e2e: the MCP agent is not configured");
+    const writer = agent.open({ name: "callout-fallback-e2e" });
+    const created = await writer.call<StoredDoc>("create_doc", {
+      title: docTitle("Callout safety"), description: "Callouts stay intact until their editor is supported.",
+      blocks: [{ type: "paragraph", text: "Context stays intact." }],
+    });
+    const doc = new Y.Doc();
+    const secret = await importRootSecret(harness().authSecret);
+    const provider = new HocuspocusProvider({
+      url: harness().hubUrl, name: roomForDoc(harness().workspaceUuid, created.uuid), document: doc,
+      token: async () => wrapToken(await mintToken(secret, {
+        typ: "room", sub: randomUUID(), workspace: harness().workspaceUuid,
+        scope: "read-write", kid: null, lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+      })),
+    });
+    try {
+      await expect.poll(() => findBlockElement(doc, created.blocks[0]?.id ?? "")).not.toBeNull();
+      const page = arrivesWhileBound
+        ? await openApp(browser, `/${harness().workspace}/${created.uuid}`, { upstream: true }) : null;
+      if (page !== null) await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+      const id = appendBlock(doc, { type: "callout", variant: "warning", icon: "🚀", inline: [
+        { text: "Keep this ", marks: {} }, { text: "warning", marks: { bold: true } },
+      ] });
+      const block = findBlockElement(doc, id);
+      if (block === null) throw new Error("e2e: the callout fixture is missing");
+      const stored = block.toString();
+      await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: created.uuid }), read => {
+        expect(read.blocks[1]).toMatchObject({ id, type: "callout", variant: "warning", icon: "🚀", text: "Keep this warning" });
+      });
+      const browserPage = page ?? await openApp(browser, `/${harness().workspace}/${created.uuid}`, { upstream: true });
+      const fallback = browserPage.locator(".ub-foreign");
+      await expect(fallback.locator(".ub-foreign-banner")).toContainText("unsupported type (callout)");
+      await expect(fallback).toContainText("Keep this warning");
+      await expect(editor(browserPage)).toHaveCount(0);
+      await expect(browserPage.locator('[contenteditable="true"]')).toHaveCount(0);
+      await proveBrowserArrival(browserPage, { path: "upstream", readTags: () => getMeta(doc).tags });
+      expect(findBlockElement(doc, id)).toBe(block);
+      expect(block.toString()).toBe(stored);
+      await browserPage.reload();
+      await expect(fallback).toContainText("Keep this warning");
+      await expect(editor(browserPage)).toHaveCount(0);
+      await proveMcpArrival(browserPage, writer, created.uuid, { path: "upstream" });
+      await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: created.uuid }), read => {
+        expect(read.blocks[1]).toMatchObject({ id, type: "callout", variant: "warning", icon: "🚀", text: "Keep this warning" });
+      });
+      expect(block.toString()).toBe(stored);
+    } finally { provider.destroy(); doc.destroy(); }
+  });
+}

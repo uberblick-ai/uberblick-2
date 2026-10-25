@@ -60,6 +60,7 @@ export { githubItemUrl, githubReference, githubRepository } from "./github-refer
 export type { GitHubItem } from "./github-reference.js";
 export { INLINE_ICONS } from "./inline-icons.js";
 export type { InlineIconName } from "./inline-icons.js";
+export { isCalloutIcon, isCalloutVariant } from "./callout.js";
 
 export { blockRev } from "./rev.js";
 export type { RevInput } from "./rev.js";
@@ -229,6 +230,7 @@ export {
   InvalidTagDescriptionError,
   InlineLinkRangeError,
   InvalidListAttributesError,
+  InvalidCalloutError,
   InvalidWorkspaceIdError,
   OldTextMismatchError,
   SchemaError,
@@ -242,6 +244,7 @@ export {
 
 export {
   BLOCK_TYPES,
+  CALLOUT_VARIANTS,
   DECISION_STATUSES,
   DOCUMENT_KINDS,
   INLINE_MARKS,
@@ -260,6 +263,7 @@ export type {
   Block,
   BlockInput,
   BlockType,
+  CalloutVariant,
   CommentMark,
   CodeCheck,
   DecisionTopicResolution,

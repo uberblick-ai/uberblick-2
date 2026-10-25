@@ -140,6 +140,11 @@ function snapshotBlock(element: Y.XmlElement): RevisionBlock {
     if (block.language !== undefined) fields.language = block.language;
     if (block.list !== undefined) fields.list = block.list;
     if (block.indent !== undefined) fields.indent = block.indent;
+    if (block.type === "callout") {
+      fields.variant = element.getAttribute("variant") ?? "note";
+      const icon = element.getAttribute("icon");
+      if (icon !== undefined) fields.icon = icon;
+    }
     const first = element.firstChild;
     const inline = normalizedRuns(first instanceof Y.XmlText ? [first] : []);
     return { ...base, fields, inline, key: contentKey({ type: block.type, fields, inline }) };

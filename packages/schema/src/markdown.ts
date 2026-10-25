@@ -22,11 +22,13 @@ import { listNumbers } from "./lists.js";
 import { parseGfmTable, writeGfmTable } from "./table.js";
 import { escapeContainerLines, parseCardInput, writeCardText } from "./card.js";
 import { parseFigmaInput, writeFigmaText } from "./figma.js";
+import { isCalloutIcon, isCalloutVariant } from "./callout.js";
 import { resolveTagAssignments } from "./tags.js";
 import { MAX_LIST_INDENT } from "./types.js";
 import type {
   Block,
   BlockType,
+  CalloutVariant,
   DecisionReference,
   HeadingLevel,
   InlineMarkSet,
@@ -547,6 +549,13 @@ function renderBlock(
         .split("\n")
         .map((line) => `> ${line}`.trimEnd())
         .join("\n");
+    case "callout": {
+      const body = renderInline(inline).replace(/^<!-- icon:/, "\\<!-- icon:");
+      const lines = [`[!${(block.variant ?? "note").toUpperCase()}]`];
+      if (block.icon !== undefined) lines.push(`<!-- icon: ${block.icon} -->`);
+      lines.push(...body.split("\n"));
+      return lines.map((line) => line === "" ? ">" : `> ${line}`).join("\n");
+    }
     case "table":
       // Unnormalized tables have no structured marked cells to render.
       return block.text;
@@ -722,6 +731,9 @@ export interface ImportedBlock {
   text: string;
   level?: HeadingLevel;
   language?: string;
+  /** Callouts only: the alert marker and optional icon override. */
+  variant?: CalloutVariant;
+  icon?: string;
   /** List items only: the marker the source line carried. */
   list?: ListStyle;
   /** List items only: nesting depth, 0–3, read from the source's indentation. */
@@ -1065,7 +1077,7 @@ function tokenizeInline(source: string, marks: InlineMarkSet, table = false): To
 
     if (char === "\\") {
       const next = source[i + 1];
-      if (next !== undefined && ("\\`*_~[]:".includes(next) || (table && "<>&!".includes(next)))) {
+      if (next !== undefined && ("\\`*_~[]:<".includes(next) || (table && ">&!".includes(next)))) {
         plain += next;
         i += 2;
         continue;
@@ -1347,6 +1359,18 @@ const LIST_LINE = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(.*))?[ \t]*$/;
 /** `> `, indented no further than a paragraph may be. */
 const QUOTE_LINE = /^ {0,3}>[ \t]?(.*)$/;
 
+/** Classify the source before inline unescaping, so literal alert markers stay quotes. */
+function importedQuote(lines: readonly string[]): ImportedBlock {
+  const marker = /^\[!([a-z]+)\]$/i.exec(lines[0] ?? "");
+  const variant = marker?.[1]?.toLowerCase();
+  if (!isCalloutVariant(variant)) return proseBlock("quote", lines.join("\n"));
+  const iconLine = /^<!-- icon: (.*) -->$/.exec(lines[1] ?? "");
+  const body = lines.slice(iconLine === null ? 1 : 2).join("\n");
+  const block = { ...proseBlock("callout", body), variant };
+  const icon = iconLine?.[1];
+  return isCalloutIcon(icon) ? { ...block, icon } : block;
+}
+
 /** An ATX heading, a fence of either character, an HTML comment — block *starts*. */
 const HEADING_LINE = /^#{1,6}\s/;
 const FENCE_LINE = /^(?:`{3,}|~{3,})/;
@@ -1408,7 +1432,7 @@ export function importMarkdown(markdown: string): ImportedDoc {
   const flush = (): void => {
     // Only one of the two can be open, and a quote always opened first.
     if (quote.length > 0) {
-      blocks.push(proseBlock("quote", quote.join("\n")));
+      blocks.push(importedQuote(quote));
       quote = [];
     }
     if (paragraph.length === 0) return;
