@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import type { JSONContent } from "@tiptap/core";
 import { DOMParser } from "@tiptap/pm/model";
-import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, moveBlocks } from "@uberblick/schema";
+import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, moveBlocks, tableCellText, tableRows } from "@uberblick/schema";
 import { uberblickSchema } from "../src/editor/create-editor.js";
 import { createRevisionSplit, revisionSplitModel, unchangedRuns } from "../src/editor/revision-split.js";
 
@@ -19,6 +19,13 @@ function clone(source: Y.Doc): Y.Doc {
   const copy = doc();
   Y.applyUpdate(copy, Y.encodeStateAsUpdate(source));
   return copy;
+}
+
+function firstColumnWidth(source: Y.Doc, width: number): void {
+  const table = getBlocksFragment(source).toArray().find((block) => block instanceof Y.XmlElement && block.nodeName === "table") as Y.XmlElement;
+  for (const row of tableRows(table)) {
+    (row[0] as unknown as { setAttribute(name: string, value: unknown): void }).setAttribute("colwidth", [width]);
+  }
 }
 
 function texts(content: JSONContent, mark: "removed" | "revisionAdded"): string[] {
@@ -149,6 +156,74 @@ describe("the side-by-side revision model", () => {
     expect(rows(model.before)).toBe(4);
     expect(rows(model.after)).toBe(3);
   });
+
+  it("explains a width-only table on After while retaining each side's widths and changed classification", () => {
+    const before = doc();
+    appendBlock(before, { type: "paragraph", text: "Opening" });
+    appendBlock(before, { type: "paragraph", text: "Quiet" });
+    appendBlock(before, { type: "table", text: "| Header | Other |\n| --- | --- |\n| Same cell | Value |" });
+    appendBlock(before, { type: "paragraph", text: "Context" });
+    appendBlock(before, { type: "paragraph", text: "Closing" });
+    firstColumnWidth(before, 180);
+    const after = clone(before);
+    firstColumnWidth(after, 260);
+    const originalBefore = Y.encodeStateAsUpdate(before);
+    const originalAfter = Y.encodeStateAsUpdate(after);
+    const left = document.body.appendChild(document.createElement("div"));
+    const right = document.body.appendChild(document.createElement("div"));
+    const split = createRevisionSplit({ beforeElement: left, afterElement: right, before, after });
+    try {
+      expect(split.model.comparison.blocks[2]).toMatchObject({ kind: "changed", fields: ["columnWidths"] });
+      expect(split.model.rows[2]).toMatchObject({ kind: "changed", changed: true,
+        before: { labels: [] }, after: { labels: ["Only column widths changed"] } });
+      expect(left.querySelector(".ub-revision-fields")).toBeNull();
+      const note = right.querySelector(".ub-revision-fields.ub-revision-widths-only");
+      expect(note?.textContent).toBe("Only column widths changed");
+      expect(note?.closest('[aria-hidden="true"], [hidden]')).toBeNull();
+      for (const [element, editor, width] of [[left, split.before, 180], [right, split.after, 260]] as const) {
+        expect(element.querySelector('[data-revision-row="changed"]')?.getAttribute("data-revision-mark")).toBe("~");
+        expect(element.querySelector("table col")?.getAttribute("style")).toContain(`width: ${width}px`);
+        expect(editor.state.doc.child(2).child(0).child(0).attrs.colwidth).toEqual([width]);
+        expect(element.querySelector("[data-revision-change]")).toBeNull();
+        expect(element.textContent).not.toContain("columnWidths");
+      }
+      const folded = revisionSplitModel(before, after, { collapse: true, expanded: new Set() });
+      expect(folded.rows.find((row) => row.at === 2)).toMatchObject({ kind: "changed", changed: true });
+      expect(Y.encodeStateAsUpdate(before)).toEqual(originalBefore);
+      expect(Y.encodeStateAsUpdate(after)).toEqual(originalAfter);
+    } finally { split.destroy(); }
+  });
+
+  it.each(["cell text", "added row", "removed row", "columns", "cell formatting"] as const)(
+    "keeps ordinary marks and human width captions when widths change with %s", (change) => {
+      const before = doc();
+      const source = "| Header | Other |\n| --- | --- |\n| old cell | Value |\n| tail | Last |";
+      const id = appendBlock(before, { type: "table", text: source });
+      firstColumnWidth(before, 180);
+      const after = clone(before);
+      if (change === "cell text") editBlock(after, id, source, source.replace("old cell", "new cell"));
+      if (change === "added row") editBlock(after, id, source, `${source}\n| extra | Added |`, { tableMapping: { rows: [0, 1, 2, null], columns: [0, 1] } });
+      if (change === "removed row") editBlock(after, id, source, source.replace("\n| tail | Last |", ""), { tableMapping: { rows: [0, 1], columns: [0, 1] } });
+      if (change === "columns") editBlock(after, id, source, "| Header |\n| --- |\n| old cell |\n| tail |", { tableMapping: { rows: [0, 1, 2], columns: [0] } });
+      if (change === "cell formatting") tableCellText(tableRows(getBlocksFragment(after).get(0) as Y.XmlElement)[1]![0]!)?.format(0, 3, { bold: {} });
+      firstColumnWidth(after, 260);
+      const model = revisionSplitModel(before, after);
+      const label = change === "columns" ? "Changed: columns, column widths"
+        : change === "cell formatting" ? "Changed: column widths, row 2, column 1: formatting" : "Changed: column widths";
+      expect(model.comparison.blocks[0]?.fields).toContain("columnWidths");
+      expect(model.rows[0]).toMatchObject({ kind: "changed", changed: true,
+        before: { labels: [label] }, after: { labels: [label] } });
+      if (change === "cell text") {
+        expect(texts(model.before, "removed")).toEqual(["old"]);
+        expect(texts(model.after, "revisionAdded")).toEqual(["new"]);
+      } else if (change === "added row") expect(texts(model.after, "revisionAdded")).toEqual(["extra", "Added"]);
+      else if (change === "removed row") expect(texts(model.before, "removed")).toEqual(["tail", "Last"]);
+      else if (change === "columns") {
+        expect(texts(model.before, "removed")).toContain("Other");
+        expect(texts(model.after, "revisionAdded")).toContain("Header");
+      }
+    },
+  );
 
   it("reports a data-only chart change on both sides, each with its own collection", () => {
     const before = doc();

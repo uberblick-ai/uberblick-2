@@ -468,6 +468,12 @@
   margin-block: 0.35rem;
 }
 
+.ub-revision-widths-only {
+  max-width: 100%;
+  text-align: end;
+  overflow-wrap: anywhere;
+}
+
 .ub-revision-split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
