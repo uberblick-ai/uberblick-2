@@ -503,9 +503,35 @@
 }
 .ub-revision-side { min-width: 0; }
 .ub-revision-side-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
   margin: 0 0 0.5rem;
   color: var(--muted-foreground);
   font: 500 var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
+}
+.ub-revision-side-label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ub-revision-side-label .ub-revision-restore {
+  position: relative;
+  z-index: 1;
+  height: var(--type-caption-leading);
+  min-height: 0;
+  padding: 0 0.5rem;
+  font: inherit;
+}
+.ub-revision-side-label .ub-revision-restore::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 50%;
+  height: 24px;
+  transform: translateY(-50%);
+}
+@media (any-pointer: coarse) {
+  /* Expand the touch target without changing the comparison's label row. */
+  .ub-revision-side-label .ub-revision-restore::after { height: 44px; }
 }
 .ub-revision-side :is(.ProseMirror, .ub-revision-ghost) > .ub-revision-row { position: relative; }
 .ub-revision-side-before :is(.ProseMirror, .ub-revision-ghost) > :is(.ub-revision-row-removed, .ub-revision-row-changed) {

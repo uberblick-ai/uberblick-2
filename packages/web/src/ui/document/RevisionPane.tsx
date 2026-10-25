@@ -290,6 +290,15 @@ function authorName(entry: RevisionEntry | undefined, earliest: boolean): string
   return entry === undefined ? "Unknown author" : revisionAuthor(entry, earliest).name;
 }
 
+function RevisionRestoreButton({ unavailable, reasonId, restore }: {
+  unavailable: string | null; reasonId: string; restore: () => Promise<void>;
+}): ReactElement {
+  return <Button variant="secondary" size="sm" disabled={unavailable !== null} aria-describedby={unavailable === null ? undefined : reasonId}
+    title={unavailable ?? undefined} className="ub-revision-restore" onClick={() => { void restore(); }}>
+    Restore this version
+  </Button>;
+}
+
 export function RevisionPane({ history, docLinks, workspaceSettings, writable = false, archived = false }: {
   history: DocumentHistory; docLinks: DocLinkContext | null; workspaceSettings: Y.Doc | null; writable?: boolean; archived?: boolean;
 }): ReactElement | null {
@@ -382,7 +391,8 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   const after = editors.find((entry) => entry.side === "after")?.editor;
   const restoreUnavailable = archived ? "This document is archived. Restore the document first, then restore a revision."
     : !writable ? "Read-only access. Write access is required to restore a revision."
-    : history.busy ? "Wait for history to load." : entry === undefined ? "Choose a revision to restore." : null;
+    : history.busy ? "Wait for history to load." : entry === undefined ? "Choose a revision to restore."
+    : selection?.index === 0 ? "This is the current version." : null;
   const restore = async (): Promise<void> => {
     if (restoreUnavailable !== null || entry === undefined) return;
     try {
@@ -392,16 +402,14 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       toast.error(error instanceof Error ? error.message : "Couldn't restore this version. Refresh history and try again.");
     }
   };
+  const restoreButton = <RevisionRestoreButton unavailable={restoreUnavailable} reasonId={restoreReason} restore={restore} />;
   return <section ref={pane} className={`ub-pane ub-page-pane ub-document-pane ub-revision-pane${split ? " ub-revision-split-pane" : ""}`}>
     <div className="ub-column">
       {/* Stays in view while the comparison scrolls; revisions keep no tags. */}
       <header ref={header} className="ub-revision-header">
         <div className="ub-revision-heading">
           <RevisionTitle title={selection === null ? live?.title?.text ?? "" : title} index={selection?.index ?? -1} />
-          <Button variant="secondary" size="sm" disabled={restoreUnavailable !== null} aria-describedby={restoreUnavailable === null ? undefined : restoreReason}
-            title={restoreUnavailable ?? undefined} className="ub-revision-restore" onClick={() => { void restore(); }}>
-            Restore this version
-          </Button>
+          {!split && restoreButton}
         </div>
         {restoreUnavailable !== null && <p id={restoreReason} className={archived || !writable ? "m-0 ub-type-small text-(--muted-foreground)" : "sr-only"}>{restoreUnavailable}</p>}
         {selection === null ? <p role="status" className="ub-history-controls ub-type-small">Loading history…</p>
@@ -413,12 +421,15 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       </header>
       {selection !== null && failed === selection && <p role="status">This client cannot display this revision. Update the client and try again.</p>}
       {selection === null ? null : split ? <div ref={body} className="ub-revision-split">
+        <p className="ub-revision-side-label">Before · {authorName(predecessor, selection.index + 2 >= total)}</p>
+        <div className="ub-revision-side-label">
+          <span>After · {authorName(entry, selection.index + 1 >= total)}</span>
+          {restoreButton}
+        </div>
         <div className="ub-revision-side ub-revision-side-before">
-          <p className="ub-revision-side-label">Before · {authorName(predecessor, selection.index + 2 >= total)}</p>
           <div className="ub-editor-frame ub-revision-view"><div className="ub-editor" ref={beforeHost} /></div>
         </div>
         <div className="ub-revision-side ub-revision-side-after">
-          <p className="ub-revision-side-label">After · {authorName(entry, selection.index + 1 >= total)}</p>
           <div className="ub-editor-frame ub-revision-view"><div className="ub-editor" ref={afterHost} /></div>
         </div>
       </div> : <div ref={body} className="ub-editor-frame ub-revision-view"><div className="ub-editor" ref={host} /></div>}
