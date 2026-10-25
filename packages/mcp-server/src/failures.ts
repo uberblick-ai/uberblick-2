@@ -124,6 +124,10 @@ const RECOVERIES: Record<string, Recovery> = {
     recoveryClass: "manual",
     guidance: "Supply list or indent only when editing a list-item block, with list bullet or ordered and indent an integer from 0 to 3. Nothing was written.",
   },
+  invalid_callout: {
+    recoveryClass: "manual",
+    guidance: "Supply variant note, tip, important, warning or caution and an optional icon: one emoji character or a curated :name: icon. On edit_block, use these fields only on a callout; an empty icon restores the default. Nothing was written.",
+  },
   annotation_cell: {
     recoveryClass: "manual",
     guidance:

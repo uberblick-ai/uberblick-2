@@ -11,6 +11,9 @@ import {
   getMeta,
   getMetaMap,
   isProseBlockType,
+  isCalloutVariant,
+  isCalloutIcon,
+  InvalidCalloutError,
   parseTableCell,
   parseTableInput,
   parseCardInput,
@@ -26,6 +29,7 @@ import type {
   Annotation,
   AnnotationAnchor,
   BlockInput,
+  CalloutVariant,
   DecisionTopicResolution,
   DirectoryEntry,
   HeadingLevel,
@@ -96,6 +100,8 @@ function toBlockInput(
     ...(input.language === undefined ? {} : { language: input.language }),
     ...(input.list === undefined ? {} : { list: input.list }),
     ...(input.indent === undefined ? {} : { indent: input.indent as ListIndent }),
+    ...(input.variant === undefined ? {} : { variant: input.variant as CalloutVariant }),
+    ...(input.icon === undefined ? {} : { icon: input.icon }),
     ...(inline === undefined ? {} : { inline }),
   };
 }
@@ -383,6 +389,14 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
     block: z.infer<typeof blockInputSchema>,
   ): BlockInput => {
     // A bad later seed must not leave earlier blocks or metadata behind.
+    if (block.type === "callout") {
+      if (block.variant !== undefined && !isCalloutVariant(block.variant)) {
+        throw new InvalidCalloutError("variant must be note, tip, important, warning or caution");
+      }
+      if (block.icon !== undefined && !isCalloutIcon(block.icon)) {
+        throw new InvalidCalloutError("icon must be one emoji or a curated :name: icon");
+      }
+    }
     validateBlockTargets(block.type, block.text ?? "");
     return toBlockInput(
       block,

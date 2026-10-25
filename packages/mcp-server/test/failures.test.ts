@@ -118,6 +118,7 @@ const EXPECTED: Record<
   },
   invalid_table: { recoveryClass: "manual", detail: [] },
   invalid_card: { recoveryClass: "manual", detail: [] },
+  invalid_callout: { recoveryClass: "manual", detail: [] },
   annotation_card: { recoveryClass: "manual", detail: ["blockId"] },
   invalid_figma: { recoveryClass: "manual", detail: [] },
   annotation_figma: { recoveryClass: "manual", detail: ["blockId"] },
@@ -293,6 +294,10 @@ describe("the failure contract", () => {
     record((await rig.call("insert_block", {
       uuid: doc.uuid,
       blocks: [{ type: "card", text: "label: Missing title" }],
+    })).payload);
+    record((await rig.call("insert_block", {
+      uuid: doc.uuid,
+      blocks: [{ type: "callout", variant: "invalid", text: "Invalid variant" }],
     })).payload);
     const card = await rig.ok("insert_block", {
       uuid: doc.uuid, after_block_id: doc.blockId,

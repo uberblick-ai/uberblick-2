@@ -77,7 +77,7 @@ Create and change documents with the fewest calls. Details live in \`decisions\`
 
 ## Markdown essentials
 
-- One block per paragraph, heading, list item, quote, code fence or table. Lists are flat: \`indent\` 0–3.
+- One block per paragraph, heading, list item, quote, callout, code fence or table. Lists are flat: \`indent\` 0–3.
 - A block's \`text\` is plain text: \`**bold**\` stays literal. For formatting or links in prose, pass \`inline\` runs with marks when creating or inserting.
 - Tables, cards, embeds and GitHub references are in \`markdown\`.
 - Check the result with \`export_markdown\`.
@@ -148,7 +148,7 @@ Markdown supports paragraphs, ATX headings \`#\` through \`######\`, bullet and 
 
 Blocks of the retired Mermaid block type are deleted automatically, including in archived documents and decision records; their source is not retained. This never touches a code block with language \`mermaid\`. Their comment threads remain available with no anchor. Removing an approved answer block reports \`approvalChanged: true\` without recording another approval.
 
-The document model is flat: one list item is one block, nested to at most four levels (indent 0–3). Markdown import does not read continuation lines or nested block content inside a list item. Consecutive quote lines form one quote block. HTML comments are skipped on import. Frontmatter can carry document identity and metadata; without a frontmatter title, a leading level-1 heading becomes the title.
+The document model is flat: one list item is one block, nested to at most four levels (indent 0–3). Markdown import does not read continuation lines or nested block content inside a list item. Consecutive quote lines form one quote block. HTML comments are skipped on import, except a callout's icon comment described below. Frontmatter can carry document identity and metadata; without a frontmatter title, a leading level-1 heading becomes the title.
 
 A \`json-tree\` fence is an ordinary code block that the web editor shows as a foldable JSON tree. Use it for API responses, tool results and settings files; keep small snippets in a \`json\` fence. Import, export and MCP preserve its literal source.
 
@@ -172,11 +172,24 @@ For a paragraph in \`create_doc\` or \`insert_block\`, supply inline runs:
 
 ### Inline icons
 
-Write \`:name:\` to show a curated icon in the web app. Available names are ${Object.keys(INLINE_ICONS).map((name) => `\`:${name}:\``).join(", ")}. Names use lowercase kebab case. Icons use the surrounding text's size and color in paragraphs, headings, list items, quotes, table cells, all four card prose parts, Figma captions and card button labels. For example, \`button: [:claude: Discuss with Claude](claude://code/new?prompt=Review)\` shows the Claude mark beside its label.
+Write \`:name:\` to show a curated icon in the web app. Available names are ${Object.keys(INLINE_ICONS).map((name) => `\`:${name}:\``).join(", ")}. Names use lowercase kebab case. Icons use the surrounding text's size and color in paragraphs, headings, list items, quotes, callouts, table cells, all four card prose parts, Figma captions and card button labels. For example, \`button: [:claude: Discuss with Claude](claude://code/new?prompt=Review)\` shows the Claude mark beside its label.
 
-Unknown names such as \`:rocket:\` stay literal, unchanged text, as do \`10:30:15\` and \`note:this:\`. Inline code and code, terminal and chart source never render icons; use inline code to show a known name literally. Stored text, MCP reads and writes, search, decision approval and Markdown import/export keep the literal \`:name:\` source. This is presentation only, without an icon node or mark; MCP does not validate icon names.
+Unknown names such as \`:rocket:\` stay literal, unchanged text, as do \`10:30:15\` and \`note:this:\`. Inline code and code, terminal and chart source never render icons; use inline code to show a known name literally. Stored text, MCP reads and writes, search, decision approval and Markdown import/export keep the literal \`:name:\` source. This is presentation only, without an icon node or mark; MCP does not validate icon names in inline prose.
 
 Write emoji as characters, such as 😃 or 🚀. MCP never converts \`:name:\` to emoji: \`:smiley:\` and \`:rocket:\` remain literal in writes, reads and Markdown import/export. The web editor's typed emoji conversion does not apply to MCP or imported Markdown.
+
+## Callouts
+
+A callout sets one short passage apart with a label and an icon: \`note\`, \`tip\`, \`important\`, \`warning\` or \`caution\`. Write it as a quote whose first line is the marker alone:
+
+    > [!WARNING]
+    > Restarting the hub signs every browser out.
+
+Import reads the marker in any case; export writes it in uppercase. The following quote lines are one prose body with inline marks; an empty \`>\` line separates paragraphs. Lists, code and nested quotes stay literal text. Any other \`[!WORD]\`, or text after the marker, keeps an ordinary quote.
+
+Each variant has its own icon. To override it, put one HTML comment on the line after the marker: \`> <!-- icon: 🚀 -->\`. The value is one emoji character or a curated icon such as \`:claude:\`. Over MCP, use \`type: "callout"\` with \`variant\` and optional \`icon\`; \`edit_block\` takes either to change it, and an empty \`icon\` restores the default. Override the icon only when it says something the variant's own icon does not, such as the tool a tip is about.
+
+Pick the variant by what happens if a reader skips it: note, missing context; tip, a better way; important, they will not succeed; warning, something breaks or work is lost; caution, an action cannot be undone. Write one to three sentences that stand alone, and do not begin with "Note:" or "Warning:", because the label says it. Use at most a couple per page, never two in a row, never for a whole section. A recommendation to act on belongs in a card; a lasting choice belongs in a decision record.
 
 ## Cards
 
