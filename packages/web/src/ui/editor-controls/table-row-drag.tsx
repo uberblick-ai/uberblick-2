@@ -50,7 +50,7 @@ export function TableHandle({ data, dragKey, disabled, axis, label, style, revea
     <DropdownMenuTrigger asChild>
       {/* Native: 12px mouse handles straddle borders; shared target floors would cover cell input. */}
       <button ref={attach} {...position}
-        type="button" className={`ub-table-control ub-table-handle ub-table-${axis}-handle absolute flex items-center justify-center pointer-events-auto rounded-(--radius-sm) border-0 bg-transparent p-0 text-(--muted-foreground) ub-type-small select-none [-webkit-touch-callout:none] ${axis === "row" ? "[.ub-table-controls:not([data-touch=true])_&]:justify-start [.ub-table-controls:not([data-touch=true])_&]:pl-px" : ""}`}
+        type="button" className={`ub-table-control ub-table-handle ub-table-${axis}-handle`}
         data-revealed={revealed} style={style}
         aria-label={label}
         title={disabled ? `${axis === "row" ? "Row" : "Column"} actions` : `${axis === "row" ? "Row" : "Column"} actions · drag to move`}
