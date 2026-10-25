@@ -272,12 +272,15 @@ async function ownTreatment(control: Locator) {
 async function expectTargetGeometry(page: Page, coarse: boolean, kind: "group" | "pin"): Promise<void> {
   expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(coarse);
   const floor = coarse ? 44 : 24;
-  const geometry = await page.locator(kind === "group" ? ".ub-group-act" : ".ub-docs-pin").evaluateAll((controls) =>
+  const actions = kind === "group"
+    ? page.getByRole("button", { name: /^(?:Rename|Delete) group / })
+    : page.locator(".ub-docs-pin");
+  const geometry = await actions.evaluateAll((controls) =>
     controls.map((control) => {
       const box = control.getBoundingClientRect();
       const container = control.closest(".ub-group-head, .ub-docs-pin-cell");
       const parent = container?.getBoundingClientRect();
-      const previous = control.classList.contains("ub-group-act")
+      const previous = control.closest(".ub-group-head") !== null
         ? control.previousElementSibling : container?.previousElementSibling;
       const rowElement = control.closest(".ub-docs-row");
       const row = rowElement?.getBoundingClientRect();
@@ -347,7 +350,7 @@ test("pointer rows retain their rest, hover and focus reveal, and deletion resto
   expect(await page.evaluate(() => matchMedia("(hover: hover)").matches)).toBe(true);
   await seed(page);
   const heading = group(page, "Reading").locator(".ub-group-head");
-  const actions = heading.locator(".ub-group-act");
+  const actions = heading.getByRole("button", { name: /^(?:Rename|Delete) group Reading$/ });
   await rest(page);
   for (const action of await actions.all()) await expect(action).toHaveCSS("opacity", "0");
   await heading.hover();
@@ -413,7 +416,7 @@ test("touch rows expose their actions without sticky hover, and Cancel and Delet
   expect(await page.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true);
   await seed(page);
   await expectTargetGeometry(page, true, "group");
-  for (const action of await page.locator(".ub-group-act").all()) {
+  for (const action of await page.getByRole("button", { name: /^(?:Rename|Delete) group / }).all()) {
     await expect(action).toHaveCSS("opacity", "1");
   }
   const rename = page.getByRole("button", { name: "Rename group Reading", exact: true });

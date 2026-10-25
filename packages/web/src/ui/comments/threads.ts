@@ -43,6 +43,7 @@ const BLOCK_LABELS: Record<BlockType, string> = {
   code: "Code block",
   "list-item": "List item",
   quote: "Quote",
+  callout: "Callout",
   table: "Table",
   terminal: "Terminal demo",
   chart: "Line chart",

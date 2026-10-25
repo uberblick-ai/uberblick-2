@@ -15,7 +15,6 @@ export type RevisionClientFailure =
   | "stale-state"
   | "invalid-name"
   | "already-named"
-  | "not-namer"
   | "archived"
   | "naming-outcome-unknown"
   | "restore-outcome-unknown";
@@ -32,7 +31,6 @@ const failureMessages: Record<RevisionClientFailure, string> = {
   "stale-state": "The displayed document differs from the hub or has changes awaiting synchronization. Nothing was changed.",
   "invalid-name": "A revision name must contain 1 to 100 characters on one line.",
   "already-named": "This document state already has a name.",
-  "not-namer": "Only the account that named this revision may change or remove its name.",
   archived: "Archived documents are read-only; restore the archived document before changing its revisions.",
   "naming-outcome-unknown": "The hub did not acknowledge the naming request; its outcome is unknown.",
   "restore-outcome-unknown": "The hub did not acknowledge the revision restore request; its outcome is unknown.",

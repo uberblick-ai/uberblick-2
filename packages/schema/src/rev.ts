@@ -14,6 +14,8 @@ export interface RevInput {
   language?: string | undefined;
   list?: ListStyle | undefined;
   indent?: ListIndent | undefined;
+  variant?: string | undefined;
+  icon?: string | undefined;
 }
 
 function fnv1a32(input: string): number {
@@ -42,13 +44,15 @@ function hex8(value: number): string {
  * prevent ambiguous concatenation before hashing.
  */
 export function blockRev(input: RevInput): string {
-  const canonical = JSON.stringify([
+  const fields: unknown[] = [
     input.type,
     input.level ?? null,
     input.language ?? null,
     input.list ?? null,
     input.indent ?? null,
     input.text,
-  ]);
+  ];
+  if (input.type === "callout") fields.push(input.variant ?? null, input.icon ?? null);
+  const canonical = JSON.stringify(fields);
   return `${hex8(fnv1a32(canonical))}${hex8(djb2(canonical))}`;
 }

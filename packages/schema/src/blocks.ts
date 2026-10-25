@@ -9,6 +9,7 @@ import fastDiff from "fast-diff";
 import { getBlocksFragment } from "./doc.js";
 import { CARD_PARTS, buildCardElement, cardButtons, cardText, cardTextParts, editCard, parseCardInput, writeCardInline } from "./card.js";
 import type { CardButton, CardInline } from "./card.js";
+import { isCalloutIcon, isCalloutVariant, validateCalloutAttributes } from "./callout.js";
 import { buildFigmaElement, editFigma, figmaFields, figmaText, parseFigmaInput, writeFigmaInline } from "./figma.js";
 import type { FigmaInline } from "./figma.js";
 import { parseInline } from "./markdown.js";
@@ -20,6 +21,7 @@ import {
   InvalidDocLinkTargetError,
   InvalidBlockMoveError,
   InvalidListAttributesError,
+  InvalidCalloutError,
   InvalidTableMappingError,
   OldTextMismatchError,
   StaleBlockError,
@@ -43,6 +45,7 @@ import type {
   Block,
   BlockInput,
   BlockType,
+  CalloutVariant,
   HeadingLevel,
   InlineRun,
   ListIndent,
@@ -213,6 +216,16 @@ export function toBlock(element: Y.XmlElement): Block {
       indent,
     };
   }
+  if (type === "callout") {
+    const storedVariant = element.getAttribute("variant");
+    const storedIcon = element.getAttribute("icon");
+    return {
+      id, type, text,
+      rev: blockRev({ type, text, variant: storedVariant, icon: storedIcon }),
+      variant: isCalloutVariant(storedVariant) ? storedVariant : "note",
+      ...(isCalloutIcon(storedIcon) ? { icon: storedIcon } : {}),
+    };
+  }
   const figma = type === "figma" ? figmaFields(element) : undefined;
   return { id, type, text, rev: blockRev({ type, text }), ...(figma === undefined ? {} : { figma }) };
 }
@@ -323,6 +336,7 @@ function inlineOf(input: BlockInput): readonly InlineRun[] | null {
 
 function buildElement(id: string, input: BlockInput): Y.XmlElement {
   // Validate before insertion: Yjs transactions cannot roll back stray blocks.
+  if (input.type === "callout") validateCalloutAttributes(input);
   const runs = inlineOf(input);
   if (runs !== null) assertInlineWritable(runs);
 
@@ -358,6 +372,10 @@ function buildElement(id: string, input: BlockInput): Y.XmlElement {
     // Store both attributes so the run never depends on a reader's defaults.
     element.setAttribute("list", input.list ?? "bullet");
     element.setAttribute("indent", String(normalizeIndent(input.indent)));
+  }
+  if (input.type === "callout") {
+    element.setAttribute("variant", input.variant ?? "note");
+    if (input.icon !== undefined) element.setAttribute("icon", input.icon);
   }
   element.insert(0, [
     new Y.XmlText(inlineOf(input) === null ? (input.text ?? "") : ""),
@@ -588,6 +606,10 @@ export interface EditBlockOptions {
   list?: ListStyle;
   /** List depth, an integer from 0 to 3; omitted depth remains unchanged. */
   indent?: ListIndent;
+  /** Callout variant to set in place; omission leaves it unchanged. */
+  variant?: CalloutVariant;
+  /** Callout icon to set in place; an empty value removes the override. */
+  icon?: string;
   /** Surviving old GFM positions, or null for newly created rows and columns. */
   tableMapping?: TableMapping;
 }
@@ -603,6 +625,18 @@ function validateListAttributes(type: BlockType, options: EditBlockOptions): voi
   if (options.indent !== undefined && (!Number.isInteger(options.indent) || options.indent < 0 || options.indent > MAX_LIST_INDENT)) {
     throw new InvalidListAttributesError("indent must be an integer from 0 to 3");
   }
+}
+
+function validateCalloutEdit(type: BlockType, options: EditBlockOptions): void {
+  if (options.variant === undefined && options.icon === undefined) return;
+  if (type !== "callout") throw new InvalidCalloutError("variant and icon apply only to callout blocks");
+  validateCalloutAttributes(options, true);
+}
+
+function writeCalloutAttributes(element: Y.XmlElement, options: EditBlockOptions): void {
+  if (options.variant !== undefined) element.setAttribute("variant", options.variant);
+  if (options.icon === "") element.removeAttribute("icon");
+  else if (options.icon !== undefined) element.setAttribute("icon", options.icon);
 }
 
 /**
@@ -651,6 +685,7 @@ export function editBlock(
       throw new StaleBlockError(details);
     }
     validateListAttributes(current.type, options);
+    validateCalloutEdit(current.type, options);
     if (current.type === "table") {
       const parsedOld = parseTableInput(oldText);
       const parsedNew = parseTableInput(newText);
@@ -670,6 +705,7 @@ export function editBlock(
     }
     if (options.list !== undefined) element.setAttribute("list", options.list);
     if (options.indent !== undefined) element.setAttribute("indent", String(options.indent));
+    writeCalloutAttributes(element, options);
     if (oldText === newText) return;
 
     const text = requireBlockText(ydoc, element, blockId);

@@ -19,6 +19,11 @@ createRoot(root).render(
           </Button>
         )),
       )}
+      <Button variant="plain" size="custom" className="flex w-full text-left font-normal">
+        A full width row keeps its own layout
+      </Button>
+      <Button variant="tool" size="custom">Quiet tool</Button>
+      <Button variant="tool" size="custom" data-emphasis="true">Emphasized tool</Button>
     </section>
     <section aria-label="Field recipes" style={{ display: "grid", gap: 8, marginBlock: 16, cursor: "pointer" }}>
       <Input aria-label="Input" defaultValue="Field text" />

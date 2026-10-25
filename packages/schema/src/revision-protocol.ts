@@ -32,7 +32,7 @@ export type RevisionResponse = { requestId: string; ok: true; revisions: Revisio
   | { requestId: string; ok: true; state: Uint8Array }
   | { requestId: string; ok: true; revision: RevisionEntry; applied?: boolean }
   | { requestId: string; ok: false; error: "unsupported" | "deleted" | "revision-not-found" | "forbidden" | "unavailable"
-    | "stale-state" | "invalid-name" | "already-named" | "not-namer" | "archived"; name?: RevisionName };
+    | "stale-state" | "invalid-name" | "already-named" | "archived"; name?: RevisionName };
 
 const REQUEST = "uberblick:revision-request";
 const RESPONSE = "uberblick:revision-response";
@@ -70,8 +70,14 @@ export function readRevisionRequest(raw: string): RevisionRequest | null {
     return { requestId, operation: value.operation, revisionId: value.revisionId };
   }
   if (value.operation === "rename" && identifier(value.revisionId)) {
+    let surface: RevisionRequest["surface"];
+    if (value.surface !== undefined) {
+      if (!object(value.surface) || !identifier(value.surface.kind) || !identifier(value.surface.name)) return null;
+      surface = { kind: value.surface.kind, name: value.surface.name };
+    }
     return { requestId, operation: "rename", revisionId: value.revisionId,
-      ...(typeof value.name === "string" ? { name: value.name } : {}) };
+      ...(typeof value.name === "string" ? { name: value.name } : {}),
+      ...(surface === undefined ? {} : { surface }) };
   }
   return (value.operation === "name" || (value.operation === "restore" && identifier(value.revisionId))) && typeof value.checksum === "string" &&
     /^[a-f0-9]{64}$/.test(value.checksum) && object(value.surface) &&
@@ -133,7 +139,7 @@ export function readRevisionResponse(raw: string): RevisionResponse | null {
   if (value?.type !== RESPONSE || !identifier(value.requestId)) return null;
   const requestId = value.requestId;
   if (value.ok === false && ["unsupported", "deleted", "revision-not-found", "forbidden", "unavailable",
-    "stale-state", "invalid-name", "already-named", "not-namer", "archived"].includes(String(value.error))) {
+    "stale-state", "invalid-name", "already-named", "archived"].includes(String(value.error))) {
     if (value.name !== undefined && !revisionName(value.name)) return null;
     return { requestId, ok: false, error: value.error as Extract<RevisionResponse, { ok: false }>["error"],
       ...(value.name === undefined ? {} : { name: value.name as RevisionName }) };

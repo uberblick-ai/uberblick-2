@@ -52,7 +52,34 @@ it("documents inline icon names, source preservation, card labels and literal MC
     "button: [:claude: Discuss with Claude](claude://code/new?prompt=Review)",
     "Write emoji as characters", "MCP never converts `:name:` to emoji",
     "`:smiley:` and `:rocket:` remain literal",
+    "quotes, callouts, table cells",
   ]) expect(text, rule).toContain(rule);
+});
+
+it("includes callouts in edit_doc essentials and teaches their syntax and restrained use", async () => {
+  const rig = await local();
+  const edit = await rig.ok("get_help", { topic: "edit_doc" });
+  expect(edit.text).toContain("One block per paragraph, heading, list item, quote, callout, code fence or table.");
+
+  const { text } = await rig.ok("get_help", { topic: "markdown" });
+  expect(text).toContain("HTML comments are skipped on import, except a callout's icon comment described below.");
+  const callouts = text.split("## Callouts\n")[1]?.split("## Cards\n")[0];
+  expect(callouts).toBeDefined();
+  for (const rule of [
+    "`note`, `tip`, `important`, `warning` or `caution`",
+    "first line is the marker alone", "> [!WARNING]\n    > Restarting the hub signs every browser out.",
+    "Import reads the marker in any case; export writes it in uppercase",
+    "one prose body with inline marks", "an empty `>` line separates paragraphs",
+    "Lists, code and nested quotes stay literal text", "Any other `[!WORD]`, or text after the marker, keeps an ordinary quote",
+    "one HTML comment on the line after the marker", "`> <!-- icon: 🚀 -->`",
+    "one emoji character or a curated icon such as `:claude:`", '`type: "callout"`',
+    "`variant` and optional `icon`", "`edit_block` takes either to change it", "an empty `icon` restores the default",
+    "Override the icon only when it says something the variant's own icon does not",
+    "note, missing context; tip, a better way; important, they will not succeed; warning, something breaks or work is lost; caution, an action cannot be undone",
+    'one to three sentences that stand alone', 'do not begin with "Note:" or "Warning:"',
+    "at most a couple per page, never two in a row, never for a whole section",
+    "A recommendation to act on belongs in a card; a lasting choice belongs in a decision record",
+  ]) expect(callouts, rule).toContain(rule);
 });
 
 it("writes the markdown help's GitHub reference example as an ordinary external link", async () => {

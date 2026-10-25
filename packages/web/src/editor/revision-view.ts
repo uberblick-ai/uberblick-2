@@ -11,7 +11,7 @@ import {
 import type { RevisionBlockComparison, RevisionComparison, TextSpan } from "@uberblick/schema";
 import { yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
 import type * as Y from "yjs";
-import { AblaufBlocks } from "./ablauf.js";
+import { AblaufBlocks, ablaufBlockView } from "./ablauf.js";
 import { JsonTreeBlocks } from "./json-tree.js";
 import { RevisionJsonCompare, RevisionJsonPlaceholder } from "./json-compare-view.js";
 import { CardBlocks } from "./card.js";
@@ -31,7 +31,7 @@ import { ToggleHeadings } from "./toggle-headings.js";
 import { WireframeBlocks } from "./wireframe.js";
 
 export const SOURCE_NODES = new Set(["code", "terminal", "chart"]);
-const INLINE_NODES = new Set(["paragraph", "heading", "list-item", "quote", ...SOURCE_NODES]);
+const INLINE_NODES = new Set(["paragraph", "heading", "list-item", "quote", "callout", ...SOURCE_NODES]);
 
 const Added = Mark.create({
   name: "revisionAdded",
@@ -86,6 +86,9 @@ export function revisionPalette(ydoc: Y.Doc | null, before: Y.Doc | null = null)
       addAttributes() {
         return {
           ...this.parent?.(), revisionSource: { default: null, rendered: false },
+          ...(this.name === "code" ? {
+            revisionOtherSource: { default: null, rendered: false }, revisionSide: { default: null, rendered: false },
+          } : {}),
           ...(this.name === "chart" ? { revisionRemoved: { default: false, rendered: false } } : {}),
         };
       },
@@ -93,12 +96,17 @@ export function revisionPalette(ydoc: Y.Doc | null, before: Y.Doc | null = null)
         const render = this.parent?.();
         if (render == null) throw new Error("Revision source requires its ordinary node view");
         return (props) => {
+          const { revisionOtherSource, revisionSide } = props.node.attrs;
           // A removed chart's mapping and collection belong to the same predecessor.
-          const selected = this.name === "chart" && props.node.attrs.revisionRemoved === true && before !== null
+          const selected = this.name === "code" && props.node.attrs.language === "ablauf"
+            && typeof revisionOtherSource === "string" && (revisionSide === "before" || revisionSide === "after")
+            ? ablaufBlockView({ source: revisionOtherSource, side: revisionSide })
+            : this.name === "chart" && props.node.attrs.revisionRemoved === true && before !== null
             ? chartBlockView(before) : render;
           const view = selected({ ...props, node: drawingNode(props.node) });
           const update = view.update;
-          view.update = (node, decorations, inner) => update?.(drawingNode(node), decorations, inner) ?? false;
+          view.update = (node, decorations, inner) => node.attrs.revisionOtherSource === revisionOtherSource && node.attrs.revisionSide === revisionSide
+            && (update?.(drawingNode(node), decorations, inner) ?? false);
           return view;
         };
       },
@@ -199,8 +207,44 @@ function tableChanges(before: PMNode, after: PMNode, change: RevisionBlockCompar
 export interface RevisionBlockDetails {
   kind: RevisionBlockComparison["kind"];
   fields: string[];
+  widthsOnly: boolean;
   dataCollections: string[];
   showSource: boolean;
+}
+
+export function isColumnWidthsOnly(change: RevisionBlockComparison): boolean {
+  return change.fields.length === 1 && change.fields[0] === "columnWidths"
+    && change.spans.every((span) => span.kind === "unchanged")
+    && change.rows !== undefined && change.rows.length > 0
+    && change.rows.every((row) => row.kind === "unchanged" && (row.cells ?? []).every((cell) =>
+      cell.kind === "unchanged" && cell.fields.length === 0 && cell.spans.every((span) => span.kind === "unchanged")));
+}
+
+export function revisionFields(change: RevisionBlockComparison): string[] {
+  const fields = change.fields.map((field) => field === "columnWidths" ? "column widths" : field);
+  for (const row of change.rows ?? []) {
+    for (const cell of row.cells ?? []) {
+      for (const field of cell.fields) fields.push(`row ${(row.afterIndex ?? row.beforeIndex ?? 0) + 1}, column ${cell.column + 1}: ${field}`);
+    }
+  }
+  return fields;
+}
+
+export function columnWidthsCaption(node: PMNode): HTMLSpanElement {
+  const label = document.createElement("span");
+  label.className = "ub-revision-fields ub-revision-widths-only";
+  label.setAttribute("role", "note");
+  label.textContent = "Only column widths changed";
+  let width = 0;
+  let fixed = true;
+  node.firstChild?.forEach((cell) => {
+    const saved = cell.attrs.colwidth?.[0];
+    if (typeof saved === "number") width += saved;
+    else fixed = false;
+  });
+  // Match the framework table's fixed width; unsized columns fill the pane.
+  if (fixed && width > 0) label.style.width = `${width}px`;
+  return label;
 }
 
 export interface RevisionViewModel {
@@ -225,14 +269,14 @@ export function revisionViewModel(before: Y.Doc | null, after: Y.Doc): RevisionV
   const changes = comparison?.blocks ?? newNodes.map((_, index): RevisionBlockComparison => ({ kind: "unchanged", afterIndex: index, fields: [], spans: [] }));
   const nodes: PMNode[] = [];
   const blocks: RevisionBlockDetails[] = [];
-  const append = (node: PMNode, kind: RevisionBlockComparison["kind"], fields: string[]): void => {
+  const append = (node: PMNode, kind: RevisionBlockComparison["kind"], fields: string[], widthsOnly = false): void => {
     // A removed and an added copy can share authored identity; the live editor stays mounted too.
     nodes.push(node.type.create({
       ...node.attrs, id: `revision-${nodes.length}-${node.attrs.id ?? ""}`,
       ...(node.type.name === "chart" ? { revisionRemoved: kind === "removed" } : {}),
     }, node.content, node.marks));
     blocks.push({
-      kind, fields, dataCollections: chartCollections(node, comparison),
+      kind, fields, widthsOnly, dataCollections: chartCollections(node, comparison),
       showSource: SOURCE_NODES.has(node.type.name) && kind !== "unchanged",
     });
   };
@@ -243,20 +287,14 @@ export function revisionViewModel(before: Y.Doc | null, after: Y.Doc): RevisionV
     if (node === undefined) throw new Error("Revision comparison refers to missing content");
     // These comparisons intentionally have no shared text address space.
     if (oldNode && newNode && (change.fields.includes("content") || change.fields.includes("columns"))) {
-      append(markTree(oldNode, "removed"), "removed", change.fields);
-      append(markTree(newNode, "added"), "added", change.fields);
+      append(markTree(oldNode, "removed"), "removed", revisionFields(change));
+      append(markTree(newNode, "added"), "added", revisionFields(change));
       continue;
     }
     if (change.kind === "removed" || change.kind === "added") node = markTree(node, change.kind);
     else if (oldNode && newNode && change.spans.length > 0 && oldNode.isTextblock && newNode.isTextblock) node = inlineChanges(oldNode, newNode, change.spans);
     else if (oldNode?.type.name === "table" && newNode?.type.name === "table") node = tableChanges(oldNode, newNode, change);
-    const fields = [...change.fields];
-    for (const row of change.rows ?? []) {
-      for (const cell of row.cells ?? []) {
-        for (const field of cell.fields) fields.push(`row ${(row.afterIndex ?? row.beforeIndex ?? 0) + 1}, column ${cell.column + 1}: ${field}`);
-      }
-    }
-    append(node, change.kind, fields);
+    append(node, change.kind, revisionFields(change), node.type.name === "table" && isColumnWidthsOnly(change));
   }
   const content = revisionSchema.topNodeType.create(null, nodes.length ? Fragment.fromArray(nodes) : revisionSchema.nodes.paragraph?.create()).toJSON() as JSONContent;
   return { content, comparison, blocks };
@@ -304,6 +342,7 @@ function revisionPresentation(blocks: readonly RevisionBlockDetails[]): Extensio
                 ...block.dataCollections.map((name) => `Data changed: ${name}`),
               ];
               if (labels.length) decorations.push(Decoration.widget(pos, () => {
+                if (block.widthsOnly) return columnWidthsCaption(node);
                 const label = document.createElement("span");
                 label.className = "ub-revision-fields";
                 label.textContent = labels.join(" · ");

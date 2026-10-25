@@ -146,6 +146,13 @@ const pairs: Pair[] = [
   ...["slate", "rose", "green", "blue"].flatMap((hue) =>
     ["--muted-foreground", "--foreground", "--prose-text"].map((ink) =>
       text("framed caption, actions and content", ink, `--block-${hue}-tint`))),
+  ...["note", "tip", "important", "warning", "caution"].flatMap((variant): Pair[] => [
+    text("callout caption", `--block-${variant}-ink`, `--block-${variant}-tint`),
+    text("callout body", "--prose-text", `--block-${variant}-tint`),
+    ...["--page-ground[0]", "--page-ground[1]"].map((ground) => ({
+      name: "callout bar", ink: `--block-${variant}-bar`, ground, floor: 3,
+    })),
+  ]),
   // Revision comparison: prose and captions on row tints and word highlights,
   // and the gutter marks on the page.
   ...["--revision-added-row", "--revision-removed-row", "--revision-added-background", "--revision-removed-background"]

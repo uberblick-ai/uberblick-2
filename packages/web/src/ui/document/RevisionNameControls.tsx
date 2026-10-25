@@ -1,3 +1,4 @@
+import { Button } from "../shadcn/button.js";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactElement } from "react";
 import type * as Y from "yjs";
@@ -117,7 +118,7 @@ export function RevisionNameControls({ history, liveDocument, writable }: {
       {error !== null && <span id={`${id}-error`} role="alert" className="ub-history-name-error">{error}</span>}
     </span>;
   }
-  return <button ref={trigger} type="button" className="ub-history-icon ub-history-name-trigger" disabled={history.busy}
+  return <Button variant="history" size="custom" ref={trigger} type="button" className="ub-history-name-trigger opacity-70 data-named:text-(--brand-ink) data-named:opacity-100" disabled={history.busy}
     data-named={naming ? undefined : ""} aria-label={naming ? "Name current revision" : "Rename revision"}
-    title={naming ? "Name this revision" : "Rename this revision"} onClick={open}><TagIcon /></button>;
+    title={naming ? "Name this revision" : "Rename this revision"} onClick={open}><TagIcon className="text-current" /></Button>;
 }

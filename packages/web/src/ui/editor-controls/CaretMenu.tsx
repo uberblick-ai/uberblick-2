@@ -4,6 +4,7 @@ import type { ReactElement, ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
 import { autoUpdate, computePosition, flip, offset, shift, size } from "@floating-ui/dom";
 import type { Editor } from "@tiptap/core";
+import { Button } from "../shadcn/button.js";
 import { useEditorControlsHost } from "./EditorControlsHost.js";
 
 export function useCaretMenuIds(active: number): {
@@ -162,14 +163,14 @@ export function CaretMenu({
                   {option.group}
                 </p>
               )}
-              <button
+              <Button variant="plain" size="custom"
                 id={`${listId}-${index}`}
                 type="button"
                 role="option"
                 tabIndex={-1}
                 aria-label={option.label}
                 aria-selected={index === active}
-                className={`flex min-h-6 w-full items-center gap-2 rounded-(--radius-sm) border px-[0.4rem] py-[0.3rem] text-left ub-type-ui [font-family:inherit] [@media(pointer:coarse)]:min-h-11 ${index === active ? "border-(--border) bg-(--card-accent) text-(--accent-foreground)" : "border-transparent bg-transparent text-card-foreground"}`}
+                className={`flex w-full items-center gap-2 rounded-(--radius-sm) border px-[0.4rem] py-[0.3rem] text-left ub-type-ui [font-family:inherit] ${index === active ? "border-(--border) bg-(--card-accent) text-(--accent-foreground)" : "border-transparent bg-transparent text-card-foreground"}`}
                 // A pick must run against the prose selection, before focus
                 // can leave it. Touch clicks still reach the same command.
                 onMouseDown={(event) => event.preventDefault()}
@@ -179,7 +180,7 @@ export function CaretMenu({
                 {option.glyph}
                 <span className="min-w-0 flex-1">{option.label}</span>
                 {option.hint && <span className="ub-type-small text-(--muted-foreground)">{option.hint}</span>}
-              </button>
+              </Button>
             </Fragment>
           ))}
         </div>

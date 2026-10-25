@@ -49,6 +49,17 @@ it("validates restore's revision, checksum and author surface and preserves no-o
   }
 });
 
+it("preserves an optional rename surface and rejects malformed attribution", () => {
+  const request = { requestId: "rename", operation: "rename" as const, revisionId: "past", name: "Reviewed" };
+  expect(readRevisionRequest(encodeRevisionRequest(request))).toEqual(request);
+  const surface = { kind: "browser", name: "browser" };
+  expect(readRevisionRequest(encodeRevisionRequest({ ...request, surface }))).toEqual({ ...request, surface });
+  for (const invalid of [null, {}, { kind: "", name: "browser" }, { kind: "browser", name: "" },
+    { kind: "browser", name: "x".repeat(257) }, { kind: "x".repeat(257), name: "browser" }]) {
+    expect(readRevisionRequest(JSON.stringify({ type: "uberblick:revision-request", ...request, surface: invalid }))).toBeNull();
+  }
+});
+
 it("opts into titles independently of names and accepts legacy replies without titles", () => {
   const legacy = { id: "revision", author: null, startedAt: null, endedAt: 1 };
   const request = { requestId: "one", operation: "list" as const, includeTitles: true as const };

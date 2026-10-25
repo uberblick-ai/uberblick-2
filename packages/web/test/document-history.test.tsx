@@ -420,7 +420,7 @@ describe("document history navigation", () => {
       text: "Reviewed", namer: { githubUsername: "ben", surface: { kind: "browser", name: "Browser" } }, namedAt: 120, canManage: true,
     } };
     vi.mocked(api.name).mockResolvedValue(named);
-    vi.mocked(api.rename).mockRejectedValue(new DocumentHistoryError("not-namer"));
+    vi.mocked(api.rename).mockRejectedValue(new DocumentHistoryError("forbidden"));
     vi.mocked(api.removeName).mockResolvedValue({ ...named, name: null });
     const fix = mount(api);
     await act(async () => {});
@@ -431,7 +431,7 @@ describe("document history navigation", () => {
     await act(async () => fix.reading().back());
     const snapshot = fix.reading().selection?.after;
     await act(async () => {
-      await expect(fix.reading().rename(named.id, "Other")).rejects.toThrow(/Only the person/);
+      await expect(fix.reading().rename(named.id, "Other")).rejects.toThrow(/refused access/);
     });
     expect(fix.reading().entry).toEqual(named);
     expect(fix.reading().busy).toBe(false);

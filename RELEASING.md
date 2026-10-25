@@ -99,12 +99,14 @@ credential boundary for `HOMEBREW_TAP_TOKEN`, which publishes the asset and
 formula on the tap. The job's `GITHUB_TOKEN` stores attestations in this
 repository; a short-lived OIDC identity signs them. The job
 builds the versioned install payload, checks the payload's own `ub --version`,
-publishes it as an asset on a release of the same tag in the tap repository,
-verifies that exact asset is anonymously downloadable, and only then commits the
-generated public formula naming it. It refuses before creating a release while
-the tap repository is not public. After publication, it attests the versioned
-`uberblick-X.Y.Z.tar.gz` payload. The download and verification commands are in
-[README.md's Install section](README.md#install).
+creates a draft release of the same tag in the tap repository, and uploads the
+payload to that draft. It confirms the uploaded bytes before publishing the
+release, then verifies the asset is anonymously downloadable from the versioned
+URL the formula names. Only then does it commit the generated public formula
+with that payload's version and sha256. It refuses before creating a release
+while the tap repository is not public. After publication, it attests the
+versioned `uberblick-X.Y.Z.tar.gz` payload built by that run. The download and
+verification commands are in [README.md's Install section](README.md#install).
 
 One-time prerequisite before the first tag: the tap repository must hold at
 least one commit on its default branch, because a GitHub release needs a commit
@@ -119,15 +121,20 @@ be inspected without reading a credential or changing either repository:
 mise run publish-homebrew-release -- v0.5.0 --dry-run
 ```
 
-A published tag is immutable. Each release records the source commit it was
-published from, so re-running a tag that has since been moved is refused before
-anything changes. Re-running a matching tag verifies and reuses its published
+A published tag is immutable. Each release, including a draft, records its
+source commit, so re-running a tag that has since been moved is refused before
+anything changes. Re-running a matching draft reuses a matching payload with
+verified release provenance or uploads it when missing, verifies it, and
+publishes the draft before updating the formula. Re-running a matching published
+release verifies and reuses its
 payload; it changes nothing when the tap formula matches and refuses when the
 tag, payload, or formula disagree.
 
-If GitHub leaves the expected asset incompletely uploaded, delete that
-incomplete asset before re-running the workflow. The publisher reports this
-recovery and never deletes a release asset automatically.
+An incomplete, duplicate or differing payload stops the publisher before the
+draft is published. If the draft cannot be resumed, a maintainer inspects and
+deletes the unpublished draft, then re-runs the workflow. The publisher never
+deletes assets automatically. A published release cannot be repaired, including
+when its payload is missing: cut a new version instead.
 
 ### Hub publisher
 
@@ -191,6 +198,17 @@ certificate retrieval on Linux and public DNS certificate issuance on a host
 with the required DNS and TCP 443 reachability. These are attended checks;
 an image push alone does not prove anonymous deployment works.
 
+## One-time release immutability setup
+
+After the draft-first publishers have merged, an administrator enables release
+immutability on both `uberblick-ai/uberblick-2` and
+`uberblick-ai/homebrew-tap`: open each repository's **Settings → General →
+Releases** and select **Enable release immutability**. This is an attended,
+one-time setting; the publishers do not change it. GitHub applies immutability
+only to releases published after it is enabled. Earlier releases stay as they
+are. See GitHub's [release immutability setup](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes)
+and [immutable release guidance](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases).
+
 ## Inspect a hub candidate
 
 For diagnostics, from a clean checkout of the intended release commit, build
@@ -243,11 +261,14 @@ runner tools and repository scripts without installing packages, building or
 running images. It runs on the same person's hub tag push as the image job,
 including when that job reuses both images on a rerun.
 
-The asset job is serialized across hub tags. It creates releases without making
-them latest, verifies every asset through its anonymous download URL, and marks
-a complete release latest only when no higher stable hub version has all its
-assets completely uploaded. An interrupted newer upload does not hide a
-complete release; rerunning the newer tag finishes its uploads and promotes it.
+The asset job is serialized across hub tags. It creates a draft, uploads all
+four host files and confirms their bytes before publishing. Publishing explicitly
+sets `make_latest: "false"`. The job then verifies all four files through their
+anonymous `releases/download/hub-vX.Y.Z/` URLs and marks the release latest only
+when no higher published stable hub version has all its assets completely
+uploaded. A lower version never becomes latest, even while being published.
+An interrupted newer draft does not hide a complete release; rerunning the
+newer tag finishes its uploads and promotes it after the anonymous checks.
 Operators download the newest files from
 `https://github.com/uberblick-ai/uberblick-2/releases/latest/download/<file>`
 or one version from `releases/download/hub-vX.Y.Z/<file>`.
@@ -263,12 +284,15 @@ This resolves all three routes, checks unchanged volume identities and refuses
 an unset version before `pull` or `up` can act. It also checks that the new
 `compose.yml` takes precedence beside a migrated `docker-compose.yml`.
 
-Rerunning a tag compares existing assets byte for byte with that tag's generated
-files before uploading any missing ones. Differing, duplicate or incompletely
-uploaded assets stop the job; it never deletes or replaces them. A failed
-upload can leave a release with only some assets. Re-run to recover missing
-assets only when the existing ones match and finished uploading; an incomplete
-or differing asset requires maintainer inspection rather than replacement.
+Rerunning a tag resumes its draft, verifies existing assets against that tag's
+generated files and uploads missing ones only to the draft. Differing, duplicate
+or incompletely uploaded assets stop the job before publication; it never
+deletes or replaces them. If a draft cannot be resumed, a maintainer inspects
+and deletes the unpublished draft, then re-runs the workflow. A tag with more
+than one release, including drafts, or with a prerelease is refused by both
+publishers rather than guessed. A published release is only verified, never
+repaired: a missing or bad asset requires a new version.
+
 There is no `latest` tag or moving channel. A published version is immutable:
 a rerun verifies the recorded source commit and reuses matching published
 images without replacing them. A tag moved to another commit is refused before

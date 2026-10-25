@@ -8,7 +8,7 @@ import { McpAgent } from "./mcp-agent.js";
 import { expectMcp, proveMcpArrival, waitForDocumentDraw } from "./settle.js";
 import type { McpSession } from "./mcp-agent.js";
 import { installPageTimers, withPageTimers } from "./page-timers.js";
-import { alphaOf, contrast, oklab } from "../test/colour.js";
+import { alphaOf, contrast, oklab, pageGrounds } from "../test/colour.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
@@ -36,6 +36,10 @@ const FRAME_TYPES = [
   [".ub-terminal", "green", "Terminal"],
   [".ub-chart[data-view=line]", "blue", "Chart"],
 ] as const;
+const CALLOUTS = [
+  ["note", "Note", 245], ["tip", "Tip", 150], ["important", "Important", 300],
+  ["warning", "Warning", 75], ["caution", "Caution", 25],
+] as const;
 
 function writer(): McpSession {
   if (agent === null) throw new Error("e2e: frame writer is missing");
@@ -52,6 +56,12 @@ async function fixture(session: McpSession, title: string): Promise<string> {
       { type: "code", language: "wireframe", text: WIREFRAME },
       { type: "terminal", text: TERMINAL },
       { type: "chart", text: JSON.stringify(MAPPING) },
+      ...CALLOUTS.map(([variant]) => ({ type: "callout", variant,
+        inline: [{ text: "Ordinary upright prose with ", marks: {} }, { text: "bold", marks: { bold: true } },
+          { text: ", ", marks: {} }, { text: "a link", marks: { link: "https://example.invalid/callout" } },
+          { text: " and :claude:.", marks: {} }] })),
+      { type: "callout", variant: "tip", icon: "🚀", text: "An emoji replaces the default icon." },
+      { type: "callout", variant: "important", icon: ":claude:", text: "A curated icon replaces the default icon." },
     ],
   });
   await session.call("update_data", { uuid, operations: [{
@@ -93,7 +103,7 @@ async function colorToken(frame: Locator, token: string): Promise<string> {
   }, token);
 }
 
-async function expectFrame(frame: Locator, hue: string): Promise<void> {
+async function frameGeometry(frame: Locator) {
   const paint = await frame.evaluate((element) => {
     const style = getComputedStyle(element);
     return {
@@ -115,6 +125,11 @@ async function expectFrame(frame: Locator, hue: string): Promise<void> {
     return result;
   });
   expect(paint.radii.slice(2)).toEqual([radius, radius]);
+  return paint;
+}
+
+async function expectFrame(frame: Locator, hue: string): Promise<void> {
+  const paint = await frameGeometry(frame);
   expect(paint.bar).toBe(await colorToken(frame, `--block-${hue}-bar`));
   expect(paint.ground).toBe(await colorToken(frame, `--block-${hue}-tint`));
   expect(paint.bar).not.toBe(await colorToken(frame, "--brand"));
@@ -133,6 +148,49 @@ async function expectFrame(frame: Locator, hue: string): Promise<void> {
     expect(item.border, item.selector).toEqual(["0px", "0px", "0px", "0px"]);
     expect(alphaOf(item.ground), item.selector).toBe(0);
   }
+}
+
+async function expectCallout(page: Page, frame: Locator, variant: string, label: string, hue: number, touch: boolean): Promise<void> {
+  const paint = await frameGeometry(frame);
+  expect(paint.bar).toBe(await colorToken(frame, `--block-${variant}-bar`));
+  expect(paint.ground).toBe(await colorToken(frame, `--block-${variant}-tint`));
+  const bar = oklab(paint.bar);
+  expect(bar.chroma).toBeGreaterThan(0.10);
+  expect(bar.chroma).toBeLessThanOrEqual(0.13);
+  const paintedHue = (Math.atan2(bar.b, bar.a) * 180 / Math.PI + 360) % 360;
+  expect(Math.abs(paintedHue - hue)).toBeLessThan(1);
+  const pagePaint = await page.evaluate(() => {
+    const style = getComputedStyle(document.body);
+    return { image: style.backgroundImage, color: style.backgroundColor };
+  });
+  for (const ground of pageGrounds(pagePaint.image, pagePaint.color)) {
+    expect(contrast(paint.bar, ground), variant).toBeGreaterThanOrEqual(3);
+  }
+  await expect(frame).toHaveAttribute("role", "note");
+  await expect(frame).toHaveAccessibleName(label);
+  await expect(frame).not.toHaveAttribute("role", "alert");
+  await expectCaption(frame, label, touch);
+  const caption = frame.locator(":scope > .ub-block-caption");
+  await expect(caption).toHaveAttribute("contenteditable", "false");
+  await expect(caption).toHaveCSS("font-weight", "500");
+  await expect(caption).toHaveCSS("color", await colorToken(frame, `--block-${variant}-ink`));
+  const body = frame.locator(".ub-callout-body");
+  await expect(body).toHaveCSS("font-style", "normal");
+  await expect(body).toHaveCSS("font-size", await editor(page).locator(":scope > p").first().evaluate(element => getComputedStyle(element).fontSize));
+  await expect(body.locator("strong")).toHaveText("bold");
+  await expect(body.getByRole("link", { name: "a link", exact: true })).toBeVisible();
+  await expect(body.locator('.ub-inline-icon[data-icon="claude"] svg')).toHaveCount(1);
+  const icon = caption.locator(".ub-callout-icon");
+  await expect(icon).toHaveAttribute("aria-hidden", "true");
+  const iconPaint = await icon.evaluate(element => {
+    const svg = element.querySelector("svg");
+    if (svg === null) throw new Error("e2e: default callout icon is missing");
+    return { ink: getComputedStyle(element).color, svgInk: getComputedStyle(svg).color,
+      source: svg.outerHTML, animations: element.getAnimations({ subtree: true }).length };
+  });
+  expect(iconPaint.svgInk).toBe(iconPaint.ink);
+  expect(iconPaint.source).toContain("currentColor");
+  expect(iconPaint.animations).toBe(0);
 }
 
 async function expectCaption(frame: Locator, label: string, touch: boolean): Promise<void> {
@@ -247,7 +305,31 @@ for (const touch of [false, true]) {
       const quote = page.locator(".ub-quote");
       await expectFrame(quote, "rose");
       await expect(quote.locator(".ub-block-caption")).toHaveCount(0);
+      await expect(quote).toHaveCSS("font-style", "italic");
       await expectAA(page, ".ub-quote");
+      const defaultIcons: string[] = [];
+      for (const [variant, label, hue] of CALLOUTS) {
+        const selector = `.ub-callout[data-variant="${variant}"]:not([data-icon])`;
+        const frame = page.locator(selector);
+        await frame.scrollIntoViewIfNeeded();
+        await expectCallout(page, frame, variant, label, hue, touch);
+        await expectAA(page, selector);
+        defaultIcons.push(await frame.locator(".ub-callout-icon svg").evaluate(element => element.innerHTML));
+      }
+      expect(new Set(defaultIcons).size).toBe(CALLOUTS.length);
+      const emoji = page.locator('.ub-callout[data-icon="🚀"]');
+      await expect(emoji).toHaveAccessibleName("Tip");
+      await expect(emoji.locator(".ub-callout-icon")).toHaveText("🚀");
+      await expect(emoji.locator(".ub-callout-icon svg")).toHaveCount(0);
+      const curated = page.locator('.ub-callout[data-icon=":claude:"]');
+      await expect(curated).toHaveAccessibleName("Important");
+      await expect(curated.locator(".ub-block-caption .ub-inline-icon svg")).toHaveCount(1);
+      for (const frame of [emoji, curated]) {
+        await frame.scrollIntoViewIfNeeded();
+        const variant = await frame.getAttribute("data-variant");
+        await expect(frame.locator(".ub-block-caption")).toHaveCSS("color", await colorToken(frame, `--block-${variant}-ink`));
+        await expectAA(page, `.ub-callout[data-icon="${await frame.getAttribute("data-icon")}"]`);
+      }
       for (const [selector, hue, label] of FRAME_TYPES) {
         const frame = page.locator(selector);
         await expectFrame(frame, hue);

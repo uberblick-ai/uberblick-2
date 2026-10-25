@@ -1,4 +1,4 @@
-import { CODE_CHECK_RESULTS, DECISION_STATUSES, DOCUMENT_KINDS, LIST_STYLES, MAX_LIST_INDENT } from "@uberblick/schema";
+import { CALLOUT_VARIANTS, CODE_CHECK_RESULTS, DECISION_STATUSES, DOCUMENT_KINDS, LIST_STYLES, MAX_LIST_INDENT } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "./inputs.js";
 
@@ -152,6 +152,7 @@ function blockSchema(withLinks: boolean, withRev = true) {
   const prose = { ...fields, ...(withLinks ? linkRanges : {}) };
   return z.union([
     z.object({ ...prose, type: z.enum(["paragraph", "quote"]) }).strict(),
+    z.object({ ...prose, type: z.literal("callout"), variant: z.enum(CALLOUT_VARIANTS), icon: z.string().optional() }).strict(),
     z.object({ ...prose, type: z.literal("heading"), level: z.number().int().min(1).max(6) }).strict(),
     z.object({ ...prose, type: z.literal("list-item"), list: z.enum(LIST_STYLES), indent: z.number().int().min(0).max(MAX_LIST_INDENT) }).strict(),
     z.object({ ...fields, type: z.literal("code"), language: z.string() }).strict(),
@@ -268,8 +269,8 @@ const revisionAuthor = z.object({
 }).strict().nullable();
 const revisionName = z.object({
   text: z.string(),
-  namer: revisionAuthor.describe("Account and surface that named the revision; separate from its author."),
-  namedAt: z.string().describe("Naming time as an ISO 8601 UTC string; renaming preserves this time."),
+  namer: revisionAuthor.describe("Account and surface that set the name's current text; separate from the revision's author."),
+  namedAt: z.string().describe("Hub time when the name's current text was set, as an ISO 8601 UTC string; updated on rename."),
   canManage: z.boolean().describe("Whether this account may rename or remove this name."),
 }).strict().nullable();
 const revisionEntry = z.object({

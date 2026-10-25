@@ -55,14 +55,19 @@ test("only publishing jobs can attest and only this run's newly built subjects r
   assert.deepEqual(privileged.sort(), ["release-homebrew.yml/publish", "release-hub.yml/publish"]);
   for (const [file, count] of [["release-homebrew.yml", 1], ["release-hub.yml", 2]]) {
     const body = readFileSync(join(".github/workflows", file), "utf8");
+    const condition = "if: steps.publish.outputs.outcome == 'published'" +
+      (file === "release-homebrew.yml" ? " && steps.publish.outputs.archive != ''" : "");
     const steps = body.split(/^ {6}- /m).filter((step) => /uses: actions\/attest-build-provenance@/.test(step));
     assert.equal(steps.length, count);
     for (const step of steps) {
-      assert.match(step, /if: steps.publish.outputs.outcome == 'published'/);
+      assert.equal(step.split("\n").find((line) => line.trim().startsWith("if:"))?.trim(), condition);
       assert.match(step, /uses: actions\/attest-build-provenance@[0-9a-f]{40} # v/);
       assert.doesNotMatch(step, /continue-on-error:|push-to-registry: true/);
     }
-    assert.match(body, /name: Verify[^\n]*\n {8}if: steps.publish.outputs.outcome == 'published'\n {8}run: >-\n {10}node scripts\/release-attestation.mjs/);
+    const verify = body.split(/^ {6}- /m).find((step) => /^name: Verify/.test(step));
+    assert.ok(verify);
+    assert.equal(verify.split("\n").find((line) => line.trim().startsWith("if:"))?.trim(), condition);
+    assert.match(verify, /run: >-\n {10}node scripts\/release-attestation.mjs/);
     assert.doesNotMatch(body, /continue-on-error:/);
   }
 });
