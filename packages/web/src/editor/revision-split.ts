@@ -37,7 +37,7 @@ export interface RevisionSideCell {
   labels: string[];
   widthsOnly?: boolean;
   filler: boolean;
-  /** The other side's block spans this cell; it carries no mark of its own. */
+  /** The other side's block spans this cell. */
   spanned?: boolean;
 }
 
@@ -268,7 +268,6 @@ function foldRows(rows: readonly RevisionRow[], left: readonly PMNode[], right: 
   return shown;
 }
 
-const MARK: Record<RevisionRowKind, string> = { unchanged: "", changed: "~", added: "+", removed: "−", folded: "" };
 const revisionRows = new PluginKey<readonly RevisionRow[]>("revisionSideRows");
 
 /** Side-scoped interaction and row widgets: captions and the spacers the aligner sizes. */
@@ -319,7 +318,7 @@ function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docL
               const cell = row[side];
               const tint = row.kind;
               decorations.push(Decoration.node(pos, pos + node.nodeSize, {
-                class: `ub-revision-row ub-revision-row-${tint}`, "data-revision-row": tint, "data-revision-mark": cell.filler || cell.spanned === true ? "" : MARK[row.kind],
+                class: `ub-revision-row ub-revision-row-${tint}`, "data-revision-row": tint,
               }));
               decorations.push(Decoration.widget(pos, () => {
                 const start = window.document.createElement("div");

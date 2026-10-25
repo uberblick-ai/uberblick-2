@@ -181,7 +181,8 @@ describe("the side-by-side revision model", () => {
       expect(note?.textContent).toBe("Only column widths changed");
       expect(note?.closest('[aria-hidden="true"], [hidden]')).toBeNull();
       for (const [element, editor, width] of [[left, split.before, 180], [right, split.after, 260]] as const) {
-        expect(element.querySelector('[data-revision-row="changed"]')?.getAttribute("data-revision-mark")).toBe("~");
+        expect(element.querySelector('[data-revision-row="changed"]')).not.toBeNull();
+        expect(element.querySelector("[data-revision-mark]")).toBeNull();
         expect(element.querySelector("table col")?.getAttribute("style")).toContain(`width: ${width}px`);
         expect(editor.state.doc.child(2).child(0).child(0).attrs.colwidth).toEqual([width]);
         expect(element.querySelector("[data-revision-change]")).toBeNull();
