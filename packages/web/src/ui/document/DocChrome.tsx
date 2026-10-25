@@ -22,6 +22,7 @@ import { LifecycleBadge } from "./LifecycleBadge.js";
 import { PickerList } from "../PickerList.js";
 import { shareUrl } from "../route.js";
 import { useTagCatalog } from "../tags.js";
+import { Button } from "../shadcn/button.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,6 +48,9 @@ import {
 
 /** What an untitled document is called wherever its name is shown. */
 const UNTITLED = "Untitled";
+// WebKit needs one spare pixel after resize to keep the live touch width at 44px.
+const ACTION_CLASSES = "group/actions flex w-6 h-11 items-center justify-end rounded-(--radius-sm) border-0 bg-transparent p-0 text-(--muted-foreground) hover:text-foreground data-[state=open]:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1 [@media(any-pointer:coarse)]:w-[45px]";
+const ACTION_FACE_CLASSES = "ub-actions-face flex size-6 shrink-0 items-center justify-center rounded-(--radius-sm) border border-transparent group-hover/actions:border-(--border) group-hover/actions:bg-secondary group-data-[state=open]/actions:border-(--border) group-data-[state=open]/actions:bg-secondary";
 
 export type DocumentActionProps = {
   pinned?: boolean;
@@ -215,7 +219,7 @@ function TagStrip({
       }}
     >
       <PopoverTrigger asChild>
-        <button
+        <Button variant="plain" size="custom"
           ref={trigger}
           type="button"
           className="ub-tags ub-tag-picker-trigger group/tags flex min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 flex-initial flex-wrap items-center gap-[0.3rem] border-0 bg-transparent p-0 text-left [font:inherit] text-inherit focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
@@ -237,7 +241,7 @@ function TagStrip({
               ▾
             </span>
           )}
-        </button>
+        </Button>
       </PopoverTrigger>
       <PopoverContent
         align="start"
@@ -318,7 +322,7 @@ export function CopyLink({
 
   return (
     <span className="ub-copy-wrap">
-      <button
+      <Button variant="plain" size="custom"
         type="button"
         className="ub-copy-link inline-flex min-h-11 min-w-[max(2.75rem,6em)] items-center justify-center border-0 bg-transparent px-[0.15rem] py-0 [font:inherit] text-(--muted-foreground) hover:text-(--foreground) hover:underline focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
         aria-label={`Copy link — copies the canonical document URL for ${address}`}
@@ -326,7 +330,7 @@ export function CopyLink({
         onClick={() => void copyText(shareUrl(address, window.location.origin), "Link copied", "Couldn't copy the link. Select it in the address bar instead.")}
       >
         Copy link
-      </button>
+      </Button>
     </span>
   );
 }
@@ -390,14 +394,14 @@ export function DocMetaLine({
             canWrite={() => connection.status.writable && canCleanupTags?.() !== false}
           />
           <span className="ub-document-controls">
-            <button
+            <Button variant="plain" size="custom"
               type="button"
-              className="ub-copy-link-icon ub-actions-trigger focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1"
+              className={`ub-copy-link-icon ${ACTION_CLASSES}`}
               aria-label="Copy link"
               title="Copy link"
               onClick={() => void copyText(shareUrl(copyAddress(connection.room, segment, copyPath), window.location.origin), "Link copied", "Couldn't copy the link. Select it in the address bar instead.")}
             >
-              <span className="ub-actions-face">
+              <span className={ACTION_FACE_CLASSES}>
                 <svg className="block size-4 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
                   <path
                     d="m6.5 9.5 3-3m-4 1-1 1a2.83 2.83 0 0 0 4 4l1.5-1.5m-3-6L8.5 3.5a2.83 2.83 0 0 1 4 4l-1 1"
@@ -409,7 +413,7 @@ export function DocMetaLine({
                   />
                 </svg>
               </span>
-            </button>
+            </Button>
             <DocumentActions
               key={`${connection.room}/${archived}`}
               title={actionTitle || titleOf(meta)}
@@ -507,13 +511,13 @@ function DocumentActions({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <AlertDialogTrigger asChild>
-              <button
+              <Button variant="plain" size="custom"
                 type="button"
-                className="ub-actions-trigger focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1"
+                className={ACTION_CLASSES}
                 aria-label="Document actions"
                 title="Document actions"
               >
-                <span className="ub-actions-face">
+                <span className={ACTION_FACE_CLASSES}>
                   <svg className="block size-4 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
                     <g fill="currentColor">
                       <circle cx="3" cy="8" r="1.25" />
@@ -522,7 +526,7 @@ function DocumentActions({
                     </g>
                   </svg>
                 </span>
-              </button>
+              </Button>
             </AlertDialogTrigger>
           </DropdownMenuTrigger>
           <DropdownMenuContent

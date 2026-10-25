@@ -2,6 +2,7 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
+import { Button } from "../shadcn/button.js";
 import type { RemotePresence } from "./doc-chrome.js";
 import { presenceKey, presenceLabel } from "./doc-chrome.js";
 import { PeerAvatar } from "./PeerAvatar.js";
@@ -14,7 +15,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../shadcn/tooltip.js";
 
 const VISIBLE_PEERS = 3;
-const PEER_CONTROL_CLASS = "ub-peer-control relative box-border size-[28px] flex-none rounded-full m-0 p-0 not-first:-ml-[6px] hover:z-4 focus-visible:z-4 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-(--ring) focus-visible:outline-offset-2";
+const PEER_CONTROL_CLASS = "ub-peer-control relative box-border flex size-[28px] flex-none items-center justify-center rounded-full m-0 p-0 not-first:-ml-[6px] hover:z-4 focus-visible:z-4 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-(--ring) focus-visible:outline-offset-2";
 // Earlier circles paint above their overlapping siblings; hover and keyboard
 // focus use a higher stack level than any circle's resting order.
 const PEER_STACK_CLASSES = ["z-3", "z-2", "z-1"];
@@ -113,9 +114,9 @@ export function PeerCluster({
             return (
               <Tooltip key={presenceKey(session)}>
                 <TooltipTrigger asChild>
-                  <button
+                  <Button variant="plain" size="custom"
                     type="button"
-                    className={`${PEER_CONTROL_CLASS} border-0 bg-(--background) text-(--foreground) [font:inherit] ${PEER_STACK_CLASSES[index]}`}
+                    className={`${PEER_CONTROL_CLASS} border-0 bg-transparent text-(--foreground) [font:inherit] ${PEER_STACK_CLASSES[index]}`}
                     data-peer-id={presenceKey(session)}
                     aria-label={label}
                     onFocus={() => {
@@ -125,8 +126,8 @@ export function PeerCluster({
                     onBlur={leaveCluster}
                     onClick={() => activate(session)}
                   >
-                    <PeerAvatar session={session} />
-                  </button>
+                    <span className="flex size-[28px] flex-none rounded-full bg-(--background)"><PeerAvatar session={session} /></span>
+                  </Button>
                 </TooltipTrigger>
                 <TooltipContent align="end">
                   {session.name} · {session.kind === "agent" ? "agent" : "person"}
@@ -137,10 +138,10 @@ export function PeerCluster({
           })}
           {remaining.length > 0 && (
             <PopoverTrigger asChild>
-              <button
+              <Button variant="plain" size="custom"
                 ref={overflowTrigger}
                 type="button"
-                className={`${PEER_CONTROL_CLASS} ub-peer-more border border-solid border-(--border) bg-(--secondary) text-(--secondary-foreground) font-(family-name:--font-sans) ub-type-caption font-semibold`}
+                className={`${PEER_CONTROL_CLASS} ub-peer-more border-0 bg-transparent text-(--secondary-foreground) font-(family-name:--font-sans) ub-type-caption font-semibold`}
                 aria-label={`${remaining.length} more ${
                   remaining.length === 1 ? "collaborator" : "collaborators"
                 }`}
@@ -150,8 +151,8 @@ export function PeerCluster({
                 }}
                 onBlur={leaveCluster}
               >
-                +{remaining.length}
-              </button>
+                <span className="box-border flex size-[28px] flex-none items-center justify-center rounded-full border border-solid border-(--border) bg-(--secondary)">+{remaining.length}</span>
+              </Button>
             </PopoverTrigger>
           )}
         </span>
@@ -174,7 +175,7 @@ export function PeerCluster({
             }}
           >
             {remaining.map((session) => (
-              <button
+              <Button variant="plain" size="custom"
                 key={presenceKey(session)}
                 type="button"
                 className="ub-peer-overflow-row flex w-full min-w-0 items-center gap-2 rounded-(--radius-sm) border-0 bg-transparent p-[0.35rem] text-left text-inherit [font:inherit] hover:bg-(--card-accent) focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-(--ring) focus-visible:outline-offset-2"
@@ -193,7 +194,7 @@ export function PeerCluster({
                   {session.kind === "agent" ? "agent" : "person"}
                   {session.departed ? " · left" : ""}
                 </span>
-              </button>
+              </Button>
             ))}
           </PopoverContent>
         )}

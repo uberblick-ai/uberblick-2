@@ -199,15 +199,17 @@ test("empty and long-label sidebars fit narrow and docked layouts in both modes"
         // The header, rows and hover-revealed group actions must fit as
         // boxes, rather than becoming invisible under an overflow rule.
         if (content === "long labels") await pane.locator(".ub-group-head").last().hover();
-        const outside = await page.locator(".ub-list").evaluate((element) => {
-          const bounds = element.getBoundingClientRect();
-          return [...element.querySelectorAll<HTMLElement>(
-            '.ub-sidebar-pane:not([inert]) .ub-workspace, .ub-sidebar-pane:not([inert]) .ub-pin-row > button, .ub-sidebar-pane:not([inert]) .ub-group-toggle, .ub-sidebar-pane:not([inert]) .ub-group-act, .ub-settings-entry, [data-testid="account-menu"]',
-          )].filter((control) => {
+        const measured = page.locator(".ub-list").locator(
+          '.ub-sidebar-pane:not([inert]) .ub-workspace, .ub-sidebar-pane:not([inert]) .ub-pin-row > button, .ub-sidebar-pane:not([inert]) .ub-group-toggle, .ub-settings-entry, [data-testid="account-menu"]',
+        ).or(pane.getByRole("button", { name: /^(?:Rename|Delete) group / }));
+        const outside = await measured.evaluateAll((controls) =>
+          controls.filter((control) => {
+            const bounds = control.closest(".ub-list")?.getBoundingClientRect();
+            if (bounds === undefined) throw new Error("e2e: control has no sidebar frame");
             const box = control.getBoundingClientRect();
             return box.left < bounds.left || box.right > bounds.right;
-          }).map((control) => control.className);
-        });
+          }).map((control) => control.getAttribute("aria-label") ?? control.textContent),
+        );
         expect(outside).toEqual([]);
         await page.getByTestId("account-menu").click();
         await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();

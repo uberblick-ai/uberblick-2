@@ -412,8 +412,10 @@ export function BlockMenu({
     <>
       <FigmaDraft editor={editor} />
       {/*
-          * Keep the button mounted for opacity-only reveal, but remove its invisible
-          * Tab stop; slash is the keyboard entry route.
+        Native: this line-centred gutter uses 24px for mouse/trackpad and 44px
+        for touch. A device-wide coarse floor displaces its fine-input anchor.
+        Keep it mounted for opacity-only reveal without an invisible Tab stop;
+        slash is the keyboard entry route.
        */}
       <button
         type="button"

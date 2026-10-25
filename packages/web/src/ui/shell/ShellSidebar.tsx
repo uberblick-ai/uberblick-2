@@ -1,6 +1,7 @@
 import { Sidebar } from "../sidebar/Sidebar.js";
 import { HistorySidebar } from "../sidebar/HistorySidebar.js";
 import { SIDEBAR_TOGGLE_CLASSES } from "../shadcn/sidebar.js";
+import { Button } from "../shadcn/button.js";
 import type { AppShell } from "./use-app-shell.js";
 
 export function ShellSidebar({ shell }: { shell: AppShell }) {
@@ -16,7 +17,7 @@ export function ShellSidebar({ shell }: { shell: AppShell }) {
     {(narrowLayout || collapsed) && (
       /* Pane-local and out of flow: restoring the sidebar costs no global
          row and leaves every route at the application's top edge. */
-      <button
+      <Button variant="plain" size="custom"
         ref={restoreSidebar}
         type="button"
         className={`${SIDEBAR_TOGGLE_CLASSES} ub-sidebar-toggle ub-sidebar-restore top-2 left-2 border-(--border) bg-(--card-accent) text-(--secondary-foreground)`}
@@ -26,7 +27,7 @@ export function ShellSidebar({ shell }: { shell: AppShell }) {
         onClick={() => narrowLayout ? setSidebarOpen(true) : setCollapsed(false)}
       >
         »
-      </button>
+      </Button>
     )}
     <Sidebar
       collapsed={narrowLayout ? false : collapsed}

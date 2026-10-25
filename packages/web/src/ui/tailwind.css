@@ -95,13 +95,19 @@
   }
 
   /*
-   * Reset only vendored native buttons. Keep the reset layered so existing
-   * unlayered product button styles still win with asChild composition.
+   * Reset shared controls' border, background and colour below caller utilities.
+   * DOM-built editor controls retain their own styles.
    */
   button[data-slot] {
     border: 0;
     background: none;
     color: inherit;
+  }
+
+  /* Button recipes set data-size, including when a Radix trigger owns data-slot. */
+  button[data-size] {
+    min-height: 1.5rem;
+    min-width: 1.5rem;
   }
 }
 

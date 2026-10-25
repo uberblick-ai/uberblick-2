@@ -5,6 +5,7 @@ import type { Editor } from "@tiptap/core";
 import { commitFigmaDraft, currentFigmaDraft, discardFigmaDraft } from "../../editor/figma-creation.js";
 import type { FigmaDraft as Draft } from "../../editor/figma-creation.js";
 import { FigmaFields } from "../../editor/figma-fields.js";
+import { Button } from "../shadcn/button.js";
 
 /** React fills the local widget; only a valid submitted link creates a node. */
 export function FigmaDraft({ editor }: { editor: Editor }): ReactElement | null {
@@ -26,8 +27,8 @@ export function FigmaDraft({ editor }: { editor: Editor }): ReactElement | null 
   return createPortal(<>
     <span className="ub-block-caption">
       <span className="ub-block-label">Figma</span>
-      <span className="ub-block-actions"><button type="button"
-        onClick={() => draft.slot.querySelector("form")?.requestSubmit()}>Done</button></span>
+      <span className="ub-block-actions"><Button variant="plain" size="custom" type="button"
+        onClick={() => draft.slot.querySelector("form")?.requestSubmit()}>Done</Button></span>
     </span>
     <FigmaFields
       url=""

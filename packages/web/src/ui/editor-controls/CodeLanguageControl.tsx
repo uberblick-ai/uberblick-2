@@ -11,6 +11,7 @@ import { retypeBlockInTransaction } from "../../editor/retype.js";
 import { selectedBlock } from "../../editor/source-chrome.js";
 import { codeLanguageLabel, codeLanguages } from "../../editor/syntax-highlighting.js";
 import { PickerList } from "../PickerList.js";
+import { Button } from "../shadcn/button.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../shadcn/popover.js";
 import { useEditorControlsHost } from "./EditorControlsHost.js";
 
@@ -120,11 +121,11 @@ export function CodeLanguageControl({ editor, canWrite }: {
       setOpen(next);
     }}>
       <PopoverTrigger asChild>
-        <button type="button" className="ub-code-language-trigger flex max-w-full items-center gap-[0.35rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.3rem] py-[0.05rem] text-muted-foreground [font:inherit] hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11" aria-label="Code language"
+        <Button variant="plain" size="custom" type="button" className="ub-code-language-trigger pointer-events-auto flex max-w-full items-center gap-[0.35rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.3rem] py-[0.05rem] text-muted-foreground [font:inherit] hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 [@media(any-pointer:coarse)]:min-w-11" aria-label="Code language"
           title="Code language · Shift+F10 from the code block" aria-keyshortcuts="Shift+F10"
           aria-haspopup="listbox" aria-controls={open ? listId : undefined}>
           <span className="overflow-hidden text-ellipsis">{codeLanguageLabel(language)}</span><span aria-hidden="true">▾</span>
-        </button>
+        </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[min(16rem,calc(100vw_-_2rem))]! overflow-hidden p-0!"
         container={controlsHost?.portalContainer}
