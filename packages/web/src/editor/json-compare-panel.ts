@@ -291,6 +291,8 @@ export function jsonComparePanel(key: string, rendered: () => void = () => {}): 
     }
   });
   for (const type of ["beforeinput", "paste", "drop"]) grid.addEventListener(type, (event) => event.preventDefault());
+  // Composition can bypass beforeinput cancellation; restore the revision synchronously before paint.
+  grid.addEventListener("input", render);
   // Select-all would climb to the editor around the panes, so it selects the pane the caret is in.
   grid.addEventListener("keydown", (event) => {
     const pane = event.target instanceof Element ? event.target.closest(".ub-json-compare-pane") : null;

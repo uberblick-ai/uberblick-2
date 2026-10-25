@@ -2182,6 +2182,59 @@ test.describe("document history through ub open", () => {
     await info.attach("JSON comparison interactions", { body: await compare.screenshot(), contentType: "image/png" });
   });
 
+  test("JSON comparison rejects IME text inline and full screen while search accepts it", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 1000 } } });
+    const title = docTitle("Read-only JSON composition");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], jsonHistory(uuid, title, {
+      before: JSON.stringify({ version: "日本 old", nested: { a: 1 } }),
+      after: JSON.stringify({ version: "日本 new", nested: { a: 2 } }),
+    }));
+    await previous(page);
+    const compare = page.locator(".ub-json-compare");
+    await expect(compare).toBeVisible();
+    const session = await page.context().newCDPSession(page);
+    try {
+      for (const expanded of [false, true]) {
+        if (expanded) await compare.getByRole("button", { name: "Expand JSON comparison" }).click();
+        const panel = expanded ? page.getByRole("dialog", { name: "JSON comparison", exact: true }) : compare;
+        await expect(panel).toBeVisible();
+        for (const side of ["Before", "After"]) {
+          const pane = panel.getByRole("textbox", { name: `${side} JSON`, exact: true });
+          for (const commit of [true, false]) {
+            await pane.focus();
+            await pane.evaluate((element, commit) => {
+              const text = element.querySelector(".ub-json-string")?.firstChild;
+              if (text == null) throw new Error("Missing JSON composition target");
+              document.getSelection()?.setBaseAndExtent(text, 1, text, commit ? 1 : (text.textContent?.length ?? 1));
+            }, commit);
+            const original = await pane.innerHTML();
+            await session.send("Input.imeSetComposition", { text: "に", selectionStart: 1, selectionEnd: 1 });
+            expect(await pane.innerHTML()).toBe(original);
+            await session.send("Input.imeSetComposition", { text: "にほん", selectionStart: 3, selectionEnd: 3 });
+            expect(await pane.innerHTML()).toBe(original);
+            if (commit) await session.send("Input.insertText", { text: "日本" });
+            else await session.send("Input.imeSetComposition", { text: "", selectionStart: 0, selectionEnd: 0 });
+            expect(await pane.innerHTML()).toBe(original);
+            if (expanded) await expect(panel.getByRole("searchbox", { name: "Search keys and values" })).toHaveValue("");
+          }
+        }
+      }
+      const search = page.getByRole("searchbox", { name: "Search keys and values" });
+      await search.focus();
+      await session.send("Input.imeSetComposition", { text: "にほん", selectionStart: 3, selectionEnd: 3 });
+      await expect(search).toHaveValue("にほん");
+      await session.send("Input.insertText", { text: "日本" });
+      await expect(search).toHaveValue("日本");
+      await expect(page.locator(".ub-json-tree-count")).toHaveText("1 of 1");
+    } finally {
+      await session.detach();
+    }
+  });
+
   test("JSON comparison copies only selected authored text inline and full screen", { tag: "@webkit" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 1000 } } });
     const title = docTitle("Partial JSON copying");
