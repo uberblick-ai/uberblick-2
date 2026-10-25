@@ -21,13 +21,14 @@ import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 import { importCredentialKey, mintToken } from "@uberblick/schema/token";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
+import { backupDatabase, restoreDatabase } from "../src/operator-database.js";
 import { HubDatabase } from "../src/persistence.js";
 import { RevisionReads } from "../src/revision-reads.js";
 import type { HubContext } from "../src/server.js";
 import { createTeamHub, type TeamHub } from "../src/team.js";
 import type { UpdateAttribution } from "../src/update-attribution.js";
 import { issueCredential } from "./device-credentials.js";
-import { WORKSPACE, waitUntil } from "./helpers.js";
+import { removeTempDatabases, tempDatabasePath, WORKSPACE, waitUntil } from "./helpers.js";
 
 const databases: HubDatabase[] = [];
 const documents: Y.Doc[] = [];
@@ -39,6 +40,7 @@ afterEach(async () => {
   for (const hub of hubs.splice(0)) await hub.stop();
   for (const document of documents.splice(0)) document.destroy();
   for (const database of databases.splice(0)) database.close();
+  removeTempDatabases();
   vi.restoreAllMocks();
 });
 
@@ -91,6 +93,196 @@ async function request(reads: RevisionReads, connection: Connection<HubContext>,
 }
 
 describe("revision replies on admitted document rooms", () => {
+  it("validates complete catalogs without reading snapshots and separates include options", async () => {
+    const db = database();
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    seed(db, room, "Title");
+    const reads = new RevisionReads({ database: db, assertCurrent() {}, username: id => id });
+    const reader = receiver();
+    for (const options of [{}, { includeNames: true as const }, { includeTitles: true as const },
+      { includeNames: true as const, includeTitles: true as const }]) {
+      const first = await request(reads, reader.connection, room, { operation: "list", ...options }, reader.sent);
+      if (!("revisions" in first) || first.version === undefined) throw new Error("expected versioned catalog");
+      const get = vi.spyOn(db.revisions, "get").mockImplementation(() => { throw new Error("must not read snapshots"); });
+      const getSnapshot = vi.spyOn(db.revisions, "getSnapshot").mockImplementation(() => { throw new Error("must not read snapshots"); });
+      expect(await request(reads, reader.connection, room,
+        { operation: "list", ...options, ifVersion: first.version }, reader.sent))
+        .toEqual({ requestId: expect.any(String), ok: true, unchanged: true, version: first.version });
+      expect(get).not.toHaveBeenCalled();
+      expect(getSnapshot).not.toHaveBeenCalled();
+      get.mockRestore();
+      getSnapshot.mockRestore();
+      for (const other of [{}, { includeNames: true as const }, { includeTitles: true as const },
+        { includeNames: true as const, includeTitles: true as const }]) {
+        if (JSON.stringify(options) === JSON.stringify(other)) continue;
+        const changed = await request(reads, reader.connection, room,
+          { operation: "list", ...other, ifVersion: first.version }, reader.sent);
+        expect(changed).toHaveProperty("revisions");
+        expect(changed).not.toHaveProperty("version", first.version);
+      }
+      expect(await request(reads, reader.connection, room,
+        { operation: "list", ...options, ifVersion: "unknown" }, reader.sent)).toHaveProperty("revisions", first.revisions);
+    }
+    const empty = `${WORKSPACE}/${randomUUID()}`;
+    const listed = await request(reads, reader.connection, empty, { operation: "list" }, reader.sent);
+    if (!("revisions" in listed) || listed.version === undefined) throw new Error("expected empty catalog");
+    expect(listed.revisions).toEqual([]);
+    expect(await request(reads, reader.connection, empty,
+      { operation: "list", ifVersion: listed.version }, reader.sent)).toHaveProperty("unchanged", true);
+    expect(await request(reads, reader.connection, empty,
+      { operation: "list", includeTitles: true, ifVersion: listed.version }, reader.sent)).toHaveProperty("revisions", []);
+  });
+
+  it("keeps catalog versions across a database restart and backup restore", async () => {
+    let clock = 1_000;
+    const path = tempDatabasePath();
+    const open = () => {
+      const db = new HubDatabase(path, error => { throw error; }, { revisions: true, now: () => clock });
+      db.open();
+      databases.push(db);
+      return db;
+    };
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const original = open();
+    const saved = seed(original, room, "Named state");
+    const author = { principalId: "ben", surface: { kind: "mcp", name: "Claude Code" } };
+    expect(original.revisions.name(room, saved.doc,
+      createHash("sha256").update(snapshotRevision(saved.doc).checksum).digest("hex"), "Backed up", author).ok).toBe(true);
+    clock = 2_000;
+    saved.doc.transact(() => getMetaMap(saved.doc).set("title", "Open state"), { attribution: { author } });
+    original.connection.prepare("INSERT INTO documents (name, data) VALUES (?, ?)").run(room, Y.encodeStateAsUpdate(saved.doc));
+    const reader = receiver();
+    const options = { operation: "list" as const, includeNames: true as const, includeTitles: true as const };
+    const reads = (db: HubDatabase) => new RevisionReads({ database: db, assertCurrent() {}, username: id => id });
+    const initial = await request(reads(original), reader.connection, room, options, reader.sent);
+    if (!("revisions" in initial) || initial.version === undefined) throw new Error("expected versioned catalog");
+    expect(initial.revisions).toMatchObject([
+      { title: "Open state", final: false, name: null },
+      { id: saved.id, title: "Named state", final: true, name: { text: "Backed up" } },
+    ]);
+    original.close();
+    const reopened = open();
+    expect(await request(reads(reopened), reader.connection, room, options, reader.sent))
+      .toEqual({ ...initial, requestId: expect.any(String) });
+    expect(await request(reads(reopened), reader.connection, room, { ...options, ifVersion: initial.version }, reader.sent))
+      .toMatchObject({ unchanged: true, version: initial.version });
+    const loop = setInterval(() => {}, 10);
+    try {
+      const backup = await backupDatabase(reopened.connection, path);
+      const loaded = new Document(room);
+      documents.push(loaded);
+      await reopened.onLoadDocument({ document: loaded, documentName: room });
+      loaded.transact(() => getMetaMap(loaded).set("title", "After backup"), { attribution: { author } });
+      const changed = await request(reads(reopened), reader.connection, room, options, reader.sent);
+      expect(changed).not.toHaveProperty("version", initial.version);
+      reopened.close();
+      await restoreDatabase(path, backup, { yes: true, writeLine() {} });
+      const restored = open();
+      expect(await request(reads(restored), reader.connection, room, options, reader.sent))
+        .toEqual({ ...initial, requestId: expect.any(String) });
+      expect(await request(reads(restored), reader.connection, room, { ...options, ifVersion: initial.version }, reader.sent))
+        .toMatchObject({ unchanged: true, version: initial.version });
+    } finally {
+      clearInterval(loop);
+    }
+  });
+
+  it("keeps an expired head's catalog version when it moves to closed storage", async () => {
+    let clock = 1_000;
+    const db = database(true, () => clock);
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const saved = seed(db, room, "Expired state");
+    clock = 902_000;
+    const reads = new RevisionReads({ database: db, assertCurrent() {}, username: id => id });
+    const reader = receiver();
+    const options = { operation: "list" as const, includeTitles: true as const };
+    const expired = await request(reads, reader.connection, room, options, reader.sent);
+    if (!("revisions" in expired) || expired.version === undefined) throw new Error("expected versioned catalog");
+    expect(expired.revisions).toMatchObject([{ id: saved.id, final: true, endedAt: 901_000 }]);
+    expect(expired.revisions[0]).not.toHaveProperty("deadlineAt");
+    expect(db.revisions.name(room, saved.doc,
+      createHash("sha256").update(snapshotRevision(saved.doc).checksum).digest("hex"), "Closed", {
+        principalId: "ben", surface: { kind: "browser", name: "browser" },
+      }).ok).toBe(true);
+    expect(db.connection.prepare("SELECT room FROM document_revision_heads WHERE room = ?").get(room)).toBeUndefined();
+    expect(await request(reads, reader.connection, room, options, reader.sent))
+      .toEqual({ ...expired, requestId: expect.any(String) });
+    expect(await request(reads, reader.connection, room, { ...options, ifVersion: expired.version }, reader.sent))
+      .toMatchObject({ unchanged: true, version: expired.version });
+  });
+
+  it("versions live usernames, names, naming times and reader permissions with the projected catalog", async () => {
+    let clock = 1_000;
+    let username = "before";
+    const db = database(true, () => clock);
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const saved = seed(db, room, "Title");
+    const reads = new RevisionReads({ database: db, assertCurrent() {}, username: () => username });
+    const writer = receiver();
+    const options = { operation: "list" as const, includeNames: true as const, includeTitles: true as const };
+    async function catalog(readOnly = false) {
+      const reader = readOnly ? receiver(true) : writer;
+      const response = await request(reads, reader.connection, room, options, reader.sent);
+      if (!("revisions" in response)) throw new Error("expected catalog");
+      return response;
+    }
+    const initial = await catalog();
+    expect((await catalog()).version).toBe(initial.version);
+    username = "renamed";
+    const renamedAuthor = await catalog();
+    expect(renamedAuthor.version).not.toBe(initial.version);
+    expect(renamedAuthor.revisions[0]?.author?.githubUsername).toBe("renamed");
+    const checksum = createHash("sha256").update(snapshotRevision(saved.doc).checksum).digest("hex");
+    db.revisions.name(room, saved.doc, checksum, "Named", { principalId: "ben", surface: { kind: "browser", name: "browser" } });
+    const named = await catalog();
+    expect(named.version).not.toBe(renamedAuthor.version);
+    const readOnly = await catalog(true);
+    expect(readOnly.version).not.toBe(named.version);
+    expect(readOnly.revisions[0]?.name?.canManage).toBe(false);
+    clock++;
+    db.revisions.rename(room, saved.id, "Named", { principalId: "ben", surface: { kind: "browser", name: "browser" } });
+    const renamed = await catalog();
+    expect(renamed.version).not.toBe(named.version);
+    expect(renamed.revisions[0]?.name?.namedAt).toBe(clock);
+    username = "renamed-again";
+    const renamedNamer = await catalog();
+    expect(renamedNamer.version).not.toBe(renamed.version);
+    expect(renamedNamer.revisions[0]?.name?.namer?.githubUsername).toBe(username);
+    db.revisions.removeName(room, saved.id);
+    const unnamed = await catalog();
+    expect(unnamed.version).not.toBe(renamedNamer.version);
+    // Writer capabilities are not carried when no name exists.
+    expect((await catalog(true)).version).toBe(unnamed.version);
+  });
+
+  it("returns the checksum stored with snapshot bytes when the open head changes after listing", async () => {
+    const db = database();
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const saved = seed(db, room, "Before");
+    const reads = new RevisionReads({ database: db, assertCurrent() {}, username: id => id });
+    const reader = receiver();
+    const listed = await request(reads, reader.connection, room, { operation: "list" }, reader.sent);
+    if (!("revisions" in listed) || listed.version === undefined) throw new Error("expected catalog");
+    const before = listed.revisions[0]!;
+    expect(before).toMatchObject({ checksum: expect.stringMatching(/^[a-f0-9]{64}$/), final: false, deadlineAt: 901_000 });
+    saved.doc.transact(() => getMetaMap(saved.doc).set("title", "After"), {
+      attribution: { author: { principalId: "ben", surface: { kind: "mcp", name: "Claude Code" } } },
+    });
+    const fetched = await request(reads, reader.connection, room, { operation: "get", revisionId: saved.id }, reader.sent);
+    if (!("state" in fetched)) throw new Error("expected snapshot");
+    expect(fetched.revisionId).toBe(saved.id);
+    expect(fetched.checksum).not.toBe(before.checksum);
+    const decoded = document();
+    Y.applyUpdate(decoded, fetched.state);
+    expect(fetched.checksum).toBe(createHash("sha256").update(snapshotRevision(decoded).checksum).digest("hex"));
+    const changed = await request(reads, reader.connection, room,
+      { operation: "list", ifVersion: listed.version }, reader.sent);
+    expect(changed).toMatchObject({ revisions: [{ id: saved.id, checksum: fetched.checksum }] });
+    db.connection.prepare("UPDATE document_revision_heads SET data = ? WHERE room = ?").run(Uint8Array.of(255), room);
+    expect(await request(reads, reader.connection, room, { operation: "get", revisionId: saved.id }, reader.sent))
+      .toMatchObject({ revisionId: saved.id, checksum: fetched.checksum, state: Uint8Array.of(255) });
+  });
+
   it("restores by revision ID under current write authority and returns the closed attributed entry", async () => {
     const db = database();
     const room = `${WORKSPACE}/${randomUUID()}`;
@@ -161,19 +353,33 @@ describe("revision replies on admitted document rooms", () => {
       attribution: { author: { principalId: "ben", surface: { kind: "browser", name: "browser" } } },
     });
     const originalGet = db.revisions.get.bind(db.revisions);
-    vi.spyOn(db.revisions, "get").mockImplementation((requestedRoom, id) => {
+    const reads = new RevisionReads({ database: db, assertCurrent() {}, username: id => id });
+    const reader = receiver(true);
+    const complete = await request(reads, reader.connection, room, { operation: "list", includeTitles: true }, reader.sent);
+    if (!("revisions" in complete) || complete.version === undefined) throw new Error("expected complete catalog");
+    const get = vi.spyOn(db.revisions, "get").mockImplementation((requestedRoom, id) => {
       if (id !== middle) return originalGet(requestedRoom, id);
       if (failure === "throw") throw new Error("snapshot unavailable");
       return failure === "missing" ? null : Uint8Array.of(255);
     });
     const destroy = vi.spyOn(Y.Doc.prototype, "destroy");
-    const reads = new RevisionReads({ database: db, assertCurrent() {}, username: id => id });
-    const reader = receiver(true);
     const response = await request(reads, reader.connection, room, { operation: "list", includeTitles: true }, reader.sent);
     expect(response).toMatchObject({ ok: true, revisions: [{ title: "Third" }, { id: middle }, { title: "First" }] });
-    if (!("revisions" in response)) throw new Error("expected list");
+    if (!("revisions" in response) || response.version === undefined) throw new Error("expected list");
     expect(response.revisions[1]).not.toHaveProperty("title");
     expect(destroy).toHaveBeenCalledTimes(3);
+    expect(response.version).not.toBe(complete.version);
+    expect(await request(reads, reader.connection, room,
+      { operation: "list", includeTitles: true, ifVersion: response.version }, reader.sent)).toMatchObject({ revisions: response.revisions, version: response.version });
+    get.mockClear();
+    expect(await request(reads, reader.connection, room,
+      { operation: "list", includeTitles: true, ifVersion: complete.version }, reader.sent))
+      .toMatchObject({ unchanged: true, version: complete.version });
+    expect(get).not.toHaveBeenCalled();
+    get.mockRestore();
+    expect(await request(reads, reader.connection, room,
+      { operation: "list", includeTitles: true, ifVersion: response.version }, reader.sent))
+      .toMatchObject({ revisions: complete.revisions, version: complete.version });
   });
 
   it("opts into naming metadata and lets any writer rename and remove names with current attribution", async () => {
@@ -202,7 +408,7 @@ describe("revision replies on admitted document rooms", () => {
       .toMatchObject({ ok: false, error: "already-named", name });
     const legacy = await request(reads, namer.connection, room, { operation: "list" }, namer.sent);
     if (!("revisions" in legacy)) throw new Error("expected list");
-    expect(Object.keys(legacy.revisions[0]!).sort()).toEqual(["author", "endedAt", "id", "startedAt"]);
+    expect(Object.keys(legacy.revisions[0]!).sort()).toEqual(["author", "checksum", "endedAt", "final", "id", "startedAt"]);
     expect(await request(reads, namer.connection, room, { operation: "list", includeNames: true }, namer.sent))
       .toMatchObject({ revisions: [{ name }] });
     expect(await request(reads, readOnly.connection, room, { operation: "list", includeNames: true }, readOnly.sent))
@@ -325,19 +531,28 @@ describe("revision replies on admitted document rooms", () => {
     const db = database();
     const room = `${WORKSPACE}/${randomUUID()}`;
     const saved = seed(db, room, "Never disclosed");
-    const list = vi.spyOn(db.revisions, "list");
-    const get = vi.spyOn(db.revisions, "get");
     const username = vi.fn(() => "ben");
-    const assertCurrent = vi.fn(() => { throw new Error("membership removed"); });
+    const assertCurrent = vi.fn(() => {});
     const reads = new RevisionReads({ database: db, assertCurrent, username });
     const reader = receiver();
-    for (const value of [{ operation: "list" as const, includeTitles: true as const }, { operation: "get" as const, revisionId: saved.id }]) {
+    const cached = await request(reads, reader.connection, room, { operation: "list", includeTitles: true }, reader.sent);
+    if (!("revisions" in cached) || cached.version === undefined) throw new Error("expected versioned catalog");
+    reader.sent.length = 0;
+    username.mockClear();
+    assertCurrent.mockClear().mockImplementation(() => { throw new Error("membership removed"); });
+    const list = vi.spyOn(db.revisions, "list");
+    const get = vi.spyOn(db.revisions, "get");
+    const getSnapshot = vi.spyOn(db.revisions, "getSnapshot");
+    for (const value of [{ operation: "list" as const, includeTitles: true as const },
+      { operation: "list" as const, includeTitles: true as const, ifVersion: cached.version },
+      { operation: "get" as const, revisionId: saved.id }]) {
       expect(await request(reads, reader.connection, room, value, reader.sent))
         .toMatchObject({ ok: false, error: "forbidden" });
     }
-    expect(assertCurrent).toHaveBeenCalledTimes(2);
+    expect(assertCurrent).toHaveBeenCalledTimes(3);
     expect(list).not.toHaveBeenCalled();
     expect(get).not.toHaveBeenCalled();
+    expect(getSnapshot).not.toHaveBeenCalled();
     expect(username).not.toHaveBeenCalled();
     expect(reader.sent.join("")).not.toContain("Never disclosed");
   });

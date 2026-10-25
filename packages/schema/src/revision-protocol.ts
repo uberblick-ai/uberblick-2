@@ -4,6 +4,11 @@ export interface RevisionEntry {
   author: { githubUsername: string; surface: { kind: string; name: string } } | null;
   startedAt: number | null;
   endedAt: number | null;
+  /** Absent in replies from older hubs. */
+  checksum?: string;
+  final?: boolean;
+  /** The hub's closing deadline, present only while the revision is open. */
+  deadlineAt?: number;
   /** Only sent in response to a list request that opts in to names. */
   name?: RevisionName | null;
   /** Only sent when requested in a list and the stored snapshot title can be read. */
@@ -23,13 +28,15 @@ export interface RevisionRequest {
   revisionId?: string;
   includeNames?: true;
   includeTitles?: true;
+  ifVersion?: string;
   name?: string;
   checksum?: string;
   surface?: { kind: string; name: string };
 }
 
-export type RevisionResponse = { requestId: string; ok: true; revisions: RevisionEntry[] }
-  | { requestId: string; ok: true; state: Uint8Array }
+export type RevisionResponse = { requestId: string; ok: true; revisions: RevisionEntry[]; version?: string }
+  | { requestId: string; ok: true; unchanged: true; version: string }
+  | { requestId: string; ok: true; state: Uint8Array; revisionId?: string; checksum?: string }
   | { requestId: string; ok: true; revision: RevisionEntry; applied?: boolean }
   | { requestId: string; ok: false; error: "unsupported" | "deleted" | "revision-not-found" | "forbidden" | "unavailable"
     | "stale-state" | "invalid-name" | "already-named" | "archived"; name?: RevisionName };
@@ -45,6 +52,10 @@ function object(value: unknown): value is Record<string, unknown> {
 
 function identifier(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 256;
+}
+
+function checksum(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 }
 
 function json(raw: string): Record<string, unknown> | null {
@@ -63,9 +74,13 @@ export function readRevisionRequest(raw: string): RevisionRequest | null {
   const value = json(raw);
   if (value?.type !== REQUEST || !identifier(value.requestId)) return null;
   const requestId = value.requestId;
-  if (value.operation === "list") return { requestId, operation: "list",
-    ...(value.includeNames === true ? { includeNames: true } : {}),
-    ...(value.includeTitles === true ? { includeTitles: true } : {}) };
+  if (value.operation === "list") {
+    if (value.ifVersion !== undefined && typeof value.ifVersion !== "string") return null;
+    return { requestId, operation: "list",
+      ...(value.includeNames === true ? { includeNames: true } : {}),
+      ...(value.includeTitles === true ? { includeTitles: true } : {}),
+      ...(value.ifVersion === undefined ? {} : { ifVersion: value.ifVersion }) };
+  }
   if ((value.operation === "get" || value.operation === "remove-name") && identifier(value.revisionId)) {
     return { requestId, operation: value.operation, revisionId: value.revisionId };
   }
@@ -79,8 +94,7 @@ export function readRevisionRequest(raw: string): RevisionRequest | null {
       ...(typeof value.name === "string" ? { name: value.name } : {}),
       ...(surface === undefined ? {} : { surface }) };
   }
-  return (value.operation === "name" || (value.operation === "restore" && identifier(value.revisionId))) && typeof value.checksum === "string" &&
-    /^[a-f0-9]{64}$/.test(value.checksum) && object(value.surface) &&
+  return (value.operation === "name" || (value.operation === "restore" && identifier(value.revisionId))) && checksum(value.checksum) && object(value.surface) &&
     identifier(value.surface.kind) && identifier(value.surface.name)
     ? { requestId, operation: value.operation, ...(value.operation === "restore" ? { revisionId: value.revisionId as string }
       : typeof value.name === "string" ? { name: value.name } : {}), checksum: value.checksum,
@@ -121,7 +135,10 @@ function timestamp(value: unknown): value is number | null {
 function entry(value: unknown): value is RevisionEntry {
   if (!object(value) || !identifier(value.id) || !timestamp(value.startedAt) || !timestamp(value.endedAt)) return false;
   return author(value.author) && (value.name === undefined || value.name === null || revisionName(value.name)) &&
-    (value.title === undefined || typeof value.title === "string");
+    (value.title === undefined || typeof value.title === "string") &&
+    (value.checksum === undefined || checksum(value.checksum)) &&
+    (value.final === undefined || typeof value.final === "boolean") &&
+    (value.deadlineAt === undefined || (typeof value.deadlineAt === "number" && Number.isFinite(value.deadlineAt)));
 }
 
 function author(value: unknown): boolean {
@@ -145,15 +162,28 @@ export function readRevisionResponse(raw: string): RevisionResponse | null {
       ...(value.name === undefined ? {} : { name: value.name as RevisionName }) };
   }
   if (value.ok !== true) return null;
-  if (Array.isArray(value.revisions) && value.revisions.every(entry)) return { requestId, ok: true, revisions: value.revisions };
+  if (value.unchanged !== undefined) {
+    return value.unchanged === true && identifier(value.version) && value.revisions === undefined &&
+      value.revision === undefined && value.state === undefined
+      ? { requestId, ok: true, unchanged: true, version: value.version } : null;
+  }
+  if (Array.isArray(value.revisions) && value.revisions.every(entry)) {
+    if (value.version !== undefined && !identifier(value.version)) return null;
+    return { requestId, ok: true, revisions: value.revisions,
+      ...(value.version === undefined ? {} : { version: value.version }) };
+  }
   if (entry(value.revision)) {
     if (value.applied !== undefined && typeof value.applied !== "boolean") return null;
     return { requestId, ok: true, revision: value.revision,
       ...(value.applied === undefined ? {} : { applied: value.applied }) };
   }
   if (typeof value.state !== "string") return null;
+  if (value.revisionId !== undefined && !identifier(value.revisionId)) return null;
+  if (value.checksum !== undefined && !checksum(value.checksum)) return null;
   try {
-    return { requestId, ok: true, state: Uint8Array.from(atob(value.state), character => character.charCodeAt(0)) };
+    return { requestId, ok: true, state: Uint8Array.from(atob(value.state), character => character.charCodeAt(0)),
+      ...(value.revisionId === undefined ? {} : { revisionId: value.revisionId }),
+      ...(value.checksum === undefined ? {} : { checksum: value.checksum }) };
   } catch { return null; }
 }
 

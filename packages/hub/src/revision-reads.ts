@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Connection, Extension, onStatelessPayload } from "@hocuspocus/server";
 import { encodeRevisionResponseFrames, getMeta, parseRoom, readRevisionRequest, type RevisionEntry, type RevisionName,
   type RevisionRequest, type RevisionResponse } from "@uberblick/schema";
@@ -11,6 +12,14 @@ export interface RevisionReadsOptions {
   database: HubDatabase;
   assertCurrent(connection: Connection<HubContext>, room: string): void;
   username(principalId: string): string | null;
+}
+
+function catalogVersion(request: RevisionRequest, revisions: RevisionEntry[], missingTitles: string[] = []): string {
+  // A canonical checksum fixes the title. Only failed title lookups distinguish
+  // an incomplete reply from the complete catalog, without decoding to validate it.
+  return createHash("sha256").update(JSON.stringify([
+    request.includeNames === true, request.includeTitles === true, revisions, missingTitles,
+  ])).digest("hex");
 }
 
 /** Replies stay on the admitted document room and are addressed only to its requester. */
@@ -42,14 +51,27 @@ export class RevisionReads implements Extension<HubContext> {
       } else if (request.operation === "list") {
         const names = request.includeNames ? database.revisions.names(documentName) : undefined;
         const canWrite = !connection.readOnly && !database.isArchivedRoom(documentName);
-        response = { requestId: request.requestId, ok: true, revisions: database.revisions.list(documentName).map(revision => ({
-          ...this.entry(revision, names?.get(revision.id), request.includeNames === true, canWrite),
-          ...(request.includeTitles ? this.title(documentName, revision.id) : {}),
-        })) };
+        const entries = database.revisions.list(documentName).map(revision =>
+          this.entry(revision, names?.get(revision.id), request.includeNames === true, canWrite));
+        const version = catalogVersion(request, entries);
+        if (request.ifVersion === version) {
+          response = { requestId: request.requestId, ok: true, unchanged: true, version };
+        } else {
+          const missingTitles: string[] = [];
+          const revisions = entries.map(entry => {
+            if (!request.includeTitles) return entry;
+            const title = this.title(documentName, entry.id);
+            if (title.title === undefined) missingTitles.push(entry.id);
+            return { ...entry, ...title };
+          });
+          response = { requestId: request.requestId, ok: true, revisions,
+            version: missingTitles.length === 0 ? version : catalogVersion(request, entries, missingTitles) };
+        }
       } else if (request.operation === "get") {
-        const state = database.revisions.get(documentName, request.revisionId ?? "");
-        response = state === null ? { requestId: request.requestId, ok: false, error: "revision-not-found" }
-          : { requestId: request.requestId, ok: true, state };
+        const revisionId = request.revisionId ?? "";
+        const snapshot = database.revisions.getSnapshot(documentName, revisionId);
+        response = snapshot === null ? { requestId: request.requestId, ok: false, error: "revision-not-found" }
+          : { requestId: request.requestId, ok: true, revisionId, ...snapshot };
       } else if (connection.readOnly) {
         response = { requestId: request.requestId, ok: false, error: "forbidden" };
       } else if (database.isArchivedRoom(documentName)) {
@@ -103,7 +125,8 @@ export class RevisionReads implements Extension<HubContext> {
 
   private author(author: UpdateAuthor | null): RevisionEntry["author"] {
     const username = author === null ? null : this.options.username(author.principalId);
-    return username === null || author === null ? null : { githubUsername: username, surface: author.surface };
+    return username === null || author === null ? null : { githubUsername: username,
+      surface: { kind: author.surface.kind, name: author.surface.name } };
   }
 
   private name(name: StoredRevisionName, canWrite = true): RevisionName {
