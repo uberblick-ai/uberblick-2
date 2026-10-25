@@ -232,37 +232,30 @@ test("a published payload refuses a disagreeing formula without mutating either 
 
 test("reused payloads require provenance before executing the payload or recovering the formula", async () => {
   for (const draft of [false, true]) {
-    for (const formula of [
-      null,
-      { sha: "older-formula", content: formulaFor("v1.2.2", "1.2.2", "b".repeat(64)) },
-      { sha: "matching-formula", content: formulaFor(TAG, VERSION, DIGEST) },
-    ]) {
-      for (const reason of ["no attestations found", "source ref does not match"]) {
-        const fake = services({
-          getRelease: async () => {
-            fake.calls.push("get release");
-            return { ...release(), draft };
-          },
-          getTapFormula: async () => {
-            fake.calls.push("get formula");
-            return formula;
-          },
-          verifyAttestation: async () => {
-            fake.calls.push("verify attestation");
-            throw new Error(reason);
-          },
-        });
+    const fake = services({
+      getRelease: async () => {
+        fake.calls.push("get release");
+        return { ...release(), draft };
+      },
+      getTapFormula: async () => {
+        fake.calls.push("get formula");
+        return null;
+      },
+      verifyAttestation: async () => {
+        fake.calls.push("verify attestation");
+        throw new Error("missing or invalid provenance");
+      },
+    });
 
-        await assert.rejects(() => publishHomebrewRelease(input(), fake), { message: reason });
-        assert.deepEqual(fake.calls, [
-          "get tap",
-          "get release",
-          "get formula",
-          "download",
-          "verify attestation",
-        ]);
-      }
-    }
+    await assert.rejects(() => publishHomebrewRelease(input(), fake),
+      draft ? /inspect and delete the unpublished draft, then re-run/ : /missing or invalid provenance/);
+    assert.deepEqual(fake.calls, [
+      "get tap",
+      "get release",
+      "get formula",
+      "download",
+      "verify attestation",
+    ]);
   }
 });
 
@@ -371,31 +364,67 @@ test("a draft missing its payload uploads, verifies, publishes, then commits the
   ]);
 });
 
-test("a draft reuses its verified payload without requiring a public draft URL or rebuilding", async () => {
-  const draft = { ...release(), draft: true };
-  draft.assets[0].browser_download_url =
-    "https://github.com/uberblick-ai/homebrew-tap/releases/download/untagged-abc/uberblick-1.2.3.tar.gz";
+test("an interrupted draft requires inspection and deletion before the same tag can be rebuilt", async () => {
+  let draft = null;
+  let interruptPublication = true;
+  let attested = false;
   const fake = services({
     getRelease: async () => {
       fake.calls.push("get release");
       return draft;
     },
-    downloadAsset: async (asset) => {
-      fake.calls.push("download");
-      assert.equal(asset.id, draft.assets[0].id);
-      return BYTES;
+    createRelease: async () => {
+      fake.calls.push("create release");
+      draft = { ...release(), draft: true, assets: [] };
+      return draft;
+    },
+    uploadAsset: async () => {
+      fake.calls.push("upload");
+      const asset = { ...release().assets[0], browser_download_url: "https://github.test/untagged/payload" };
+      draft.assets.push(asset);
+      return asset;
+    },
+    publishRelease: async () => {
+      fake.calls.push("publish release");
+      if (interruptPublication) throw new Error("publication interrupted");
+      return release();
+    },
+    verifyAttestation: async () => {
+      fake.calls.push("verify attestation");
+      if (!attested) throw new Error("No verified release provenance; use a new version.");
     },
   });
+  async function workflow() {
+    const result = await publishHomebrewRelease(input(), fake);
+    if (result.outcome === "published" && result.archive !== undefined) attested = true;
+    return result;
+  }
 
-  const result = await publishHomebrewRelease(input(), fake);
+  await assert.rejects(workflow, /publication interrupted/);
+  assert.equal(draft.draft, true);
+  assert.equal(draft.assets.length, 1);
+  assert.equal(attested, false);
+  fake.calls.length = 0;
 
-  assert.equal(result.outcome, "published");
-  assert.equal(result.formula, formulaFor(TAG, VERSION, DIGEST));
-  assert.equal(result.archive, undefined);
+  await assert.rejects(workflow, (error) => {
+    assert.match(error.message, /inspect and delete the unpublished draft, then re-run/);
+    assert.doesNotMatch(error.message, /new version/);
+    assert.match(error.cause.message, /No verified release provenance/);
+    return true;
+  });
   assert.deepEqual(fake.calls, [
-    "get tap", "get release", "get formula", "download", "verify attestation", "published version",
-    "publish release", "public asset", "put formula new",
+    "get tap", "get release", "get formula", "download", "verify attestation",
   ]);
+
+  draft = null;
+  interruptPublication = false;
+  fake.calls.length = 0;
+  const result = await workflow();
+  assert.equal(result.outcome, "published");
+  assert.equal(result.archive, "/fixture/archive");
+  assert.equal(result.formula, formulaFor(TAG, VERSION, DIGEST));
+  assert.ok(fake.calls.includes("build"));
+  assert.equal(attested, true);
 });
 
 test("a published release missing its required payload is never repaired", async () => {

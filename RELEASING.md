@@ -81,10 +81,11 @@ The publishing jobs create GitHub build-provenance attestations in this
 repository only for artifacts built by that run, then verify them before
 reporting success. A rerun verifies existing attestations without attesting
 reused bytes. Missing or invalid provenance fails the run, including on a
-rerun. Attestation happens after publication, so a failed run can leave a
-published artifact without provenance: keep that version immutable and publish
-a new version to recover. Older releases are not backfilled. Dry runs create
-no attestations and need no OIDC token.
+rerun. Attestation happens after publication and its validation steps. A failed
+image identity readback, public payload check, formula commit or attestation can
+leave a published artifact without provenance: keep that version immutable and
+publish a new version to recover. Older releases are not backfilled. Dry runs
+create no attestations and need no OIDC token.
 
 ### Homebrew publisher
 
@@ -123,10 +124,12 @@ mise run publish-homebrew-release -- v0.5.0 --dry-run
 
 A published tag is immutable. Each release, including a draft, records its
 source commit, so re-running a tag that has since been moved is refused before
-anything changes. Re-running a matching draft reuses a matching payload with
-verified release provenance or uploads it when missing, verifies it, and
-publishes the draft before updating the formula. Re-running a matching published
-release verifies and reuses its
+anything changes. Re-running a matching draft without a payload builds and
+uploads it, verifies the uploaded bytes, and publishes the draft before updating
+the formula. A draft left holding an uploaded payload by an interrupted run has
+not reached attestation; its rerun refuses provenance verification and directs
+the maintainer to inspect and delete the unpublished draft, then re-run the same
+tag. Re-running a matching published release verifies provenance and reuses its
 payload; it changes nothing when the tap formula matches and refuses when the
 tag, payload, or formula disagree.
 

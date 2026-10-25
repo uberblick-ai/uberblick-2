@@ -57,17 +57,18 @@ test("only publishing jobs can attest and only this run's newly built subjects r
     const body = readFileSync(join(".github/workflows", file), "utf8");
     const condition = "if: steps.publish.outputs.outcome == 'published'" +
       (file === "release-homebrew.yml" ? " && steps.publish.outputs.archive != ''" : "");
-    const steps = body.split(/^ {6}- /m).filter((step) => /uses: actions\/attest-build-provenance@/.test(step));
+    const workflowSteps = body.split(/^\s*- (?=[\w-]+:)/m);
+    const steps = workflowSteps.filter((step) => /uses: actions\/attest-build-provenance@/.test(step));
     assert.equal(steps.length, count);
     for (const step of steps) {
       assert.equal(step.split("\n").find((line) => line.trim().startsWith("if:"))?.trim(), condition);
       assert.match(step, /uses: actions\/attest-build-provenance@[0-9a-f]{40} # v/);
       assert.doesNotMatch(step, /continue-on-error:|push-to-registry: true/);
     }
-    const verify = body.split(/^ {6}- /m).find((step) => /^name: Verify/.test(step));
+    const verify = workflowSteps.find((step) => /^name: Verify/.test(step));
     assert.ok(verify);
     assert.equal(verify.split("\n").find((line) => line.trim().startsWith("if:"))?.trim(), condition);
-    assert.match(verify, /run: >-\n {10}node scripts\/release-attestation.mjs/);
+    assert.match(verify, /\bnode scripts\/release-attestation\.mjs\b/);
     assert.doesNotMatch(body, /continue-on-error:/);
   }
 });

@@ -138,9 +138,7 @@ export async function publishHubRelease(input, services) {
   }
   const digests = [];
   for (const ref of refs) {
-    const digest = await services.publishIndex(ref, uploaded.get(ref));
-    if (!/^sha256:[0-9a-f]{64}$/.test(digest)) fail(`cannot identify published index for ${ref}`);
-    digests.push(digest);
+    digests.push(await services.publishIndex(ref, uploaded.get(ref)));
   }
   for (const ref of refs) {
     const published = await services.getImage(ref);

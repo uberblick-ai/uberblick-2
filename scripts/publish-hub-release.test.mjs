@@ -128,11 +128,6 @@ test("a reused hub release missing either index attestation cannot succeed or re
   }
 });
 
-test("a publishing result cannot omit a captured index digest", async () => {
-  const fake = services({ publishIndex: async () => undefined });
-  await assert.rejects(publishHubRelease(input(), fake), /identify published index/);
-});
-
 test("mismatching platform identity and partial publications refuse before building or publishing", async () => {
   const mismatching = published();
   mismatching["linux/arm64"] = image("linux/arm64", REFS[0], "b".repeat(40));

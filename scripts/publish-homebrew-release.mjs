@@ -151,7 +151,15 @@ async function verifiedAssetBytes(release, asset, input, version, services, expe
 		fail(`release ${tag}'s ${name} asset differs from the intended payload; ${recovery}`);
 	}
 	if (expectedBytes === null) {
-		await services.verifyAttestation(bytes, name, input);
+		try {
+			await services.verifyAttestation(bytes, name, input);
+		} catch (error) {
+			if (!release.draft) throw error;
+			throw new Error(
+				`could not verify release provenance for ${tag}'s ${name}; inspect and delete the unpublished draft, then re-run`,
+				{ cause: error },
+			);
+		}
 		const reportedVersion = await services.publishedArchiveVersion(bytes, name, version);
 		if (reportedVersion !== version) {
 			fail(`published payload reports ${JSON.stringify(reportedVersion)}, expected ${version}`);
