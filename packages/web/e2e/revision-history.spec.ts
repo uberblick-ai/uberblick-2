@@ -1420,6 +1420,11 @@ test.describe("document history through ub open", () => {
             const row = element.getBoundingClientRect(), band = header.getBoundingClientRect();
             return row.top < band.bottom - 8 && row.bottom > band.bottom && pane.scrollTop > 0;
           })).toBe(true);
+          if (split) {
+            // Geometry settles before the controls' frame update; the only change now starts behind the header.
+            await expect(header.getByRole("button", { name: "Previous change", exact: true })).toBeEnabled();
+            await expect(header.getByRole("button", { name: "Next change", exact: true })).toBeDisabled();
+          }
           const geometry = () => header.evaluate(element => {
             const rect = (target: Element) => {
               const box = target.getBoundingClientRect();
