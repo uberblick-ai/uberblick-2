@@ -137,9 +137,9 @@ describe("automatic hub revisions", () => {
     expect(getAnnotation(doc, replacedThread.id)).toEqual(replacedThreadBefore);
     for (const [key, value] of Object.entries(metadata)) expect(getMetaMap(doc).get(key)).toEqual(value);
     expect(db.revisions.list(ROOM).slice(0, 3)).toEqual([
-      { id: restored.id, author: claude, startedAt: 2 * MINUTE, endedAt: 2 * MINUTE },
-      { id: before, author: browser, startedAt: MINUTE, endedAt: 2 * MINUTE },
-      { id: past, author: browser, startedAt: 0, endedAt: 0 },
+      { id: restored.id, author: claude, startedAt: 2 * MINUTE, endedAt: 2 * MINUTE, checksum: checksum(doc), final: true },
+      { id: before, author: browser, startedAt: MINUTE, endedAt: 2 * MINUTE, checksum: checksum(beforeSnapshot), final: true },
+      { id: past, author: browser, startedAt: 0, endedAt: 0, checksum: checksum(doc), final: true },
     ]);
     expect(db.revisions.get(ROOM, past)).toEqual(oldBytes);
     const saved = await load(db);
@@ -235,7 +235,9 @@ describe("automatic hub revisions", () => {
     const content = db.revisions.get(ROOM, id);
     clock = MINUTE;
     expect(db.revisions.name(ROOM, doc, checksum(doc), "Reviewed after auth rewrite", browser)).toEqual({ ok: true, id });
-    expect(db.revisions.list(ROOM)[0]).toEqual({ id, author: claude, startedAt: 0, endedAt: MINUTE });
+    expect(db.revisions.list(ROOM)[0]).toEqual({
+      id, author: claude, startedAt: 0, endedAt: MINUTE, checksum: checksum(doc), final: true,
+    });
     expect(db.revisions.names(ROOM).get(id)).toEqual({ text: "Reviewed after auth rewrite", namer: browser, namedAt: MINUTE });
     clock = 2 * MINUTE;
     title(doc, "Later", claude);
@@ -261,7 +263,7 @@ describe("automatic hub revisions", () => {
     clock = 1;
     expect(db.revisions.name(ROOM, doc, checksum(doc), "Reviewed revert", browser)).toEqual({ ok: true, id: reverted });
     expect(db.revisions.list(ROOM)).toEqual([
-      { id: reverted, author: claude, startedAt: 0, endedAt: 1 }, original,
+      { id: reverted, author: claude, startedAt: 0, endedAt: 1, checksum: checksum(doc), final: true }, original,
     ]);
     expect(db.revisions.removeName(ROOM, reverted as string).ok).toBe(true);
     title(doc, "Next", claude);
@@ -348,17 +350,22 @@ describe("automatic hub revisions", () => {
     title(doc, "Browser edit");
     const firstId = db.revisions.list(ROOM)[0]!.id;
     const firstBytes = db.revisions.get(ROOM, firstId);
+    const firstChecksum = checksum(doc);
     clock += MINUTE;
     title(doc, "Claude edit", claude);
     clock += 6 * MINUTE;
     title(doc, "Last Claude edit", claude);
+    const claudeChecksum = checksum(doc);
     clock = (9 * 60 + 40) * MINUTE;
     title(doc, "Browser returns");
 
     expect(db.revisions.list(ROOM)).toEqual([
-      { id: expect.any(String), author: browser, startedAt: (9 * 60 + 40) * MINUTE, endedAt: null },
-      { id: expect.any(String), author: claude, startedAt: (9 * 60 + 6) * MINUTE, endedAt: (9 * 60 + 21) * MINUTE },
-      { id: firstId, author: browser, startedAt: 9 * 60 * MINUTE, endedAt: (9 * 60 + 6) * MINUTE },
+      { id: expect.any(String), author: browser, startedAt: (9 * 60 + 40) * MINUTE, endedAt: null,
+        checksum: checksum(doc), final: false, deadlineAt: (9 * 60 + 55) * MINUTE },
+      { id: expect.any(String), author: claude, startedAt: (9 * 60 + 6) * MINUTE, endedAt: (9 * 60 + 21) * MINUTE,
+        checksum: claudeChecksum, final: true },
+      { id: firstId, author: browser, startedAt: 9 * 60 * MINUTE, endedAt: (9 * 60 + 6) * MINUTE,
+        checksum: firstChecksum, final: true },
     ]);
     expect(db.revisions.get(ROOM, firstId)).toEqual(firstBytes);
     expect(getMeta(revision(db, firstId)).title).toBe("Browser edit");
@@ -380,16 +387,50 @@ describe("automatic hub revisions", () => {
       meta.set("code-check:repo", { result: "matches" });
       doc.getMap("annotations").set("thread", "A comment");
     }, { attribution: { author: claude } });
-    expect(db.revisions.list(ROOM)).toEqual([{ id, author: browser, startedAt: 0, endedAt: null }]);
+    expect(db.revisions.list(ROOM)).toEqual([{
+      id, author: browser, startedAt: 0, endedAt: null, checksum: checksum(doc), final: false, deadlineAt: 15 * MINUTE,
+    }]);
     expect(db.revisions.get(ROOM, id)).toEqual(bytes);
     clock = 15 * MINUTE;
     expect(db.revisions.list(ROOM)[0]!.endedAt).toBe(15 * MINUTE);
     doc.transact(() => doc.getMap("meta").set("description", "After expiry"), { attribution: { author: claude } });
     expect(db.connection.prepare("SELECT ended_at FROM document_revisions WHERE room = ?").all(ROOM)).toEqual([]);
-    expect(db.revisions.list(ROOM)).toEqual([{ id, author: browser, startedAt: 0, endedAt: 15 * MINUTE }]);
+    const expired = db.revisions.list(ROOM)[0];
+    expect(expired).toEqual({ id, author: browser, startedAt: 0, endedAt: 15 * MINUTE, checksum: checksum(doc), final: true });
     title(doc, "Second");
     expect(db.revisions.list(ROOM)).toHaveLength(2);
+    expect(db.revisions.list(ROOM)[1]).toEqual(expired);
     expect(db.revisions.get(ROOM, id)).toEqual(bytes);
+  });
+
+  it("reads canonical checksums with open and closed snapshot bytes, including corrupt bytes", async () => {
+    const db = database();
+    const doc = await load(db);
+    title(doc, "First");
+    const first = db.revisions.list(ROOM)[0]!;
+    const snapshot = db.revisions.getSnapshot(ROOM, first.id);
+    expect(snapshot).toEqual({ state: db.revisions.get(ROOM, first.id), checksum: checksum(doc) });
+    title(doc, "Second");
+    const second = db.revisions.list(ROOM)[0]!;
+    expect(second.id).toBe(first.id);
+    expect(second.checksum).toBe(checksum(doc));
+    expect(second.checksum).not.toBe(first.checksum);
+    expect(db.revisions.getSnapshot(ROOM, first.id)).toEqual({ state: db.revisions.get(ROOM, first.id), checksum: second.checksum });
+    expect(snapshot!.checksum).toBe(first.checksum);
+    const corrupt = Uint8Array.of(255);
+    db.connection.prepare("UPDATE document_revision_heads SET data = ? WHERE room = ?").run(corrupt, ROOM);
+    expect(db.revisions.getSnapshot(ROOM, first.id)).toEqual({ state: corrupt, checksum: second.checksum });
+    expect(db.revisions.list(ROOM)[0]!.checksum).toBe(second.checksum);
+    clock = 15 * MINUTE;
+    title(doc, "Third");
+    expect(db.revisions.getSnapshot(ROOM, first.id)).toEqual({ state: corrupt, checksum: second.checksum });
+    expect(db.revisions.list(ROOM)[1]!.checksum).toBe(second.checksum);
+    const differentCorrupt = Uint8Array.of(254);
+    db.connection.prepare("UPDATE document_revisions SET data = ? WHERE room = ? AND id = ?")
+      .run(differentCorrupt, ROOM, first.id);
+    expect(db.revisions.getSnapshot(ROOM, first.id)).toEqual({ state: differentCorrupt, checksum: second.checksum });
+    expect(db.revisions.getSnapshot(roomForDoc(WORKSPACE, TOPIC), first.id)).toBeNull();
+    expect(db.revisions.getSnapshot(ROOM, "missing")).toBeNull();
   });
 
   it("preserves earlier content with unknown author and start before the first recorded edit", async () => {
@@ -404,8 +445,9 @@ describe("automatic hub revisions", () => {
     title(doc, "Known editor");
     const rows = db.revisions.list(ROOM);
     expect(rows).toEqual([
-      { id: expect.any(String), author: browser, startedAt: 50, endedAt: null },
-      { id: expect.any(String), author: null, startedAt: null, endedAt: 50 },
+      { id: expect.any(String), author: browser, startedAt: 50, endedAt: null,
+        checksum: checksum(doc), final: false, deadlineAt: 50 + 15 * MINUTE },
+      { id: expect.any(String), author: null, startedAt: null, endedAt: 50, checksum: checksum(existing), final: true },
     ]);
     expect(getMeta(revision(db, rows[1]!.id)).title).toBe("Before revisions");
   });
@@ -414,6 +456,7 @@ describe("automatic hub revisions", () => {
     const db = database();
     const doc = await load(db);
     title(doc, "X");
+    const firstChecksum = checksum(doc);
     clock = 100;
     title(doc, "Y", claude);
     clock = 200;
@@ -425,8 +468,9 @@ describe("automatic hub revisions", () => {
     clock = 300;
     title(reloaded, "Z", claude);
     expect(db.revisions.list(ROOM)).toEqual([
-      { id: expect.any(String), author: claude, startedAt: 100, endedAt: null },
-      { id: expect.any(String), author: browser, startedAt: 0, endedAt: 100 },
+      { id: expect.any(String), author: claude, startedAt: 100, endedAt: null,
+        checksum: checksum(reloaded), final: false, deadlineAt: 100 + 15 * MINUTE },
+      { id: expect.any(String), author: browser, startedAt: 0, endedAt: 100, checksum: firstChecksum, final: true },
     ]);
   });
 
@@ -629,7 +673,10 @@ describe("automatic hub revisions", () => {
     expect(db.revisions.list(ROOM)).toEqual([]);
     await deliver(predecessor, "predecessor-later", browser);
     const rows = db.revisions.list(ROOM);
-    expect(rows).toEqual([{ id: expect.any(String), author: null, startedAt: 0, endedAt: null }]);
+    expect(rows).toEqual([{
+      id: expect.any(String), author: null, startedAt: 0, endedAt: null,
+      checksum: checksum(hub), final: false, deadlineAt: 15 * MINUTE,
+    }]);
     expect(getMeta(hub).title).toBe("Claude's edited title");
     expect(getMeta(revision(db, rows[0]!.id)).title).toBe("Claude's edited title");
   });
@@ -647,7 +694,7 @@ describe("automatic hub revisions", () => {
     await db.onStoreDocument({ document: doc, documentName: ROOM });
     const expected = db.revisions.list(ROOM);
     const names = db.revisions.names(ROOM);
-    const bytes = expected.map(row => db.revisions.get(ROOM, row.id));
+    const snapshots = expected.map(row => db.revisions.getSnapshot(ROOM, row.id));
     const loop = setInterval(() => {}, 10);
     try {
       const backup = await backupDatabase(db.connection, databasePath);
@@ -661,7 +708,7 @@ describe("automatic hub revisions", () => {
       databases.push(restored);
       expect(restored.revisions.list(ROOM)).toEqual(expected);
       expect(restored.revisions.names(ROOM)).toEqual(names);
-      expect(expected.map(row => restored.revisions.get(ROOM, row.id))).toEqual(bytes);
+      expect(expected.map(row => restored.revisions.getSnapshot(ROOM, row.id))).toEqual(snapshots);
       expect(getMeta(await load(restored)).title).toBe("Second");
     } finally {
       clearInterval(loop);

@@ -22,6 +22,9 @@ export interface StoredRevision {
   author: UpdateAuthor | null;
   startedAt: number | null;
   endedAt: number | null;
+  checksum: string;
+  final: boolean;
+  deadlineAt?: number;
 }
 
 export interface StoredRevisionName {
@@ -174,7 +177,7 @@ export class HubRevisions {
   }
 
   list(room: string): StoredRevision[] {
-    const rows = this.db.prepare(`SELECT id, author, started_at, ended_at FROM document_revisions
+    const rows = this.db.prepare(`SELECT id, author, started_at, ended_at, checksum FROM document_revisions
       WHERE room = ? ORDER BY rowid DESC`).all(room);
     const head = this.head(room);
     const result: StoredRevision[] = rows.map(row => ({
@@ -182,21 +185,36 @@ export class HubRevisions {
       author: row.author === null ? null : JSON.parse(row.author as string) as UpdateAuthor,
       startedAt: row.started_at as number | null,
       endedAt: row.ended_at as number,
+      checksum: row.checksum as string,
+      final: true,
     }));
-    if (head !== undefined && head.checksum !== head.previous_checksum) result.unshift({
-      id: head.id,
-      author: head.author === null ? null : JSON.parse(head.author) as UpdateAuthor,
-      startedAt: head.started_at,
-      endedAt: this.now() >= head.started_at + STRETCH_MS ? head.started_at + STRETCH_MS : null,
-    });
+    if (head !== undefined && head.checksum !== head.previous_checksum) {
+      const deadlineAt = head.started_at + STRETCH_MS;
+      const final = this.now() >= deadlineAt;
+      result.unshift({
+        id: head.id,
+        author: head.author === null ? null : JSON.parse(head.author) as UpdateAuthor,
+        startedAt: head.started_at,
+        endedAt: final ? deadlineAt : null,
+        checksum: head.checksum,
+        final,
+        ...(final ? {} : { deadlineAt }),
+      });
+    }
     return result;
   }
 
   get(room: string, id: string): Uint8Array | null {
+    return this.getSnapshot(room, id)?.state ?? null;
+  }
+
+  getSnapshot(room: string, id: string): { state: Uint8Array; checksum: string } | null {
     const head = this.head(room);
-    if (head?.id === id && head.checksum !== head.previous_checksum) return head.data;
-    const row = this.db.prepare("SELECT data FROM document_revisions WHERE room = ? AND id = ?").get(room, id);
-    return row?.data instanceof Uint8Array ? row.data : null;
+    if (head?.id === id && head.checksum !== head.previous_checksum) {
+      return head.data instanceof Uint8Array ? { state: head.data, checksum: head.checksum } : null;
+    }
+    const row = this.db.prepare("SELECT data, checksum FROM document_revisions WHERE room = ? AND id = ?").get(room, id);
+    return row?.data instanceof Uint8Array ? { state: row.data, checksum: row.checksum as string } : null;
   }
 
   names(room: string): Map<string, StoredRevisionName> {

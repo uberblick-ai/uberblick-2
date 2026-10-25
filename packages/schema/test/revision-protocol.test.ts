@@ -78,13 +78,75 @@ it("opts into titles independently of names and accepts legacy replies without t
   }
 });
 
+it("preserves list version strings within the request bound independently of the include options", () => {
+  const request = { requestId: "one", operation: "list" as const, ifVersion: "catalog-version" };
+  for (const options of [{}, { includeNames: true as const }, { includeTitles: true as const },
+    { includeNames: true as const, includeTitles: true as const }]) {
+    expect(readRevisionRequest(encodeRevisionRequest({ ...request, ...options }))).toEqual({ ...request, ...options });
+  }
+  for (const ifVersion of ["", "x".repeat(257)]) {
+    expect(readRevisionRequest(encodeRevisionRequest({ ...request, ifVersion }))).toEqual({ ...request, ifVersion });
+  }
+  expect(readRevisionRequest(encodeRevisionRequest({ ...request, ifVersion: "x".repeat(4096) }))).toBeNull();
+  for (const ifVersion of [null, 1, {}, []]) {
+    expect(readRevisionRequest(JSON.stringify({ type: "uberblick:revision-request", ...request, ifVersion }))).toBeNull();
+  }
+});
+
+it("distinguishes a token-less catalog, a versioned catalog and an unchanged reply", () => {
+  const responses: RevisionResponse[] = [
+    { requestId: "one", ok: true, revisions: [] },
+    { requestId: "one", ok: true, revisions: [], version: "catalog-version" },
+    { requestId: "one", ok: true, unchanged: true, version: "catalog-version" },
+  ];
+  for (const response of responses) {
+    const encoded = encodeRevisionResponseFrames(response)[0]!;
+    expect(readRevisionResponse(encoded)).toEqual(response);
+    expect(createRevisionResponseReader("one")(encoded)).toEqual(response);
+  }
+  expect(readRevisionResponse(encodeRevisionResponseFrames(responses[0]!)[0]!)).not.toHaveProperty("version");
+  for (const fields of [{ unchanged: true }, { unchanged: false, version: "catalog-version" },
+    { unchanged: true, version: "catalog-version", revisions: [] },
+    { unchanged: true, version: "catalog-version", state: "" },
+    ...[null, "", "x".repeat(257), 1, {}, []].flatMap(version => [{ revisions: [], version }, { unchanged: true, version }])]) {
+    expect(readRevisionResponse(JSON.stringify({ type: "uberblick:revision-response", requestId: "one", ok: true, ...fields })))
+      .toBeNull();
+  }
+});
+
+it("preserves canonical catalog metadata and rejects malformed metadata", () => {
+  const revision = { id: "revision", author: null, startedAt: 1, endedAt: null,
+    checksum: "a".repeat(64), final: false, deadlineAt: 900001 };
+  const response = { requestId: "one", ok: true as const, revisions: [revision], version: "catalog-version" };
+  expect(readRevisionResponse(encodeRevisionResponseFrames(response)[0]!)).toEqual(response);
+  for (const fields of [{ checksum: "A".repeat(64) }, { checksum: "a".repeat(63) }, { checksum: null },
+    { final: null }, { final: "false" }, { deadlineAt: null }, { deadlineAt: "900001" }]) {
+    expect(readRevisionResponse(JSON.stringify({ type: "uberblick:revision-response", ...response,
+      revisions: [{ ...revision, ...fields }] }))).toBeNull();
+  }
+  expect(readRevisionResponse(encodeRevisionResponseFrames(response)[0]!.replace('"deadlineAt":900001', '"deadlineAt":1e999')))
+    .toBeNull();
+});
+
+it("preserves snapshot identity and checksum while accepting legacy snapshots", () => {
+  for (const metadata of [{}, { revisionId: "revision", checksum: "b".repeat(64) }]) {
+    const response = { requestId: "one", ok: true as const, state: Uint8Array.of(1, 2, 3), ...metadata };
+    expect(readRevisionResponse(encodeRevisionResponseFrames(response)[0]!)).toEqual(response);
+  }
+  for (const metadata of [{ revisionId: "" }, { revisionId: "x".repeat(257) }, { revisionId: null },
+    { checksum: "B".repeat(64) }, { checksum: null }]) {
+    expect(readRevisionResponse(JSON.stringify({ type: "uberblick:revision-response", requestId: "one", ok: true,
+      state: "AQID", ...metadata }))).toBeNull();
+  }
+});
+
 it("reassembles large snapshots and lists without exceeding the WebSocket frame ceiling", () => {
   const state = Uint8Array.from({ length: 17 * 1024 * 1024 }, (_, index) => index % 251);
   const responses: RevisionResponse[] = [
-    { requestId: "one", ok: true, state },
-    { requestId: "one", ok: true, revisions: Array.from({ length: 5000 }, (_, index) => ({
+    { requestId: "one", ok: true, state, revisionId: "revision", checksum: "c".repeat(64) },
+    { requestId: "one", ok: true, version: "catalog-version", revisions: Array.from({ length: 5000 }, (_, index) => ({
       id: `revision-${index}`, author: { githubUsername: "person", surface: { kind: "mcp", name: "Claude Code" } },
-      startedAt: index, endedAt: index + 1,
+      startedAt: index, endedAt: index + 1, checksum: "d".repeat(64), final: true,
     })) },
   ];
   for (const response of responses) {
@@ -100,6 +162,7 @@ it("reassembles large snapshots and lists without exceeding the WebSocket frame 
     }
     if ("state" in response) {
       expect(result !== null && "state" in result && Buffer.from(result.state).equals(response.state)).toBe(true);
+      expect(result).toMatchObject({ revisionId: "revision", checksum: "c".repeat(64) });
     } else {
       expect(result).toEqual(response);
     }
