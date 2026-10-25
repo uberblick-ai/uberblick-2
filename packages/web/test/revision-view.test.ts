@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import {
   appendBlock, applyDocData, createAnnotation, deleteBlock, editBlock, getBlock, getBlocksFragment,
+  tableRows,
 } from "@uberblick/schema";
 import { parseWireframe } from "@uberblick/wireframe";
 import { AllSelection } from "@tiptap/pm/state";
@@ -18,6 +19,12 @@ function clone(doc: Y.Doc): Y.Doc {
   const copy = new Y.Doc();
   Y.applyUpdate(copy, Y.encodeStateAsUpdate(doc));
   return copy;
+}
+
+function firstColumnWidth(source: Y.Doc, width: number): void {
+  for (const row of tableRows(getBlocksFragment(source).get(0) as Y.XmlElement)) {
+    (row[0] as unknown as { setAttribute(name: string, value: unknown): void }).setAttribute("colwidth", [width]);
+  }
 }
 
 function mount(before: Y.Doc | null, after: Y.Doc) {
@@ -245,6 +252,52 @@ describe("the detached revision view", () => {
       expect(table.child(2).textContent).toBe("gone row");
       expect(table.child(3).textContent).toBe("tail");
       expect(view.element.querySelectorAll('[data-revision-change="removed"]')).toHaveLength(2);
+    } finally { view.destroy(); before.destroy(); after.destroy(); }
+  });
+
+  it("puts an accessible width-only note above a changed table using its After widths", () => {
+    const before = new Y.Doc();
+    appendBlock(before, { type: "table", text: "| Header | Other |\n| --- | --- |\n| Same cell | Value |" });
+    firstColumnWidth(before, 180);
+    const after = clone(before);
+    firstColumnWidth(after, 260);
+    const originalBefore = Y.encodeStateAsUpdate(before);
+    const originalAfter = Y.encodeStateAsUpdate(after);
+    const view = mount(before, after);
+    try {
+      const note = view.element.querySelector(".ub-revision-fields.ub-revision-widths-only");
+      const table = view.element.querySelector("table");
+      expect(note?.textContent).toBe("Only column widths changed");
+      expect(note?.closest('[aria-hidden="true"], [hidden]')).toBeNull();
+      expect(note?.compareDocumentPosition(table!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(view.element.querySelector('[data-revision-block="changed"]')).not.toBeNull();
+      expect(table?.querySelector("col")?.getAttribute("style")).toContain("width: 260px");
+      expect(view.editor.state.doc.child(0).child(0).child(0).attrs.colwidth).toEqual([260]);
+      expect(view.element.querySelector("[data-revision-change]")).toBeNull();
+      expect(view.element.textContent).not.toContain("columnWidths");
+      expect(Y.encodeStateAsUpdate(before)).toEqual(originalBefore);
+      expect(Y.encodeStateAsUpdate(after)).toEqual(originalAfter);
+    } finally { view.destroy(); before.destroy(); after.destroy(); }
+  });
+
+  it.each(["cell text", "columns"] as const)("names widths alongside %s and keeps its existing marks", (change) => {
+    const before = new Y.Doc();
+    const source = "| Header | Other |\n| --- | --- |\n| old cell | Value |";
+    const id = appendBlock(before, { type: "table", text: source });
+    firstColumnWidth(before, 180);
+    const after = clone(before);
+    if (change === "cell text") editBlock(after, id, source, source.replace("old cell", "new cell"));
+    else editBlock(after, id, source, "| Header |\n| --- |\n| old cell |", { tableMapping: { rows: [0, 1], columns: [0] } });
+    firstColumnWidth(after, 260);
+    const view = mount(before, after);
+    try {
+      const captions = [...view.element.querySelectorAll(".ub-revision-fields")].map((label) => label.textContent);
+      expect(captions).toEqual(change === "cell text" ? ["Changed: column widths"]
+        : ["Removed block · Changed: columns, column widths", "Added block · Changed: columns, column widths"]);
+      expect(view.element.querySelector(".ub-revision-widths-only")).toBeNull();
+      expect(view.element.textContent).not.toContain("columnWidths");
+      expect(view.element.querySelector('[data-revision-change="removed"]')?.textContent).toBe(change === "cell text" ? "old" : "Header");
+      expect(view.element.querySelector('[data-revision-change="added"]')?.textContent).toBe(change === "cell text" ? "new" : "Header");
     } finally { view.destroy(); before.destroy(); after.destroy(); }
   });
 

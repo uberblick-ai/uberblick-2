@@ -3,7 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
-import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, initDoc, insertBlock, setKind, setStatus, setTitle, snapshotRevision } from "@uberblick/schema";
+import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, initDoc, insertBlock, setKind, setStatus, setTitle, snapshotRevision, tableRows } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import { activateControl, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
@@ -11,6 +11,8 @@ import { assertNoViolations, WCAG_TAGS } from "./accessibility-assertions.js";
 import { waitForAcknowledged } from "./settle.js";
 import { setPointerSelection } from "./native-selection.js";
 import { mockFigmaLookup } from "./figma-fixtures.js";
+import { renderedText } from "./contrast-helpers.js";
+import { alphaOf } from "../test/colour.js";
 
 function history(page: Page): Locator {
   return page.getByRole("group", { name: "Document history", exact: true });
@@ -144,6 +146,40 @@ function splitHistory(uuid: string, title: string): Record<string, string> {
     insertBlock(document, heading, { type: "paragraph", text: "An added note." });
     const rows = getBlock(document, table)?.text ?? "";
     editBlock(document, table, rows, rows.replace("10", "12"));
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+  }
+}
+
+function tableWidthHistory(uuid: string, title: string): Record<string, string> {
+  const document = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title });
+    const only = appendBlock(document, { type: "table", text: "| Day | Latency |\n| --- | --- |\n| Mon | 10 |" });
+    for (let index = 1; index <= 18; index += 1) {
+      appendBlock(document, { type: "paragraph", text: `Unchanged context ${index} separates the two table changes.` });
+    }
+    const mixed = appendBlock(document, { type: "table", text: "| Stage | Duration |\n| --- | --- |\n| Build | 10 |" });
+    appendBlock(document, { type: "paragraph", text: "The closing context stays." });
+    const widths = (id: string, values: number[]): void => {
+      const table = getBlocksFragment(document).toArray().find(node => node instanceof Y.XmlElement && node.getAttribute("id") === id);
+      if (!(table instanceof Y.XmlElement)) throw new Error("The width comparison fixture table is missing");
+      for (const row of tableRows(table)) {
+        for (const [column, width] of values.entries()) {
+          const cell = row[column];
+          if (cell === undefined) throw new Error("The width comparison fixture cell is missing");
+          (cell as unknown as { setAttribute(name: string, value: unknown): void }).setAttribute("colwidth", [width]);
+        }
+      }
+    };
+    widths(only, [160, 180]);
+    widths(mixed, [160, 180]);
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    widths(only, [240, 180]);
+    const source = getBlock(document, mixed)?.text ?? "";
+    editBlock(document, mixed, source, source.replace("10", "12"));
+    widths(mixed, [240, 180]);
     return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
   } finally {
     document.destroy();
@@ -1545,6 +1581,104 @@ test.describe("document history through ub open", () => {
     await expect(page.getByLabel("Document revision", { exact: true })).toContainText("The amberblue fox stays.");
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect(split).toBeVisible();
+  });
+
+  test("table width changes explain themselves while keeping widths, tint and change navigation", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 640 } } });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const title = docTitle("Table column widths in history");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], tableWidthHistory(uuid, title));
+    await previous(page);
+    await expect(page.locator(".ub-revision-split")).toBeVisible();
+    const before = earlierSide(page);
+    const after = historicalEditor(page);
+    const note = after.getByText("Only column widths changed", { exact: true });
+    await expect(note).toBeVisible();
+    await expect(before.locator(".ub-revision-fields")).toHaveText("Changed: column widths");
+    await expect(after.locator(".ub-revision-fields")).toHaveText(["Only column widths changed", "Changed: column widths"]);
+    await expect(page.locator(".ub-revision-pane")).not.toContainText("columnWidths");
+    const widthTable = (side: Locator): Locator => side.locator(".ub-table").filter({ hasText: "Latency" });
+    const mixedTable = (side: Locator): Locator => side.locator(".ub-table").filter({ hasText: "Duration" });
+    await expect(widthTable(before).locator("[data-revision-change]")).toHaveCount(0);
+    await expect(widthTable(after).locator("[data-revision-change]")).toHaveCount(0);
+    await expect(mixedTable(before).locator('[data-revision-change="removed"]')).toHaveText("10");
+    await expect(mixedTable(after).locator('[data-revision-change="added"]')).toHaveText("12");
+    for (const [side, expected] of [[before, [160, 180]], [after, [240, 180]]] as const) {
+      await expect.poll(() => widthTable(side).locator("th").evaluateAll(cells => cells.map(cell => Math.round(cell.getBoundingClientRect().width))))
+        .toEqual(expected);
+      await expect(side.locator(':scope > [data-revision-row="changed"]').first()).toHaveAttribute("data-revision-mark", "~");
+    }
+    // The widths-only table remains visible with the unchanged middle folded.
+    await expect(after.locator(".ub-revision-fold-button")).toHaveCount(1);
+    await expect(after.locator(".ub-table")).toHaveCount(2);
+    const changeMarks = async () => (await rulerGeometry(page)).marks.filter(mark => mark.kind !== "same" && mark.kind !== "fold");
+    await expect.poll(async () => (await changeMarks()).length).toBe(2);
+    await activateControl(historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true }));
+    await expect(after.locator(".ub-revision-fold-button")).toHaveCount(0);
+    await expect.poll(async () => (await changeMarks()).length).toBe(2);
+    const nextChange = page.getByRole("button", { name: "Next change", exact: true });
+    const previousChange = page.getByRole("button", { name: "Previous change", exact: true });
+    await expect(nextChange).toBeEnabled();
+    await activateControl(nextChange);
+    const pane = page.locator(".ub-revision-pane");
+    await expect.poll(() => pane.evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThan(2);
+    await expect(previousChange).toBeEnabled();
+    await activateControl(previousChange);
+    await expect.poll(() => pane.evaluate(element => element.scrollTop)).toBeLessThan(40);
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      const paints = [];
+      for (const side of [before, after]) {
+        const row = side.locator(':scope > [data-revision-row="changed"]').first();
+        const paint = await row.evaluate(element => ({ background: getComputedStyle(element).backgroundColor, mark: getComputedStyle(element, "::before").content }));
+        expect(alphaOf(paint.background)).toBeGreaterThan(0);
+        expect(paint.mark).toBe('"~"');
+        paints.push(paint.background);
+      }
+      expect(paints[0]).not.toBe(paints[1]);
+      const typography = await after.locator(".ub-revision-fields").evaluateAll(labels => labels.map(label => {
+        const style = getComputedStyle(label);
+        return [style.fontFamily, style.fontSize, style.lineHeight, style.color];
+      }));
+      expect(typography[0]).toEqual(typography[1]);
+      const readings = await renderedText(page, ".ub-revision-side-after .ub-revision-fields");
+      expect(readings.length).toBeGreaterThan(0);
+      for (const reading of readings) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
+      await expect.poll(async () => {
+        const label = await note.boundingBox();
+        const table = await widthTable(after).boundingBox();
+        return label !== null && table !== null && label.y + label.height <= table.y
+          && Math.abs(label.x + label.width - table.x - table.width) <= 1;
+      }).toBe(true);
+    }
+    expect(await after.ariaSnapshot()).toContain("Only column widths changed");
+    expect(await note.evaluate(element => [...element.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent === "Only column widths changed"))).toBe(true);
+    // The same label and marked words survive the one-column projection.
+    await page.setViewportSize({ width: 860, height: 640 });
+    await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+    const single = page.getByLabel("Document revision", { exact: true });
+    const singleNote = single.getByText("Only column widths changed", { exact: true });
+    await expect(single.locator(".ub-revision-fields")).toHaveText(["Only column widths changed", "Changed: column widths"]);
+    await expect(single).not.toContainText("columnWidths");
+    await expect(mixedTable(single).locator('[data-revision-change="removed"]')).toHaveText("10");
+    await expect(mixedTable(single).locator('[data-revision-change="added"]')).toHaveText("12");
+    expect(await single.ariaSnapshot()).toContain("Only column widths changed");
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await expect(singleNote).toBeVisible();
+      await expect.poll(async () => {
+        const label = await singleNote.boundingBox();
+        const table = await widthTable(single).boundingBox();
+        return label !== null && table !== null && label.y + label.height <= table.y;
+      }).toBe(true);
+      const readings = await renderedText(page, ".ub-revision-view .ub-revision-fields");
+      expect(readings.length).toBeGreaterThan(0);
+      for (const reading of readings) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   test("each comparison side follows document links by click and Enter, and Tab leaves lists and tables", { tag: "@webkit" }, async ({ browser }) => {
