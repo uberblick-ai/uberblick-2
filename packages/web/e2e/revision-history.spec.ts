@@ -1701,6 +1701,59 @@ test.describe("document history through ub open", () => {
     }
   });
 
+  test("opaque drawings retain visible row tint inside comparison edges", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane",
+      contextOptions: { viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" } });
+    const title = docTitle("Opaque comparison surfaces");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], ablaufHistory(uuid, title, [
+      { before: historyFlow(6, 0), after: historyFlow(7, 0) },
+      { before: historyFlow(3, 0) },
+      { after: historyFlow(4, 0) },
+      { before: historyFlow(2, 0), after: historyFlow(2, 0) },
+    ]));
+    await previous(page);
+    await expect(page.locator(".ub-revision-split")).toBeVisible();
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      for (const side of [earlierSide(page), historicalEditor(page)]) {
+        const rows = side.locator(":scope > .ub-ablauf:is(.ub-revision-row-changed, .ub-revision-row-added, .ub-revision-row-removed)");
+        await expect(rows).toHaveCount(2);
+        for (const row of await rows.all()) {
+          const tint = await row.evaluate(element => getComputedStyle(element).backgroundColor);
+          expect(alphaOf(tint)).toBe(1);
+          await expect(row).toHaveCSS("box-shadow", "none");
+          await expect(row.locator(".ub-ablauf-viewport")).toHaveCSS("background-color", tint);
+          await expect(row.locator("svg")).toHaveCSS("background-color", tint);
+          const screenshot = await row.screenshot({ animations: "disabled", scale: "css" });
+          const paint = await page.evaluate(async ({ bytes, tint }) => {
+            const image = await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: "image/png" }));
+            const canvas = document.createElement("canvas");
+            canvas.width = image.width; canvas.height = image.height;
+            const context = canvas.getContext("2d");
+            if (context === null) throw new Error("Canvas pixel readback is unavailable");
+            context.fillStyle = tint; context.fillRect(0, 0, 1, 1);
+            const expected = context.getImageData(0, 0, 1, 1).data;
+            context.drawImage(image, 0, 0);
+            image.close();
+            const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+            let tinted = 0;
+            for (let offset = 0; offset < pixels.length; offset += 4) {
+              if (expected.every((value, channel) => Math.abs(value - (pixels[offset + channel] ?? -255)) <= 1)) tinted += 1;
+            }
+            return { tinted, width: canvas.width };
+          }, { bytes: [...screenshot], tint });
+          expect(paint.tinted, "The row tint must be visible inside the block, even when its content has an opaque surface").toBeGreaterThan(paint.width);
+        }
+        const unchanged = side.locator(":scope > .ub-ablauf.ub-revision-row-unchanged .ub-ablauf-viewport");
+        await expect(unchanged).not.toHaveCSS("background-color", await rows.first().evaluate(element => getComputedStyle(element).backgroundColor));
+      }
+    }
+  });
+
   test("table width changes explain themselves while keeping widths, tint and change navigation", { tag: "@webkit" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 640 } } });
     await page.emulateMedia({ reducedMotion: "reduce" });

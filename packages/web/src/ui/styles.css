@@ -515,9 +515,11 @@
 .ub-revision-side :is(.ProseMirror, .ub-revision-ghost) > .ub-revision-row { position: relative; }
 .ub-revision-side-before :is(.ProseMirror, .ub-revision-ghost) > :is(.ub-revision-row-removed, .ub-revision-row-changed) {
   background: var(--revision-removed-row);
+  --ab-bg: var(--revision-removed-row);
 }
 .ub-revision-side-after :is(.ProseMirror, .ub-revision-ghost) > :is(.ub-revision-row-added, .ub-revision-row-changed) {
   background: var(--revision-added-row);
+  --ab-bg: var(--revision-added-row);
 }
 .ub-revision-filler { height: 0; }
 /* Rows never share a collapsed margin, so each side's spacing is its own and
