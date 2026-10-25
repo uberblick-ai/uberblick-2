@@ -1,5 +1,5 @@
 import { editBlock, getBlock } from "@uberblick/schema";
-import type { ListIndent } from "@uberblick/schema";
+import type { CalloutVariant, ListIndent } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "../inputs.js";
 import { listIndentArg, listStyleArg, uuidArg } from "./schemas.js";
@@ -10,9 +10,11 @@ export const inputSchema = strictInput({
   uuid: uuidArg,
   block_id: z.string().min(1),
   old_text: z.string().describe("The block text you read. Asserted before the splice."),
-  new_text: z.string().describe("Replacement text. Repeat old_text for a list style or depth change without a text change."),
+  new_text: z.string().describe("Replacement text. Repeat old_text to change only list style, depth, callout variant or icon."),
   list: listStyleArg.optional().describe("New list style on an existing list item; omitted keeps its style. Refused on other block types."),
   indent: listIndentArg.optional().describe("New list depth, an integer from 0 to 3, on an existing list item; omitted keeps its depth. Refused on other block types."),
+  variant: z.string().optional().describe("New callout variant: note, tip, important, warning or caution; omitted keeps it. Refused on other block types."),
+  icon: z.string().optional().describe("New callout icon: one emoji character or a curated :name: icon; an empty value restores the default. Omitted keeps it. Refused on other block types."),
   rev: z
     .string()
     .min(1)
@@ -26,7 +28,7 @@ export const inputSchema = strictInput({
   }).strict().optional().describe("Explicit surviving table positions. Both arrays are required; omitted old positions are deleted."),
 });
 
-export const editBlockOperation = documentOperation({ content: true, contentDurability: true }, inputSchema, (context, { uuid, block_id, old_text, new_text, list, indent, rev, table_mapping }, _request, replica) => {
+export const editBlockOperation = documentOperation({ content: true, contentDurability: true }, inputSchema, (context, { uuid, block_id, old_text, new_text, list, indent, variant, icon, rev, table_mapping }, _request, replica) => {
   const { replicas, validateBlockTargets } = context;
 
   const current = getBlock(replica.doc, block_id);
@@ -38,6 +40,8 @@ export const editBlockOperation = documentOperation({ content: true, contentDura
     ...(rev === undefined ? {} : { rev }),
     ...(list === undefined ? {} : { list }),
     ...(indent === undefined ? {} : { indent: indent as ListIndent }),
+    ...(variant === undefined ? {} : { variant: variant as CalloutVariant }),
+    ...(icon === undefined ? {} : { icon }),
     ...(table_mapping === undefined ? {} : { tableMapping: table_mapping }),
   }));
   replicas.publishCursor(replica, block_id, new_text.length);

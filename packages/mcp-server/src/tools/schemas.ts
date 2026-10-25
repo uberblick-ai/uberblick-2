@@ -88,7 +88,7 @@ export const documentStatusArg = z
   .describe("The recorded lifecycle state. Its kind owns the legal values.");
 
 const INLINE_RUNS =
-  "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: " +
+  "Formatted content for a PROSE block (paragraph, heading, list-item, quote, callout), as runs of equally-marked text: " +
   "`[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) " +
   "and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the " +
   "run texts joined together are the block's text. Code, terminal and chart hold source text and ignore it; " +
@@ -167,6 +167,8 @@ export const blockShape = {
     .describe("Code language, e.g. \"ts\". Code blocks only. Drawings are code blocks too, with language \"ablauf\" or \"wireframe\"."),
   list: listStyleArg.optional().describe("List style. List items only; omitted means bullet."),
   indent: listIndentArg.optional().describe("List depth, an integer from 0 to 3. List items only; omitted means 0."),
+  variant: z.string().optional().describe("Callout variant: note, tip, important, warning or caution; omitted means note. Ignored for other block types."),
+  icon: z.string().optional().describe("Callout icon override: one emoji character or a curated :name: icon. Ignored for other block types."),
   inline: inlineArg,
 };
 

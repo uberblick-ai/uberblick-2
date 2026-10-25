@@ -182,8 +182,16 @@
                 "minimum": 0,
                 "maximum": 3
               },
+              "variant": {
+                "description": "Callout variant: note, tip, important, warning or caution; omitted means note. Ignored for other block types.",
+                "type": "string"
+              },
+              "icon": {
+                "description": "Callout icon override: one emoji character or a curated :name: icon. Ignored for other block types.",
+                "type": "string"
+              },
               "inline": {
-                "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, terminal and chart hold source text and ignore it; tables, cards and figma also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card/:::figma and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
+                "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote, callout), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, terminal and chart hold source text and ignore it; tables, cards and figma also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card/:::figma and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
                 "type": "array",
                 "items": {
                   "type": "object",
@@ -766,7 +774,7 @@
         },
         "new_text": {
           "type": "string",
-          "description": "Replacement text. Repeat old_text for a list style or depth change without a text change."
+          "description": "Replacement text. Repeat old_text to change only list style, depth, callout variant or icon."
         },
         "list": {
           "description": "New list style on an existing list item; omitted keeps its style. Refused on other block types.",
@@ -781,6 +789,14 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 3
+        },
+        "variant": {
+          "description": "New callout variant: note, tip, important, warning or caution; omitted keeps it. Refused on other block types.",
+          "type": "string"
+        },
+        "icon": {
+          "description": "New callout icon: one emoji character or a curated :name: icon; an empty value restores the default. Omitted keeps it. Refused on other block types.",
+          "type": "string"
         },
         "rev": {
           "description": "The block's `rev` from get_doc. Asserted alongside old_text.",
@@ -922,8 +938,16 @@
                 "minimum": 0,
                 "maximum": 3
               },
+              "variant": {
+                "description": "Callout variant: note, tip, important, warning or caution; omitted means note. Ignored for other block types.",
+                "type": "string"
+              },
+              "icon": {
+                "description": "Callout icon override: one emoji character or a curated :name: icon. Ignored for other block types.",
+                "type": "string"
+              },
               "inline": {
-                "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, terminal and chart hold source text and ignore it; tables, cards and figma also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card/:::figma and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
+                "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote, callout), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, terminal and chart hold source text and ignore it; tables, cards and figma also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card/:::figma and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
                 "type": "array",
                 "items": {
                   "type": "object",
