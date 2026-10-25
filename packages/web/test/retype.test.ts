@@ -101,6 +101,41 @@ describe("retypeBlockInTransaction", () => {
     expect(element.getAttribute("level")).toBe("4");
   });
 
+  it.each(["quote", "paragraph"] as const)("keeps callout text, inline marks and comment anchors when retyping to %s, including undo", (type) => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "callout-retype", title: "Callout retype" });
+    const id = appendBlock(ydoc, { type: "callout", variant: "tip", icon: ":claude:", text: "Keep these words" });
+    const thread = createAnnotation(ydoc, id, 5, 10, "reviewer", "These");
+    const text = (ydoc.getXmlFragment("blocks").get(0) as Y.XmlElement).firstChild as Y.XmlText;
+    text.format(0, 4, { bold: true });
+    const original = getBlockInline(ydoc, id);
+    const { editor } = mountEditor(ydoc);
+    editors.push(editor);
+    editor.commands.setTextSelection(1);
+    expect(retypeAtCaret(editor, type)).toBe(true);
+    expect(getBlocks(ydoc)).toMatchObject([{ id, type, text: "Keep these words" }]);
+    expect(getBlockInline(ydoc, id)).toEqual(original);
+    expect(listAnnotationRanges(ydoc, id)).toEqual([{ threadId: thread.id, start: 5, end: 10 }]);
+    expect(editor.commands.keyboardShortcut("Mod-z")).toBe(true);
+    expect(getBlocks(ydoc)).toMatchObject([{ id, type: "callout", variant: "tip", icon: ":claude:", text: "Keep these words" }]);
+    expect(getBlockInline(ydoc, id)).toEqual(original);
+  });
+
+  it("creates a valid callout and preserves stored raw attributes across callout changes", () => {
+    const { ydoc, blockId, editor } = docWithParagraph();
+    expect(retypeAtCaret(editor, "callout", { variant: "tip", icon: "💡" })).toBe(true);
+    expect(getBlocks(ydoc)[0]).toMatchObject({ id: blockId, type: "callout", variant: "tip", icon: "💡" });
+    expect(retypeAtCaret(editor, "callout")).toBe(false);
+    expect(retypeAtCaret(editor, "callout", { icon: ":unknown:" })).toBe(false);
+    const element = ydoc.getXmlFragment("blocks").get(0) as Y.XmlElement;
+    element.setAttribute("icon", ":unknown:");
+    expect(retypeAtCaret(editor, "callout", { variant: "warning" })).toBe(true);
+    expect((ydoc.getXmlFragment("blocks").get(0) as Y.XmlElement).getAttribute("icon")).toBe(":unknown:");
+    expect(retypeAtCaret(editor, "callout", { icon: null })).toBe(true);
+    expect(getBlocks(ydoc)[0]).toMatchObject({ variant: "warning" });
+    expect(getBlocks(ydoc)[0]?.icon).toBeUndefined();
+  });
+
   it("carries a code language, and preserves it across a level-less re-type", () => {
     const { ydoc, blockId, editor } = docWithParagraph();
     retypeAtCaret(editor, "code", { language: "ts" });

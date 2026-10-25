@@ -57,6 +57,8 @@ export const Callout = Node.create({
   group: "block",
   content: "inline*",
   marks: PROSE_MARKS,
+  // DOM changes after typing must retain the body's authored line breaks.
+  whitespace: "pre",
   addAttributes() {
     return {
       id: storedAttribute("id"),
@@ -84,6 +86,9 @@ export const Callout = Node.create({
       dom.dataset.blockType = "callout";
       dom.setAttribute("role", "note");
       const caption = blockCaption("");
+      const controls = document.createElement("span");
+      controls.className = "ub-callout-caption";
+      caption.row.insertBefore(controls, caption.actions);
       const contentDOM = document.createElement("div");
       contentDOM.className = "ub-callout-body";
       dom.append(caption.row, contentDOM);
@@ -95,7 +100,10 @@ export const Callout = Node.create({
           if (typeof value === "string") dom.setAttribute(attr, value);
           else dom.removeAttribute(attr);
         }
-        caption.label.replaceChildren(captionIcon(variant, current.attrs.icon), document.createTextNode(labels[variant]));
+        const name = document.createElement("span");
+        name.className = "ub-callout-name";
+        name.textContent = labels[variant];
+        caption.label.replaceChildren(captionIcon(variant, current.attrs.icon), name);
       };
       draw();
       return {

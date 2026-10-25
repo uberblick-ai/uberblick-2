@@ -109,6 +109,21 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
     type: "figma",
     attrs: {},
   },
+  ...([
+    ["note", "Note", "info"],
+    ["tip", "Tip", "hint"],
+    ["important", "Important", ""],
+    ["warning", "Warning", "attention"],
+    ["caution", "Caution", "danger"],
+  ] as const).map(([variant, label, alias]): BlockMenuEntry => ({
+    id: `callout-${variant}`,
+    label,
+    group: "Callouts",
+    trigger: `[!${variant.toUpperCase()}] `,
+    keywords: ["callout", "alert", "admonition", ...(alias === "" ? [] : [alias])],
+    type: "callout",
+    attrs: { variant },
+  })),
   {
     id: "list-bullet",
     label: "Bullet list",
@@ -293,6 +308,7 @@ function attrsForNewBlock(entry: BlockMenuEntry): Record<string, unknown> {
   // Strings, like everything the schema stores — see editor/nodes.ts.
   if (entry.type === "heading") attrs.level = String(entry.attrs.level ?? 1);
   if (entry.type === "code") attrs.language = entry.attrs.language ?? null;
+  if (entry.type === "callout") attrs.variant = entry.attrs.variant ?? "note";
   if (entry.type === "list-item") {
     attrs.list = entry.attrs.list ?? "bullet";
     attrs.indent = String(entry.attrs.indent ?? 0);

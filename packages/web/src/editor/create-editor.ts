@@ -31,6 +31,7 @@ import { CodeHighlighting } from "./syntax-highlighting.js";
 import { TableBlocks } from "./table.js";
 import { TerminalBlocks } from "./terminal.js";
 import { CardBlocks } from "./card.js";
+import { CalloutBlocks } from "./callout-keys.js";
 import { FigmaBlocks } from "./figma.js";
 import { FigmaCreation } from "./figma-creation.js";
 import { ySyncPluginKey } from "y-prosemirror";
@@ -100,6 +101,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // cell content and keeps the typed and pasted GFM doors.
     TableBlocks,
     CardBlocks,
+    CalloutBlocks,
     FigmaBlocks,
     FigmaCreation,
     // Opening transcript source also pauses its derived playback.

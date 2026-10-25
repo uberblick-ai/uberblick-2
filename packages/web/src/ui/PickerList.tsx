@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import type { ReactElement, RefObject } from "react";
+import type { ReactElement, ReactNode, RefObject } from "react";
 import { Button } from "./shadcn/button.js";
 
 export interface PickerOption {
@@ -8,6 +8,7 @@ export interface PickerOption {
   selected: boolean;
   disabled?: boolean;
   detail?: string;
+  glyph?: ReactNode;
 }
 
 /** Shared option list for the tag and code-language popovers. */
@@ -82,6 +83,7 @@ export function PickerList({
           >
             {option.selected ? "✓" : ""}
           </span>
+          {option.glyph !== undefined && <span aria-hidden="true" className="inline-flex size-5 shrink-0 items-center justify-center">{option.glyph}</span>}
           <span className="min-w-0 truncate" title={option.label}>{option.label}</span>
           {option.detail !== undefined && (
             <span className="ub-picker-detail ml-auto shrink-0 text-muted-foreground">

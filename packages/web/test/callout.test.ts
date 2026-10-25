@@ -139,18 +139,18 @@ describe("stored callout compatibility", () => {
   });
 
   it.each(cases)("keeps $name attributes through HTML serialization and parsing", ({ attrs, label }) => {
-    const callout = uberblickSchema.nodes.callout!.create({ id: "callout-html", ...attrs }, uberblickSchema.text("Authored prose"));
+    const callout = uberblickSchema.nodes.callout!.create({ id: "callout-html", ...attrs }, uberblickSchema.text("Authored\nprose"));
     const host = document.createElement("div");
     host.append(DOMSerializer.fromSchema(uberblickSchema).serializeNode(callout));
     const rendered = host.firstElementChild!;
     expect(rendered.getAttribute("aria-label")).toBe(label);
-    expect(rendered.textContent).toBe("Authored prose");
+    expect(rendered.textContent).toBe("Authored\nprose");
     expect(rendered.querySelector(".ub-block-caption")).toBeNull();
     expect(rendered.getAttribute("data-variant")).toBe("variant" in attrs ? attrs.variant : null);
     expect(rendered.getAttribute("data-icon")).toBe("icon" in attrs ? attrs.icon : null);
     const parsed = DOMParser.fromSchema(uberblickSchema).parse(host).firstChild!;
     expect(parsed.type.name).toBe("callout");
     expect(parsed.attrs).toEqual(callout.attrs);
-    expect(parsed.textContent).toBe("Authored prose");
+    expect(parsed.textContent).toBe("Authored\nprose");
   });
 });

@@ -1497,6 +1497,10 @@ h6.ub-heading {
 }
 .ub-block-label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ub-callout > .ub-block-caption { color: var(--callout-ink); font-weight: 500; }
+.ub-callout > .ub-block-caption > .ub-block-actions:empty { display: none; }
+.ub-callout > .ub-block-caption:has(.ub-callout-trigger) > .ub-block-label { flex: none; }
+.ub-callout > .ub-block-caption:has(.ub-callout-trigger) .ub-callout-name { display: none; }
+.ub-callout-caption { min-width: 0; max-width: 100%; }
 .ub-callout-body { font-style: normal; white-space: pre-wrap; }
 .ub-callout .ub-callout-icon {
   display: inline-flex;
