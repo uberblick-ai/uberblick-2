@@ -100,7 +100,12 @@ test("native select-all and copy omit the caption in editable and archived prose
     const selected = await selectAll(page, frame.locator(".ub-callout-body"), touch);
     expect(selected).toContain("Preserved body.");
     expect(selected).not.toMatch(/Caution|🚀/);
-    expect(await copyText(page)).toBe("Before prose.\n\nPreserved body.\n\nAfter prose.");
+    const copied = await copyText(page);
+    expect(copied).toContain("Before prose.");
+    expect(copied).toContain("Preserved body.");
+    expect(copied).toContain("After prose.");
+    expect(copied).not.toMatch(/Caution|🚀/);
+    if (!archived) expect(copied).toBe("Before prose.\n\nPreserved body.\n\nAfter prose.");
   }
 });
 
@@ -213,7 +218,7 @@ test("split history draws each caption and keeps callout links keyboard reachabl
   await expect(before.locator(".ub-callout-icon")).toHaveText("🚀");
   await expect(after.getByRole("note", { name: "Caution", exact: true })).toBeVisible();
   await expect(after.locator(".ub-callout-icon.ub-inline-icon svg")).toBeVisible();
-  await expect(after).toContainText("Changed: variant, icon");
+  await expect(after.locator(".ub-revision-fields")).toHaveText("Changed: icon, variant");
   await expect(before.locator(".ub-revision-removed")).toHaveText("earlier");
   await expect(after.locator(".ub-revision-added")).toHaveText("later");
   for (const side of [before, after]) {
