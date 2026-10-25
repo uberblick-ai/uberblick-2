@@ -8,6 +8,7 @@ import { activateControl, docTitle, editor, setupHarness } from "./app-helpers.j
 import { placeCaretIn } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
+import { setPointerSelection } from "./native-selection.js";
 import { expectMcp } from "./settle.js";
 
 const { harness, openApp } = setupHarness();
@@ -53,8 +54,15 @@ async function selectAll(page: Page, body: Locator, touch: boolean): Promise<str
     await editor(page).focus();
     await activateControl(body, { touch });
   }
-  const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
-  await page.keyboard.press(`${modifier}+a`);
+  // An iPad UA on Linux selects iOS's Ctrl+A caret binding. Use the browser's
+  // select-all command here; desktop keeps its physical keyboard shortcut.
+  if (touch) await page.evaluate(() => document.execCommand("selectAll"));
+  else {
+    const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+    await page.keyboard.press(`${modifier}+a`);
+  }
+  await expect.poll(() => page.evaluate(() => document.getSelection()?.toString() ?? ""))
+    .toContain(await body.innerText());
   return page.evaluate(() => document.getSelection()?.toString() ?? "");
 }
 
@@ -84,7 +92,10 @@ test("native select-all and copy omit the caption in editable and archived prose
   });
   const frame = page.getByRole("note", { name: "Caution", exact: true });
   const caption = frame.locator(".ub-block-caption");
-  await expect(caption).toHaveCSS("user-select", "none");
+  expect(await caption.evaluate(element => {
+    const style = getComputedStyle(element);
+    return style.userSelect || style.getPropertyValue("-webkit-user-select");
+  })).toBe("none");
   await expect(caption).toHaveAttribute("contenteditable", "false");
   await expect(frame.locator(".ub-callout-body")).toHaveText("Preserved body.");
   await expectMcp(() => session.call<{ hits: Array<{ uuid: string }> }>("search", { query: "Preserved" }), result => {
@@ -221,10 +232,15 @@ test("split history draws each caption and keeps callout links keyboard reachabl
   await expect(after.locator(".ub-revision-fields")).toHaveText("Changed: icon, variant");
   await expect(before.locator(".ub-revision-removed")).toHaveText("earlier");
   await expect(after.locator(".ub-revision-added")).toHaveText("later");
-  for (const side of [before, after]) {
+  for (const [side, prefix] of [[before, "Keep earlier words. "], [after, "Keep later words. "]] as const) {
     const external = side.getByRole("link", { name: "external", exact: true });
-    await expect(external).toHaveAttribute("tabindex", "0");
-    await external.focus();
+    const body = side.locator(".ub-callout-body");
+    await setPointerSelection(body, () => body.click({ position: { x: 2, y: 10 } }));
+    for (let step = 0; step <= prefix.length; step += 1) await page.keyboard.press("ArrowRight");
+    await expect.poll(() => external.evaluate(element => {
+      const selection = document.getSelection();
+      return selection !== null && selection.isCollapsed && element.contains(selection.anchorNode);
+    })).toBe(true);
     await followExternal(page, () => page.keyboard.press("Enter"));
     await expect(side.getByRole("note")).toBeVisible();
   }
