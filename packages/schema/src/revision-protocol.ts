@@ -41,9 +41,12 @@ export type RevisionResponse = { requestId: string; ok: true; revisions: Revisio
   | { requestId: string; ok: false; error: "unsupported" | "deleted" | "revision-not-found" | "forbidden" | "unavailable"
     | "stale-state" | "invalid-name" | "already-named" | "archived"; name?: RevisionName };
 
+export type RevisionCatalogChanged = { type: "uberblick:revision-catalog-changed" };
+
 const REQUEST = "uberblick:revision-request";
 const RESPONSE = "uberblick:revision-response";
 const CHUNK = "uberblick:revision-response-chunk";
+const CATALOG_CHANGED = "uberblick:revision-catalog-changed";
 const CHUNK_LENGTH = 512 * 1024;
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -63,6 +66,14 @@ function json(raw: string): Record<string, unknown> | null {
     const value: unknown = JSON.parse(raw);
     return object(value) ? value : null;
   } catch { return null; }
+}
+
+export function encodeRevisionCatalogChanged(): string {
+  return JSON.stringify({ type: CATALOG_CHANGED });
+}
+
+export function readRevisionCatalogChanged(raw: string): RevisionCatalogChanged | null {
+  return json(raw)?.type === CATALOG_CHANGED ? { type: CATALOG_CHANGED } : null;
 }
 
 export function encodeRevisionRequest(request: RevisionRequest): string {

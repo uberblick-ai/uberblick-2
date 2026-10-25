@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Connection, Extension, onStatelessPayload } from "@hocuspocus/server";
-import { encodeRevisionResponseFrames, getMeta, parseRoom, readRevisionRequest, type RevisionEntry, type RevisionName,
+import { encodeRevisionCatalogChanged, encodeRevisionResponseFrames, getMeta, parseRoom, readRevisionRequest, type RevisionEntry, type RevisionName,
   type RevisionRequest, type RevisionResponse } from "@uberblick/schema";
 import * as Y from "yjs";
 import type { HubDatabase } from "./persistence.js";
@@ -116,6 +116,8 @@ export class RevisionReads implements Extension<HubContext> {
         : revisions.removeName(room, request.revisionId ?? "");
     if (!result.ok) return { requestId: request.requestId, ok: false, error: result.error,
       ...(!("name" in result) || result.name === undefined ? {} : { name: this.name(result.name) }) };
+    // Naming has committed, even if constructing the private reply fails below.
+    if (request.operation !== "restore") document.broadcastStateless(encodeRevisionCatalogChanged());
     const revision = revisions.list(room).find(entry => entry.id === result.id);
     if (revision === undefined) throw new Error("written revision missing");
     return { requestId: request.requestId, ok: true, revision: this.entry(revision,
