@@ -42,6 +42,7 @@ import { formatTimestamp, useTimestampClock } from "../timestamps.js";
 import { handleDocLinkClick } from "./doc-link-click.js";
 import { BlockMenu } from "../editor-controls/BlockMenu.js";
 import { CodeLanguageControl } from "../editor-controls/CodeLanguageControl.js";
+import { CalloutControl } from "../editor-controls/CalloutControl.js";
 import { CardButtonControls } from "../editor-controls/CardButtonControls.js";
 import { TableControls } from "../editor-controls/TableControls.js";
 import { MentionMenu } from "../editor-controls/MentionMenu.js";
@@ -819,6 +820,12 @@ const BoundEditor = memo(function BoundEditor({
         )}
         {editor !== null && !contentReadOnly && writable && (
           <CodeLanguageControl
+            editor={editor}
+            canWrite={() => canWriteContent(connection, contentReadOnly)}
+          />
+        )}
+        {editor !== null && !contentReadOnly && writable && (
+          <CalloutControl
             editor={editor}
             canWrite={() => canWriteContent(connection, contentReadOnly)}
           />

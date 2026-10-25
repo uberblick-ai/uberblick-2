@@ -20,14 +20,17 @@ import { endUndoCapture, findBlockById } from "./blocks.js";
 import { retypeBlockInTransaction } from "./retype.js";
 
 /**
- * Match the whole paragraph against a literal registry trigger, including 1.
- * for ordered lists. Mid-text prefixes and other authored numbers stay prose.
+ * Match a whole paragraph against its literal registry trigger, or a quote
+ * against a case-insensitive callout marker. Other authored prose stays text.
  */
 function entryForTrigger(
   text: string,
+  blockType: string,
   entries: readonly BlockMenuEntry[] = BLOCK_MENU_ENTRIES,
 ): BlockMenuEntry | null {
-  return entries.find((entry) => entry.trigger === text) ?? null;
+  return entries.find((entry) => entry.type === "callout"
+    ? blockType === "quote" && entry.trigger?.toLowerCase() === text.toLowerCase()
+    : blockType === "paragraph" && entry.trigger === text) ?? null;
 }
 
 /**
@@ -43,21 +46,20 @@ function conversionFor(
 ): { blockId: string; entry: BlockMenuEntry } | null {
   // An input method mid-composition is not finished typing; taking the
   // keystroke here would commit half a character.
-  if (view.composing) return null;
+  if (view.composing || !view.editable) return null;
   // Typing over a selection is replacing prose, not opening a fresh block.
   if (from !== to) return null;
 
   const $from = view.state.doc.resolve(from);
-  // Depth 1 is a top-level block; the palette has no nesting. Paragraph only:
-  // converting from anything else is what the menu is for.
+  // Depth 1 is a top-level block; typed callout markers belong to quotes.
   if ($from.depth !== 1) return null;
   const block = $from.parent;
-  if (block.type.name !== "paragraph") return null;
+  if (block.type.name !== "paragraph" && block.type.name !== "quote") return null;
   // The caret has to be at the end of what is there, or the prefix is not a
   // prefix — there is text in front of it.
   if ($from.parentOffset !== block.content.size) return null;
 
-  const entry = entryForTrigger(block.textContent + text, entries);
+  const entry = entryForTrigger(block.textContent + text, block.type.name, entries);
   if (entry === null) return null;
   const blockId = block.attrs.id;
   if (typeof blockId !== "string" || blockId === "") return null;
@@ -74,9 +76,9 @@ function convertOnTrigger(
   view: EditorView,
   blockId: string,
   entry: BlockMenuEntry,
-  typed: () => Transaction,
+  typed?: () => Transaction,
 ): boolean {
-  view.dispatch(typed());
+  if (typed !== undefined) view.dispatch(typed());
   endUndoCapture(view.state);
 
   const found = findBlockById(view.state.doc, blockId);
@@ -97,6 +99,13 @@ function convertOnTrigger(
 function blockInputRulePlugin(entries: readonly BlockMenuEntry[] = BLOCK_MENU_ENTRIES): Plugin {
   return new Plugin({
     props: {
+      handleKeyDown(view, event) {
+        if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229) return false;
+        const { from, to } = view.state.selection;
+        const conversion = conversionFor(view, from, to, " ", entries);
+        if (conversion?.entry.type !== "callout") return false;
+        return convertOnTrigger(view, conversion.blockId, conversion.entry);
+      },
       handleTextInput(view, from, to, text, defaultTransaction) {
         const conversion = conversionFor(view, from, to, text, entries);
         if (conversion === null) return false;
@@ -114,6 +123,7 @@ function blockInputRulePlugin(entries: readonly BlockMenuEntry[] = BLOCK_MENU_EN
 /** Tiptap wrapper around {@link blockInputRulePlugin}. */
 export const BlockInputRules = Extension.create<{ entries: readonly BlockMenuEntry[] }>({
   name: "uberblickBlockInputRules",
+  priority: 1100,
   addOptions: () => ({ entries: BLOCK_MENU_ENTRIES }),
   addProseMirrorPlugins() {
     return [blockInputRulePlugin(this.options.entries)];

@@ -24,18 +24,19 @@
 
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { appendBlock, editBlock, getBlocks, initDoc } from "@uberblick/schema";
+import { appendBlock, editBlock, getBlocks, getBlocksFragment, initDoc } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
-import { BLOCK_MENU_ENTRIES } from "../src/editor/block-menu.js";
+import { BLOCK_MENU_ENTRIES, DECISION_ANSWER_MENU_ENTRIES } from "../src/editor/block-menu.js";
+import { createUberblickEditor } from "../src/editor/create-editor.js";
 import { mountEditor, typeText } from "./helpers.js";
 
 /** The entries a reader can type their way to — the input rules' whole subject. */
 const TRIGGERS = BLOCK_MENU_ENTRIES.filter((entry) => entry.trigger !== null);
 
-function docWith(texts: string[]): { ydoc: Y.Doc; ids: string[] } {
+function docWith(texts: string[], type: "paragraph" | "quote" = "paragraph"): { ydoc: Y.Doc; ids: string[] } {
   const ydoc = new Y.Doc();
   initDoc(ydoc, { uuid: "rules-doc", title: "Rules" });
-  const ids = texts.map((text) => appendBlock(ydoc, { type: "paragraph", text }));
+  const ids = texts.map((text) => appendBlock(ydoc, { type, text }));
   return { ydoc, ids };
 }
 
@@ -53,9 +54,9 @@ describe("typing a markdown prefix", () => {
    * reference to the block — see the module comment in editor/input-rules.ts.
    */
   it.each(TRIGGERS)(
-    "converts an empty paragraph to $label, keeping the block id",
+    "converts a typed marker to $label, keeping the block id",
     (entry) => {
-      const { ydoc, ids } = docWith([""]);
+      const { ydoc, ids } = docWith([""], entry.type === "callout" ? "quote" : "paragraph");
       const { editor } = mountEditor(ydoc);
       try {
         caret(editor, 0, 0);
@@ -69,6 +70,7 @@ describe("typing a markdown prefix", () => {
           // The prefix is consumed: it was syntax, not text.
           text: "",
           ...(entry.attrs.level === undefined ? {} : { level: entry.attrs.level }),
+          ...(entry.attrs.variant === undefined ? {} : { variant: entry.attrs.variant }),
         });
         // And the caret is in the block that was just made, ready to be typed in.
         expect(editor.state.selection.$head.parent.type.name).toBe(entry.type);
@@ -179,5 +181,94 @@ describe("typing a markdown prefix", () => {
     } finally {
       editor.destroy();
     }
+  });
+});
+
+describe("typed callout markers", () => {
+  it.each(["space", "Enter"])("converts mixed-case whole-quote markers on %s and undoes to the typed quote", (commit) => {
+    const { ydoc, ids } = docWith([""], "quote");
+    const { editor } = mountEditor(ydoc);
+    try {
+      caret(editor, 0, 0);
+      typeText(editor, "[!tIp]");
+      if (commit === "space") typeText(editor, " ");
+      else {
+        const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+        editor.view.dom.dispatchEvent(event);
+        expect(event.defaultPrevented).toBe(true);
+      }
+      expect(getBlocks(ydoc)).toMatchObject([{ id: ids[0], type: "callout", variant: "tip", text: "" }]);
+      expect(editor.state.selection.$head.parent.type.name).toBe("callout");
+      expect(editor.commands.keyboardShortcut("Mod-z")).toBe(true);
+      expect(getBlocks(ydoc)).toMatchObject([{
+        id: ids[0], type: "quote", text: commit === "space" ? "[!tIp] " : "[!tIp]",
+      }]);
+    } finally { editor.destroy(); }
+  });
+
+  it.each(["[!info]", "[!unknown]", "[!NOTE]-", "[!NOTE] title", "before [!TIP]"])("leaves %s as quote text", (text) => {
+    const { ydoc } = docWith([text], "quote");
+    const { editor } = mountEditor(ydoc);
+    try {
+      caret(editor, 0, text.length);
+      typeText(editor, " ");
+      expect(getBlocks(ydoc)).toMatchObject([{ type: "quote", text: `${text} ` }]);
+    } finally { editor.destroy(); }
+  });
+
+  it("keeps paragraph markers and markers before existing quote text as prose", () => {
+    const { ydoc } = docWith([""]);
+    const { editor } = mountEditor(ydoc);
+    try {
+      caret(editor, 0, 0);
+      typeText(editor, "[!NOTE] ");
+      expect(getBlocks(ydoc)).toMatchObject([{ type: "paragraph", text: "[!NOTE] " }]);
+      const quote = editor.state.schema.nodes.quote;
+      if (quote === undefined) throw new Error("missing quote node");
+      editor.view.dispatch(editor.state.tr.setNodeMarkup(0, quote));
+      caret(editor, 0, 0);
+      typeText(editor, "[!TIP] ");
+      expect(getBlocks(ydoc)).toMatchObject([{ type: "quote", text: "[!TIP] [!NOTE] " }]);
+    } finally { editor.destroy(); }
+  });
+
+  it.each([{ isComposing: true }, { keyCode: 229 }, { shiftKey: true }, { metaKey: true }])("does not treat composition or modified Enter as a callout shortcut: %j", (init) => {
+    const { ydoc } = docWith(["[!NOTE]"], "quote");
+    const { editor } = mountEditor(ydoc);
+    try {
+      caret(editor, 0, 7);
+      editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true, ...init }));
+      expect(getBlocks(ydoc).some((block) => block.type === "callout")).toBe(false);
+    } finally { editor.destroy(); }
+  });
+
+  it("does not convert a marker when text input reaches a read-only editor", () => {
+    const { ydoc } = docWith(["[!NOTE]"], "quote");
+    const { editor } = mountEditor(ydoc);
+    try {
+      caret(editor, 0, 7);
+      editor.setEditable(false);
+      const { view } = editor;
+      view.someProp("handleTextInput", (handler) => handler(view, 8, 8, " ", () => view.state.tr.insertText(" ", 8, 8)));
+      expect(getBlocks(ydoc)).toMatchObject([{ type: "quote", text: "[!NOTE]" }]);
+    } finally { editor.destroy(); }
+  });
+
+  it("offers no callouts and never converts markers in a decision answer draft", () => {
+    expect(DECISION_ANSWER_MENU_ENTRIES.some((entry) => entry.type === "callout")).toBe(false);
+    const { ydoc } = docWith([""], "quote");
+    const element = document.createElement("div");
+    document.body.appendChild(element);
+    const editor = createUberblickEditor({
+      element, fragment: getBlocksFragment(ydoc), blockMenuEntries: DECISION_ANSWER_MENU_ENTRIES,
+    });
+    try {
+      caret(editor, 0, 0);
+      typeText(editor, "[!NOTE] ");
+      expect(getBlocks(ydoc)).toMatchObject([{ type: "quote", text: "[!NOTE] " }]);
+      editor.view.dispatch(editor.state.tr.delete(8, 9));
+      editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      expect(getBlocks(ydoc).some((block) => block.type === "callout")).toBe(false);
+    } finally { editor.destroy(); element.remove(); }
   });
 });

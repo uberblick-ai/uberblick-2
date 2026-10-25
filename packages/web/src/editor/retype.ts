@@ -6,8 +6,9 @@
  */
 
 import type { Transaction } from "@tiptap/pm/state";
-import { BLOCK_TYPES } from "@uberblick/schema";
-import type { BlockType, HeadingLevel, ListStyle } from "@uberblick/schema";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { BLOCK_TYPES, isCalloutIcon, isCalloutVariant } from "@uberblick/schema";
+import type { BlockType, CalloutVariant, HeadingLevel, ListStyle } from "@uberblick/schema";
 import { renderableIndent } from "./nodes.js";
 
 export interface RetypeAttrs {
@@ -19,10 +20,24 @@ export interface RetypeAttrs {
   list?: ListStyle;
   /** List depth, 0–3. Ignored for other types. */
   indent?: number;
+  /** Callout variant. A newly created callout defaults to note. */
+  variant?: CalloutVariant;
+  /** A callout icon, or null to restore its default. */
+  icon?: string | null;
 }
 
 function attrString(value: unknown): string | null {
   return typeof value === "string" && value !== "" ? value : null;
+}
+
+function calloutAttributes(node: ProseMirrorNode, attrs: RetypeAttrs): Record<string, unknown> | null {
+  if (attrs.variant !== undefined && !isCalloutVariant(attrs.variant)) return null;
+  if (attrs.icon !== undefined && attrs.icon !== null && !isCalloutIcon(attrs.icon)) return null;
+  const wasCallout = node.type.name === "callout";
+  return {
+    variant: attrs.variant ?? (wasCallout ? node.attrs.variant : "note"),
+    icon: attrs.icon === undefined ? (wasCallout ? node.attrs.icon : null) : attrs.icon,
+  };
 }
 
 /**
@@ -68,6 +83,11 @@ export function retypeBlockInTransaction(
       attrs.indent ?? (wasItem ? renderableIndent(node.attrs.indent) : 0),
     );
   }
+  if (type === "callout") {
+    const callout = calloutAttributes(node, attrs);
+    if (callout === null) return false;
+    Object.assign(next, callout);
+  }
 
   // Normalize absent attrs to null so no-ops do not become writes.
   const unchanged =
@@ -75,7 +95,9 @@ export function retypeBlockInTransaction(
     (next.level ?? null) === attrString(node.attrs.level) &&
     (next.language ?? null) === attrString(node.attrs.language) &&
     (next.list ?? null) === attrString(node.attrs.list) &&
-    (next.indent ?? null) === attrString(node.attrs.indent);
+    (next.indent ?? null) === attrString(node.attrs.indent) &&
+    (next.variant ?? null) === (node.attrs.variant ?? null) &&
+    (next.icon ?? null) === (node.attrs.icon ?? null);
   if (unchanged) return false;
 
   if (!nodeType.validContent(node.content)) return false;

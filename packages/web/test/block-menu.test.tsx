@@ -192,6 +192,11 @@ describe("the registry", () => {
       "Quote",
       "Card",
       "Figma",
+      "Note",
+      "Tip",
+      "Important",
+      "Warning",
+      "Caution",
       "Bullet list",
       "Numbered list",
       "Code",
@@ -243,6 +248,13 @@ describe("the registry", () => {
     expect(labels("console")).toEqual(["Terminal demo"]);
     expect(labels("table")).toEqual(["Table", "Data table"]);
     expect(labels("nothing here")).toEqual([]);
+    expect(labels("callout")).toEqual(["Note", "Tip", "Important", "Warning", "Caution"]);
+    expect(labels("alert")).toEqual(labels("callout"));
+    expect(labels("admonition")).toEqual(labels("callout"));
+    expect(labels("info")).toEqual(["Note"]);
+    expect(labels("hint")).toEqual(["Tip"]);
+    expect(labels("attention")).toEqual(["Warning"]);
+    expect(labels("danger")).toEqual(["Caution"]);
   });
 });
 
@@ -290,6 +302,28 @@ describe("the slash trigger", () => {
 });
 
 describe("the slash menu", () => {
+  it.each(BLOCK_MENU_ENTRIES.filter((entry) => entry.type === "callout"))("creates $label from slash and gutter entries with valid attributes and one undo", (entry) => {
+    const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }]);
+    const mounted = mountMenu(ydoc);
+    try {
+      caret(mounted.editor, 0, 0);
+      type(mounted.editor, `/${entry.label.toLowerCase()}`);
+      const trigger = slashTriggerAt(mounted.editor);
+      if (trigger === null) throw new Error("missing slash trigger");
+      act(() => { expect(convertBlockAtTrigger(mounted.editor, trigger, entry)).toBe(true); });
+      expect(getBlocks(ydoc)).toMatchObject([{ id: ids[0], type: "callout", variant: entry.attrs.variant, text: "" }]);
+      expect(mounted.editor.state.selection.$head.parent.type.name).toBe("callout");
+      act(() => { expect(mounted.editor.commands.keyboardShortcut("Mod-z")).toBe(true); });
+      expect(getBlocks(ydoc)).toMatchObject([{ id: ids[0], type: "paragraph", text: `/${entry.label.toLowerCase()}` }]);
+      act(() => { expect(insertBlockBelow(mounted.editor, ids[0] ?? "", entry)).toBe(true); });
+      expect(getBlocks(ydoc)[1]).toMatchObject({ type: "callout", variant: entry.attrs.variant, text: "" });
+      expect(getBlocks(ydoc)[1]?.id).not.toBe(ids[0]);
+      expect(mounted.editor.state.selection.$head.parent.type.name).toBe("callout");
+      act(() => { expect(mounted.editor.commands.keyboardShortcut("Mod-z")).toBe(true); });
+      expect(getBlocks(ydoc)).toHaveLength(1);
+    } finally { mounted.unmount(); }
+  });
+
   it("opens a focused local Figma draft and discards an invalid Done without publishing a block", () => {
     const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
     const { editor, press, unmount } = mountMenu(ydoc);

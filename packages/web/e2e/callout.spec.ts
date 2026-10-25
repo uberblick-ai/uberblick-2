@@ -21,7 +21,10 @@ test.beforeAll(() => {
 test.afterEach(async () => { await agent?.closeSessions(); });
 test.afterAll(async () => { await agent?.close(); agent = null; });
 
-interface StoredDoc { uuid: string; blocks: Array<{ id: string; text: string; rev: string }> }
+interface StoredDoc {
+  uuid: string;
+  blocks: Array<{ id: string; text: string; rev: string; type: string; variant?: string; icon?: string }>;
+}
 
 function writer(): McpSession {
   if (agent === null) throw new Error("e2e: callout writer is missing");
@@ -78,6 +81,255 @@ async function followExternal(page: Page, activate: () => Promise<unknown>): Pro
   }
 }
 
+function variantControl(page: Page): Locator {
+  return page.getByRole("button", { name: "Callout variant", exact: true });
+}
+
+function variantMenu(page: Page): Locator {
+  return page.getByRole("menu", { name: "Callout variant", exact: true });
+}
+
+test("slash and the shared gutter create editable callouts without replacing the existing block", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const session = writer();
+  const created = await session.call<StoredDoc>("create_doc", {
+    title: docTitle("Author a callout"), description: "Callout creation through real editor controls.",
+    blocks: [{ type: "paragraph", text: "" }],
+  });
+  const id = created.blocks[0]?.id;
+  if (id === undefined) throw new Error("e2e: starting paragraph is missing");
+  const touch = info.project.use.hasTouch === true;
+  const page = await openApp(browser, `/${harness().workspace}/${created.uuid}`, {
+    upstream: true, contextOptions: contextOptions(touch),
+  });
+  await placeCaretIn(editor(page).locator(":scope > p"), { touch });
+  await page.keyboard.type("/warn");
+  const blockMenu = page.getByRole("listbox", { name: "Block types", exact: true });
+  await expect(blockMenu.getByRole("option", { name: "Warning", exact: true })).toBeVisible();
+  await page.keyboard.press("Enter");
+  const warning = page.getByRole("note", { name: "Warning", exact: true });
+  await expect(warning).toHaveAttribute("id", id);
+  await expect(warning.locator(".ub-callout-body")).toHaveText("");
+  await expect(editor(page)).toBeFocused();
+  await page.keyboard.insertText("First line");
+  await expect(warning.locator(".ub-callout-body")).toHaveText("First line");
+
+  if (touch) await placeCaretIn(warning.locator(".ub-callout-body"), { touch });
+  else await warning.hover();
+  const gutter = page.getByRole("button", { name: "Insert block below", includeHidden: true });
+  await expect(gutter).toHaveCSS("opacity", "1");
+  await activateControl(gutter, { touch });
+  await expect(blockMenu.getByText("Callouts", { exact: true })).toBeVisible();
+  for (const name of ["Note", "Tip", "Important", "Warning", "Caution"]) {
+    await expect(blockMenu.getByRole("option", { name, exact: true })).toBeVisible();
+  }
+  await activateControl(blockMenu.getByRole("option", { name: "Tip", exact: true }), { touch });
+  await page.keyboard.insertText("Inserted below");
+  await expect(editor(page).locator(":scope > .ub-callout")).toHaveCount(2);
+  await expect(page.getByRole("note", { name: "Tip", exact: true }).locator(".ub-callout-body")).toHaveText("Inserted below");
+  await expectMcp(() => session.call<StoredDoc>("get_doc", { uuid: created.uuid }), stored => {
+    expect(stored.blocks.map(block => ({ type: block.type, variant: block.variant, text: block.text })))
+      .toEqual([{ type: "callout", variant: "warning", text: "First line" },
+        { type: "callout", variant: "tip", text: "Inserted below" }]);
+    expect(stored.blocks[0]?.id).toBe(id);
+  });
+});
+
+test("typing a complete quote marker with Space or Enter makes one undoable empty callout", async ({ browser }) => {
+  const session = writer();
+  for (const key of ["Space", "Enter"]) {
+    const created = await session.call<StoredDoc>("create_doc", {
+      title: docTitle(`Typed marker ${key}`), description: "Native marker shortcut and its undo boundary.",
+      blocks: [{ type: "quote", text: "" }],
+    });
+    const id = created.blocks[0]?.id;
+    if (id === undefined) throw new Error("e2e: marker quote is missing");
+    const page = await openApp(browser, `/${harness().workspace}/${created.uuid}`, {
+      upstream: true, contextOptions: contextOptions(false),
+    });
+    await placeCaretIn(editor(page).locator(":scope > blockquote"));
+    await page.keyboard.type("[!tIp]");
+    await page.keyboard.press(key);
+    const tip = page.getByRole("note", { name: "Tip", exact: true });
+    await expect(tip).toHaveAttribute("id", id);
+    await expect(tip.locator(".ub-callout-body")).toHaveText("");
+    await page.keyboard.press("ControlOrMeta+z");
+    const quote = editor(page).locator(":scope > blockquote");
+    await expect(quote).toHaveAttribute("id", id);
+    await expect.poll(() => quote.textContent()).toBe(key === "Space" ? "[!tIp] " : "[!tIp]");
+    await page.keyboard.press("ControlOrMeta+Shift+z");
+    await expect(tip).toHaveAttribute("id", id);
+    await page.keyboard.insertText("Line one");
+    await page.keyboard.press("Enter");
+    await page.keyboard.insertText("Line two");
+    await page.keyboard.press("Shift+Enter");
+    await expect.poll(() => tip.locator(".ub-callout-body").textContent()).toBe("Line one\nLine two\n");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => tip.locator(".ub-callout-body").textContent()).toBe("Line one\nLine two");
+    await page.keyboard.insertText("Below the callout");
+    await expect(editor(page).locator(":scope > p")).toHaveText("Below the callout");
+    await placeCaretIn(tip.locator(".ub-callout-body"), { edge: "start" });
+    await page.keyboard.press("Backspace");
+    await expect.poll(() => editor(page).locator(`:scope > p[id="${id}"]`).textContent()).toBe("Line one\nLine two");
+    await page.keyboard.press("ControlOrMeta+z");
+    await expect(tip).toHaveAttribute("id", id);
+    await expect.poll(() => tip.locator(".ub-callout-body").textContent()).toBe("Line one\nLine two");
+  }
+});
+
+test("caption menus work with keyboard, pointer and iPad touch, and variant and icon edits sync with separate undo steps", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const session = writer();
+  const created = await session.call<StoredDoc>("create_doc", {
+    title: docTitle("Callout controls"), description: "Callout caption controls and replicated attributes.",
+    blocks: [{ type: "callout", variant: "tip", icon: "🚀", text: "Keep this text." }],
+  });
+  const touch = info.project.use.hasTouch === true;
+  const page = await openApp(browser, `/${harness().workspace}/${created.uuid}`, {
+    upstream: true, contextOptions: contextOptions(touch),
+  });
+  const peer = await openApp(browser, `/${harness().workspace}/${created.uuid}`, {
+    upstream: true, contextOptions: contextOptions(touch),
+  });
+  const frame = editor(page).locator(":scope > .ub-callout");
+  const peerFrame = editor(peer).locator(":scope > .ub-callout");
+  await placeCaretIn(frame.locator(".ub-callout-body"), { touch });
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await activateControl(variantControl(page), { touch });
+    await expect(variantMenu(page)).toBeInViewport();
+    await expect(variantMenu(page).getByRole("menuitem", { name: "Warning", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(variantMenu(page)).toHaveCount(0);
+    await expect(editor(page)).toBeFocused();
+  }
+  await page.keyboard.press("Shift+F10");
+  await expect(variantMenu(page)).toBeVisible();
+  await expect(variantMenu(page).getByRole("menuitem").first()).toBeFocused();
+  if (touch) {
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+  } else await page.keyboard.press("w");
+  await expect(variantMenu(page).getByRole("menuitem", { name: "Warning", exact: true })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(frame).toHaveAccessibleName("Warning");
+  await expect(peerFrame).toHaveAccessibleName("Warning");
+  await expect(peerFrame).toHaveAttribute("data-icon", "🚀");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(frame).toHaveAccessibleName("Tip");
+  await expect(peerFrame).toHaveAccessibleName("Tip");
+  await page.keyboard.press("ControlOrMeta+Shift+z");
+  await expect(frame).toHaveAccessibleName("Warning");
+
+  await activateControl(variantControl(page), { touch });
+  await activateControl(variantMenu(page).getByRole("menuitem", { name: "Change icon…", exact: true }), { touch });
+  const search = page.getByRole("combobox", { name: "Search icons", exact: true });
+  const icons = page.getByRole("listbox", { name: "Callout icons", exact: true });
+  await expect(search).toBeFocused();
+  await expect(search).toBeInViewport();
+  if (touch) expect(await search.evaluate(element => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
+  await search.fill("smi");
+  await expect(icons.getByRole("option")).toHaveCount(8);
+  await expect(icons.getByRole("option", { name: "smiley", exact: true })).toContainText("😃");
+  await search.fill("cla");
+  const claude = icons.getByRole("option", { name: "Claude", exact: true });
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expect(claude).toBeInViewport();
+    await expect(claude.locator("svg")).toBeVisible();
+  }
+  await activateControl(claude, { touch });
+  await expect(editor(page)).toBeFocused();
+  await expect(peerFrame).toHaveAttribute("data-icon", ":claude:");
+  await expect(peerFrame.locator('.ub-callout-icon[data-icon="claude"] svg')).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(frame).toHaveAccessibleName("Warning");
+  await expect(peerFrame).toHaveAttribute("data-icon", "🚀");
+  await page.keyboard.press("ControlOrMeta+Shift+z");
+  await expect(peerFrame).toHaveAttribute("data-icon", ":claude:");
+
+  await activateControl(variantControl(page), { touch });
+  await activateControl(variantMenu(page).getByRole("menuitem", { name: "Caution", exact: true }), { touch });
+  await expect(peerFrame).toHaveAccessibleName("Caution");
+  await expect(peerFrame).toHaveAttribute("data-icon", ":claude:");
+  await activateControl(variantControl(page), { touch });
+  await activateControl(variantMenu(page).getByRole("menuitem", { name: "Change icon…", exact: true }), { touch });
+  await search.fill("smi");
+  await page.keyboard.press("Enter");
+  await expect(peerFrame).toHaveAttribute("data-icon", "😃");
+  await activateControl(variantControl(page), { touch });
+  await activateControl(variantMenu(page).getByRole("menuitem", { name: "Change icon…", exact: true }), { touch });
+  await activateControl(page.getByRole("button", { name: "Use default icon", exact: true }), { touch });
+  await expect(peerFrame).not.toHaveAttribute("data-icon");
+  await expect(peerFrame.locator(".ub-callout-icon svg")).toBeVisible();
+  await expectMcp(() => session.call<StoredDoc>("get_doc", { uuid: created.uuid }), stored => {
+    expect(stored.blocks[0]).toMatchObject({ id: created.blocks[0]?.id, type: "callout", variant: "caution", text: "Keep this text." });
+    expect(stored.blocks[0]?.icon).toBeUndefined();
+  });
+});
+
+test("caption conversions preserve formatted and commented prose, the block id, and one-step undo", async ({ browser }) => {
+  const session = writer();
+  const created = await session.call<StoredDoc>("create_doc", {
+    title: docTitle("Retype a callout"), description: "Comment and mark preservation through label conversions.",
+    blocks: [{ type: "callout", variant: "important", inline: [
+      { text: "Keep", marks: { bold: true } }, { text: " this passage.", marks: {} },
+    ] }],
+  });
+  const id = created.blocks[0]?.id;
+  if (id === undefined) throw new Error("e2e: conversion callout is missing");
+  await session.call("annotate", { uuid: created.uuid, block_id: id, start: 0, end: 4, text: "Keep this comment." });
+  const page = await openApp(browser, `/${harness().workspace}/${created.uuid}`, {
+    upstream: true, contextOptions: contextOptions(false),
+  });
+  for (const [label, tag] of [["Quote", "blockquote"], ["Paragraph", "p"]] as const) {
+    await activateControl(variantControl(page));
+    await activateControl(variantMenu(page).getByRole("menuitem", { name: label, exact: true }));
+    const converted = editor(page).locator(`:scope > ${tag}`);
+    await expect(converted).toHaveAttribute("id", id);
+    await expect(converted).toHaveText("Keep this passage.");
+    await expect(converted.locator("strong")).toHaveText("Keep");
+    await expect(converted.locator("[data-comment-thread]")).toHaveText("Keep");
+    await page.keyboard.press("ControlOrMeta+z");
+    const callout = page.getByRole("note", { name: "Important", exact: true });
+    await expect(callout).toHaveAttribute("id", id);
+    await expect(callout.locator("strong")).toHaveText("Keep");
+    await expect(callout.locator("[data-comment-thread]")).toHaveText("Keep");
+  }
+});
+
+test("open emoji and document menus take Enter and Tab before callout line keys", async ({ browser }) => {
+  const session = writer();
+  const targetTitle = docTitle("CalloutReference").replaceAll(" ", "");
+  const target = await session.call<StoredDoc>("create_doc", {
+    title: targetTitle, description: "Document reference selected from a callout.",
+    blocks: [{ type: "paragraph", text: "Reference target." }],
+  });
+  const created = await session.call<StoredDoc>("create_doc", {
+    title: docTitle("Callout caret menus"), description: "Caret menus retain their keyboard priority.",
+    blocks: [{ type: "callout", variant: "note", text: "Thanks " }],
+  });
+  const page = await openApp(browser, `/${harness().workspace}/${created.uuid}`, {
+    upstream: true, contextOptions: contextOptions(false),
+  });
+  const body = page.getByRole("note", { name: "Note", exact: true }).locator(".ub-callout-body");
+  await placeCaretIn(body);
+  await page.keyboard.type(":smi");
+  await expect(page.getByRole("listbox", { name: "Emoji and icons", exact: true })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(body).toHaveText("Thanks 😃");
+  await page.keyboard.type(" :claude");
+  await expect(page.getByRole("listbox", { name: "Emoji and icons", exact: true })).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(body.locator('.ub-inline-icon[data-icon="claude"] svg')).toBeVisible();
+  await page.keyboard.type(` @${targetTitle}`);
+  const references = page.getByRole("listbox", { name: "Documents", exact: true });
+  await expect(references.getByRole("option", { name: targetTitle, exact: true })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(body.locator(`a[data-doc-id="${target.uuid}"]`)).toHaveText(targetTitle);
+  await expect(body).toHaveText(`Thanks 😃 :claude: ${targetTitle}`);
+  await expect(editor(page).locator(":scope > *")).toHaveCount(1);
+});
+
 test("native select-all and copy omit the caption in editable and archived prose", { tag: "@webkit" }, async ({ browser }, info) => {
   const session = writer();
   const created = await session.call<StoredDoc>("create_doc", {
@@ -108,6 +360,7 @@ test("native select-all and copy omit the caption in editable and archived prose
       await session.call("archive_doc", { uuid: created.uuid });
       await expect(editor(page)).toHaveAttribute("contenteditable", "false");
     } else await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    await expect(variantControl(page)).toHaveCount(archived ? 0 : 1);
     const selected = await selectAll(page, frame.locator(".ub-callout-body"), touch);
     expect(selected).toContain("Preserved body.");
     expect(selected).not.toMatch(/Caution|🚀/);
@@ -155,6 +408,7 @@ test("callout marks, inline icons, links and comments remain usable in editable,
       await session.call("archive_doc", { uuid: created.uuid });
       await expect(editor(page)).toHaveAttribute("contenteditable", "false");
     } else await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    await expect(variantControl(page)).toHaveCount(archived ? 0 : 1);
     await followExternal(page, () => activateControl(external, { touch }));
     if (archived) {
       await external.focus();
@@ -175,6 +429,7 @@ test("callout marks, inline icons, links and comments remain usable in editable,
   await harness().stopHub();
   try {
     await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+    await expect(variantControl(page)).toHaveCount(0);
     await expect(callout).toHaveAccessibleName("Warning");
     await external.focus();
     await page.keyboard.press("Tab");
@@ -225,6 +480,8 @@ test("split history draws each caption and keeps callout links keyboard reachabl
     .getByRole("button", { name: "Previous revision", exact: true }));
   const before = page.locator('.ub-revision-pane .ProseMirror[aria-label="Before this revision"]');
   const after = page.locator('.ub-revision-pane .ProseMirror[aria-label="This revision"]');
+  await expect(before.getByRole("button", { name: "Callout variant", exact: true })).toHaveCount(0);
+  await expect(after.getByRole("button", { name: "Callout variant", exact: true })).toHaveCount(0);
   await expect(before.getByRole("note", { name: "Warning", exact: true })).toBeVisible();
   await expect(before.locator(".ub-callout-icon")).toHaveText("🚀");
   await expect(after.getByRole("note", { name: "Caution", exact: true })).toBeVisible();
