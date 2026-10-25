@@ -99,6 +99,36 @@ describe("the side-by-side revision model", () => {
     expect(model.rows[0]?.before.labels).toEqual(["Data changed: values"]);
   });
 
+  it("pairs only the changed source of the same Ablauf block, never a neighboring or different-language drawing", () => {
+    const before = doc();
+    const oldSource = 'flow v0\ncolumns main\nbox draft "Draft"';
+    const newSource = oldSource.replace("Draft", "Approved");
+    const changed = appendBlock(before, { type: "code", language: "ablauf", text: oldSource });
+    appendBlock(before, { type: "code", language: "ablauf", text: "unchanged" });
+    const removed = appendBlock(before, { type: "code", language: "ablauf", text: "removed" });
+    appendBlock(before, { type: "code", language: "ablauf", text: "switch away" });
+    appendBlock(before, { type: "code", language: "wireframe", text: "switch into" });
+    const otherCode = appendBlock(before, { type: "code", language: "typescript", text: "old code" });
+    const after = clone(before);
+    editBlock(after, changed, oldSource, newSource);
+    deleteBlock(after, removed);
+    (getBlocksFragment(after).get(2) as Y.XmlElement).setAttribute("language", "wireframe");
+    (getBlocksFragment(after).get(3) as Y.XmlElement).setAttribute("language", "ablauf");
+    editBlock(after, otherCode, "old code", "new code");
+    appendBlock(after, { type: "code", language: "ablauf", text: "added" });
+    const model = revisionSplitModel(before, after);
+    expect(model.before.content?.[0]?.attrs).toMatchObject({ revisionSource: oldSource, revisionOtherSource: newSource, revisionSide: "before" });
+    expect(model.after.content?.[0]?.attrs).toMatchObject({ revisionSource: newSource, revisionOtherSource: oldSource, revisionSide: "after" });
+    for (const side of [model.before, model.after]) {
+      const otherBlocks = side.content?.slice(1).filter(node => node.type === "code") ?? [];
+      expect(otherBlocks).toHaveLength(5);
+      for (const block of otherBlocks) {
+        expect(block.attrs?.revisionOtherSource).toBeNull();
+        expect(block.attrs?.revisionSide).toBeNull();
+      }
+    }
+  });
+
   it("mounts two independent read-only sides whose copies drop revision styling and fillers", () => {
     const before = doc();
     appendBlock(before, { type: "paragraph", text: "Kept" });
@@ -121,20 +151,25 @@ describe("the side-by-side revision model", () => {
     } finally { split.destroy(); }
   });
 
-  it("copies each revision's changed JSON with surrounding prose as plain text and authored HTML", () => {
+  it.each([
+    { language: "json-tree", oldSource: '{\n  "version": "old",\n  "nested": { "a": 1, "b": 2 }\n}', newSource: '{\n  "version": "new",\n  "nested": { "a": 1, "b": 2 }\n}' },
+    { language: "ablauf", oldSource: 'flow v0\ncolumns main\nbox draft "Draft"', newSource: 'flow v0\ncolumns main\nbox draft "Approved"' },
+  ])("copies each revision's changed $language with surrounding prose as plain text and authored HTML", ({ language, oldSource, newSource }) => {
     const before = doc();
-    const oldJson = '{\n  "version": "old",\n  "nested": { "a": 1, "b": 2 }\n}';
-    const newJson = '{\n  "version": "new",\n  "nested": { "a": 1, "b": 2 }\n}';
     appendBlock(before, { type: "paragraph", text: "Opening paragraph" });
-    const block = appendBlock(before, { type: "code", language: "json-tree", text: oldJson });
+    const block = appendBlock(before, { type: "code", language, text: oldSource });
     appendBlock(before, { type: "paragraph", text: "Closing paragraph" });
     const after = clone(before);
-    editBlock(after, block, oldJson, newJson);
+    editBlock(after, block, oldSource, newSource);
     const left = document.body.appendChild(document.createElement("div"));
     const right = document.body.appendChild(document.createElement("div"));
-    const split = createRevisionSplit({ beforeElement: left, afterElement: right, before, after });
+    const originalFonts = Object.getOwnPropertyDescriptor(document, "fonts");
+    if (language === "ablauf") Object.defineProperty(document, "fonts", { configurable: true,
+      value: Object.assign(new EventTarget(), { load: async () => [], ready: Promise.resolve() }) });
+    let split: ReturnType<typeof createRevisionSplit> | undefined;
     try {
-      for (const [editor, source] of [[split.before, oldJson], [split.after, newJson]] as const) {
+      split = createRevisionSplit({ beforeElement: left, afterElement: right, before, after });
+      for (const [editor, source] of [[split.before, oldSource], [split.after, newSource]] as const) {
         editor.commands.selectAll();
         const copied = editor.view.serializeForClipboard(editor.state.selection.content());
         expect(copied.text).toBe(`Opening paragraph\n\n${source}\n\nClosing paragraph`);
@@ -142,12 +177,16 @@ describe("the side-by-side revision model", () => {
         expect(pasted.childCount).toBe(3);
         expect(pasted.child(0).textContent).toBe("Opening paragraph");
         expect(pasted.child(1).type.name).toBe("code");
-        expect(pasted.child(1).attrs.language).toBe("json-tree");
+        expect(pasted.child(1).attrs.language).toBe(language);
         expect(pasted.child(1).textContent).toBe(source);
         expect(pasted.child(2).textContent).toBe("Closing paragraph");
         expect(copied.dom.innerHTML).not.toContain("ub-json-compare");
       }
-    } finally { split.destroy(); }
+    } finally {
+      split?.destroy();
+      if (originalFonts !== undefined) Object.defineProperty(document, "fonts", originalFonts);
+      else Reflect.deleteProperty(document, "fonts");
+    }
   });
 
   it("folds runs of two or more quiet rows, keeping the row next to a change as context", () => {

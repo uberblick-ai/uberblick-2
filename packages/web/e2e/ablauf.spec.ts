@@ -576,8 +576,8 @@ test("iPad taps open the viewer without an inline toolbar and read-only Copy ret
   await preview.tap();
   await expect(viewer(page)).toBeVisible();
   await expect.poll(() => zoomLevel(page)).toBeLessThan(25);
-  const surface = await viewer(page).locator(".ub-ablauf-viewer-drawing").evaluate(element => {
-    const svg = element.querySelector(".ub-ablauf-drawing")?.shadowRoot?.querySelector("svg");
+  const surface = await viewer(page).locator(".ub-ablauf-viewer-drawing > .ub-ablauf-drawing").evaluate(element => {
+    const svg = element.shadowRoot?.querySelector("svg");
     if (svg === null || svg === undefined) throw new Error("e2e: viewer SVG is missing");
     return { drawing: getComputedStyle(element).backgroundColor, svg: getComputedStyle(svg).backgroundColor };
   });

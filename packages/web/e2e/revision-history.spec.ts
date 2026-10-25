@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
 import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, initDoc, insertBlock, setKind, setStatus, setTitle, snapshotRevision } from "@uberblick/schema";
@@ -186,6 +186,58 @@ function jsonHistory(uuid: string, title: string, sources?: { before: string; af
   } finally {
     document.destroy();
   }
+}
+
+function ablaufHistory(uuid: string, title: string, drawings: { before?: string; after?: string }[]): Record<string, string> {
+  const document = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title });
+    const blocks = drawings.map(({ before }) => before === undefined ? null
+      : appendBlock(document, { type: "code", language: "ablauf", text: before }));
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    drawings.forEach(({ before, after }, index) => {
+      const block = blocks[index];
+      if (block == null && after !== undefined) appendBlock(document, { type: "code", language: "ablauf", text: after });
+      else if (block != null && after === undefined) deleteBlock(document, block);
+      else if (block != null && before !== undefined && after !== undefined && before !== after) editBlock(document, block, before, after);
+    });
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally { document.destroy(); }
+}
+
+function historyFlow(columns: number, rows: number): string {
+  return `flow v0\ncolumns ${Array.from({ length: columns }, (_, index) => `c${index}`).join(" ")}\n${
+    Array.from({ length: columns }, (_, index) => `box n${index} col=c${index}${index === 0 ? "" : " row=n0"} "Step ${index + 1}"`).join("\n")}\n${
+    Array.from({ length: rows }, (_, index) => `box tail${index} col=c0 "Later step ${index + 1}"`).join("\n")}\n${
+    Array.from({ length: columns - 1 }, (_, index) => `n${index} --> n${index + 1}`).join("\n")}`;
+}
+
+function ablaufViewer(page: Page): Locator { return page.getByRole("dialog", { name: "Ablauf diagram", exact: true }); }
+
+async function diagramTransform(viewer: Locator): Promise<{ a: number; d: number; e: number; f: number }> {
+  return viewer.locator("svg").evaluate(element => {
+    const matrix = (element as SVGSVGElement).getScreenCTM();
+    if (matrix === null) throw new Error("The displayed diagram has no screen transform");
+    return { a: matrix.a, d: matrix.d, e: matrix.e, f: matrix.f };
+  });
+}
+
+async function expectDiagramAt(viewer: Locator, before: Awaited<ReturnType<typeof diagramTransform>>): Promise<void> {
+  await expect.poll(async () => {
+    const after = await diagramTransform(viewer);
+    return Math.max(...Object.keys(before).map(key => Math.abs(after[key as keyof typeof after] - before[key as keyof typeof before])));
+  }).toBeLessThan(0.1);
+}
+
+async function expectDiagramFits(viewer: Locator): Promise<void> {
+  await expect.poll(async () => {
+    const viewport = await viewer.locator(".ub-ablauf-viewer-viewport").boundingBox();
+    const svg = await viewer.locator("svg").boundingBox();
+    return viewport !== null && svg !== null && svg.x >= viewport.x - 1 && svg.y >= viewport.y - 1
+      && svg.x + svg.width <= viewport.x + viewport.width + 1 && svg.y + svg.height <= viewport.y + viewport.height + 1
+      && Math.abs(svg.x + svg.width / 2 - viewport.x - viewport.width / 2) <= 1
+      && Math.abs(svg.y + svg.height / 2 - viewport.y - viewport.height / 2) <= 1;
+  }).toBe(true);
 }
 
 /** A long json-tree block with a change at each end and one inside a nested object in the middle, then a changed paragraph. */
@@ -1406,6 +1458,197 @@ test.describe("document history through ub open", () => {
       await expect(side.getByText("Quiet block", { exact: true })).toBeVisible();
       await expect(side.locator("p").filter({ hasText: "Outside section change" })).toBeVisible();
     }
+  });
+
+  test("changed Ablauf viewers open either state and keep diagram coordinates when switching after zoom and pan", { tag: "@webkit" }, async ({ browser }, info) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+      viewport: { width: 1440, height: 900 }, hasTouch: false, isMobile: false,
+    }, beforeNavigate: async page => { await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", { configurable: true,
+        value: { writeText: async (text: string) => document.documentElement.setAttribute("data-copied-source", text) } });
+    }); } });
+    const title = docTitle("Ablauf history coordinates");
+    const uuid = await newDocument(page, title);
+    const sources = { before: historyFlow(6, 0), after: historyFlow(12, 50) };
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], ablaufHistory(uuid, title, [sources]));
+    await previous(page);
+    await expect(page).toHaveURL(/\/rev\//);
+    const dialog = ablaufViewer(page);
+    const address = page.url();
+    const sides = [[earlierSide(page), "Before", sources.before], [historicalEditor(page), "After", sources.after]] as const;
+    // The scaled drawing and Expand share the comparison behavior from either side.
+    for (const [side, state, source] of sides) {
+      const preview = side.getByRole("region", { name: "Ablauf preview", exact: true });
+      await expect(preview.locator("svg")).toBeVisible();
+      await expect(preview).toHaveAttribute("data-zoomable", "true");
+      for (const opening of ["drawing", "Expand", "keyboard"] as const) {
+        if (opening === "drawing") await preview.click();
+        else {
+          const expand = side.getByRole("button", { name: "Expand ablauf diagram", exact: true });
+          await expand.focus();
+          if (opening === "keyboard") await page.keyboard.press("Enter");
+          else await expand.click();
+        }
+        await expect(dialog.getByRole("tab", { name: state, exact: true })).toHaveAttribute("aria-selected", "true");
+        await expectDiagramFits(dialog);
+        await dialog.getByRole("button", { name: "Copy ablauf source", exact: true }).click();
+        await expect(page.locator("html")).toHaveAttribute("data-copied-source", source);
+        await expect(dialog.getByRole("button", { name: "Open ablauf source", exact: true })).toHaveCount(0);
+        await page.keyboard.press("Escape");
+        await expect(dialog).toHaveCount(0);
+        await expect(preview).toBeFocused();
+        await expect(page).toHaveURL(address);
+      }
+    }
+    const preview = earlierSide(page).getByRole("region", { name: "Ablauf preview", exact: true });
+    await preview.click();
+    await dialog.getByRole("button", { name: "Zoom in", exact: true }).click();
+    await expect(dialog.getByLabel("Zoom level", { exact: true })).toHaveText("125%");
+    const viewport = await dialog.locator(".ub-ablauf-viewer-viewport").boundingBox();
+    if (viewport === null) throw new Error("The diagram viewport is missing");
+    const beforePan = await diagramTransform(dialog);
+    await page.mouse.move(viewport.x + viewport.width / 2, viewport.y + viewport.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(viewport.x + viewport.width / 2 + 80, viewport.y + viewport.height / 2 + 45, { steps: 4 });
+    await page.mouse.up();
+    await expect.poll(async () => (await diagramTransform(dialog)).e).not.toBe(beforePan.e);
+    const position = await diagramTransform(dialog);
+    const zoom = await dialog.getByLabel("Zoom level", { exact: true }).textContent();
+    const before = dialog.getByRole("tab", { name: "Before", exact: true });
+    const after = dialog.getByRole("tab", { name: "After", exact: true });
+    await before.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(after).toHaveAttribute("aria-selected", "true");
+    await expect(after).toBeFocused();
+    await expect(dialog.locator("svg")).toContainText("Later step 50");
+    await expectDiagramAt(dialog, position);
+    await expect(dialog.getByLabel("Zoom level", { exact: true })).toHaveText(zoom ?? "");
+    await page.keyboard.press("ArrowLeft");
+    await expect(before).toHaveAttribute("aria-selected", "true");
+    await expect(before).toBeFocused();
+    await expect(dialog.locator("svg")).not.toContainText("Later step 50");
+    await expectDiagramAt(dialog, position);
+    await after.click();
+    await dialog.getByRole("button", { name: "Copy ablauf source", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-copied-source", sources.after);
+    await dialog.getByRole("button", { name: "Fit", exact: true }).click();
+    await expectDiagramFits(dialog);
+    await expect.poll(async () => Number((await dialog.getByLabel("Zoom level", { exact: true }).textContent())?.replace("%", ""))).toBeLessThan(25);
+    const fitted = await diagramTransform(dialog);
+    await before.click();
+    await expectDiagramAt(dialog, fitted);
+    await dialog.getByRole("button", { name: "Fit", exact: true }).click();
+    await expectDiagramFits(dialog);
+    await expect(dialog.getByLabel("Zoom level", { exact: true })).toHaveText("100%");
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      const screenshot = info.outputPath(`ablauf-comparison-viewer-${scheme}.png`);
+      await dialog.screenshot({ path: screenshot });
+      await info.attach(`ablauf-comparison-viewer-${scheme}`, { path: screenshot, contentType: "image/png" });
+    }
+    await page.goBack();
+    await expect(dialog).toHaveCount(0);
+    await expect(preview).toBeFocused();
+    await expect(page).toHaveURL(address);
+  });
+
+  test("iPad taps open either fan-out state and switch without losing its position", { tag: "@webkit-touch" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+      ...devices["iPad Pro 11"], viewport: { width: 1366, height: 1024 },
+    } });
+    const title = docTitle("Touch fan-out comparison");
+    const uuid = await newDocument(page, title);
+    const before = 'fan-out v0\nstep "Before approval"\noutcome "Accepted" reason="Approved" destination="Start" tone="done"';
+    const after = before.replace("Before approval", "After approval")
+      + '\noutcome "Deferred" reason="Needs review" destination="Wait" tone="stop"';
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], ablaufHistory(uuid, title, [{ before, after }]));
+    await previous(page);
+    const dialog = ablaufViewer(page);
+    for (const [side, state, opposite] of [[earlierSide(page), "Before", "After"], [historicalEditor(page), "After", "Before"]] as const) {
+      const preview = side.getByRole("region", { name: "Ablauf preview", exact: true });
+      await expect(preview.locator("svg")).toBeVisible();
+      await preview.tap({ position: { x: 30, y: 30 } });
+      await expect(dialog.getByRole("tab", { name: state, exact: true })).toHaveAttribute("aria-selected", "true");
+      await expect(dialog.locator("svg")).toContainText(`${state} approval`);
+      const fitted = await diagramTransform(dialog);
+      await dialog.getByRole("button", { name: "Zoom in", exact: true }).tap();
+      await expect.poll(async () => (await diagramTransform(dialog)).a).toBeGreaterThan(fitted.a);
+      const position = await diagramTransform(dialog);
+      const other = dialog.getByRole("tab", { name: opposite, exact: true });
+      const bounds = await other.boundingBox();
+      if (bounds === null) throw new Error("The comparison switch is missing");
+      expect(bounds.width).toBeGreaterThanOrEqual(44);
+      expect(bounds.height).toBeGreaterThanOrEqual(44);
+      await other.tap();
+      await expect(other).toHaveAttribute("aria-selected", "true");
+      await expect(dialog.locator("svg")).toContainText(`${opposite} approval`);
+      await expectDiagramAt(dialog, position);
+      await dialog.getByRole("button", { name: "Close diagram viewer", exact: true }).tap();
+      await expect(dialog).toHaveCount(0);
+      await expect(preview).toBeFocused();
+    }
+  });
+
+  test("unchanged, added, removed and unrenderable comparison drawings keep the ordinary viewer, as does one column", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 900 } },
+      beforeNavigate: async page => { await page.addInitScript(() => {
+        const measure = CanvasRenderingContext2D.prototype.measureText;
+        CanvasRenderingContext2D.prototype.measureText = function (text) {
+          if (text.includes("Unrenderable")) throw new Error("Injected text measurement failure");
+          return measure.call(this, text);
+        };
+      }); } });
+    const title = docTitle("Ordinary history drawing viewers");
+    const uuid = await newDocument(page, title);
+    const drawing = (name: string) => `flow v0\ncolumns main\nbox first title="${name}"`;
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], ablaufHistory(uuid, title, [
+      { before: drawing("Unchanged drawing"), after: drawing("Unchanged drawing") },
+      { before: drawing("Removed drawing") },
+      { after: drawing("Added drawing") },
+      { before: drawing("Invalid after drawing"), after: drawing("Unrenderable drawing") },
+      { before: drawing("Unrenderable drawing"), after: drawing("Invalid before drawing") },
+      { before: drawing("Changed before drawing"), after: drawing("Changed after drawing") },
+    ]));
+    await previous(page);
+    const drawer = await showHistoryList(page);
+    await historyList(page).getByRole("switch", { name: "Collapse unchanged" }).uncheck();
+    await closeHistoryList(page, drawer);
+    const dialog = ablaufViewer(page);
+    for (const side of [earlierSide(page), historicalEditor(page)]) {
+      await expect(side.locator(".ub-ablauf-diagnostics").filter({ hasText: "Injected text measurement failure" })).toBeVisible();
+    }
+    for (const [side, name] of [[earlierSide(page), "Unchanged drawing"], [historicalEditor(page), "Unchanged drawing"],
+      [earlierSide(page), "Removed drawing"], [historicalEditor(page), "Added drawing"],
+      [earlierSide(page), "Invalid after drawing"], [historicalEditor(page), "Invalid before drawing"]] as const) {
+      const block = side.locator(".ub-ablauf").filter({ hasText: name });
+      await expect(block.locator("svg")).toBeVisible();
+      const expand = block.getByRole("button", { name: "Expand ablauf diagram", exact: true });
+      await expand.focus();
+      await page.keyboard.press("Enter");
+      await expect(dialog.locator("svg")).toContainText(name);
+      await expect(dialog.getByRole("tab", { name: /Before|After/ })).toHaveCount(0);
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+    }
+    await page.setViewportSize({ width: 860, height: 900 });
+    await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+    const changed = historicalEditor(page).locator(".ub-ablauf").filter({ hasText: "Changed after drawing" });
+    await expect(changed.locator("svg")).toBeVisible();
+    await changed.getByRole("button", { name: "Expand ablauf diagram", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(dialog.locator("svg")).toContainText("Changed after drawing");
+    await expect(dialog.getByRole("tab", { name: /Before|After/ })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
   });
 
   test("a changed json-tree block spans both columns with paired rows and its own Collapse unchanged switch", async ({ browser }, info) => {

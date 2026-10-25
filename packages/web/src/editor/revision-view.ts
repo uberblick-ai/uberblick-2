@@ -11,7 +11,7 @@ import {
 import type { RevisionBlockComparison, RevisionComparison, TextSpan } from "@uberblick/schema";
 import { yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
 import type * as Y from "yjs";
-import { AblaufBlocks } from "./ablauf.js";
+import { AblaufBlocks, ablaufBlockView } from "./ablauf.js";
 import { JsonTreeBlocks } from "./json-tree.js";
 import { RevisionJsonCompare, RevisionJsonPlaceholder } from "./json-compare-view.js";
 import { CardBlocks } from "./card.js";
@@ -86,6 +86,9 @@ export function revisionPalette(ydoc: Y.Doc | null, before: Y.Doc | null = null)
       addAttributes() {
         return {
           ...this.parent?.(), revisionSource: { default: null, rendered: false },
+          ...(this.name === "code" ? {
+            revisionOtherSource: { default: null, rendered: false }, revisionSide: { default: null, rendered: false },
+          } : {}),
           ...(this.name === "chart" ? { revisionRemoved: { default: false, rendered: false } } : {}),
         };
       },
@@ -93,12 +96,17 @@ export function revisionPalette(ydoc: Y.Doc | null, before: Y.Doc | null = null)
         const render = this.parent?.();
         if (render == null) throw new Error("Revision source requires its ordinary node view");
         return (props) => {
+          const { revisionOtherSource, revisionSide } = props.node.attrs;
           // A removed chart's mapping and collection belong to the same predecessor.
-          const selected = this.name === "chart" && props.node.attrs.revisionRemoved === true && before !== null
+          const selected = this.name === "code" && props.node.attrs.language === "ablauf"
+            && typeof revisionOtherSource === "string" && (revisionSide === "before" || revisionSide === "after")
+            ? ablaufBlockView({ source: revisionOtherSource, side: revisionSide })
+            : this.name === "chart" && props.node.attrs.revisionRemoved === true && before !== null
             ? chartBlockView(before) : render;
           const view = selected({ ...props, node: drawingNode(props.node) });
           const update = view.update;
-          view.update = (node, decorations, inner) => update?.(drawingNode(node), decorations, inner) ?? false;
+          view.update = (node, decorations, inner) => node.attrs.revisionOtherSource === revisionOtherSource && node.attrs.revisionSide === revisionSide
+            && (update?.(drawingNode(node), decorations, inner) ?? false);
           return view;
         };
       },

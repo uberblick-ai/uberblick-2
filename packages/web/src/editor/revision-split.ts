@@ -207,6 +207,14 @@ function splitRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, 
   const beforeLabels = oldNode === undefined ? [] : [...(kind === "removed" ? ["Removed block"] : changedLabel), ...data(oldNode)];
   const afterLabels = newNode === undefined ? [] : [...(kind === "added" ? ["Added block"] : changedLabel), ...data(newNode)];
   const shown = newNode ?? oldNode;
+  const pairedAblauf = oldNode?.type.name === "code" && newNode?.type.name === "code"
+    && oldNode.attrs.language === "ablauf" && newNode.attrs.language === "ablauf" && sourceText(oldNode) !== sourceText(newNode);
+  const drawingSide = (node: PMNode, side: RevisionSide): PMNode => {
+    const own = sideNode(node, change, side);
+    if (!pairedAblauf) return own;
+    return own.type.create({ ...own.attrs, revisionSide: side,
+      revisionOtherSource: sourceText(side === "before" ? newNode : oldNode) }, own.content, own.marks);
+  };
   return {
     row: {
       kind,
@@ -216,8 +224,8 @@ function splitRow(change: RevisionBlockComparison, oldNode: PMNode | undefined, 
       before: { labels: beforeLabels, filler: oldNode === undefined },
       after: { labels: afterLabels, filler: newNode === undefined },
     },
-    left: oldNode === undefined ? filler() : kind === "removed" ? markTree(oldNode, "removed") : sideNode(oldNode, change, "before"),
-    right: newNode === undefined ? filler() : kind === "added" ? markTree(newNode, "added") : sideNode(newNode, change, "after"),
+    left: oldNode === undefined ? filler() : kind === "removed" ? markTree(oldNode, "removed") : drawingSide(oldNode, "before"),
+    right: newNode === undefined ? filler() : kind === "added" ? markTree(newNode, "added") : drawingSide(newNode, "after"),
   };
 }
 
