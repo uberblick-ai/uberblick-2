@@ -82,6 +82,7 @@ function RevisionStatus({ history, writable }: { history: DocumentHistory; writa
   const group = useRef<HTMLFieldSetElement | null>(null);
   const back = useRef<HTMLButtonElement | null>(null);
   const forward = useRef<HTMLButtonElement | null>(null);
+  const copyRevision = useRef<HTMLButtonElement | null>(null);
   const focus = useRef<"back" | "forward" | null>("back");
   const now = useTimestampClock();
   // biome-ignore lint/correctness/useExhaustiveDependencies: Focus is placed again each time a navigation settles.
@@ -94,8 +95,8 @@ function RevisionStatus({ history, writable }: { history: DocumentHistory; writa
     // Entering history hides the live pane, which drops the focus it held.
     const dropped = active === null || active === fieldset.ownerDocument.body || active.closest("[inert]") !== null;
     if (!dropped && !fieldset.contains(active)) return;
-    // Native disabled buttons cannot keep focus at the oldest revision.
-    (requested?.disabled ? forward.current : requested)?.focus({ preventScroll: true });
+    // Named history can have no revision in either direction.
+    [requested, back.current, forward.current, copyRevision.current].find((button) => button !== null && !button.disabled)?.focus({ preventScroll: true });
   }, [busy, selection]);
   if (selection === null || entries === null || entry === null) return null;
   const total = entries.length;
@@ -110,22 +111,22 @@ function RevisionStatus({ history, writable }: { history: DocumentHistory; writa
       <span className="ub-history-author" aria-hidden="true">{label}</span>
       <span className="ub-history-when" aria-hidden="true">{selection.index === 0 && "· current version "}{time !== null && <>· <time dateTime={time.dateTime} title={time.title}>{time.label}</time></>}</span>
       {renamed !== null && <span className="ub-history-renamed">· renamed from <s>{renamed || "Untitled"}</s></span>}
-      {compared?.name != null && <span className="ub-history-compared">· compared with “{compared.name.text}”</span>}
+      {compared !== undefined && (compared.name != null || entry.name != null) && <span className="ub-history-compared">· compared with {compared.name != null && <>“{compared.name.text}” · </>}{authorName(compared, compared.id === entries[total - 1]?.id)}</span>}
     </span>
     <span role="status" className="ub-history-state">{error ?? (busy ? "Loading…" : "")}</span>
     <span className="ub-history-steps">
       <Button variant="history" size="custom" ref={back} type="button" aria-label="Previous revision" title="Previous revision"
-        disabled={busy || oldest} onClick={() => { focus.current = "back"; history.back(); }}><PreviousIcon /></Button>
+        disabled={busy || !history.canBack} onClick={() => { focus.current = "back"; history.back(); }}><PreviousIcon /></Button>
       <Button variant="history" size="custom" ref={forward} type="button" aria-label="Next revision"
-        title={selection.index === 0 ? "Back to the current version" : "Next revision"} disabled={busy && selection.index > 0}
-        onClick={() => { if (selection.index === 0) history.now(); else { focus.current = "forward"; history.open(selection.index - 1); } }}><NextIcon /></Button>
+        title={history.filter === "all" && selection.index === 0 ? "Back to the current version" : "Next revision"} disabled={!history.canForward || (busy && selection.index > 0)}
+        onClick={() => { focus.current = "forward"; history.forward(); }}><NextIcon /></Button>
     </span>
     <span className="ub-history-position">{selection.index + 1} of {total} ·</span>
     {/* A named revision shows its name where the id would be; writers can rename it with the tag. */}
     {entry.name != null && !(writable && entry.name.canManage) && <TagIcon />}
     <RevisionNameControls history={history} liveDocument={null} writable={writable} />
     <Button variant="plain" size="custom" type="button" className={`shrink-0 min-w-0 rounded-(--radius-sm) border-0 bg-transparent px-0 py-1 whitespace-nowrap focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 ub-history-rev${entry.name != null ? " inline-flex max-w-44 -ml-[0.35rem] text-foreground font-medium [&>span]:min-w-0 [&>span]:overflow-hidden [&>span]:text-ellipsis ub-history-named" : " text-inherit"}`} aria-label={`Copy revision ${entry.id}`}
-      title={entry.name != null ? `${entry.name.text} · rev ${entry.id.slice(0, 8)}` : `Copy revision ${entry.id}`}
+      ref={copyRevision} title={entry.name != null ? `${entry.name.text} · rev ${entry.id.slice(0, 8)}` : `Copy revision ${entry.id}`}
       onClick={() => { void writeToClipboard(entry.id).then((ok) => toast[ok ? "success" : "error"](ok ? "Revision copied" : "Couldn't copy the revision. Try again in a browser with clipboard access.", { id: "clipboard" })); }}>
       {entry.name != null ? <span>{entry.name.text}</span> : <>rev <span className="ub-doc-id">{entry.id.slice(0, 8)}</span></>}
     </Button>
@@ -393,6 +394,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   </section>;
   const entry = selection === null ? undefined : entries?.[selection.index];
   const comparedWith = selection?.comparedWith;
+  const namedComparison = comparedWith !== undefined && entry?.name != null;
   const restoreTarget = comparedWith ?? entry;
   const restoreLabel = comparedWith?.name == null ? "Restore this version" : `Restore “${comparedWith.name.text}”`;
   const predecessor = selection === null ? undefined : selection.comparedWith ?? entries?.[selection.index + 1];
@@ -429,11 +431,11 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       {selection !== null && failed === selection && <p role="status">This client cannot display this revision. Update the client and try again.</p>}
       {selection === null ? null : split ? <div ref={body} className="ub-revision-split">
         <div className="ub-revision-side-label">
-          <span>Before · {authorName(predecessor, selection.index + 2 >= total)}</span>
+          <span>Before · {authorName(predecessor, predecessor !== undefined && predecessor.id === entries?.[total - 1]?.id)}{namedComparison && predecessor?.name != null && <> · “{predecessor.name.text}”</>}</span>
           {comparedWith !== undefined && restoreButton}
         </div>
         <div className="ub-revision-side-label">
-          <span>After · {authorName(entry, selection.index + 1 >= total)}</span>
+          <span>After · {authorName(entry, selection.index + 1 >= total)}{namedComparison && entry?.name != null && <> · “{entry.name.text}”</>}</span>
           {comparedWith === undefined && restoreButton}
         </div>
         <div className="ub-revision-side ub-revision-side-before">

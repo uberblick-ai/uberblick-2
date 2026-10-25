@@ -75,6 +75,205 @@ function mountRouted(initialApi: DocumentRevisionsClient | null, initialView: Re
   };
 }
 
+function anchorHistory(): RevisionEntry[] {
+  const names: Record<string, string> = { release: "Release", review: "Reviewed", kickoff: "Kickoff" };
+  return ["newest", "release", "release-edit", "review", "review-edit", "kickoff", "earliest"].map((id, index) => ({
+    id, title: id, author: id === "earliest" ? null : entries[0]!.author,
+    startedAt: id === "earliest" ? null : 100 - index * 10, endedAt: index === 0 ? null : 110 - index * 10,
+    ...(names[id] === undefined ? {} : { name: { text: names[id], namer: null, namedAt: 100 - index * 10, canManage: true } }),
+  }));
+}
+
+describe("named history navigation", () => {
+  it("opens named comparisons and steps between anchors from After, stopping at both ends", async () => {
+    const api = client();
+    const revisions = anchorHistory();
+    vi.mocked(api.list).mockResolvedValue(revisions);
+    const fix = mountRouted(api, null);
+    await act(async () => {});
+    await act(async () => fix.reading().open(1));
+    await act(async () => fix.reading().setFilter("named"));
+    expect(fix.reading()).toMatchObject({ filter: "named", canBack: true, canForward: false });
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "release", since: "review" });
+    expect(fix.reading().selection).toMatchObject({ index: 1, comparedWith: revisions[3] });
+    expect(getMeta(fix.reading().selection!.before!).title).toBe("review");
+
+    await act(async () => fix.reading().back());
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "review", since: "kickoff" });
+    expect(fix.reading().entry?.id).toBe("review");
+    expect(fix.reading()).toMatchObject({ canBack: true, canForward: true });
+    await act(async () => fix.reading().back());
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "kickoff", since: "earliest" });
+    expect(fix.reading().selection).toMatchObject({ index: 5, comparedWith: revisions[6] });
+    expect(fix.reading()).toMatchObject({ canBack: false, canForward: true });
+    const oldest = fix.reading().selection;
+    fix.navigate.mockClear();
+    await act(async () => fix.reading().back());
+    expect(fix.reading().selection).toBe(oldest);
+    expect(fix.navigate).not.toHaveBeenCalled();
+
+    await act(async () => fix.reading().forward());
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "review", since: "kickoff" });
+    await act(async () => fix.reading().forward());
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "release", since: "review" });
+    const newest = fix.reading().selection;
+    expect(fix.reading()).toMatchObject({ canBack: true, canForward: false });
+    fix.navigate.mockClear();
+    await act(async () => fix.reading().forward());
+    expect(fix.reading().selection).toBe(newest);
+    expect(fix.navigate).not.toHaveBeenCalled();
+    await act(async () => fix.reading().open(3));
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "review", since: "kickoff" });
+  });
+
+  it("shows a named earliest revision alone and keeps All stepping adjacent through now", async () => {
+    const api = client();
+    const revisions = anchorHistory();
+    revisions[6] = { ...revisions[6]!, name: { text: "Beginning", namer: null, namedAt: 40, canManage: true } };
+    vi.mocked(api.list).mockResolvedValue(revisions);
+    const fix = mountRouted(api, { revision: "kickoff" });
+    await act(async () => {});
+    await act(async () => fix.reading().setFilter("named"));
+    await act(async () => fix.reading().back());
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "earliest" });
+    expect(fix.reading().selection).toMatchObject({ index: 6, before: null });
+    expect(fix.reading().selection?.comparedWith).toBeUndefined();
+    expect(fix.reading()).toMatchObject({ canBack: false, canForward: true });
+
+    await act(async () => fix.reading().setFilter("all"));
+    await act(async () => fix.reading().forward());
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "kickoff" });
+    await act(async () => fix.reading().open(1));
+    await act(async () => fix.reading().forward());
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "newest" });
+    expect(fix.reading().canForward).toBe(true);
+    await act(async () => fix.reading().forward());
+    expect(fix.navigate).toHaveBeenLastCalledWith(null);
+    expect(fix.reading()).toMatchObject({ active: false, filter: "all", selection: null });
+  });
+
+  it("changes a selected anchor's baseline on filter switches and preserves an unnamed selection", async () => {
+    const api = client();
+    vi.mocked(api.list).mockResolvedValue(anchorHistory());
+    const fix = mountRouted(api, { revision: "review" });
+    await act(async () => {});
+    await act(async () => fix.reading().setFilter("named"));
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "review", since: "kickoff" });
+    expect(getMeta(fix.reading().selection!.after).title).toBe("review");
+    await act(async () => fix.reading().setFilter("all"));
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "review" });
+    expect(getMeta(fix.reading().selection!.before!).title).toBe("review-edit");
+    expect(fix.reading().selection?.comparedWith).toBeUndefined();
+
+    await act(async () => fix.reading().open(2));
+    const unnamed = fix.reading().selection;
+    fix.navigate.mockClear();
+    await act(async () => fix.reading().setFilter("named"));
+    expect(fix.reading().selection).toBe(unnamed);
+    expect(fix.navigate).not.toHaveBeenCalled();
+    expect(fix.reading()).toMatchObject({ canBack: true, canForward: true });
+    await act(async () => fix.reading().back());
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "review", since: "kickoff" });
+    await act(async () => fix.reading().setFilter("all"));
+    await act(async () => fix.reading().open(2));
+    await act(async () => fix.reading().setFilter("named"));
+    await act(async () => fix.reading().forward());
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "release", since: "review" });
+  });
+
+  it.each([
+    { index: 0, canBack: true, canForward: false, direction: "back" as const, address: { revision: "release", since: "review" } },
+    { index: 6, canBack: false, canForward: true, direction: "forward" as const, address: { revision: "kickoff", since: "earliest" } },
+  ])("steps toward names from unnamed revision $index with the opposite control disabled", async ({ index, canBack, canForward, direction, address }) => {
+    const api = client();
+    vi.mocked(api.list).mockResolvedValue(anchorHistory());
+    const fix = mountRouted(api, null);
+    await act(async () => {});
+    await act(async () => fix.reading().open(index));
+    await act(async () => fix.reading().setFilter("named"));
+    expect(fix.reading()).toMatchObject({ canBack, canForward });
+    await act(async () => fix.reading()[direction]());
+    expect(fix.navigate).toHaveBeenLastCalledWith(address);
+  });
+
+  it("renders addressed endpoints under either filter, including browser navigation to a plain named revision", async () => {
+    const api = client();
+    vi.mocked(api.list).mockResolvedValue(anchorHistory());
+    const fix = mountRouted(api, { revision: "release", since: "kickoff" });
+    await act(async () => {});
+    expect(fix.reading().filter).toBe("all");
+    expect(getMeta(fix.reading().selection!.before!).title).toBe("kickoff");
+    expect(fix.navigate).not.toHaveBeenCalled();
+    await act(async () => fix.reading().setFilter("named"));
+    fix.navigate.mockClear();
+
+    fix.visit({ revision: "release", since: "kickoff" });
+    await act(async () => {});
+    expect(fix.reading().entry?.id).toBe("release");
+    expect(getMeta(fix.reading().selection!.before!).title).toBe("kickoff");
+    fix.visit({ revision: "release" });
+    await act(async () => {});
+    expect(getMeta(fix.reading().selection!.before!).title).toBe("release-edit");
+    expect(fix.reading().selection?.comparedWith).toBeUndefined();
+    expect(fix.reading().filter).toBe("named");
+    expect(fix.navigate).not.toHaveBeenCalled();
+
+    fix.visit({ revision: "release", since: "review" });
+    await act(async () => {});
+    expect(getMeta(fix.reading().selection!.before!).title).toBe("review");
+    act(() => fix.reading().now());
+    expect(fix.reading().filter).toBe("all");
+    fix.visit({ revision: "release", since: "review" });
+    await act(async () => {});
+    expect(fix.reading().filter).toBe("all");
+    expect(getMeta(fix.reading().selection!.before!).title).toBe("review");
+  });
+
+  it.each(["all", "named"] as const)("keeps Changes since this name fixed when switching from %s", async filter => {
+    const api = client();
+    vi.mocked(api.list).mockResolvedValue(anchorHistory());
+    const fix = mountRouted(api, { revision: "review" });
+    await act(async () => {});
+    await act(async () => fix.reading().setFilter(filter));
+    await act(async () => fix.reading().sinceNamed("review"));
+    const selected = fix.reading().selection;
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "newest", since: "review" });
+    fix.navigate.mockClear();
+    await act(async () => fix.reading().setFilter(filter === "all" ? "named" : "all"));
+    expect(fix.reading().selection).toBe(selected);
+    expect(fix.navigate).not.toHaveBeenCalled();
+    expect(getMeta(fix.reading().selection!.after).title).toBe("newest");
+    expect(getMeta(fix.reading().selection!.before!).title).toBe("review");
+  });
+
+  it("keeps the restore starting point and viewed snapshots through named selection and stepping", async () => {
+    const checksum = vi.spyOn(revisionClient, "documentRevisionChecksum").mockImplementation(async doc => getMeta(doc).title);
+    try {
+      const api = client();
+      vi.mocked(api.list).mockResolvedValue(anchorHistory());
+      vi.mocked(api.restore).mockResolvedValue({ revision: entries[0]!, applied: false });
+      const live = document("State when history opened");
+      const fix = mountRouted(api, { revision: "release" }, live);
+      await act(async () => {});
+      const release = fix.reading().selection!.after;
+      setTitle(live, "Later collaborator changes");
+      await act(async () => fix.reading().setFilter("named"));
+      const review = fix.reading().selection!.before;
+      expect(fix.reading().selection!.after).toBe(release);
+      await act(async () => fix.reading().back());
+      expect(fix.reading().selection!.after).toBe(review);
+      await act(async () => fix.reading().open(1));
+      expect(fix.reading().selection).toMatchObject({ after: release, before: review });
+      expect(release.isDestroyed).toBe(false);
+      await act(async () => fix.reading().restore("review"));
+      expect(api.restore).toHaveBeenLastCalledWith(UUID, "review", "State when history opened", expect.any(AbortSignal));
+      fix.view.unmount();
+      expect(release.isDestroyed).toBe(true);
+      expect(review!.isDestroyed).toBe(true);
+    } finally { checksum.mockRestore(); }
+  });
+});
+
 describe("address-controlled history views", () => {
   it("opens an old revision with its own predecessor even when newer revisions exist", async () => {
     const api = client();

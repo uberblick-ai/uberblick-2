@@ -3,7 +3,6 @@
  * every revision newest first, grouped by day, each opening that revision.
  */
 
-import { useState } from "react";
 import type { ReactElement } from "react";
 import { renamedFrom } from "../document/document-history.js";
 import type { DocumentHistory } from "../document/document-history.js";
@@ -20,11 +19,11 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
   title: string;
   onNow?: () => void;
 }): ReactElement {
-  const [filter, setFilter] = useState<"all" | "named">("all");
+  const { filter, setFilter } = history;
   const now = useTimestampClock();
   const entries = history.entries ?? [];
   const groups = revisionGroups(entries, now, filter === "named");
-  const selected = history.selection?.comparedWith === undefined ? history.selection?.index ?? null : null;
+  const selected = filter === "named" || history.selection?.comparedWith === undefined ? history.selection?.index ?? null : null;
   const count = entries.length === 1 ? "1 revision" : `${entries.length} revisions`;
   return (
     <>
@@ -48,7 +47,7 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
         </div>
         <fieldset className="ub-history-filter mx-2 mt-1 mb-0 flex min-w-0 rounded-(--radius-sm) border-0 bg-(--sidebar-accent) p-0.5" aria-label="Show revisions">
           {(["all", "named"] as const).map((value) => (
-            <Button variant="plain" size="custom" key={value} type="button" aria-pressed={filter === value}
+            <Button variant="plain" size="custom" key={value} type="button" aria-pressed={filter === value} disabled={history.busy}
               className="flex-1 rounded-[calc(var(--radius-sm)-2px)] px-2.5 py-1 ub-type-caption font-medium text-(--sidebar-muted-foreground) aria-pressed:bg-background aria-pressed:text-sidebar-foreground"
               onClick={() => setFilter(value)}>
               {value === "all" ? "All" : "Named"}
