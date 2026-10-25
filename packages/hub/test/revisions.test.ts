@@ -312,10 +312,12 @@ describe("automatic hub revisions", () => {
     }
     db.connection.exec(`CREATE TRIGGER fail_revision_name BEFORE INSERT ON document_revision_names
       BEGIN SELECT RAISE(ABORT, 'name failed'); END`);
+    clock = 10 * MINUTE;
     expect(() => db.revisions.name(ROOM, doc, checksum(doc), "A name", browser)).toThrow("name failed");
     expect(failures).toHaveLength(1);
     expect(db.revisions.names(ROOM).size).toBe(0);
     expect(db.revisions.list(ROOM)[0]!.endedAt).toBeNull();
+    expect(db.revisions.list(ROOM)[0]!.deadlineAt).toBe(15 * MINUTE);
     expect(db.connection.prepare("SELECT id FROM document_revisions WHERE room = ?").all(ROOM)).toEqual([]);
     db.connection.exec("DROP TRIGGER fail_revision_name");
     expect(db.revisions.name(ROOM, doc, checksum(doc), "🦊".repeat(100), browser).ok).toBe(true);
@@ -362,7 +364,7 @@ describe("automatic hub revisions", () => {
     expect(db.revisions.list(ROOM)).toEqual([
       { id: expect.any(String), author: browser, startedAt: (9 * 60 + 40) * MINUTE, endedAt: null,
         checksum: checksum(doc), final: false, deadlineAt: (9 * 60 + 55) * MINUTE },
-      { id: expect.any(String), author: claude, startedAt: (9 * 60 + 6) * MINUTE, endedAt: (9 * 60 + 21) * MINUTE,
+      { id: expect.any(String), author: claude, startedAt: (9 * 60 + 6) * MINUTE, endedAt: (9 * 60 + 12) * MINUTE,
         checksum: claudeChecksum, final: true },
       { id: firstId, author: browser, startedAt: 9 * 60 * MINUTE, endedAt: (9 * 60 + 6) * MINUTE,
         checksum: firstChecksum, final: true },
@@ -372,13 +374,79 @@ describe("automatic hub revisions", () => {
     expect(compareRevisions(revision(db, db.revisions.list(ROOM)[0]!.id), doc).changed).toBe(false);
   });
 
+  it("keeps one continuous session open until fifteen minutes after its last edit", async () => {
+    const db = database();
+    const doc = await load(db);
+    title(doc, "Minute 0");
+    const id = db.revisions.list(ROOM)[0]!.id;
+    for (const minute of [10, 20, 34]) {
+      clock = minute * MINUTE;
+      title(doc, `Minute ${minute}`);
+      expect(db.revisions.list(ROOM)).toEqual([{
+        id, author: browser, startedAt: 0, endedAt: null, checksum: checksum(doc),
+        final: false, deadlineAt: (minute + 15) * MINUTE,
+      }]);
+    }
+    clock = 49 * MINUTE - 1;
+    expect(db.revisions.list(ROOM)[0]!.endedAt).toBeNull();
+    clock++;
+    const expired = db.revisions.list(ROOM)[0]!;
+    expect(expired).toMatchObject({ id, startedAt: 0, endedAt: 34 * MINUTE, final: true });
+    expect(expired).not.toHaveProperty("deadlineAt");
+    const bytes = db.revisions.get(ROOM, id);
+    clock = 50 * MINUTE;
+    title(doc, "New session");
+    expect(db.revisions.list(ROOM)).toEqual([
+      { id: expect.any(String), author: browser, startedAt: clock, endedAt: null,
+        checksum: checksum(doc), final: false, deadlineAt: 65 * MINUTE }, expired,
+    ]);
+    expect(db.revisions.list(ROOM)[0]!.id).not.toBe(id);
+    expect(db.revisions.get(ROOM, id)).toEqual(bytes);
+  });
+
+  it.each(["author", "name", "archive", "unarchive", "restore"] as const)(
+    "closes a long session at the %s event time or preserves its expired end", async event => {
+      for (const expired of [false, true]) {
+        clock = 0;
+        const db = database();
+        const doc = await load(db);
+        const directory = await load(db, directoryRoom(WORKSPACE));
+        directory.getMap("docs").set(UUID, { title: "Page", tags: [] });
+        title(doc, "Baseline");
+        const baseline = db.revisions.list(ROOM)[0]!.id;
+        db.revisions.name(ROOM, doc, checksum(doc), "Baseline", browser);
+        if (event === "unarchive") tombstoneDirectoryEntry(directory, UUID);
+        for (const minute of [1, 11, 21]) {
+          clock = minute * MINUTE;
+          title(doc, `Minute ${minute}`);
+        }
+        const head = db.revisions.list(ROOM)[0]!;
+        const bytes = db.revisions.get(ROOM, head.id);
+        clock = (expired ? 36 : 22) * MINUTE;
+        if (event === "author") title(doc, "Another author", claude);
+        if (event === "name") expect(db.revisions.name(ROOM, doc, checksum(doc), "Named", claude).ok).toBe(true);
+        if (event === "archive") tombstoneDirectoryEntry(directory, UUID);
+        if (event === "unarchive") restoreDirectoryEntry(directory, UUID);
+        if (event === "restore") expect(db.restoreRevision(ROOM, doc, checksum(doc), baseline, claude).ok).toBe(true);
+        const closed = { ...head, endedAt: (expired ? 21 : 22) * MINUTE, final: true };
+        delete closed.deadlineAt;
+        expect(db.revisions.list(ROOM).find(row => row.id === head.id)).toEqual(closed);
+        expect(db.connection.prepare("SELECT ended_at FROM document_revisions WHERE id = ?").get(head.id))
+          .toEqual({ ended_at: closed.endedAt });
+        expect(db.revisions.get(ROOM, head.id)).toEqual(bytes);
+      }
+    },
+  );
+
   it("expires without a timer and excludes ignored changes from stretch boundaries", async () => {
     const db = database();
     const doc = await load(db);
     title(doc, "First");
+    clock = 10 * MINUTE;
+    title(doc, "Last content edit");
     const id = db.revisions.list(ROOM)[0]!.id;
     const bytes = db.revisions.get(ROOM, id);
-    clock = 2 * MINUTE;
+    clock = 20 * MINUTE;
     doc.transact(() => {
       const meta = doc.getMap("meta");
       meta.set("description", "Other author");
@@ -388,15 +456,15 @@ describe("automatic hub revisions", () => {
       doc.getMap("annotations").set("thread", "A comment");
     }, { attribution: { author: claude } });
     expect(db.revisions.list(ROOM)).toEqual([{
-      id, author: browser, startedAt: 0, endedAt: null, checksum: checksum(doc), final: false, deadlineAt: 15 * MINUTE,
+      id, author: browser, startedAt: 0, endedAt: null, checksum: checksum(doc), final: false, deadlineAt: 25 * MINUTE,
     }]);
     expect(db.revisions.get(ROOM, id)).toEqual(bytes);
-    clock = 15 * MINUTE;
-    expect(db.revisions.list(ROOM)[0]!.endedAt).toBe(15 * MINUTE);
+    clock = 25 * MINUTE;
+    expect(db.revisions.list(ROOM)[0]!.endedAt).toBe(10 * MINUTE);
     doc.transact(() => doc.getMap("meta").set("description", "After expiry"), { attribution: { author: claude } });
     expect(db.connection.prepare("SELECT ended_at FROM document_revisions WHERE room = ?").all(ROOM)).toEqual([]);
     const expired = db.revisions.list(ROOM)[0];
-    expect(expired).toEqual({ id, author: browser, startedAt: 0, endedAt: 15 * MINUTE, checksum: checksum(doc), final: true });
+    expect(expired).toEqual({ id, author: browser, startedAt: 0, endedAt: 10 * MINUTE, checksum: checksum(doc), final: true });
     title(doc, "Second");
     expect(db.revisions.list(ROOM)).toHaveLength(2);
     expect(db.revisions.list(ROOM)[1]).toEqual(expired);
@@ -469,7 +537,7 @@ describe("automatic hub revisions", () => {
     title(reloaded, "Z", claude);
     expect(db.revisions.list(ROOM)).toEqual([
       { id: expect.any(String), author: claude, startedAt: 100, endedAt: null,
-        checksum: checksum(reloaded), final: false, deadlineAt: 100 + 15 * MINUTE },
+        checksum: checksum(reloaded), final: false, deadlineAt: 300 + 15 * MINUTE },
       { id: expect.any(String), author: browser, startedAt: 0, endedAt: 100, checksum: firstChecksum, final: true },
     ]);
   });
@@ -624,7 +692,9 @@ describe("automatic hub revisions", () => {
     title(doc, "One");
     db.connection.exec(`CREATE TRIGGER fail_head_update BEFORE UPDATE ON document_revision_heads
       BEGIN SELECT RAISE(ABORT, 'capture failed'); END`);
+    clock = 5 * MINUTE;
     expect(() => title(doc, "Unrecorded edit")).toThrow("capture failed");
+    expect(db.revisions.list(ROOM)[0]!.deadlineAt).toBe(15 * MINUTE);
     db.connection.exec("DROP TRIGGER fail_head_update");
     title(doc, "Another author's edit", claude);
     expect(failures).toHaveLength(1);
@@ -691,6 +761,8 @@ describe("automatic hub revisions", () => {
     expect(db.revisions.name(ROOM, doc, checksum(doc), "Backed up", browser).ok).toBe(true);
     clock = 100;
     title(doc, "Second", claude);
+    clock = 10 * MINUTE + 100;
+    title(doc, "Last edit before backup", claude);
     await db.onStoreDocument({ document: doc, documentName: ROOM });
     const expected = db.revisions.list(ROOM);
     const names = db.revisions.names(ROOM);
@@ -698,7 +770,7 @@ describe("automatic hub revisions", () => {
     const loop = setInterval(() => {}, 10);
     try {
       const backup = await backupDatabase(db.connection, databasePath);
-      clock = 200;
+      clock = 20 * MINUTE + 100;
       title(doc, "After backup");
       await db.onStoreDocument({ document: doc, documentName: ROOM });
       db.close();
@@ -709,7 +781,11 @@ describe("automatic hub revisions", () => {
       expect(restored.revisions.list(ROOM)).toEqual(expected);
       expect(restored.revisions.names(ROOM)).toEqual(names);
       expect(expected.map(row => restored.revisions.getSnapshot(ROOM, row.id))).toEqual(snapshots);
-      expect(getMeta(await load(restored)).title).toBe("Second");
+      expect(getMeta(await load(restored)).title).toBe("Last edit before backup");
+      clock = 25 * MINUTE + 100;
+      expect(restored.revisions.list(ROOM)[0]).toMatchObject({
+        id: expected[0]!.id, startedAt: 100, endedAt: 10 * MINUTE + 100, final: true,
+      });
     } finally {
       clearInterval(loop);
     }
