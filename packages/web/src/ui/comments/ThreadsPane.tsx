@@ -1,3 +1,4 @@
+import { Button } from "../shadcn/button.js";
 /**
  * Each card has one body button with phrasing content; actions sit beside it
  * to avoid nested buttons. Quote marks are CSS. Share focus with editor
@@ -83,7 +84,7 @@ function ThreadCard({
 }): ReactElement {
   return (
     <li id={threadCardId(thread.id)} className="ub-thread-card">
-      <button
+      <Button variant="plain" size="custom"
         type="button"
         // Resolved and orphaned cards keep their labels and collapse state;
         // opacity would also dim their enabled text below its contrast floor.
@@ -128,7 +129,7 @@ function ThreadCard({
             {thread.replyCount} {thread.replyCount === 1 ? "reply" : "replies"}
           </span>
         )}
-      </button>
+      </Button>
       {/*
           * Keep refusal outside the collapsing branch so a concurrent resolve cannot
           * hide it with the form.
@@ -149,17 +150,16 @@ function ThreadCard({
         ) : (
           <div className="ub-thread-actions flex gap-1 pt-[0.3rem] pl-[0.6rem]">
             {!thread.resolved && (
-              <button type="button" className="ub-tool" onClick={onReplyOpen}>
+              <Button variant="tool" size="custom" type="button" onClick={onReplyOpen}>
                 Reply
-              </button>
+              </Button>
             )}
-            <button
+            <Button variant="tool" size="custom"
               type="button"
-              className="ub-tool"
               onClick={() => onResolve(!thread.resolved)}
             >
               {thread.resolved ? "Reopen" : "Resolve"}
-            </button>
+            </Button>
           </div>
         ))}
     </li>

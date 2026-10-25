@@ -226,7 +226,7 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Quiet ‹ › and tag icons beside the revision chip, live and in history. */
+/* Live and revision history controls share one quiet row. */
 .ub-history-nav,
 .ub-history-steps {
   display: inline-flex;
@@ -234,28 +234,7 @@
   align-items: center;
 }
 
-.ub-history-icon {
-  display: inline-grid;
-  width: 26px;
-  height: 26px;
-  flex: none;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted-foreground);
-}
-.ub-history-icon:disabled { opacity: 0.4; }
-.ub-history-icon:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .ub-history-nav { margin: 0; border: 0; padding: 0; min-width: 0; }
-.ub-history-name-trigger { opacity: 0.7; }
-@media (hover: hover) {
-  .ub-history-icon:enabled:hover { background: var(--card-accent); color: var(--foreground); opacity: 1; }
-}
-@media (any-pointer: coarse) {
-  .ub-history-icon { width: 44px; height: 44px; }
-}
 
 /* The revision view's compact header stays above the scrolling comparison. */
 .ub-revision-header {
@@ -357,9 +336,7 @@
 .ub-history-who > svg { flex: none; }
 .ub-history-state:empty { display: none; }
 .ub-history-position { font-family: var(--font-mono); font-size: var(--type-caption-size); white-space: nowrap; }
-.ub-history-tag { flex: none; color: var(--brand-ink); }
-.ub-history-name-trigger .ub-history-tag { color: currentColor; }
-.ub-history-name-trigger[data-named] { color: var(--brand-ink); opacity: 1; }
+.ub-history-tag { flex: none; }
 /* Naming happens in place, in a field the width of a short name. */
 .ub-history-naming {
   display: inline-flex;
@@ -385,27 +362,6 @@
 @media (any-pointer: coarse) {
   .ub-history-name-field { min-height: 44px; }
 }
-.ub-history-rev {
-  flex: none;
-  min-width: 0;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  padding: 0.25rem 0;
-  color: inherit;
-  font: inherit;
-  white-space: nowrap;
-}
-.ub-history-named {
-  display: inline-flex;
-  max-width: 11rem;
-  /* Sits with its tag, as one name. */
-  margin-inline-start: -0.35rem;
-  color: var(--foreground);
-  font-weight: 500;
-}
-.ub-history-rev:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.ub-history-named > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* The sidebar holds Back to now; narrow layouts keep it beside the revision. */
 .ub-history-now { display: none; }
 /* Narrow screens wrap the row rather than hide who made the revision. */
@@ -882,12 +838,9 @@ body {
 
 /* Keep font resets scoped to product selectors: unlayered rules outrank
    every Tailwind utility, including shadcn controls. */
-.ub-mention,
 .ub-tags:not(.ub-tag-picker-trigger),
-.ub-tool,
 .ub-tldr-form textarea,
-.ub-docs-search,
-.ub-docs-open {
+.ub-docs-search {
   font: inherit;
 }
 
@@ -951,19 +904,8 @@ body {
 
 .ub-terminal-toggle,
 .ub-copy,
-.ub-docs-open,
 .ub-title {
   border: 0;
-}
-
-.ub-docs-open {
-  color: inherit;
-}
-
-.ub-docs-open {
-  width: 100%;
-  border-radius: var(--radius-sm);
-  text-align: left;
 }
 
 /* Keep the eight presence choices in one equal-width row. */
@@ -971,19 +913,6 @@ body {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
   gap: 0.25rem;
-}
-
-.ub-swatch {
-  height: 1.2rem;
-  padding: 0;
-  border: var(--border-width-emphasis) solid transparent;
-  border-radius: var(--radius-sm);
-}
-
-/* Selection uses a border visible over every swatch hue, leaving outline
-   available for the browser's keyboard focus ring. */
-.ub-swatch[aria-pressed="true"] {
-  border-color: var(--foreground);
 }
 
 .ub-appearance {
@@ -1029,11 +958,6 @@ body {
     font-size: var(--type-body-size);
     line-height: var(--type-body-leading);
   }
-}
-
-.ub-comment-buttons .ub-tool:disabled,
-.ub-tldr-actions .ub-tool:disabled {
-  opacity: 0.5;
 }
 
 .ub-pane {
@@ -1113,32 +1037,10 @@ body {
   gap: 0.25rem;
 }
 
-.ub-mention,
-.ub-tool {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--secondary);
-  color: var(--secondary-foreground);
-}
-
-.ub-mention {
-  font-size: var(--type-caption-size);
-  line-height: var(--type-caption-leading);
-  padding: 0 0.3rem;
-}
-
 .ub-comment-buttons {
   display: flex;
   justify-content: flex-end;
   gap: 0.25rem;
-}
-
-/* Composer controls on card use its accent; rail controls on background
-   keep secondary. Exclude the submit's emphasis and the closed
-   affordance outside the composer buttons. */
-.ub-composer .ub-mention,
-.ub-composer .ub-comment-buttons .ub-tool:not(.ub-tool-on) {
-  background: var(--card-accent);
 }
 
 .ub-comment-error {
@@ -1207,8 +1109,7 @@ textarea.ub-title {
 
 .ub-title,
 .ub-terminal-toggle,
-.ub-copy,
-.ub-docs-open {
+.ub-copy {
   background: none;
 }
 
@@ -1323,63 +1224,6 @@ textarea.ub-title {
 .ub-document-actions {
   flex: none;
   display: inline-flex;
-}
-
-/* Keep compact paint at the column edge; retain the menu's vertical anchor. */
-.ub-actions-trigger {
-  display: flex;
-  width: 24px;
-  height: 44px;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted-foreground);
-}
-
-.ub-actions-face {
-  display: flex;
-  width: 24px;
-  height: 24px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-}
-
-.ub-actions-trigger[data-state="open"] {
-  color: var(--foreground);
-}
-.ub-actions-trigger[data-state="open"] .ub-actions-face {
-  border-color: var(--border);
-  background: var(--secondary);
-}
-@media (hover: hover) {
-  .ub-actions-trigger:hover { color: var(--foreground); }
-  .ub-actions-trigger:hover .ub-actions-face {
-    border-color: var(--border);
-    background: var(--secondary);
-  }
-}
-@media (any-pointer: coarse) {
-  /* WebKit can give the right edge back to the pane after a viewport resize.
-     Reserve one extra pixel so the live target still spans at least 44px. */
-  .ub-actions-trigger { width: 45px; }
-}
-
-.ub-tool {
-  font-size: var(--type-caption-size);
-  line-height: var(--type-caption-leading);
-  padding: 0.15rem 0.45rem;
-}
-
-.ub-tool-on {
-  background: var(--card-accent);
-  border-color: var(--muted-foreground);
-  color: var(--foreground);
 }
 
 .ub-tldr-form textarea {
@@ -1616,7 +1460,7 @@ h6.ub-heading {
 }
 .ub-block-label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ub-block-actions { display: flex; flex: none; gap: 0.3rem; }
-.ub-block-actions > button,
+.ub-block-actions > button:not([data-slot]),
 .ub-figma-placeholder > button {
   pointer-events: auto;
   position: static;
@@ -1631,13 +1475,12 @@ h6.ub-heading {
   letter-spacing: normal;
   text-align: center;
 }
-.ub-block-actions > button:focus-visible,
+.ub-block-actions > button:not([data-slot]):focus-visible,
 .ub-figma-placeholder > button:focus-visible { color: var(--foreground); }
 @media (hover: hover) {
-  .ub-block-actions > button:hover,
+  .ub-block-actions > button:not([data-slot]):hover,
   .ub-figma-placeholder > button:hover { color: var(--foreground); }
 }
-.ub-code-language-trigger { pointer-events: auto; }
 
 .ub-figma { min-width: 0; max-width: 100%; margin: 0.7em 0; white-space: normal; }
 .ub-figma-caption { white-space: pre-wrap; }
@@ -1679,8 +1522,7 @@ h6.ub-heading {
   .ub-figma-print { display: block; }
 }
 @media (any-pointer: coarse) {
-  .ub-block-actions > button,
-  .ub-block-caption .ub-code-language-trigger { min-width: 2.75rem; min-height: 2.75rem; }
+  .ub-block-actions > button:not([data-slot]) { min-width: 2.75rem; min-height: 2.75rem; }
 }
 
 .ub-quote { font-style: italic; }
@@ -1846,22 +1688,6 @@ h6.ub-heading {
   display: none;
 }
 
-.ub-table-control {
-  position: absolute;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: auto;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--muted-foreground);
-  font: inherit;
-  font-size: var(--type-small-size);
-  line-height: var(--type-small-leading);
-  border-radius: var(--radius-sm);
-}
-
 .ub-table-control span {
   display: flex;
   align-items: center;
@@ -1884,12 +1710,6 @@ h6.ub-heading {
   pointer-events: auto;
 }
 
-.ub-table-handle {
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
-}
-
 /* Quiet outlined pills: horizontal on a column's top border, vertical on a
    row's border. The hit target stays larger than the pill. */
 .ub-table-control.ub-table-handle span {
@@ -1903,13 +1723,6 @@ h6.ub-heading {
 .ub-table-control.ub-table-row-handle span {
   width: 6px;
   height: 20px;
-}
-
-/* A mouse row handle starts at the border, clear of the block gutter button,
-   and centres its pill on that border. */
-.ub-table-controls:not([data-touch="true"]) .ub-table-row-handle {
-  justify-content: flex-start;
-  padding-left: 1px;
 }
 
 .ub-table-control.ub-table-handle:hover span,
@@ -2964,12 +2777,6 @@ h6.ub-heading {
   gap: 0.4rem;
 }
 
-/* Long repair targets wrap within their buttons instead of widening the row. */
-.ub-link-repair .ub-tool {
-  text-align: left;
-  overflow-wrap: anywhere;
-}
-
 .ub-tldr {
   position: relative;
   margin: 0.5rem 0 0.85rem;
@@ -3127,7 +2934,6 @@ h6.ub-heading {
   white-space: nowrap;
 }
 
-.ub-status-sync,
 .ub-status-sync-slot {
   display: inline-flex;
   width: 24px;
@@ -3142,19 +2948,10 @@ h6.ub-heading {
   color: inherit;
   font: inherit;
 }
-.ub-status-sync--code {
-  width: 44px;
-  column-gap: 4px;
-}
 .ub-sync-code-mark {
   color: var(--muted-foreground);
   font-family: var(--font-mono);
   font-size: var(--type-caption-size);
-}
-.ub-status-sync:focus-visible,
-.ub-doc-rev:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
 }
 
 .ub-sync-dot {
@@ -3185,25 +2982,8 @@ h6.ub-heading {
   to { inset: -0.5rem; opacity: 0; }
 }
 
-.ub-status .ub-doc-rev {
-  flex: none;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  padding: 0.25rem 0;
-  color: inherit;
-  font: inherit;
-  white-space: nowrap;
-}
-@media (hover: hover) {
-  .ub-status-sync:hover { background: var(--card-accent); }
-  .ub-doc-rev:hover { color: var(--foreground); }
-}
-
 @media (any-pointer: coarse) {
-  .ub-status-sync,
   .ub-status-sync-slot { width: 44px; height: 44px; }
-  .ub-status .ub-doc-rev { min-height: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3352,14 +3132,14 @@ h6.ub-heading {
   max-width: 100%;
 }
 
-.ub-docs-filter-control {
+.ub-docs-filter-control:not(button) {
   flex: none;
   max-width: 100%;
 }
 
 /* Search and both filters share one height, stroke and radius, with no fill. */
 .ub-docs-search-label,
-.ub-docs-filter-control {
+.ub-docs-filter-control:not(button) {
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
@@ -3408,10 +3188,6 @@ h6.ub-heading {
   font: 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
 }
 
-.ub-docs-tag-filter {
-  max-width: 100%;
-}
-
 .ub-docs-filter-value {
   min-width: 0;
   overflow: hidden;
@@ -3421,7 +3197,6 @@ h6.ub-heading {
 }
 
 @media (hover: hover) {
-  .ub-docs-tag-filter:hover,
   .ub-docs-state-filter:hover {
     border-color: var(--ring);
   }
@@ -3459,27 +3234,6 @@ h6.ub-heading {
 .ub-docs-search-status {
   margin: 0;
   font: 400 var(--type-small-size)/var(--type-small-leading) var(--font-sans);
-}
-
-.ub-docs-clear-tags,
-.ub-docs-clear-filters {
-  min-height: 2rem;
-  padding: 0.4rem;
-  border: 0;
-  background: transparent;
-  color: var(--foreground);
-  font: 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
-  text-decoration: underline;
-}
-
-.ub-docs-clear-tags {
-  width: 100%;
-  border-top: 1px solid var(--border);
-  text-align: left;
-}
-
-.ub-docs-clear-tags:disabled {
-  color: var(--muted-foreground);
 }
 
 .ub-docs-empty {
@@ -3553,13 +3307,6 @@ h6.ub-heading {
 
 .ub-docs-tags-cell {
   padding-block: 0.25rem;
-}
-
-.ub-docs-open {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  padding: 0.4rem;
 }
 
 .ub-docs-title {
@@ -3641,32 +3388,10 @@ h6.ub-heading {
   pointer-events: none;
 }
 
-.ub-docs-tag-chip {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  min-height: 1.5rem;
-  padding: 0.125rem 0.35rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--muted);
-  color: var(--muted-foreground);
-  font: 400 var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
-  white-space: nowrap;
-}
-
-button.ub-docs-tag-chip:hover {
-  color: var(--foreground);
-}
-
 @media (any-pointer: coarse) {
   .ub-docs-tab,
   .ub-docs-search-label,
-  .ub-docs-filter-control,
-  .ub-docs-clear-tags,
-  .ub-docs-clear-filters,
-  .ub-docs-tag-chip {
+  .ub-docs-filter-control:not(button) {
     min-height: 2.75rem;
   }
 }
@@ -3695,14 +3420,6 @@ button.ub-docs-tag-chip:hover {
 /* Native fields need Body size on iPad to avoid focus zoom. The title keeps
    its larger Title metrics; checkbox and radio glyphs have no text value. */
 @media (any-pointer: coarse) {
-  .ub-tool,
-  .ub-mention,
-  .ub-threads-toggle,
-  .ub-appearance-option,
-  .ub-archived-banner button {
-    min-height: 2.75rem;
-  }
-
   input:not(.ub-title, [type="checkbox"], [type="radio"]),
   textarea:not(.ub-title, [hidden]),
   select,

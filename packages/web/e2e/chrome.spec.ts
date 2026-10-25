@@ -1821,7 +1821,7 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
    */
   const probe = (
     toClipEdge: boolean,
-    selector: string,
+    control: Locator,
   ): Promise<{
     liveHeight: number;
     liveWidth: number;
@@ -1830,8 +1830,7 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
     takesOtherControl: boolean;
     scrolled: number;
   }> =>
-    page.evaluate(({ flush, selector }) => {
-      const control = document.querySelector(selector);
+    control.evaluate((control, flush) => {
       const revision = document.querySelector(".ub-doc-rev");
       const title = document.querySelector(".ub-title");
       const pane = document.querySelector(".ub-pane");
@@ -1871,14 +1870,14 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
           Math.round(revisionBox.y + revisionBox.height / 2),
         ),
         takesTheTitle: answers(x, title.getBoundingClientRect().top + 1),
-        takesOtherControl: [...document.querySelectorAll(".ub-actions-trigger")].some((other) => {
+        takesOtherControl: [...document.querySelectorAll('button[aria-label="Copy link"], button[aria-label="Document actions"]')].some((other) => {
           if (other === control) return false;
           const otherBox = other.getBoundingClientRect();
           return answers(otherBox.x + otherBox.width / 2, otherBox.y + otherBox.height / 2);
         }),
         scrolled: pane.scrollTop,
       };
-    }, { flush: toClipEdge, selector });
+    }, toClipEdge);
 
   const expectCompactPaint = async (): Promise<void> => {
     const geometry = await actions.evaluate((control) => {
@@ -1977,8 +1976,9 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
         if (pane !== null) pane.scrollTop = 0;
       });
 
-      for (const selector of [".ub-copy-link-icon", ".ub-document-actions .ub-actions-trigger"]) {
-        const rest = await probe(false, selector);
+      for (const control of [copy, actions]) {
+        const selector = await control.getAttribute("aria-label") ?? "header action";
+        const rest = await probe(false, control);
         expect(rest.liveHeight, selector).toBeGreaterThanOrEqual(floor);
         expect(rest.liveWidth, selector).toBeGreaterThanOrEqual(floor);
         expect(rest.takesTheRevision, selector).toBe(false);
@@ -2037,8 +2037,9 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
       // Then again with the header scrolled up against the clip edge. A
       // measurement taken where the pane could not scroll proves nothing, so the
       // offset it reached is asserted too.
-      for (const selector of [".ub-copy-link-icon", ".ub-document-actions .ub-actions-trigger"]) {
-        const scrolled = await probe(true, selector);
+      for (const control of [copy, actions]) {
+        const selector = await control.getAttribute("aria-label") ?? "header action";
+        const scrolled = await probe(true, control);
         expect(scrolled.scrolled, selector).toBeGreaterThan(0);
         expect(scrolled.liveHeight, selector).toBeGreaterThanOrEqual(floor);
         expect(scrolled.liveWidth, selector).toBeGreaterThanOrEqual(floor);
@@ -2846,7 +2847,7 @@ for (const scheme of ["light"] as const) {
       for (const selector of [".ub-sync-toggle", ".ub-doc-rev"]) {
         await check(page.locator(selector));
       }
-      for (const actions of await page.locator(".ub-actions-trigger").all()) {
+      for (const actions of await page.getByRole("button", { name: "Copy link", exact: true }).or(page.getByRole("button", { name: "Document actions", exact: true })).all()) {
         await check(actions, actions.locator(".ub-actions-face"));
       }
       await check(page.getByRole("button", { name: "Edit tags" }), page.locator(".ub-tag-chevron"));
@@ -2886,7 +2887,7 @@ for (const scheme of ["light"] as const) {
     await contrastDocument(page, scheme, async () => {
       expect(await page.evaluate(() => matchMedia("(hover: hover)").matches)).toBe(true);
       await page.addStyleTag({ content: "* { transition: none !important; }" });
-      for (const control of await page.locator(".ub-sync-toggle, .ub-doc-rev, .ub-actions-trigger, .ub-tag-chevron").all()) {
+      for (const control of await page.locator(".ub-sync-toggle, .ub-doc-rev, .ub-tag-chevron").or(page.getByRole("button", { name: "Copy link", exact: true })).or(page.getByRole("button", { name: "Document actions", exact: true })).all()) {
         await page.mouse.move(1399, 999);
         const before = await controlPaint(control);
         await control.hover();
@@ -3045,7 +3046,7 @@ for (const scheme of ["light", "dark"] as const) {
       const composerGround = await paintedIn(composer, "background-color");
       expect(composerGround).toBe(tokens.card);
       await check(composer.getByRole("button", { name: "Cancel", exact: true }), composerGround);
-      await check(composer.locator(".ub-mention").first(), composerGround);
+      await check(composer.getByRole("button", { name: /^@/ }).first(), composerGround);
       await composer.getByRole("textbox").fill("A comment with neutral submit emphasis.");
       await expectNeutralEmphasis(composer.getByRole("button", { name: "Comment", exact: true }));
       await composer.getByRole("button", { name: "Cancel", exact: true }).click();

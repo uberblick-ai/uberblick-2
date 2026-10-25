@@ -62,9 +62,9 @@ export function HistoryControls({ history, liveDocument = null, writable = false
   useFocusOnReturn(back, history.active);
   if (!history.available) return null;
   return <fieldset className="ub-history-nav" aria-label="Document history">
-    <button ref={back} type="button" className="ub-history-icon" aria-label="Previous revision" title="Previous revision"
-      disabled={history.busy && history.active} onClick={(event) => { rememberLiveHeader(event.currentTarget); history.back(); }}><PreviousIcon /></button>
-    <button type="button" className="ub-history-icon" aria-label="Next revision" title="This is the current version" disabled><NextIcon /></button>
+    <Button variant="history" size="custom" ref={back} type="button" aria-label="Previous revision" title="Previous revision"
+      disabled={history.busy && history.active} onClick={(event) => { rememberLiveHeader(event.currentTarget); history.back(); }}><PreviousIcon /></Button>
+    <Button variant="history" size="custom" type="button" aria-label="Next revision" title="This is the current version" disabled><NextIcon /></Button>
     {!history.active && <RevisionNameControls history={history} liveDocument={liveDocument} writable={writable} />}
   </fieldset>;
 }
@@ -114,21 +114,21 @@ function RevisionStatus({ history, writable }: { history: DocumentHistory; writa
     </span>
     <span role="status" className="ub-history-state">{error ?? (busy ? "Loading…" : "")}</span>
     <span className="ub-history-steps">
-      <button ref={back} type="button" className="ub-history-icon" aria-label="Previous revision" title="Previous revision"
-        disabled={busy || oldest} onClick={() => { focus.current = "back"; history.back(); }}><PreviousIcon /></button>
-      <button ref={forward} type="button" className="ub-history-icon" aria-label="Next revision"
+      <Button variant="history" size="custom" ref={back} type="button" aria-label="Previous revision" title="Previous revision"
+        disabled={busy || oldest} onClick={() => { focus.current = "back"; history.back(); }}><PreviousIcon /></Button>
+      <Button variant="history" size="custom" ref={forward} type="button" aria-label="Next revision"
         title={selection.index === 0 ? "Back to the current version" : "Next revision"} disabled={busy && selection.index > 0}
-        onClick={() => { if (selection.index === 0) history.now(); else { focus.current = "forward"; history.open(selection.index - 1); } }}><NextIcon /></button>
+        onClick={() => { if (selection.index === 0) history.now(); else { focus.current = "forward"; history.open(selection.index - 1); } }}><NextIcon /></Button>
     </span>
     <span className="ub-history-position">{selection.index + 1} of {total} ·</span>
     {/* A named revision shows its name where the id would be; the tag renames it when its namer may. */}
     {entry.name != null && !(writable && entry.name.canManage) && <TagIcon />}
     <RevisionNameControls history={history} liveDocument={null} writable={writable} />
-    <button type="button" className={`ub-history-rev${entry.name != null ? " ub-history-named" : ""}`} aria-label={`Copy revision ${entry.id}`}
+    <Button variant="plain" size="custom" type="button" className={`shrink-0 min-w-0 rounded-(--radius-sm) border-0 bg-transparent px-0 py-1 whitespace-nowrap focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 ub-history-rev${entry.name != null ? " inline-flex max-w-44 -ml-[0.35rem] text-foreground font-medium [&>span]:min-w-0 [&>span]:overflow-hidden [&>span]:text-ellipsis ub-history-named" : " text-inherit"}`} aria-label={`Copy revision ${entry.id}`}
       title={entry.name != null ? `${entry.name.text} · rev ${entry.id.slice(0, 8)}` : `Copy revision ${entry.id}`}
       onClick={() => { void writeToClipboard(entry.id).then((ok) => toast[ok ? "success" : "error"](ok ? "Revision copied" : "Couldn't copy the revision. Try again in a browser with clipboard access.", { id: "clipboard" })); }}>
       {entry.name != null ? <span>{entry.name.text}</span> : <>rev <span className="ub-doc-id">{entry.id.slice(0, 8)}</span></>}
-    </button>
+    </Button>
     <Button variant="secondary" size="sm" className="ub-history-now" onClick={history.now}>Back to now</Button>
   </fieldset>;
 }
@@ -257,8 +257,8 @@ function ChangeNavigation({ pane, header, before, after, rows }: {
     scroller.scrollBy({ top: revealed.top, behavior: reduce ? "auto" : "smooth" });
   };
   return <fieldset className="ub-change-nav" aria-label="Changes">
-    <button type="button" className="ub-history-icon" aria-label="Previous change" title="Previous change" disabled={!state.previous} onClick={() => go(-1)}><UpIcon /></button>
-    <button type="button" className="ub-history-icon" aria-label="Next change" title="Next change" disabled={!state.next} onClick={() => go(1)}><DownIcon /></button>
+    <Button variant="history" size="custom" type="button" aria-label="Previous change" title="Previous change" disabled={!state.previous} onClick={() => go(-1)}><UpIcon /></Button>
+    <Button variant="history" size="custom" type="button" aria-label="Next change" title="Next change" disabled={!state.next} onClick={() => go(1)}><DownIcon /></Button>
   </fieldset>;
 }
 

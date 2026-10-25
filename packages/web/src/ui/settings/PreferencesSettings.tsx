@@ -40,7 +40,8 @@ export function PreferencesSettings({ identity }: { identity: AwarenessUser }): 
       <h2 id="ub-presence-title" className="m-0 ub-type-h2 font-semibold">Presence</h2>
       <p className="m-0 ub-type-ui">How others see you while you edit: {identity.name}</p>
       <fieldset className="ub-swatches m-0 min-w-0 border-0 p-0" aria-label="Presence colour">
-        {AWARENESS_COLORS.map((swatch) => <button key={swatch.hex} type="button" className="ub-swatch [@media(any-pointer:coarse)]:min-h-11"
+        {AWARENESS_COLORS.map((swatch) => <Button variant="plain" size="custom" key={swatch.hex} type="button"
+          className="ub-swatch h-[1.2rem] rounded-(--radius-sm) border-(length:--border-width-emphasis) border-transparent p-0 aria-pressed:border-(--foreground)"
           style={{ background: swatch.hex }} aria-label={swatch.name} aria-pressed={swatch.hex === color}
           onClick={() => setSetting("presenceColor", swatch.hex)} />)}
       </fieldset>

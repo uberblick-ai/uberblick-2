@@ -150,12 +150,12 @@ function ArchivedBanner({
       {(!decision || topicArchived) && (
         <AlertDialog>
           <AlertDialogTrigger asChild>
-            <button
+            <Button variant="plain" size="custom"
               type="button"
               className="min-h-6 min-w-6 rounded-(--radius-sm) bg-transparent px-2 py-1 ub-type-ui text-(--destructive-ink) disabled:opacity-50"
               disabled={onDelete === null}
               aria-describedby={onDelete === null ? "ub-delete-unavailable" : undefined}
-            >{decision ? "Delete topic…" : "Delete…"}</button>
+            >{decision ? "Delete topic…" : "Delete…"}</Button>
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogTitle>{decision ? `Delete topic “${title}”?` : `Delete “${title}”?`}</AlertDialogTitle>
@@ -324,35 +324,33 @@ function TldrCallout({
             )}
             <div className="ub-tldr-actions">
               {tldr !== null && (
-                <button
+                <Button variant="tool" size="custom"
                   type="button"
-                  className="ub-tool"
                   disabled={readOnly}
                   onClick={() => write(null)}
                 >
                   Clear
-                </button>
+                </Button>
               )}
-              <button
+              <Button variant="tool" size="custom"
                 type="button"
-                className="ub-tool"
                 onClick={() => onEditingChange(false)}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button variant="tool" size="custom"
                 type="submit"
-                className="ub-tool ub-tool-on"
+                data-emphasis="true"
                 disabled={readOnly || value.length === 0}
               >
                 Save
-              </button>
+              </Button>
             </div>
           </form>
         ) : (
           <p>
             {readOnly ? tldr : (
-              <button
+              <Button variant="plain" size="custom"
                 type="button"
                 className="block w-full border-0 p-0 bg-transparent text-left [font:inherit] [color:inherit] cursor-text"
                 aria-label="Edit TL;DR"
@@ -362,7 +360,7 @@ function TldrCallout({
                 }}
               >
                 {tldr}
-              </button>
+              </Button>
             )}
           </p>
         )}
@@ -517,10 +515,10 @@ export function StatusLine({
          */}
         {reading.detail === null && peerStrip}
         {historyNav}
-        {revision !== null && <button type="button" className="ub-doc-rev" aria-label={`Copy revision ${revision}`} title={`Copy revision ${revision}`}
+        {revision !== null && <Button variant="plain" size="custom" type="button" className="ub-doc-rev shrink-0 rounded-(--radius-sm) border-0 bg-transparent px-0 py-1 [font:inherit] text-inherit whitespace-nowrap hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2" aria-label={`Copy revision ${revision}`} title={`Copy revision ${revision}`}
           onClick={() => { void writeToClipboard(revision).then((ok) => toast[ok ? "success" : "error"](ok ? "Revision copied" : "Couldn't copy the revision. Try again in a browser with clipboard access.", { id: "clipboard" })); }}>
           rev <span className="ub-doc-id">{revision.slice(0, 8)}</span>
-        </button>}
+        </Button>}
       </div>
     </div>
   );
@@ -571,20 +569,18 @@ function LinkConflictRepair({
             key={`${conflict.index}:${conflict.cell?.row ?? "prose"}:${conflict.cell?.column ?? ""}:${conflict.textIndex}:${conflict.start}:${conflict.end}`}
           >
             <q>{conflict.label}</q>
-            <button
+            <Button variant="tool" size="custom" className="text-left [overflow-wrap:anywhere]"
               type="button"
-              className="ub-tool"
               onClick={() => repair(conflict, "docLink")}
             >
               Keep the document: {name(conflict.docId)}
-            </button>
-            <button
+            </Button>
+            <Button variant="tool" size="custom" className="text-left [overflow-wrap:anywhere]"
               type="button"
-              className="ub-tool"
               onClick={() => repair(conflict, "link")}
             >
               Keep the link: {conflict.href}
-            </button>
+            </Button>
           </li>
         ))}
       </ul>
@@ -986,7 +982,7 @@ export function EditorPane({
     <section className="ub-pane ub-page-pane ub-document-pane" ref={pane}
       inert={historyActive} style={historyActive ? { display: "none" } : undefined}>
       {threads.length > 0 && onToggleThreads !== undefined && (
-        <button
+        <Button variant="plain" size="custom"
           type="button"
           className="ub-threads-toggle ub-pane-threads-toggle hidden max-xl:inline-flex items-center gap-[0.35rem] [font-family:inherit] [font-weight:inherit] ub-type-caption border border-border rounded-full py-[0.1rem] px-[0.55rem] bg-(--card-accent) text-secondary-foreground whitespace-nowrap"
           aria-expanded={threadsOpen}
@@ -994,7 +990,7 @@ export function EditorPane({
           onClick={onToggleThreads}
         >
           Threads <span className="ub-muted">{openThreads}</span>
-        </button>
+        </Button>
       )}
       <div className="ub-column">
         {archived && (

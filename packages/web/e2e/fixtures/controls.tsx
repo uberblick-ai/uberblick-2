@@ -4,7 +4,7 @@ import { Button } from "../../src/ui/shadcn/button.js";
 import { Input } from "../../src/ui/shadcn/input.js";
 import { Textarea } from "../../src/ui/shadcn/textarea.js";
 import "../../src/ui/styles.css";
-import "../../src/ui/tailwind.css";
+import "./controls.css";
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("no fixture root");
@@ -19,6 +19,11 @@ createRoot(root).render(
           </Button>
         )),
       )}
+      <Button variant="plain" size="custom" className="flex w-full justify-start whitespace-normal font-normal">
+        A full width row keeps its own layout
+      </Button>
+      <Button variant="tool" size="custom">Quiet tool</Button>
+      <Button variant="tool" size="custom" data-emphasis="true">Emphasized tool</Button>
     </section>
     <section aria-label="Field recipes" style={{ display: "grid", gap: 8, marginBlock: 16, cursor: "pointer" }}>
       <Input aria-label="Input" defaultValue="Field text" />

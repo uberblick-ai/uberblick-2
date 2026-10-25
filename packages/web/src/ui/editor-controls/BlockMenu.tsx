@@ -20,6 +20,7 @@ import {
 } from "../../editor/block-menu.js";
 import type { BlockMenuEntry, SlashTrigger } from "../../editor/block-menu.js";
 import { findBlockById } from "../../editor/blocks.js";
+import { Button } from "../shadcn/button.js";
 import { useCaretMenuKeys } from "./caret-menu.js";
 import { CaretMenu, useCaretMenuIds } from "./CaretMenu.js";
 import { FigmaDraft } from "./FigmaDraft.js";
@@ -415,7 +416,7 @@ export function BlockMenu({
           * Keep the button mounted for opacity-only reveal, but remove its invisible
           * Tab stop; slash is the keyboard entry route.
        */}
-      <button
+      <Button variant="plain" size="custom"
         type="button"
         ref={gutterButton}
         className={`absolute z-[1] flex items-center justify-center rounded-(--radius-sm) border border-transparent bg-transparent p-0 ub-type-body text-(--muted-foreground) [font-family:inherit] transition-opacity duration-[120ms] ease-out motion-reduce:transition-none ${
@@ -439,7 +440,7 @@ export function BlockMenu({
         }}
       >
         +
-      </button>
+      </Button>
       <CaretMenu
         editor={editor}
         host={host}

@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import type { ReactElement, RefObject } from "react";
+import { Button } from "./shadcn/button.js";
 
 export interface PickerOption {
   id: string;
@@ -45,10 +46,10 @@ export function PickerList({
       aria-label={label}
     >
       {options.map((option) => (
-        <button
+        <Button variant="plain" size="custom"
           key={option.id}
           type="button"
-          className={`${multiple ? "ub-tag-option " : ""}ub-picker-option flex w-full items-center gap-[0.45rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.45rem] py-[0.4rem] text-left text-popover-foreground [font:inherit] hover:bg-accent focus-visible:bg-accent focus-visible:outline-none disabled:opacity-50 [@media(pointer:coarse)]:min-h-11`}
+          className={`${multiple ? "ub-tag-option " : ""}ub-picker-option flex w-full items-center gap-[0.45rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.45rem] py-[0.4rem] text-left text-popover-foreground [font:inherit] hover:bg-accent focus-visible:bg-accent disabled:opacity-50`}
           role="option"
           aria-selected={option.selected}
           disabled={option.disabled}
@@ -87,7 +88,7 @@ export function PickerList({
               {option.detail}
             </span>
           )}
-        </button>
+        </Button>
       ))}
       {options.length === 0 && (
         <p className={`${multiple ? "ub-tag-empty " : ""}ub-picker-empty m-0 px-2 py-[0.65rem] text-muted-foreground`}>

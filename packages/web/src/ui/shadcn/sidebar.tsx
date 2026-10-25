@@ -10,6 +10,7 @@
 import { createContext, useContext } from "react";
 import type { ComponentProps, ReactElement } from "react";
 import { cn } from "./cn.js";
+import { Button } from "./button.js";
 import { Sheet, SheetContent, SheetTitle } from "./sheet.js";
 
 type SidebarState = {
@@ -28,7 +29,7 @@ export function useSidebar(): SidebarState {
   return context;
 }
 
-export const SIDEBAR_TOGGLE_CLASSES = "absolute z-4 size-8 rounded-(--radius-sm) border font-[inherit] [font-size:inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+export const SIDEBAR_TOGGLE_CLASSES = "absolute z-4 size-8 rounded-(--radius-sm) border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
 export function SidebarProvider({
   open,
@@ -146,15 +147,15 @@ export function SidebarMenuItem({ className, ...props }: ComponentProps<"li">): 
   return <li data-slot="sidebar-menu-item" data-sidebar="menu-item" className={cn("group/menu-item relative min-w-0", className)} {...props} />;
 }
 
-/** Native-button default recipe; DropdownMenuTrigger supplies composition. */
+/** Sidebar menu recipe; DropdownMenuTrigger supplies composition. */
 export function SidebarMenuButton({ className, ...props }: ComponentProps<"button">): ReactElement {
   return (
-    <button
+    <Button variant="plain" size="custom"
       type="button"
       data-slot="sidebar-menu-button"
       data-sidebar="menu-button"
       className={cn(
-        "peer/menu-button flex min-h-8 w-full min-w-0 items-center gap-2 rounded-(--radius-sm) p-2 text-left ub-type-ui [@media(any-pointer:coarse)]:min-h-11",
+        "peer/menu-button flex min-h-8 w-full min-w-0 items-center gap-2 rounded-(--radius-sm) p-2 text-left ub-type-ui",
         "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:bg-sidebar-accent active:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sidebar-ring disabled:pointer-events-none disabled:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0",
         className,
       )}

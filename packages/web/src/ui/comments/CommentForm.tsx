@@ -1,3 +1,4 @@
+import { Button } from "../shadcn/button.js";
 /**
  * Enter submits, Shift+Enter inserts a newline and Escape dismisses. Peer
  * chips append plain-text @name from current awareness only; they provide no
@@ -81,10 +82,10 @@ export function CommentForm({
       {mentions.length > 0 && (
         <div className="ub-mentions">
           {mentions.map((name) => (
-            <button
+            <Button variant="plain" size="custom"
               key={name}
               type="button"
-              className="ub-mention"
+              className="rounded-(--radius-sm) border border-(--border) bg-secondary px-[0.3rem] py-0 ub-type-caption text-secondary-foreground in-[.ub-composer]:bg-(--card-accent)"
               // Keep the caret in the field: a chip is a typing shortcut.
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
@@ -93,23 +94,23 @@ export function CommentForm({
               }}
             >
               @{name}
-            </button>
+            </Button>
           ))}
         </div>
       )}
       {error != null && error !== "" && <p className="ub-comment-error">{error}</p>}
       <div className="ub-comment-buttons">
-        <button type="button" className="ub-tool" onClick={onCancel}>
+        <Button variant="tool" size="custom" type="button" onClick={onCancel}>
           Cancel
-        </button>
-        <button
+        </Button>
+        <Button variant="tool" size="custom"
           type="button"
-          className="ub-tool ub-tool-on"
+          data-emphasis="true"
           disabled={body === ""}
           onClick={submit}
         >
           {submitLabel}
-        </button>
+        </Button>
       </div>
     </div>
   );

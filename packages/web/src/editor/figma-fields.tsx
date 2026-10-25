@@ -49,6 +49,7 @@ export function FigmaFields({ url, title, height, onSave, onDone, focusLink = fa
         <Input id={`${fieldId}-height`} value={size} inputMode="numeric" placeholder="480" onChange={(event) => setSize(event.target.value)} onBlur={blur} />
       </label>
       {error !== "" && <p role="alert">{error}</p>}
+      {/* Native form plumbing: hidden submit preserves Enter without a visible control or shared target styling. */}
       <button type="submit" hidden>Done</button>
     </form>
   );

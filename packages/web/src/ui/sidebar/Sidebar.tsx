@@ -32,6 +32,7 @@ import { useDroppable } from "@dnd-kit/react";
 import { SidebarDragProvider, sidebarRowSensors, useSidebarDragInstructions, useSidebarRowClickGuard } from "./sidebar-drag.js";
 import { Sidebar as SidebarFrame, SidebarHeader, SidebarContent as SidebarScrollContent, SidebarFooter, SIDEBAR_TOGGLE_CLASSES, useSidebar } from "../shadcn/sidebar.js";
 import { Input } from "../shadcn/input.js";
+import { Button } from "../shadcn/button.js";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle, AlertDialogTrigger } from "../shadcn/alert-dialog.js";
 import { UserMenu } from "./UserMenu.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
@@ -44,14 +45,12 @@ const FIRST_GROUP_NAME = "Pinned";
 /** What `+ New group` creates, before the reader types over it. */
 const NEW_GROUP_NAME = "New group";
 
-const GROUP_ACTION_CLASSES = "ub-group-act flex-none min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 border-0 bg-transparent rounded-(--radius-sm) px-[0.3rem] py-[0.15rem] font-[inherit] ub-type-caption [font-weight:inherit] [font-style:inherit] text-(--sidebar-muted-foreground) opacity-0 [@media(hover:none)]:opacity-100 [@media(hover:hover)]:[.ub-group-head:hover_&]:opacity-100 [.ub-group-head:focus-within_&]:opacity-100 hover:text-foreground hover:bg-sidebar-accent transition-opacity duration-[120ms] ease-[ease] motion-reduce:transition-none";
+const GROUP_ACTION_CLASSES = "flex-none [@media(any-pointer:coarse)]:min-w-11 rounded-(--radius-sm) px-[0.3rem] py-[0.15rem] ub-type-caption text-(--sidebar-muted-foreground) opacity-0 [@media(hover:none)]:opacity-100 [@media(hover:hover)]:[.ub-group-head:hover_&]:opacity-100 [.ub-group-head:focus-within_&]:opacity-100 hover:text-foreground hover:bg-sidebar-accent transition-opacity duration-[120ms] ease-[ease] motion-reduce:transition-none";
 
 // Both modes share a grid cell; only each mode's middle content scrolls.
 const SIDEBAR_PANE_CLASSES = "ub-sidebar-pane [grid-area:1/1] min-w-0 min-h-0 flex flex-col transition-[transform,opacity] duration-[180ms] ease-[ease] motion-reduce:transition-none motion-reduce:duration-0 [&[inert]]:pointer-events-none [&[inert]_*]:pointer-events-none";
 
-// Native buttons have no preflight reset. Keep their inherited type and focus
-// ring while Tailwind gates hover by the primary input's capability.
-const SIDEBAR_ROW_CLASSES = "flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 items-center gap-2 rounded-(--radius-sm) border border-solid border-transparent bg-transparent px-2 py-1.5 text-left ub-type-ui font-[inherit] text-(--sidebar-row-foreground) enabled:not-aria-disabled:hover:bg-(--sidebar-accent) enabled:not-aria-disabled:hover:text-sidebar-foreground";
+const SIDEBAR_ROW_CLASSES = "flex min-h-8.5 items-center gap-2 rounded-(--radius-sm) border border-solid border-transparent px-2 py-1.5 text-left ub-type-ui text-(--sidebar-row-foreground) enabled:not-aria-disabled:hover:bg-(--sidebar-accent) enabled:not-aria-disabled:hover:text-sidebar-foreground";
 const SIDEBAR_NAV_CLASSES = `${SIDEBAR_ROW_CLASSES} w-full aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium`;
 
 /** Per-group collapse preference, persisted per browser like the sidebar's own. */
@@ -272,7 +271,7 @@ function SidebarContent({
 
   return (
     <>
-      <button
+      <Button variant="plain" size="custom"
         ref={collapseButtonRef}
         type="button"
         className={`${SIDEBAR_TOGGLE_CLASSES} ub-sidebar-toggle ub-sidebar-hide top-2 right-2 [@media(any-pointer:coarse)]:size-11 border-transparent bg-(--sidebar-accent) text-sidebar-foreground`}
@@ -282,7 +281,7 @@ function SidebarContent({
         onClick={onCollapse}
       >
         {drawer ? "×" : "«"}
-      </button>
+      </Button>
       <SidebarDragProvider
         connection={sidebar}
         directory={connection?.ydoc ?? null}
@@ -340,7 +339,7 @@ function SidebarContent({
                 />
             ))}
             <div className="ub-sidebar-create flex min-w-0 gap-1 mt-[0.35rem]">
-              <button
+              <Button variant="plain" size="custom"
                 type="button"
                 className={`${SIDEBAR_ROW_CLASSES} min-w-0 flex-1 whitespace-nowrap disabled:text-(--sidebar-muted-foreground)`}
                 onClick={onCreate}
@@ -352,8 +351,8 @@ function SidebarContent({
                 }
               >
                 + New page
-              </button>
-              <button
+              </Button>
+              <Button variant="plain" size="custom"
                 type="button"
                 className={`ub-group-add ${SIDEBAR_ROW_CLASSES} min-w-0 flex-1 whitespace-nowrap disabled:opacity-50`}
                 onClick={addGroup}
@@ -365,7 +364,7 @@ function SidebarContent({
                 }
               >
                 + New group
-              </button>
+              </Button>
             </div>
           </SidebarScrollContent>
         </nav>
@@ -391,7 +390,7 @@ function SidebarContent({
       </div>
       <SidebarFooter className="border-t border-sidebar-border" aria-hidden={collapsed} inert={collapsed}>
         {workspace !== null && (workspaceAdmin || hubAdmin) && settingsArea !== "workspace" && (
-          <button
+          <Button variant="plain" size="custom"
             type="button"
             className={`ub-settings-entry ${SIDEBAR_ROW_CLASSES} w-full`}
             data-swap-focus
@@ -399,7 +398,7 @@ function SidebarContent({
           >
             <GearIcon />
             Workspace settings
-          </button>
+          </Button>
         )}
         <UserMenu key={settingsOpen ? settingsPage : "documents"} account={account} active={!collapsed}
           onOpenPreferences={() => onOpenSettings("preferences")}
@@ -440,8 +439,8 @@ function SettingsSection({ label, links, page, onSelect }: {
     <p className="ub-nav-label">{label}</p>
     <ul>
       {links.map(({ page: target, label: name, Icon }) => <li key={target}>
-        <button type="button" className={SIDEBAR_NAV_CLASSES} aria-current={page === target ? "page" : undefined}
-          onClick={() => onSelect(target)}><Icon />{name}</button>
+        <Button variant="plain" size="custom" type="button" className={SIDEBAR_NAV_CLASSES} aria-current={page === target ? "page" : undefined}
+          onClick={() => onSelect(target)}><Icon />{name}</Button>
       </li>)}
     </ul>
   </section>;
@@ -477,9 +476,9 @@ function SettingsNavigation({
       inert={!active}
     >
       <SidebarHeader className="pr-12 [@media(any-pointer:coarse)]:pr-15">
-        <button
+        <Button variant="plain" size="custom"
           type="button"
-          className="ub-settings-back flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 w-full items-center gap-2 rounded-(--radius-sm) border border-transparent bg-transparent px-2 py-1.5 text-left ub-type-ui font-[inherit] text-(--sidebar-row-foreground) hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
+          className="ub-settings-back flex min-h-8.5 w-full items-center gap-2 rounded-(--radius-sm) border border-transparent px-2 py-1.5 text-left ub-type-ui text-(--sidebar-row-foreground) hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
           data-swap-focus
           onClick={onBack}
         >
@@ -489,7 +488,7 @@ function SettingsNavigation({
           <span className="min-w-0 truncate">
             {label}
           </span>
-        </button>
+        </Button>
       </SidebarHeader>
       <SidebarScrollContent className="px-2 pb-2 [&>*]:shrink-0">
         {!personal && workspaceAdmin &&
@@ -519,7 +518,7 @@ function Navigation({
       <ul>
         <Soon icon={<DashboardIcon />}>Dashboard</Soon>
         <li>
-          <button
+          <Button variant="plain" size="custom"
             type="button"
             className={`ub-all-open-entry ${SIDEBAR_NAV_CLASSES}`}
             aria-current={allOpen ? "page" : undefined}
@@ -527,7 +526,7 @@ function Navigation({
           >
             <GridIcon />
             All documents
-          </button>
+          </Button>
         </li>
       </ul>
     </section>
@@ -544,15 +543,15 @@ function Soon({
 }): ReactElement {
   return (
     <li>
-      <button
+      <Button variant="plain" size="custom"
         type="button"
-        className="ub-nav-soon flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 w-full items-center gap-2 rounded-(--radius-sm) border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] ub-type-ui text-(--sidebar-muted-foreground)"
+        className="ub-nav-soon flex min-h-8.5 w-full items-center gap-2 rounded-(--radius-sm) border border-transparent px-2 py-1.5 text-left ub-type-ui text-(--sidebar-muted-foreground)"
         aria-disabled="true"
         title="Coming soon"
       >
         {icon}
         <span>{children}</span>
-      </button>
+      </Button>
     </li>
   );
 }
@@ -799,10 +798,10 @@ function GroupSection({
             />
           </form>
         ) : (
-          <button
+          <Button variant="plain" size="custom"
             type="button"
             {...rowClickGuard}
-            className="ub-group-toggle flex flex-1 min-w-0 min-h-6 [@media(any-pointer:coarse)]:min-h-11 items-center gap-1 rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-1 text-left font-[inherit] ub-type-caption font-medium text-(--sidebar-group-label) select-none [-webkit-touch-callout:none] hover:text-sidebar-foreground"
+            className="ub-group-toggle flex flex-1 min-w-0 items-center gap-1 rounded-(--radius-sm) px-[0.4rem] py-1 text-left ub-type-caption font-medium text-(--sidebar-group-label) select-none [-webkit-touch-callout:none] hover:text-sidebar-foreground"
             ref={sortable.handleRef}
             aria-describedby={ydoc === null ? undefined : instructions}
             aria-expanded={!collapsed}
@@ -810,11 +809,11 @@ function GroupSection({
           >
             <Chevron />
             <span className="ub-group-label">{group.name}</span>
-          </button>
+          </Button>
         )}
         {!editing && ydoc !== null && (
           <>
-            <button
+            <Button variant="plain" size="custom"
               type="button"
               className={GROUP_ACTION_CLASSES}
               aria-label={`Rename group ${group.name}`}
@@ -822,9 +821,9 @@ function GroupSection({
               onClick={onEdit}
             >
               <span aria-hidden="true">✎</span>
-            </button>
+            </Button>
             <AlertDialogTrigger asChild>
-              <button
+              <Button variant="plain" size="custom"
                 ref={deleteTrigger}
                 type="button"
                 className={GROUP_ACTION_CLASSES}
@@ -832,7 +831,7 @@ function GroupSection({
                 title="Delete group"
               >
                 <span aria-hidden="true">×</span>
-              </button>
+              </Button>
             </AlertDialogTrigger>
           </>
         )}
@@ -901,14 +900,14 @@ function PinnedRow({ uuid, index, group, entry, selected, onSelect, disabled }: 
   const rowClickGuard = useSidebarRowClickGuard();
   return (
     <li className="ub-pin-row flex items-center data-[drop-target=true]:bg-(--sidebar-accent)" ref={sortable.ref} data-drop-target={sortable.isDropTarget && !sortable.isDragSource}>
-      <button type="button" aria-current={uuid === selected ? "page" : undefined}
+      <Button variant="plain" size="custom" type="button" aria-current={uuid === selected ? "page" : undefined}
         {...rowClickGuard}
-        className="flex flex-1 min-w-0 w-full min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 items-center gap-2 rounded-(--radius-sm) border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] ub-type-ui text-(--sidebar-row-foreground) select-none [-webkit-touch-callout:none] hover:bg-(--sidebar-accent) hover:text-sidebar-foreground aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium"
+        className="flex flex-1 min-w-0 w-full min-h-8.5 items-center gap-2 rounded-(--radius-sm) border border-transparent px-2 py-1.5 text-left ub-type-ui text-(--sidebar-row-foreground) select-none [-webkit-touch-callout:none] hover:bg-(--sidebar-accent) hover:text-sidebar-foreground aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium"
         ref={sortable.handleRef} aria-describedby={disabled ? undefined : instructions}
         onClick={() => onSelect(uuid)} title={pinTitle(uuid, entry)}>
         <DocumentIcon />
         <span className="ub-pin-label"><PinLabel uuid={uuid} entry={entry} /></span>
-      </button>
+      </Button>
     </li>
   );
 }

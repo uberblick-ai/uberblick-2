@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
+import { Button } from "../shadcn/button.js";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../shadcn/tooltip.js";
 
 /** Keep the longest trailing folder suffix that fits; only oversized basenames lose letters. */
@@ -70,9 +71,9 @@ export function CodeCheckPaths({ paths }: { paths: readonly string[] }): ReactEl
       {paths.map((path, index) => <CodeCheckPath key={path} path={path} focusAfterExpansion={index === 0} />)}
     </div> : <div className="flex min-w-0 items-center gap-2">
       <CodeCheckPath path={paths[0] ?? ""} />
-      {paths.length > 1 && <button type="button"
-        className="min-h-6 shrink-0 whitespace-nowrap border-0 bg-transparent p-0 font-sans text-foreground underline [@media(any-pointer:coarse)]:min-h-11"
-        onClick={() => setExpanded(true)}>+{paths.length - 1} more</button>}
+      {paths.length > 1 && <Button variant="plain" size="custom" type="button"
+        className="shrink-0 whitespace-nowrap border-0 bg-transparent p-0 font-sans text-foreground underline"
+        onClick={() => setExpanded(true)}>+{paths.length - 1} more</Button>}
     </div>}
   </TooltipProvider>;
 }

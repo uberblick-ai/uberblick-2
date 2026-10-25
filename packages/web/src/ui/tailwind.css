@@ -95,13 +95,15 @@
   }
 
   /*
-   * Reset only vendored native buttons. Keep the reset layered so existing
-   * unlayered product button styles still win with asChild composition.
+   * Shared React buttons inherit type and fine-pointer floors here, below
+   * caller utilities. DOM-built editor controls retain their own styles.
    */
   button[data-slot] {
     border: 0;
     background: none;
     color: inherit;
+    min-height: 1.5rem;
+    min-width: 1.5rem;
   }
 }
 

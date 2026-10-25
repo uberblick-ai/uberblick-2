@@ -11,11 +11,17 @@ import { TOPIC_STATES } from "../ui/document/decision-state.js";
 import { formatTimestamp, useTimestampClock } from "../ui/timestamps.js";
 import { PickerList } from "../ui/PickerList.js";
 import { useTagCatalog } from "../ui/tags.js";
+import { Button } from "../ui/shadcn/button.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/shadcn/popover.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/shadcn/tabs.js";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/shadcn/tooltip.js";
 import { documentSearchRows, rankDocumentSearchRows, usableDocumentStamp, useDocumentSearch } from "./document-search-results.js";
 import type { DocumentSearchSource } from "./document-search-results.js";
+
+// Measuring spans use the same recipe and target floor as the visible chips.
+export const DOCUMENT_TAG_CHIP = "ub-docs-tag-chip box-border inline-flex min-h-6 min-w-6 flex-none items-center justify-center rounded-(--radius-sm) border border-(--border) bg-(--muted) px-[0.35rem] py-[0.125rem] text-(--muted-foreground) font-(family-name:--font-sans) ub-type-caption font-normal whitespace-nowrap hover:text-(--foreground) [@media(any-pointer:coarse)]:min-h-11";
+const FILTER_CONTROL = "ub-docs-tag-filter box-border inline-flex min-h-8 max-w-full flex-none items-center gap-[0.375rem] rounded-(--radius-sm) border border-(--input) bg-transparent px-[0.625rem] py-0 text-(--muted-foreground) font-(family-name:--font-sans) ub-type-ui font-normal hover:border-(--ring)";
+const CLEAR_FILTERS = "min-h-8 bg-transparent p-[0.4rem] text-(--foreground) font-(family-name:--font-sans) ub-type-ui font-normal underline";
 
 /** The two sortable columns, in their visual order. */
 const ORDERS = ["title", "changed"] as const;
@@ -188,9 +194,9 @@ function TagFilter({
   return (
     <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery(""); }}>
       <PopoverTrigger asChild>
-        <button type="button" className="ub-docs-tag-filter ub-docs-filter-control" aria-label="Filter by tags" aria-haspopup="listbox" aria-controls={open ? listId : undefined}>
+        <Button variant="plain" size="custom" type="button" className={FILTER_CONTROL} aria-label="Filter by tags" aria-haspopup="listbox" aria-controls={open ? listId : undefined}>
           Tag <span className="ub-docs-filter-value">{labels.length === 0 ? "Any" : labels.join(", ")}</span><FilterChevron />
-        </button>
+        </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="ub-docs-tag-picker p-0">
         {showSearch && <label className="block border-b border-border p-2">
@@ -198,7 +204,7 @@ function TagFilter({
           <input type="search" className="w-full rounded-(--radius-sm) border border-border bg-transparent px-2 py-1 [font:inherit]" placeholder="Find tags" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
         </label>}
         <PickerList id={listId} label="Tags" multiple options={options.filter((tag) => needle === "" || tag.name.toLowerCase().includes(needle)).map((tag) => ({ id: tag.id, label: tag.name, selected: selected.includes(tag.id) }))} onPick={(id) => onChange(selected.includes(id) ? selected.filter((tag) => tag !== id) : [...selected, id])} empty={needle === "" ? "No tags." : "No tags match."} />
-        <button type="button" className="ub-docs-clear-tags" disabled={selected.length === 0} onClick={() => onChange([])}>Clear tags</button>
+        <Button variant="plain" size="custom" type="button" className={`ub-docs-clear-tags ${CLEAR_FILTERS} w-full border-t border-t-(--border) text-left disabled:text-(--muted-foreground)`} disabled={selected.length === 0} onClick={() => onChange([])}>Clear tags</Button>
       </PopoverContent>
     </Popover>
   );
@@ -242,19 +248,19 @@ function RowTags({ tags, title, onPick }: { tags: readonly TagCatalogEntry[]; ti
   return (
     <div ref={container} className="ub-docs-tags">
       <div ref={measure} aria-hidden="true" className="ub-docs-tag-measure">
-        {tags.map((tag) => <span key={tag.id} className="ub-docs-tag-chip">{tagLabel(tag)}</span>)}
-        <span className="ub-docs-tag-chip">+{tags.length}</span>
+        {tags.map((tag) => <span key={tag.id} className={DOCUMENT_TAG_CHIP}>{tagLabel(tag)}</span>)}
+        <span className={DOCUMENT_TAG_CHIP}>+{tags.length}</span>
       </div>
-      {tags.slice(0, shown).map((tag) => <button key={tag.id} type="button" className="ub-docs-tag-chip" onClick={() => onPick(tag.id)}>{tagLabel(tag)}</button>)}
+      {tags.slice(0, shown).map((tag) => <Button variant="plain" size="custom" key={tag.id} type="button" className={DOCUMENT_TAG_CHIP} onClick={() => onPick(tag.id)}>{tagLabel(tag)}</Button>)}
       {shown < tags.length && <Popover open={open} onOpenChange={setOpen}>
         <TooltipProvider><Tooltip>
           <TooltipTrigger asChild><PopoverTrigger asChild>
-            <button type="button" className="ub-docs-tag-chip" aria-label={`Show all tags for ${title === "" ? "Untitled" : title}`}>+{tags.length - shown}</button>
+            <Button variant="plain" size="custom" type="button" className={DOCUMENT_TAG_CHIP} aria-label={`Show all tags for ${title === "" ? "Untitled" : title}`}>+{tags.length - shown}</Button>
           </PopoverTrigger></TooltipTrigger>
           {!open && <TooltipContent>{tags.map(tagLabel).join(", ")}</TooltipContent>}
         </Tooltip></TooltipProvider>
         <PopoverContent align="start" className="flex flex-wrap gap-1" aria-label={`All tags for ${title === "" ? "Untitled" : title}`}>
-          {tags.map((tag) => <button key={tag.id} type="button" className="ub-docs-tag-chip" onClick={() => { onPick(tag.id); setOpen(false); }}>{tagLabel(tag)}</button>)}
+          {tags.map((tag) => <Button variant="plain" size="custom" key={tag.id} type="button" className={DOCUMENT_TAG_CHIP} onClick={() => { onPick(tag.id); setOpen(false); }}>{tagLabel(tag)}</Button>)}
         </PopoverContent>
       </Popover>}
     </div>
@@ -419,9 +425,9 @@ export function DocumentList({
                   className={`ub-docs-heading-cell ub-docs-heading-cell--${option}`}
                   aria-sort={!(searchText !== "" && relevance) && option === sort.order ? sort.direction : undefined}
                 >
-                  <button
+                  <Button variant="plain" size="custom"
                     type="button"
-                    className={`ub-docs-sort flex min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 w-full items-center gap-[0.3rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-1 [font:inherit] text-inherit hover:bg-(--accent) hover:text-(--accent-foreground) ${option === "changed" ? "justify-end" : ""}`}
+                    className={`ub-docs-sort flex [@media(any-pointer:coarse)]:min-w-11 w-full items-center gap-[0.3rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-1 [font:inherit] text-inherit hover:bg-(--accent) hover:text-(--accent-foreground) ${option === "changed" ? "justify-end" : ""}`}
                     onClick={() =>
                       updateState({ relevance: false, sort:
                         sort.order === option && !(searchText !== "" && relevance)
@@ -442,7 +448,7 @@ export function DocumentList({
                         {sort.direction === "ascending" ? "↑" : "↓"}
                       </span>
                     )}
-                  </button>
+                  </Button>
                 </th>
               ))}
               <th scope="col" className="ub-docs-heading-cell">
@@ -457,7 +463,7 @@ export function DocumentList({
                   <p className="ub-muted ub-docs-empty" role={searchUnavailable || searchPending ? "status" : undefined}>
                     {searchUnavailable ? `Search is unavailable.${status.synced ? "" : " The directory covers only documents synced so far."}` : searchPending ? "Searching…" : emptyMessage}
                   </p>
-                  {hasFilters && !searchPending && <button type="button" className="ub-docs-clear-filters" onClick={() => updateState({ query: "", selectedTags: [], mode: "working", stateFilter: "all", relevance: false })}>Clear filters</button>}
+                  {hasFilters && !searchPending && <Button variant="plain" size="custom" type="button" className={`ub-docs-clear-filters ${CLEAR_FILTERS}`} onClick={() => updateState({ query: "", selectedTags: [], mode: "working", stateFilter: "all", relevance: false })}>Clear filters</Button>}
                 </td>
               </tr>
             ) : (
@@ -467,9 +473,9 @@ export function DocumentList({
                   className="ub-docs-row hover:bg-(--accent) hover:text-(--accent-foreground)"
                 >
                   <th scope="row" className="ub-docs-title-cell">
-                    <button
+                    <Button variant="plain" size="custom"
                       type="button"
-                      className={`ub-docs-open min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11`}
+                      className="ub-docs-open flex w-full items-baseline rounded-(--radius-sm) gap-2 border-0 bg-transparent p-[0.4rem] text-left text-inherit [font:inherit] [@media(any-pointer:coarse)]:min-w-11"
                       onClick={() => onSelect(entry.uuid)}
                       title={entry.uuid}
                     >
@@ -480,7 +486,7 @@ export function DocumentList({
                           answer, detailed state and comments live on the topic
                           page, and the state filter above narrows by state. */}
                       {entry.topicState === undefined && <LifecycleBadge kind={entry.kind} />}
-                    </button>
+                    </Button>
                   </th>
                   {/* Decision records never sit in sidebar groups, so topics
                       use this column for their latest stage instead. */}
@@ -498,9 +504,9 @@ export function DocumentList({
                       the long tail gets pinned from. The mark carries the state
                       and the row never changes width. */}
                   <td className="ub-docs-pin-cell">
-                    <button
+                    <Button variant="plain" size="custom"
                       type="button"
-                      className="ub-docs-pin min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 rounded-(--radius-sm) border-0 bg-transparent p-1 font-[inherit] text-(--muted-foreground) opacity-0 [@media(hover:none)]:opacity-100 [@media(hover:hover)]:[.ub-docs-row:hover_&]:opacity-100 [.ub-docs-row:focus-within_&]:opacity-100 aria-pressed:opacity-100 hover:text-(--foreground)"
+                      className="ub-docs-pin [@media(any-pointer:coarse)]:min-w-11 rounded-(--radius-sm) border-0 bg-transparent p-1 font-[inherit] text-(--muted-foreground) opacity-0 [@media(hover:none)]:opacity-100 [@media(hover:hover)]:[.ub-docs-row:hover_&]:opacity-100 [.ub-docs-row:focus-within_&]:opacity-100 aria-pressed:opacity-100 hover:text-(--foreground)"
                       disabled={onTogglePin === null}
                       aria-describedby={onTogglePin === null ? pinUnavailableId : undefined}
                       aria-pressed={entry.pinned}
@@ -517,7 +523,7 @@ export function DocumentList({
                       onClick={() => onTogglePin?.(entry.uuid)}
                     >
                       <PinIcon active={entry.pinned} />
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               ))

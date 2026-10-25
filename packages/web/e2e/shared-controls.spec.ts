@@ -119,6 +119,15 @@ async function focusFromKeyboard(page: Page, control: Locator): Promise<string[]
   });
 }
 
+test("custom rows keep their left alignment, wrapping and normal weight", async ({ browser }) => {
+  const page = await openFixture(browser, false, 1280);
+  const row = page.getByRole("button", { name: "A full width row keeps its own layout", exact: true });
+  await expect(row).toHaveCSS("display", "flex");
+  await expect(row).toHaveCSS("justify-content", "flex-start");
+  await expect(row).toHaveCSS("white-space", "normal");
+  await expect(row).toHaveCSS("font-weight", "400");
+});
+
 test("regular and invalid controls keep the browser's keyboard outline", async ({ browser }) => {
   const page = await openFixture(browser, false, 1280);
   const destructive = await page.evaluate(() => {
