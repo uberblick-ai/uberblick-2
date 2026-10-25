@@ -4,12 +4,13 @@ import type { Editor, NodeViewRenderer, NodeViewRendererProps } from "@tiptap/co
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { AllSelection, Selection } from "@tiptap/pm/state";
 import type { NodeView } from "@tiptap/pm/view";
-import type { TextStyle } from "@uberblick/ablauf";
+import type { Diagnostic, FontOptions, TextStyle } from "@uberblick/ablauf";
 import {
   blockCaption, carriesComment, chromeFilters, codeBlockChrome, lazyRenderer, openSource,
   selectedBlock, showDiagnostics, showFailure, sourceButton, sourceEditingPlugin,
 } from "./source-chrome.js";
 import { openAblaufViewer } from "./ablauf-viewer.js";
+import type { AblaufComparison, AblaufDrawing } from "./ablauf-viewer.js";
 import rendererUrl from "./ablauf-renderer-url.js";
 import { DRAW_ATTRIBUTES, dataRevision, recordDraw } from "./render-state.js";
 
@@ -45,11 +46,33 @@ function languageCaption(): HTMLElement {
   return caption;
 }
 
-export function ablaufBlockView(): NodeViewRenderer {
-  return ablaufNodeView;
+export function ablaufBlockView(comparison?: { source: string; side: "before" | "after" }): NodeViewRenderer {
+  return (props) => ablaufNodeView(props, comparison);
 }
 
-function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps): NodeView {
+function renderDrawing(text: string, idPrefix: string, mono: FontOptions): AblaufDrawing & { diagnostics: Diagnostic[] } {
+  const renderer = renderers.current();
+  if (renderer === null) throw new Error("Renderer is unavailable");
+  const result = renderer.render(text, { idPrefix, fonts: { mono } });
+  // Source-derived text and attributes are escaped by the renderer. Parse
+  // as SVG, then adopt its nodes; never interpret the source as HTML.
+  const parsed = new DOMParser().parseFromString(result.svg, "image/svg+xml");
+  const svg = parsed.documentElement;
+  if (svg.localName !== "svg") throw new Error("Renderer returned invalid SVG");
+  const width = Number(svg.getAttribute("width"));
+  const height = Number(svg.getAttribute("height"));
+  if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) throw new Error("Renderer returned invalid dimensions");
+  const hostStyle = document.createElement("style");
+  // Fan-out ignores fonts options. Its mono role still uses the host face.
+  hostStyle.textContent = '.ab { display: block; width: 100%; height: auto; background: var(--ab-bg); } .ab .m, .ab .cap { font-family: var(--font-mono); }';
+  const drawing = document.createElement("div");
+  drawing.className = "ub-ablauf-drawing";
+  drawing.attachShadow({ mode: "open" }).replaceChildren(document.importNode(svg, true), hostStyle);
+  return { drawing, width, height, diagnostics: result.diagnostics };
+}
+
+function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
+  comparison?: { source: string; side: "before" | "after" }): NodeView {
   let current: PMNode = node;
   let pending: ReturnType<typeof setTimeout> | null = null;
   let destroyed = false;
@@ -97,9 +120,19 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps): NodeVi
     const fullDrawing = document.createElement("div");
     fullDrawing.className = "ub-ablauf-drawing";
     fullDrawing.attachShadow({ mode: "open" }).replaceChildren(...Array.from(shadow.childNodes, (child) => child.cloneNode(true)));
+    let compared: AblaufComparison | undefined;
+    if (comparison !== undefined) {
+      try {
+        const other = renderDrawing(comparison.source, `${idPrefix}-other`, { family: monoFamily(), measureText });
+        compared = { side: comparison.side, other: { ...other, source: () => comparison.source } };
+      } catch {
+        // A state without a drawing has no visual counterpart to switch to.
+      }
+    }
     viewer = openAblaufViewer({
       drawing: fullDrawing, width: naturalWidth, height: naturalHeight,
       source: () => current.textContent, editable: editor.isEditable, openSource: showSource, returnFocus: viewport,
+      ...(compared === undefined ? {} : { comparison: compared }),
     });
   };
   expand.addEventListener("mousedown", (event) => event.preventDefault());
@@ -156,21 +189,9 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps): NodeVi
       return;
     }
     try {
-      const result = renderer.render(current.textContent, {
-        idPrefix, fonts: { mono: { family: monoFamily(), measureText } },
-      });
-      // Source-derived text and attributes are escaped by the renderer. Parse
-      // as SVG, then adopt its nodes; never interpret the source as HTML.
-      const parsed = new DOMParser().parseFromString(result.svg, "image/svg+xml");
-      const svg = parsed.documentElement;
-      if (svg.localName !== "svg") throw new Error("Renderer returned invalid SVG");
-      const width = Number(svg.getAttribute("width"));
-      const height = Number(svg.getAttribute("height"));
-      if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) throw new Error("Renderer returned invalid dimensions");
-      const hostStyle = document.createElement("style");
-      // Fan-out ignores fonts options. Its mono role still uses the host face.
-      hostStyle.textContent = '.ab { display: block; width: 100%; height: auto; background: var(--ab-bg); } .ab .m, .ab .cap { font-family: var(--font-mono); }';
-      shadow.replaceChildren(document.importNode(svg, true), hostStyle);
+      const result = renderDrawing(current.textContent, idPrefix, { family: monoFamily(), measureText });
+      const { width, height } = result;
+      shadow.replaceChildren(...Array.from(result.drawing.shadowRoot?.childNodes ?? []));
       naturalWidth = width;
       naturalHeight = height;
       panel.style.width = `min(100%, ${width}px)`;
