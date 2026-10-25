@@ -29,6 +29,7 @@ import { ablaufBlockView } from "./ablauf.js";
 import { jsonTreeBlockView } from "./json-tree.js";
 import { Card, CardParts } from "./card.js";
 import { Figma, FigmaCaption } from "./figma.js";
+import { Callout } from "./callout.js";
 
 /**
  * BlockIds assigns null ids. y-prosemirror skips null attributes, so a transient
@@ -357,6 +358,7 @@ export const paletteExtensions = [
   CodeBlock,
   ListItem,
   Quote,
+  Callout,
   TableNodes,
   Terminal,
   ChartBlock,

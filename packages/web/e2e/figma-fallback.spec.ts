@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { expect, test } from "@playwright/test";
-import { appendBlock, findBlockElement, getMeta, roomForDoc } from "@uberblick/schema";
+import {
+  appendBlock, createAnnotation, findBlockElement, getBlockInline, getMeta,
+  listAnnotationRanges, roomForDoc,
+} from "@uberblick/schema";
 import { wrapToken } from "@uberblick/schema/protocol";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import * as Y from "yjs";
@@ -124,11 +127,11 @@ test("an unsupported Figma shape still names the block and makes the document re
 });
 
 for (const arrivesWhileBound of [false, true]) {
-  test(`a callout ${arrivesWhileBound ? "arriving during editing" : "already stored"} preserves its attributes and text in the read-only fallback`, async ({ browser }) => {
+  test(`callouts ${arrivesWhileBound ? "arriving during editing" : "already stored"} stay editable and preserve stored attributes, prose and comments`, async ({ browser }) => {
     if (agent === null) throw new Error("e2e: the MCP agent is not configured");
-    const writer = agent.open({ name: "callout-fallback-e2e" });
+    const writer = agent.open({ name: "callout-compatibility-e2e" });
     const created = await writer.call<StoredDoc>("create_doc", {
-      title: docTitle("Callout safety"), description: "Callouts stay intact until their editor is supported.",
+      title: docTitle("Callout safety"), description: "Body edits retain known, unknown and absent callout attributes.",
       blocks: [{ type: "paragraph", text: "Context stays intact." }],
     });
     const doc = new Y.Doc();
@@ -145,32 +148,62 @@ for (const arrivesWhileBound of [false, true]) {
       const page = arrivesWhileBound
         ? await openApp(browser, `/${harness().workspace}/${created.uuid}`, { upstream: true }) : null;
       if (page !== null) await expect(editor(page)).toHaveAttribute("contenteditable", "true");
-      const id = appendBlock(doc, { type: "callout", variant: "warning", icon: "🚀", inline: [
-        { text: "Keep this ", marks: {} }, { text: "warning", marks: { bold: true } },
-      ] });
-      const block = findBlockElement(doc, id);
-      if (block === null) throw new Error("e2e: the callout fixture is missing");
-      const stored = block.toString();
-      await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: created.uuid }), read => {
-        expect(read.blocks[1]).toMatchObject({ id, type: "callout", variant: "warning", icon: "🚀", text: "Keep this warning" });
+      const fixtures = [
+        { attrs: { variant: "warning", icon: "🚀" }, label: "Warning" },
+        { attrs: { variant: "future-variant", icon: ":future:" }, label: "Note" },
+        { attrs: {}, label: "Note" },
+      ].map(({ attrs, label }) => {
+        const id = appendBlock(doc, { type: "callout", variant: "warning", icon: "🚀", inline: [
+          { text: "Keep this ", marks: {} }, { text: "warning", marks: { bold: true } }, { text: ".", marks: {} },
+        ] });
+        const block = findBlockElement(doc, id);
+        if (block === null) throw new Error("e2e: the callout fixture is missing");
+        block.removeAttribute("variant");
+        block.removeAttribute("icon");
+        for (const [name, value] of Object.entries(attrs)) block.setAttribute(name, value);
+        const thread = createAnnotation(doc, id, 10, 17, "Reader", "Keep this warning");
+        return { id, block, label, attrs: block.getAttributes(), thread,
+          inline: getBlockInline(doc, id), anchors: listAnnotationRanges(doc, id) };
       });
       const browserPage = page ?? await openApp(browser, `/${harness().workspace}/${created.uuid}`, { upstream: true });
-      const fallback = browserPage.locator(".ub-foreign");
-      await expect(fallback.locator(".ub-foreign-banner")).toContainText("unsupported type (callout)");
-      await expect(fallback).toContainText("Keep this warning");
-      await expect(editor(browserPage)).toHaveCount(0);
-      await expect(browserPage.locator('[contenteditable="true"]')).toHaveCount(0);
+      await expect(editor(browserPage)).toHaveAttribute("contenteditable", "true");
+      await expect(browserPage.locator(".ub-foreign")).toHaveCount(0);
       await proveBrowserArrival(browserPage, { path: "upstream", readTags: () => getMeta(doc).tags });
-      expect(findBlockElement(doc, id)).toBe(block);
-      expect(block.toString()).toBe(stored);
+      for (const fixture of fixtures) {
+        const callout = browserPage.locator(`.ub-callout[id="${fixture.id}"]`);
+        await expect(callout).toHaveAttribute("role", "note");
+        await expect(callout).toHaveAccessibleName(fixture.label);
+        const body = callout.locator(".ub-callout-body");
+        await expect(body.locator("strong")).toHaveText("warning");
+        await expect(body.locator(`[data-comment-thread="${fixture.thread.id}"]`)).toHaveText("warning");
+        expect(findBlockElement(doc, fixture.id)).toBe(fixture.block);
+        expect(fixture.block.getAttributes()).toEqual(fixture.attrs);
+        expect(getBlockInline(doc, fixture.id)).toEqual(fixture.inline);
+        expect(listAnnotationRanges(doc, fixture.id)).toEqual(fixture.anchors);
+
+        await body.click();
+        await browserPage.keyboard.press("End");
+        await browserPage.keyboard.insertText(" edited");
+        await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: created.uuid }), read => {
+          expect(read.blocks.find(block => block.id === fixture.id)?.text).toBe("Keep this warning. edited");
+        });
+        await expect.poll(() => getBlockInline(doc, fixture.id)).toEqual([
+          ...fixture.inline.slice(0, -1), { text: ". edited", marks: {} },
+        ]);
+        expect(findBlockElement(doc, fixture.id)).toBe(fixture.block);
+        expect(fixture.block.nodeName).toBe("callout");
+        expect(fixture.block.getAttributes()).toEqual(fixture.attrs);
+        expect(listAnnotationRanges(doc, fixture.id)).toEqual(fixture.anchors);
+      }
       await browserPage.reload();
-      await expect(fallback).toContainText("Keep this warning");
-      await expect(editor(browserPage)).toHaveCount(0);
+      await expect(editor(browserPage)).toHaveAttribute("contenteditable", "true");
       await proveMcpArrival(browserPage, writer, created.uuid, { path: "upstream" });
-      await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: created.uuid }), read => {
-        expect(read.blocks[1]).toMatchObject({ id, type: "callout", variant: "warning", icon: "🚀", text: "Keep this warning" });
-      });
-      expect(block.toString()).toBe(stored);
+      for (const fixture of fixtures) {
+        await expect(browserPage.locator(`.ub-callout[id="${fixture.id}"] .ub-callout-body`)).toHaveText("Keep this warning. edited");
+        expect(findBlockElement(doc, fixture.id)).toBe(fixture.block);
+        expect(fixture.block.getAttributes()).toEqual(fixture.attrs);
+        expect(listAnnotationRanges(doc, fixture.id)).toEqual(fixture.anchors);
+      }
     } finally { provider.destroy(); doc.destroy(); }
   });
 }

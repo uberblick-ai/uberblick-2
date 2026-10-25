@@ -34,6 +34,69 @@ function texts(content: JSONContent, mark: "removed" | "revisionAdded"): string[
 const top = (content: JSONContent): string[] => (content.content ?? []).map((node) => node.type ?? "");
 
 describe("the side-by-side revision model", () => {
+  it.each([
+    { field: "variant", options: { variant: "tip" as const }, afterLabel: "Tip", afterIcon: "💡" },
+    { field: "icon", options: { icon: ":claude:" }, afterLabel: "Note", afterIcon: null },
+  ])("keeps the old and new callout appearances for a changed $field", ({ field, options, afterLabel, afterIcon }) => {
+    const before = doc();
+    const id = appendBlock(before, { type: "callout", variant: "note", icon: "💡", text: "Unchanged body" });
+    const after = clone(before);
+    editBlock(after, id, "Unchanged body", "Unchanged body", options);
+    const left = document.body.appendChild(document.createElement("div"));
+    const right = document.body.appendChild(document.createElement("div"));
+    const split = createRevisionSplit({ beforeElement: left, afterElement: right, before, after });
+    try {
+      expect(split.model.rows[0]).toMatchObject({ kind: "changed", changed: true,
+        before: { labels: [`Changed: ${field}`] }, after: { labels: [`Changed: ${field}`] } });
+      for (const [element, label, icon] of [[left, "Note", "💡"], [right, afterLabel, afterIcon]] as const) {
+        const callout = element.querySelector('[role="note"]');
+        expect(callout?.getAttribute("aria-label")).toBe(label);
+        expect(callout?.querySelector(".ub-block-caption")?.textContent).toContain(label);
+        if (icon === null) expect(callout?.querySelector(".ub-block-caption .ub-inline-icon")).not.toBeNull();
+        else expect(callout?.querySelector(".ub-block-caption")?.textContent).toContain(icon);
+        expect(callout?.querySelector(".ub-callout-body")?.textContent).toBe("Unchanged body");
+        expect(callout?.querySelector("[data-revision-change]")).toBeNull();
+        expect(element.querySelector(".ub-revision-fields")?.textContent).toBe(`Changed: ${field}`);
+      }
+    } finally { split.destroy(); }
+  });
+
+  it.each(["quote", "callout"] as const)("marks callout body changes per side after a %s and copies only authored prose", (type) => {
+    const before = doc();
+    const id = appendBlock(before, type === "quote" ? { type, text: "The amber fox stays." }
+      : { type, variant: "note", text: "The amber fox stays." });
+    const after = clone(before);
+    if (type === "quote") {
+      const fragment = getBlocksFragment(after);
+      const old = fragment.get(0) as Y.XmlElement;
+      const callout = new Y.XmlElement("callout");
+      callout.setAttribute("id", id);
+      callout.setAttribute("variant", "note");
+      callout.insert(0, [(old.firstChild as Y.XmlText).clone()]);
+      after.transact(() => { fragment.delete(0, 1); fragment.insert(0, [callout]); });
+    }
+    editBlock(after, id, "The amber fox stays.", "The blue fox stays.");
+    const left = document.body.appendChild(document.createElement("div"));
+    const right = document.body.appendChild(document.createElement("div"));
+    const split = createRevisionSplit({ beforeElement: left, afterElement: right, before, after });
+    try {
+      expect(texts(split.model.before, "removed")).toEqual(["amber"]);
+      expect(texts(split.model.after, "revisionAdded")).toEqual(["blue"]);
+      expect(texts(split.model.before, "revisionAdded")).toEqual([]);
+      expect(texts(split.model.after, "removed")).toEqual([]);
+      expect(right.querySelector('[role="note"]')?.getAttribute("aria-label")).toBe("Note");
+      expect(left.querySelector(type === "quote" ? ".ub-quote" : '[role="note"]')).not.toBeNull();
+      for (const [editor, text] of [[split.before, "The amber fox stays."], [split.after, "The blue fox stays."]] as const) {
+        editor.commands.selectAll();
+        const copied = editor.view.serializeForClipboard(editor.state.selection.content());
+        expect(copied.text).toBe(text);
+        expect(copied.dom.textContent).toBe(text);
+        expect(copied.dom.querySelector(".ub-block-caption, [data-revision-change]")).toBeNull();
+        expect(DOMParser.fromSchema(uberblickSchema).parse(copied.dom).textContent).toBe(text);
+      }
+    } finally { split.destroy(); }
+  });
+
   it("pairs rows, fills the empty side, and marks each side's own words only", () => {
     const before = doc();
     const fox = appendBlock(before, { type: "paragraph", text: "The amber fox stays." });

@@ -486,9 +486,9 @@ describe("the fallback offers the person the choice, and takes only that write",
 
   it("stays in the fallback while another foreign reason is left", async () => {
     const { ydoc } = stage();
-    const callout = new Y.XmlElement("callout");
-    callout.insert(0, [new Y.XmlText("from the future")]);
-    getBlocksFragment(ydoc).insert(1, [callout]);
+    const foreign = new Y.XmlElement("future-block");
+    foreign.insert(0, [new Y.XmlText("from the future")]);
+    getBlocksFragment(ydoc).insert(1, [foreign]);
 
     const host = await openApp(`/${WORKSPACE}/${UUID}`);
     act(() => buttonSaying(host, "The hub")?.click());
@@ -497,7 +497,7 @@ describe("the fallback offers the person the choice, and takes only that write",
     // is named on its own terms.
     expect(findLinkConflicts(getBlocksFragment(ydoc))).toEqual([]);
     expect(prose(host)).toBeNull();
-    expect(banner(host)).toContain("callout");
+    expect(banner(host)).toContain("future-block");
     expect(banner(host)).not.toContain("conflicting external and document links");
     expect(repairOffer(host)).toBeNull();
   });

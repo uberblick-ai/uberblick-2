@@ -69,6 +69,7 @@ const blocks: BlockInput[] = [
   { type: "code", language: "wireframe", text: "dialog Preview\n  text A same-origin renderer.\n  button Continue" },
   { type: "list-item", text: "A list entry" },
   { type: "quote", text: "Quoted prose" },
+  { type: "callout", variant: "note", text: "Callout prose" },
   { type: "table", text: "| Name | Count |\n| --- | --- |\n| Example | 2 |" },
   { type: "terminal", text: "$ ub init\nworkspace ready" },
   { type: "chart", text: JSON.stringify({
@@ -85,7 +86,7 @@ const figma: BlockInput = {
 test("workspace and every block render, load Figma and sync edits without CSP violations", { tag: "@webkit" }, async ({ browser }, info) => {
   if (agent === null) throw new Error("e2e: the CSP MCP agent is not configured");
   const writer = agent.open({ name: "csp-e2e" });
-  expect([...new Set([...blocks, figma].map((block) => block.type))].sort()).toEqual(BLOCK_TYPES.filter((type) => type !== "callout").sort());
+  expect([...new Set([...blocks, figma].map((block) => block.type))].sort()).toEqual([...BLOCK_TYPES].sort());
   const allTypes = await writer.call<{ uuid: string }>("create_doc", {
     title: "CSP every block type", description: "Includes the live Figma view.", blocks: [...blocks, figma],
   });
@@ -130,7 +131,7 @@ test("workspace and every block render, load Figma and sync edits without CSP vi
   for (const selector of [
     ".ub-code > code", ".ub-wireframe-drawing .wf-root",
     ".ProseMirror h2", ".ProseMirror li", ".ProseMirror blockquote",
-    ".ProseMirror table", ".ub-terminal-screen", ".ub-chart canvas", ".ub-card",
+    ".ProseMirror table", ".ub-terminal-screen", ".ub-chart canvas", ".ub-card", ".ub-callout",
   ]) await expect(page.locator(selector).first()).toBeVisible();
   await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "ready");
   await page.getByRole("button", { name: "Document actions", exact: true }).click();
