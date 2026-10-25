@@ -193,13 +193,19 @@ describe("revision replies on admitted document rooms", () => {
     const db = database(true, () => clock);
     const room = `${WORKSPACE}/${randomUUID()}`;
     const saved = seed(db, room, "Expired state");
-    clock = 902_000;
     const reads = new RevisionReads({ database: db, assertCurrent() {}, username: id => id });
     const reader = receiver();
     const options = { operation: "list" as const, includeTitles: true as const };
+    clock = 601_000;
+    saved.doc.transact(() => getMetaMap(saved.doc).set("title", "Last edit"), { attribution: {
+      author: { principalId: "ben", surface: { kind: "mcp", name: "Claude Code" } },
+    } });
+    const open = await request(reads, reader.connection, room, options, reader.sent);
+    expect(open).toMatchObject({ revisions: [{ id: saved.id, final: false, endedAt: null, deadlineAt: 1_501_000 }] });
+    clock = 1_501_000;
     const expired = await request(reads, reader.connection, room, options, reader.sent);
     if (!("revisions" in expired) || expired.version === undefined) throw new Error("expected versioned catalog");
-    expect(expired.revisions).toMatchObject([{ id: saved.id, final: true, endedAt: 901_000 }]);
+    expect(expired.revisions).toMatchObject([{ id: saved.id, final: true, endedAt: 601_000 }]);
     expect(expired.revisions[0]).not.toHaveProperty("deadlineAt");
     expect(db.revisions.name(room, saved.doc,
       createHash("sha256").update(snapshotRevision(saved.doc).checksum).digest("hex"), "Closed", {

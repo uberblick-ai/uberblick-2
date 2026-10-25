@@ -50,9 +50,20 @@ interface Head {
   author: string | null;
   author_key: string;
   started_at: number;
+  last_edited_at: number | null;
   checksum: string;
   previous_checksum: string;
   data: Uint8Array | null;
+}
+
+function headDeadline(head: Head): number {
+  return (head.last_edited_at ?? head.started_at) + STRETCH_MS;
+}
+
+function headEnd(head: Head, at: number): number {
+  const deadline = headDeadline(head);
+  // Legacy heads retain their start-based end until a new edit extends them.
+  return at >= deadline ? head.last_edited_at ?? deadline : at;
 }
 
 function digest(value: string): string {
@@ -110,6 +121,7 @@ export class HubRevisions {
       author TEXT,
       author_key TEXT NOT NULL,
       started_at INTEGER NOT NULL,
+      last_edited_at INTEGER,
       checksum TEXT NOT NULL,
       previous_checksum TEXT NOT NULL,
       data BLOB
@@ -124,6 +136,16 @@ export class HubRevisions {
       named_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS document_revision_names_room ON document_revision_names(room)`);
+    if (!db.prepare("PRAGMA table_info(document_revision_heads)").all().some(column => column.name === "last_edited_at")) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.exec("ALTER TABLE document_revision_heads ADD COLUMN last_edited_at INTEGER");
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    }
   }
 
   observe(room: string, document: Y.Doc): void {
@@ -189,13 +211,14 @@ export class HubRevisions {
       final: true,
     }));
     if (head !== undefined && head.checksum !== head.previous_checksum) {
-      const deadlineAt = head.started_at + STRETCH_MS;
-      const final = this.now() >= deadlineAt;
+      const deadlineAt = headDeadline(head);
+      const at = this.now();
+      const final = at >= deadlineAt;
       result.unshift({
         id: head.id,
         author: head.author === null ? null : JSON.parse(head.author) as UpdateAuthor,
         startedAt: head.started_at,
-        endedAt: final ? deadlineAt : null,
+        endedAt: final ? headEnd(head, at) : null,
         checksum: head.checksum,
         final,
         ...(final ? {} : { deadlineAt }),
@@ -278,7 +301,7 @@ export class HubRevisions {
       if (head !== undefined) {
         if (head.checksum !== current.checksum) throw new Error("revision capture does not match current content");
         // Naming preserves even a reverted stretch, whose automatic head has no bytes.
-        this.insert(room, head.id, head.author, head.started_at, Math.min(at, head.started_at + STRETCH_MS),
+        this.insert(room, head.id, head.author, head.started_at, headEnd(head, at),
           { ...current, state: head.data ?? current.state });
         this.db.prepare("DELETE FROM document_revision_heads WHERE room = ?").run(room);
       } else if (last?.id !== id) {
@@ -342,7 +365,7 @@ export class HubRevisions {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       let head = this.head(room);
-      if (head !== undefined && (head.author_key !== identity.key || at >= head.started_at + STRETCH_MS)) {
+      if (head !== undefined && (head.author_key !== identity.key || at >= headDeadline(head))) {
         this.closeHead(room, head, at);
         head = undefined;
       }
@@ -353,13 +376,13 @@ export class HubRevisions {
           this.db.prepare("INSERT INTO document_revision_documents (room) VALUES (?)").run(room);
         }
         this.db.prepare(`INSERT INTO document_revision_heads
-          (room, id, author, author_key, started_at, checksum, previous_checksum, data)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
-          room, randomUUID(), identity.label, identity.key, at, after.checksum, before.checksum, after.state,
+          (room, id, author, author_key, started_at, last_edited_at, checksum, previous_checksum, data)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+          room, randomUUID(), identity.label, identity.key, at, at, after.checksum, before.checksum, after.state,
         );
       } else {
-        this.db.prepare("UPDATE document_revision_heads SET checksum = ?, data = ? WHERE room = ?")
-          .run(after.checksum, after.checksum === head.previous_checksum ? null : after.state, room);
+        this.db.prepare("UPDATE document_revision_heads SET checksum = ?, data = ?, last_edited_at = ? WHERE room = ?")
+          .run(after.checksum, after.checksum === head.previous_checksum ? null : after.state, at, room);
       }
       this.db.exec("COMMIT");
     } catch (error) {
@@ -387,7 +410,7 @@ export class HubRevisions {
 
   private closeHead(room: string, head: Head, at: number): void {
     if (head.checksum !== head.previous_checksum && head.data !== null) this.insert(
-      room, head.id, head.author, head.started_at, Math.min(at, head.started_at + STRETCH_MS),
+      room, head.id, head.author, head.started_at, headEnd(head, at),
       { state: head.data, checksum: head.checksum, empty: false },
     );
     this.db.prepare("DELETE FROM document_revision_heads WHERE room = ?").run(room);
