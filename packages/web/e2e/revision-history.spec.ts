@@ -590,6 +590,9 @@ test.describe("document history through ub open", () => {
     await shared.goto(new URL(unnamedComparison, harness().appUrl).href);
     await assertComparison(shared, "Unnamed baseline content.");
     await expect(history(shared)).not.toContainText("compared with");
+    await expect(shared.locator(".ub-revision-side-label").first()
+      .getByRole("button", { name: "Restore this version", exact: true })).toBeEnabled();
+    await expect(shared.locator(".ub-revision-side-label").last().getByRole("button")).toHaveCount(0);
     await shared.reload();
     await assertComparison(shared, "Unnamed baseline content.");
     await expect(shared).toHaveURL(new URL(unnamedComparison, harness().appUrl).href);
@@ -807,16 +810,21 @@ test.describe("document history through ub open", () => {
       .getByRole("button", { name: "Changes since this name", exact: true }));
     await closeHistoryList(page, sinceDrawer);
     await expect(history(page)).toContainText("compared with “Baseline to restore”");
-    await expect(restore).toBeDisabled();
-    await expect(restore).toHaveAccessibleDescription("This is the current version.");
+    const restoreBaseline = page.getByRole("button", { name: "Restore “Baseline to restore”", exact: true });
+    await expect(restoreBaseline).toBeEnabled();
+    await expect(restoreBaseline).toHaveText("Restore “Baseline to restore”");
+    if (await page.locator(".ub-revision-split").isVisible()) {
+      await expect(page.locator(".ub-revision-side-label").first().getByRole("button")).toHaveAccessibleName("Restore “Baseline to restore”");
+      await expect(page.locator(".ub-revision-side-label").last().getByRole("button")).toHaveCount(0);
+    } else {
+      await expect(page.locator(".ub-revision-header").getByRole("button", { name: "Restore “Baseline to restore”", exact: true })).toBeEnabled();
+    }
     const fixedComparison = new URL(page.url()).pathname;
-    await previous(page);
-    await expect(history(page).getByRole("button", { name: /Copy revision/ })).toHaveText("Baseline to restore");
-    await expect(restore).toBeEnabled();
+    const selectedAfter = fixedComparison.split("/since/")[0] ?? "";
     if (browserName === "chromium") {
-      await restore.focus();
+      await restoreBaseline.focus();
       await page.keyboard.press("Enter");
-    } else await activateControl(restore);
+    } else await activateControl(restoreBaseline);
     await expect(page.getByText("Document restored to this version", { exact: true })).toBeVisible();
     await expect.poll(() => liveText(peer)).toBe("The earlier document content.");
     await expect(peer.locator(".ub-title")).toHaveValue(title);
@@ -843,6 +851,10 @@ test.describe("document history through ub open", () => {
     await expect(history(page)).toContainText("compared with “Baseline to restore”");
     await expect(historicalEditor(page).locator('[data-revision-change="added"]').filter({ hasText: "newer" })).toHaveText("newer");
     await expect(earlierSide(page).locator('[data-revision-change="removed"]').filter({ hasText: "earlier" })).toHaveText("earlier");
+    await expect(restoreBaseline).toBeEnabled();
+    // Step to the original After itself to restore the state just before the first restore.
+    await page.goto(new URL(selectedAfter, harness().appUrl).href);
+    await expect(history(page).getByRole("button", { name: /Copy revision/ })).toHaveText("Before the restore");
     await expect(restore).toBeEnabled();
     await activateControl(restore);
     await expect.poll(() => liveText(peer)).toBe("The newer document content.");
@@ -902,15 +914,18 @@ test.describe("document history through ub open", () => {
     await expect(page.locator(".ub-title")).toHaveValue(`${title} collaborator`);
   });
 
-  test("restore stays on the After label with compact geometry, touch reach and native keyboard order", { tag: "@webkit-touch" }, async ({ browser }) => {
+  test("restore follows its column with compact geometry, touch reach and native keyboard order", { tag: "@webkit-touch" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane",
       contextOptions: { viewport: { width: 1440, height: 640 }, reducedMotion: "reduce" } });
     const title = docTitle("Restore comparison placement");
     const uuid = await newDocument(page, title);
+    const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
+    const baselineName = "Reviewed after the auth rewrite with Lena and the entire release team before the final launch review";
     await serveHistory(page, [
       { id: "newest", title, author: null, startedAt: 3_000, endedAt: null },
-      { id: "latest", title, author: null, startedAt: 2_000, endedAt: 3_000 },
-      { id: "earlier", title, author: null, startedAt: 1_000, endedAt: 2_000 },
+      { id: "latest", title, author: { ...person, githubUsername: "W".repeat(39) }, startedAt: 2_000, endedAt: 3_000 },
+      { id: "earlier", title, author: null, startedAt: 1_000, endedAt: 2_000,
+        name: { text: baselineName, namer: person, namedAt: 2_000, canManage: true } },
     ], { ...toggleNavigationHistory(uuid, title, false), newest: savedState(uuid, title, "Current live version.") });
     await previous(page);
     const restore = page.getByRole("button", { name: "Restore this version", exact: true });
@@ -938,35 +953,43 @@ test.describe("document history through ub open", () => {
     const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true });
     if (await collapse.getAttribute("aria-checked") === "true") await activateControl(collapse);
     await closeHistoryList(page, drawer);
-    for (const scheme of ["light", "dark"] as const) {
-      await page.emulateMedia({ colorScheme: scheme });
-      const geometry = await restore.evaluate(button => {
-        const labels = [...document.querySelectorAll<HTMLElement>(".ub-revision-side-label")];
-        const [before, after] = labels;
-        const sides = [...document.querySelectorAll<HTMLElement>(".ub-revision-split .ProseMirror")];
-        if (before === undefined || after === undefined || sides.length !== 2) throw new Error("Both comparison columns must be shown");
-        const left = before.getBoundingClientRect();
-        const right = after.getBoundingClientRect();
-        const control = button.getBoundingClientRect();
-        const text = getComputedStyle(before);
-        const style = getComputedStyle(button);
-        return { beforeHeight: left.height, afterHeight: right.height, labelTopDifference: right.top - left.top,
-          editorTopDifference: (sides[1]?.getBoundingClientRect().top ?? 0) - (sides[0]?.getBoundingClientRect().top ?? 0),
-          rightInset: right.right - control.right, controlTop: control.top - right.top, controlBottom: right.bottom - control.bottom,
-          font: style.fontSize, labelFont: text.fontSize, lineHeight: style.lineHeight, labelLineHeight: text.lineHeight,
-          touch: matchMedia("(any-pointer: coarse)").matches,
-          hitArea: [-21.5, 21.5].map(offset => button.contains(document.elementFromPoint(control.x + control.width / 2, control.y + control.height / 2 + offset))) };
-      });
-      expect(geometry.afterHeight).toBeCloseTo(geometry.beforeHeight, 1);
-      expect(Math.abs(geometry.labelTopDifference)).toBeLessThanOrEqual(1);
-      expect(Math.abs(geometry.editorTopDifference)).toBeLessThanOrEqual(1);
-      expect(Math.abs(geometry.rightInset)).toBeLessThanOrEqual(1);
-      expect(geometry.controlTop).toBeGreaterThanOrEqual(-1);
-      expect(geometry.controlBottom).toBeGreaterThanOrEqual(-1);
-      expect(geometry.font).toBe(geometry.labelFont);
-      expect(geometry.lineHeight).toBe(geometry.labelLineHeight);
-      if (geometry.touch) expect(geometry.hitArea).toEqual([true, true]);
-    }
+    const assertCompactGeometry = async (control: Locator): Promise<void> => {
+      for (const scheme of ["light", "dark"] as const) {
+        await page.emulateMedia({ colorScheme: scheme });
+        const geometry = await control.evaluate(button => {
+          const labels = [...document.querySelectorAll<HTMLElement>(".ub-revision-side-label")];
+          const [before, after] = labels;
+          const sides = [...document.querySelectorAll<HTMLElement>(".ub-revision-split .ProseMirror")];
+          if (before === undefined || after === undefined || sides.length !== 2) throw new Error("Both comparison columns must be shown");
+          const left = before.getBoundingClientRect();
+          const right = after.getBoundingClientRect();
+          const box = button.getBoundingClientRect();
+          const owner = button.closest(".ub-revision-side-label")?.getBoundingClientRect();
+          if (owner === undefined) throw new Error("Restore must belong to a column label");
+          const text = getComputedStyle(before);
+          const style = getComputedStyle(button);
+          return { beforeHeight: left.height, afterHeight: right.height, labelTopDifference: right.top - left.top,
+            editorTopDifference: (sides[1]?.getBoundingClientRect().top ?? 0) - (sides[0]?.getBoundingClientRect().top ?? 0),
+            rightInset: owner.right - box.right, controlTop: box.top - owner.top, controlBottom: owner.bottom - box.bottom,
+            font: style.fontSize, labelFont: text.fontSize, lineHeight: style.lineHeight, labelLineHeight: text.lineHeight,
+            touch: matchMedia("(any-pointer: coarse)").matches,
+            hitArea: [-21.5, 21.5].map(offset => button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2 + offset))) };
+        });
+        expect(geometry.afterHeight).toBeCloseTo(geometry.beforeHeight, 1);
+        expect(Math.abs(geometry.labelTopDifference)).toBeLessThanOrEqual(1);
+        expect(Math.abs(geometry.editorTopDifference)).toBeLessThanOrEqual(1);
+        expect(Math.abs(geometry.rightInset)).toBeLessThanOrEqual(1);
+        expect(geometry.controlTop).toBeGreaterThanOrEqual(-1);
+        expect(geometry.controlBottom).toBeGreaterThanOrEqual(-1);
+        expect(geometry.font).toBe(geometry.labelFont);
+        expect(geometry.lineHeight).toBe(geometry.labelLineHeight);
+        if (geometry.touch) expect(geometry.hitArea).toEqual([true, true]);
+      }
+    };
+    await expect(page.locator(".ub-revision-side-label").first().getByRole("button")).toHaveCount(0);
+    await expect(page.locator(".ub-revision-side-label").last().getByRole("button")).toHaveAccessibleName("Restore this version");
+    await assertCompactGeometry(restore);
+    expect(await restore.locator("span").evaluate(label => label.scrollWidth > label.clientWidth)).toBe(false);
     const nextChange = page.getByRole("button", { name: "Next change", exact: true });
     await expect(nextChange).toBeEnabled();
     await nextChange.focus();
@@ -982,8 +1005,52 @@ test.describe("document history through ub open", () => {
     await expect.poll(async () => (await page.locator(".ub-revision-side-label").last().boundingBox())?.y ?? 0)
       .toBeLessThan((start?.y ?? 0) - 100);
     expect((await header.boundingBox())?.y).toBeCloseTo(headerStart?.y ?? 0, 0);
-    // An older comparison uses the header again when the pane narrows or has no predecessor.
+    const selectedAddress = new URL(page.url()).pathname;
+    await page.goto(new URL(`${selectedAddress}/since/${revisionId("earlier")}`, harness().appUrl).href);
+    const restoreNamed = page.getByRole("button", { name: `Restore “${baselineName}”`, exact: true });
+    await expect(split).toBeVisible();
+    await expect(restoreNamed).toBeEnabled();
+    await expect(page.locator(".ub-revision-side-label").first().getByRole("button")).toHaveAccessibleName(`Restore “${baselineName}”`);
+    await expect(page.locator(".ub-revision-side-label").last().getByRole("button")).toHaveCount(0);
+    await expect(header.locator(".ub-revision-restore")).toHaveCount(0);
+    await assertCompactGeometry(restoreNamed);
+    expect(await page.locator(".ub-revision-side-label").first().locator("span").first()
+      .evaluate(label => label.scrollWidth > label.clientWidth)).toBe(false);
+    await expect(restoreNamed).toHaveText(`Restore “${baselineName}”`);
+    const clipped = await restoreNamed.locator("span").evaluate(label => ({
+      overflow: getComputedStyle(label).textOverflow, clipped: label.scrollWidth > label.clientWidth,
+    }));
+    expect(clipped).toEqual({ overflow: "ellipsis", clipped: true });
+    await expect(nextChange).toBeEnabled();
+    await nextChange.focus();
+    await page.keyboard.press("Tab");
+    await expect(restoreNamed).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(earlierSide(page)).toBeFocused();
     await page.setViewportSize({ width: 860, height: 640 });
+    await expect(split).toHaveCount(0);
+    await expect(header.getByRole("button", { name: `Restore “${baselineName}”`, exact: true })).toBeEnabled();
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      const geometry = await header.locator(".ub-revision-heading").evaluate(heading => {
+        const title = heading.querySelector(".ub-revision-title-text:not([aria-hidden])");
+        const button = heading.querySelector("button");
+        const label = button?.querySelector("span");
+        if (title === null || button === null || label == null) throw new Error("Revision title and restore must be shown");
+        const titleBox = title.getBoundingClientRect();
+        const buttonBox = button.getBoundingClientRect();
+        return { headingWidth: heading.getBoundingClientRect().width, titleWidth: titleBox.width,
+          titleRight: titleBox.right, buttonLeft: buttonBox.left,
+          clipped: label.scrollWidth > label.clientWidth, overflow: getComputedStyle(label).textOverflow };
+      });
+      expect(geometry.titleWidth).toBeGreaterThan(geometry.headingWidth * 0.4);
+      expect(geometry.titleRight).toBeLessThanOrEqual(geometry.buttonLeft);
+      expect(geometry.clipped).toBe(true);
+      expect(geometry.overflow).toBe("ellipsis");
+      await expect(restoreNamed).toHaveAccessibleName(`Restore “${baselineName}”`);
+    }
+    // Ordinary revision views keep their generic header action when narrow or without a predecessor.
+    await page.goto(new URL(selectedAddress, harness().appUrl).href);
     await expect(split).toHaveCount(0);
     await expect(header.getByRole("button", { name: "Restore this version", exact: true })).toBeEnabled();
     await page.setViewportSize({ width: 1440, height: 640 });
