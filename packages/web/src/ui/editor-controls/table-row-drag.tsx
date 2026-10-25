@@ -49,8 +49,9 @@ export function TableHandle({ data, dragKey, disabled, axis, label, style, revea
   }, []);
   return (
     <DropdownMenuTrigger asChild>
+      {/* Mouse geometry owns a narrow gutter; touch geometry widens it to 44px. */}
       <Button variant="plain" size="custom" ref={attach} {...position}
-        type="button" className={`ub-table-control ub-table-handle ub-table-${axis}-handle absolute flex items-center justify-center pointer-events-auto rounded-(--radius-sm) border-0 bg-transparent p-0 text-(--muted-foreground) ub-type-small select-none [-webkit-touch-callout:none] ${axis === "row" ? "[.ub-table-controls:not([data-touch=true])_&]:justify-start [.ub-table-controls:not([data-touch=true])_&]:pl-px" : ""}`}
+        type="button" className={`ub-table-control ub-table-handle ub-table-${axis}-handle absolute flex min-w-0 items-center justify-center pointer-events-auto rounded-(--radius-sm) border-0 bg-transparent p-0 text-(--muted-foreground) ub-type-small select-none [-webkit-touch-callout:none] ${axis === "row" ? "[.ub-table-controls:not([data-touch=true])_&]:justify-start [.ub-table-controls:not([data-touch=true])_&]:pl-px" : ""}`}
         data-revealed={revealed} style={style}
         aria-label={label}
         title={disabled ? `${axis === "row" ? "Row" : "Column"} actions` : `${axis === "row" ? "Row" : "Column"} actions · drag to move`}

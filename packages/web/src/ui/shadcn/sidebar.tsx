@@ -54,7 +54,7 @@ export function SidebarProvider({
         className={cn(
           "relative flex min-h-0 flex-1",
           // Keep scrolling content below the narrow opener; docked collapse uses an inset.
-          "max-xl:[&>.ub-pane]:mt-11 max-xl:[&>.ub-page-pane]:[--pane-document-inset:1rem] max-xl:[&>.ub-page-pane]:[--document-rail-gap:1rem] xl:data-[sidebar-collapsed=true]:[&>.ub-page-pane]:[--pane-document-inset:4rem]",
+          "max-xl:[&>.ub-pane]:mt-11 [@media(any-pointer:coarse)]:max-xl:[&>.ub-pane]:mt-14 max-xl:[&>.ub-page-pane]:[--pane-document-inset:1rem] max-xl:[&>.ub-page-pane]:[--document-rail-gap:1rem] xl:data-[sidebar-collapsed=true]:[&>.ub-page-pane]:[--pane-document-inset:4rem]",
           // Keep the pane's Threads control above its scrollport too.
           "[&_.ub-pane-threads-toggle]:absolute [&_.ub-pane-threads-toggle]:top-3 [&_.ub-pane-threads-toggle]:z-4 [&_.ub-pane-threads-toggle]:self-end",
           className,
