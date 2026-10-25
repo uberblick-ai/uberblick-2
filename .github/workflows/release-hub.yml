@@ -19,6 +19,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -33,7 +35,30 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Build, scan and publish the immutable hub version
+        id: publish
         run: mise run publish-hub-release -- "$GITHUB_REF_NAME"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Attest the hub index built by this run
+        if: steps.publish.outputs.outcome == 'published'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/uberblick-ai/hub
+          subject-digest: ${{ steps.publish.outputs.hub-digest }}
+      - name: Attest the web index built by this run
+        if: steps.publish.outputs.outcome == 'published'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/uberblick-ai/hub-web
+          subject-digest: ${{ steps.publish.outputs.web-digest }}
+      - name: Verify both published indexes have release provenance
+        if: steps.publish.outputs.outcome == 'published'
+        run: >-
+          node scripts/release-attestation.mjs release-hub.yml "$GITHUB_REF_NAME" "$GITHUB_SHA"
+          "oci://ghcr.io/uberblick-ai/hub@${{ steps.publish.outputs.hub-digest }}"
+          "oci://ghcr.io/uberblick-ai/hub-web@${{ steps.publish.outputs.web-digest }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   assets:
     needs: publish

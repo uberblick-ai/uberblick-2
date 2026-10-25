@@ -124,6 +124,29 @@ the [paired release procedure](RELEASING.md#cut-a-paired-release). Matching
 protocol versions still decide wire compatibility; a shared package version
 alone does not establish it.
 
+To verify the images' build provenance, install the
+[GitHub CLI](https://cli.github.com) and sign in to a GitHub account with
+`gh auth login`. Replace `X.Y.Z` with the release version:
+
+```sh
+gh attestation verify oci://ghcr.io/uberblick-ai/hub:X.Y.Z \
+  --repo uberblick-ai/uberblick-2 \
+  --signer-workflow uberblick-ai/uberblick-2/.github/workflows/release-hub.yml \
+  --source-ref refs/tags/hub-vX.Y.Z
+gh attestation verify oci://ghcr.io/uberblick-ai/hub-web:X.Y.Z \
+  --repo uberblick-ai/uberblick-2 \
+  --signer-workflow uberblick-ai/uberblick-2/.github/workflows/release-hub.yml \
+  --source-ref refs/tags/hub-vX.Y.Z
+```
+
+These commands check that both images were built by this repository's hub
+release workflow from the release tag. Each checks the complete multi-platform
+image index, so the same command works from an amd64 or arm64 host. Attestations
+are stored in this repository. New releases carry them; releases published
+before their introduction are not backfilled. The Compose and route files
+attached to a release have no attestation. See the
+[verification options](https://cli.github.com/manual/gh_attestation_verify).
+
 ### Updating the host — deliberately
 
 **The host does not update itself.** Choose a newer published version and

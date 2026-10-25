@@ -1,9 +1,9 @@
 name: Publish Homebrew release
 
 # Release step: push an exact vMAJOR.MINOR.PATCH tag. The tag-only environment
-# policy is the authority that admits this job to HOMEBREW_TAP_TOKEN, which is
-# the only credential the publisher needs: the asset and the formula both land
-# on the public tap. The script verifies the tag again before it publishes.
+# policy is the authority that admits this job to HOMEBREW_TAP_TOKEN, the
+# credential for publishing the asset and formula on the public tap. Provenance
+# uses this repository's workflow token and OIDC. The script verifies the tag.
 on:
   push:
     tags:
@@ -21,6 +21,10 @@ jobs:
     name: Publish payload and tap formula
     runs-on: ubuntu-latest
     environment: homebrew-tap
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -39,6 +43,20 @@ jobs:
           PNPM_STORE_DIR: ~/.pnpm-store
 
       - name: Publish the immutable release and generated formula
+        id: publish
         run: mise run publish-homebrew-release -- "$GITHUB_REF_NAME"
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Attest the payload built by this run
+        if: steps.publish.outputs.outcome == 'published' && steps.publish.outputs.archive != ''
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.publish.outputs.archive }}
+      - name: Verify the published payload has release provenance
+        if: steps.publish.outputs.outcome == 'published' && steps.publish.outputs.archive != ''
+        run: >-
+          node scripts/release-attestation.mjs release-homebrew.yml "$GITHUB_REF_NAME" "$GITHUB_SHA"
+          "${{ steps.publish.outputs.archive }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

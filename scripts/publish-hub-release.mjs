@@ -2,10 +2,11 @@
 
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { verifyReleaseAttestation } from "./release-attestation.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPOSITORY = "uberblick-ai/uberblick-2";
@@ -91,6 +92,7 @@ export async function publishHubRelease(input, services) {
   const existing = await Promise.all(refs.map((ref) => services.getImage(ref)));
   for (const image of existing) if (image !== null) assertPublishedImage(image, input);
   if (existing.every((image) => image !== null)) {
+    if (!input.dryRun) for (const ref of refs) await services.verifyAttestation(`oci://${ref}`, input);
     for (const image of existing) for (const platform of PLATFORMS) await services.scanImage(image[platform].Id, platform);
     services.log(`Hub ${version} already matches; all platforms scanned, no images rebuilt or published.`);
     return { outcome: "no-op", refs };
@@ -134,7 +136,10 @@ export async function publishHubRelease(input, services) {
   for (const ref of refs) if (await services.getImage(ref) !== null) {
     fail("hub version appeared during upload; refusing to overwrite it");
   }
-  for (const ref of refs) await services.publishIndex(ref, uploaded.get(ref));
+  const digests = [];
+  for (const ref of refs) {
+    digests.push(await services.publishIndex(ref, uploaded.get(ref)));
+  }
   for (const ref of refs) {
     const published = await services.getImage(ref);
     assertPublishedImage(published, input);
@@ -143,7 +148,15 @@ export async function publishHubRelease(input, services) {
     }
   }
   services.log(`Published hub ${version} from ${input.headSha}, sync protocol ${input.protocolVersion}.`);
-  return { outcome: "published", refs };
+  return { outcome: "published", refs, digests };
+}
+
+export async function publishIndex(ref, digests, metadataPath) {
+  run("docker", ["buildx", "imagetools", "create", "--tag", ref, "--metadata-file", metadataPath, ...digests], { stdio: "inherit" });
+  const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+  const digest = metadata["containerimage.descriptor"]?.digest;
+  if (!/^sha256:[0-9a-f]{64}$/.test(digest)) fail(`cannot identify published index for ${ref}`);
+  return digest;
 }
 
 export function run(command, args, options = {}) {
@@ -237,7 +250,8 @@ function productionServices(scratch) {
       if (!/^sha256:[0-9a-f]{64}$/.test(manifest.digest)) fail(`cannot identify pushed digest for ${stage}`);
       return `${repository}@${manifest.digest}`;
     },
-    publishIndex: async (ref, digests) => run("docker", ["buildx", "imagetools", "create", "--tag", ref, ...digests], { stdio: "inherit" }),
+    publishIndex: (ref, digests) => publishIndex(ref, digests, join(scratch, "index.json")),
+    verifyAttestation: (subject, input) => verifyReleaseAttestation(subject, "release-hub.yml", input),
   };
 }
 
@@ -255,12 +269,18 @@ async function main() {
   try {
     const headSha = run("git", ["rev-parse", "HEAD"]);
     const event = dryRun ? null : JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
-    await publishHubRelease({ tag, dryRun, headSha, protocolVersion: Number(protocol[1]),
+    const result = await publishHubRelease({ tag, dryRun, headSha, protocolVersion: Number(protocol[1]),
       repository: process.env.GITHUB_REPOSITORY, eventName: process.env.GITHUB_EVENT_NAME,
       actorType: event?.sender?.type, actorLogin: event?.sender?.login,
       refType: process.env.GITHUB_REF_TYPE, refName: process.env.GITHUB_REF_NAME,
       tagSha: dryRun ? headSha : run("git", ["rev-parse", `${tag}^{commit}`]), workflowSha: process.env.GITHUB_SHA,
     }, dryRun ? localServices(scratch) : productionServices(scratch));
+    if (!dryRun && process.env.GITHUB_OUTPUT) {
+      appendFileSync(process.env.GITHUB_OUTPUT, `outcome=${result.outcome}\n`);
+      if (result.outcome === "published") {
+        appendFileSync(process.env.GITHUB_OUTPUT, `hub-digest=${result.digests[0]}\nweb-digest=${result.digests[1]}\n`);
+      }
+    }
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

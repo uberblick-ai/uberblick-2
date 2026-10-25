@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
+	appendFileSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -11,6 +12,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { verifyReleaseAttestation } from "./release-attestation.mjs";
 
 const REPOSITORY_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SOURCE_REPOSITORY = "uberblick-ai/uberblick-2";
@@ -39,10 +42,8 @@ function assetUrl(tag, version) {
 }
 
 /**
- * The published release's body. The source repository stays private and the
- * artifact lives on the public tap, whose release targets a tap commit — so the
- * commit this version was published from is recorded here, and is what a later
- * run of the same tag is checked against.
+ * The tap release targets a tap commit, so record the source commit separately
+ * and check later runs of the same tag against it.
  */
 export function releaseBody(version, sourceCommit) {
 	return `Uberblick ${version}\n\nSource-commit: ${sourceCommit}\n`;
@@ -129,7 +130,8 @@ function assertRelease(release, tag, expectedAssetName, headSha) {
 	return assets[0] ?? null;
 }
 
-async function verifiedAssetBytes(release, asset, tag, version, services, expectedBytes = null) {
+async function verifiedAssetBytes(release, asset, input, version, services, expectedBytes = null) {
+	const { tag } = input;
 	const name = assetName(version);
 	const recovery = release.draft
 		? "delete the unpublished draft and re-run"
@@ -149,6 +151,15 @@ async function verifiedAssetBytes(release, asset, tag, version, services, expect
 		fail(`release ${tag}'s ${name} asset differs from the intended payload; ${recovery}`);
 	}
 	if (expectedBytes === null) {
+		try {
+			await services.verifyAttestation(bytes, name, input);
+		} catch (error) {
+			if (!release.draft) throw error;
+			throw new Error(
+				`could not verify release provenance for ${tag}'s ${name}; inspect and delete the unpublished draft, then re-run`,
+				{ cause: error },
+			);
+		}
 		const reportedVersion = await services.publishedArchiveVersion(bytes, name, version);
 		if (reportedVersion !== version) {
 			fail(`published payload reports ${JSON.stringify(reportedVersion)}, expected ${version}`);
@@ -196,8 +207,9 @@ export async function publishHomebrewRelease(input, services) {
 	const existingFormula = input.dryRun ? null : await services.getTapFormula();
 
 	let bytes;
+	let archive;
 	if (existingAsset !== null) {
-		bytes = await verifiedAssetBytes(release, existingAsset, input.tag, version, services);
+		bytes = await verifiedAssetBytes(release, existingAsset, input, version, services);
 	} else {
 		if (release !== null && release.assets.length > 0) {
 			fail(`release ${input.tag} has assets, but not ${name}`);
@@ -208,7 +220,7 @@ export async function publishHomebrewRelease(input, services) {
 				fail("the tap formula disagrees with an unpublished or older release tag");
 			}
 		}
-		const archive = await services.buildArchive(version);
+		archive = await services.buildArchive(version);
 		const reportedVersion = await services.archiveVersion(archive, version);
 		if (reportedVersion !== version) {
 			fail(`payload reports ${JSON.stringify(reportedVersion)}, expected ${version}`);
@@ -245,7 +257,7 @@ export async function publishHomebrewRelease(input, services) {
 		}
 		if (existingAsset === null) {
 			const uploaded = await services.uploadAsset(release.upload_url, name, bytes);
-			await verifiedAssetBytes(release, uploaded, input.tag, version, services, bytes);
+			await verifiedAssetBytes(release, uploaded, input, version, services, bytes);
 		}
 		release = await services.publishRelease(release.id);
 		if (release.draft !== false) fail(`release ${input.tag} was not published`);
@@ -261,7 +273,7 @@ export async function publishHomebrewRelease(input, services) {
 	await services.putTapFormula(formula, existingFormula?.sha ?? null, version);
 	if (wasPublished) return { outcome: "recovered-formula", formula };
 	services.log(`Published ${input.tag} and committed ${TAP_FORMULA_PATH} to ${TAP_REPOSITORY}.`);
-	return { outcome: "published", formula };
+	return { outcome: "published", formula, archive };
 }
 
 function run(command, args, options = {}) {
@@ -306,6 +318,17 @@ const localServices = {
 		}
 	},
 	readArchive: async (archive) => readFileSync(archive),
+	verifyAttestation: async (bytes, name, input) => {
+		const scratch = mkdtempSync(join(process.env.UB_AGENTS_SCRATCH ?? tmpdir(),
+			`uberblick-attestation-check-${process.env.UB_AGENTS_RUN ?? "local"}-`));
+		try {
+			const archive = join(scratch, name);
+			writeFileSync(archive, bytes);
+			await verifyReleaseAttestation(archive, "release-homebrew.yml", input);
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	},
 };
 
 async function githubRequest(path, token, options = {}) {
@@ -454,7 +477,7 @@ async function main() {
 				log: (message) => process.stdout.write(`${message}\n`),
 			}
 		: productionServices();
-	await publishHomebrewRelease(
+	const result = await publishHomebrewRelease(
 		{
 			tag,
 			dryRun,
@@ -467,6 +490,12 @@ async function main() {
 		},
 		services,
 	);
+	if (!dryRun && process.env.GITHUB_OUTPUT !== undefined) {
+		appendFileSync(process.env.GITHUB_OUTPUT, `outcome=${result.outcome}\n`);
+		if (result.archive !== undefined) {
+			appendFileSync(process.env.GITHUB_OUTPUT, `archive=${result.archive}\n`);
+		}
+	}
 }
 
 function productionServicesForDryRun() {
