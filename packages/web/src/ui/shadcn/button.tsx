@@ -4,9 +4,10 @@
  * class recipes, with the browser owning activation and keyboard focus.
  * Coarse-pointer floors and native outlines follow Web UI system.
  * New React buttons use this component, including hidden form submits. Native
- * buttons are acceptable when shared floors would cover editor input (narrow
- * table handles). Editor node views built with document.createElement("button")
- * keep their DOM lifecycle and stay native outside React.
+ * buttons are acceptable for input-specific editor geometry (narrow table
+ * handles and the line-centred block gutter). Editor node views built with
+ * document.createElement("button") keep their DOM lifecycle and stay native
+ * outside React.
  */
 import type { ComponentProps, ReactElement } from "react";
 import { cn } from "./cn.js";

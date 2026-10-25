@@ -20,7 +20,6 @@ import {
 } from "../../editor/block-menu.js";
 import type { BlockMenuEntry, SlashTrigger } from "../../editor/block-menu.js";
 import { findBlockById } from "../../editor/blocks.js";
-import { Button } from "../shadcn/button.js";
 import { useCaretMenuKeys } from "./caret-menu.js";
 import { CaretMenu, useCaretMenuIds } from "./CaretMenu.js";
 import { FigmaDraft } from "./FigmaDraft.js";
@@ -413,10 +412,12 @@ export function BlockMenu({
     <>
       <FigmaDraft editor={editor} />
       {/*
-          * Keep the button mounted for opacity-only reveal, but remove its invisible
-          * Tab stop; slash is the keyboard entry route.
+        Native: this line-centred gutter uses 24px for mouse/trackpad and 44px
+        for touch. A device-wide coarse floor displaces its fine-input anchor.
+        Keep it mounted for opacity-only reveal without an invisible Tab stop;
+        slash is the keyboard entry route.
        */}
-      <Button variant="plain" size="custom"
+      <button
         type="button"
         ref={gutterButton}
         className={`absolute z-[1] flex items-center justify-center rounded-(--radius-sm) border border-transparent bg-transparent p-0 ub-type-body text-(--muted-foreground) [font-family:inherit] transition-opacity duration-[120ms] ease-out motion-reduce:transition-none ${
@@ -440,7 +441,7 @@ export function BlockMenu({
         }}
       >
         +
-      </Button>
+      </button>
       <CaretMenu
         editor={editor}
         host={host}

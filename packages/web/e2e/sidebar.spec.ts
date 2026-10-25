@@ -149,6 +149,9 @@ async function expectPaneClearsOpener(page: Page): Promise<{ left: number; width
       viewport: innerWidth,
       contentTop: c.top,
       openerBottom: o.bottom,
+      openerWidth: o.width,
+      openerHeight: o.height,
+      coarse: matchMedia("(any-pointer: coarse)").matches,
       reachable: document.elementFromPoint(o.left + o.width / 2, o.top + o.height / 2) === opener,
     };
   });
@@ -158,6 +161,8 @@ async function expectPaneClearsOpener(page: Page): Promise<{ left: number; width
   // The scrollport itself clears the opener, so scrolling cannot cover prose.
   expect(layout.paneTop).toBeGreaterThanOrEqual(layout.openerBottom);
   expect(layout.contentTop).toBeGreaterThanOrEqual(layout.openerBottom);
+  expect(layout.openerWidth).toBe(layout.coarse ? 44 : 32);
+  expect(layout.openerHeight).toBe(layout.coarse ? 44 : 32);
   expect(layout.reachable).toBe(true);
   return { left: layout.paneLeft, width: layout.paneWidth };
 }

@@ -1,4 +1,3 @@
-import { Button } from "../shadcn/button.js";
 /**
  * The document metadata line above its prose: catalog-backed tags, lifecycle
  * and document actions.
@@ -23,6 +22,7 @@ import { LifecycleBadge } from "./LifecycleBadge.js";
 import { PickerList } from "../PickerList.js";
 import { shareUrl } from "../route.js";
 import { useTagCatalog } from "../tags.js";
+import { Button } from "../shadcn/button.js";
 import {
   DropdownMenu,
   DropdownMenuContent,

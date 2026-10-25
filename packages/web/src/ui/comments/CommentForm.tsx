@@ -1,4 +1,3 @@
-import { Button } from "../shadcn/button.js";
 /**
  * Enter submits, Shift+Enter inserts a newline and Escape dismisses. Peer
  * chips append plain-text @name from current awareness only; they provide no
@@ -7,6 +6,7 @@ import { Button } from "../shadcn/button.js";
 
 import { useRef, useState } from "react";
 import type { ReactElement } from "react";
+import { Button } from "../shadcn/button.js";
 import { Textarea } from "../shadcn/textarea.js";
 
 /** `@name`, appended to `text` with a separating space where one is needed. */

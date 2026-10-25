@@ -1,4 +1,3 @@
-import { Button } from "../shadcn/button.js";
 /**
  * Each card has one body button with phrasing content; actions sit beside it
  * to avoid nested buttons. Quote marks are CSS. Share focus with editor
@@ -24,6 +23,7 @@ import {
   threadCardId,
 } from "./threads.js";
 import type { ThreadFocus, ThreadView } from "./threads.js";
+import { Button } from "../shadcn/button.js";
 import { Sheet, SheetContent, SheetTitle } from "../shadcn/sheet.js";
 import { useTimestampClock } from "../timestamps.js";
 

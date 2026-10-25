@@ -274,7 +274,7 @@ function SidebarContent({
       <Button variant="plain" size="custom"
         ref={collapseButtonRef}
         type="button"
-        className={`${SIDEBAR_TOGGLE_CLASSES} ub-sidebar-toggle ub-sidebar-hide top-2 right-2 [@media(any-pointer:coarse)]:size-11 border-transparent bg-(--sidebar-accent) text-sidebar-foreground`}
+        className={`${SIDEBAR_TOGGLE_CLASSES} ub-sidebar-toggle ub-sidebar-hide top-2 right-2 border-transparent bg-(--sidebar-accent) text-sidebar-foreground`}
         aria-expanded="true"
         aria-label={collapseLabel}
         title={collapseLabel}

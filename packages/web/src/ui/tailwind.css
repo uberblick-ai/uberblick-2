@@ -95,8 +95,8 @@
   }
 
   /*
-   * Shared controls inherit type below caller utilities. DOM-built editor
-   * controls retain their own styles.
+   * Reset shared controls' border, background and colour below caller utilities.
+   * DOM-built editor controls retain their own styles.
    */
   button[data-slot] {
     border: 0;

@@ -255,6 +255,16 @@ test("a touch caret exposes a 44px gutter without moving prose, follows edits, a
   await first.hover();
   await expect(gutter(page)).toHaveCSS("opacity", "1");
   await minimumTargets(gutter(page), 24, true);
+  await expect(gutter(page)).toHaveCSS("width", "24px");
+  await expect(gutter(page)).toHaveCSS("height", "24px");
+  await expect.poll(async () => {
+    const firstLineCenter = await first.evaluate((element) =>
+      element.getBoundingClientRect().top + Number.parseFloat(getComputedStyle(element).lineHeight) / 2,
+    );
+    const bounds = await gutter(page).boundingBox();
+    if (bounds === null) throw new Error("e2e: missing fine-input gutter");
+    return Math.abs(bounds.y + bounds.height / 2 - firstLineCenter);
+  }).toBeLessThan(1);
   await page.mouse.move(0, 0);
   await expect(gutter(page)).toHaveCSS("opacity", "0");
 });

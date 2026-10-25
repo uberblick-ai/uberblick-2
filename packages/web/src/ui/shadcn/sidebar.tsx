@@ -29,7 +29,7 @@ export function useSidebar(): SidebarState {
   return context;
 }
 
-export const SIDEBAR_TOGGLE_CLASSES = "absolute z-4 size-8 rounded-(--radius-sm) border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+export const SIDEBAR_TOGGLE_CLASSES = "absolute z-4 size-8 [@media(any-pointer:coarse)]:size-11 rounded-(--radius-sm) border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
 export function SidebarProvider({
   open,

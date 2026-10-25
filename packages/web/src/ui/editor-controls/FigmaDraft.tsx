@@ -28,7 +28,6 @@ export function FigmaDraft({ editor }: { editor: Editor }): ReactElement | null 
     <span className="ub-block-caption">
       <span className="ub-block-label">Figma</span>
       <span className="ub-block-actions"><Button variant="plain" size="custom" type="button"
-        className="pointer-events-auto static rounded-(--radius-sm) border-0 bg-transparent px-[0.3rem] py-[0.05rem] text-center text-(--muted-foreground) [font:inherit] tracking-normal hover:text-foreground focus-visible:text-foreground [@media(any-pointer:coarse)]:min-w-11"
         onClick={() => draft.slot.querySelector("form")?.requestSubmit()}>Done</Button></span>
     </span>
     <FigmaFields

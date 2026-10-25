@@ -1460,7 +1460,7 @@ h6.ub-heading {
 }
 .ub-block-label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ub-block-actions { display: flex; flex: none; gap: 0.3rem; }
-.ub-block-actions > button:not([data-slot]),
+.ub-block-actions > button,
 .ub-figma-placeholder > button {
   pointer-events: auto;
   position: static;
@@ -1475,10 +1475,10 @@ h6.ub-heading {
   letter-spacing: normal;
   text-align: center;
 }
-.ub-block-actions > button:not([data-slot]):focus-visible,
+.ub-block-actions > button:focus-visible,
 .ub-figma-placeholder > button:focus-visible { color: var(--foreground); }
 @media (hover: hover) {
-  .ub-block-actions > button:not([data-slot]):hover,
+  .ub-block-actions > button:hover,
   .ub-figma-placeholder > button:hover { color: var(--foreground); }
 }
 
@@ -1522,7 +1522,7 @@ h6.ub-heading {
   .ub-figma-print { display: block; }
 }
 @media (any-pointer: coarse) {
-  .ub-block-actions > button:not([data-slot]) { min-width: 2.75rem; min-height: 2.75rem; }
+  .ub-block-actions > button { min-width: 2.75rem; min-height: 2.75rem; }
 }
 
 .ub-quote { font-style: italic; }
@@ -3161,14 +3161,14 @@ h6.ub-heading {
   max-width: 100%;
 }
 
-.ub-docs-filter-control:not(button) {
+.ub-docs-filter-control {
   flex: none;
   max-width: 100%;
 }
 
 /* Search and both filters share one height, stroke and radius, with no fill. */
 .ub-docs-search-label,
-.ub-docs-filter-control:not(button) {
+.ub-docs-filter-control {
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
@@ -3226,6 +3226,7 @@ h6.ub-heading {
 }
 
 @media (hover: hover) {
+  .ub-docs-tag-filter:hover,
   .ub-docs-state-filter:hover {
     border-color: var(--ring);
   }
@@ -3420,7 +3421,7 @@ h6.ub-heading {
 @media (any-pointer: coarse) {
   .ub-docs-tab,
   .ub-docs-search-label,
-  .ub-docs-filter-control:not(button) {
+  .ub-docs-filter-control {
     min-height: 2.75rem;
   }
 }

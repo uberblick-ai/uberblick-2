@@ -19,8 +19,7 @@ import { documentSearchRows, rankDocumentSearchRows, usableDocumentStamp, useDoc
 import type { DocumentSearchSource } from "./document-search-results.js";
 
 // Measuring spans use the same recipe and target floor as the visible chips.
-export const DOCUMENT_TAG_CHIP = "ub-docs-tag-chip box-border inline-flex min-h-6 min-w-6 flex-none items-center justify-center rounded-(--radius-sm) border border-(--border) bg-(--muted) px-[0.35rem] py-[0.125rem] text-(--muted-foreground) font-(family-name:--font-sans) ub-type-caption font-normal whitespace-nowrap hover:text-(--foreground) [@media(any-pointer:coarse)]:min-h-11";
-const FILTER_CONTROL = "ub-docs-tag-filter box-border inline-flex min-h-8 max-w-full flex-none items-center gap-[0.375rem] rounded-(--radius-sm) border border-(--input) bg-transparent px-[0.625rem] py-0 text-(--muted-foreground) font-(family-name:--font-sans) ub-type-ui font-normal hover:border-(--ring)";
+const DOCUMENT_TAG_CHIP = "ub-docs-tag-chip box-border inline-flex min-h-6 min-w-6 flex-none items-center justify-center rounded-(--radius-sm) border border-(--border) bg-(--muted) px-[0.35rem] py-[0.125rem] text-(--muted-foreground) font-(family-name:--font-sans) ub-type-caption font-normal whitespace-nowrap hover:text-(--foreground) [@media(any-pointer:coarse)]:min-h-11";
 const CLEAR_FILTERS = "min-h-8 bg-transparent p-[0.4rem] text-(--foreground) font-(family-name:--font-sans) ub-type-ui font-normal underline";
 
 /** The two sortable columns, in their visual order. */
@@ -194,7 +193,7 @@ function TagFilter({
   return (
     <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery(""); }}>
       <PopoverTrigger asChild>
-        <Button variant="plain" size="custom" type="button" className={FILTER_CONTROL} aria-label="Filter by tags" aria-haspopup="listbox" aria-controls={open ? listId : undefined}>
+        <Button variant="plain" size="custom" type="button" className="ub-docs-tag-filter ub-docs-filter-control" aria-label="Filter by tags" aria-haspopup="listbox" aria-controls={open ? listId : undefined}>
           Tag <span className="ub-docs-filter-value">{labels.length === 0 ? "Any" : labels.join(", ")}</span><FilterChevron />
         </Button>
       </PopoverTrigger>
