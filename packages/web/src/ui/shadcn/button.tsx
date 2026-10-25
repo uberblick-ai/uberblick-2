@@ -3,9 +3,9 @@
  * No consumer needs Slot composition or a variant helper: these are static
  * class recipes, with the browser owning activation and keyboard focus.
  * Coarse-pointer floors and native outlines follow Web UI system.
- * New React buttons use this component. Native buttons are only for controls
- * that cannot use its rendered target, such as a hidden form submit. Editor
- * node views built with document.createElement("button") stay native.
+ * New React buttons use this component, including hidden form submits. Native
+ * buttons are acceptable outside React: editor node views built with
+ * document.createElement("button") keep their DOM lifecycle and stay native.
  */
 import type { ComponentProps, ReactElement } from "react";
 import { cn } from "./cn.js";
