@@ -35,6 +35,7 @@ function historyAt(index: number, since = false, busy = false): DocumentHistory 
   const baseline = entries[3]!;
   return {
     entries, entry: entries[index]!, titles: {}, active: true, available: true, busy, error: null,
+    filter: "all", setFilter: vi.fn(), canBack: index < entries.length - 1, canForward: true,
     selection: { index, before: snapshot(since ? baseline.id : entries[index + 1]!.id), after: snapshot(entries[index]!.id),
       ...(since ? { comparedWith: baseline } : {}) },
     collapseUnchanged: true, setCollapseUnchanged: vi.fn(), back: vi.fn(), forward: vi.fn(), open: vi.fn(),
@@ -137,5 +138,68 @@ describe("revision restore control states", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Restore “Reviewed”" })));
     expect(history.restore).toHaveBeenCalledExactlyOnceWith("baseline");
     expect(notice).toHaveBeenCalledWith(message);
+  });
+});
+
+describe("revision comparison controls", () => {
+  it("identifies the named endpoints and their authors, keeps the all-revision position and restores Before", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1200, 900));
+    const history = historyAt(1, true);
+    const selected = { ...entries[1]!, name: { text: "Release", namer: person, namedAt: 40, canManage: false } };
+    const baseline = { ...entries[3]!, author: { ...person, githubUsername: "lena" } };
+    history.entries = [entries[0]!, selected, entries[2]!, baseline];
+    history.entry = selected;
+    history.filter = "named";
+    history.selection = { ...history.selection!, comparedWith: baseline };
+    const view = render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);
+    expect(screen.getByText("Before · lena · “Reviewed”")).not.toBeNull();
+    expect(screen.getByText("After · ben · “Release”")).not.toBeNull();
+    expect(screen.getByText("· compared with “Reviewed” · lena")).not.toBeNull();
+    expect(screen.getByText("2 of 4 ·")).not.toBeNull();
+    const restore = screen.getByRole("button", { name: "Restore “Reviewed”" });
+    expect(restore.closest(".ub-revision-side-label")?.textContent).toContain("Before · lena");
+    expect(view.container.querySelector(".ub-revision-side-after")?.textContent).toContain("selected");
+    await act(async () => fireEvent.click(restore));
+    expect(history.restore).toHaveBeenCalledExactlyOnceWith("baseline");
+  });
+
+  it("labels an authorless earliest baseline as Earlier content despite intervening revisions", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1200, 900));
+    const history = historyAt(1, true);
+    const baseline = { ...entries[3]!, author: null, name: null, startedAt: null, endedAt: null };
+    const selected = { ...entries[1]!, name: { text: "Kickoff", namer: person, namedAt: 40, canManage: false } };
+    history.entries = [entries[0]!, selected, entries[2]!, baseline];
+    history.entry = selected;
+    history.selection = { ...history.selection!, comparedWith: baseline };
+    render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);
+    expect(screen.getByText("Before · Earlier content")).not.toBeNull();
+    expect(screen.getByText("· compared with Earlier content")).not.toBeNull();
+    expect(screen.queryByText(/Unknown author/)).toBeNull();
+  });
+
+  it("delegates both directions to filter-aware navigation without selecting adjacent indices", async () => {
+    const history = historyAt(1, true);
+    history.filter = "named";
+    render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Previous revision" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Next revision" })));
+    expect(history.back).toHaveBeenCalledExactlyOnceWith();
+    expect(history.forward).toHaveBeenCalledExactlyOnceWith();
+    expect(history.open).not.toHaveBeenCalled();
+  });
+
+  it("focuses the revision identifier when both named directions are disabled and keeps Back to now available", async () => {
+    const history = historyAt(1, true);
+    history.filter = "named";
+    history.canBack = false;
+    history.canForward = false;
+    render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} />);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Previous revision" }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Next revision" }).disabled).toBe(true);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: `Copy revision ${history.entry!.id}` }));
+    const now = screen.getByRole<HTMLButtonElement>("button", { name: "Back to now" });
+    expect(now.disabled).toBe(false);
+    await act(async () => fireEvent.click(now));
+    expect(history.now).toHaveBeenCalledOnce();
   });
 });

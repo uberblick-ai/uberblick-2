@@ -8,6 +8,7 @@ import type { RevisionView } from "../route.js";
 
 interface Selection { index: number; before: Y.Doc | null; after: Y.Doc; comparedWith?: RevisionEntry }
 interface HistoryState {
+  filter: "all" | "named";
   entries: RevisionEntry[] | null;
   selection: Selection | null;
   /** History was asked for: it stays open through loading, failure and an empty list. */
@@ -30,8 +31,8 @@ interface Session {
   startingHash: Promise<string | Error> | null;
   state: HistoryState;
 }
-const initial: HistoryState = { entries: null, selection: null, active: false, busy: true, error: null, titles: {} };
-type Target = { index: number } | { step: -1 | 1 } | { since: string | null } | { id: string; since?: string };
+const initial: HistoryState = { filter: "all", entries: null, selection: null, active: false, busy: true, error: null, titles: {} };
+type Target = { index: number; named?: boolean } | { step: -1 | 1; named?: boolean } | { since: string | null } | { id: string; since?: string };
 interface HistoryRoute { view: RevisionView | null; navigate: (view: RevisionView | null) => void }
 function sameView(left: RevisionView | null, right: RevisionView | null): boolean {
   return left?.revision === right?.revision && left?.since === right?.since;
@@ -54,7 +55,15 @@ function destroyDocuments(documents: Map<string, Y.Doc>): void {
 function targetIndex(target: Target, selection: Selection | null, entries: readonly RevisionEntry[]): number {
   if ("id" in target) return entries.findIndex(entry => entry.id === target.id);
   if ("since" in target || (selection === null && "step" in target)) return 0;
+  if ("step" in target && target.named) return namedStep(entries, selection?.index ?? 0, target.step);
   return "index" in target ? target.index : (selection?.index ?? 0) + target.step;
+}
+
+function namedStep(entries: readonly RevisionEntry[], index: number, step: -1 | 1): number {
+  for (let next = index + step; next >= 0 && next < entries.length; next += step) {
+    if (entries[next]?.name != null) return next;
+  }
+  return -1;
 }
 
 function listedTitles(entries: readonly RevisionEntry[]): Record<string, string> {
@@ -123,6 +132,9 @@ async function selectionEntries(owner: Session, target: Target, relist: boolean,
 }
 
 function comparisonBaseline(target: Target, entries: RevisionEntry[], index: number): RevisionEntry | undefined {
+  if ("named" in target && target.named && entries[index]?.name != null) {
+    return entries.slice(index + 1).find(entry => entry.name != null) ?? (index < entries.length - 1 ? entries.at(-1) : undefined);
+  }
   if (!("since" in target)) return undefined;
   const previous = "id" in target ? entries.find(entry => entry.id === target.since) : namedBaseline(entries, target.since ?? null);
   if (previous === undefined) throw new DocumentHistoryError("revision-not-found", "History is unavailable: this revision is no longer available. Try again.");
@@ -311,7 +323,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
       owner.operation++;
       owner.retryTarget = null;
       owner.requestedView = null;
-      update(owner, { selection: null, active: false, error: null, busy: false });
+      update(owner, { selection: null, active: false, error: null, busy: false, filter: "all" });
     }
     if (!fromRoute) routing.current?.navigate(null);
   }, [update]);
@@ -331,15 +343,34 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
   }, [client, uuid, key, routeControlled, revision, since, close]);
   // A new address never displays the previous address's comparison or live editor.
   const displayed = displayedState(state, session, route);
+  const { selection, entries, filter } = displayed;
+  const canBack = selection !== null && (filter === "named" ? namedStep(entries ?? [], selection.index, 1) >= 0 : selection.index < (entries?.length ?? 0) - 1);
+  const canForward = selection !== null && (filter === "named" ? namedStep(entries ?? [], selection.index, -1) >= 0 : true);
+  const setFilter = (next: HistoryState["filter"]): void => {
+    const owner = current.current;
+    if (owner === null || owner.state.filter === next || owner.state.busy) return;
+    update(owner, { filter: next });
+    const selected = owner.state.selection;
+    if (selected === null || owner.state.entries?.[selected.index]?.name == null) return;
+    if (selected.index === 0 && selected.comparedWith?.name != null) return;
+    void select({ index: selected.index, named: next === "named" });
+  };
   return {
     ...displayed,
+    setFilter,
+    canBack,
+    canForward,
     available: client !== null && uuid !== null,
     collapseUnchanged,
     setCollapseUnchanged,
     entry: displayed.selection === null ? null : displayed.entries?.[displayed.selection.index] ?? null,
-    back: () => { void select({ step: 1 }); },
-    forward: () => { void select({ step: -1 }); },
-    open: (index: number) => { void select({ index }); },
+    back: () => { if (selection === null || canBack) void select({ step: 1, named: filter === "named" }); },
+    forward: () => {
+      if (!canForward) return;
+      if (filter === "all" && selection?.index === 0) close();
+      else void select({ step: -1, named: filter === "named" });
+    },
+    open: (index: number) => { void select({ index, named: filter === "named" }); },
     sinceLastNamed: () => { void select({ since: null }); },
     sinceNamed: (id: string) => { void select({ since: id }); },
     name: (name: string, checksum: string) => mutate(owner => owner.client.name(owner.uuid, name, checksum, owner.signal)),

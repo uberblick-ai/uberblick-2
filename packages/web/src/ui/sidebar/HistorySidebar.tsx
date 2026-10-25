@@ -3,7 +3,6 @@
  * every revision newest first, grouped by day, each opening that revision.
  */
 
-import { useState } from "react";
 import type { ReactElement } from "react";
 import { renamedFrom } from "../document/document-history.js";
 import type { DocumentHistory } from "../document/document-history.js";
@@ -20,11 +19,11 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
   title: string;
   onNow?: () => void;
 }): ReactElement {
-  const [filter, setFilter] = useState<"all" | "named">("all");
+  const { filter, setFilter } = history;
   const now = useTimestampClock();
   const entries = history.entries ?? [];
   const groups = revisionGroups(entries, now, filter === "named");
-  const selected = history.selection?.comparedWith === undefined ? history.selection?.index ?? null : null;
+  const selected = filter === "named" || history.selection?.comparedWith === undefined ? history.selection?.index ?? null : null;
   const count = entries.length === 1 ? "1 revision" : `${entries.length} revisions`;
   return (
     <>
