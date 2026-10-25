@@ -515,23 +515,10 @@
 .ub-revision-side :is(.ProseMirror, .ub-revision-ghost) > .ub-revision-row { position: relative; }
 .ub-revision-side-before :is(.ProseMirror, .ub-revision-ghost) > :is(.ub-revision-row-removed, .ub-revision-row-changed) {
   background: var(--revision-removed-row);
-  box-shadow: -0.5rem 0 0 var(--revision-removed-row), 0.5rem 0 0 var(--revision-removed-row);
 }
 .ub-revision-side-after :is(.ProseMirror, .ub-revision-ghost) > :is(.ub-revision-row-added, .ub-revision-row-changed) {
   background: var(--revision-added-row);
-  box-shadow: -0.5rem 0 0 var(--revision-added-row), 0.5rem 0 0 var(--revision-added-row);
 }
-/* A narrow gutter mark: − removed, + added, ~ changed. */
-.ub-revision-side .ProseMirror > .ub-revision-row:not([data-revision-mark=""])::before {
-  content: attr(data-revision-mark);
-  position: absolute;
-  inset-inline-start: calc(-1 * var(--block-gutter) + 0.1rem);
-  top: 0.15em;
-  font: 600 var(--type-caption-size)/1.4 var(--font-mono);
-  pointer-events: none;
-}
-.ub-revision-side-before .ProseMirror > .ub-revision-row::before { color: var(--revision-removed-ink); }
-.ub-revision-side-after .ProseMirror > .ub-revision-row::before { color: var(--revision-added-ink); }
 .ub-revision-filler { height: 0; }
 /* Rows never share a collapsed margin, so each side's spacing is its own and
    the aligner's padding moves exactly what it measures. */

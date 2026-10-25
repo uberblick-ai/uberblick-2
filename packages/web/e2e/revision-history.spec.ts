@@ -152,6 +152,34 @@ function splitHistory(uuid: string, title: string): Record<string, string> {
   }
 }
 
+function rowEdgesHistory(uuid: string, title: string): Record<string, string> {
+  const document = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title });
+    const paragraph = appendBlock(document, { type: "paragraph", text: "The amber paragraph changes." });
+    const removed = appendBlock(document, { type: "paragraph", text: "A removed paragraph." });
+    const bullet = appendBlock(document, { type: "list-item", text: "The amber bullet changes." });
+    appendBlock(document, { type: "list-item", text: "An unchanged bullet." });
+    const ordered = appendBlock(document, { type: "list-item", list: "ordered", text: "The amber numbered item changes." });
+    appendBlock(document, { type: "list-item", list: "ordered", text: "An unchanged numbered item." });
+    for (let index = 1; index <= 6; index += 1) {
+      appendBlock(document, { type: "paragraph", text: `Unchanged context ${index}.` });
+    }
+    const table = appendBlock(document, { type: "table", text: "| Day | Latency |\n| --- | --- |\n| Mon | 10 |" });
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    editBlock(document, paragraph, "The amber paragraph changes.", "The blue paragraph changes.");
+    editBlock(document, bullet, "The amber bullet changes.", "The blue bullet changes.");
+    editBlock(document, ordered, "The amber numbered item changes.", "The blue numbered item changes.");
+    deleteBlock(document, removed);
+    insertBlock(document, paragraph, { type: "paragraph", text: "An added paragraph." });
+    const rows = getBlock(document, table)?.text ?? "";
+    editBlock(document, table, rows, rows.replace("10", "12"));
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+  }
+}
+
 function tableWidthHistory(uuid: string, title: string): Record<string, string> {
   const document = new Y.Doc();
   try {
@@ -1588,6 +1616,91 @@ test.describe("document history through ub open", () => {
     await expect(split).toBeVisible();
   });
 
+  test("comparison tints, fillers and folds share text edges and list markers keep document styling", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane",
+      contextOptions: { viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" } });
+    const title = docTitle("Comparison row edges");
+    const uuid = await newDocument(page, title);
+    await editor(page).evaluate(element => {
+      (element as HTMLElement & { editor: Editor }).editor.commands.setContent({ type: "doc", content: [
+        ...["bullet", "ordered"].flatMap(list => [1, 2].map(number => ({
+          type: "list-item", attrs: { list }, content: [{ type: "text", text: `${list} item ${number}` }],
+        }))),
+      ] });
+    });
+    const markerStyles = (view: Locator) => view.locator(":scope > .ub-list-item").evaluateAll(items => items.map(item => {
+      const style = getComputedStyle(item, "::before");
+      return { content: style.content, color: style.color, font: style.font, left: style.left, width: style.width };
+    }));
+    const documentMarkers = new Map<"light" | "dark", Awaited<ReturnType<typeof markerStyles>>>();
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      const markers = await markerStyles(editor(page));
+      expect(markers).toHaveLength(4);
+      expect(markers[0]?.content).toContain("•");
+      expect(markers[1]?.content).toContain("•");
+      expect(markers[2]?.content).toMatch(/1.*\./);
+      expect(markers[3]?.content).toMatch(/2.*\./);
+      documentMarkers.set(scheme, markers);
+    }
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], rowEdgesHistory(uuid, title));
+    await previous(page);
+    await expect(page.locator(".ub-revision-split")).toBeVisible();
+    const before = earlierSide(page), after = historicalEditor(page);
+    const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true });
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      for (const folding of [true, false]) {
+        await collapse.setChecked(folding);
+        await expect(page.locator(".ub-revision-ghost")).toHaveCount(0);
+        for (const [side, tint] of [[before, "removed"], [after, "added"]] as const) {
+          await expect(side.locator(".ub-revision-fold-button")).toHaveCount(Number(folding));
+          await expect(side.locator("[data-revision-mark]")).toHaveCount(0);
+          await expect(side.locator(`:scope > p.ub-revision-row-${tint}`)).toHaveCount(1);
+          await expect(side.locator(".ub-revision-fields")).toContainText(tint === "removed" ? "Removed block" : "Added block");
+          const geometry = await side.evaluate((element, kind) => {
+            const edges = (target: Element) => {
+              const box = target.getBoundingClientRect();
+              return { left: box.left, right: box.right };
+            };
+            const filler = element.querySelector(".ub-revision-row-end.ub-revision-row-filler");
+            const paragraph = element.querySelector("p.ub-revision-row-changed");
+            if (filler === null || paragraph?.firstChild == null) throw new Error("The comparison geometry fixture is missing");
+            const text = document.createRange();
+            text.setStart(paragraph.firstChild, 0);
+            text.setEnd(paragraph.firstChild, 1);
+            const rows = [...element.querySelectorAll(`:scope > .ub-revision-row-${kind}, :scope > .ub-revision-row-changed`)];
+            const fold = element.querySelector(".ub-revision-fold-button");
+            return { filler: edges(filler), fold: fold === null ? null : edges(fold), text: text.getBoundingClientRect().left,
+              rows: rows.map(row => ({ ...edges(row), shadow: getComputedStyle(row).boxShadow,
+                tint: getComputedStyle(row).backgroundColor, mark: getComputedStyle(row, "::before").content,
+                list: row.classList.contains("ub-list-item") })) };
+          }, tint);
+          expect(geometry.rows.length).toBeGreaterThan(3);
+          for (const row of geometry.rows) {
+            expect(row.left).toBeCloseTo(geometry.filler.left, 0);
+            expect(row.right).toBeCloseTo(geometry.filler.right, 0);
+            // Box geometry alone cannot detect paint extending through a shadow.
+            expect(row.shadow).toBe("none");
+            expect(alphaOf(row.tint)).toBeGreaterThan(0);
+            if (!row.list) expect(["none", "normal"]).toContain(row.mark);
+          }
+          expect(geometry.text).toBeCloseTo(geometry.filler.left, 0);
+          if (geometry.fold !== null) {
+            expect(geometry.fold.left).toBeCloseTo(geometry.filler.left, 0);
+            expect(geometry.fold.right).toBeCloseTo(geometry.filler.right, 0);
+          }
+          expect(await markerStyles(side)).toEqual(documentMarkers.get(scheme));
+          await expect(side.locator('.ub-list-item[data-revision-row="changed"]')).toHaveCount(2);
+          await expect(side.locator('.ub-list-item[data-revision-row="unchanged"]')).toHaveCount(2);
+        }
+      }
+    }
+  });
+
   test("table width changes explain themselves while keeping widths, tint and change navigation", { tag: "@webkit" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 640 } } });
     await page.emulateMedia({ reducedMotion: "reduce" });
@@ -1615,7 +1728,7 @@ test.describe("document history through ub open", () => {
     for (const [side, expected] of [[before, [160, 180]], [after, [240, 180]]] as const) {
       await expect.poll(() => widthTable(side).locator("th").evaluateAll(cells => cells.map(cell => Math.round(cell.getBoundingClientRect().width))))
         .toEqual(expected);
-      await expect(side.locator(':scope > [data-revision-row="changed"]').first()).toHaveAttribute("data-revision-mark", "~");
+      await expect(side.locator("[data-revision-mark]")).toHaveCount(0);
     }
     // The widths-only table remains visible with the unchanged middle folded.
     await expect(after.locator(".ub-revision-fold-button")).toHaveCount(1);
@@ -1641,7 +1754,7 @@ test.describe("document history through ub open", () => {
         const row = side.locator(':scope > [data-revision-row="changed"]').first();
         const paint = await row.evaluate(element => ({ background: getComputedStyle(element).backgroundColor, mark: getComputedStyle(element, "::before").content }));
         expect(alphaOf(paint.background)).toBeGreaterThan(0);
-        expect(paint.mark).toBe('"~"');
+        expect(["none", "normal"]).toContain(paint.mark);
         paints.push(paint.background);
       }
       expect(paints[0]).not.toBe(paints[1]);
@@ -2970,6 +3083,8 @@ test.describe("document history through ub open", () => {
     if (await page.locator(".ub-revision-split").isVisible()) {
       // Side by side, the predecessor draws its own numbers with the same mapping.
       const earlier = earlierSide(page);
+      await expect(earlier.locator(".ub-revision-fields")).toHaveText(["Data changed: measurements", "Data changed: measurements"]);
+      await expect(page.locator(".ub-revision-split [data-revision-mark]")).toHaveCount(0);
       await expect(earlier.getByRole("table", { name: "Historical measurements", exact: true }).locator("tbody tr")).toHaveText(["2026-10-2010 ms", "2026-10-2120 ms"]);
       await expect(earlier.locator(".ub-chart").filter({ has: page.getByRole("img", { name: "Historical latency", exact: true }) })
         .locator(".ub-chart-description")).toContainText("Latest values: Latency: 20 ms.");
