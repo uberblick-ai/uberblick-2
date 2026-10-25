@@ -77,6 +77,15 @@ The individual publishers below explain the workflows and allow dry-run
 inspection. They are not separate release paths from 0.5.0 on; use the paired
 task to publish both tags.
 
+The publishing jobs create GitHub build-provenance attestations in this
+repository only for artifacts built by that run, then verify them before
+reporting success. A rerun verifies existing attestations without attesting
+reused bytes. Missing or invalid provenance fails the run, including on a
+rerun. Attestation happens after publication, so a failed run can leave a
+published artifact without provenance: keep that version immutable and publish
+a new version to recover. Older releases are not backfilled. Dry runs create
+no attestations and need no OIDC token.
+
 ### Homebrew publisher
 
 This repository is public; the release artifact is published on the public tap
@@ -86,13 +95,16 @@ GitHub account or token.
 An exact `vMAJOR.MINOR.PATCH` tag starts the repository's `Publish Homebrew
 release` workflow. Its only job runs under the `homebrew-tap` environment,
 whose selected-tag policy is the
-credential boundary for `HOMEBREW_TAP_TOKEN` — the only credential the
-publisher uses, because both the asset and the formula land on the tap. The job
+credential boundary for `HOMEBREW_TAP_TOKEN`, which publishes the asset and
+formula on the tap. The job's `GITHUB_TOKEN` stores attestations in this
+repository; a short-lived OIDC identity signs them. The job
 builds the versioned install payload, checks the payload's own `ub --version`,
 publishes it as an asset on a release of the same tag in the tap repository,
 verifies that exact asset is anonymously downloadable, and only then commits the
 generated public formula naming it. It refuses before creating a release while
-the tap repository is not public.
+the tap repository is not public. After publication, it attests the versioned
+`uberblick-X.Y.Z.tar.gz` payload. The download and verification commands are in
+[README.md's Install section](README.md#install).
 
 One-time prerequisite before the first tag: the tap repository must hold at
 least one commit on its default branch, because a GitHub release needs a commit
@@ -134,6 +146,10 @@ metadata and labels and scans its layers for `.env`, `fnox.toml`,
 The dry run performs the same checks without pushing. Local dry runs retain
 platform-suffixed image tags (`X.Y.Z-amd64` and `X.Y.Z-arm64`) and an unsuffixed
 alias for the Docker host's native platform, for the launch proof below.
+After publication, the job attests each complete image index, covering both
+platforms. It stores the attestations in this repository without pushing them
+to GHCR. The Compose and route release assets are not attested. See
+[REMOTE.md's verification commands](REMOTE.md#read-a-releases-identity).
 
 ## One-time registry setup
 

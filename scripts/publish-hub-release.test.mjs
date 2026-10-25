@@ -27,6 +27,9 @@ function image(platform = "linux/amd64", ref = REFS[0], revision = SHA) {
 function uploadedRef(ref, platform) {
   return `${ref.split(":")[0]}@sha256:${createHash("sha256").update(`uploaded/${ref}/${platform}`).digest("hex")}`;
 }
+function indexDigest(ref) {
+  return `sha256:${createHash("sha256").update(`index/${ref}`).digest("hex")}`;
+}
 function published(ref = REFS[0]) {
   return Object.fromEntries(PLATFORMS.map((platform) => {
     const inspected = image(platform, ref);
@@ -52,6 +55,10 @@ function services(overrides = {}) {
     publishIndex: async (ref, digests) => {
       calls.push(`index ${ref} ${digests.join(" ")}`);
       indexes.add(ref);
+      return indexDigest(ref);
+    },
+    verifyAttestation: async (subject, input) => {
+      calls.push(`verify ${subject} ${input.tag} ${input.headSha}`);
     },
     log: () => {}, ...overrides,
   };
@@ -87,7 +94,9 @@ test("only a person's matching tag push admits publication", async () => {
 
 test("all four platform images are checked before publishing those exact images and their indexes", async () => {
   const fake = services();
-  assert.equal((await publishHubRelease(input(), fake)).outcome, "published");
+  const result = await publishHubRelease(input(), fake);
+  assert.equal(result.outcome, "published");
+  assert.deepEqual(result.digests, REFS.map(indexDigest));
   const firstPush = fake.calls.findIndex((call) => call.startsWith("push "));
   assert.deepEqual(fake.calls.slice(0, firstPush), ["tag", ...REFS.map((ref) => `read ${ref}`),
     "build", ...localChecks(), "tag", ...REFS.map((ref) => `read ${ref}`)]);
@@ -103,8 +112,25 @@ test("all four platform images are checked before publishing those exact images 
 test("an unchanged published version scans all four platform images without rebuilding or pushing", async () => {
   const fake = services({ getImage: async (ref) => published(ref) });
   assert.equal((await publishHubRelease(input(), fake)).outcome, "no-op");
-  assert.deepEqual(fake.calls, ["tag", ...REFS.flatMap((ref) => PLATFORMS.map((platform) =>
+  assert.deepEqual(fake.calls, ["tag", ...REFS.map((ref) => `verify oci://${ref} ${TAG} ${SHA}`), ...REFS.flatMap((ref) => PLATFORMS.map((platform) =>
     `scan ${image(platform, ref).Id} ${platform}`))]);
+});
+
+test("a reused hub release missing either index attestation cannot succeed or rebuild", async () => {
+  for (const missing of REFS) {
+    const fake = services({ getImage: async (ref) => published(ref),
+      verifyAttestation: async (subject) => {
+        if (subject === `oci://${missing}`) throw new Error("missing or invalid provenance");
+      } });
+    await assert.rejects(publishHubRelease(input(), fake), /provenance/);
+    assert.ok(!fake.calls.includes("build"));
+    assert.deepEqual(pushes(fake), []);
+  }
+});
+
+test("a publishing result cannot omit a captured index digest", async () => {
+  const fake = services({ publishIndex: async () => undefined });
+  await assert.rejects(publishHubRelease(input(), fake), /identify published index/);
 });
 
 test("mismatching platform identity and partial publications refuse before building or publishing", async () => {
@@ -275,6 +301,43 @@ test("published platform digests come from one complete index and tolerate only 
     narrowed.manifests[position].platform.variant = variant;
     assert.throws(() => platformDigests(narrowed), /unsupported/,
       "a digest pull must not hide an index variant that excludes baseline hosts");
+  }
+});
+
+test("the index publisher captures the digest assembled from this run's platform subjects", async () => {
+  const scratch = mkdtempSync(join(process.env.UB_AGENTS_SCRATCH ?? tmpdir(),
+    `hub-index-adapter-${process.env.UB_AGENTS_RUN ?? "test"}-`));
+  try {
+    const docker = join(scratch, "docker");
+    const log = join(scratch, "docker.json");
+    const metadata = join(scratch, "metadata.json");
+    writeFileSync(docker, `#!${process.execPath}
+const { writeFileSync } = require("node:fs");
+const args = process.argv.slice(2);
+writeFileSync(${JSON.stringify(log)}, JSON.stringify(args));
+writeFileSync(args[args.indexOf("--metadata-file") + 1], JSON.stringify({
+  "containerimage.descriptor": { digest: process.env.INDEX_TEST_DIGEST }
+}));
+`);
+    chmodSync(docker, 0o755);
+    for (const digest of [indexDigest(REFS[0]), "", "sha256:invalid"]) {
+      const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+import { publishIndex } from ${JSON.stringify(new URL("./publish-hub-release.mjs", import.meta.url).href)};
+process.stdout.write(await publishIndex(${JSON.stringify(REFS[0])},
+  ${JSON.stringify(PLATFORMS.map((platform) => uploadedRef(REFS[0], platform)))}, ${JSON.stringify(metadata)}));
+`], { env: { ...process.env, PATH: scratch, INDEX_TEST_DIGEST: digest }, encoding: "utf8", timeout: 10_000 });
+      if (digest === indexDigest(REFS[0])) {
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(result.stdout, digest);
+      } else {
+        assert.equal(result.status, 1);
+        assert.match(result.stderr, /cannot identify published index/);
+      }
+      assert.deepEqual(JSON.parse(readFileSync(log, "utf8")), ["buildx", "imagetools", "create", "--tag", REFS[0],
+        "--metadata-file", metadata, ...PLATFORMS.map((platform) => uploadedRef(REFS[0], platform))]);
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 });
 

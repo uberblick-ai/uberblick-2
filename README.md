@@ -24,6 +24,23 @@ ub --version
 
 Homebrew installs the CLI and web editor together.
 
+To verify the downloaded payload's build provenance, install the
+[GitHub CLI](https://cli.github.com) and sign in to a GitHub account with
+`gh auth login`. Replace `X.Y.Z` with the release version:
+
+```sh
+curl -fL -o uberblick-X.Y.Z.tar.gz https://github.com/uberblick-ai/homebrew-tap/releases/download/vX.Y.Z/uberblick-X.Y.Z.tar.gz
+gh attestation verify uberblick-X.Y.Z.tar.gz \
+  --repo uberblick-ai/uberblick-2 \
+  --signer-workflow uberblick-ai/uberblick-2/.github/workflows/release-homebrew.yml \
+  --source-ref refs/tags/vX.Y.Z
+```
+
+This checks that the payload was built by this repository's Homebrew release
+workflow from the release tag. New releases carry these attestations; releases
+published before their introduction are not backfilled. See the
+[verification options](https://cli.github.com/manual/gh_attestation_verify).
+
 ## Your first ten minutes
 
 Local only, no hub, no account. The same five steps, with the result to expect

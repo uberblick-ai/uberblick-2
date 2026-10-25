@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
+	appendFileSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -11,6 +12,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { verifyReleaseAttestation } from "./release-attestation.mjs";
 
 const REPOSITORY_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SOURCE_REPOSITORY = "uberblick-ai/uberblick-2";
@@ -39,10 +42,8 @@ function assetUrl(tag, version) {
 }
 
 /**
- * The published release's body. The source repository stays private and the
- * artifact lives on the public tap, whose release targets a tap commit — so the
- * commit this version was published from is recorded here, and is what a later
- * run of the same tag is checked against.
+ * The tap release targets a tap commit, so record the source commit separately
+ * and check later runs of the same tag against it.
  */
 export function releaseBody(version, sourceCommit) {
 	return `Uberblick ${version}\n\nSource-commit: ${sourceCommit}\n`;
@@ -161,6 +162,7 @@ export async function publishHomebrewRelease(input, services) {
 	const existingFormula = input.dryRun ? null : await services.getTapFormula();
 
 	let bytes;
+	let archive;
 	let published = false;
 	if (existingAsset !== null) {
 		if (existingAsset.state !== "uploaded") {
@@ -172,6 +174,7 @@ export async function publishHomebrewRelease(input, services) {
 			fail(`release ${input.tag}'s asset URL disagrees with the public formula URL`);
 		}
 		bytes = await services.downloadAsset(existingAsset.browser_download_url);
+		await services.verifyAttestation(bytes, name, input);
 		const reportedVersion = await services.publishedArchiveVersion(bytes, name, version);
 		if (reportedVersion !== version) {
 			fail(`published payload reports ${JSON.stringify(reportedVersion)}, expected ${version}`);
@@ -188,7 +191,7 @@ export async function publishHomebrewRelease(input, services) {
 				fail("the tap formula disagrees with an unpublished or older release tag");
 			}
 		}
-		const archive = await services.buildArchive(version);
+		archive = await services.buildArchive(version);
 		const reportedVersion = await services.archiveVersion(archive, version);
 		if (reportedVersion !== version) {
 			fail(`payload reports ${JSON.stringify(reportedVersion)}, expected ${version}`);
@@ -227,7 +230,7 @@ export async function publishHomebrewRelease(input, services) {
 	await services.assertPublicAsset(assetUrl(input.tag, version));
 	await services.putTapFormula(formula, existingFormula?.sha ?? null, version);
 	services.log(`Published ${input.tag} and committed ${TAP_FORMULA_PATH} to ${TAP_REPOSITORY}.`);
-	return { outcome: "published", formula };
+	return { outcome: "published", formula, archive };
 }
 
 function run(command, args, options = {}) {
@@ -272,6 +275,17 @@ const localServices = {
 		}
 	},
 	readArchive: async (archive) => readFileSync(archive),
+	verifyAttestation: async (bytes, name, input) => {
+		const scratch = mkdtempSync(join(process.env.UB_AGENTS_SCRATCH ?? tmpdir(),
+			`uberblick-attestation-check-${process.env.UB_AGENTS_RUN ?? "local"}-`));
+		try {
+			const archive = join(scratch, name);
+			writeFileSync(archive, bytes);
+			await verifyReleaseAttestation(archive, "release-homebrew.yml", input);
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	},
 };
 
 async function githubRequest(path, token, options = {}) {
@@ -391,7 +405,7 @@ async function main() {
 				log: (message) => process.stdout.write(`${message}\n`),
 			}
 		: productionServices();
-	await publishHomebrewRelease(
+	const result = await publishHomebrewRelease(
 		{
 			tag,
 			dryRun,
@@ -404,6 +418,12 @@ async function main() {
 		},
 		services,
 	);
+	if (!dryRun && process.env.GITHUB_OUTPUT !== undefined) {
+		appendFileSync(process.env.GITHUB_OUTPUT, `outcome=${result.outcome}\n`);
+		if (result.archive !== undefined) {
+			appendFileSync(process.env.GITHUB_OUTPUT, `archive=${result.archive}\n`);
+		}
+	}
 }
 
 function productionServicesForDryRun() {

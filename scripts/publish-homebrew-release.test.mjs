@@ -59,6 +59,12 @@ function services(overrides = {}) {
       calls.push("download");
       return BYTES;
     },
+    verifyAttestation: async (bytes, name, context) => {
+      assert.deepEqual(bytes, BYTES);
+      assert.equal(name, `uberblick-${VERSION}.tar.gz`);
+      assert.deepEqual(context, input());
+      calls.push("verify attestation");
+    },
     publishedArchiveVersion: async () => {
       calls.push("published version");
       return VERSION;
@@ -136,6 +142,7 @@ test("a new tag builds, verifies, publishes, then commits the generated formula"
   const result = await publishHomebrewRelease(input(), fake);
 
   assert.equal(result.outcome, "published");
+  assert.equal(result.archive, "/fixture/archive");
   assert.deepEqual(fake.calls, [
     "get tap",
     "get release",
@@ -176,11 +183,13 @@ test("a matching published tag verifies the asset and changes nothing", async ()
   const result = await publishHomebrewRelease(input(), fake);
 
   assert.equal(result.outcome, "no-op");
+  assert.equal(result.archive, undefined);
   assert.deepEqual(fake.calls, [
     "get tap",
     "get release",
     "get formula",
     "download",
+    "verify attestation",
     "published version",
     "public asset",
   ]);
@@ -204,9 +213,44 @@ test("a published payload refuses a disagreeing formula without mutating either 
     "get release",
     "get formula",
     "download",
+    "verify attestation",
     "published version",
     "public asset",
   ]);
+});
+
+test("reused payloads require provenance before executing the payload or recovering the formula", async () => {
+  for (const formula of [
+    null,
+    { sha: "older-formula", content: formulaFor("v1.2.2", "1.2.2", "b".repeat(64)) },
+    { sha: "matching-formula", content: formulaFor(TAG, VERSION, DIGEST) },
+  ]) {
+    for (const reason of ["no attestations found", "source ref does not match"]) {
+      const fake = services({
+        getRelease: async () => {
+          fake.calls.push("get release");
+          return release();
+        },
+        getTapFormula: async () => {
+          fake.calls.push("get formula");
+          return formula;
+        },
+        verifyAttestation: async () => {
+          fake.calls.push("verify attestation");
+          throw new Error(reason);
+        },
+      });
+
+      await assert.rejects(() => publishHomebrewRelease(input(), fake), { message: reason });
+      assert.deepEqual(fake.calls, [
+        "get tap",
+        "get release",
+        "get formula",
+        "download",
+        "verify attestation",
+      ]);
+    }
+  }
 });
 
 test("a payload version mismatch publishes nothing", async () => {
@@ -252,11 +296,13 @@ test("a partial publication can add an absent formula from the verified asset", 
   const result = await publishHomebrewRelease(input(), fake);
 
   assert.equal(result.outcome, "recovered-formula");
+  assert.equal(result.archive, undefined);
   assert.deepEqual(fake.calls, [
     "get tap",
     "get release",
     "get formula",
     "download",
+    "verify attestation",
     "published version",
     "public asset",
     "put formula new",
@@ -281,11 +327,13 @@ test("a partial publication advances an older formula from the verified asset", 
   const result = await publishHomebrewRelease(input(), fake);
 
   assert.equal(result.outcome, "recovered-formula");
+  assert.equal(result.archive, undefined);
   assert.deepEqual(fake.calls, [
     "get tap",
     "get release",
     "get formula",
     "download",
+    "verify attestation",
     "published version",
     "public asset",
     "put formula old-formula-sha",
@@ -300,6 +348,7 @@ test("a dry run builds the payload but reaches no repository API", async () => {
     createRelease: async () => assert.fail("dry-run created a release"),
     uploadAsset: async () => assert.fail("dry-run uploaded an asset"),
     putTapFormula: async () => assert.fail("dry-run wrote the tap"),
+    verifyAttestation: async () => assert.fail("dry-run verified an attestation"),
     log: (line) => output.push(line),
   });
 
