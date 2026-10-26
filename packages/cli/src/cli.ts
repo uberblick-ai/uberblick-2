@@ -96,7 +96,7 @@ export const COMMAND_TREE: CommandGroup = {
       command({ path: ["workspace", "list"], help: WORKSPACE_LIST_HELP, options: WORKSPACE_LIST_OPTIONS, positionals: false, run: listWorkspacesCommand }),
       command({ path: ["workspace", "use"], help: WORKSPACE_USE_HELP, options: WORKSPACE_USE_OPTIONS,
         positionals: { min: 1, max: 1, error: "expected exactly one workspace link or id" }, run: useWorkspaceCommand }),
-      command({ path: ["workspace", "remove"], help: WORKSPACE_REMOVE_HELP, options: WORKSPACE_REMOVE_OPTIONS,
+      command({ path: ["workspace", "remove"], aliases: ["rm"], help: WORKSPACE_REMOVE_HELP, options: WORKSPACE_REMOVE_OPTIONS,
         positionals: { min: 1, max: 1, error: "expected exactly one workspace id or prefix" }, run: removeWorkspaceCommand }),
     ] },
     { path: ["auth"], help: AUTH_HELP, unknownCommand: () => "unknown command", children: [

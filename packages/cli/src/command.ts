@@ -22,6 +22,7 @@ export function usageError(message: string, recovery?: string, path?: string): n
 
 interface CommandPath {
   path: readonly string[];
+  aliases?: readonly string[];
 }
 
 export interface CommandGroup extends CommandPath {
@@ -90,7 +91,7 @@ export async function dispatchCommand(
       io.out(`${entry.version()}\n`);
       return 0;
     }
-    const next = entry.children.find(candidate => candidate.path.at(-1) === child);
+    const next = entry.children.find(candidate => candidate.path.at(-1) === child || candidate.aliases?.includes(child));
     return next === undefined
       ? printUsageError(entry, new UsageError(entry.unknownCommand?.(child) ?? `unknown command ${JSON.stringify(child)}`), io)
       : dispatchCommand(next, rest, io, options);

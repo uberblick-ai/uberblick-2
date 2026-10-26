@@ -352,7 +352,7 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
   });
 });
 
-describe("ub workspace remove", () => {
+describe.each(["remove", "rm"])("ub workspace %s", command => {
   function databasePath(box: Sandbox, uuid = OTHER): string {
     return join(box.dataHome, "uberblick", `${uuid}.sqlite`);
   }
@@ -374,7 +374,7 @@ readline.createInterface = () => ({
 });
 syncBuiltinESMExports();
 `, "utf8");
-    return runUbAsync(["workspace", "remove", operand], box, {
+    return runUbAsync(["workspace", command, operand], box, {
       NODE_OPTIONS: `${box.env.NODE_OPTIONS ?? ""} --import=${pathToFileURL(preload).href}`.trim(),
     });
   }
@@ -400,8 +400,10 @@ syncBuiltinESMExports();
       join(box.configHome, "uberblick", "credentials.json"), databasePath(box, UNRELATED),
     ];
     const before = protectedPaths.map(path => readFileSync(path));
-    const run = await runInProcess(["workspace", "remove", operand, "--yes"], box);
+    const run = await runInProcess(["workspace", command, operand, "--yes"], box);
     expect(run.status, run.output).toBe(0);
+    expect(run.stdout).toBe(`removed ${OTHER} from this computer\n`);
+    expect(run.stderr).toBe("");
     expect(replicaFiles(box).map(path => existsSync(path))).toEqual([false, false, false, false]);
     expect(readWorkspaceHub(OTHER, box.env)).toBeUndefined();
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(HUB);
@@ -420,7 +422,7 @@ syncBuiltinESMExports();
     const box = sandbox();
     if (source === "database only") withDatabase(box, OTHER);
     else record(box, OTHER, null);
-    const run = await runInProcess(["workspace", "remove", OTHER.slice(0, 8), "--yes"], box);
+    const run = await runInProcess(["workspace", command, OTHER.slice(0, 8), "--yes"], box);
     expect(run.status, run.output).toBe(0);
     expect(existsSync(databasePath(box))).toBe(false);
     expect(readWorkspaceHub(OTHER, box.env)).toBeUndefined();
@@ -438,9 +440,11 @@ syncBuiltinESMExports();
       [UNRELATED, 1, "ub workspace use <link>"],
       ["4d8e", 2, "matches 2"],
     ] as const) {
-      const run = await runInProcess(["workspace", "remove", operand, "--yes"], box);
+      const run = await runInProcess(["workspace", command, operand, "--yes"], box);
+      expect(run).toEqual(await runInProcess(["workspace", "remove", operand, "--yes"], box));
       expect(run.status, run.output).toBe(status);
       expect(run.stdout).toBe("");
+      expect(run.stderr).toMatch(/^ub workspace remove: /);
       expect(run.stderr).toContain(message);
       if (operand === "4d8e") {
         expect(run.stderr).toContain(WORKSPACE);
@@ -461,8 +465,11 @@ syncBuiltinESMExports();
     const status = await runInProcess(["status"], box, env);
     expect(status.stdout).toContain(target);
     const before = files.map(path => readFileSync(path));
-    const run = await runInProcess(["workspace", "remove", target, "--yes"], box, env);
+    const run = await runInProcess(["workspace", command, target, "--yes"], box, env);
+    expect(run).toEqual(await runInProcess(["workspace", "remove", target, "--yes"], box, env));
     expect(run.status, run.output).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toMatch(/^ub workspace remove: /);
     expect(run.stderr).toContain("ub workspace use");
     expect(run.stderr).toMatch(/another workspace|different workspace/);
     expect(files.map(path => readFileSync(path))).toEqual(before);
@@ -475,7 +482,7 @@ syncBuiltinESMExports();
     record(box, WORKSPACE, HUB);
     record(box, OTHER, null);
     const before = readFileSync(join(box.cwd, ".uberblick.json"));
-    const run = await runInProcess(["workspace", "remove", WORKSPACE, "--yes"], box, {
+    const run = await runInProcess(["workspace", command, WORKSPACE, "--yes"], box, {
       UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "local",
     });
     expect(run.status, run.output).toBe(0);
@@ -491,7 +498,7 @@ syncBuiltinESMExports();
     const registry = workspaceRegistryPath(box.env);
     mkdirSync(dirname(registry), { recursive: true });
     writeFileSync(registry, "{broken");
-    const run = await runInProcess(["workspace", "remove", OTHER.slice(0, 8), "--yes"], box);
+    const run = await runInProcess(["workspace", command, OTHER.slice(0, 8), "--yes"], box);
     expect(run.status, run.output).toBe(1);
     expect(existsSync(databasePath(box))).toBe(true);
     expect(readFileSync(registry, "utf8")).toBe("{broken");
@@ -507,8 +514,11 @@ syncBuiltinESMExports();
     // Closing a separate file descriptor in the holder would release its POSIX lock.
     const lockFile = statSync(`${path}.serving-lock`);
     try {
-      const run = await runUbAsync(["workspace", "remove", OTHER, "--yes"], box);
+      const run = await runUbAsync(["workspace", command, OTHER, "--yes"], box);
+      expect(run).toEqual(await runUbAsync(["workspace", "remove", OTHER, "--yes"], box));
       expect(run.status, run.output).toBe(1);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toMatch(/^ub workspace remove: /);
       expect(run.stderr).toMatch(/serving|ub open/);
       expect(existsSync(path)).toBe(true);
       expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(registry);
@@ -517,7 +527,7 @@ syncBuiltinESMExports();
     } finally {
       role.close();
     }
-    const removed = await runInProcess(["workspace", "remove", OTHER, "--yes"], box);
+    const removed = await runInProcess(["workspace", command, OTHER, "--yes"], box);
     expect(removed.status, removed.output).toBe(0);
     expect(replicaFiles(box).some(path => existsSync(path))).toBe(false);
   });
@@ -531,7 +541,7 @@ syncBuiltinESMExports();
     try {
       await first.ok("create_doc", { title: "Before removal", description: "A document saved before this computer removes its workspace." });
       sessions.push(await startServer(config));
-      const removed = await runUbAsync(["workspace", "remove", OTHER, "--yes"], box);
+      const removed = await runUbAsync(["workspace", command, OTHER, "--yes"], box);
       expect(removed.status, removed.output).toBe(0);
       expect(replicaFiles(box).some(path => existsSync(path))).toBe(false);
       expect(readWorkspaceHub(OTHER, box.env)).toBeUndefined();
@@ -555,8 +565,11 @@ syncBuiltinESMExports();
     withDatabase(box, OTHER);
     record(box, OTHER, null);
     const before = readFileSync(workspaceRegistryPath(box.env));
-    const run = await runInProcess(["workspace", "remove", OTHER], box);
+    const run = await runInProcess(["workspace", command, OTHER], box);
+    expect(run).toEqual(await runInProcess(["workspace", "remove", OTHER], box));
     expect(run.status, run.output).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toMatch(/^ub workspace remove: /);
     expect(run.stderr).toContain("--yes");
     expect(run.output).not.toContain("[y/N]");
     expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(before);
@@ -568,11 +581,12 @@ syncBuiltinESMExports();
     withDatabase(box, OTHER);
     record(box, OTHER, null);
     const run = await terminal(box, OTHER, answer);
-    expect(run.stderr).toContain("[y/N]");
+    expect(run.stderr).toBe(`Delete this computer's copy of workspace ${OTHER}? This is the only copy of this local-only workspace. [y/N] `);
     const approved = /^(y|yes)$/i.test(answer);
+    expect(run.status, run.output).toBe(0);
+    expect(run.stdout).toBe(approved ? `removed ${OTHER} from this computer\n` : "cancelled; nothing was removed\n");
     expect(existsSync(databasePath(box))).toBe(!approved);
     expect(readWorkspaceHub(OTHER, box.env)).toBe(approved ? undefined : null);
-    if (approved) expect(run.status, run.output).toBe(0);
   });
 
   it.each(["shared", "shared pending", "local", "unknown"])("explains the %s copy's loss before asking", async kind => {
@@ -614,13 +628,15 @@ syncBuiltinESMExports();
     const registry = workspaceRegistryPath(box.env);
     mkdirSync(dirname(registry), { recursive: true });
     writeFileSync(registry, "{broken");
-    const bare = await runInProcess(["workspace", "remove"], box);
+    const bare = await runInProcess(["workspace", command], box);
+    expect(bare).toEqual(await runInProcess(["workspace", "remove"], box));
     expect(bare.status, bare.output).toBe(2);
     expect(bare.stdout).toBe("");
     expect(bare.stderr).toContain("usage: ub workspace remove");
     expect(bare.stderr).toContain("--yes");
-    for (const args of [["--help"], [OTHER, "--yes", "--help"]]) {
-      const run = await runInProcess(["workspace", "remove", ...args], box);
+    for (const args of [["--help"], ["-h"], [OTHER, "--yes", "--help"]]) {
+      const run = await runInProcess(["workspace", command, ...args], box);
+      expect(run).toEqual(await runInProcess(["workspace", "remove", ...args], box));
       expect(run.status, run.output).toBe(0);
       expect(run.stdout).toContain("usage: ub workspace remove");
       expect(run.stderr).toBe("");
