@@ -5,6 +5,7 @@ import {
   initDoc, listAnnotationRanges,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
+import { DOMSerializer } from "@tiptap/pm/model";
 import { findForeignBlocks, findLinkConflicts, LINK_CONFLICT } from "../src/editor/palette.js";
 import { commentTargetOf } from "../src/editor/selection.js";
 import { threadsFromDoc } from "../src/ui/comments/threads.js";
@@ -44,6 +45,38 @@ describe("Figma caption integration", () => {
     expect(editor.view.dom.querySelector(".ub-figma-caption strong")?.textContent).toBe("marked");
     expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
     expect(findForeignBlocks(getBlocksFragment(ydoc))).toEqual([]);
+  });
+
+  it.each([0, 1, 2, 3])("preserves caption breaks, marks and comment anchors when a DOM reread starts at depth %s", (depth) => {
+    const { ydoc, id } = figmaDoc("**Line one**\n*Line two*");
+    createAnnotation(ydoc, id, 0, 8, "Reader", "First line", { part: "caption" });
+    createAnnotation(ydoc, id, 9, 17, "Reader", "Second line", { part: "caption" });
+    const { editor } = mountEditor(ydoc);
+    const at = editor.state.doc.resolve(captionPosition(editor));
+    const context = editor.state.doc.resolve(at.start(depth));
+    const host = document.createElement("div");
+    host.append(DOMSerializer.fromSchema(editor.schema).serializeFragment(context.parent.content));
+    const parser = editor.view.someProp("domParser");
+    if (parser === undefined) throw new Error("Figma DOM parser is missing");
+    const parsed = parser.parse(host, { topNode: context.parent, context, preserveWhitespace: true });
+    expect(parsed.textContent).toBe("Line one\nLine two");
+    expect(parsed.toJSON()).toEqual(context.parent.toJSON());
+  });
+
+  it("keeps ordinary paragraph rereads and HTML paste whitespace unchanged", () => {
+    const { ydoc } = figmaDoc();
+    appendBlock(ydoc, { type: "paragraph", text: "Ordinary prose" });
+    const { editor } = mountEditor(ydoc);
+    const parser = editor.view.someProp("domParser");
+    if (parser === undefined) throw new Error("Figma DOM parser is missing");
+    const context = editor.state.doc.resolve(editor.state.doc.firstChild!.nodeSize + 1);
+    const host = document.createElement("div");
+    host.textContent = "Line one\nLine two";
+    expect(parser.parse(host, { topNode: context.parent, context, preserveWhitespace: true }).textContent)
+      .toBe("Line one Line two");
+    host.innerHTML = "<p>Line  one\nLine two</p>";
+    const pasted = parser.parseSlice(host, { context }).content;
+    expect(pasted.textBetween(0, pasted.size)).toBe("Line one Line two");
   });
 
   it("anchors selected caption prose and restores pre-existing threads in document order", () => {

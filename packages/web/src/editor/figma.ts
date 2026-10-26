@@ -1,5 +1,6 @@
 import { Extension, Node, mergeAttributes } from "@tiptap/core";
-import type { Node as PMNode } from "@tiptap/pm/model";
+import { DOMParser } from "@tiptap/pm/model";
+import type { Node as PMNode, ParseOptions } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
 import { normalizeFigmaLink, parseFigmaHeight } from "@uberblick/schema";
 import { blockShapeGuard, isPlainPart } from "./blocks.js";
@@ -22,10 +23,24 @@ export const Figma = Node.create({
 });
 
 export const FigmaCaption = Node.create({
-  name: "figmaCaption", content: "paragraph", defining: true, isolating: true,
+  name: "figmaCaption", content: "paragraph", defining: true, isolating: true, whitespace: "pre",
   parseHTML() { return [{ tag: "div[data-figma-caption]" }]; },
   renderHTML() { return ["div", { class: "ub-figma-caption", "data-figma-caption": "" }, 0]; },
 });
+
+class FigmaCaptionDOMParser extends DOMParser {
+  override parse(dom: Parameters<DOMParser["parse"]>[0], options: ParseOptions = {}): PMNode {
+    // A DOM reread rooted inside the shared paragraph skips the caption's
+    // whitespace setting. Keep its literal breaks without changing other prose.
+    const context = options.context;
+    for (let depth = context?.depth ?? -1; depth >= 0; depth--) {
+      if (context?.node(depth).type.name === "figmaCaption") {
+        return super.parse(dom, { ...options, preserveWhitespace: "full" });
+      }
+    }
+    return super.parse(dom, options);
+  }
+}
 
 function supportedFigma(node: PMNode): boolean {
   try {
@@ -45,6 +60,7 @@ export const FigmaBlocks = Extension.create({
   addProseMirrorPlugins() {
     return [blockShapeGuard("figma", supportedFigma), new Plugin({
       props: {
+        domParser: new FigmaCaptionDOMParser(this.editor.schema, DOMParser.fromSchema(this.editor.schema).rules),
         handleKeyDown(view, event) {
           const { $from } = view.state.selection;
           if ($from.depth !== 3 || $from.node(1).type.name !== "figma" || event.key !== "Enter" || event.isComposing) return false;

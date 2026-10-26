@@ -31,8 +31,18 @@ for (const [id, label] of [
   ["ini", "INI"],
   ["html", "HTML"],
   ["xml", "XML"],
+  ["svg", "SVG"],
+  ["xhtml", "XHTML"],
+  ["rss", "XML"],
+  ["atom", "XML"],
+  ["xjb", "XML"],
+  ["xsd", "XML"],
+  ["xsl", "XML"],
+  ["plist", "XML"],
+  ["wsf", "XML"],
   ["shell", "Shell session"],
   ["console", "Shell session"],
+  ["shellsession", "Shell session"],
 ] as const) displayNames.set(id, label);
 
 // A json-tree block is drawn as a tree, and its source is JSON.
