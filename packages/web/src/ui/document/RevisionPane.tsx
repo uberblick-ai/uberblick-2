@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement, RefObject } from "react";
 import type { Editor } from "@tiptap/core";
 import { getMeta } from "@uberblick/schema";
@@ -10,7 +10,7 @@ import { createRevisionEditor } from "../../editor/revision-view.js";
 import { setEditorMembers } from "../../editor/person-mentions.js";
 import { useWorkspaceMembers } from "../workspace-members.js";
 import { alignRevisionSides, createRevisionSplit } from "../../editor/revision-split.js";
-import type { RevisionRow } from "../../editor/revision-split.js";
+import type { RevisionRow, RevisionSplit } from "../../editor/revision-split.js";
 import { revealFoldedTarget } from "../../editor/toggle-headings.js";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import { toast } from "sonner";
@@ -26,7 +26,7 @@ import { revisionAuthor, revisionTime } from "./revision-list.js";
 import { RevisionNameControls } from "./RevisionNameControls.js";
 import { RevisionRuler } from "./RevisionRuler.js";
 import { animateRows, morphFromLive, morphToLive, reducedMotion, rememberLiveHeader, revealRevision, snapshotRows, takeLiveHeader } from "./revision-motion.js";
-import type { HeaderMorph, RowSnapshot } from "./revision-motion.js";
+import type { HeaderMorph } from "./revision-motion.js";
 import { handleDocLinkClick } from "./doc-link-click.js";
 
 export function revisionLabel(entry: RevisionEntry): string {
@@ -328,7 +328,8 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   // The live header this pane replaced, when a click just entered history.
   const [live] = useState(takeLiveHeader);
   const morph = useRef<HeaderMorph | null>(null);
-  const folded = useRef<{ selection: DocumentHistory["selection"]; rows: RowSnapshot } | null>(null);
+  const comparison = useRef<RevisionSplit | null>(null);
+  const readCollapse = useEffectEvent(() => collapseUnchanged);
   // The revision on screen before this one; the first arrives with the header morph instead.
   const stepped = useRef<DocumentHistory["selection"]>(null);
   const body = useRef<HTMLDivElement | null>(null);
@@ -351,7 +352,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       if (split && selection.before !== null && beforeHost.current !== null && afterHost.current !== null) {
         const view = createRevisionSplit({ beforeElement: beforeHost.current, afterElement: afterHost.current,
           before: selection.before, after: selection.after, docLinks, workspaceSettings,
-          folding: { collapse: collapseUnchanged, expanded: new Set() },
+          folding: { collapse: readCollapse(), expanded: new Set() },
           onExpand: (run) => {
             const previous = pane.current === null ? null : snapshotRows(sides, pane.current);
             view.expand(run);
@@ -359,16 +360,13 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
             if (previous !== null && pane.current !== null) animateRows(sides, previous, pane.current);
           } });
         const sides = [view.before.view.dom, view.after.view.dom];
+        comparison.current = view;
         const activate = (event: MouseEvent): void => { handleDocLinkClick(event, docLinks); };
         for (const side of sides) side.addEventListener("click", activate);
         setEditors([{ side: "before", editor: view.before }, { side: "after", editor: view.after }]);
         setRows(view.model.rows);
-        // The Collapse unchanged switch rebuilds both sides; rows slide from where they stood.
-        const previous = folded.current;
-        folded.current = null;
-        if (previous?.selection === selection && pane.current !== null) animateRows([view.before.view.dom, view.after.view.dom], previous.rows, pane.current);
         return () => {
-          folded.current = pane.current === null ? null : { selection, rows: snapshotRows([view.before.view.dom, view.after.view.dom], pane.current) };
+          comparison.current = null;
           for (const side of sides) side.removeEventListener("click", activate);
           setEditors([]);
           setRows([]);
@@ -381,7 +379,16 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       setEditors([{ side: "single", editor }]);
       return () => { setEditors([]); editor.destroy(); };
     } catch { setFailed(selection); }
-  }, [selection, split, docLinks, workspaceSettings, collapseUnchanged]);
+  }, [selection, split, docLinks, workspaceSettings]);
+  useEffect(() => {
+    const view = comparison.current;
+    if (view === null || pane.current === null) return;
+    const sides = [view.before.view.dom, view.after.view.dom];
+    const previous = snapshotRows(sides, pane.current);
+    view.setCollapse(collapseUnchanged);
+    setRows(view.model.rows);
+    animateRows(sides, previous, pane.current);
+  }, [collapseUnchanged]);
   // The header arrives from where the live header stood; leaving cancels it at once.
   // biome-ignore lint/correctness/useExhaustiveDependencies: The morph runs once, when history opens.
   useLayoutEffect(() => {

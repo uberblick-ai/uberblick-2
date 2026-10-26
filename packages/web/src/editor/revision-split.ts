@@ -445,6 +445,7 @@ export interface RevisionSplit {
   before: Editor;
   after: Editor;
   expand: (run: number) => void;
+  setCollapse: (collapse: boolean) => void;
   align: () => void;
   destroy: () => void;
 }
@@ -488,6 +489,30 @@ export function createRevisionSplit(options: CreateRevisionSplitOptions): Revisi
   };
   for (const view of [before.view, after.view]) view.dom.addEventListener("click", expand);
   alignRevisionSides(before.view, after.view);
+  const apply = (next: RevisionSplitModel): void => {
+    for (const [editor, content] of [[before, next.before], [after, next.after]] as const) {
+      const transaction = editor.state.tr;
+      for (const run of [...model.runs].reverse()) {
+        const index = model.rows.findIndex((row) => row.at === run);
+        const start = next.rows.findIndex((row) => row.at === run);
+        const oldFold = model.rows[index]?.fold;
+        const newFold = next.rows[start]?.fold;
+        if ((oldFold === undefined) === (newFold === undefined)) continue;
+        let position = 0;
+        for (let row = 0; row < index; row += 1) position += editor.state.doc.child(row).nodeSize;
+        let end = position;
+        const count = oldFold === undefined ? newFold?.count ?? 0 : 1;
+        for (let row = index; row < index + count; row += 1) end += editor.state.doc.child(row).nodeSize;
+        const replacement = Fragment.fromArray((content.content ?? []).slice(start, start + (oldFold?.count ?? 1))
+          .map((node) => editor.schema.nodeFromJSON(node)));
+        transaction.replaceWith(position, end, replacement);
+      }
+      editor.view.dispatch(transaction.setMeta(revisionRows, next.rows));
+    }
+    model = next;
+    observeRows();
+    alignRevisionSides(before.view, after.view);
+  };
   return {
     get model() { return model; },
     before, after, align,
@@ -496,18 +521,11 @@ export function createRevisionSplit(options: CreateRevisionSplitOptions): Revisi
       const fold = model.rows[index]?.fold;
       if (fold === undefined) return;
       expanded.add(run);
-      const next = revisionSplitModel(options.before, options.after, { collapse: true, expanded });
-      const start = next.rows.findIndex((row) => row.at === run);
-      for (const [editor, content] of [[before, next.before], [after, next.after]] as const) {
-        let position = 0;
-        for (let row = 0; row < index; row += 1) position += editor.state.doc.child(row).nodeSize;
-        const replacement = Fragment.fromArray((content.content ?? []).slice(start, start + fold.count).map((node) => editor.schema.nodeFromJSON(node)));
-        editor.view.dispatch(editor.state.tr.replaceWith(position, position + editor.state.doc.child(index).nodeSize, replacement)
-          .setMeta(revisionRows, next.rows));
-      }
-      model = next;
-      observeRows();
-      alignRevisionSides(before.view, after.view);
+      apply(revisionSplitModel(options.before, options.after, { collapse: true, expanded }));
+    },
+    setCollapse: (collapse) => {
+      expanded.clear();
+      apply(revisionSplitModel(options.before, options.after, { collapse, expanded }));
     },
     destroy: () => {
       cancelAnimationFrame(frame);

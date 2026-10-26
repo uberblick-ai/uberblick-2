@@ -361,7 +361,7 @@ describe("the side-by-side revision model", () => {
     expect(revisionSplitModel(before, after).rows).toHaveLength(5);
   });
 
-  it("opens multiple runs in place, retaining surrounding drawings and read-only sides", () => {
+  it("opens and folds multiple runs in place, retaining surrounding drawings and read-only sides", () => {
     const before = doc();
     const first = appendBlock(before, { type: "paragraph", text: "Opening" });
     appendBlock(before, { type: "code", language: "wireframe", text: 'page "Before the runs"\n  text "Context"' });
@@ -374,6 +374,8 @@ describe("the side-by-side revision model", () => {
     editBlock(after, first, "Opening", "Opened");
     editBlock(after, middle, "Middle", "Changed middle");
     editBlock(after, last, "Closing", "Closed");
+    const originalBefore = Y.encodeStateAsUpdate(before);
+    const originalAfter = Y.encodeStateAsUpdate(after);
     const left = document.body.appendChild(document.createElement("div"));
     const right = document.body.appendChild(document.createElement("div"));
     const split = createRevisionSplit({ beforeElement: left, afterElement: right, before, after,
@@ -383,15 +385,15 @@ describe("the side-by-side revision model", () => {
       const retained = sides.map((editor) => [...editor.view.dom.querySelectorAll(".ub-wireframe")]);
       expect(retained.map((drawings) => drawings.length)).toEqual([2, 2]);
       expect(split.model.runs).toEqual([2, 8]);
-      for (const run of split.model.runs) {
-        const previous = split.model;
-        split.expand(run);
-        expect(split.model).not.toBe(previous);
-        expect(split.model.rows.some((row) => row.fold?.run === run)).toBe(false);
+      const assertSides = (folds: number[]): void => {
+        expect(split.model.rows.flatMap((row) => row.fold === undefined ? [] : [row.fold.run])).toEqual(folds);
         sides.forEach((editor, side) => {
+          expect(editor.isEditable).toBe(false);
+          expect(editor.state.doc.eq(editor.schema.nodeFromJSON(side === 0 ? split.model.before : split.model.after))).toBe(true);
           const drawings = [...editor.view.dom.querySelectorAll(".ub-wireframe")];
           expect(drawings).toHaveLength(2);
           drawings.forEach((drawing, index) => { expect(drawing).toBe(retained[side]?.[index]); });
+          expect(editor.view.dom.querySelectorAll(".ub-revision-fold-button")).toHaveLength(folds.length);
           expect([...editor.view.dom.querySelectorAll<HTMLElement>(".ub-revision-row-start")].map((element) => [element.dataset.row, element.dataset.key]))
             .toEqual(split.model.rows.map((row, index) => [String(index), `${row.kind === "folded" ? "fold" : "row"}-${row.at}`]));
           expect(editor.getJSON().content?.filter((node) => node.type === "code").map((node) => node.attrs?.id))
@@ -400,13 +402,32 @@ describe("the side-by-side revision model", () => {
           editor.view.dispatch(editor.state.tr.insertText("Unwanted edit", 1));
           expect(editor.state.doc).toBe(content);
         });
+        expect(Y.encodeStateAsUpdate(before)).toEqual(originalBefore);
+        expect(Y.encodeStateAsUpdate(after)).toEqual(originalAfter);
+      };
+      assertSides([2, 8]);
+      for (const run of split.model.runs) {
+        const previous = split.model;
+        split.expand(run);
+        expect(split.model).not.toBe(previous);
+        assertSides(run === 2 ? [8] : []);
       }
       expect(split.model.rows).toHaveLength(13);
-      expect(left.querySelectorAll(".ub-revision-fold-button")).toHaveLength(0);
-      expect(right.querySelectorAll(".ub-revision-fold-button")).toHaveLength(0);
       const opened = split.model;
       split.expand(2);
       expect(split.model).toBe(opened);
+      split.setCollapse(true);
+      assertSides([2, 8]);
+      split.expand(8);
+      assertSides([2]);
+      // Enabling folds every run, including one opened individually.
+      split.setCollapse(true);
+      assertSides([2, 8]);
+      for (const collapse of [false, true, false, true]) {
+        split.setCollapse(collapse);
+        assertSides(collapse ? [2, 8] : []);
+        if (!collapse) expect(split.model.rows).toHaveLength(13);
+      }
     } finally { split.destroy(); }
   });
 
