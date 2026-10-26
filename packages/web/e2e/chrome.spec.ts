@@ -3046,8 +3046,8 @@ for (const scheme of ["light", "dark"] as const) {
       const composerGround = await paintedIn(composer, "background-color");
       expect(composerGround).toBe(tokens.card);
       await check(composer.getByRole("button", { name: "Cancel", exact: true }), composerGround);
-      await check(composer.getByRole("button", { name: /^@/ }).first(), composerGround);
       await composer.getByRole("textbox").fill("A comment with neutral submit emphasis.");
+      await check(composer.getByRole("button", { name: "Comment", exact: true }), composerGround);
       await expectNeutralEmphasis(composer.getByRole("button", { name: "Comment", exact: true }));
       await composer.getByRole("button", { name: "Cancel", exact: true }).click();
     }, true);

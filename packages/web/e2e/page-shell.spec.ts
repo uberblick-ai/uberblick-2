@@ -152,7 +152,7 @@ test.describe("one page shell", () => {
         beforeNavigate: async (target) => {
           await target.route("**/api/access", (route) => {
             const action = route.request().postDataJSON() as { operation: string };
-            if (action.operation === "own-hub-role" || action.operation === "own-role" ||
+            if (action.operation === "own-hub-role" || action.operation === "own-role" || action.operation === "list-member-usernames" ||
               (suffix !== "devices" && action.operation === "list-devices")) return route.continue();
             pending.push(route);
           });
