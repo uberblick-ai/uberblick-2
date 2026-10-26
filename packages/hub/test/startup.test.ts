@@ -68,6 +68,28 @@ describe("bind address", () => {
   });
 });
 
+describe("OAuth public URL configuration", () => {
+  it("allows HUB_PUBLIC_URL to be absent and resolves a set origin before startup", () => {
+    const env = { HUB_AUTH_TOKEN: "secret" };
+    expect(resolveCoreHubConfig(env, ":memory:")).not.toHaveProperty("publicUrl");
+    expect(resolveCoreHubConfig({ ...env, HUB_PUBLIC_URL: "https://hub.example.com/" }, ":memory:").publicUrl)
+      .toBe("https://hub.example.com");
+  });
+
+  it.each([
+    "",
+    "http://hub.example.com",
+    "https://hub.example.com/path",
+    "https://hub.example.com/?query",
+    "https://hub.example.com/#fragment",
+    "https://private-user:private-password@hub.example.com",
+    "not a URL",
+  ])("refuses invalid HUB_PUBLIC_URL %j with a named startup error", (publicUrl) => {
+    expect(() => resolveCoreHubConfig({ HUB_AUTH_TOKEN: "secret", HUB_PUBLIC_URL: publicUrl }, ":memory:"))
+      .toThrow(/^HUB_PUBLIC_URL/);
+  });
+});
+
 describe("createHub", () => {
   it("requires its embedding client to supply the database path", async () => {
     await expect(createHub({ authSecret: "secret", port: 0 })).rejects.toThrow(/databasePath/);

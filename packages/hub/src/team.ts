@@ -18,6 +18,7 @@ import { isEphemeralDatabase } from "./persistence.js";
 import { createHub, type Hub, type HubExtensionContext, type HubExtension } from "./server.js";
 import { validateGithubClientId, type TeamHubConfig } from "./team-config.js";
 import { resolveUpdateAuthor } from "./update-attribution.js";
+import { handleAuthorizationServerMetadata } from "./oauth-discovery.js";
 
 export interface TeamHub extends Hub {
   /** Hub-internal authorities; never exposed through a public route. */
@@ -84,6 +85,7 @@ function createTeamExtension(
     },
     revisionUsername(principalId) { return principals?.get(principalId)?.githubUsername ?? null; },
     async handleRequest(request, response) {
+      if (handleAuthorizationServerMetadata(config.publicUrl, signIn !== undefined, request, response)) return true;
       if (handleHubClaimState(claims, signIn !== undefined, request, response)) return true;
       if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response, workspaceNames)) return true;
       if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts, hubAdmins, options.hubVersion)) return true;

@@ -22,6 +22,7 @@ import { HubDatabase, isEphemeralDatabase } from "./persistence.js";
 import { isAdmissibleRoom, readAdmission, roomWorkspace } from "./admissible-room.js";
 import { DeletedRooms } from "./deleted-rooms.js";
 import { replyJson, SIGN_IN_ROUTES } from "./http.js";
+import { handleAuthorizationServerMetadata } from "./oauth-discovery.js";
 import {
   isProtocolVersion,
   protocolMismatchReason,
@@ -118,6 +119,7 @@ function createRevisionReads(database: HubDatabase, deletedRooms: DeletedRooms, 
 
 /** Preserve the HTTP surface of an embedded hub with no sign-in configured. */
 function handleUnconfiguredAuthRequest(request: IncomingMessage, response: ServerResponse): boolean {
+  if (handleAuthorizationServerMetadata(undefined, false, request, response)) return true;
   const path = request.url ?? "";
   if (!path.startsWith("/auth/")) return false;
   let status = 404;

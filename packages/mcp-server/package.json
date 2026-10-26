@@ -14,6 +14,7 @@
     "./init-lock": "./src/init-lock.ts",
     "./safe-write": "./src/safe-write.ts",
     "./remote-url": "./src/remote-url.ts",
+    "./oauth-discovery": "./src/oauth-discovery.ts",
     "./storage": "./src/storage.ts",
     "./project-config": "./src/project-config.ts",
     "./project-binding": "./src/project-binding.ts",
