@@ -2945,7 +2945,10 @@ test.describe("document history through ub open", () => {
       await nextBar.scrollIntoViewIfNeeded();
       const run = Number(await nextBar.getAttribute("data-fold"));
       const positionsAbove = () => page.locator(".ub-revision-pane .ub-revision-row-start").evaluateAll((elements, run) =>
-        elements.filter(element => Number((element as HTMLElement).dataset.key?.slice(4)) < run).map(element => ({
+        elements.filter(element => {
+          const key = (element as HTMLElement).dataset.key;
+          return key?.startsWith("row-") && Number(key.slice(4)) < run;
+        }).map(element => ({
           top: element.getBoundingClientRect().top,
           block: element.nextElementSibling?.getBoundingClientRect().top ?? 0,
         })), run);

@@ -391,13 +391,19 @@ interface SideRows {
   padding: number[];
 }
 
+function rowTranslation(element: HTMLElement): number {
+  // Fold motion translates each widget independently; padding belongs to the settled layout.
+  const transform = getComputedStyle(element).transform;
+  return !transform || transform === "none" ? 0 : new DOMMatrixReadOnly(transform).m42;
+}
+
 function sideRows(view: EditorView): SideRows {
   const origin = view.dom.getBoundingClientRect().top;
   const starts = [...view.dom.querySelectorAll<HTMLElement>(":scope > .ub-revision-row-start")];
   const ends = [...view.dom.querySelectorAll<HTMLElement>(":scope > .ub-revision-row-end")];
-  const tops = starts.map((element) => element.getBoundingClientRect().top - origin);
+  const tops = starts.map((element) => element.getBoundingClientRect().top - rowTranslation(element) - origin);
   const last = ends.at(-1);
-  if (last !== undefined) tops.push(last.getBoundingClientRect().bottom - origin);
+  if (last !== undefined) tops.push(last.getBoundingClientRect().bottom - rowTranslation(last) - origin);
   return { tops, ends, padding: ends.map((element) => Number.parseFloat(element.style.height) || 0) };
 }
 
