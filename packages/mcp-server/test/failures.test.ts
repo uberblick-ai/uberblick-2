@@ -117,6 +117,9 @@ const EXPECTED: Record<
     detail: ["collection", "recordId", "limit", "value", "attempted"],
   },
   invalid_table: { recoveryClass: "manual", detail: [] },
+  invalid_tag_name: { recoveryClass: "manual", detail: [] },
+  invalid_tag_description: { recoveryClass: "manual", detail: [] },
+  invalid_tag_identity: { recoveryClass: "reread", detail: ["id"] },
   invalid_card: { recoveryClass: "manual", detail: [] },
   invalid_callout: { recoveryClass: "manual", detail: [] },
   annotation_card: { recoveryClass: "manual", detail: ["blockId"] },
@@ -541,6 +544,9 @@ describe("the failure contract", () => {
         })
       ).payload,
     );
+    record((await rig.call("create_tag", { name: "bad name" })).payload);
+    record((await rig.call("create_tag", { name: "release", description: "two\nlines" })).payload);
+    record((await rig.call("edit_tag", { id: randomUUID(), description: "Unknown identity" })).payload);
 
     // Exercise shared data-operation errors through the tool failure adapter.
     const dataDoc = rig.instance.replicas.replica(doc.uuid).doc;

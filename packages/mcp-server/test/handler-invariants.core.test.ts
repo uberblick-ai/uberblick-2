@@ -92,8 +92,9 @@ it("every registered tool is guarded and only hub revision requests wait after o
     function visit(node: ts.Node): void {
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
           node.initializer !== undefined && ts.isCallExpression(node.initializer) &&
-          ["operation", "documentOperation", "sidebarOperation"].includes(node.initializer.expression.getText(source))) {
-        handlers.set(`${source.fileName}:${node.name.text}`, { handler: node.initializer.arguments[2]!, source });
+          ["operation", "documentOperation", "sidebarOperation", "settingsOperation"].includes(node.initializer.expression.getText(source))) {
+        const bodyIndex = node.initializer.expression.getText(source) === "settingsOperation" ? 1 : 2;
+        handlers.set(`${source.fileName}:${node.name.text}`, { handler: node.initializer.arguments[bodyIndex]!, source });
       }
       if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
           node.expression.name.text === "registerTool") {
@@ -146,7 +147,7 @@ it("every registered tool is guarded and only hub revision requests wait after o
   }
 
   const wrapper = sources.find((source) => source.fileName === join(root, "tools/operation.ts"))!;
-  for (const name of ["operation", "documentOperation", "sidebarOperation"]) {
+  for (const name of ["operation", "documentOperation", "sidebarOperation", "settingsOperation"]) {
     const node = wrapper.statements.find((statement): statement is ts.FunctionDeclaration =>
       ts.isFunctionDeclaration(statement) && statement.name?.text === name);
     if (node?.body === undefined) throw new Error(`No inspected ${name} wrapper`);

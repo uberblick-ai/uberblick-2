@@ -111,6 +111,8 @@ describe("successful MCP output contracts", () => {
     };
 
     const tags = await success("list_tags");
+    const tag = await success("create_tag", { name: "release", description: "Use for release coordination." });
+    await success("edit_tag", { id: tag.id, description: null });
     const created = await success("create_doc", {
       title: "Output contract", description: "A fixture for every MCP answer.",
       blocks: [{ type: "paragraph", text: "first paragraph" }],

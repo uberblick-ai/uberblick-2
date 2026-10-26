@@ -75,6 +75,46 @@ it.each(["get_doc", "list_docs"])("describes %s timestamps as ISO 8601 UTC", asy
   expect(tool?.description).toContain("ISO 8601 UTC");
 });
 
+it("teaches deliberate catalog creation, explicit guidance editing and sparse document tagging", async () => {
+  const rig = await local();
+  for (const topic of ["list_tags", "create_tag", "edit_tag"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    for (const rule of [
+      "Read list_tags and check `complete` first", "guidance for LLMs on when to apply a tag",
+      "Reuse existing meanings", "small vocabulary", "lasting, reusable subjects or purposes",
+      "one-off task, file, issue or version tags", "only tags that improve discovery",
+      "leaving a document untagged is valid",
+    ]) expect(text, `${topic}: ${rule}`).toContain(rule);
+    expect(text).not.toContain("MCP cannot curate");
+  }
+  const { text: create } = await rig.ok("get_help", { topic: "create_tag" });
+  for (const rule of [
+    "trim surrounding whitespace", "lowercase letters", "at most 30 characters",
+    "at most 300 characters after trimming", "without a duplicate or a description change",
+    "Creation changes no document's assignments", "Unknown assignments still refuse",
+    "`complete: false`", "converges with an unseen tag", "deleted elsewhere",
+  ]) expect(create, rule).toContain(rule);
+  const { text: edit } = await rig.ok("get_help", { topic: "edit_tag" });
+  for (const rule of [
+    "keeping its name, identity and document assignments", "required `description`",
+    "null to clear it", "Blank text also clears it", "no further effect",
+    "Unknown or deleted ids", "editing never creates a tag",
+  ]) expect(edit, rule).toContain(rule);
+  for (const text of [create, edit]) {
+    for (const rule of [
+      "no hub or sign-in", "workspace-admin", "offline settings handling",
+      "hub checks authority when the change arrives", "hub's settings restored",
+      "MCP access grants no extra rights", "`applied`, `synced` and `hub`",
+      "never reported as `synced: true`",
+    ]) expect(text, rule).toContain(rule);
+  }
+  const { text: workspaces } = await rig.ok("get_help", { topic: "workspaces" });
+  expect(workspaces).toContain("`create_tag` creates a missing category");
+  expect(workspaces).toContain("`edit_tag` explicitly replaces or clears");
+  expect(workspaces).toContain("leaving a document untagged is valid");
+  expect(workspaces).not.toContain("MCP cannot curate");
+});
+
 it.each(["delete_doc", "archive_doc", "unpin_doc"])("explains explicit topic deletion in %s help and description", async (topic) => {
   const rig = await local();
   const { text } = await rig.ok("get_help", { topic });
