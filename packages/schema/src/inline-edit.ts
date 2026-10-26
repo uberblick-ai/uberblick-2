@@ -1,6 +1,8 @@
 import type * as Y from "yjs";
 import fastDiff from "fast-diff";
+import { interiorCommentMark, snapshotCommentAnchors, widenShortenedCommentAnchors } from "./comment-edit.js";
 import { attributesOf, inlinePlainText } from "./marks.js";
+import { COMMENT_MARK } from "./types.js";
 import type { InlineMarkSet, InlineRun } from "./types.js";
 
 /** One mark set per UTF-16 character, matching Yjs and fast-diff offsets. */
@@ -19,8 +21,9 @@ function changedMarks(before: InlineMarkSet, after: InlineMarkSet): Record<strin
   return changes;
 }
 
-/** Diff projected characters and mark keys, leaving comment anchors untouched. */
+/** Diff projected characters and mark keys, preserving interior comment anchors. */
 export function spliceInlineText(text: Y.XmlText, oldRuns: readonly InlineRun[], newRuns: readonly InlineRun[], offset = 0): void {
+  const anchors = snapshotCommentAnchors(text);
   const oldValue = inlinePlainText(oldRuns);
   const newValue = inlinePlainText(newRuns);
   const oldMarks = characterMarks(oldRuns);
@@ -45,17 +48,21 @@ export function spliceInlineText(text: Y.XmlText, oldRuns: readonly InlineRun[],
       text.delete(offset, chunk.length);
       oldOffset += chunk.length;
     } else {
+      const comment = interiorCommentMark(text, offset);
       let start = 0;
       while (start < chunk.length) {
         const marks = newMarks[newOffset + start] ?? {};
         const signature = JSON.stringify(marks);
         let end = start + 1;
         while (end < chunk.length && JSON.stringify(newMarks[newOffset + end] ?? {}) === signature) end += 1;
-        text.insert(offset + start, chunk.slice(start, end), attributesOf(marks) ?? {});
+        const attributes = attributesOf(marks) ?? {};
+        if (comment !== undefined) attributes[COMMENT_MARK] = comment;
+        text.insert(offset + start, chunk.slice(start, end), attributes);
         start = end;
       }
       offset += chunk.length;
       newOffset += chunk.length;
     }
   }
+  widenShortenedCommentAnchors(text, anchors);
 }
