@@ -457,7 +457,7 @@ for (const appearance of ["light", "dark"] as const) {
         expect(paint.color).not.toBe(amber);
       }
       await page.keyboard.press("Enter");
-      await expect(cardButton).toBeFocused();
+      await expect(cardButton.getByRole("button").first()).toBeFocused();
       await page.clock.resume();
       await proveMcpArrival(page, session, uuid, { path: "upstream" });
       await expectMcp(async () => {

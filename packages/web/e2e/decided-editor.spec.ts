@@ -124,7 +124,7 @@ test("decided prose and cells offer only Comment, keep threads keyboard reachabl
     }
     await expect(highlight).toBeFocused();
     await page.keyboard.press("Enter");
-    await expect(cardButton).toBeFocused();
+    await expect(cardButton.getByRole("button").first()).toBeFocused();
     await card.getByRole("button", { name: "Reply", exact: true }).click();
     await card.getByPlaceholder("Reply…").fill(part.reply);
     await card.getByRole("button", { name: "Reply", exact: true }).click();
