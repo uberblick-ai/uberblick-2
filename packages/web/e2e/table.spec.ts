@@ -196,7 +196,7 @@ test("the cell @ picker takes keyboard and pointer or iPad touch picks through s
   const missing = `@absent-${prefix}`;
   await page.keyboard.type(missing);
   await expect(picker.getByRole("option")).toHaveCount(0);
-  const emptyCard = page.locator('[data-slot="caret-menu-content"]').filter({ hasText: "No document this page knows matches." });
+  const emptyCard = page.locator('[data-slot="caret-menu-content"]').filter({ hasText: "No people or documents match." });
   await expect(emptyCard).toBeVisible();
   await page.keyboard.press("Enter");
   await expect(emptyResultCell).toHaveText(missing);

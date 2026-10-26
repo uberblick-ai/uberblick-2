@@ -174,10 +174,10 @@ async function paneCards(page: Page, browserName: string, width?: number): Promi
   await page.keyboard.insertText(prefix);
   await page.keyboard.type("@collisiontarget1067");
   await alignBlock(target, 42);
-  await staysInsidePane(page, "Documents");
-  await expect(card(page, "Documents")).toHaveAttribute("data-side", "top");
+  await staysInsidePane(page, "People and documents");
+  await expect(card(page, "People and documents")).toHaveAttribute("data-side", "top");
   const anchor = await caretBox(page);
-  const rect = await card(page, "Documents").boundingBox();
+  const rect = await card(page, "People and documents").boundingBox();
   const rightEdge = await target.evaluate((element) => {
     const pane = element.closest(".ub-document-pane")?.getBoundingClientRect();
     if (pane === undefined) throw new Error("e2e: no document pane");
@@ -227,7 +227,7 @@ test("a short pane bounds all three cards and scrolls their lists internally", {
   await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
 
   for (const surface of ["slash", "gutter", "mention"] as const) {
-    const name = surface === "mention" ? "Documents" : "Block types";
+    const name = surface === "mention" ? "People and documents" : "Block types";
     await focusBlock(target);
     if (surface === "gutter") {
       await target.hover();
@@ -263,7 +263,7 @@ test("composing Escape stays native on slash, gutter search and @; ordinary Esca
   await createDoc(page, "escape-target1067");
   for (const surface of ["slash", "gutter", "mention"] as const) {
     await createDoc(page, `Escape ${surface}`);
-    const name = surface === "mention" ? "Documents" : "Block types";
+    const name = surface === "mention" ? "People and documents" : "Block types";
     const control = surface === "gutter"
       ? page.getByRole("combobox", { name: "Search blocks" })
       : prose(page);
@@ -357,23 +357,23 @@ test("outside touch scroll preserves menus; taps and clicks dismiss, and fresh t
 
     await focusBlock(heading);
     await page.keyboard.type("@touch-target1067");
-    await staysInsidePane(page, "Documents");
+    await staysInsidePane(page, "People and documents");
     await page.evaluate(() => new Promise<void>((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     }));
     await page.touchscreen.tap(point.x, point.y);
-    await expect(menu(page, "Documents")).toHaveCount(0);
+    await expect(menu(page, "People and documents")).toHaveCount(0);
     await focusBlock(heading, "end");
     await page.keyboard.type("x");
-    await expect(menu(page, "Documents")).toHaveCount(0);
+    await expect(menu(page, "People and documents")).toHaveCount(0);
     await expect(heading).toHaveText("@touch-target1067x");
     for (let count = 0; count < "@touch-target1067x".length; count += 1) {
       await page.keyboard.press("Backspace");
     }
     await page.keyboard.type("@touch-target1067");
-    await expect(menu(page, "Documents")).toBeVisible();
-    await menu(page, "Documents").getByRole("option", { name: "touch-target1067", exact: true }).tap();
-    await expect(menu(page, "Documents")).toHaveCount(0);
+    await expect(menu(page, "People and documents")).toBeVisible();
+    await menu(page, "People and documents").getByRole("option", { name: "touch-target1067", exact: true }).tap();
+    await expect(menu(page, "People and documents")).toHaveCount(0);
     await expect(heading.getByRole("link", { name: "touch-target1067" })).toBeVisible();
 
     // The click opening the gutter must retain its focused search. Both a
@@ -436,9 +436,9 @@ test("iOS Return replays through the slash and @ handlers without a stray paragr
 
   await createDoc(page, "iOS mentions");
   await page.keyboard.type("@iOS-target1067");
-  await expect(menu(page, "Documents")).toBeVisible();
+  await expect(menu(page, "People and documents")).toBeVisible();
   await returnWithDOMSplit();
-  await expect(menu(page, "Documents")).toHaveCount(0);
+  await expect(menu(page, "People and documents")).toHaveCount(0);
   await expect(prose(page).locator(":scope > *")).toHaveCount(1);
   await expect(prose(page).getByRole("link", { name: "iOS-target1067" })).toBeVisible();
 });
