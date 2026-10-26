@@ -729,7 +729,13 @@ test("bar charts keep negative endpoints, missing values and a lone x inside the
   expect(await page.evaluate(() => (window as unknown as { barProbe: BarPaintProbe }).barProbe.points)).toHaveLength(0);
   const zero = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink.find(entry => entry.text === "0 responses")?.y);
   expect(zero).toBeDefined();
-  for (const bar of bars) expect(Math.abs(bar.top - (zero ?? NaN))).toBeLessThanOrEqual(0.5);
+  // Probes report CSS coordinates; preserve half a canvas pixel through the
+  // fractional scaling of a chart in a constrained document column.
+  const halfPixel = await page.locator(".ub-chart canvas").evaluate((element) => {
+    const canvas = element as HTMLCanvasElement;
+    return 0.5 * canvas.getBoundingClientRect().height / canvas.height;
+  });
+  for (const bar of bars) expect(Math.abs(bar.top - (zero ?? NaN))).toBeLessThanOrEqual(halfPixel + 1e-6);
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
     { id: "middle", value: { day: 4, a: null, b: "wrong" } },
     { id: "absent", value: { day: 20 } },
