@@ -212,6 +212,13 @@ function rowElements(start: HTMLElement): Element[] {
   return elements;
 }
 
+/** A new switch starts from its snapshot, including any interrupted row motion. */
+export function cancelRowMotion(sides: readonly Element[]): void {
+  for (const side of sides) for (const start of rowStarts(side)) {
+    for (const element of rowElements(start)) for (const animation of element.getAnimations()) animation.cancel();
+  }
+}
+
 function nearView(viewport: Element): (top: number, bottom?: number) => boolean {
   const view = viewport.getBoundingClientRect();
   return (top, bottom = top) => bottom > view.top - view.height && top < view.bottom + view.height;

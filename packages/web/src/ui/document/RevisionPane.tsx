@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement, RefObject } from "react";
 import type { Editor } from "@tiptap/core";
 import { getMeta } from "@uberblick/schema";
@@ -10,7 +10,7 @@ import { createRevisionEditor } from "../../editor/revision-view.js";
 import { setEditorMembers } from "../../editor/person-mentions.js";
 import { useWorkspaceMembers } from "../workspace-members.js";
 import { alignRevisionSides, createRevisionSplit } from "../../editor/revision-split.js";
-import type { RevisionRow } from "../../editor/revision-split.js";
+import type { RevisionRow, RevisionSplit } from "../../editor/revision-split.js";
 import { revealFoldedTarget } from "../../editor/toggle-headings.js";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import { toast } from "sonner";
@@ -25,9 +25,11 @@ import { ClockIcon, DownIcon, NextIcon, PreviousIcon, TagIcon, UpIcon } from "./
 import { revisionAuthor, revisionTime } from "./revision-list.js";
 import { RevisionNameControls } from "./RevisionNameControls.js";
 import { RevisionRuler } from "./RevisionRuler.js";
-import { animateRows, morphFromLive, morphToLive, reducedMotion, rememberLiveHeader, revealRevision, snapshotRows, takeLiveHeader } from "./revision-motion.js";
-import type { HeaderMorph, RowSnapshot } from "./revision-motion.js";
+import { animateRows, cancelRowMotion, morphFromLive, morphToLive, reducedMotion, rememberLiveHeader, revealRevision, snapshotRows, takeLiveHeader } from "./revision-motion.js";
+import type { HeaderMorph } from "./revision-motion.js";
 import { handleDocLinkClick } from "./doc-link-click.js";
+import { holdRevisionRow, REVISION_READING_INSET } from "./revision-anchor.js";
+import type { RevisionRowHold } from "./revision-anchor.js";
 
 export function revisionLabel(entry: RevisionEntry): string {
   const author = entry.author === null ? "Unknown author"
@@ -167,8 +169,6 @@ function useAvailableWidth(target: { current: HTMLElement | null }, active: bool
   return width;
 }
 
-/** A change lands this far below the sticky header. */
-const CHANGE_OFFSET = 8;
 /** A change within about two lines below its landing place, like the first one under the column labels, is the current one. */
 const CHANGE_SLACK = 64;
 
@@ -191,9 +191,10 @@ function nextChangeTarget<T extends { top: number }>(list: readonly T[]): T | un
  * Stacked previous and next change, level with the line under the title. They
  * scroll the pane so a change sits just below the sticky header.
  */
-function ChangeNavigation({ pane, header, before, after, rows }: {
+function ChangeNavigation({ pane, header, before, after, rows, onNavigate }: {
   pane: { current: HTMLElement | null }; header: { current: HTMLElement | null };
   before: Editor; after: Editor; rows: readonly RevisionRow[];
+  onNavigate: () => void;
 }): ReactElement {
   const side = after.view.dom;
   const starts = useMemo(() => changeStarts(rows), [rows]);
@@ -208,7 +209,7 @@ function ChangeNavigation({ pane, header, before, after, rows }: {
       // A toggle can hide the block; its row marker still has a position to reveal.
       const inner = block === null || block.getClientRects().length === 0 ? [] : jsonChangeStarts(block);
       // Relative to where a change lands: 0 is the current change.
-      return (inner.length > 0 ? inner : [element]).map((each) => ({ row, top: each.getBoundingClientRect().top - line - CHANGE_OFFSET, element: each }));
+      return (inner.length > 0 ? inner : [element]).map((each) => ({ row, top: each.getBoundingClientRect().top - line - REVISION_READING_INSET, element: each }));
     });
   }, [header, side, starts, rows]);
   useEffect(() => {
@@ -236,6 +237,7 @@ function ChangeNavigation({ pane, header, before, after, rows }: {
     };
   }, [pane, side, targets]);
   const go = (direction: -1 | 1): void => {
+    onNavigate();
     const scroller = pane.current;
     if (scroller === null) return;
     const list = targets();
@@ -328,7 +330,10 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   // The live header this pane replaced, when a click just entered history.
   const [live] = useState(takeLiveHeader);
   const morph = useRef<HeaderMorph | null>(null);
-  const folded = useRef<{ selection: DocumentHistory["selection"]; rows: RowSnapshot } | null>(null);
+  const comparison = useRef<RevisionSplit | null>(null);
+  const heldRow = useRef<RevisionRowHold | null>(null);
+  const stopHolding = useCallback((): void => { heldRow.current?.stop(); heldRow.current = null; }, []);
+  const readCollapse = useEffectEvent(() => collapseUnchanged);
   // The revision on screen before this one; the first arrives with the header morph instead.
   const stepped = useRef<DocumentHistory["selection"]>(null);
   const body = useRef<HTMLDivElement | null>(null);
@@ -351,24 +356,23 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       if (split && selection.before !== null && beforeHost.current !== null && afterHost.current !== null) {
         const view = createRevisionSplit({ beforeElement: beforeHost.current, afterElement: afterHost.current,
           before: selection.before, after: selection.after, docLinks, workspaceSettings,
-          folding: { collapse: collapseUnchanged, expanded: new Set() },
+          folding: { collapse: readCollapse(), expanded: new Set() },
           onExpand: (run) => {
+            stopHolding();
             const previous = pane.current === null ? null : snapshotRows(sides, pane.current);
             view.expand(run);
             setRows(view.model.rows);
             if (previous !== null && pane.current !== null) animateRows(sides, previous, pane.current);
           } });
         const sides = [view.before.view.dom, view.after.view.dom];
+        comparison.current = view;
         const activate = (event: MouseEvent): void => { handleDocLinkClick(event, docLinks); };
         for (const side of sides) side.addEventListener("click", activate);
         setEditors([{ side: "before", editor: view.before }, { side: "after", editor: view.after }]);
         setRows(view.model.rows);
-        // The Collapse unchanged switch rebuilds both sides; rows slide from where they stood.
-        const previous = folded.current;
-        folded.current = null;
-        if (previous?.selection === selection && pane.current !== null) animateRows([view.before.view.dom, view.after.view.dom], previous.rows, pane.current);
         return () => {
-          folded.current = pane.current === null ? null : { selection, rows: snapshotRows([view.before.view.dom, view.after.view.dom], pane.current) };
+          stopHolding();
+          comparison.current = null;
           for (const side of sides) side.removeEventListener("click", activate);
           setEditors([]);
           setRows([]);
@@ -381,7 +385,25 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       setEditors([{ side: "single", editor }]);
       return () => { setEditors([]); editor.destroy(); };
     } catch { setFailed(selection); }
-  }, [selection, split, docLinks, workspaceSettings, collapseUnchanged]);
+  }, [selection, split, docLinks, workspaceSettings, stopHolding]);
+  useLayoutEffect(() => {
+    const view = comparison.current;
+    if (view === null || pane.current === null) return;
+    stopHolding();
+    const sides = [view.before.view.dom, view.after.view.dom];
+    const previous = snapshotRows(sides, pane.current);
+    const hold = header.current === null ? null : holdRevisionRow(pane.current, header.current, view);
+    heldRow.current = hold;
+    cancelRowMotion(sides);
+    view.setCollapse(collapseUnchanged);
+    setRows(view.model.rows);
+    const anchor = hold?.align();
+    const positions = new Map(previous.positions);
+    if (anchor != null) positions.set(anchor.key, anchor.top);
+    animateRows(sides, { ...previous, positions }, pane.current);
+    hold?.follow();
+    return stopHolding;
+  }, [collapseUnchanged, stopHolding]);
   // The header arrives from where the live header stood; leaving cancels it at once.
   // biome-ignore lint/correctness/useExhaustiveDependencies: The morph runs once, when history opens.
   useLayoutEffect(() => {
@@ -430,7 +452,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
         {selection === null ? <p role="status" className="ub-history-controls ub-type-small">Loading history…</p>
           : <RevisionStatus history={history} writable={writable} />}
         {split && before !== undefined && after !== undefined && rows.length > 0 && <>
-          <ChangeNavigation pane={pane} header={header} before={before} after={after} rows={rows} />
+          <ChangeNavigation pane={pane} header={header} before={before} after={after} rows={rows} onNavigate={stopHolding} />
           <RevisionRuler pane={pane} header={header} side={after.view.dom} rows={rows} />
         </>}
       </header>
