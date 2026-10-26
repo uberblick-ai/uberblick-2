@@ -55,7 +55,7 @@ import { collectReplicaSyncState } from "./status.js";
 import type { MirrorStore, UpdateOrigin } from "./store.js";
 import { SettingsResetError, WorkspaceRemovedError } from "./store.js";
 import { HubSync, LOCAL_HUB_REASON, type HubState, type SyncWaitResult } from "./sync.js";
-import { readDeviceLogin } from "./device-login.js";
+import { createLocalCredentialProvider, type CredentialProvider } from "./credential-provider.js";
 
 /** Replayed updates are already durable; the update observer must skip them. */
 const LOG_ORIGIN = Symbol("uberblick/log");
@@ -178,6 +178,8 @@ export class Replicas {
 
   readonly sync: HubSync;
 
+  private readonly credentialProvider: CredentialProvider;
+
   /** Whether this process publishes its own agent awareness state. */
   private readonly publishOwnPresence: boolean;
 
@@ -229,16 +231,20 @@ export class Replicas {
   constructor(
     config: McpConfig,
     store: MirrorStore,
-    options: { publishOwnPresence?: boolean } = {},
+    options: { publishOwnPresence?: boolean; credentialProvider?: CredentialProvider } = {},
   ) {
     this.config = config;
     this.store = store;
+    this.credentialProvider = options.credentialProvider ?? createLocalCredentialProvider(
+      config.hubUrl, config.workspaceId, config.deviceLogin?.env ?? config.authEnv,
+    );
     this.publishOwnPresence = options.publishOwnPresence ?? true;
     this.agentName = "agent";
     this.sync = new HubSync(config, () => {
       // A reconnect can reveal unseen documents; settle before serving again.
       this.settleNeeded = true;
-    }, { onDocDeleted: (room) => {
+    }, { ...(options.credentialProvider === undefined ? {} : { credentialProvider: options.credentialProvider }),
+    onDocDeleted: (room) => {
       const prefix = `${config.workspaceId}/`;
       if (!room.startsWith(prefix)) return;
       const uuid = room.slice(prefix.length);
@@ -265,10 +271,7 @@ export class Replicas {
   }
 
   createUpdateOrigin(surface: UpdateSurface = this.writeSurface): UpdateOriginMetadata {
-    const login = this.config.localWorkspace === true ? null : readDeviceLogin(
-      this.config.hubUrl, this.config.workspaceId,
-      this.config.deviceLogin?.env ?? this.config.authEnv,
-    );
+    const login = this.config.localWorkspace === true ? null : this.credentialProvider.read();
     return {
       updateId: randomUUID(),
       credentialId: login?.status === "ready" ? login.login.credential.record.id : null,

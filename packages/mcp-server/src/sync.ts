@@ -20,7 +20,7 @@ import {
   SYNC_PROTOCOL_VERSION,
   wrapToken,
 } from "@uberblick/schema/protocol";
-import { DEVICE_CREDENTIAL_RENEWAL_AGE_MS, ensureDeviceLogin, readDeviceLogin, type DeviceLoginFailure } from "@uberblick/mcp-server/device-login";
+import { DEVICE_CREDENTIAL_RENEWAL_AGE_MS, type DeviceLoginFailure } from "@uberblick/mcp-server/device-login";
 import type { StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { hubTransportProblem, isLoopbackEndpoint } from "@uberblick/mcp-server/remote-url";
 import * as Y from "yjs";
@@ -35,6 +35,7 @@ import { encodeOriginUpdate, readOriginAck, encodeRevisionRequest, createRevisio
 import type { RevisionRequest, RevisionResponse } from "@uberblick/schema";
 import type { LogSlice } from "./store.js";
 import { RevisionClientError } from "./revision-client.js";
+import { createLocalCredentialProvider, type CredentialProvider } from "./credential-provider.js";
 
 export type HubStatus =
   | "disabled"
@@ -407,6 +408,7 @@ class AdmittedHocuspocusProvider extends HocuspocusProvider {
 }
 
 export interface HubSyncOptions {
+  credentialProvider?: CredentialProvider;
   readLog?: (room: string, seq: number) => LogSlice;
   acknowledgeLog?: (room: string, seq: number) => void;
   /** An authenticated room's deletion refusal authorizes purging only its copy. */
@@ -432,6 +434,8 @@ export class HubSync {
   readonly enabled: boolean;
 
   private config: McpConfig;
+
+  private readonly credentialProvider: CredentialProvider;
 
   private readonly onConnected: () => void;
 
@@ -577,10 +581,14 @@ export class HubSync {
     this.onSettingsReset = options.onSettingsReset;
     this.readLog = options.readLog;
     this.acknowledgeLog = options.acknowledgeLog;
-    if (!isLoopbackEndpoint(config.hubUrl)) {
+    if (options.credentialProvider !== undefined || !isLoopbackEndpoint(config.hubUrl)) {
       config = { ...config, authSecret: null, deviceLogin: config.deviceLogin ?? {} };
     }
     this.config = config;
+    this.credentialProvider = options.credentialProvider ?? createLocalCredentialProvider(
+      config.hubUrl, config.workspaceId,
+      config.deviceLogin === undefined ? config.authEnv : config.deviceLogin.env,
+    );
     this.connection = new HubConnection(config.connectTimeoutMs);
     this.onConnected = onConnected;
     this.enabled = config.deviceLogin !== undefined || config.authSecret !== null;
@@ -602,7 +610,7 @@ export class HubSync {
     if (this.transportProblem !== null) return;
 
     if (config.deviceLogin !== undefined) {
-      const stored = readDeviceLogin(config.hubUrl, config.workspaceId, config.deviceLogin.env);
+      const stored = this.credentialProvider.read();
       if (stored.status !== "ready") this.deviceReading = this.deviceFailure(stored);
     }
 
@@ -793,8 +801,7 @@ export class HubSync {
 
   private async ensureLogin(): Promise<StoredHubLogin | null> {
     const rejected = this.rejectedLogin;
-    const work = ensureDeviceLogin(this.config.hubUrl, this.config.workspaceId, {
-      ...(this.config.deviceLogin?.env === undefined ? {} : { env: this.config.deviceLogin.env }),
+    const work = this.credentialProvider.ensure({
       ...(rejected === undefined ? {} : { rejected }),
       signal: this.deviceAbort.signal,
       ...(this.config.deviceRenewalCooldownMs === undefined ? {} : { renewalCooldownMs: this.config.deviceRenewalCooldownMs }),

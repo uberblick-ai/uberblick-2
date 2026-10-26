@@ -6,11 +6,12 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpConfig } from "./config.js";
+import type { CredentialProvider } from "./credential-provider.js";
 import { registerHelpResources } from "./help-resources.js";
 import { log } from "./log.js";
 import type { Replicas } from "./replica.js";
 import type { MirrorStore } from "./store.js";
-import { ServerWork } from "./server-work.js";
+import { ServerShuttingDownError, ServerWork } from "./server-work.js";
 import { SHUTDOWN_CLOSE_RESERVE_MS, SHUTDOWN_TIMEOUT_MS } from "./shutdown.js";
 import { seedTagCatalogOnce } from "./tag-catalog.js";
 import { startupInstructions } from "./startup-instructions.js";
@@ -34,30 +35,113 @@ export function mcpSurfaceName(
   return client?.title?.trim() || client?.name?.trim() || "unknown MCP client";
 }
 
-export interface UberblickMcpServer {
+export interface UberblickMcpSession {
   readonly server: McpServer;
   readonly replicas: Replicas;
   readonly store: MirrorStore;
   /** Attach a transport and start serving. */
   connect(transport: Transport): Promise<void>;
+  /** Close this session's transport and drain its admitted work. */
+  close(): Promise<void>;
+}
+
+export interface UberblickMcpServer extends Omit<UberblickMcpSession, "close"> {
   /** Drain admitted work and await hub acknowledgement before releasing replicas. */
   close(deadline?: number): Promise<void>;
 }
 
-/**
- * @param injectedStore The SQLite mirror. Defaults to one opened at
- * `config.databasePath`; injectable so a test can drive persistence failures
- * through the real code path.
- */
-export function createMcpServer(
-  config: McpConfig,
-  injectedStore?: MirrorStore,
-): UberblickMcpServer {
-  const workspace = openWorkspaceReplicas(config, injectedStore === undefined ? {} : { store: injectedStore });
-  const { store, replicas } = workspace;
-  replicas.setWriteSurface({ kind: "mcp", name: "unknown MCP client" });
-  const work = new ServerWork();
+export interface McpRuntimeOptions {
+  /** Adopt and close this mirror; omitted opens `config.databasePath`. */
+  store?: MirrorStore;
+  /** Supply only this runtime's credential; omitted uses the local login store. */
+  credentialProvider?: CredentialProvider;
+  /** Fix the name on this runtime's cursors and MCP update surface. */
+  agentName?: string;
+}
 
+export interface UberblickMcpRuntime {
+  readonly replicas: Replicas;
+  readonly store: MirrorStore;
+  /** Capture startup instructions and register tools for a new independent session. */
+  openSession(): UberblickMcpSession;
+  /** Close every session, drain admitted work, then release the shared replicas. */
+  close(deadline?: number): Promise<void>;
+}
+
+/** Open replicas and a shared identity without attaching an MCP transport. */
+export function createMcpRuntime(
+  config: McpConfig,
+  options: McpRuntimeOptions = {},
+): UberblickMcpRuntime {
+  return openRuntime(config, options, false);
+}
+
+function openRuntime(
+  config: McpConfig,
+  options: McpRuntimeOptions,
+  initializedClientIdentity: boolean,
+): UberblickMcpRuntime {
+  const workspace = openWorkspaceReplicas(config, {
+    ...(options.store === undefined ? {} : { store: options.store }),
+    ...(options.credentialProvider === undefined ? {} : { credentialProvider: options.credentialProvider }),
+  });
+  const { store, replicas } = workspace;
+  replicas.setAgentName(agentDisplayName({ name: options.agentName }));
+  replicas.setWriteSurface({ kind: "mcp", name: options.agentName === undefined
+    ? "unknown MCP client"
+    : agentDisplayName({ name: options.agentName }) });
+  const sessions = new Set<UberblickMcpSession>();
+  let seeding: Promise<void> | null = null;
+  let closed = false;
+  let closing: Promise<void> | null = null;
+
+  return {
+    replicas,
+    store,
+    openSession() {
+      if (closed) throw new ServerShuttingDownError();
+      const session = openSession(config, replicas, store, {
+        seed() {
+          seeding ??= seedTagCatalogOnce(replicas);
+          return seeding;
+        },
+        initializedClientIdentity,
+        released(session) {
+          sessions.delete(session);
+        },
+      });
+      sessions.add(session);
+      return session;
+    },
+    close(deadline = performance.now() + SHUTDOWN_TIMEOUT_MS) {
+      if (closing !== null) return closing;
+      closed = true;
+      // Every session stops admission synchronously, before any transport closes.
+      const draining = [...sessions].map((session) => session.close());
+      closing = Promise.resolve().then(async () => {
+        await Promise.all(draining);
+        const pending = await replicas.waitForPendingChanges(deadline - SHUTDOWN_CLOSE_RESERVE_MS);
+        if (!store.isRemoved() && replicas.sync.enabled && replicas.config.localWorkspace !== true && pending > 0) {
+          log.warn(`${pending} changes are still only local; they sync the next time Uberblick on this machine reaches the hub.`);
+        }
+        await workspace.close();
+      });
+      return closing;
+    },
+  };
+}
+
+function openSession(
+  config: McpConfig,
+  replicas: Replicas,
+  store: MirrorStore,
+  runtime: {
+    seed(): Promise<void>;
+    initializedClientIdentity: boolean;
+    released(session: UberblickMcpSession): void;
+  },
+): UberblickMcpSession {
+  const work = new ServerWork();
   const server = new McpServer(
     {
       name: "uberblick",
@@ -65,36 +149,30 @@ export function createMcpServer(
       websiteUrl: "https://github.com/uberblick-ai/uberblick-2",
       version: mcpVersion(),
     },
-    {
-      instructions: startupInstructions(replicas),
-    },
+    { instructions: startupInstructions(replicas) },
   );
-
-  // Use the initialized client's identity for cursors and default comment authors.
-  server.server.oninitialized = () => {
-    replicas.setAgentName(agentDisplayName(server.server.getClientVersion()));
-    replicas.setWriteSurface({ kind: "mcp", name: mcpSurfaceName(server.server.getClientVersion()) });
-  };
-
+  if (runtime.initializedClientIdentity) {
+    server.server.oninitialized = () => {
+      replicas.setAgentName(agentDisplayName(server.server.getClientVersion()));
+      replicas.setWriteSurface({ kind: "mcp", name: mcpSurfaceName(server.server.getClientVersion()) });
+    };
+  }
   const help = registerTools(server, replicas, work);
   registerHelpResources(server, help, work);
-
   let closed = false;
   let closing: Promise<void> | null = null;
 
-  return {
+  const session: UberblickMcpSession = {
     server,
     replicas,
     store,
-    async connect(transport: Transport) {
-      // Seed before attaching the transport: list_tags can therefore state a
-      // complete catalog, and a read never has to materialise missing examples.
+    async connect(transport) {
       if (closed) return;
       await work.run(async () => {
-        await seedTagCatalogOnce(replicas);
+        // A runtime seeds once before any session attaches its transport.
+        await runtime.seed();
         if (closed) return;
-        // SDK connect attaches its transport synchronously before its first
-        // await. A racing close therefore sees and closes that transport.
+        // SDK connect attaches synchronously before awaiting transport startup.
         await server.connect(transport);
         if (closed) return;
         log.info("serving", {
@@ -105,26 +183,36 @@ export function createMcpServer(
         });
       });
     },
-    close(deadline = performance.now() + SHUTDOWN_TIMEOUT_MS) {
+    close() {
       if (closing !== null) return closing;
       closed = true;
       work.stop();
-      // Assign the shared promise before transport onclose callbacks can
-      // reenter close(). Admission has already stopped synchronously.
+      // Publish the promise before transport callbacks can reenter close().
       closing = Promise.resolve().then(async () => {
         await server.close().catch((error: unknown) => {
           log.warn("closing the MCP server failed", error);
         });
-        // SDK close aborts requests and drops replies but does not await
-        // handlers. Their local writes still need the live replica and log.
+        // SDK close drops replies without awaiting handlers and their writes.
         await work.drain();
-        const pending = await replicas.waitForPendingChanges(deadline - SHUTDOWN_CLOSE_RESERVE_MS);
-        if (!store.isRemoved() && replicas.sync.enabled && replicas.config.localWorkspace !== true && pending > 0) {
-          log.warn(`${pending} changes are still only local; they sync the next time Uberblick on this machine reaches the hub.`);
-        }
-        await workspace.close();
+        runtime.released(session);
       });
       return closing;
+    },
+  };
+  return session;
+}
+
+/** Compose the local stdio runtime with its sole initialized-client session. */
+export function createMcpServer(
+  config: McpConfig,
+  injectedStore?: MirrorStore,
+): UberblickMcpServer {
+  const runtime = openRuntime(config, injectedStore === undefined ? {} : { store: injectedStore }, true);
+  const session = runtime.openSession();
+  return {
+    ...session,
+    close(deadline) {
+      return runtime.close(deadline);
     },
   };
 }
