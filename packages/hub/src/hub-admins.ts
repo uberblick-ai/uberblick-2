@@ -180,6 +180,10 @@ export class HubAdminRegistry {
     });
   }
 
+  hasWorkspace(workspaceId: string): boolean {
+    return this.workspaceIds().includes(workspaceId);
+  }
+
   private workspaceIds(): string[] {
     const db = this.database.connection;
     const sources = ["SELECT substr(name, 1, instr(name, '/') - 1) AS workspace_id FROM documents WHERE instr(name, '/') > 0"];

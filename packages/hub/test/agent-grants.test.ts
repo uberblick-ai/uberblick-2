@@ -5,7 +5,7 @@ import type { TokenScope } from "@uberblick/schema/token";
 import { removeTempDatabases, tempDatabasePath } from "./helpers.js";
 
 const WORKSPACE = "3f6a1c20-9d84-4b1e-8a77-2c5e9b0d4411";
-const request = { clientId: "hosted-agent", principalId: "person", workspaceId: WORKSPACE, scope: "read-only" as const };
+const request = { clientId: "hosted-agent", clientName: "Hosted Agent", principalId: "person", workspaceId: WORKSPACE, scope: "read-only" as const };
 const databases: HubDatabase[] = [];
 
 function open(path = ":memory:"): HubDatabase {
@@ -69,6 +69,7 @@ describe("hub-private agent grants", () => {
     const grants = new AgentGrantRegistry(open());
     expect(() => grants.create({ ...request, principalId: "" })).toThrow("must not be empty");
     expect(() => grants.create({ ...request, clientId: "" })).toThrow("must not be empty");
+    expect(() => grants.create({ ...request, clientName: "" })).toThrow("must not be empty");
     expect(() => grants.create({ ...request, workspaceId: `slug-${WORKSPACE}` })).toThrow("bare UUID");
     expect(() => grants.create({ ...request, scope: "docs:read" as TokenScope })).toThrow("scope");
   });

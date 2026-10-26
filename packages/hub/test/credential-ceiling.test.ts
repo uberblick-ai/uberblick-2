@@ -56,7 +56,7 @@ async function renewalProof(issued: TestCredential) {
 
 function createGrant(context: ReturnType<typeof registry>, scope: TokenScope = "read-only") {
   context.memberships.grant({ principalId: PRINCIPAL, workspaceId: WORKSPACE, role: "member" });
-  return context.grants.create({ clientId: "hosted-client", principalId: PRINCIPAL, workspaceId: WORKSPACE, scope });
+  return context.grants.create({ clientId: "hosted-client", clientName: "Hosted Client", principalId: PRINCIPAL, workspaceId: WORKSPACE, scope });
 }
 
 afterEach(() => {
@@ -87,7 +87,7 @@ describe("hosted grant credential ceilings", () => {
     const context = registry();
     const revoked = createGrant(context);
     context.memberships.grant({ principalId: "removed-person", workspaceId: WORKSPACE, role: "member" });
-    const removed = context.grants.create({ clientId: "hosted-client", principalId: "removed-person",
+    const removed = context.grants.create({ clientId: "hosted-client", clientName: "Hosted Client", principalId: "removed-person",
       workspaceId: WORKSPACE, scope: "read-only" });
     context.grants.revoke(revoked.id);
     context.memberships.remove({ principalId: "removed-person", workspaceId: WORKSPACE });

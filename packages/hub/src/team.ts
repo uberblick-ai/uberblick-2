@@ -19,6 +19,8 @@ import { createHub, type Hub, type HubExtensionContext, type HubExtension } from
 import { validateGithubClientId, type TeamHubConfig } from "./team-config.js";
 import { resolveUpdateAuthor } from "./update-attribution.js";
 import { handleAuthorizationServerMetadata } from "./oauth-discovery.js";
+import { handleOAuthAuthorization, type OAuthClientLookup } from "./oauth-authorization.js";
+import { OAuthAuthorizations } from "./oauth-authorizations.js";
 
 export interface TeamHub extends Hub {
   /** Hub-internal authorities; never exposed through a public route. */
@@ -34,6 +36,7 @@ export interface TeamHubOptions {
   hubVersion?: string;
   /** Test seam that can only make loopback admission stricter. */
   deviceCredentials?: true;
+  oauthClients?: OAuthClientLookup;
 }
 
 function createTeamExtension(
@@ -50,6 +53,7 @@ function createTeamExtension(
   let admission: CredentialAdmission | undefined;
   let promotions: WorkspacePromotions | undefined;
   let hubAdmins: HubAdminRegistry | undefined;
+  let authorizations: OAuthAuthorizations | undefined;
   const workspaceNames = new WorkspaceNameReader(database, room => server().hocuspocus.documents.get(room));
   const hasLiveDocuments = (workspaceId: string) =>
     [...server().hocuspocus.documents.keys()].some(name => name.startsWith(`${workspaceId}/`));
@@ -64,6 +68,7 @@ function createTeamExtension(
       promotions = new WorkspacePromotions(database, memberships, hasLiveDocuments, hubAdmins);
       signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims, workspaceNames);
       accounts = new GithubAccountLookup(config.github.fetch, config.github.now);
+      if (config.publicUrl !== undefined) authorizations = new OAuthAuthorizations(database, memberships, workspaceNames, config.github.now);
     }
   }
   if (deviceCredentials && credentials !== undefined && memberships !== undefined) {
@@ -86,6 +91,8 @@ function createTeamExtension(
     revisionUsername(principalId) { return principals?.get(principalId)?.githubUsername ?? null; },
     async handleRequest(request, response) {
       if (handleAuthorizationServerMetadata(config.publicUrl, signIn !== undefined, request, response)) return true;
+      if (await handleOAuthAuthorization(config.publicUrl, signIn, authorizations, hubAdmins,
+        options.oauthClients ?? (async () => null), request, response)) return true;
       if (handleHubClaimState(claims, signIn !== undefined, request, response)) return true;
       if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response, workspaceNames)) return true;
       if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts, hubAdmins, options.hubVersion)) return true;
@@ -106,6 +113,7 @@ function createTeamExtension(
       // Fence asynchronous identity reads before the core tears down storage.
       signIn?.stop();
       accounts?.stop();
+      authorizations?.stop();
       await adminSetup?.stop();
     },
   };

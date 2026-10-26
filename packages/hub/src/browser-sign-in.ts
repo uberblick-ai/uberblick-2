@@ -4,7 +4,7 @@ import type { GithubSignIn } from "./github-sign-in.js";
 import { BROWSER_SIGN_IN_ROUTES, isJsonPost, readJsonRequest, replyJson } from "./http.js";
 
 /** Exact origins include ports: localhost services must never share a session. */
-function browserOrigin(request: IncomingMessage): string | null {
+export function browserOrigin(request: IncomingMessage): string | null {
   const raw = request.headers.origin;
   const site = request.headers["sec-fetch-site"];
   if (typeof raw !== "string" || (site !== undefined && site !== "same-origin")) return null;
@@ -15,7 +15,7 @@ function browserOrigin(request: IncomingMessage): string | null {
   } catch { return null; }
 }
 
-/** Opaque page-held tokens are accepted here only, never by device or room APIs. */
+/** Opaque page-held tokens remain separate from device and room APIs. */
 export async function handleBrowserSignIn(
   signIn: GithubSignIn | undefined, request: IncomingMessage, response: ServerResponse,
   behindReleaseProxy = false,
@@ -63,7 +63,7 @@ export async function handleBrowserSignIn(
       else if (path.endsWith("/sign-out")) {
         signIn.signOutBrowser(token as string, origin);
         reply(200, { status: "signed-out" });
-      } else reply(200, { status: "signed-in", ...session });
+      } else reply(200, { status: "signed-in", username: session.username, expiresAt: session.expiresAt });
     }
   } catch {
     reply(500, { status: "failed" });
