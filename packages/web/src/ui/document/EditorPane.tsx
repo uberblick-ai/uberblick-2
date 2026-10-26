@@ -647,6 +647,7 @@ const BoundEditor = memo(function BoundEditor({
   catalogConnection,
   canCleanupTags,
   author,
+  account,
   archived,
   historyActive = false,
   contentReadOnly,
@@ -657,6 +658,7 @@ const BoundEditor = memo(function BoundEditor({
   catalogConnection: RoomConnection | null;
   canCleanupTags: (() => boolean) | undefined;
   author: string;
+  account?: import("../../shell/account.js").AccountIdentity | undefined;
   /** Archived documents also withhold comments. */
   archived: boolean;
   historyActive?: boolean;
@@ -862,6 +864,7 @@ const BoundEditor = memo(function BoundEditor({
             catalogConnection={catalogConnection}
             canCleanupTags={canCleanupTags}
             author={author}
+            account={account}
             docLinks={docLinks}
             openDocId={parseRoom(connection.room).uuid}
             host={frame}
@@ -878,6 +881,7 @@ export function EditorPane({
   segment,
   presence,
   author,
+  account,
   catalogConnection = null,
   canCleanupTags,
   archived,
@@ -910,6 +914,7 @@ export function EditorPane({
   presence: readonly RemotePresence[];
   /** The awareness name this client publishes — the author of its comments. */
   author: string;
+  account?: import("../../shell/account.js").AccountIdentity | undefined;
   /** The workspace settings room that owns the curated tag catalog. */
   catalogConnection?: RoomConnection | null;
   canCleanupTags?: (() => boolean) | undefined;
@@ -1088,6 +1093,7 @@ export function EditorPane({
               catalogConnection={catalogConnection}
               canCleanupTags={canCleanupTags}
               author={author}
+              account={account}
               archived={archived}
               historyActive={historyActive}
               contentReadOnly={contentReadOnly}

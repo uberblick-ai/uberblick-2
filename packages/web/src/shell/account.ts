@@ -1,10 +1,11 @@
 /** Only selected public account identity crosses the local browser boundary. */
 import { mintHubAuthMessage } from "../collab/rooms.js";
 import { localSessionHeaders } from "../collab/local-session.js";
-import { isGithubAccountId } from "@uberblick/schema/github-identity";
+import { isGithubAccountId, isGithubUsername } from "@uberblick/schema/github-identity";
+import { isUuid } from "@uberblick/schema";
 
 export type AccountIdentity =
-  | { state: "signed-in"; handle: string; accountId?: string }
+  | { state: "signed-in"; handle: string; principalId?: string; accountId?: string }
   | { state: "signed-out" | "unavailable" };
 
 export type AccountClient = (signal: AbortSignal) => Promise<AccountIdentity>;
@@ -14,13 +15,17 @@ function account(value: unknown, includeAccountId: boolean): AccountIdentity {
     throw new Error("Invalid account answer");
   }
   const body = value as Record<string, unknown>;
-  if (body.state === "signed-in" && typeof body.handle === "string" &&
-    body.handle.length <= 39 && /^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(body.handle)) {
+  if (body.state === "signed-in" && isGithubUsername(body.handle)) {
     const accountId = includeAccountId ? body.accountId : undefined;
+    const principalId = includeAccountId ? undefined : body.principalId;
     if (accountId !== undefined && !isGithubAccountId(accountId)) {
       throw new Error("Invalid account answer");
     }
+    if (principalId !== undefined && !isUuid(principalId)) {
+      throw new Error("Invalid account answer");
+    }
     return { state: body.state, handle: body.handle,
+      ...(principalId === undefined ? {} : { principalId }),
       ...(accountId === undefined ? {} : { accountId }) };
   }
   if (body.state === "signed-out" || body.state === "unavailable") {

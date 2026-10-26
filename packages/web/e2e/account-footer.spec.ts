@@ -168,7 +168,9 @@ test("the same ub open follows login removal and return for its frozen hub after
   const unauthenticated = await page.request.get(new URL("/api/account", harness().appUrl).href);
   expect(unauthenticated.status()).toBe(401);
   const reading = await page.waitForResponse((response) => new URL(response.url()).pathname === "/api/account");
-  expect(await reading.json()).toEqual({ state: "signed-in", handle, githubAccountId: "1234" });
+  const principalId = harness().access?.principalId;
+  expect(principalId).toBeDefined();
+  expect(await reading.json()).toEqual({ state: "signed-in", handle, principalId, githubAccountId: "1234" });
   try {
     harness().rebindProject("ws://127.0.0.1:1");
     harness().setStoredLogin(false);

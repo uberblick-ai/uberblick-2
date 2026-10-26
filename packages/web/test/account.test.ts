@@ -29,14 +29,25 @@ describe("the served account answer", () => {
     await expect(read(signal)).rejects.toThrow("Invalid account answer");
   });
 
-  it("uses the browser proof and projects only a verified handle", async () => {
-    const { read, fetchImpl } = client({ state: "signed-in", handle: "octocat", accountId: "1234", credential: "ignored" });
+  it("uses the browser proof and projects only the verified account and principal", async () => {
+    const principalId = "5df99824-b9b5-4260-b20c-4680e2d51fac";
+    const { read, fetchImpl } = client({ state: "signed-in", handle: "octocat", principalId, accountId: "1234", credential: "ignored", agent: "claude" });
     const signal = new AbortController().signal;
-    await expect(read(signal)).resolves.toEqual({ state: "signed-in", handle: "octocat" });
+    await expect(read(signal)).resolves.toEqual({ state: "signed-in", handle: "octocat", principalId });
     expect(fetchImpl).toHaveBeenCalledWith("/api/account", expect.objectContaining({
       cache: "no-store", redirect: "error", signal,
       headers: { Accept: "application/json", Authorization: "Bearer browser-key-proof" },
     }));
+  });
+
+  it("accepts a legacy signed-in answer without a principal", async () => {
+    await expect(client({ state: "signed-in", handle: "octocat" }).read(new AbortController().signal))
+      .resolves.toEqual({ state: "signed-in", handle: "octocat" });
+  });
+
+  it.each([null, "octocat", "", 1234])("refuses an invalid verified principal %j", async (principalId) => {
+    await expect(client({ state: "signed-in", handle: "octocat", principalId }).read(new AbortController().signal))
+      .rejects.toThrow("Invalid account answer");
   });
 
   it.each([null, "", "0", "12x", 1234, "9007199254740992"])("refuses an invalid stored-login account id %j", async (accountId) => {
@@ -46,7 +57,7 @@ describe("the served account answer", () => {
   });
 
   it.each(["signed-out", "unavailable"])("never retains a handle for %s", async (state) => {
-    await expect(client({ state, handle: "octocat" }).read(new AbortController().signal))
+    await expect(client({ state, handle: "octocat", principalId: "5df99824-b9b5-4260-b20c-4680e2d51fac" }).read(new AbortController().signal))
       .resolves.toEqual({ state });
   });
 

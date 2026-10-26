@@ -77,6 +77,83 @@ function deltaOf(doc: Y.Doc, blockId: string): Array<[string, unknown]> {
 }
 
 describe("annotations", () => {
+  it("keeps browser, MCP and legacy attribution on each stored comment through a document round trip", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Comment attribution" });
+    const blockId = appendBlock(doc, { type: "paragraph", text: SENTENCE });
+    const person = { kind: "person", account: "octo-cat", principalId: UUID } as const;
+    const claude = { kind: "agent", account: "octo-cat", principalId: UUID, agent: "claude" } as const;
+    const thread = createAnnotation(doc, blockId, 6, 11, "Presence name", "Browser opener", undefined, person);
+    addComment(doc, thread.id, "Presence name", "Unsigned browser reply", { kind: "person" });
+    addComment(doc, thread.id, "Explicit agent author", "Claude reply", claude);
+    moveAnnotation(doc, thread.id, blockId, 0, 5, "Other client", "Agent move", undefined, { kind: "agent" });
+    addComment(doc, thread.id, "Old release", "Legacy reply");
+
+    const stored = getAnnotationsMap(doc).get(thread.id) as Y.Map<unknown>;
+    expect((stored.get("comments") as Y.Array<unknown>).toArray()).toEqual([
+      { author: "Presence name", text: "Browser opener", createdAt: expect.any(String), ...person },
+      { author: "Presence name", text: "Unsigned browser reply", createdAt: expect.any(String), kind: "person" },
+      { author: "Explicit agent author", text: "Claude reply", createdAt: expect.any(String), ...claude },
+      { author: "Other client", text: "Agent move", createdAt: expect.any(String), kind: "agent" },
+      { author: "Old release", text: "Legacy reply", createdAt: expect.any(String) },
+    ]);
+    const replica = new Y.Doc();
+    Y.applyUpdate(replica, Y.encodeStateAsUpdate(doc));
+    const read = getAnnotation(replica, thread.id)!;
+    expect(read.comments).toEqual((stored.get("comments") as Y.Array<unknown>).toArray());
+    expect(listAnnotations(replica)).toEqual([read]);
+    expect(read.comments[3]).toHaveProperty("kind", "agent");
+    expect(read.comments[3]).not.toHaveProperty("agent");
+    expect(read.comments[4]).not.toHaveProperty("kind");
+    replica.destroy();
+    doc.destroy();
+  });
+
+  it.each(["claude", "codex"] as const)("stores %s attribution on openers, replies and moves", (agent) => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "MCP attribution" });
+    const blockId = appendBlock(doc, { type: "paragraph", text: SENTENCE });
+    const attribution = { kind: "agent", account: "octocat", principalId: UUID, agent } as const;
+    const thread = createAnnotation(doc, blockId, 6, 11, "Agent name", "Open", undefined, attribution);
+    addComment(doc, thread.id, "Agent name", "Reply", attribution);
+    const moved = moveAnnotation(doc, thread.id, blockId, 0, 5, "Agent name", "Move", undefined, attribution);
+
+    expect(moved?.comments).toEqual(["Open", "Reply", "Move"].map((text) => ({
+      author: "Agent name", text, createdAt: expect.any(String), ...attribution,
+    })));
+    expect(getAnnotation(doc, thread.id)).toEqual(moved);
+    doc.destroy();
+  });
+
+  it.each([
+    { field: "account", invalid: "../octocat" },
+    { field: "account", invalid: 42 },
+    { field: "agent", invalid: "other-product" },
+    { field: "agent", invalid: 42 },
+    { field: "principalId", invalid: "octocat" },
+    { field: "principalId", invalid: 42 },
+    { field: "kind", invalid: "human" },
+    { field: "kind", invalid: 42 },
+  ])("omits only invalid $field attribution ($invalid), preserving comments and their siblings", ({ field, invalid }) => {
+    const { doc, threadId } = annotated();
+    const stored = getAnnotationsMap(doc).get(threadId) as Y.Map<unknown>;
+    const rows = stored.get("comments") as Y.Array<unknown>;
+    const attribution = { kind: "agent", account: "octocat", principalId: UUID, agent: "codex" };
+    const comment = { author: "Author", text: "Foreign comment", createdAt: "2026-10-26T00:00:00.000Z" };
+    rows.push([{ ...comment, ...attribution, [field]: invalid }, null, { author: "Malformed" }]);
+    addComment(doc, threadId, "Legacy author", "Sibling");
+    const validAttribution = Object.fromEntries(Object.entries(attribution).filter(([key]) => key !== field));
+
+    const comments = getAnnotation(doc, threadId)!.comments;
+    expect(comments).toHaveLength(3);
+    expect(comments[0]).toMatchObject({ author: "reviewer", text: "Too much?" });
+    expect(comments[1]).toEqual({ ...comment, ...validAttribution });
+    expect(comments[1]).not.toHaveProperty(field);
+    expect(comments[2]).toEqual({ author: "Legacy author", text: "Sibling", createdAt: expect.any(String) });
+    expect(listAnnotations(doc)[0]?.comments).toEqual(comments);
+    doc.destroy();
+  });
+
   it.each(["paragraph", "table", "card", "figma"] as const)("resolves moved marks in a %s block without rewriting the thread", (type) => {
     const { doc, blockId, threadId } = annotated();
     const text = type === "table" ? "| brave gap world | Later |\n| --- | --- |\n| Later | Last |"

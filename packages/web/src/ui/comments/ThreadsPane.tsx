@@ -199,6 +199,7 @@ export function ThreadsPane({
   threads,
   focused,
   author,
+  account,
   readOnly = false,
   onFocus,
   narrow = false,
@@ -220,6 +221,7 @@ export function ThreadsPane({
   focused: ThreadFocus | null;
   /** The awareness name this client publishes — the author of its replies. */
   author: string;
+  account?: import("../../shell/account.js").AccountIdentity | undefined;
   /** Archives retain every card while withholding Reply, Resolve and Reopen. */
   readOnly?: boolean;
   onFocus: (threadId: string) => void;
@@ -366,7 +368,10 @@ export function ThreadsPane({
         }
         // addComment performs the final lookup and returns null if the thread
         // disappeared.
-        if (writeDocument(ydoc, catalogConnection?.ydoc ?? null, () => addComment(ydoc, thread.id, author, text), undefined, canCleanupTags) === null) {
+        if (writeDocument(ydoc, catalogConnection?.ydoc ?? null, () => addComment(ydoc, thread.id, author, text,
+          { kind: "person", ...(account?.state === "signed-in"
+            ? { account: account.handle, ...(account.principalId === undefined ? {} : { principalId: account.principalId }) }
+            : {}) }), undefined, canCleanupTags) === null) {
           setRefusal({ id: thread.id, message: "This thread no longer exists." });
           return false;
         }

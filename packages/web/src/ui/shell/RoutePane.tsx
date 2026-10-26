@@ -27,6 +27,7 @@ export interface RoutePaneProps {
   /** Empty metadata earns the waiting screen only after a confirmed room answer. */
   meta: DocMeta | null;
   author: string;
+  account?: import("../../shell/account.js").AccountIdentity | undefined;
   /** The workspace settings room that owns the curated tag catalog. */
   catalogConnection?: RoomConnection | null;
   /** Whether the directory tombstones this document — see useArchived. */
@@ -143,6 +144,7 @@ function editorProperties(props: RoutePaneProps, segment: string, connection: Ro
   return {
     connection, segment, presence: props.presence, syncReading: props.syncReading ?? {},
     author: props.author,
+    account: props.account,
     catalogConnection: props.catalogConnection ?? null, archived: props.archived, updatedAt: props.updatedAt,
     canCleanupTags: () => props.directoryConnection != null && connection.status.writable &&
       !isDirectoryEntryArchived(props.directoryConnection.ydoc, parseRoom(connection.room).uuid),

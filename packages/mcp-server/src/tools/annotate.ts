@@ -57,6 +57,7 @@ export const annotateOperation = documentOperation({ content: false, contentDura
   const { replicas, annotationJson } = context;
 
   const who = author ?? replicas.name;
+  const attribution = replicas.commentAttribution();
 
   if (thread_id !== undefined && getAnnotation(replica.doc, thread_id) === null) {
     throw new ToolError("thread_not_found", `No annotation thread ${thread_id} in document ${uuid}`, { uuid, threadId: thread_id });
@@ -65,7 +66,7 @@ export const annotateOperation = documentOperation({ content: false, contentDura
   if (thread_id !== undefined && block_id === undefined) {
     // Combine nested reply/resolution transactions into one durable append.
     const updated = replica.doc.transact(() => {
-      const added = addComment(replica.doc, thread_id, who, text);
+      const added = addComment(replica.doc, thread_id, who, text, attribution);
       return added !== null && resolved !== undefined
         ? setAnnotationResolved(replica.doc, thread_id, resolved)
         : added;
@@ -95,8 +96,8 @@ export const annotateOperation = documentOperation({ content: false, contentDura
   }
   const target = row === undefined || column === undefined ? undefined : { row, column };
   const updated = thread_id === undefined
-    ? createAnnotation(replica.doc, block_id as string, start as number, end as number, who, text, target)
-    : moveAnnotation(replica.doc, thread_id, block_id as string, start as number, end as number, who, text, target);
+    ? createAnnotation(replica.doc, block_id as string, start as number, end as number, who, text, target, attribution)
+    : moveAnnotation(replica.doc, thread_id, block_id as string, start as number, end as number, who, text, target, attribution);
   if (updated === null) throw new ToolError("thread_not_found", `No annotation thread ${thread_id} in document ${uuid}`, { uuid, threadId: thread_id });
   return {
     uuid,

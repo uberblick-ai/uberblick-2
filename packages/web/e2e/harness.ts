@@ -241,7 +241,7 @@ export interface Harness {
   /** Give a separate MCP replica this fixture machine's existing sign-in. */
   createMcpAgent(statePrefix: string): McpAgent;
   /** Public fixture identities for access-control browser proofs. */
-  readonly access?: { otherDeviceId: string; legacyDeviceId: string; foreignDeviceId: string; deviceName: string };
+  readonly access?: { principalId: string; otherDeviceId: string; legacyDeviceId: string; foreignDeviceId: string; deviceName: string };
   /** Remove the browser account's hub role while its devices and memberships stay. */
   removeCurrentHubAdmin(): void;
   changeCurrentWorkspaceRole(role: "member" | "admin"): void;
@@ -570,7 +570,7 @@ export async function startHarness(options: {
       storedCredentials = { hubLogins: { [`http://127.0.0.1:${port}`]: {
         identity: principal, credential: { record, key: Buffer.from(current.keyBytes).toString("base64url") },
       } } };
-      access = { otherDeviceId: other.record.deviceId, legacyDeviceId: legacy.record.deviceId,
+      access = { principalId: principal.id, otherDeviceId: other.record.deviceId, legacyDeviceId: legacy.record.deviceId,
         foreignDeviceId: foreignDevice.record.deviceId, deviceName };
     }
     let secondHubUrl: string | undefined;
