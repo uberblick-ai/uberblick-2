@@ -262,7 +262,7 @@ describe("credential admission on a composed server", () => {
   ] as const)("enforces a %s grant ceiling for a %s room claim", async (ceilingScope, claimedScope, allowed) => {
     const rig = await startServer();
     const grant = new AgentGrantRegistry(rig.database).create({
-      clientId: "hosted-agent", principalId: "person", workspaceId: WORKSPACE, scope: ceilingScope,
+      clientId: "hosted-agent", clientName: "Hosted Agent", principalId: "person", workspaceId: WORKSPACE, scope: ceilingScope,
     });
     const pair = generateTestCredentialKeyPair();
     const issued = rig.registry.issueForGrant(grant.id, pair.publicKey);
@@ -303,7 +303,7 @@ describe("credential admission on a composed server", () => {
   it.each(["read-only", "read-write"] as const)("refuses a %s grant outside its fixed workspace despite current membership", async scope => {
     const rig = await startServer();
     const grant = new AgentGrantRegistry(rig.database).create({
-      clientId: "hosted-agent", principalId: "person", workspaceId: WORKSPACE, scope,
+      clientId: "hosted-agent", clientName: "Hosted Agent", principalId: "person", workspaceId: WORKSPACE, scope,
     });
     const pair = generateTestCredentialKeyPair();
     const issued = rig.registry.issueForGrant(grant.id, pair.publicKey);

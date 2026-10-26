@@ -9,7 +9,11 @@ export interface BrowserSession {
   expiresAt: number;
 }
 
-/** Browser identity only: these rows and tokens grant no device or room authority. */
+export interface BrowserSessionLookup extends BrowserSession {
+  principalId: string;
+}
+
+/** Private browser identities remain separate from device and room credentials. */
 export class BrowserSessions {
   private readonly insert: StatementSync;
   private readonly select: StatementSync;
@@ -27,7 +31,7 @@ export class BrowserSessions {
     this.insert = db.prepare(`INSERT INTO hub_browser_sessions
       (token_hash, principal_id, origin, expires_at)
       VALUES ($hash, $principalId, $origin, $expiresAt)`);
-    this.select = db.prepare(`SELECT principals.github_username, sessions.expires_at
+    this.select = db.prepare(`SELECT sessions.principal_id, principals.github_username, sessions.expires_at
       FROM hub_browser_sessions AS sessions JOIN hub_principals AS principals
         ON principals.id = sessions.principal_id
       WHERE sessions.token_hash = $hash AND sessions.origin = $origin AND sessions.expires_at > $now`);
@@ -45,10 +49,11 @@ export class BrowserSessions {
     return { token, username, expiresAt };
   }
 
-  get(token: string, origin: string): BrowserSession | null {
+  get(token: string, origin: string): BrowserSessionLookup | null {
     if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
     const row = this.select.get({ hash: this.hash(token), origin, now: this.now() });
-    return row === undefined ? null : { username: row.github_username as string, expiresAt: row.expires_at as number };
+    return row === undefined ? null : { principalId: row.principal_id as string,
+      username: row.github_username as string, expiresAt: row.expires_at as number };
   }
 
   /** A successful synchronous DELETE has committed before HTTP confirms sign-out. */

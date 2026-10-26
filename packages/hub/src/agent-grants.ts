@@ -6,6 +6,7 @@ import type { HubDatabase } from "./persistence.js";
 export interface AgentGrantRecord {
   id: string;
   clientId: string;
+  clientName: string;
   principalId: string;
   workspaceId: string;
   scope: TokenScope;
@@ -15,6 +16,7 @@ export interface AgentGrantRecord {
 
 export interface CreateAgentGrantRequest {
   clientId: string;
+  clientName: string;
   principalId: string;
   workspaceId: string;
   scope: TokenScope;
@@ -24,6 +26,7 @@ function fromRow(row: Record<string, unknown>): AgentGrantRecord {
   return {
     id: row.id as string,
     clientId: row.client_id as string,
+    clientName: row.client_name as string,
     principalId: row.principal_id as string,
     workspaceId: row.workspace_id as string,
     scope: row.scope as TokenScope,
@@ -43,6 +46,7 @@ export class AgentGrantRegistry {
     db.exec(`CREATE TABLE IF NOT EXISTS hub_agent_grants (
       id TEXT PRIMARY KEY NOT NULL,
       client_id TEXT NOT NULL CHECK(length(client_id) > 0),
+      client_name TEXT NOT NULL CHECK(length(client_name) > 0),
       principal_id TEXT NOT NULL CHECK(length(principal_id) > 0),
       workspace_id TEXT NOT NULL,
       scope TEXT NOT NULL CHECK(scope IN ('read-only', 'read-write')),
@@ -50,8 +54,8 @@ export class AgentGrantRegistry {
       revoked_at INTEGER
     )`);
     this.insert = db.prepare(`INSERT INTO hub_agent_grants
-      (id, client_id, principal_id, workspace_id, scope, device_id)
-      VALUES ($id, $clientId, $principalId, $workspaceId, $scope, $deviceId)
+      (id, client_id, client_name, principal_id, workspace_id, scope, device_id)
+      VALUES ($id, $clientId, $clientName, $principalId, $workspaceId, $scope, $deviceId)
       RETURNING *`);
     this.select = db.prepare("SELECT * FROM hub_agent_grants WHERE id = $id");
     this.markRevoked = db.prepare(`UPDATE hub_agent_grants SET revoked_at = $revokedAt
@@ -61,8 +65,9 @@ export class AgentGrantRegistry {
   /** The consent caller may commit this insert with its other changes on the shared handle. */
   create(request: CreateAgentGrantRequest): AgentGrantRecord {
     if (typeof request.clientId !== "string" || request.clientId === "" ||
+      typeof request.clientName !== "string" || request.clientName === "" ||
       typeof request.principalId !== "string" || request.principalId === "") {
-      throw new Error("AgentGrantRegistry.create: clientId and principalId must not be empty");
+      throw new Error("AgentGrantRegistry.create: clientId, clientName and principalId must not be empty");
     }
     try {
       if (parseWorkspaceId(request.workspaceId).uuid !== request.workspaceId) throw new Error();
@@ -72,7 +77,7 @@ export class AgentGrantRegistry {
     if (!isTokenScope(request.scope)) {
       throw new Error("AgentGrantRegistry.create: scope must be read-only or read-write");
     }
-    const row = this.insert.get({ id: crypto.randomUUID(), clientId: request.clientId,
+    const row = this.insert.get({ id: crypto.randomUUID(), clientId: request.clientId, clientName: request.clientName,
       principalId: request.principalId, workspaceId: request.workspaceId, scope: request.scope,
       deviceId: crypto.randomUUID() });
     if (row === undefined) throw new Error("AgentGrantRegistry.create: grant was not persisted");

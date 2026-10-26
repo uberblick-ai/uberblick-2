@@ -9,7 +9,7 @@ import type { HubClaimState } from "./hub-claim.js";
 import type { HubDatabase } from "./persistence.js";
 import { addWorkspaceNames, WorkspaceNameReader } from "./workspace-names.js";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
-import { BrowserSessions, type BrowserSession } from "./browser-sessions.js";
+import { BrowserSessions, type BrowserSession, type BrowserSessionLookup } from "./browser-sessions.js";
 import { requestClient } from "./client-address.js";
 import { isCredentialPublicKey } from "@uberblick/schema/token";
 import { GITHUB_SIGN_IN_ROUTES, isJsonPost, readJsonRequest, replyJson } from "./http.js";
@@ -92,7 +92,7 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult | BrowserSignInR
     return this.browser.cancel(requestId, secret, origin);
   }
 
-  browserSession(token: string, origin: string): BrowserSession | null {
+  browserSession(token: string, origin: string): BrowserSessionLookup | null {
     return this.sessions.get(token, origin);
   }
 

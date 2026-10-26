@@ -120,7 +120,7 @@ describe("authenticated hub access management", () => {
     let issued!: IssuedCredential;
     try {
       const grant = new AgentGrantRegistry(database).create({
-        clientId: "hosted-agent", principalId: owner.principal.id, workspaceId: WORKSPACE, scope,
+        clientId: "hosted-agent", clientName: "Hosted Agent", principalId: owner.principal.id, workspaceId: WORKSPACE, scope,
       });
       const pair = generateTestCredentialKeyPair();
       const credential = hub.credentials!.issueForGrant(grant.id, pair.publicKey);

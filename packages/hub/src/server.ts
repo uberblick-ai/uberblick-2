@@ -121,6 +121,11 @@ function createRevisionReads(database: HubDatabase, deletedRooms: DeletedRooms, 
 function handleUnconfiguredAuthRequest(request: IncomingMessage, response: ServerResponse): boolean {
   if (handleAuthorizationServerMetadata(undefined, false, request, response)) return true;
   const path = request.url ?? "";
+  if (path.startsWith("/oauth/")) {
+    response.writeHead(404, { "Cache-Control": "no-store" });
+    response.end();
+    return true;
+  }
   if (!path.startsWith("/auth/")) return false;
   let status = 404;
   let body: unknown = { status: "unknown-request" };
