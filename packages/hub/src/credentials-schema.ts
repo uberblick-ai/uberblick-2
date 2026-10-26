@@ -9,8 +9,17 @@ export const CREDENTIAL_SCHEMA = `CREATE TABLE IF NOT EXISTS hub_credentials (
   public_key BLOB CHECK(public_key IS NULL OR length(public_key) = 32),
   issued_at INTEGER NOT NULL,
   revoked_at INTEGER,
-  replaced_at INTEGER
+  replaced_at INTEGER,
+  ceiling TEXT
 )`;
+
+/** Existing laptop credentials retain their authority with a null ceiling. */
+export function addCredentialCeiling(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(hub_credentials)").all();
+  if (columns.length > 0 && !columns.some(column => column.name === "ceiling")) {
+    db.exec("ALTER TABLE hub_credentials ADD COLUMN ceiling TEXT");
+  }
+}
 
 /** Run on every database open, including a restored database without sign-in configured. */
 export function revokeHmacCredentials(db: DatabaseSync): void {

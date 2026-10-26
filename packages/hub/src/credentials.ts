@@ -2,7 +2,8 @@
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { HubDatabase } from "./persistence.js";
-import type { MembershipRegistry } from "./memberships.js";
+import { MembershipRegistry } from "./memberships.js";
+import { AgentGrantRegistry } from "./agent-grants.js";
 import { HubAdminRegistry } from "./hub-admins.js";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import {
@@ -11,6 +12,7 @@ import {
   type RequestProofClaims,
   type TokenClaims,
   type TokenFailure,
+  type TokenScope,
   DEVICE_CREDENTIAL_LIFETIME_MS,
   clampToken,
   importCredentialPublicKey,
@@ -30,6 +32,13 @@ export interface CredentialRecord {
   issuedAt: number;
   revokedAt: number | null;
   replacedAt: number | null;
+  ceiling?: CredentialCeiling;
+}
+
+export interface CredentialCeiling {
+  grantId: string;
+  workspaceId: string;
+  scope: TokenScope;
 }
 
 export interface IssueCredentialRequest {
@@ -83,10 +92,11 @@ interface CredentialRow {
   issued_at: number;
   revoked_at: number | null;
   replaced_at: number | null;
+  ceiling: string | null;
 }
 
 const PUBLIC_COLUMNS =
-  "id, principal_id, device_id, workspaces, issued_at, revoked_at, replaced_at";
+  "id, principal_id, device_id, workspaces, issued_at, revoked_at, replaced_at, ceiling";
 
 function recordFromRow(row: CredentialRow): CredentialRecord {
   return {
@@ -97,6 +107,7 @@ function recordFromRow(row: CredentialRow): CredentialRecord {
     issuedAt: row.issued_at,
     revokedAt: row.revoked_at,
     replacedAt: row.replaced_at,
+    ...(row.ceiling === null ? {} : { ceiling: JSON.parse(row.ceiling) as CredentialCeiling }),
   };
 }
 
@@ -108,6 +119,8 @@ function recordFromRow(row: CredentialRow): CredentialRecord {
  */
 export class CredentialRegistry {
   private readonly db: DatabaseSync;
+  private readonly grants: AgentGrantRegistry;
+  private readonly memberships: MembershipRegistry;
   private readonly insert: StatementSync;
   private readonly select: StatementSync;
   private readonly selectKey: StatementSync;
@@ -123,11 +136,12 @@ export class CredentialRegistry {
 
   constructor(database: HubDatabase, private readonly hubAdmins = new HubAdminRegistry(database),
     private readonly log: HubLogger = stderrLogger, private readonly now: () => number = () => Date.now()) {
-    // Opening the database already revoked HMAC-era credentials, and every
-    // public-key table was created with this schema's columns.
+    // Database opening upgrades existing rows before any registry prepares queries.
     const db = database.connection;
     this.db = db;
     db.exec(CREDENTIAL_SCHEMA);
+    this.grants = new AgentGrantRegistry(database);
+    this.memberships = new MembershipRegistry(database);
     db.exec(`CREATE TABLE IF NOT EXISTS hub_used_request_proofs (
       proof TEXT PRIMARY KEY NOT NULL,
       expires_at INTEGER NOT NULL
@@ -141,8 +155,8 @@ export class CredentialRegistry {
     this.deleteExpiredProofs.run({ now: Math.floor(this.now() / 1000) });
     this.insert = db.prepare(`
       INSERT INTO hub_credentials
-        (id, principal_id, device_id, device_name, workspaces, public_key, issued_at)
-      VALUES ($id, $principalId, $deviceId, $deviceName, $workspaces, $key, $issuedAt)
+        (id, principal_id, device_id, device_name, workspaces, public_key, issued_at, ceiling)
+      VALUES ($id, $principalId, $deviceId, $deviceName, $workspaces, $key, $issuedAt, $ceiling)
     `);
     this.select = db.prepare(
       `SELECT ${PUBLIC_COLUMNS} FROM hub_credentials WHERE id = $id`,
@@ -186,6 +200,42 @@ export class CredentialRegistry {
   }
 
   issue(request: IssueCredentialRequest): IssuedCredential {
+    return this.issueWithCeiling(request, null);
+  }
+
+  /** Internal hosted issuance derives all authority from the live grant. */
+  issueForGrant(grantId: string, publicKey: Uint8Array): IssuedCredential | null {
+    let issued: IssuedCredential;
+    let previousIds: string[];
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const grant = this.grants.get(grantId);
+      if (grant === null || grant.revokedAt !== null ||
+        this.memberships.roleFor(grant.workspaceId, grant.principalId) === null) {
+        this.db.exec("ROLLBACK");
+        return null;
+      }
+      previousIds = this.selectDeviceCredentials.all({ principalId: grant.principalId, deviceId: grant.deviceId })
+        .map(row => row.id as string);
+      issued = this.issueWithCeiling({ principalId: grant.principalId, deviceId: grant.deviceId,
+        workspaces: [grant.workspaceId], publicKey },
+      { grantId: grant.id, workspaceId: grant.workspaceId, scope: grant.scope });
+      for (const id of previousIds) this.markReplaced.run({ id, replacedAt: this.now() });
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    try {
+      this.closeCredentials(previousIds);
+    } catch (error) {
+      this.revoke(issued.record.id);
+      throw error;
+    }
+    return "failure" in this.usable(this.get(issued.record.id)) ? null : issued;
+  }
+
+  private issueWithCeiling(request: IssueCredentialRequest, ceiling: CredentialCeiling | null): IssuedCredential {
     if (typeof request.principalId !== "string" || request.principalId === "") {
       throw new Error("CredentialRegistry.issue: principalId must not be empty");
     }
@@ -210,6 +260,7 @@ export class CredentialRegistry {
       issuedAt: this.now(),
       revokedAt: null,
       replacedAt: null,
+      ...(ceiling === null ? {} : { ceiling }),
     };
     this.insert.run({
       id: record.id,
@@ -219,6 +270,7 @@ export class CredentialRegistry {
       workspaces: JSON.stringify(record.workspaces),
       key: request.publicKey,
       issuedAt: record.issuedAt,
+      ceiling: ceiling === null ? null : JSON.stringify(ceiling),
     });
     return { record };
   }
@@ -346,7 +398,9 @@ export class CredentialRegistry {
         this.db.exec("COMMIT");
         exchanged = { reused: current, ids };
       } else {
-        const workspaces = this.hubAdmins.availableWorkspaces(memberships.workspacesFor(current.principalId)).sort();
+        const eligible = memberships.workspacesFor(current.principalId)
+          .filter(workspace => current.ceiling === undefined || workspace === current.ceiling.workspaceId);
+        const workspaces = this.hubAdmins.availableWorkspaces(eligible).sort();
         if (options.ifWorkspacesChanged === true &&
           workspaces.length === current.workspaces.length &&
           workspaces.every((workspace, index) => workspace === current.workspaces[index])) {
@@ -356,10 +410,10 @@ export class CredentialRegistry {
           return { status: "unchanged" };
         }
         const deviceName = sanitizeDeviceName(this.selectDeviceName.get({ id: current.id })?.device_name);
-        const issued = this.issue({ principalId: current.principalId, deviceId: current.deviceId,
+        const issued = this.issueWithCeiling({ principalId: current.principalId, deviceId: current.deviceId,
           ...(deviceName === undefined ? {} : { deviceName }),
           publicKey: Buffer.from(options.publicKey, "base64url"),
-          workspaces });
+          workspaces }, current.ceiling ?? null);
         this.markReplaced.run({ id: current.id, replacedAt: this.now() });
         this.db.exec("COMMIT");
         exchanged = { issued };
