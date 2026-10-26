@@ -1,0 +1,4 @@
+# A hub is a team's private workspace. Pages carry a noindex tag; crawling
+# stays allowed so search engines can read it and drop what they found.
+User-agent: *
+Allow: /
