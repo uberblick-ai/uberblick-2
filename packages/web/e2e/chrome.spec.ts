@@ -3046,8 +3046,8 @@ for (const scheme of ["light", "dark"] as const) {
       const composerGround = await paintedIn(composer, "background-color");
       expect(composerGround).toBe(tokens.card);
       await check(composer.getByRole("button", { name: "Cancel", exact: true }), composerGround);
-      await check(composer.getByRole("button", { name: /^@/ }).first(), composerGround);
       await composer.getByRole("textbox").fill("A comment with neutral submit emphasis.");
+      await check(composer.getByRole("button", { name: "Comment", exact: true }), composerGround);
       await expectNeutralEmphasis(composer.getByRole("button", { name: "Comment", exact: true }));
       await composer.getByRole("button", { name: "Cancel", exact: true }).click();
     }, true);
@@ -3642,7 +3642,7 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   await page.keyboard.press("Enter");
   const selected = page.locator('.ub-thread[aria-current="true"]');
   await expect(page.locator(".ub-rail")).toBeVisible();
-  await expect(selected).toBeFocused();
+  await expect(selected.getByRole("button").first()).toBeFocused();
   const withDrawer = await layout();
   expect(withDrawer.column.left).toBeCloseTo(narrow.column.left, 1);
   expect(withDrawer.column.right).toBeCloseTo(narrow.column.right, 1);

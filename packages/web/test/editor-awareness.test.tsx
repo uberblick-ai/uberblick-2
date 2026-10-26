@@ -1,4 +1,4 @@
-/** The editor reads mention names, while its parent reads caret locations. */
+/** Member presentation and document presence have independent lifecycles. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { within } from "@testing-library/react";
 import { act, render, type RenderResult } from "./react-render.js";
@@ -14,6 +14,7 @@ import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { EditorPane } from "../src/ui/document/EditorPane.js";
 import * as hooks from "../src/ui/hooks.js";
 import * as composer from "../src/ui/comments/CommentComposer.js";
+import { WorkspaceMembersContext } from "../src/ui/workspace-members.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const UUID = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
@@ -104,9 +105,6 @@ describe("the bound editor's awareness reading", () => {
     const peer = awarenessFor();
     const user = { name: "Peer", color: "#345678" };
     publish(awareness, peer, { user, cursor: cursorAt(connection, 0) });
-    // usePeers is called once per BoundEditor render. This spy preserves the
-    // real hook, binding and parent subscription, without a production seam.
-    const editorRenders = vi.spyOn(hooks, "usePeers");
     const composerRenders = vi.spyOn(composer, "CommentComposer");
     let presence: ReturnType<typeof hooks.usePresence> = [];
     function Shell() {
@@ -118,70 +116,49 @@ describe("the bound editor's awareness reading", () => {
     const host = mount(<Shell />);
     expect(within(host).queryByRole("textbox", { name: "Document content" })).not.toBeNull();
     expect(presence[0]?.block).toBe(1);
-    expect(composerRenders.mock.lastCall?.[0].mentions).toEqual(["Peer"]);
-    const before = editorRenders.mock.calls.length;
-    const originalNames = composerRenders.mock.lastCall?.[0].mentions;
+    const before = composerRenders.mock.calls.length;
 
     act(() => publish(awareness, peer, { user, cursor: cursorAt(connection, 0, 1) }));
-    expect(editorRenders).toHaveBeenCalledTimes(before);
+    expect(composerRenders).toHaveBeenCalledTimes(before);
     // This changes the shell's reading and redraws EditorPane, unlike a caret
     // moving inside one block. The memo boundary must still keep the editor out.
     act(() => publish(awareness, peer, { user, cursor: cursorAt(connection, 1) }));
     expect(presence[0]?.block).toBe(2);
-    expect(editorRenders).toHaveBeenCalledTimes(before);
+    expect(composerRenders).toHaveBeenCalledTimes(before);
     act(() => publish(awareness, peer, {
       user: { ...user, color: "#765432" }, client: "agent", session: "another-session",
       cursor: cursorAt(connection, 1, 1),
     }));
-    expect(editorRenders).toHaveBeenCalledTimes(before);
-    expect(composerRenders.mock.lastCall?.[0].mentions).toBe(originalNames);
+    expect(composerRenders).toHaveBeenCalledTimes(before);
   });
 
-  it("keeps the composer's mention candidates live through joins, renames and leaves", () => {
+  it("repaints member mentions independently of presence joins, renames and leaves", () => {
     const { connection, awareness } = fixture();
     const peer = awarenessFor();
     const second = awarenessFor();
     publish(awareness, peer, { user: { name: "Peer", color: "#345678" } });
-    const composerRenders = vi.spyOn(composer, "CommentComposer");
-    mount(<EditorPane connection={connection} segment={WORKSPACE} presence={[]}
-      author="Reader" archived={false} docLinks={null} actions={{ onRestore: null }}
-      onSelectThread={selectThread} />);
-    const names = (): string[] | undefined => composerRenders.mock.lastCall?.[0].mentions;
-    expect(names()).toEqual(["Peer"]);
-    act(() => publish(awareness, second, { user: { name: "Peer", color: "#765432" } }));
-    expect(names()).toEqual(["Peer", "Peer"]);
-    act(() => publish(awareness, peer, { user: { name: "Renamed", color: "#345678" } }));
-    expect(names()).toEqual(["Renamed", "Peer"]);
-    // Withdrawing the user while retaining a caret is also a departure from
-    // the mention roster (the MCP's ordinary presence-withdrawal shape).
-    act(() => publish(awareness, peer, { cursor: cursorAt(connection, 0) }));
-    expect(names()).toEqual(["Peer"]);
-    act(() => publish(awareness, second, null));
-    expect(names()).toEqual([]);
-  });
-
-  it("never returns peers from a replaced connection, even at the same room", () => {
-    const first = fixture();
-    const replacement = fixture();
-    const peer = awarenessFor();
-    const nextPeer = awarenessFor();
-    publish(first.awareness, peer, { user: { name: "Before", color: "#345678" } });
-    publish(replacement.awareness, nextPeer, { user: { name: "After", color: "#765432" } });
-    const seen: string[][] = [];
-    function Probe({ connection }: { connection: RoomConnection | null }): null {
-      seen.push(hooks.usePeers(connection).map(({ name }) => name));
-      return null;
+    act(() => { appendBlock(connection.ydoc, { type: "paragraph", text: "Ask @alice and @Peer" }); });
+    function Page({ members }: { members: readonly string[] }) {
+      return <WorkspaceMembersContext value={members}>
+        <EditorPane connection={connection} segment={WORKSPACE} presence={[]}
+          author="Reader" archived={false} docLinks={null} actions={{ onRestore: null }}
+          onSelectThread={selectThread} />
+      </WorkspaceMembersContext>;
     }
-    mount(<Probe connection={first.connection} />);
-    expect(seen.at(-1)).toEqual(["Before"]);
-    const before = seen.length;
-    mounted!.rerender(<Probe connection={replacement.connection} />);
-    expect(seen[before]).toEqual([]);
-    expect(seen.at(-1)).toEqual(["After"]);
-    const settled = seen.length;
-    act(() => publish(first.awareness, peer, { user: { name: "Old source", color: "#345678" } }));
-    expect(seen).toHaveLength(settled);
-    mounted!.rerender(<Probe connection={null} />);
-    expect(seen.at(-1)).toEqual([]);
+    const host = mount(<Page members={["alice"]} />);
+    const names = (): string[] => [...host.querySelectorAll(".ub-person-pill")].map((pill) => pill.textContent ?? "");
+    expect(names()).toEqual(["@alice"]);
+    act(() => publish(awareness, second, { user: { name: "Peer", color: "#765432" } }));
+    expect(names()).toEqual(["@alice"]);
+    act(() => publish(awareness, peer, { user: { name: "Renamed", color: "#345678" } }));
+    expect(names()).toEqual(["@alice"]);
+    act(() => publish(awareness, peer, { cursor: cursorAt(connection, 0) }));
+    expect(names()).toEqual(["@alice"]);
+    act(() => publish(awareness, second, null));
+    expect(names()).toEqual(["@alice"]);
+    mounted!.rerender(<Page members={["Peer"]} />);
+    expect(names()).toEqual(["@Peer"]);
+    mounted!.rerender(<Page members={[]} />);
+    expect(names()).toEqual([]);
   });
 });

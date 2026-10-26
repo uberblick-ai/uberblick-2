@@ -183,7 +183,7 @@ test("rich answer controls stay inside the modal on desktop keyboard and pointer
   await expect(dialog(page).getByRole("button", { name: "Open an RFC instead", exact: true })).toBeDisabled();
   await page.keyboard.press("Backspace");
   await page.keyboard.type(`@${reference.title}`);
-  const mentions = dialog(page).getByRole("listbox", { name: "Documents", exact: true });
+  const mentions = dialog(page).getByRole("listbox", { name: "People and documents", exact: true });
   await activateControl(mentions.getByRole("option", { name: reference.title, exact: true }), { touch });
   await expect(draft(page).locator(`a[data-doc-id="${reference.uuid}"]`)).toHaveText(reference.title);
 

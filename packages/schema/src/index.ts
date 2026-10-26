@@ -122,7 +122,7 @@ export {
 } from "./figma.js";
 export { FIGMA_PROVIDER, normalizeFigmaLink } from "./providers/figma.js";
 
-export { exportMarkdown, importMarkdown, parseInline } from "./markdown.js";
+export { exportMarkdown, importMarkdown, parseInline, parseMarkdownLinkPrefix, renderMarkdownLink } from "./markdown.js";
 export type {
   ImportedBlock,
   ImportedDoc,

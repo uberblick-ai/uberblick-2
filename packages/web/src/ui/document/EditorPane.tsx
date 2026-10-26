@@ -46,6 +46,8 @@ import { CalloutControl } from "../editor-controls/CalloutControl.js";
 import { CardButtonControls } from "../editor-controls/CardButtonControls.js";
 import { TableControls } from "../editor-controls/TableControls.js";
 import { MentionMenu } from "../editor-controls/MentionMenu.js";
+import { useWorkspaceMembers } from "../workspace-members.js";
+import { setEditorMembers } from "../../editor/person-mentions.js";
 import { EmojiMenu } from "../editor-controls/EmojiMenu.js";
 import {
   readRoomMeta,
@@ -53,7 +55,6 @@ import {
   useDocRev,
   useForeignBlocks,
   useLinkConflicts,
-  usePeers,
   useRawBlocks,
   useRoomStatus,
 } from "../hooks.js";
@@ -670,9 +671,10 @@ const BoundEditor = memo(function BoundEditor({
   const [editor, setEditor] = useState<Editor | null>(null);
   const [bindingEpoch, setBindingEpoch] = useState(0);
   const { writable } = useRoomStatus(connection);
-  // The only names anyone can mention are the peers publishing awareness right
-  // now — there is no registry, and a mention is plain text.
-  const peers = usePeers(connection);
+  const members = useWorkspaceMembers();
+  useEffect(() => {
+    if (editor !== null && !editor.isDestroyed) setEditorMembers(editor, members);
+  }, [editor, members]);
   /**
    * The binding effect reads the latest read-only flag without depending on
    * it: initial binding must already enforce read-only, and later permission
@@ -860,7 +862,8 @@ const BoundEditor = memo(function BoundEditor({
             catalogConnection={catalogConnection}
             canCleanupTags={canCleanupTags}
             author={author}
-            mentions={peers.map((peer) => peer.name)}
+            docLinks={docLinks}
+            openDocId={parseRoom(connection.room).uuid}
             host={frame}
             onCreated={onSelectThread}
           />

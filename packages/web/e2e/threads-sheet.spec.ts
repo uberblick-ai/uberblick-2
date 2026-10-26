@@ -327,7 +327,7 @@ test("touch reveals a low thread in the sheet while its close control stays in v
       await expect(sheet).toBeVisible();
       const selected = sheet.locator('.ub-thread[aria-current="true"]');
       await expect(selected).toContainText(`conversation ${number}`);
-      if (number === 10) await expect(selected).toHaveAttribute("aria-expanded", "true");
+      if (number === 10) await expect(selected.getByRole("button").first()).toHaveAttribute("aria-expanded", "true");
       await expect(selected).toBeInViewport({ ratio: 1 });
       await expect(sheet.locator(".ub-thread").first()).not.toBeInViewport();
       // Assert before tapping: Playwright's automatic scroll into view must

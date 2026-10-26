@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { filterMentions } from "../src/editor/mention-menu.js";
+import { mentionCandidates } from "../src/mentions.js";
 import type { DocLinkCandidate } from "../src/editor/doc-links.js";
 import { foldForTitleMatch } from "../src/title-fold.js";
 
@@ -33,7 +33,7 @@ const EVERY_TITLE = CORPUS.map(([, title]) => title);
 
 /** The titles the `@` picker offers for `query`, in a comparable order. */
 function pickerAnswer(query: string): string[] {
-  return filterMentions(CANDIDATES, query, null)
+  return mentionCandidates(CANDIDATES, [], query, null)
     .map((candidate) => candidate.label)
     .sort();
 }

@@ -180,6 +180,13 @@ export function sanitizeManagementReply(
         return result({ status: state, role: body.role });
       }
       break;
+    case "list-member-usernames":
+      if (status === 200 && state === "ok" && Array.isArray(body.usernames) &&
+          body.usernames.every(value => isGithubUsername(value) &&
+            (login === undefined || !value.includes(login.credential.key)))) {
+        return result({ status: state, usernames: body.usernames });
+      }
+      break;
     case "list-members":
       if (status === 200 && state === "ok" && Array.isArray(body.members)) {
         const members = body.members.map(value => member(value, login));

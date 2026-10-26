@@ -14,6 +14,8 @@ import type { DocLinkContext } from "../../editor/doc-links.js";
 import { DECISION_ANSWER_MENU_ENTRIES } from "../../editor/block-menu.js";
 import { BlockMenu } from "../editor-controls/BlockMenu.js";
 import { MentionMenu } from "../editor-controls/MentionMenu.js";
+import { setEditorMembers } from "../../editor/person-mentions.js";
+import { useWorkspaceMembers } from "../workspace-members.js";
 import { EmojiMenu } from "../editor-controls/EmojiMenu.js";
 import { CodeLanguageControl } from "../editor-controls/CodeLanguageControl.js";
 import { TableControls } from "../editor-controls/TableControls.js";
@@ -57,6 +59,10 @@ function AnswerEditor({ draft, readOnly = false, session, docLinks, displayName,
   const host = useRef<HTMLDivElement | null>(null);
   const frame = useRef<HTMLDivElement | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const members = useWorkspaceMembers();
+  useEffect(() => {
+    if (editor !== null && !editor.isDestroyed) setEditorMembers(editor, members);
+  }, [editor, members]);
   useEffect(() => {
     const element = host.current;
     if (element === null) return;
@@ -90,7 +96,7 @@ function AnswerEditor({ draft, readOnly = false, session, docLinks, displayName,
         <TableControls editor={editor} host={frame} />
         <MentionMenu editor={editor} host={frame} docLinks={docLinks} openDocId={parseRoom(session.source.room).uuid} />
         <EmojiMenu editor={editor} host={frame} />
-        <CommentComposer editor={editor} ydoc={draft} author={displayName} mentions={[]} host={frame}
+        <CommentComposer editor={editor} ydoc={draft} author={displayName} docLinks={docLinks} openDocId={parseRoom(session.source.room).uuid} host={frame}
           onCreated={() => {}} formattingOnly />
       </>}
     </div>

@@ -82,6 +82,7 @@ export type RequestAction =
   | { operation: "remove-hub-admin"; principalId: string }
   | { operation: "revoke-device"; deviceId: string }
   | { operation: "own-role"; workspaceId: string }
+  | { operation: "list-member-usernames"; workspaceId: string }
   | { operation: "list-members"; workspaceId: string }
   | { operation: "resolve-account"; workspaceId: string; githubUsername: string }
   | { operation: "grant-member"; workspaceId: string; githubAccountId: string; role?: "admin" | "member" }
@@ -402,6 +403,7 @@ export function readRequestAction(payload: Record<string, unknown>): RequestActi
       action = { operation, deviceId };
       break;
     case "own-role":
+    case "list-member-usernames":
     case "list-members":
     case "suspend-workspace":
     case "restore-workspace":

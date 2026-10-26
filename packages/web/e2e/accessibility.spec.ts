@@ -148,7 +148,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.keyboard.press("Escape");
       await placeCaret(page);
       await page.keyboard.type("@");
-      await expect(page.getByRole("listbox", { name: "Documents" })).toBeVisible();
+      await expect(page.getByRole("listbox", { name: "People and documents" })).toBeVisible();
       await scan("caret menu — document picker");
       await page.keyboard.press("Escape");
       await page.keyboard.press("Backspace");

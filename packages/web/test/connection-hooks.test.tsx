@@ -35,7 +35,6 @@ import {
   useDocRev,
   useForeignBlocks,
   useLinkConflicts,
-  usePeers,
   usePresence,
   useRawBlocks,
   useSidebar,
@@ -153,7 +152,6 @@ function useReading(connection: RoomConnection | null) {
     meta: useDocMeta(connection),
     foreign: useForeignBlocks(connection),
     conflicts: useLinkConflicts(connection).conflicts,
-    peers: usePeers(connection),
     agentSessions: useAgentSessions(connection),
     presence: usePresence(connection),
     titlePresence: useTitlePresence(connection),
@@ -169,7 +167,6 @@ const EMPTY = {
   meta: null,
   foreign: [],
   conflicts: [],
-  peers: [],
   agentSessions: 0,
   presence: [],
   titlePresence: [],
@@ -203,7 +200,6 @@ describe("connection-scoped readings", () => {
       expect(populated.meta?.title).toBe(populated.directory[0]?.title);
       expect(populated.foreign).toHaveLength(2);
       expect(populated.conflicts).toHaveLength(1);
-      expect(populated.peers).toHaveLength(1);
       expect(populated.agentSessions).toBe(1);
       expect(populated.presence).toHaveLength(1);
       expect(populated.titlePresence).toHaveLength(1);
@@ -368,24 +364,15 @@ describe("connection-scoped readings", () => {
     join(fix, { client: AGENT_CLIENT, session });
     const cursorOnly = join(fix, { cursor: { anchor } });
     join(fix, {});
-    let peers: ReturnType<typeof usePeers> = [];
     let agents = 0;
     let titlePresence: ReturnType<typeof useTitlePresence> = [];
     function Probe(): null {
-      peers = usePeers(fix.connection);
       agents = useAgentSessions(fix.connection);
       titlePresence = useTitlePresence(fix.connection);
       return null;
     }
 
     render(<Probe />);
-    expect(peers.map(({ clientId }) => clientId).sort()).toEqual(
-      [fallback.clientId, agent.clientId, human.clientId].sort(),
-    );
-    expect(peers.find(({ clientId }) => clientId === fallback.clientId)).toEqual({
-      clientId: fallback.clientId,
-      name: `client ${fallback.clientId}`,
-    });
     expect(agents).toBe(1);
     const presence = readPresence(fix.ydoc, fix.awareness);
     expect(titlePresence).toEqual(presence);
@@ -407,12 +394,9 @@ describe("connection-scoped readings", () => {
     });
 
     // Withdrawal keeps the awareness state and caret, but removes the name,
-    // marker and agent session. It stops being a mention candidate or agent.
+    // marker and agent session. It stops being counted as an agent.
     act(() => agent.publish({ cursor: { anchor } }));
     expect(fix.awareness.getStates().has(agent.clientId)).toBe(true);
-    expect(peers.map(({ clientId }) => clientId).sort()).toEqual(
-      [fallback.clientId, human.clientId].sort(),
-    );
     expect(agents).toBe(0);
     expect(readPresence(fix.ydoc, fix.awareness).find(({ clientId }) => clientId === agent.clientId)).toMatchObject({
       name: `client ${agent.clientId}`,

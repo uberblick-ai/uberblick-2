@@ -889,6 +889,7 @@ function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?
       case "own-role": body = { status: ownRoleStatus ?? "ok", hub: ACCESS_HUB, ...(ownRoleStatus === undefined ? { role } : {}) }; break;
       case "list-devices": throw new Error("Members must not read devices");
       case "list-members": body = { status: "ok", hub: ACCESS_HUB, members: members.map((item) => ({ ...item })) }; break;
+      case "list-member-usernames": body = { status: "ok", hub: ACCESS_HUB, usernames: members.map((item) => item.githubUsername) }; break;
       case "resolve-account": body = { status: "ok", hub: ACCESS_HUB, githubAccountId: NEW_MEMBER.githubAccountId, githubUsername: NEW_MEMBER.githubUsername }; break;
       case "grant-member": {
         const member = members.find((item) => item.githubAccountId === action.githubAccountId);

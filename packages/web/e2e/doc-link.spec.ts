@@ -81,7 +81,7 @@ test("the @ picker offers a synced document and writes the same reference", asyn
   await placeCaret(page);
   await page.keyboard.type("see @pick");
 
-  const picker = page.getByRole("listbox", { name: "Documents" });
+  const picker = page.getByRole("listbox", { name: "People and documents" });
   await expect(picker).toBeVisible();
   // Wait for the two remote candidates before sending input; their sorted
   // rows and selection state are the jsdom test's contract.

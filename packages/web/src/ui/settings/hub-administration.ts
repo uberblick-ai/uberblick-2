@@ -21,7 +21,7 @@ export function servesWorkspace(serving: LocalServing | null, workspace: string 
 
 /** Independent live readings share lifecycle mechanics, never permission results. */
 export function useAccessReading(workspace: string | null, serving: LocalServing | null,
-  subject: string, path: string, operation: "own-hub-role" | "own-role" | "list-devices", account: string | null = null): HubAdministration {
+  subject: string, path: string, operation: "own-hub-role" | "own-role" | "list-devices" | "list-member-usernames", account: string | null = null): HubAdministration {
   const available = serving?.remoteHubUrl != null && servesWorkspace(serving, workspace);
   const binding = serving?.remoteHubUrl;
   const client = useMemo(() => available && workspace !== null
@@ -65,15 +65,22 @@ export function useAccessReading(workspace: string | null, serving: LocalServing
             resolve({ status: "hub-down", hub: null });
           }, SERVING_STATUS_TIMEOUT_MS);
         });
-        const action: AccessAction = operation === "own-role"
+        const action: AccessAction = operation === "own-role" || operation === "list-member-usernames"
           ? { operation, workspaceId: workspace } : { operation };
         authority = await Promise.race([request(action, signal), expired]);
       } finally { if (timeout !== undefined) clearTimeout(timeout); }
       if (active && (!signal.aborted || timedOut) && revision.current === currentRevision) {
-        // A later outage cannot make a known revoked login signed in again.
-        setAnswer(previous => ({ client, authority: operation === "list-devices" && authority.status !== "ok" &&
-          previous?.client === client && ["sign-in-required", "forbidden"].includes(previous.authority.status)
-          ? previous.authority : authority }));
+        setAnswer(previous => {
+          const usernames = authority.usernames;
+          const previousUsernames = previous?.client === client && previous.authority.status === "ok" ? previous.authority.usernames : undefined;
+          const stableAuthority = operation === "list-member-usernames" && authority.status === "ok" && usernames !== undefined &&
+            previousUsernames?.length === usernames.length && usernames.every((username, index) => username === previousUsernames[index])
+            ? { ...authority, usernames: previousUsernames } : authority;
+          // A later outage cannot make a known revoked login signed in again.
+          return { client, authority: operation === "list-devices" && authority.status !== "ok" &&
+            previous?.client === client && ["sign-in-required", "forbidden"].includes(previous.authority.status)
+            ? previous.authority : stableAuthority };
+        });
       }
       if (active && controller === currentController) timer = setTimeout(() => { void read(); }, SERVING_STATUS_POLL_MS);
     };

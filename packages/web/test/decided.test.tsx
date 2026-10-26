@@ -377,7 +377,7 @@ describe("read-only decision records", () => {
     highlight.focus();
     await act(async () => highlight.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
     const item = card(host, thread.id);
-    expect(document.activeElement).toBe(item.querySelector(".ub-thread"));
+    expect(document.activeElement).toBe(item.querySelector(".ub-thread button"));
     await act(async () => button(item, "Reply").click());
     act(() => typeInto(item.querySelector<HTMLTextAreaElement>("textarea")!, "The compatibility constraint."));
     act(() => button(item, "Reply").click());

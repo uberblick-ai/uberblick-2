@@ -1,6 +1,6 @@
 /**
- * Each card has one body button with phrasing content; actions sit beside it
- * to avoid nested buttons. Quote marks are CSS. Share focus with editor
+ * Each card's selection button and linked comment text are siblings, so every
+ * link remains reachable. Quote marks are CSS. Share focus with editor
  * highlights. Keep resolved threads collapsed below the open count. Schema
  * writes recheck the live thread; a refused reply keeps its draft and reason
  * outside the retiring form, and that reason disappears when the thread
@@ -12,8 +12,10 @@ import type { ReactElement } from "react";
 import { addComment, getAnnotation, setAnnotationResolved } from "@uberblick/schema";
 import type { AnnotationComment } from "@uberblick/schema";
 import type { RoomConnection } from "../../collab/rooms.js";
+import type { DocLinkContext } from "../../editor/doc-links.js";
 import { writeDocument } from "../../collab/document-write.js";
 import { CommentForm } from "./CommentForm.js";
+import { CommentText } from "./CommentText.js";
 import {
   commentTimestamp,
   flashThreadHighlight,
@@ -30,9 +32,11 @@ import { useTimestampClock } from "../timestamps.js";
 function Comment({
   comment,
   now,
+  docLinks,
 }: {
   comment: AnnotationComment;
   now: number;
+  docLinks: DocLinkContext | null;
 }): ReactElement {
   const { label, dateTime, title } = commentTimestamp(comment.createdAt, now);
   return (
@@ -45,7 +49,7 @@ function Comment({
           {label}
         </time>
       </span>
-      <span className="ub-thread-text whitespace-pre-wrap">{comment.text}</span>
+      <span className="ub-thread-text whitespace-pre-wrap"><CommentText text={comment.text} docLinks={docLinks} /></span>
     </span>
   );
 }
@@ -64,6 +68,9 @@ function ThreadCard({
   onReplyOpen,
   onReplyClose,
   onResolve,
+  docLinks,
+  openDocId,
+  hidden,
 }: {
   thread: ThreadView;
   now: number;
@@ -81,18 +88,30 @@ function ThreadCard({
   onReplyOpen: () => void;
   onReplyClose: () => void;
   onResolve: (resolved: boolean) => void;
+  docLinks: DocLinkContext | null;
+  openDocId: string | null;
+  hidden: boolean;
 }): ReactElement {
   return (
     <li id={threadCardId(thread.id)} className="ub-thread-card">
-      <Button variant="plain" size="custom"
-        type="button"
+      <fieldset
         // Resolved and orphaned cards keep their labels and collapse state;
         // opacity would also dim their enabled text below its contrast floor.
-        className={`ub-thread flex w-full flex-col gap-[0.35rem] rounded-(--radius-sm) border border-l-(length:--border-width-emphasis) border-(--border) px-[0.6rem] py-2 text-left [font:inherit] hover:border-l-brand ${focused ? "ub-thread-focused border-l-brand bg-(--brand-subtle)" : "bg-card"} text-card-foreground${thread.orphaned ? " ub-thread-orphaned" : ""}${thread.resolved ? " ub-thread-resolved" : ""}`}
+        className={`ub-thread m-0 flex w-full min-w-0 cursor-pointer flex-col gap-[0.35rem] rounded-(--radius-sm) border border-l-(length:--border-width-emphasis) border-(--border) px-[0.6rem] py-2 text-left [font:inherit] hover:border-l-brand ${focused ? "ub-thread-focused border-l-brand bg-(--brand-subtle)" : "bg-card"} text-card-foreground${thread.orphaned ? " ub-thread-orphaned" : ""}${thread.resolved ? " ub-thread-resolved" : ""}`}
         aria-current={focused ? "true" : undefined}
-        aria-expanded={thread.resolved ? !collapsed : undefined}
-        onClick={onSelect}
+        aria-label="Comment thread"
+        onClick={(event) => { if (!(event.target instanceof Element && event.target.closest("a"))) onSelect(); }}
+        onKeyDown={(event) => {
+          if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
+            onSelect();
+          }
+        }}
       >
+        <Button variant="plain" size="custom" type="button" className="flex w-full flex-col gap-[0.35rem] text-left [font:inherit]"
+          aria-labelledby={`${threadCardId(thread.id)}-head ${threadCardId(thread.id)}-comments`}
+          aria-expanded={thread.resolved ? !collapsed : undefined}>
+        <span id={`${threadCardId(thread.id)}-head`} className="contents">
         <span className="ub-thread-head flex items-center gap-[0.35rem]">
           {/* The one auto margin keeps both state chips together at the edge. */}
           <span className="ub-thread-ref mr-auto ub-type-caption tracking-[0.02em] text-(--muted-foreground)">{thread.blockRef}</span>
@@ -114,6 +133,9 @@ function ThreadCard({
           // Quote marks are chrome; the excerpt itself stays verbatim.
           <span className="ub-thread-excerpt border-l-(length:--border-width-emphasis) border-(--border) pl-[0.4rem] text-foreground italic before:content-['“'] after:content-['”']">{thread.excerpt}</span>
         )}
+        </span>
+        </Button>
+        <span id={`${threadCardId(thread.id)}-comments`} className="contents">
         {collapsed ? (
           <span className="ub-thread-replies ub-type-caption text-(--muted-foreground)">
             {thread.comments.length}{" "}
@@ -121,7 +143,7 @@ function ThreadCard({
           </span>
         ) : (
           thread.comments.map((comment) => (
-            <Comment key={comment.key} comment={comment} now={now} />
+            <Comment key={comment.key} comment={comment} now={now} docLinks={docLinks} />
           ))
         )}
         {!collapsed && thread.replyCount > 0 && (
@@ -129,7 +151,8 @@ function ThreadCard({
             {thread.replyCount} {thread.replyCount === 1 ? "reply" : "replies"}
           </span>
         )}
-      </Button>
+        </span>
+      </fieldset>
       {/*
           * Keep refusal outside the collapsing branch so a concurrent resolve cannot
           * hide it with the form.
@@ -144,6 +167,9 @@ function ThreadCard({
             submitLabel="Reply"
             draft={draft}
             autoFocus={false}
+            docLinks={docLinks}
+            openDocId={openDocId}
+            hidden={hidden}
             onSubmit={onReply}
             onCancel={onReplyClose}
           />
@@ -180,6 +206,8 @@ export function ThreadsPane({
   hidden = false,
   onOpenChange,
   onCloseAutoFocus,
+  docLinks = null,
+  openDocId = null,
 }: {
   connection: RoomConnection | null;
   catalogConnection?: RoomConnection | null;
@@ -201,6 +229,8 @@ export function ThreadsPane({
   hidden?: boolean;
   onOpenChange?: (open: boolean) => void;
   onCloseAutoFocus?: (event: Event) => void;
+  docLinks?: DocLinkContext | null;
+  openDocId?: string | null;
 }): ReactElement | null {
   const [replyTo, setReplyTo] = useState<string | null>(null);
   // The pane stays mounted when the sheet closes or switches to a column.
@@ -300,6 +330,9 @@ export function ThreadsPane({
       replying={replyTo === thread.id && !thread.resolved}
       draft={{ text: replyText, onChange: setReplyText }}
       readOnly={readOnly}
+      docLinks={docLinks}
+      openDocId={openDocId}
+      hidden={hidden || (narrow && !open)}
       // Suppress settled-thread refusal during the first reopened render,
       // before the clearing effect runs.
       refusal={

@@ -68,7 +68,7 @@ describe("decision answer editor controls", () => {
   it("formats selected draft text inside the host without exposing a comment action", () => {
     const fix = fixture("Current answer");
     render(<EditorControlsHost value={{ portalContainer: fix.boundary, boundary: fix.boundary }}>
-      <CommentComposer editor={fix.editor} ydoc={fix.ydoc} author="Ben" mentions={[]}
+      <CommentComposer editor={fix.editor} ydoc={fix.ydoc} author="Ben"
         host={{ current: fix.boundary }} onCreated={() => { throw new Error("Draft comments are unavailable"); }}
         formattingOnly />
     </EditorControlsHost>, { container: fix.controls });
@@ -86,7 +86,7 @@ describe("decision answer editor controls", () => {
   it.each(["Escape", "Cancel"])("returns focus to the draft after dismissing the external link field with %s", (dismissal) => {
     const fix = fixture("Current answer");
     render(<EditorControlsHost value={{ portalContainer: fix.boundary, boundary: fix.boundary }}>
-      <CommentComposer editor={fix.editor} ydoc={fix.ydoc} author="Ben" mentions={[]}
+      <CommentComposer editor={fix.editor} ydoc={fix.ydoc} author="Ben"
         host={{ current: fix.boundary }} onCreated={() => { throw new Error("Draft comments are unavailable"); }}
         formattingOnly />
     </EditorControlsHost>, { container: fix.controls });

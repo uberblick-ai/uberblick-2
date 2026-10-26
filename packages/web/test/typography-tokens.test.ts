@@ -50,7 +50,7 @@ describe("product typography source contract", () => {
           if (property === "font-size" && (
             (selector === ".ub-avatar-agent-badge" && value === "8px") ||
             (selector === ".ub-inline-code" && value === "0.85em") ||
-            (selector.replace(/\s+/g, "") === ".ub-github-link-text,.ub-toggle-heading-marker,.ub-inline-icon-text" && value === "0")
+            (selector.replace(/\s+/g, "") === ".ub-github-link-text,.ub-person-mention-text,.ub-toggle-heading-marker,.ub-inline-icon-text" && value === "0")
           )) continue;
           const token = property === "font-size"
             ? /^var\((--[\w-]+)\)$/.exec(value)?.[1]

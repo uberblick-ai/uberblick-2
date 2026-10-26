@@ -29,6 +29,7 @@ import { act, render } from "./react-render.js";
 import * as Y from "yjs";
 import {
   appendBlock,
+  createAnnotation,
   deleteBlock,
   editBlock,
   getBlocks,
@@ -47,9 +48,11 @@ import type { DocLinkContext } from "../src/editor/doc-links.js";
 import {
   linkMentionAtTrigger,
   mentionTriggerAt,
+  personMentionAtTrigger,
 } from "../src/editor/mention-menu.js";
 import type { MentionTrigger } from "../src/editor/mention-menu.js";
 import { MentionMenu } from "../src/ui/editor-controls/MentionMenu.js";
+import { WorkspaceMembersContext } from "../src/ui/workspace-members.js";
 import { mountEditor, snapshotFragment } from "./helpers.js";
 import { onTestCleanup } from "./test-cleanup.js";
 
@@ -95,7 +98,7 @@ interface Mounted {
 }
 
 /** An editor with the picker mounted over it, the way `EditorPane` wires them. */
-function mountPicker(ydoc: Y.Doc, context: DocLinkContext): Mounted {
+function mountPicker(ydoc: Y.Doc, context: DocLinkContext, members: readonly string[] = []): Mounted {
   const { editor, element } = mountEditor(ydoc, { docLinks: context });
   const frame = document.createElement("div");
   onTestCleanup(() => frame.remove());
@@ -104,12 +107,9 @@ function mountPicker(ydoc: Y.Doc, context: DocLinkContext): Mounted {
   const container = document.createElement("div");
   frame.appendChild(container);
   const view = render(
-    <MentionMenu
-      editor={editor}
-      host={{ current: frame }}
-      docLinks={context}
-      openDocId={DOC}
-    />,
+    <WorkspaceMembersContext value={members}>
+      <MentionMenu editor={editor} host={{ current: frame }} docLinks={context} openDocId={DOC} />
+    </WorkspaceMembersContext>,
     { container },
   );
 
@@ -222,6 +222,104 @@ function cellDelta(ydoc: Y.Doc, row: number, column: number): unknown[] {
 }
 
 describe("the picker", () => {
+  it("puts members before documents and inserts a person as plain text with Tab", () => {
+    const { ydoc: dir, context } = directory();
+    upsertDirectoryEntry(dir, { uuid: HUB, title: "Alice's notes" });
+    const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
+    const mounted = mountPicker(ydoc, context, ["Zalice", "alice", "Malik"]);
+    try {
+      caret(mounted.editor, 0, 0);
+      type(mounted.editor, "@");
+      type(mounted.editor, "ali");
+      expect(mounted.labels()).toEqual(["@alice", "@Malik", "@Zalice", "Alice's notes"]);
+      expect(mounted.press("Tab").defaultPrevented).toBe(true);
+      expect(delta(ydoc)).toEqual([{ insert: "@alice" }]);
+      expect(mounted.card()).toBeNull();
+      act(() => { mounted.editor.commands.keyboardShortcut("Mod-z"); });
+      expect(delta(ydoc)).toEqual([{ insert: "@ali" }]);
+      expect(mounted.card()).toBeNull();
+    } finally { mounted.unmount(); ydoc.destroy(); dir.destroy(); }
+  });
+
+  it("checks current membership and the current trigger before a person pick", () => {
+    const { context } = directory();
+    const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
+    const mounted = mountPicker(ydoc, context, ["alice"]);
+    try {
+      caret(mounted.editor, 0, 0);
+      type(mounted.editor, "@");
+      type(mounted.editor, "ali");
+      const trigger = mentionTriggerAt(mounted.editor)!;
+      expect(personMentionAtTrigger(mounted.editor, trigger, "alice", [])).toBe(false);
+      expect(delta(ydoc)).toEqual([{ insert: "@ali" }]);
+      type(mounted.editor, "c");
+      expect(personMentionAtTrigger(mounted.editor, trigger, "alice", ["alice"])).toBe(false);
+      expect(delta(ydoc)).toEqual([{ insert: "@alic" }]);
+      mounted.pick("@alice");
+      expect(delta(ydoc)).toEqual([{ insert: "@alice" }]);
+    } finally { mounted.unmount(); ydoc.destroy(); }
+  });
+
+  it("keeps ordinary formatting and comment anchors when replacing a mention trigger", () => {
+    const { context } = directory();
+    const { ydoc, ids } = docWith([{ type: "paragraph", text: "before  after" }]);
+    const thread = createAnnotation(ydoc, ids[0]!, 0, 13, "Reader", "Check the person");
+    const mounted = mountPicker(ydoc, context, ["alice"]);
+    try {
+      caret(mounted.editor, 0, 7);
+      act(() => { mounted.editor.commands.setMark("bold"); });
+      type(mounted.editor, "@");
+      type(mounted.editor, "ali");
+      mounted.pick("@alice");
+      expect(mounted.editor.state.doc.firstChild?.textContent).toBe("before @alice after");
+      const text = mounted.editor.state.doc.firstChild?.child(1);
+      expect(text?.marks.some((mark) => mark.type.name === "bold")).toBe(true);
+      expect(text?.marks.find((mark) => mark.type.name === "comment")?.attrs.threadId).toBe(thread.id);
+      expect(text?.marks.map((mark) => mark.type.name).sort()).toEqual(["bold", "comment"]);
+    } finally { mounted.unmount(); ydoc.destroy(); }
+  });
+
+  it.each(["cardLabel", "cardTitle", "cardBody", "cardFooter", "figmaCaption"])(
+    "offers people in the %s prose part",
+    (part) => {
+      const { context } = directory();
+      const ydoc = new Y.Doc();
+      initDoc(ydoc, { uuid: DOC, title: "References" });
+      appendBlock(ydoc, part === "figmaCaption"
+        ? { type: "figma", text: "url: https://www.figma.com/design/key/Checkout-flow\n\nCaption" }
+        : { type: "card", text: "label: Label\ntitle: Title\nfooter: Footer\n\nBody" });
+      const mounted = mountPicker(ydoc, context, ["alice"]);
+      try {
+        let end = 0;
+        mounted.editor.state.doc.descendants((node, pos, parent) => {
+          if (node.isTextblock && parent?.type.name === part) end = pos + 1 + node.content.size;
+        });
+        expect(end).toBeGreaterThan(0);
+        act(() => { mounted.editor.commands.setTextSelection(end); });
+        type(mounted.editor, " ");
+        type(mounted.editor, "@");
+        type(mounted.editor, "ali");
+        expect(mounted.labels()).toEqual(["@alice"]);
+        expect(mounted.press("Enter").defaultPrevented).toBe(true);
+        expect(getBlocks(ydoc)[0]?.text).toContain("@alice");
+        expect(mounted.card()).toBeNull();
+      } finally { mounted.unmount(); ydoc.destroy(); }
+    },
+  );
+
+  it("does not open while typing an inline-code mention", () => {
+    const { context } = directory();
+    const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
+    const mounted = mountPicker(ydoc, context, ["alice"]);
+    try {
+      caret(mounted.editor, 0, 0);
+      act(() => { mounted.editor.commands.setMark("inlineCode"); });
+      type(mounted.editor, "@");
+      expect(mounted.card()).toBeNull();
+      expect(mentionTriggerAt(mounted.editor)).toBeNull();
+    } finally { mounted.unmount(); ydoc.destroy(); }
+  });
+
   it("identifies the highlighted document from the prose, and clears an empty list", () => {
     const { context } = directory();
     const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
@@ -229,7 +327,7 @@ describe("the picker", () => {
     try {
       caret(mounted.editor, 0, 0);
       type(mounted.editor, "@");
-      const list = screen.queryByRole("listbox", { name: "Documents" });
+      const list = screen.queryByRole("listbox", { name: "People and documents" });
       if (list === null || list === undefined) throw new Error("no list");
       const options = within(list).getAllByRole("option");
       expect(mounted.editor.view.dom.getAttribute("aria-controls")).toBe(list.id);
@@ -402,7 +500,7 @@ describe("the picker", () => {
       // which a partly synced replica cannot claim.
       const card = mounted.card();
       expect(card?.textContent).toBe(
-        "No document this page knows matches.",
+        "No people or documents match.",
       );
 
       // Nothing to move over or pick, so the keys are the prose's again: this

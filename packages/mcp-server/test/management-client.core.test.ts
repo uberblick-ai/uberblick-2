@@ -169,6 +169,7 @@ describe("management replies exposed to a browser", () => {
     [{ operation: "suspend-workspace", workspaceId: WORKSPACE }, { status: "ok", workspaceId: WORKSPACE, workspaceStatus: "suspended" }],
     [{ operation: "restore-workspace", workspaceId: WORKSPACE }, { status: "ok", workspaceId: WORKSPACE, workspaceStatus: "active" }],
     [{ operation: "own-role", workspaceId: WORKSPACE }, { status: "ok", role: "admin" }],
+    [{ operation: "list-member-usernames", workspaceId: WORKSPACE }, { status: "ok", usernames: ["octocat", "offline-member"] }],
     [{ operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "octocat" }, { status: "ok", githubAccountId: "1234", githubUsername: "octocat" }],
     [{ operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "1234" }, { status: "already-member", member }],
     [{ operation: "list-members", workspaceId: WORKSPACE }, { status: "ok", members: [member] }],
@@ -187,6 +188,25 @@ describe("management replies exposed to a browser", () => {
     if (typeof privateBody.member === "object") privateBody.member = { ...privateBody.member as Record<string, unknown>, key: "private-member-key" };
     expect(sanitizeManagementReply(action, { status: 200, body: privateBody }, login)).toEqual({ status: 200, body: publicBody });
   });
+
+  it("keeps identities and roles out of the member usernames projection", () => {
+    expect(sanitizeManagementReply({ operation: "list-member-usernames", workspaceId: WORKSPACE }, {
+      status: 200, body: { status: "ok", usernames: ["octocat"], members: [member],
+        principalId: PRINCIPAL, githubAccountId: "1234", role: "admin", key: login.credential.key },
+    }, login)).toEqual({ status: 200, body: { status: "ok", usernames: ["octocat"] } });
+    expect(sanitizeManagementReply({ operation: "list-member-usernames", workspaceId: WORKSPACE }, {
+      status: 200, body: { status: "ok", usernames: [] },
+    }, login)).toEqual({ status: 200, body: { status: "ok", usernames: [] } });
+  });
+
+  it.each([undefined, null, {}, [member], ["octocat", 1], ["octocat", ""], ["<b>octocat</b>"], ["octocat\n"],
+    [login.credential.key], [`stored-${login.credential.key}`]])(
+    "refuses malformed or credential-bearing member usernames %j", usernames => {
+      expect(() => sanitizeManagementReply({ operation: "list-member-usernames", workspaceId: WORKSPACE }, {
+        status: 200, body: { status: "ok", usernames },
+      }, login)).toThrow(ManagementResponseError);
+    },
+  );
 
   it("projects continuation pages without requiring the current admin in every page", () => {
     const other = { ...admin, principalId: WORKSPACE, current: false };
