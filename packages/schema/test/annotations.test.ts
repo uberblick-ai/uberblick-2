@@ -297,7 +297,7 @@ describe("annotations", () => {
       {
         what: "shrinks when part of the annotated text is deleted",
         newText: "Hello be world",
-        covers: "be",
+        covers: "be ",
       },
     ];
 

@@ -6,6 +6,7 @@
 
 import * as Y from "yjs";
 import fastDiff from "fast-diff";
+import { snapshotCommentAnchors, widenShortenedCommentAnchors } from "./comment-edit.js";
 import { getBlocksFragment } from "./doc.js";
 import { CARD_PARTS, buildCardElement, cardButtons, cardText, cardTextParts, editCard, parseCardInput, writeCardInline } from "./card.js";
 import type { CardButton, CardInline } from "./card.js";
@@ -642,8 +643,8 @@ function writeCalloutAttributes(element: Y.XmlElement, options: EditBlockOptions
 /**
  * Validate oldText/optional rev, then splice only changed characters in one
  * transaction. Untouched characters, their marks and concurrent edits survive,
- * including edits at the end of the block. Prose marks neither affect rev nor
- * receive explicit writes; inserts inherit left formatting, start-boundary
+ * including edits at the end of the block. Prose marks do not affect rev;
+ * inserts inherit left formatting, start-boundary
  * inserts stay outside, and fully deleted runs lose their marks.
  * Table edits compare marked GFM and retain unchanged cell text and mark keys.
  * StaleBlockError guards only the local replica; a current rev with wrong
@@ -709,6 +710,7 @@ export function editBlock(
     if (oldText === newText) return;
 
     const text = requireBlockText(ydoc, element, blockId);
+    const anchors = snapshotCommentAnchors(text);
     let index = 0;
     for (const [op, chunk] of fastDiff(oldText, newText)) {
       if (op === DIFF_EQUAL) {
@@ -720,6 +722,8 @@ export function editBlock(
         index += chunk.length;
       }
     }
+
+    widenShortenedCommentAnchors(text, anchors);
 
     // An enclosing transaction may detach the block; detached writes go nowhere.
     // Report absence rather than silently succeeding, just as for the initial lookup.
