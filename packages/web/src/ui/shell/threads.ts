@@ -50,7 +50,7 @@ export function useThreadsRail(doc: RoomConnection | null): ThreadsRail {
     const opener = threadsOpener.current;
     threadsOpener.current = null;
     const back =
-      opener?.isConnected === true
+      opener?.isConnected === true && !opener.hasAttribute("data-comment-resolved")
         ? opener
         : document.querySelector<HTMLElement>(".ub-threads-toggle");
     back?.focus();

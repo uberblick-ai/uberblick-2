@@ -231,5 +231,17 @@ test("iPad taps select, reply, resolve and reopen without reviving a resolved an
     await mark.tap();
     await expect(sheet).toBeVisible();
     await expect(card).toContainText("Touch reply");
+    await sheet.getByRole("button", { name: "Close comments" }).tap();
+    await mark.focus();
+    await mark.press("Enter");
+    await expect(card.locator(".ub-thread-select")).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(card.getByRole("button", { name: "Resolve", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(sheet.getByRole("button", { name: "1 resolved", exact: true })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+    await expect(mark).not.toHaveAttribute("tabindex");
   } finally { data.close(); }
 });
