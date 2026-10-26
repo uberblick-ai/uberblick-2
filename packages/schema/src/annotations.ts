@@ -13,11 +13,14 @@ import { CARD_PARTS, cardPartTexts } from "./card.js";
 import type { CardPart } from "./card.js";
 import { figmaCaptionTexts } from "./figma.js";
 import { structuredInlineParts } from "./inline-parts.js";
+import { isGithubUsername } from "./github-identity.js";
+import { isUuid } from "./workspace.js";
 import { COMMENT_MARK, isCommentMark } from "./types.js";
 import type {
   Annotation,
   AnnotationComment,
   AnnotationRange,
+  CommentAttribution,
   CommentMark,
 } from "./types.js";
 
@@ -135,7 +138,7 @@ function commentRows(thread: ThreadMap): Y.Array<unknown> {
   return thread.get(COMMENTS_FIELD) as Y.Array<unknown>;
 }
 
-function isComment(value: unknown): value is AnnotationComment {
+function isComment(value: unknown): value is Pick<AnnotationComment, "author" | "text" | "createdAt"> & Record<string, unknown> {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Partial<AnnotationComment>;
   return (
@@ -150,8 +153,16 @@ function readThread(thread: ThreadMap): Annotation {
   const comments: AnnotationComment[] = [];
   for (const value of commentRows(thread).toArray()) {
     if (!isComment(value)) continue;
-    const { author, text, createdAt } = value;
-    comments.push({ author, text, createdAt });
+    const { author, text, createdAt, account, agent, principalId, kind } = value;
+    comments.push({
+      author,
+      text,
+      createdAt,
+      ...(isGithubUsername(account) ? { account } : {}),
+      ...(agent === "claude" || agent === "codex" ? { agent } : {}),
+      ...(isUuid(principalId) ? { principalId } : {}),
+      ...(kind === "person" || kind === "agent" ? { kind } : {}),
+    });
   }
   const resolved = thread.get("resolved");
   return {
@@ -235,6 +246,7 @@ export function createAnnotation(
   author: string,
   text: string,
   target?: { row: number; column: number } | { part: CardPart | "caption" },
+  attribution?: CommentAttribution,
 ): Annotation {
   const { texts, lo, hi } = annotationRange(ydoc, blockId, startIndex, endIndex, target);
 
@@ -243,6 +255,7 @@ export function createAnnotation(
     author,
     text,
     createdAt: new Date().toISOString(),
+    ...attribution,
   };
   const mark: CommentMark = { threadId: id };
   const annotations = getAnnotationsMap(ydoc);
@@ -269,6 +282,7 @@ export function moveAnnotation(
   author: string,
   text: string,
   target?: { row: number; column: number } | { part: CardPart | "caption" },
+  attribution?: CommentAttribution,
 ): Annotation | null {
   const thread = threadMap(ydoc, threadId);
   if (thread === null) return null;
@@ -285,7 +299,7 @@ export function moveAnnotation(
     }
     formatRange(texts, lo, hi, { threadId });
     thread.set("blockId", blockId);
-    commentRows(thread).push([{ author, text, createdAt: new Date().toISOString() }]);
+    commentRows(thread).push([{ author, text, createdAt: new Date().toISOString(), ...attribution }]);
   });
   return readThread(thread);
 }
@@ -402,6 +416,7 @@ export function addComment(
   threadId: string,
   author: string,
   text: string,
+  attribution?: CommentAttribution,
 ): Annotation | null {
   const thread = threadMap(ydoc, threadId);
   if (thread === null) return null;
@@ -409,6 +424,7 @@ export function addComment(
     author,
     text,
     createdAt: new Date().toISOString(),
+    ...attribution,
   };
   ydoc.transact(() => {
     commentRows(thread).push([comment]);

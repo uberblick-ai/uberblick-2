@@ -28,7 +28,7 @@ function documentActions(shell: AppShell) {
 }
 
 export function ShellDocument({ shell }: { shell: AppShell }) {
-  const { route, hubReady, statusEndpoint, serving, identity } = shell.environment;
+  const { route, hubReady, statusEndpoint, serving, identity, account } = shell.environment;
   const { topic, selected, directory, doc, docStatus, topicTitleRoom, catalog, deleted } = shell.rooms;
   const { openAlterDecision } = shell.alter;
   const { relatedTopics, titlePresence, servingStatus, meta, archived, selectedDirectoryEntry, chromeRoom } = shell.readings;
@@ -64,6 +64,7 @@ export function ShellDocument({ shell }: { shell: AppShell }) {
         }}
         meta={meta}
         author={identity.name}
+        account={account}
         catalogConnection={catalog}
         archived={archived}
         deleted={deleted}

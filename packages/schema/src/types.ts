@@ -283,7 +283,15 @@ export interface DecisionTopicResolution {
 /** One topic in a regular page's derived decision log. */
 export type DecisionReference = DecisionTopicResolution;
 
-export interface AnnotationComment {
+/** Display attribution supplied by the writing client, never proof of identity. */
+export interface CommentAttribution {
+  kind: "person" | "agent";
+  account?: string;
+  principalId?: string;
+  agent?: "claude" | "codex";
+}
+
+export interface AnnotationComment extends Partial<CommentAttribution> {
   author: string;
   text: string;
   /** ISO-8601 timestamp. */

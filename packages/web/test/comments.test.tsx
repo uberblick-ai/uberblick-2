@@ -39,6 +39,7 @@ import { resolvedHighlightCss } from "../src/ui/comments/threads.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
 import { mountEditor, snapshotFragment } from "./helpers.js";
 import { useThreads } from "../src/ui/hooks.js";
+import type { AccountIdentity } from "../src/shell/account.js";
 
 /**
  * `ThreadsPane` over a live document — the wiring the app shell provides.
@@ -163,7 +164,7 @@ beforeEach(() => {
 /** Mount the composer over a mounted editor, and drive it the way a reader does. */
 function mountComposer(
   ydoc: Y.Doc,
-  options: { author?: string; mentions?: string[]; contentReadOnly?: boolean } = {},
+  options: { author?: string; account?: AccountIdentity; mentions?: string[]; contentReadOnly?: boolean } = {},
 ): {
   editor: Editor;
   created: string[];
@@ -182,6 +183,7 @@ function mountComposer(
       contentReadOnly={options.contentReadOnly ?? false}
       ydoc={ydoc}
       author={options.author ?? "ben"}
+      account={options.account}
       host={{ current: frame }}
       onCreated={(threadId) => created.push(threadId)}
     /></WorkspaceMembersContext>,
@@ -1008,6 +1010,24 @@ describe("the table-cell selection toolbar", () => {
 });
 
 describe("starting a thread from the prose", () => {
+  it.each([undefined, { state: "signed-out" }, { state: "unavailable" },
+    { state: "signed-in", handle: "octocat", principalId: "5df99824-b9b5-4260-b20c-4680e2d51fac" },
+  ] as const)("stores a person opener with the current public account reading %j", (account) => {
+    const { ydoc } = annotatedDoc();
+    const remote = mirrorOf(ydoc);
+    const view = mountComposer(ydoc, { author: "Presence name", ...(account === undefined ? {} : { account }) });
+    try {
+      select(view.editor, 1, 4, 15);
+      view.open();
+      view.type("New question");
+      view.submit();
+      expect(listAnnotations(remote)[0]?.comments[0]).toEqual({
+        author: "Presence name", text: "New question", createdAt: expect.any(String), kind: "person",
+        ...(account?.state === "signed-in" ? { account: "octocat", principalId: account.principalId } : {}),
+      });
+    } finally { view.unmount(); }
+  });
+
   // Safari's order, which only the IME keyCode still marks as composing.
   it("keeps a composing Enter after compositionend in the comment field, then sends on Enter", () => {
     const { ydoc } = annotatedDoc();
@@ -1089,7 +1109,7 @@ describe("starting a thread from the prose", () => {
       const [thread] = listAnnotations(ydoc);
       expect(thread).toMatchObject({ blockId: blocks[1] });
       expect(thread?.comments).toEqual([
-        { author: "ben", text: "why quick?", createdAt: expect.any(String) },
+        { author: "ben", text: "why quick?", createdAt: expect.any(String), kind: "person" },
       ]);
       expect(view.created).toEqual([thread?.id]);
 
@@ -1260,6 +1280,7 @@ describe("the rail writes back", () => {
   function renderRail(
     ydoc: Y.Doc,
     author = "ben",
+    account?: AccountIdentity,
   ): {
     cards: () => HTMLElement[];
     card: (excerpt: string) => HTMLElement;
@@ -1273,6 +1294,7 @@ describe("the rail writes back", () => {
         connection={stubConnection(ydoc)}
         focused={null}
         author={author}
+        account={account}
         onFocus={() => {}}
       />,
     );
@@ -1328,7 +1350,9 @@ describe("the rail writes back", () => {
     const { ydoc, blocks } = annotatedDoc();
     const remote = mirrorOf(ydoc);
     const thread = createAnnotation(ydoc, blocks[1]!, 4, 15, "agent-a", "why?");
-    const view = renderRail(ydoc, "loitering otter");
+    const view = renderRail(ydoc, "loitering otter", {
+      state: "signed-in", handle: "octocat", principalId: "5df99824-b9b5-4260-b20c-4680e2d51fac",
+    });
     try {
       await settle(() => action(view.cards()[0]!, "Reply").click());
       await view.type("because it is a pangram");
@@ -1340,6 +1364,7 @@ describe("the rail writes back", () => {
           author: "loitering otter",
           text: "because it is a pangram",
           createdAt: expect.any(String),
+          kind: "person", account: "octocat", principalId: "5df99824-b9b5-4260-b20c-4680e2d51fac",
         },
       ]);
       // The form closes, and the card shows the reply it just wrote.

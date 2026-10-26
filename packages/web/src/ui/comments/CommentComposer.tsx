@@ -217,6 +217,7 @@ export function CommentComposer({
   catalogConnection = null,
   canCleanupTags,
   author,
+  account,
   docLinks = null,
   openDocId = null,
   host,
@@ -234,6 +235,7 @@ export function CommentComposer({
   canCleanupTags?: (() => boolean) | undefined;
   /** The awareness name this client publishes — the comment's author. */
   author: string;
+  account?: import("../../shell/account.js").AccountIdentity | undefined;
   docLinks?: DocLinkContext | null;
   openDocId?: string | null;
   /** The positioned element the selection chrome is placed inside. */
@@ -489,6 +491,9 @@ export function CommentComposer({
         author,
         text,
         cell ? { row: target.row, column: target.column } : card ? { part: target.part } : undefined,
+        { kind: "person", ...(account?.state === "signed-in"
+          ? { account: account.handle, ...(account.principalId === undefined ? {} : { principalId: account.principalId }) }
+          : {}) },
       ), undefined, canCleanupTags);
       close();
       onCreated(thread.id);

@@ -48,7 +48,7 @@ import {
   githubReference,
 } from "@uberblick/schema";
 import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
-import type { Block, CardPart, DocMeta, InlineRun, UpdateOriginMetadata, UpdateSurface } from "@uberblick/schema";
+import type { Block, CardPart, CommentAttribution, DocMeta, InlineRun, UpdateOriginMetadata, UpdateSurface } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
 import { collectReplicaSyncState } from "./status.js";
@@ -276,6 +276,20 @@ export class Replicas {
       updateId: randomUUID(),
       credentialId: login?.status === "ready" ? login.login.credential.record.id : null,
       surface,
+    };
+  }
+
+  commentAttribution(): CommentAttribution {
+    const name = this.writeSurface.name.toLowerCase();
+    const agent = name.includes("claude") ? "claude" : name.includes("codex") ? "codex" : undefined;
+    const login = this.config.localWorkspace === true ? null : this.credentialProvider.read();
+    return {
+      kind: "agent",
+      ...(agent === undefined ? {} : { agent }),
+      ...(login?.status === "ready" ? {
+        account: login.login.identity.githubUsername,
+        principalId: login.login.identity.id,
+      } : {}),
     };
   }
 

@@ -260,6 +260,7 @@ export {
 export type {
   Annotation,
   AnnotationComment,
+  CommentAttribution,
   Block,
   BlockInput,
   BlockType,

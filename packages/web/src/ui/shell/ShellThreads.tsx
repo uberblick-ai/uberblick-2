@@ -5,7 +5,7 @@ import { isDirectoryEntryArchived, parseRoom } from "@uberblick/schema";
 export function ShellThreads({ shell }: { shell: AppShell }) {
   const { doc, docStatus, topic, catalog, directory, deleted } = shell.rooms;
   const { archived, meta } = shell.readings;
-  const { identity } = shell.environment;
+  const { identity, account } = shell.environment;
   const { narrowLayout } = shell.layout;
   const { threads, focusedThread, threadsOpen, onFocusThread, setThreadsOpen, restoreThreadsFocus } = shell.threads;
   return <>
@@ -24,6 +24,7 @@ export function ShellThreads({ shell }: { shell: AppShell }) {
           threads={threads}
           focused={focusedThread}
           author={identity.name}
+          account={account}
           docLinks={shell.navigation.docLinks}
           openDocId={parseRoom(doc.room).uuid}
           readOnly={archived || !docStatus.writable || (meta?.kind === "decision" && (topic === null || topic.first === null))}

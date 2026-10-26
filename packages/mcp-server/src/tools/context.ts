@@ -502,6 +502,13 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
     const anchor = anchors.get(annotation.id);
     return {
       ...annotation,
+      comments: annotation.comments.map(({ author, text, createdAt, account, agent }) => ({
+        author,
+        text,
+        createdAt,
+        ...(account === undefined ? {} : { account }),
+        ...(agent === undefined ? {} : { agent }),
+      })),
       blockId: anchor?.blockId ?? annotation.blockId,
       range: anchor?.range ?? null,
     };

@@ -174,7 +174,13 @@ const readBlocks = z.array(blockSchema(true)).describe("Visible document blocks 
 const annotation = z.object({
   id: z.string(),
   blockId: z.string().describe("Block containing range; the recorded block id when range is null."),
-  comments: z.array(z.object({ author: z.string(), text: z.string(), createdAt: z.string() }).strict()),
+  comments: z.array(z.object({
+    author: z.string(),
+    text: z.string(),
+    createdAt: z.string(),
+    account: z.string().optional().describe("The writing client's signed-in GitHub username, when known; display data, not verified authorship."),
+    agent: z.enum(["claude", "codex"]).optional().describe("Recognized MCP client product; display data, not verified authorship."),
+  }).strict()),
   resolved: z.boolean().optional(),
   range: z.object({
     row: count.optional(),

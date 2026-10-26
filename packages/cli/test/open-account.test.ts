@@ -56,13 +56,14 @@ describe("ub open: account projection", () => {
   it("sends no account proof to an unencrypted remote hub and forwards its exact environment opt-in", async () => {
     const { box } = configured();
     const origin = "http://account-hub.example:1234";
-    await writeHubLogin(origin, login(), box.env);
+    const stored = login();
+    await writeHubLogin(origin, stored, box.env);
     const binding = { workspaceId: WORKSPACE, hubUrl: `${origin}/proxy/ws`, env: { ...box.env, UB_INSECURE_HUBS: "another-hub:1234" } };
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ status: "ok", role: "admin" }));
     expect(await requestAccount(binding, () => null, new AbortController().signal)).toEqual({ state: "unavailable" });
     expect(fetch).not.toHaveBeenCalled();
     binding.env.UB_INSECURE_HUBS = "account-hub.example:1234";
-    expect(await requestAccount(binding, () => null, new AbortController().signal)).toEqual({ state: "signed-in", handle: "account-person", githubAccountId: "1234" });
+    expect(await requestAccount(binding, () => null, new AbortController().signal)).toEqual({ state: "signed-in", handle: "account-person", principalId: stored.identity.id, githubAccountId: "1234" });
     expect(fetch).toHaveBeenCalledOnce();
   });
   it("reads only the bound hub's stored public login without membership or a hub request", async () => {
@@ -99,9 +100,8 @@ describe("ub open: account projection", () => {
       name: "Untrusted upstream name", githubAccountId: "9999",
       credential: stored.credential, token: "private-upstream-token", signingSecret: "private-signing-secret" }));
     const answer = await read();
-    expect(answer).toEqual({ state: "signed-in", handle: "account-person", name: "Synthetic Account Person", githubAccountId: "1234" });
+    expect(answer).toEqual({ state: "signed-in", handle: "account-person", principalId: stored.identity.id, name: "Synthetic Account Person", githubAccountId: "1234" });
     expect(JSON.stringify(answer)).not.toContain(stored.credential.key);
-    expect(JSON.stringify(answer)).not.toContain(stored.identity.id);
     expect(JSON.stringify(answer)).not.toContain(stored.credential.record.deviceId);
     expect(fetch).toHaveBeenCalledOnce();
     expect(fetch.mock.calls[0]?.[0]).toBe(`${ORIGIN}/auth/manage`);
@@ -116,7 +116,7 @@ describe("ub open: account projection", () => {
       const supplied = { ...stored, identity: { ...stored.identity, name } };
       writeFileSync(join(configDir(box), "credentials.json"), JSON.stringify({ hubLogins: { [ORIGIN]: supplied } }));
       const answer = await read();
-      expect(answer).toEqual({ state: "signed-in", handle: "account-person", githubAccountId: "1234" });
+      expect(answer).toEqual({ state: "signed-in", handle: "account-person", principalId: stored.identity.id, githubAccountId: "1234" });
       expect(Object.hasOwn(answer, "name")).toBe(false);
     }
   });

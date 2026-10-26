@@ -209,6 +209,7 @@ describe("ub open: this machine's workspaces", () => {
         expect((await search(index === 0 ? "Secondary" : "Primary")).hits).toEqual([]);
         expect(await (await fetch(`${app.url}api/account`, { headers: auth[index]! })).json())
           .toEqual({ state: "signed-in", handle: `${index === 0 ? "primary" : "secondary"}-person`,
+            principalId: target.login.identity.id,
             githubAccountId: target.login.identity.githubAccountId });
         const access = await fetch(`${app.url}api/access`, { method: "POST",
           headers: { ...auth[index], "content-type": "application/json", origin: new URL(app.url).origin },
