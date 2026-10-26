@@ -712,16 +712,12 @@ const BoundEditor = memo(function BoundEditor({
     // one action; the conversation remains reachable from adjacent highlight
     // or rail.
     const selectThread = (threadId: string, viaKeyboard = false): void => {
-      onSelectThread(threadId, {
-        viaKeyboard,
-        // Only a resolved anchor takes the rail's one expansion slot. An open
-        // anchor leaves the resolved conversation a reader already expanded
-        // alone, while a card keeps its own toggle gesture.
-        revealResolved:
-          getAnnotation(connection.ydoc, threadId)?.resolved === true,
-      });
+      if (getAnnotation(connection.ydoc, threadId)?.resolved === true) return;
+      onSelectThread(threadId, { viaKeyboard });
     };
     const activate = (event: MouseEvent): void => {
+      const threadId = threadIdFromTarget(event.target);
+      if (threadId === null) onSelectThread(null);
       if (handleDocLinkClick(event, docLinks)) return;
       const anchor = linkAnchorFromTarget(event.target);
       if (anchor !== null) {
@@ -739,13 +735,13 @@ const BoundEditor = memo(function BoundEditor({
         }
         return;
       }
-      const threadId = threadIdFromTarget(event.target);
       if (threadId !== null) selectThread(threadId);
     };
     // Enter/Space activates only a focused button-role highlight. Capture and
     // stop activation before ProseMirror can split a block; caret typing
     // targets the contenteditable and must remain untouched.
     const activateThread = (event: KeyboardEvent): void => {
+      if (event.isComposing || event.keyCode === 229) return;
       // Enter on a focused read-only reference navigates in-app, preserving
       // Back and avoiding surrounding thread selection. Caret typing targets
       // contenteditable, outside the anchor.
@@ -895,6 +891,7 @@ export function EditorPane({
   syncReading = {},
   threads = [],
   threadsOpen = false,
+  hasReplyDrafts = false,
   onToggleThreads,
   header,
   beforeAnswer,
@@ -943,6 +940,7 @@ export function EditorPane({
   syncReading?: DocumentSyncReading;
   threads?: readonly ThreadView[];
   threadsOpen?: boolean;
+  hasReplyDrafts?: boolean;
   onToggleThreads?: (() => void) | undefined;
   /** Topic pages supply their shared title. */
   header?: ReactNode;
@@ -996,15 +994,15 @@ export function EditorPane({
   return (
     <section className="ub-pane ub-page-pane ub-document-pane" ref={pane}
       inert={historyActive} style={historyActive ? { display: "none" } : undefined}>
-      {threads.length > 0 && onToggleThreads !== undefined && (
+      {(threads.length > 0 || hasReplyDrafts) && onToggleThreads !== undefined && (
         <Button variant="plain" size="custom"
           type="button"
-          className="ub-threads-toggle ub-pane-threads-toggle hidden max-xl:inline-flex items-center gap-[0.35rem] [font-family:inherit] [font-weight:inherit] ub-type-caption border border-border rounded-full py-[0.1rem] px-[0.55rem] bg-(--card-accent) text-secondary-foreground whitespace-nowrap"
+          className="ub-threads-toggle ub-pane-threads-toggle hidden max-xl:inline-flex items-center gap-[0.35rem] [font-family:inherit] [font-weight:inherit] ub-type-caption text-secondary-foreground whitespace-nowrap"
           aria-expanded={threadsOpen}
           aria-controls="ub-rail"
           onClick={onToggleThreads}
         >
-          Threads <span className="ub-muted">{openThreads}</span>
+          Comments <span className="ub-muted">{openThreads}</span>
         </Button>
       )}
       <div className="ub-column">

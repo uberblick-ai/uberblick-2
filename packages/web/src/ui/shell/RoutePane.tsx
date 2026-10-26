@@ -43,6 +43,7 @@ export interface RoutePaneProps {
   /** The open document's conversations, for the narrow pane-edge trigger. */
   threads?: readonly ThreadView[];
   threadsOpen?: boolean;
+  hasReplyDrafts?: boolean;
   onToggleThreads?: (() => void) | undefined;
   topic?: DecisionTopicResolution | null;
   selectedUuid?: string | null | undefined;
@@ -150,6 +151,7 @@ function editorProperties(props: RoutePaneProps, segment: string, connection: Ro
       !isDirectoryEntryArchived(props.directoryConnection.ydoc, parseRoom(connection.room).uuid),
     docLinks: props.docLinks, actions: props.actions ?? {},
     onSelectThread: props.onSelectThread, threads: props.threads ?? [], threadsOpen: props.threadsOpen ?? false,
+    hasReplyDrafts: props.hasReplyDrafts ?? false,
     onToggleThreads: props.onToggleThreads,
     historyControl: props.historyControl,
     historyActive: props.historyActive,

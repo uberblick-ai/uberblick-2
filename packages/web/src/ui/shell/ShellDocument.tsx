@@ -34,7 +34,7 @@ export function ShellDocument({ shell }: { shell: AppShell }) {
   const { relatedTopics, titlePresence, servingStatus, meta, archived, selectedDirectoryEntry, chromeRoom } = shell.readings;
   const { navigate } = shell;
   const { docLinks } = shell.navigation;
-  const { onFocusThread, threads, threadsOpen, onToggleThreads } = shell.threads;
+  const { onFocusThread, threads, threadsOpen, hasReplyDrafts, onToggleThreads } = shell.threads;
   const { syncOpen, setSyncOpen } = shell.sync;
   const historyVisible = shell.history.active && !deleted;
   const lastUpdated = !deleted && documentPaneState({
@@ -74,6 +74,7 @@ export function ShellDocument({ shell }: { shell: AppShell }) {
         onSelectThread={onFocusThread}
         threads={threads}
         threadsOpen={threadsOpen}
+        hasReplyDrafts={hasReplyDrafts}
         onToggleThreads={onToggleThreads}
         historyControl={<HistoryControls history={shell.history} liveDocument={doc?.ydoc ?? null} writable={docStatus.writable && !archived} returnFocus={shell.historyBack} />}
         historyActive={historyVisible}

@@ -702,8 +702,8 @@ test("new and existing caption comments stay at their Figma block and MCP reads 
     await expect(existing).toHaveText("marked");
     await existing.click();
     const oldCard = page.locator(".ub-thread-card").filter({ hasText: "Existing caption discussion." });
-    await expect(oldCard.locator(".ub-thread-ref")).toHaveText("Figma 2");
-    await expect(oldCard.locator(".ub-thread-excerpt")).toHaveText("marked");
+    await expect(oldCard.locator(".ub-thread-ref")).toHaveCount(0);
+    await expect(oldCard).toBeVisible();
     await page.setViewportSize({ width: 1280, height: 1000 });
     const geometry = await frame.evaluate((element) => {
       const block = element.getBoundingClientRect();
@@ -712,7 +712,7 @@ test("new and existing caption comments stay at their Figma block and MCP reads 
     });
     expect(geometry.left).toBeGreaterThanOrEqual(geometry.columnLeft ?? 0);
     expect(geometry.right).toBeLessThanOrEqual(geometry.columnRight ?? 0);
-    await closeIfOpen(page.getByRole("button", { name: "Close threads", exact: true }), page.locator(".ub-threads-toggle"));
+    await closeIfOpen(page.getByRole("button", { name: "Close comments", exact: true }), page.locator(".ub-threads-toggle"));
     await caption.locator("p").click();
     await setNativeSelection(caption, () => caption.evaluate((element) => {
       element.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "mouse", bubbles: true, pointerId: 1 }));
@@ -738,8 +738,8 @@ test("new and existing caption comments stay at their Figma block and MCP reads 
     await composer.locator("textarea").fill("New caption discussion.");
     await composer.getByRole("button", { name: "Comment", exact: true }).click();
     const newCard = page.locator(".ub-thread-card").filter({ hasText: "New caption discussion." });
-    await expect(newCard.locator(".ub-thread-ref")).toHaveText("Figma 2");
-    await expect(newCard.locator(".ub-thread-excerpt")).toHaveText("design reference.");
+    await expect(newCard.locator(".ub-thread-ref")).toHaveCount(0);
+    await expect(caption.locator("[data-comment-thread]").last()).toHaveText("design reference.");
     await expect.poll(async () => {
       const result = await session.call<StoredDoc>("get_doc", { uuid: created.uuid });
       return result.annotations.map((annotation) => ({ text: annotation.comments[0]?.text, range: annotation.range }));
@@ -749,9 +749,11 @@ test("new and existing caption comments stay at their Figma block and MCP reads 
     ]));
     await page.reload();
     await expect(page.locator(".ub-figma-caption [data-comment-thread]")).not.toHaveCount(0);
-    await closeIfOpen(page.getByRole("button", { name: "Close threads", exact: true }), page.locator(".ub-threads-toggle"));
+    await closeIfOpen(page.getByRole("button", { name: "Close comments", exact: true }), page.locator(".ub-threads-toggle"));
     await page.locator(".ub-figma-caption [data-comment-thread]").first().click();
-    await expect(page.locator(".ub-thread-card").filter({ hasText: "Existing caption discussion." }).locator(".ub-thread-excerpt")).toHaveText("marked");
-    await expect(page.locator(".ub-thread-card").filter({ hasText: "New caption discussion." }).locator(".ub-thread-excerpt")).toHaveText("design reference.");
+    await expect(page.locator(".ub-thread-card").filter({ hasText: "Existing caption discussion." })).toBeVisible();
+    await expect(page.locator(".ub-figma-caption [data-comment-thread]").first()).toHaveText("marked");
+    await expect(page.locator(".ub-thread-card").filter({ hasText: "New caption discussion." })).toBeVisible();
+    await expect(page.locator(".ub-figma-caption [data-comment-thread]").last()).toHaveText("design reference.");
   } finally { provider.destroy(); doc.destroy(); }
 });

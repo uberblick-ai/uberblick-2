@@ -432,7 +432,7 @@ for (const appearance of ["light", "dark"] as const) {
       // run, so the flash cannot expire before the conflicting cascade is read.
       await page.clock.install();
       await page.clock.pauseAt(new Date(Date.now() + 100));
-      await cardButton.click();
+      await cardButton.locator(".ub-thread-select").click();
       await expect(highlight).toHaveClass(/ub-comment-flash/);
       await page.getByRole("button", { name: "Document actions", exact: true }).focus();
       const nextControl = browserName === "webkit" ? "Alt+Tab" : "Tab";
@@ -457,7 +457,7 @@ for (const appearance of ["light", "dark"] as const) {
         expect(paint.color).not.toBe(amber);
       }
       await page.keyboard.press("Enter");
-      await expect(cardButton.getByRole("button").first()).toBeFocused();
+      await expect(cardButton.locator(".ub-thread-select")).toBeFocused();
       await page.clock.resume();
       await proveMcpArrival(page, session, uuid, { path: "upstream" });
       await expectMcp(async () => {

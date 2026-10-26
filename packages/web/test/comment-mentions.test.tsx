@@ -125,7 +125,6 @@ describe("comment and reply mention fields", () => {
     const connection = { room: `workspace/${DOC}`, ydoc, status: { writable: true } } as unknown as RoomConnection;
     render(<WorkspaceMembersContext value={["alice"]}><ThreadsPane connection={connection} focused={null}
       author="Reply author" threads={threadsFromDoc(ydoc)} onFocus={() => {}} docLinks={dir.context} openDocId={DOC} /></WorkspaceMembersContext>);
-    await act(async () => { screen.getByRole<HTMLButtonElement>("button", { name: "Reply" }).click(); });
     const field = screen.getByPlaceholderText<HTMLTextAreaElement>("Reply…");
     await input(field, "@", "@");
     expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["@alice", "Alice's notes [draft]", "Other document"]);
@@ -154,7 +153,7 @@ it("renders current-member pills and reachable document links while other Markdo
   expect(view.container.querySelector(".ub-person-pill")).toBeNull();
 });
 
-it("keeps card links outside the selection button with native keyboard reach", () => {
+it("keeps card links independently reachable without selecting their card", () => {
   const dir = directory();
   const ydoc = new Y.Doc();
   initDoc(ydoc, { uuid: DOC, title: "Comments" });
@@ -164,13 +163,15 @@ it("keeps card links outside the selection button with native keyboard reach", (
   const focus = vi.fn();
   const view = render(<WorkspaceMembersContext value={["alice"]}><ThreadsPane connection={connection} focused={null} author="Reader"
     threads={threadsFromDoc(ydoc)} onFocus={focus} docLinks={dir.context} openDocId={DOC} /></WorkspaceMembersContext>);
-  const card = within(view.container).getByRole("group", { name: "Comment thread" });
+  const card = within(view.container).getByRole("group", { name: "Comment" });
   const link = within(card).getByRole<HTMLAnchorElement>("link", { name: "Target" });
   expect(link.closest("button")).toBeNull();
   expect(link.tabIndex).toBe(0);
   act(() => { link.click(); });
   expect(dir.opened).toEqual([TARGET]);
   expect(focus).not.toHaveBeenCalled();
-  act(() => { within(card).getByRole<HTMLButtonElement>("button").click(); });
+  const select = within(card).getByRole<HTMLButtonElement>("button", { name: "Comment" });
+  expect(select.tabIndex).toBe(0);
+  act(() => { select.click(); });
   expect(focus).toHaveBeenCalledOnce();
 });

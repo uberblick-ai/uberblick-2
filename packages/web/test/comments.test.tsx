@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { act, render } from "./react-render.js";
 import { screen, within } from "@testing-library/react";
 import type { ComponentProps, ReactElement } from "react";
+import { useState } from "react";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -35,7 +36,8 @@ import { CommentComposer } from "../src/ui/comments/CommentComposer.js";
 import { ThreadsPane } from "../src/ui/comments/ThreadsPane.js";
 import { cellTextTargetOf, commentTargetOf } from "../src/editor/selection.js";
 import { WorkspaceMembersContext } from "../src/ui/workspace-members.js";
-import { resolvedHighlightCss } from "../src/ui/comments/threads.js";
+import { focusThread, selectedHighlightCss } from "../src/ui/comments/threads.js";
+import type { ThreadFocus } from "../src/ui/comments/threads.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
 import { mountEditor, snapshotFragment } from "./helpers.js";
 import { useThreads } from "../src/ui/hooks.js";
@@ -192,7 +194,7 @@ function mountComposer(
   return {
     editor,
     created,
-    open: () => act(() => screen.getByRole<HTMLButtonElement>("button", { name: /^Comment(?: on .+)?$/ }).click()),
+    open: () => act(() => within(commentComposer()).getByRole<HTMLButtonElement>("button", { name: /^Comment(?: on .+)?$/ }).click()),
     type: (text: string) => {
       const field = screen.queryByPlaceholderText<HTMLTextAreaElement>(/^Comment as /);
       if (field === null) throw new Error("no composer field");
@@ -207,7 +209,7 @@ function mountComposer(
     },
     submit: () =>
       act(() => {
-        screen.getByRole<HTMLButtonElement>("button", { name: "Comment" }).click();
+        within(commentComposer()).getByRole<HTMLButtonElement>("button", { name: "Comment" }).click();
       }),
     unmount: () => {
       view.unmount();
@@ -1140,8 +1142,8 @@ describe("starting a thread from the prose", () => {
       view.submit();
 
       expect(listAnnotations(ydoc)).toHaveLength(1);
-      expect(within(commentComposer()).queryByText(/already part of another thread/)?.textContent).toContain(
-        "already part of another thread",
+      expect(within(commentComposer()).queryByText(/already has a comment/)?.textContent).toContain(
+        "already has a comment",
       );
       expect(screen.queryByPlaceholderText<HTMLTextAreaElement>(/^Comment as /)?.value).toBe(
         "mine too",
@@ -1149,7 +1151,7 @@ describe("starting a thread from the prose", () => {
 
       // Aim at a free range and the refusal no longer applies…
       select(view.editor, 1, 20, 25);
-      expect(within(commentComposer()).queryByText(/already part of another thread/)).toBeNull();
+      expect(within(commentComposer()).queryByText(/already has a comment/)).toBeNull();
       // …and the same text, never retyped, lands there.
       view.submit();
       expect(
@@ -1276,44 +1278,40 @@ describe("starting a thread from the prose", () => {
   });
 });
 
-describe("the rail writes back", () => {
+describe("the comments column writes back", () => {
   function renderRail(
     ydoc: Y.Doc,
     author = "ben",
     account?: AccountIdentity,
   ): {
     cards: () => HTMLElement[];
-    card: (excerpt: string) => HTMLElement;
+    card: (id: string) => HTMLElement;
     count: () => string | null;
-    resolvedCss: () => string;
     type: (text: string) => Promise<void>;
     unmount: () => void;
   } {
-    const view = render(
-      <LiveThreadsPane
+    function LiveComments(): ReactElement {
+      const [focused, setFocused] = useState<ThreadFocus | null>(null);
+      return <LiveThreadsPane
         connection={stubConnection(ydoc)}
-        focused={null}
+        focused={focused}
         author={author}
         account={account}
-        onFocus={() => {}}
-      />,
-    );
+        onFocus={(id) => setFocused((current) => id === null ? null : focusThread(current, id))}
+      />;
+    }
+    const view = render(<LiveComments />);
     const host = view.container;
-    const region = (): HTMLElement => within(host).getByRole("region", { name: "Threads" });
-    const cards = (): HTMLElement[] => within(region()).getAllByRole("listitem");
+    const region = (): HTMLElement => within(host).getByRole("region", { name: "Comments" });
+    const cards = (): HTMLElement[] => within(region()).queryAllByRole("listitem");
     return {
       cards,
-      card: (excerpt) => {
-        const control = within(region()).getByRole("button", { name: new RegExp(excerpt) });
-        const found = cards().find((card) => card.contains(control));
-        if (found === undefined) throw new Error(`no card quoting ${excerpt}`);
+      card: (id) => {
+        const found = cards().find((card) => card.id === `ub-thread-${id}`);
+        if (found === undefined) throw new Error(`no card for ${id}`);
         return found;
       },
-      count: () => within(within(region()).getByText("Threads", { exact: true }))
-        .getByText(/^\d+$/).textContent,
-      resolvedCss: () =>
-        // This generated stylesheet, rather than a visible control, is the contract.
-        host.querySelector("[data-resolved-highlights]")?.textContent ?? "",
+      count: () => String(region().querySelectorAll(".ub-thread:not(.ub-thread-resolved)").length),
       type: (text) =>
         settle(() => {
           const field = within(region()).queryByPlaceholderText<HTMLTextAreaElement>("Reply…");
@@ -1342,8 +1340,8 @@ describe("the rail writes back", () => {
     action(card, "Reply").click();
   }
 
-  function threadButton(card: HTMLElement): HTMLButtonElement {
-    return within(card).getByRole<HTMLButtonElement>("button", { name: /^Paragraph \d/ });
+  function selectCard(card: HTMLElement): void {
+    within(card).getByRole<HTMLFieldSetElement>("group", { name: "Comment" }).click();
   }
 
   it("appends a reply authored by this client, live to a second client", async () => {
@@ -1354,7 +1352,7 @@ describe("the rail writes back", () => {
       state: "signed-in", handle: "octocat", principalId: "5df99824-b9b5-4260-b20c-4680e2d51fac",
     });
     try {
-      await settle(() => action(view.cards()[0]!, "Reply").click());
+      await settle(() => selectCard(view.cards()[0]!));
       await view.type("because it is a pangram");
       await settle(() => submitReply(view.cards()[0]!));
 
@@ -1367,11 +1365,11 @@ describe("the rail writes back", () => {
           kind: "person", account: "octocat", principalId: "5df99824-b9b5-4260-b20c-4680e2d51fac",
         },
       ]);
-      // The form closes, and the card shows the reply it just wrote.
-      expect(within(view.cards()[0]!).queryByPlaceholderText("Reply…")).toBeNull();
+      // The selected card shows the reply and keeps an empty composer ready.
+      expect(within(view.cards()[0]!).getByPlaceholderText<HTMLTextAreaElement>("Reply…").value).toBe("");
       expect(
         within(view.cards()[0]!).getAllByRole("time").map(
-          (time) => within(time.parentElement!.parentElement!).getByText(/^(why\?|because it is a pangram)$/).textContent,
+          (time) => within(time.closest<HTMLElement>(".ub-thread-comment")!).getByText(/^(why\?|because it is a pangram)$/).textContent,
         ),
       ).toEqual(["why?", "because it is a pangram"]);
     } finally {
@@ -1381,8 +1379,8 @@ describe("the rail writes back", () => {
 
   /**
    * A reply form open on a thread another client then resolves. The reply
-   * belongs to a conversation that is over, so the form goes — and expanding
-   * the resolved card to read it back must not quietly offer it again.
+   * belongs to a resolved conversation, so the field goes and the draft stays
+   * recoverable. Reopening restores the same text without taking focus.
    */
   it("takes back an open reply form when another client resolves the thread", async () => {
     const { ydoc, blocks } = annotatedDoc();
@@ -1390,25 +1388,27 @@ describe("the rail writes back", () => {
     const thread = createAnnotation(ydoc, blocks[1]!, 4, 15, "agent-a", "why?");
     const view = renderRail(ydoc);
     try {
-      await settle(() => action(view.cards()[0]!, "Reply").click());
+      await settle(() => selectCard(view.cards()[0]!));
       expect(within(view.cards()[0]!).queryByPlaceholderText("Reply…")).not.toBeNull();
+      await view.type("a retained reply");
 
       await settle(() => setAnnotationResolved(remote, thread.id, true));
+      await settle(() => screen.getByRole<HTMLButtonElement>("button", { name: "1 resolved" }).click());
       expect(within(view.cards()[0]!).queryByPlaceholderText("Reply…")).toBeNull();
 
-      // Expanding the resolved card shows the conversation, and no form.
-      await settle(() =>
-        threadButton(view.cards()[0]!).click(),
-      );
+      // Selecting the resolved card shows the conversation, and no form.
+      await settle(() => selectCard(view.cards()[0]!));
       expect(within(view.cards()[0]!).queryByText("why?")?.textContent).toBe(
         "why?",
       );
       expect(within(view.cards()[0]!).queryByPlaceholderText("Reply…")).toBeNull();
+      expect(within(view.cards()[0]!).getByText("a retained reply")).toBeDefined();
 
-      // Reopened by that same client: the reply was let go, not merely hidden,
-      // so the form does not come back — and does not steal the caret with it.
+      // Reopened by the same client: the draft returns without taking focus.
       await settle(() => setAnnotationResolved(remote, thread.id, false));
-      expect(within(view.cards()[0]!).queryByPlaceholderText("Reply…")).toBeNull();
+      const field = within(view.cards()[0]!).getByPlaceholderText<HTMLTextAreaElement>("Reply…");
+      expect(field.value).toBe("a retained reply");
+      expect(document.activeElement).not.toBe(field);
     } finally {
       view.unmount();
     }
@@ -1430,41 +1430,42 @@ describe("the rail writes back", () => {
     const thread = createAnnotation(ydoc, blocks[1]!, 4, 15, "agent-a", "why?");
     const view = renderRail(ydoc);
     try {
-      await settle(() => action(view.cards()[0]!, "Reply").click());
+      await settle(() => selectCard(view.cards()[0]!));
       await view.type("because it is a pangram");
 
       // One task: the rail's observer only queues a microtask, so the click is
       // handled against the render that still shows an open thread.
       await settle(() => {
         setAnnotationResolved(remote, thread.id, true);
-        submitReply(view.card("quick brown"));
+        submitReply(view.card(thread.id));
       });
 
       // Nothing was appended, on either replica…
       expect(getAnnotation(remote, thread.id)?.comments).toHaveLength(1);
       expect(getAnnotation(ydoc, thread.id)?.comments).toHaveLength(1);
+      await settle(() => screen.getByRole<HTMLButtonElement>("button", { name: "1 resolved" }).click());
       // …and the card says why, on the card rather than in a form that is gone.
       expect(
-        within(view.card("quick brown")).queryByText("This thread was resolved while you wrote — reopen it to reply.")?.textContent,
-      ).toBe("This thread was resolved while you wrote — reopen it to reply.");
-      expect(within(view.card("quick brown")).queryByPlaceholderText("Reply…")).toBeNull();
+        within(view.card(thread.id)).queryByText("This comment was resolved while you wrote — reopen it to reply.")?.textContent,
+      ).toBe("This comment was resolved while you wrote — reopen it to reply.");
+      expect(within(view.card(thread.id)).queryByPlaceholderText("Reply…")).toBeNull();
+      expect(within(view.card(thread.id)).getByText("because it is a pangram")).toBeDefined();
 
       // The message is about a thread that reads as resolved, and whoever
       // settled it can reopen it from anywhere. Nobody clicks anything here:
       // the reopen arrives from the other replica and the message goes with the
       // state that justified it.
       await settle(() => setAnnotationResolved(remote, thread.id, false));
-      expect(within(view.card("quick brown")).queryByText("This thread was resolved while you wrote — reopen it to reply.")).toBeNull();
-      await settle(() => action(view.card("quick brown"), "Reply").click());
-      await view.type("because it is a pangram");
-      await settle(() => submitReply(view.card("quick brown")));
+      expect(within(view.card(thread.id)).queryByText("This comment was resolved while you wrote — reopen it to reply.")).toBeNull();
+      expect(within(view.card(thread.id)).getByPlaceholderText<HTMLTextAreaElement>("Reply…").value).toBe("because it is a pangram");
+      await settle(() => submitReply(view.card(thread.id)));
       expect(getAnnotation(remote, thread.id)?.comments).toHaveLength(2);
     } finally {
       view.unmount();
     }
   });
 
-  it("resolves a thread: out of the count, still in the rail, faded in the prose", async () => {
+  it("resolves a comment: retained below the open cards while its prose becomes ordinary text", async () => {
     const { ydoc, blocks } = annotatedDoc();
     const remote = mirrorOf(ydoc);
     const thread = createAnnotation(ydoc, blocks[1]!, 4, 15, "ben", "why?");
@@ -1483,38 +1484,38 @@ describe("the rail writes back", () => {
         { threadId: thread.id, start: 4, end: 15 },
       ]);
 
-      // One open thread left, and the resolved one is still on screen.
+      // Resolving folds the retained conversation into the quiet count row.
       expect(view.count()).toBe("1");
+      expect(view.cards()).toHaveLength(1);
+      const resolvedRow = screen.getByRole<HTMLButtonElement>("button", { name: "1 resolved" });
+      expect(resolvedRow.getAttribute("aria-expanded")).toBe("false");
+      expect(document.activeElement).toBe(resolvedRow);
+      await settle(() => resolvedRow.click());
       expect(view.cards()).toHaveLength(2);
-      const resolved = view
-        .cards()
-        .find((card) => within(card).queryByText("resolved"));
-      expect(within(resolved!).queryByText("resolved")?.textContent).toBe("resolved");
-      // Collapsed, but expandable — the conversation is not lost.
-      expect(within(resolved!).queryByText("why?")).toBeNull();
-      await settle(() =>
-        threadButton(resolved!).click(),
-      );
-      expect(
-        within(view.cards().find((card) => within(card).queryByText("resolved"))!)
-          .queryByText("why?")?.textContent,
-      ).toBe("why?");
+      const resolved = view.card(thread.id);
+      expect(resolved.querySelector(".ub-thread-resolved")).not.toBeNull();
+      expect(within(resolved).getByText("why?").textContent).toBe("why?");
+      expect(screen.getByRole("button", { name: "1 resolved" })).toBeDefined();
+      await settle(() => screen.getByRole<HTMLButtonElement>("button", { name: "1 resolved" }).click());
+      expect(view.cards()).toHaveLength(1);
+      await settle(() => screen.getByRole<HTMLButtonElement>("button", { name: "1 resolved" }).click());
+      expect(within(view.card(thread.id)).getByText("why?")).toBeDefined();
 
-      // The highlight in the prose fades: still there, no amber ground.
-      expect(
-        element.querySelector(`[data-comment-thread="${thread.id}"]`),
-      ).not.toBeNull();
-      expect(view.resolvedCss()).toContain(`[data-comment-thread="${thread.id}"]`);
-      expect(view.resolvedCss()).toContain("background:transparent");
+      // The stored range survives, with no interactive highlight left.
+      const anchor = element.querySelector(`[data-comment-thread="${thread.id}"]`);
+      expect(anchor).not.toBeNull();
+      expect(anchor?.classList.contains("ub-comment")).toBe(false);
+      expect(anchor?.hasAttribute("tabindex")).toBe(false);
+      expect(anchor?.hasAttribute("role")).toBe(false);
 
       // …and reopening puts it back in the count.
-      const reopen = view
-        .cards()
-        .find((card) => within(card).queryByText("resolved"))!;
-      await settle(() => action(reopen, "Reopen").click());
+      await settle(() => action(view.card(thread.id), "Reopen").click());
       expect(getAnnotation(remote, thread.id)?.resolved).toBe(false);
       expect(view.count()).toBe("2");
-      expect(view.resolvedCss()).toBe("");
+      const reopened = element.querySelector<HTMLElement>(`[data-comment-thread="${thread.id}"]`);
+      expect(reopened?.classList.contains("ub-comment")).toBe(true);
+      expect(reopened?.tabIndex).toBe(0);
+      expect(reopened?.getAttribute("aria-label")).toBe("Comment");
     } finally {
       view.unmount();
       editor.destroy();
@@ -1549,9 +1550,12 @@ describe("the rail writes back", () => {
       await settle(() => syncDocs(ydoc, remote));
 
       expect(getAnnotation(remote, thread.id)?.resolved).toBe(true);
-      // …and the rail still finds it, anchored to the first half.
-      expect(view.cards()).toHaveLength(1);
+      // …and the folded conversation can still be read beside the first half.
+      expect(view.cards()).toHaveLength(0);
       expect(view.count()).toBe("0");
+      await settle(() => screen.getByRole<HTMLButtonElement>("button", { name: "1 resolved" }).click());
+      expect(view.cards()).toHaveLength(1);
+      expect(within(view.card(thread.id)).getByText("why?")).toBeDefined();
     } finally {
       view.unmount();
       editor.destroy();
@@ -1561,19 +1565,18 @@ describe("the rail writes back", () => {
 
   /**
    * A thread id is a key in a Y.Map, so any client can make one up — including
-   * one that would close the CSS string the fade rule puts it in. An id outside
-   * the shape the schema package generates gets no rule at all: its highlight
-   * stays amber, which is loud rather than dangerous.
+   * one that would close the CSS string used for selected highlights. IDs
+   * outside the bounded schema shape must not enter that stylesheet.
    */
   it("writes no stylesheet rule for a thread id it cannot vouch for", () => {
     const hostile = '"]{}\n*{display:none}';
-    expect(resolvedHighlightCss([hostile])).toBe("");
-    expect(resolvedHighlightCss([hostile, "b3d1f0e2-4c5a-11ee-be56-0242ac120002"]))
+    expect(selectedHighlightCss(hostile)).toBe("");
+    expect(selectedHighlightCss("b3d1f0e2-4c5a-11ee-be56-0242ac120002"))
       .toBe(
-        '[data-comment-thread="b3d1f0e2-4c5a-11ee-be56-0242ac120002"]{background:transparent;border-bottom:1px dotted var(--muted-foreground);}',
+        '[data-comment-thread="b3d1f0e2-4c5a-11ee-be56-0242ac120002"]:not([data-comment-resolved]){background:var(--brand-subtle);}',
       );
     // Harmless characters, hostile size: a uuid is 36 characters, and an id
     // that goes on for a megabyte is a megabyte of selector on every render.
-    expect(resolvedHighlightCss(["a".repeat(100_000)])).toBe("");
+    expect(selectedHighlightCss("a".repeat(100_000))).toBe("");
   });
 });

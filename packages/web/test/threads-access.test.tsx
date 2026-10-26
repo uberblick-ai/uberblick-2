@@ -185,14 +185,16 @@ function highlight(host: HTMLElement, threadId: string): HTMLElement {
   return span;
 }
 
-function threadButton(item: HTMLElement): HTMLButtonElement {
-  return within(item).getByRole<HTMLButtonElement>("button", { name: /^Paragraph \d/ });
+function threadButton(item: HTMLElement): HTMLElement {
+  return item.querySelector<HTMLButtonElement>(".ub-thread-select") ?? within(item).getByRole("button", { name: "Comment" });
 }
 
 function threadCard(host: HTMLElement, excerpt = "quick brown"): HTMLElement {
-  const region = within(host).getByRole("region", { name: "Threads" });
-  const control = within(region).getByRole("button", { name: new RegExp(excerpt) });
-  return within(region).getAllByRole("listitem").find((item) => item.contains(control))!;
+  const region = within(host).getByRole("region", { name: "Comments" });
+  const comment = excerpt === "quick brown" ? "why quick?" : excerpt === "jumps" ? "why jumps?" : excerpt;
+  const card = within(region).getAllByRole("group", { name: "Comment" }).find((item) => item.textContent?.includes(comment));
+  if (card === undefined) throw new Error(`no comment card: ${comment}`);
+  return card;
 }
 
 function press(target: HTMLElement, key: string, init: KeyboardEventInit = {}): void {
@@ -237,6 +239,7 @@ describe("thread writes require a writable, unarchived document", () => {
       setAnnotationResolved(ydoc, resolvedId, true);
     });
     const open = threadCard(host);
+    await act(async () => within(host).getByRole("button", { name: "1 resolved" }).click());
     const resolved = threadCard(host, "jumps");
     // A collapsed resolved card has no actions even when writable. Expand
     // first so removing the read-only gate cannot pass this test vacuously.
@@ -249,20 +252,21 @@ describe("thread writes require a writable, unarchived document", () => {
 
     await act(async () => emitStatus(roomForDoc(WORKSPACE, UUID), { writable: false }));
 
-    for (const [item, excerpt, comments] of [
-      [open, "quick brown", ["why quick?", "open reply"]],
-      [resolved, "jumps", ["why jumps?", "resolved reply"]],
+    for (const [item, comments] of [
+      [open, ["why quick?"]],
+      [resolved, ["why jumps?", "resolved reply"]],
     ] as const) {
-      expect(within(item).getByText(excerpt).textContent).toBe(excerpt);
-      expect(within(item).getAllByRole("time").map((time) =>
-        within(time.parentElement!.parentElement!).getByText((text) => comments.some((comment) => comment === text)).textContent,
-      )).toEqual(comments);
+      expect(Array.from(item.querySelectorAll(".ub-thread-text")).map((node) => node.textContent)).toEqual(comments);
       for (const label of ["Reply", "Resolve", "Reopen"]) {
         expect(findButton(item, label)).toBeNull();
       }
       expect(within(item).queryByPlaceholderText("Reply…")).toBeNull();
     }
     expect(threadButton(resolved).getAttribute("aria-expanded")).toBe("true");
+    await act(async () => threadButton(open).click());
+    expect(Array.from(open.querySelectorAll(".ub-thread-text")).map((node) => node.textContent)).toEqual(["why quick?", "open reply"]);
+    expect(within(open).queryByPlaceholderText("Reply…")).toBeNull();
+    await act(async () => threadButton(resolved).click());
     expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
 
     await act(async () => emitStatus(roomForDoc(WORKSPACE, UUID), { writable: true }));
@@ -272,10 +276,10 @@ describe("thread writes require a writable, unarchived document", () => {
     expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
     });
 
-  it("lets an unsent reply go on archive, without writing or reviving it on Restore", async () => {
+  it("keeps an unsent reply through archive and Restore without writing it", async () => {
     const { host, ydoc } = await openAnnotatedDoc();
     const item = threadCard(host);
-    await act(async () => button(item, "Reply").click());
+    await act(async () => item.click());
     typeReply(replyField(item), "Unsent draft");
     const before = [...Y.encodeStateAsUpdate(ydoc)];
 
@@ -283,10 +287,10 @@ describe("thread writes require a writable, unarchived document", () => {
     expect(within(item).queryByPlaceholderText("Reply…")).toBeNull();
     expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
     await act(async () => button(host, "Restore").click());
-    expect(within(item).queryByPlaceholderText("Reply…")).toBeNull();
+    expect(replyField(item).value).toBe("Unsent draft");
     expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
-    await act(async () => button(item, "Reply").click());
-    expect(replyField(item).value).toBe("");
+    await act(async () => item.click());
+    expect(replyField(item).value).toBe("Unsent draft");
     expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
   });
 
@@ -300,7 +304,7 @@ describe("thread writes require a writable, unarchived document", () => {
       deleteTagCatalogEntry(catalog, deleted.id);
     });
     const item = threadCard(host);
-    await act(async () => button(item, "Reply").click());
+    await act(async () => item.click());
     const field = replyField(item);
     typeReply(field, "Reply from the stale form");
     const submit = button(item, "Reply");
@@ -340,7 +344,7 @@ describe("a keyboard reaches a thread from its range in the prose", () => {
     // tab stop at all.
     expect(span.tabIndex).toBe(0);
     expect(span.getAttribute("role")).toBe("button");
-    expect(span.getAttribute("aria-label")).toBe("Comment thread");
+    expect(span.getAttribute("aria-label")).toBe("Comment");
 
     span.focus();
     expect(document.activeElement).toBe(span);
@@ -352,76 +356,38 @@ describe("a keyboard reaches a thread from its range in the prose", () => {
     expect(document.activeElement).toBe(card);
   });
 
-  it("reveals a resolved conversation without changing or toggling it", async () => {
-    const scrolled: Element[] = [];
-    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
-      scrolled.push(this);
-    };
+  it("makes resolved anchors ordinary text after live updates and redraws, and restores a reopened control", async () => {
     const { host, ydoc, threadId } = await openAnnotatedDoc();
-
-    // The live annotations subscription repaints an already-mounted mark; this
-    // state change touches no prose and gives ProseMirror no reason to redraw.
     let span = highlight(host, threadId);
-    expect(span.getAttribute("aria-label")).toBe("Comment thread");
-    expect(span.getAttribute("title")).toBeNull();
+    expect(span.getAttribute("aria-label")).toBe("Comment");
     await act(async () => setAnnotationResolved(ydoc, threadId, true));
-    expect(span.getAttribute("aria-label")).toBe(
-      "Resolved comment thread",
-    );
-    expect(span.getAttribute("title")).toBe("Resolved comment thread");
-
-    // And rewritten after the mark's DOM is redrawn, rather than being a
-    // one-time class on a ProseMirror-owned span.
-    const text = (getBlocksFragment(ydoc).get(0) as Y.XmlElement)
-      .firstChild as Y.XmlText;
-    await act(async () => {
-      text.insert(0, "Now ");
-      await Promise.resolve();
-    });
+    const ordinary = (node: HTMLElement): void => {
+      expect(node.getAttribute("role")).toBeNull();
+      expect(node.getAttribute("tabindex")).toBeNull();
+      expect(node.getAttribute("aria-label")).toBeNull();
+      expect(node.getAttribute("title")).toBeNull();
+      expect(node.classList.contains("ub-comment")).toBe(false);
+    };
+    ordinary(span);
+    const text = (getBlocksFragment(ydoc).get(0) as Y.XmlElement).firstChild as Y.XmlText;
+    await act(async () => { text.insert(0, "Now "); await Promise.resolve(); });
     span = highlight(host, threadId);
-    expect(span.getAttribute("aria-label")).toBe("Resolved comment thread");
-    expect(span.getAttribute("title")).toBe("Resolved comment thread");
-
+    ordinary(span);
     const before = [...Y.encodeStateAsUpdate(ydoc)];
     await act(async () => span.click());
-    const item = threadCard(host);
-    const card = threadButton(item);
-    expect(card?.getAttribute("aria-expanded")).toBe("true");
-    expect(item.textContent).toContain("why quick?");
-    expect(scrolled).toContain(item);
-    expect(getAnnotation(ydoc, threadId)?.resolved).toBe(true);
-    expect(within(item!).queryByPlaceholderText("Reply…")).toBeNull();
-    expect(
-      within(item).queryByRole("button", { name: "Reply" }) !== null,
-    ).toBe(false);
-
-    // A second anchor activation is another request to reveal, never the
-    // resolved card's own collapse toggle.
-    await act(async () => span.click());
-    expect(card?.getAttribute("aria-expanded")).toBe("true");
-
-    // The card itself keeps that existing toggle. Once it has collapsed the
-    // conversation, the keyboard path from the prose reveals it and lands on
-    // the card.
-    await act(async () => card?.click());
-    expect(card?.getAttribute("aria-expanded")).toBe("false");
-    span = highlight(host, threadId);
-    span.focus();
-    await act(async () => {
-      span.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "Enter",
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-    });
-    expect(card?.getAttribute("aria-expanded")).toBe("true");
-    expect(document.activeElement).toBe(card);
-
-    // Selection state, DOM state and scrolling are the whole operation.
-    expect(getAnnotation(ydoc, threadId)?.resolved).toBe(true);
+    expect(within(host).queryByRole("group", { name: "Comment" })).toBeNull();
     expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
+    await act(async () => within(host).getByRole("button", { name: "1 resolved" }).click());
+    const card = threadCard(host);
+    await act(async () => card.click());
+    expect(within(card).queryByPlaceholderText("Reply…")).toBeNull();
+    await act(async () => within(card).getByRole("button", { name: "Reopen" }).click());
+    span = highlight(host, threadId);
+    expect(span.getAttribute("role")).toBe("button");
+    expect(span.tabIndex).toBe(0);
+    expect(span.getAttribute("aria-label")).toBe("Comment");
+    expect(span.classList.contains("ub-comment")).toBe(true);
+    expect(getAnnotation(ydoc, threadId)?.resolved).toBe(false);
   });
 
   /**
@@ -489,13 +455,13 @@ describe("the threads rail can be opened where the layout hides it", () => {
     // Radix hides the app while its modal is open; keep the opener found before
     // that transition so assertions can inspect its expanded state afterward.
     const found = toggles.get(host)
-      ?? within(host).getByRole<HTMLButtonElement>("button", { name: /^Threads \d+$/ });
+      ?? within(host).getByRole<HTMLButtonElement>("button", { name: /^Comments \d+$/ });
     toggles.set(host, found);
     return found;
   }
 
   function sheet(): HTMLElement {
-    return screen.getByRole("dialog", { name: "Threads" });
+    return screen.getByRole("dialog", { name: "Comments" });
   }
 
   function button(label: string): HTMLButtonElement {
@@ -536,11 +502,11 @@ describe("the threads rail can be opened where the layout hides it", () => {
   }
 
   // Safari's order, which only the IME keyCode still marks as composing.
-  it("keeps a composing Escape after compositionend in a drawer reply, then cancels only the form", async () => {
+  it("keeps a composing Escape after compositionend in a drawer reply, then closes while retaining its draft", async () => {
     threadsWidth(true);
     const { host, ydoc, threadId } = await openAnnotatedDoc();
     await settle(() => toggle(host).click());
-    await settle(() => button("Reply").click());
+    await settle(() => { const card = threadButton(sheet()); card.click(); within(card.closest(".ub-thread")!).getByPlaceholderText<HTMLTextAreaElement>("Reply…").focus(); });
     typeReply("日本語の返信");
     const field = within(sheet()).queryByPlaceholderText<HTMLTextAreaElement>("Reply…")!;
 
@@ -553,41 +519,42 @@ describe("the threads rail can be opened where the layout hides it", () => {
     expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
 
     await settle(() => press(field, "Escape"));
-    expect(within(sheet()).queryByPlaceholderText("Reply…")).toBeNull();
-    expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
-    await settle(() => button("Reply").click());
-    expect(within(sheet()).queryByPlaceholderText<HTMLTextAreaElement>("Reply…")?.value).toBe("");
+    expect(screen.queryByRole("dialog", { name: "Comments" })).toBeNull();
+    expect(toggle(host).getAttribute("aria-expanded")).toBe("false");
+    await settle(() => toggle(host).click());
+    expect(within(sheet()).queryByPlaceholderText<HTMLTextAreaElement>("Reply…")?.value).toBe("日本語の返信");
   });
 
-  it("counts threads and lets reply-form Escape cancel only the form", async () => {
+  it("counts open comments and lets reply-field Escape close the drawer and restore its opener", async () => {
     threadsWidth(true);
     const { host } = await openAnnotatedDoc();
 
     // The unnamed scroll container is the placement contract, not a control.
     expect(toggle(host).closest(".ub-pane")).not.toBeNull();
-    expect(toggle(host).textContent).toBe("Threads 1");
+    expect(toggle(host).textContent).toBe("Comments 1");
     expect(toggle(host).getAttribute("aria-controls")).toBe("ub-rail");
     expect(toggle(host).getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByRole("dialog", { name: "Threads" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Comments" })).toBeNull();
 
     await settle(() => toggle(host).click());
     expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
     expect(sheet().id).toBe("ub-rail");
 
-    await settle(() => button("Reply").click());
+    await settle(() => { const card = threadButton(sheet()); card.click(); within(card.closest(".ub-thread")!).getByPlaceholderText<HTMLTextAreaElement>("Reply…").focus(); });
     const field = within(sheet()).queryByPlaceholderText<HTMLTextAreaElement>("Reply…");
     expect(field).not.toBeNull();
     expect(document.activeElement).toBe(field);
     await settle(() => press(field!, "Escape"));
-    expect(within(sheet()).queryByPlaceholderText("Reply…")).toBeNull();
-    expect(toggle(host).getAttribute("aria-expanded")).toBe("true");
-
+    expect(screen.queryByRole("dialog", { name: "Comments" })).toBeNull();
+    expect(toggle(host).getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(toggle(host));
+    await settle(() => toggle(host).click());
     const card = threadButton(sheet());
     card?.focus();
     expect(document.activeElement).toBe(card);
     await settle(() => press(card!, "Escape"));
     expect(toggle(host).getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByRole("dialog", { name: "Threads" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Comments" })).toBeNull();
     expect(document.activeElement).toBe(toggle(host));
   });
 
@@ -595,11 +562,11 @@ describe("the threads rail can be opened where the layout hides it", () => {
     const width = threadsWidth(true);
     const { host } = await openAnnotatedDoc();
     await settle(() => toggle(host).click());
-    await settle(() => button("Reply").click());
+    await settle(() => { const card = threadButton(sheet()); card.click(); within(card.closest(".ub-thread")!).getByPlaceholderText<HTMLTextAreaElement>("Reply…").focus(); });
     typeReply("Keep this unsent reply");
 
     for (const close of [
-      () => button("Close threads").click(),
+      () => button("Close comments").click(),
       () => {
         const card = threadButton(sheet());
         card!.focus();
@@ -607,7 +574,7 @@ describe("the threads rail can be opened where the layout hides it", () => {
       },
     ]) {
       await settle(close);
-      expect(screen.queryByRole("dialog", { name: "Threads" })).toBeNull();
+      expect(screen.queryByRole("dialog", { name: "Comments" })).toBeNull();
       await settle(() => toggle(host).click());
       expect(within(sheet()).queryByPlaceholderText<HTMLTextAreaElement>("Reply…")?.value).toBe(
         "Keep this unsent reply",
@@ -615,8 +582,8 @@ describe("the threads rail can be opened where the layout hides it", () => {
     }
 
     await width.change(false);
-    expect(screen.queryByRole("dialog", { name: "Threads" })).toBeNull();
-    expect(within(within(host).getByRole("region", { name: "Threads" })).queryByPlaceholderText<HTMLTextAreaElement>("Reply…")?.value).toBe(
+    expect(screen.queryByRole("dialog", { name: "Comments" })).toBeNull();
+    expect(within(within(host).getByRole("region", { name: "Comments" })).queryByPlaceholderText<HTMLTextAreaElement>("Reply…")?.value).toBe(
       "Keep this unsent reply",
     );
     await width.change(true);
@@ -626,17 +593,17 @@ describe("the threads rail can be opened where the layout hides it", () => {
 
     // A retained draft is not another request to start replying. While the
     // sheet is closed, resizing must leave the writer in the prose.
-    await settle(() => button("Close threads").click());
+    await settle(() => button("Close comments").click());
     const prose = within(host).getByRole("textbox", { name: "Document content" });
     expect(prose).not.toBeNull();
     await settle(() => prose!.focus());
     await width.change(false);
     expect(document.activeElement).toBe(prose);
-    expect(within(within(host).getByRole("region", { name: "Threads" })).queryByPlaceholderText<HTMLTextAreaElement>("Reply…")?.value).toBe(
+    expect(within(within(host).getByRole("region", { name: "Comments" })).queryByPlaceholderText<HTMLTextAreaElement>("Reply…")?.value).toBe(
       "Keep this unsent reply",
     );
     await width.change(true);
-    expect(screen.queryByRole("dialog", { name: "Threads" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Comments" })).toBeNull();
     expect(document.activeElement).toBe(prose);
     await settle(() => toggle(host).click());
     expect(within(sheet()).queryByPlaceholderText<HTMLTextAreaElement>("Reply…")?.value).toBe(
@@ -656,9 +623,9 @@ describe("the threads rail can be opened where the layout hides it", () => {
     const text = (getBlocksFragment(ydoc).get(0) as Y.XmlElement).firstChild as Y.XmlText;
     await settle(() => text.delete(4, 11));
     expect(opener.isConnected).toBe(false);
-    expect(within(sheet()).queryByRole("button", { name: /orphaned/ })).not.toBeNull();
+    expect(within(sheet()).getByText(/text removed/)).not.toBeNull();
 
-    await settle(() => button("Close threads").click());
+    await settle(() => button("Close comments").click());
     expect(document.activeElement).toBe(toggle(host));
   });
 });

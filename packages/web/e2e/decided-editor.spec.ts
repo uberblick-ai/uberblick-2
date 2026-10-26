@@ -88,7 +88,7 @@ test("decided prose and cells offer only Comment, keep threads keyboard reachabl
   await expect(page.getByRole("button", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
   const prose = editor(page).locator(":scope > p").first();
   const header = editor(page).locator(".ub-table th").first();
-  const rail = page.getByRole("region", { name: "Threads", exact: true });
+  const rail = page.getByRole("region", { name: "Comments", exact: true });
   for (const [index, part] of [
     { target: prose, container: prose, inset: 8, length: 170, comment: "Pointer comment on approved reasoning.", reply: "Keyboard readers can continue this thread." },
     { target: header.locator("p"), container: header, inset: 2, length: 70, comment: "Discuss the approved cell.", reply: "Cell reply." },
@@ -110,9 +110,9 @@ test("decided prose and cells offer only Comment, keep threads keyboard reachabl
     await expect(rail).toContainText(part.comment);
     const card = rail.locator(".ub-thread-card").filter({ hasText: part.comment });
     const cardButton = card.locator(".ub-thread");
-    await expect(card.locator(".ub-thread-excerpt")).toHaveText(selected);
+    await expect(card.locator(".ub-thread-excerpt")).toHaveCount(0);
     await expect(cardButton).toHaveAttribute("aria-current", "true");
-    await cardButton.click();
+    await cardButton.locator(".ub-thread-select").click();
     await expect(highlight).toHaveClass(/ub-comment-flash/);
 
     // Native Tab reaches each highlight without an editing caret; Enter
@@ -124,16 +124,18 @@ test("decided prose and cells offer only Comment, keep threads keyboard reachabl
     }
     await expect(highlight).toBeFocused();
     await page.keyboard.press("Enter");
-    await expect(cardButton.getByRole("button").first()).toBeFocused();
-    await card.getByRole("button", { name: "Reply", exact: true }).click();
+    await expect(cardButton.locator(".ub-thread-select")).toBeFocused();
     await card.getByPlaceholder("Reply…").fill(part.reply);
     await card.getByRole("button", { name: "Reply", exact: true }).click();
     await expect(card).toContainText(part.reply);
     await card.getByRole("button", { name: "Resolve", exact: true }).click();
-    await expect(highlight).toHaveAccessibleName("Resolved comment thread");
-    await highlight.click();
+    await expect(highlight).not.toHaveAttribute("role");
+    await expect(highlight).not.toHaveAttribute("tabindex");
+    await expect(highlight).not.toHaveClass(/(?:^| )ub-comment(?: |$)/);
+    await rail.getByRole("button", { name: /resolved$/ }).click();
+    await card.locator(".ub-thread").click();
     await card.getByRole("button", { name: "Reopen", exact: true }).click();
-    await expect(highlight).toHaveAccessibleName("Comment thread");
+    await expect(highlight).toHaveAccessibleName("Comment");
   }
   await expect(prose).toHaveText("Selected words remain readable after deciding.");
   await proveMcpArrival(page, writer, uuid, { path: "upstream" });
@@ -171,23 +173,25 @@ test("touch selection on a decided record starts a thread and its highlight open
   await onlyComment(page);
   await addComment(page, "Touch readers can discuss the decided record.", true);
   const highlight = editor(page).locator("[data-comment-thread]");
-  const close = page.getByRole("button", { name: "Close threads", exact: true });
+  const close = page.getByRole("button", { name: "Close comments", exact: true });
   await closeIfOpen(close, page.locator(".ub-threads-toggle"), { touch: true });
   await highlight.tap();
-  const rail = page.getByRole("region", { name: "Threads", exact: true });
+  const rail = page.getByRole("region", { name: "Comments", exact: true });
   await expect(rail).toContainText("Touch readers can discuss the decided record.");
-  await rail.getByRole("button", { name: "Reply", exact: true }).tap();
   await rail.getByPlaceholder("Reply…").fill("Touch reply.");
   await rail.getByRole("button", { name: "Reply", exact: true }).tap();
   await expect(rail).toContainText("Touch reply.");
   await rail.getByRole("button", { name: "Resolve", exact: true }).tap();
   // Dismissing the drawer exposes the text highlight for the touch route back.
   await closeIfOpen(close, page.locator(".ub-threads-toggle"), { touch: true });
-  await expect(highlight).toHaveAccessibleName("Resolved comment thread");
-  await highlight.tap();
+  await expect(highlight).not.toHaveAttribute("role");
+  await expect(highlight).not.toHaveAttribute("tabindex");
+  await page.locator(".ub-threads-toggle").tap();
+  await rail.getByRole("button", { name: "1 resolved" }).tap();
+  await rail.locator(".ub-thread").tap();
   await rail.getByRole("button", { name: "Reopen", exact: true }).tap();
   await closeIfOpen(close, page.locator(".ub-threads-toggle"), { touch: true });
-  await expect(highlight).toHaveAccessibleName("Comment thread");
+  await expect(highlight).toHaveAccessibleName("Comment");
   await expect(paragraph).toHaveText("Selected words remain readable after deciding.");
 });
 

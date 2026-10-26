@@ -225,13 +225,13 @@ async function rfcLayout(page: Page): Promise<void> {
 
 async function readThread(page: Page, text: string, touch: boolean): Promise<Locator> {
   await activateControl(editor(page).locator("[data-comment-thread]"), { touch });
-  const rail = page.getByRole("region", { name: "Threads", exact: true });
+  const rail = page.getByRole("region", { name: "Comments", exact: true });
   await expect(rail).toContainText(text);
   return rail;
 }
 
 async function closeThreadDrawer(page: Page, touch: boolean): Promise<void> {
-  await closeIfOpen(page.getByRole("button", { name: "Close threads", exact: true }), page.locator(".ub-threads-toggle"), { touch });
+  await closeIfOpen(page.getByRole("button", { name: "Close comments", exact: true }), page.locator(".ub-threads-toggle"), { touch });
 }
 
 async function selectedTopicPin(page: Page, touch: boolean): Promise<void> {
@@ -1061,7 +1061,7 @@ for (const { touch, appearance } of [
     expect(await editor(page).locator("p").evaluate((element) => getComputedStyle(element).color)).not.toBe(currentColor);
     const rail = await readThread(page, "Conversation about the earlier answer.", touch);
     await expect(rail).not.toContainText("Conversation about the current answer.");
-    await activateControl(rail.getByRole("button", { name: "Reply", exact: true }), { touch });
+    await activateControl(rail.locator(".ub-thread"), { touch });
     await rail.getByPlaceholder("Reply…").fill("Readers can still discuss historical answers.");
     await activateControl(rail.getByRole("button", { name: "Reply", exact: true }), { touch });
     await expect(rail).toContainText("Readers can still discuss historical answers.");

@@ -7,7 +7,7 @@ export function ShellThreads({ shell }: { shell: AppShell }) {
   const { archived, meta } = shell.readings;
   const { identity, account } = shell.environment;
   const { narrowLayout } = shell.layout;
-  const { threads, focusedThread, threadsOpen, onFocusThread, setThreadsOpen, restoreThreadsFocus } = shell.threads;
+  const { threads, focusedThread, threadsOpen, onFocusThread, setThreadsOpen, setHasReplyDrafts, restoreThreadsFocus } = shell.threads;
   return <>
     {/* Every open document keeps its threads column, before the first comment too. */}
     {doc !== null && !deleted && (
@@ -29,6 +29,7 @@ export function ShellThreads({ shell }: { shell: AppShell }) {
           openDocId={parseRoom(doc.room).uuid}
           readOnly={archived || !docStatus.writable || (meta?.kind === "decision" && (topic === null || topic.first === null))}
           onFocus={onFocusThread}
+          onDraftsChange={setHasReplyDrafts}
           narrow={narrowLayout}
           open={threadsOpen}
           hidden={shell.history.active}

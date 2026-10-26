@@ -102,7 +102,7 @@ test("members pick people and documents in prose, new comments and replies while
   await expect(menu(page)).toHaveCount(0);
 
   await selectParagraph(prose.nth(2));
-  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).click();
   const field = page.getByPlaceholder(/Comment as/);
   await field.fill("Review ");
   await field.pressSequentially("@other");
@@ -128,7 +128,7 @@ test("members pick people and documents in prose, new comments and replies while
   await page.locator(".ub-composer").getByRole("button", { name: "Comment", exact: true }).click();
   const card = page.locator(".ub-thread-card").filter({ hasText: "Review @other-admin" });
   await expect(card.locator(".ub-person-pill")).toHaveText("@other-admin");
-  await card.getByRole("button", { name: "Reply", exact: true }).click();
+  await card.locator(".ub-thread-select").click();
   const reply = card.getByPlaceholder("Reply…", { exact: true });
   await reply.pressSequentially("@bro");
   await expect(menu(page).getByRole("option")).toHaveText(["@browser-person"]);
@@ -151,7 +151,7 @@ test("members pick people and documents in prose, new comments and replies while
   await expect(page.locator(".ub-title")).toHaveValue(title);
   await page.goBack();
   await expect(card).toBeVisible();
-  await card.getByRole("button").first().focus();
+  await card.locator(".ub-thread-select").focus();
   await page.keyboard.press("Tab");
   await expect(link).toBeFocused();
   await link.press("Enter");
@@ -165,10 +165,10 @@ test("the shared comment picker is visible in both appearances and touch picks p
   const page = await open(browser, source.uuid, touch);
   if (touch) {
     await activateControl(page.locator(".ub-threads-toggle"), { touch });
-    await expect(page.getByRole("dialog", { name: "Threads", exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Comments", exact: true })).toBeVisible();
   }
   const card = page.locator(".ub-thread-card").filter({ hasText: "Agent @other-admin" });
-  await activateControl(card.getByRole("button", { name: "Reply", exact: true }), { touch });
+  await activateControl(card.locator(".ub-thread-select"), { touch });
   const reply = card.getByPlaceholder("Reply…", { exact: true });
   await reply.pressSequentially("@other");
   const option = menu(page).getByRole("option", { name: "@other-admin", exact: true });
@@ -199,7 +199,7 @@ test("the shared comment picker is visible in both appearances and touch picks p
   await expect(menu(page)).toHaveCount(0);
   await expect(reply).toBeVisible();
   await expect(reply).toHaveValue(beforeEscape);
-  if (touch) await expect(page.getByRole("dialog", { name: "Threads", exact: true })).toBeVisible();
+  if (touch) await expect(page.getByRole("dialog", { name: "Comments", exact: true })).toBeVisible();
   await reply.fill(replyText);
   await activateControl(card.getByRole("button", { name: "Reply", exact: true }), { touch });
   await expect(card.locator(".ub-person-pill")).toHaveCount(2);

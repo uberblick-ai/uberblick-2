@@ -61,7 +61,7 @@ test("an Enter split moves the shared comment anchor into the new paragraph", as
     expect(destination).not.toBe(recorded);
     const card = page.locator(`#ub-thread-${thread.annotation.id}`);
     await expect(card).toContainText("brave");
-    await expect(card).toContainText("Paragraph 2");
+    await expect(prose.nth(1).locator("[data-comment-thread]")).toHaveText("brave");
     await expect(card).not.toContainText("orphaned");
     await expect.poll(() => page.locator(".ub-thread-card").evaluateAll((cards) => cards.map((card) => card.id))).toEqual([
       `ub-thread-${thread.annotation.id}`, `ub-thread-${other.annotation.id}`,

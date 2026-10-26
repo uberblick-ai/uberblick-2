@@ -121,7 +121,7 @@ function editorElement(host: HTMLElement): HTMLElement {
 
 function button(host: ParentNode, label: string): HTMLButtonElement {
   const found = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-    (candidate) => candidate.textContent?.trim() === label,
+    (candidate) => candidate.textContent?.trim() === label || candidate.getAttribute("aria-label") === label,
   );
   if (found === undefined) throw new Error(`no ${label} button`);
   return found;
@@ -377,16 +377,15 @@ describe("read-only decision records", () => {
     highlight.focus();
     await act(async () => highlight.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
     const item = card(host, thread.id);
-    expect(document.activeElement).toBe(item.querySelector(".ub-thread button"));
-    await act(async () => button(item, "Reply").click());
+    expect(document.activeElement).toBe(item.querySelector(".ub-thread-select"));
     act(() => typeInto(item.querySelector<HTMLTextAreaElement>("textarea")!, "The compatibility constraint."));
     act(() => button(item, "Reply").click());
     expect(getAnnotation(ydoc, thread.id)?.comments.map((comment) => comment.text)).toEqual([
       "Why this protocol?", "The compatibility constraint.",
     ]);
-    await act(async () => button(item, "Resolve").click());
+    await act(async () => button(item, "✓ Resolve").click());
     expect(getAnnotation(ydoc, thread.id)?.resolved).toBe(true);
-    await act(async () => card(host, thread.id).querySelector<HTMLButtonElement>(".ub-thread")?.click());
+    await act(async () => card(host, thread.id).querySelector<HTMLElement>(".ub-thread")?.click());
     await act(async () => button(card(host, thread.id), "Reopen").click());
     expect(getAnnotation(ydoc, thread.id)?.resolved).toBe(false);
     expect(plainText(textAt(ydoc))).toBe(PROSE);
@@ -408,9 +407,9 @@ describe("read-only decision records", () => {
     expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
     const item = card(host, thread.id);
     expect(button(item, "Reply")).toBeDefined();
-    await act(async () => button(item, "Resolve").click());
+    await act(async () => button(item, "✓ Resolve").click());
     expect(getAnnotation(ydoc, thread.id)?.resolved).toBe(true);
-    await act(async () => card(host, thread.id).querySelector<HTMLButtonElement>(".ub-thread")?.click());
+    await act(async () => card(host, thread.id).querySelector<HTMLElement>(".ub-thread")?.click());
     expect(button(card(host, thread.id), "Reopen")).toBeDefined();
     expect(findLinkConflicts(getBlocksFragment(ydoc))).toHaveLength(1);
   });
@@ -426,7 +425,8 @@ describe("read-only decision records", () => {
     const dialog = document.querySelector<HTMLElement>('[role="alertdialog"]')!;
     act(() => button(dialog, "Archive").click());
     const item = card(host, thread.id);
-    expect(item.querySelector(".ub-thread-actions")).toBeNull();
+    expect(item.querySelector(".ub-thread-resolve")).toBeNull();
+    expect(item.querySelector("textarea")).toBeNull();
     const archivedTitle = host.querySelector<HTMLTextAreaElement>(".ub-title")!;
     expect(archivedTitle.readOnly).toBe(true);
     act(() => typeInto(archivedTitle, "Archived rename"));

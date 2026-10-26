@@ -275,10 +275,10 @@ test("Tab selection is navigation, triple click selects one cell, and cross-cell
   await activate(popup(page).getByRole("button", { name: "Comment", exact: true }), info);
   await expect(first.locator('[data-comment-thread]')).toHaveText("pha words suffix");
   await expect(second.locator('[data-comment-thread]')).toHaveCount(0);
-  await expect(page.locator(".ub-thread-card")).toContainText("pha words suffix");
+  await expect(page.locator(".ub-thread-card .ub-thread-excerpt")).toHaveCount(0);
   await expect(page.locator(".ub-thread-card")).toContainText("Clamped cell discussion");
   await expect(page.locator(".ub-thread-card .ub-thread")).toHaveAttribute("aria-current", "true");
-  await closeIfOpen(page.getByRole("button", { name: "Close threads", exact: true }), page.locator(".ub-threads-toggle"), {
+  await closeIfOpen(page.getByRole("button", { name: "Close comments", exact: true }), page.locator(".ub-threads-toggle"), {
     touch: info.project.use.hasTouch === true,
   });
   await selectCell(first, 0, 5, "mouse");

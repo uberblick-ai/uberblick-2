@@ -104,11 +104,6 @@ export interface ThreadFocus {
    * preserves the prose caret.
    */
   viaKeyboard: boolean;
-  /**
-   * A resolved-anchor activation reveals its collapsed conversation; card
-   * clicks keep their own toggle gesture.
-   */
-  revealResolved: boolean;
 }
 
 /**
@@ -117,12 +112,11 @@ export interface ThreadFocus {
  */
 export interface ThreadSelection {
   viaKeyboard?: boolean;
-  revealResolved?: boolean;
 }
 
 /** Select a thread, carrying only the behavior its activation requested. */
 export type SelectThread = (
-  threadId: string,
+  threadId: string | null,
   selection?: ThreadSelection,
 ) => void;
 
@@ -136,7 +130,6 @@ export function focusThread(
     id: threadId,
     click: (previous?.click ?? 0) + 1,
     viaKeyboard: selection.viaKeyboard === true,
-    revealResolved: selection.revealResolved === true,
   };
 }
 
@@ -256,10 +249,9 @@ export function threadCardId(threadId: string): string {
  */
 export function threadIdFromTarget(target: EventTarget | null): string | null {
   if (!(target instanceof Element)) return null;
-  const threadId =
-    target
-      .closest("[data-comment-thread]")
-      ?.getAttribute("data-comment-thread") ?? "";
+  const anchor = target.closest("[data-comment-thread]");
+  if (anchor?.hasAttribute("data-comment-resolved")) return null;
+  const threadId = anchor?.getAttribute("data-comment-thread") ?? "";
   return threadId === "" ? null : threadId;
 }
 
@@ -283,10 +275,11 @@ const flashTimers = new WeakMap<Element, ReturnType<typeof setTimeout>>();
  * the class and forcing layout before reapplying it.
  */
 export function flashThreadHighlight(threadId: string): void {
-  const target = document.querySelector<HTMLElement>(`[data-comment-thread="${CSS.escape(threadId)}"]`);
+  const selector = `[data-comment-thread="${CSS.escape(threadId)}"]:not([data-comment-resolved])`;
+  const target = document.querySelector<HTMLElement>(selector);
   if (target !== null) revealFoldedTarget(target);
   const spans = document.querySelectorAll<HTMLElement>(
-    `[data-comment-thread="${CSS.escape(threadId)}"]`,
+    selector,
   );
   const first = spans[0];
   if (first === undefined) return;
@@ -307,17 +300,10 @@ export function flashThreadHighlight(threadId: string): void {
   }
 }
 
-/**
- * Derive resolved selectors instead of DOM classes: ProseMirror rebuilds
- * spans on text edits. Keep the annotated range reachable with a dotted
- * neutral underline. Refuse IDs outside SAFE_THREAD_ID shape or length;
- * rejected IDs keep their harmless amber highlight.
- */
-export function resolvedHighlightCss(threadIds: readonly string[]): string {
-  const safe = threadIds.filter((id) => SAFE_THREAD_ID.test(id));
-  if (safe.length === 0) return "";
-  const selector = safe.map((id) => `[data-comment-thread="${id}"]`).join(",");
-  return `${selector}{background:transparent;border-bottom:1px dotted var(--muted-foreground);}`;
+/** Selected highlights are the only amber comment ranges in the document. */
+export function selectedHighlightCss(threadId: string | null): string {
+  if (threadId === null || !SAFE_THREAD_ID.test(threadId)) return "";
+  return `[data-comment-thread="${threadId}"]:not([data-comment-resolved]){background:var(--brand-subtle);}`;
 }
 
 /** Scroll a thread's card into view inside the rail. */
@@ -328,14 +314,27 @@ export function scrollThreadCardIntoView(threadId: string): void {
 }
 
 /**
- * Focus the card body button so the conversation and adjacent Reply/Resolve
- * actions remain in native Tab order.
+ * Focus the card's native selection button before its quiet actions.
  */
 export function focusThreadCard(threadId: string): void {
-  document
-    .getElementById(threadCardId(threadId))
-    ?.querySelector<HTMLElement>("button")
-    ?.focus();
+  document.getElementById(threadCardId(threadId))
+    ?.querySelector<HTMLElement>(".ub-thread-select")?.focus();
+}
+
+/** Escape from a card returns to its live highlight, or the document text. */
+export function returnFocusToComment(threadId: string): void {
+  const highlight = document.querySelector<HTMLElement>(
+    `[data-comment-thread="${CSS.escape(threadId)}"]:not([data-comment-resolved])`,
+  );
+  if (highlight !== null) {
+    highlight.focus();
+    return;
+  }
+  const text = document.querySelector<HTMLElement>(".ub-editor .tiptap")
+    ?? document.querySelector<HTMLElement>(".ub-document-pane");
+  if (text === null) return;
+  if (!text.hasAttribute("tabindex")) text.tabIndex = -1;
+  text.focus();
 }
 
 /**

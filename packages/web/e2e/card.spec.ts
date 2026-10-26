@@ -68,8 +68,8 @@ test("empty optional parts collapse outside the card, and all four prose parts t
     await composer.locator("textarea").fill(`Discuss ${part}`);
     await composer.getByRole("button", { name: "Comment", exact: true }).click();
     await expect(field.locator("[data-comment-thread]")).toHaveText(text);
-    await expect(page.locator(".ub-thread-card").filter({ hasText: `Discuss ${part}` })).toContainText("Card 1");
-    await closeIfOpen(page.getByRole("button", { name: "Close threads", exact: true }), page.locator(".ub-threads-toggle"), { touch: false });
+    await expect(page.locator(".ub-thread-card").filter({ hasText: `Discuss ${part}` })).toBeVisible();
+    await closeIfOpen(page.getByRole("button", { name: "Close comments", exact: true }), page.locator(".ub-threads-toggle"), { touch: false });
   }
   const footer = card.locator(".ub-card-footer p");
   await footer.click();

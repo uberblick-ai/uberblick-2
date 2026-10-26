@@ -1,473 +1,243 @@
-/**
- * Each card's selection button and linked comment text are siblings, so every
- * link remains reachable. Quote marks are CSS. Share focus with editor
- * highlights. Keep resolved threads collapsed below the open count. Schema
- * writes recheck the live thread; a refused reply keeps its draft and reason
- * outside the retiring form, and that reason disappears when the thread
- * reopens.
- */
-
+/** Drafts belong to conversations, outside the drawer's mount lifetime. */
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { addComment, getAnnotation, setAnnotationResolved } from "@uberblick/schema";
-import type { AnnotationComment } from "@uberblick/schema";
 import type { RoomConnection } from "../../collab/rooms.js";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import { writeDocument } from "../../collab/document-write.js";
 import { CommentForm } from "./CommentForm.js";
 import { CommentText } from "./CommentText.js";
+import { CommentByline } from "./CommentByline.js";
 import {
-  commentTimestamp,
   flashThreadHighlight,
   focusThreadCard,
-  resolvedHighlightCss,
+  returnFocusToComment,
+  selectedHighlightCss,
   scrollThreadCardIntoView,
   threadCardId,
 } from "./threads.js";
 import type { ThreadFocus, ThreadView } from "./threads.js";
 import { Button } from "../shadcn/button.js";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../shadcn/collapsible.js";
 import { Sheet, SheetContent, SheetTitle } from "../shadcn/sheet.js";
 import { useTimestampClock } from "../timestamps.js";
 
-function Comment({
-  comment,
-  now,
-  docLinks,
-}: {
-  comment: AnnotationComment;
-  now: number;
-  docLinks: DocLinkContext | null;
-}): ReactElement {
-  const { label, dateTime, title } = commentTimestamp(comment.createdAt, now);
-  return (
-    <span className="ub-thread-comment flex flex-col">
-      <span className="ub-thread-byline flex gap-[0.35rem] ub-type-ui text-(--muted-foreground)">
-        <span className="ub-thread-author font-medium text-foreground">{comment.author}</span>
-        {/* No `dateTime` when the stored value is not a date: React drops the
-            attribute, and the label still shows what the document holds. */}
-        <time dateTime={dateTime} title={title}>
-          {label}
-        </time>
-      </span>
-      <span className="ub-thread-text whitespace-pre-wrap"><CommentText text={comment.text} docLinks={docLinks} /></span>
-    </span>
-  );
-}
-
 function ThreadCard({
-  thread,
-  now,
-  focused,
-  collapsed,
-  replying,
-  draft,
-  readOnly,
-  refusal,
-  onSelect,
-  onReply,
-  onReplyOpen,
-  onReplyClose,
-  onResolve,
-  docLinks,
-  openDocId,
-  hidden,
+  thread, now, focused, draft, readOnly, refusal, onSelect, onReply,
+  onDeselect, onReplyFocus, onResolve, docLinks, openDocId, hidden,
 }: {
   thread: ThreadView;
   now: number;
   focused: boolean;
-  /** Resolved and not expanded: head and excerpt only. */
-  collapsed: boolean;
-  replying: boolean;
   draft: { text: string; onChange: (text: string) => void };
-  /** The conversation is readable, but nothing on the card writes. */
   readOnly: boolean;
-  /** Keep the refused-reply reason only while the card reads as settled. */
   refusal: string | null;
   onSelect: () => void;
+  onDeselect: () => void;
+  onReplyFocus: () => void;
   onReply: (text: string) => boolean;
-  onReplyOpen: () => void;
-  onReplyClose: () => void;
   onResolve: (resolved: boolean) => void;
   docLinks: DocLinkContext | null;
   openDocId: string | null;
   hidden: boolean;
 }): ReactElement {
-  return (
-    <li id={threadCardId(thread.id)} className="ub-thread-card">
-      <fieldset
-        // Resolved and orphaned cards keep their labels and collapse state;
-        // opacity would also dim their enabled text below its contrast floor.
-        className={`ub-thread m-0 flex w-full min-w-0 cursor-pointer flex-col gap-[0.35rem] rounded-(--radius-sm) border border-l-(length:--border-width-emphasis) border-(--border) px-[0.6rem] py-2 text-left [font:inherit] hover:border-l-brand ${focused ? "ub-thread-focused border-l-brand bg-(--brand-subtle)" : "bg-card"} text-card-foreground${thread.orphaned ? " ub-thread-orphaned" : ""}${thread.resolved ? " ub-thread-resolved" : ""}`}
-        aria-current={focused ? "true" : undefined}
-        aria-label="Comment thread"
-        onClick={(event) => { if (!(event.target instanceof Element && event.target.closest("a"))) onSelect(); }}
-        onKeyDown={(event) => {
-          if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
-            event.preventDefault();
-            onSelect();
-          }
-        }}
-      >
-        <Button variant="plain" size="custom" type="button" className="flex w-full flex-col gap-[0.35rem] text-left [font:inherit]"
-          aria-labelledby={`${threadCardId(thread.id)}-head ${threadCardId(thread.id)}-comments`}
-          aria-expanded={thread.resolved ? !collapsed : undefined}>
-        <span id={`${threadCardId(thread.id)}-head`} className="contents">
-        <span className="ub-thread-head flex items-center gap-[0.35rem]">
-          {/* The one auto margin keeps both state chips together at the edge. */}
-          <span className="ub-thread-ref mr-auto ub-type-caption tracking-[0.02em] text-(--muted-foreground)">{thread.blockRef}</span>
-          {thread.orphaned && (
-            // The subtle warning fill disappears on a focused amber ground.
-            <span className={`ub-chip ub-chip-orphaned rounded-(--radius-sm) px-[0.3rem] ub-type-caption tracking-[0.04em] uppercase ${focused ? "bg-(--status-warning) text-(--brand-foreground)" : "bg-(--status-warning-subtle) text-foreground"}`}>
-              orphaned
-            </span>
-          )}
-          {thread.resolved && <span className="ub-chip rounded-(--radius-sm) bg-(--card-accent) px-[0.3rem] ub-type-caption tracking-[0.04em] text-secondary-foreground uppercase">resolved</span>}
-        </span>
-        {thread.orphaned ? (
-          // The range is gone, so there is nothing to quote. Say so, and say
-          // where it was — the conversation itself is right below, untouched.
-          <span className="ub-thread-gone ub-type-small text-(--muted-foreground)">
-            annotated range deleted from {thread.blockRef}
-          </span>
-        ) : (
-          // Quote marks are chrome; the excerpt itself stays verbatim.
-          <span className="ub-thread-excerpt border-l-(length:--border-width-emphasis) border-(--border) pl-[0.4rem] text-foreground italic before:content-['“'] after:content-['”']">{thread.excerpt}</span>
-        )}
-        </span>
-        </Button>
-        <span id={`${threadCardId(thread.id)}-comments`} className="contents">
-        {collapsed ? (
-          <span className="ub-thread-replies ub-type-caption text-(--muted-foreground)">
-            {thread.comments.length}{" "}
-            {thread.comments.length === 1 ? "comment" : "comments"} — show
-          </span>
-        ) : (
-          thread.comments.map((comment) => (
-            <Comment key={comment.key} comment={comment} now={now} docLinks={docLinks} />
-          ))
-        )}
-        {!collapsed && thread.replyCount > 0 && (
-          <span className="ub-thread-replies ub-type-caption text-(--muted-foreground)">
-            {thread.replyCount} {thread.replyCount === 1 ? "reply" : "replies"}
-          </span>
-        )}
-        </span>
-      </fieldset>
-      {/*
-          * Keep refusal outside the collapsing branch so a concurrent resolve cannot
-          * hide it with the form.
-       */}
+  const comments = focused ? thread.comments : thread.comments.slice(0, 1);
+  const newest = thread.comments.at(-1)?.createdAt ?? "";
+  return <li id={threadCardId(thread.id)} className="ub-thread-card">
+    <fieldset
+      className={`ub-thread${focused ? " ub-thread-focused" : ""}${thread.orphaned ? " ub-thread-orphaned" : ""}${thread.resolved ? " ub-thread-resolved" : ""}`}
+      aria-current={focused ? "true" : undefined}
+      aria-label="Comment"
+      data-expanded={focused}
+      onClick={(event) => {
+        if (!(event.target instanceof Element && event.target.closest("a, button, textarea, input"))) onSelect();
+      }}
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+        if (event.key === "Escape" && !event.defaultPrevented) {
+          event.preventDefault();
+          onDeselect();
+        }
+      }}>
+      {thread.orphaned && <span className="ub-thread-gone ub-type-small text-(--muted-foreground)">on ‘…’ (text removed)</span>}
+      {comments.map((comment, index) => <div key={comment.key} className="ub-thread-comment">
+        {index === 0 ? <Button variant="plain" size="custom" type="button" className="ub-thread-select text-left"
+          aria-label="Comment" aria-expanded={focused} onClick={onSelect}>
+          <CommentByline comment={comment} now={now} updatedAt={newest} />
+        </Button> : <CommentByline comment={comment} now={now} />}
+        <div className="ub-thread-text whitespace-pre-wrap"><CommentText text={comment.text} docLinks={docLinks} /></div>
+      </div>)}
+      {!focused && thread.replyCount > 0 && <span className="ub-thread-replies ub-type-small text-(--muted-foreground)">
+        {thread.replyCount} {thread.replyCount === 1 ? "reply" : "replies"}
+      </span>}
+      {!readOnly && <Button variant="plain" size="custom" type="button"
+        aria-label={thread.resolved ? "Reopen" : "Resolve"}
+        className="ub-thread-resolve ub-thread-control" onClick={() => onResolve(!thread.resolved)}>
+        {thread.resolved ? "Reopen" : "✓ Resolve"}
+      </Button>}
       {refusal !== null && <p className="ub-comment-error">{refusal}</p>}
-      {/* Archived conversations remain readable without write controls. */}
-      {!collapsed &&
-        !readOnly &&
-        (replying ? (
-          <CommentForm
-            placeholder="Reply…"
-            submitLabel="Reply"
-            draft={draft}
-            autoFocus={false}
-            docLinks={docLinks}
-            openDocId={openDocId}
-            hidden={hidden}
-            onSubmit={onReply}
-            onCancel={onReplyClose}
-          />
-        ) : (
-          <div className="ub-thread-actions flex gap-1 pt-[0.3rem] pl-[0.6rem]">
-            {!thread.resolved && (
-              <Button variant="tool" size="custom" type="button" onClick={onReplyOpen}>
-                Reply
-              </Button>
-            )}
-            <Button variant="tool" size="custom"
-              type="button"
-              onClick={() => onResolve(!thread.resolved)}
-            >
-              {thread.resolved ? "Reopen" : "Resolve"}
-            </Button>
-          </div>
-        ))}
-    </li>
-  );
+      {thread.resolved && draft.text !== "" && <div className="ub-thread-unsent ub-type-small">
+        <span className="text-(--muted-foreground)">Unsent reply — reopen to continue</span>
+        <p className="m-0 whitespace-pre-wrap">{draft.text}</p>
+      </div>}
+      {!readOnly && !thread.resolved && <div className="ub-thread-control ub-thread-reply">
+        <CommentForm compact placeholder="Reply…" submitLabel="Reply" draft={draft}
+          autoFocus={false} docLinks={docLinks} openDocId={openDocId} hidden={hidden}
+          onSubmit={onReply} onCancel={onDeselect} onFocus={onReplyFocus} />
+      </div>}
+    </fieldset>
+  </li>;
 }
 
 export function ThreadsPane({
-  connection,
-  catalogConnection = null,
-  canCleanupTags,
-  threads,
-  focused,
-  author,
-  account,
-  readOnly = false,
-  onFocus,
-  narrow = false,
-  open = false,
-  hidden = false,
-  onOpenChange,
-  onCloseAutoFocus,
-  docLinks = null,
-  openDocId = null,
+  connection, catalogConnection = null, canCleanupTags, threads, focused,
+  author, account, readOnly = false, onFocus, narrow = false, open = false,
+  hidden = false, onOpenChange, onCloseAutoFocus, onDraftsChange, docLinks = null, openDocId = null,
 }: {
   connection: RoomConnection | null;
   catalogConnection?: RoomConnection | null;
   canCleanupTags?: (() => boolean) | undefined;
-  /**
-   * Share the shell's ordered thread list with the pane-edge count and drawer
-   * gate instead of recomputing it in three observers.
-   */
   threads: readonly ThreadView[];
   focused: ThreadFocus | null;
-  /** The awareness name this client publishes — the author of its replies. */
   author: string;
   account?: import("../../shell/account.js").AccountIdentity | undefined;
-  /** Archives retain every card while withholding Reply, Resolve and Reopen. */
   readOnly?: boolean;
-  onFocus: (threadId: string) => void;
+  onFocus: (threadId: string | null) => void;
   narrow?: boolean;
   open?: boolean;
-  /** Keep reply drafts while hiding the live document, including its sheet. */
   hidden?: boolean;
   onOpenChange?: (open: boolean) => void;
   onCloseAutoFocus?: (event: Event) => void;
+  onDraftsChange?: (hasDrafts: boolean) => void;
   docLinks?: DocLinkContext | null;
   openDocId?: string | null;
 }): ReactElement | null {
-  const [replyTo, setReplyTo] = useState<string | null>(null);
-  // The pane stays mounted when the sheet closes or switches to a column.
-  // The modal content can unmount without losing the form or its draft.
-  const [replyText, setReplyText] = useState("");
-  // Only choosing Reply takes focus. A retained form remounting after closure
-  // or a breakpoint crossing is not another request to start writing in it.
-  useEffect(() => {
-    if (replyTo === null) return;
-    document
-      .getElementById(threadCardId(replyTo))
-      ?.querySelector<HTMLTextAreaElement>(".ub-comment-input")
-      ?.focus();
-  }, [replyTo]);
-  const cancelReply = (): void => {
-    setReplyTo(null);
-    setReplyText("");
-  };
-  const now = useTimestampClock();
-  /** Only one resolved card may be expanded at a time. */
-  const [expanded, setExpanded] = useState<string | null>(null);
-  /**
-   * Pair the refused reply with its thread and clear it only when the
-   * observed document state no longer justifies it.
-   */
-  const [refusal, setRefusal] = useState<{ id: string; message: string } | null>(
-    null,
-  );
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [showResolved, setShowResolved] = useState(false);
+  const [refusals, setRefusals] = useState<Record<string, string>>({});
   const handledSelection = useRef<ThreadFocus | null>(null);
-
-  // Key scrolling on the whole focus value so repeated highlight activation
-  // works. Move keyboard focus after commit because selecting may mount the
-  // drawer and card.
+  const resolvedToggle = useRef<HTMLButtonElement>(null);
+  const focusResolvedToggle = useRef(false);
+  const now = useTimestampClock();
   useEffect(() => {
-    // A resize or a dismissal can rerun this effect, but neither repeats the
-    // last highlight's request to move focus out of the prose.
-    if (
-      focused === null ||
-      focused === handledSelection.current ||
-      (narrow && !open) ||
-      // Creation selects its thread before the coalesced document observer
-      // supplies its card. Retain that request until the card can receive it.
-      !threads.some((thread) => thread.id === focused.id)
-    ) return;
-    // The first committed frame still has the collapsed card to focus. Reveal
-    // it, then let this effect's second pass scroll and focus the expanded card.
-    // A card selection never sets this flag, so its own toggle remains intact.
-    if (focused.revealResolved && expanded !== focused.id) {
-      setExpanded(focused.id);
+    if (!focusResolvedToggle.current || !threads.some((thread) => thread.resolved) || resolvedToggle.current === null) return;
+    focusResolvedToggle.current = false;
+    resolvedToggle.current.focus();
+  }, [threads]);
+  useEffect(() => {
+    onDraftsChange?.(connection !== null && Object.entries(drafts).some(([key, text]) =>
+      key.startsWith(`${connection.room}:`) && text !== ""));
+  }, [connection, drafts, onDraftsChange]);
+  useEffect(() => {
+    if (connection === null) return;
+    setRefusals((current) => {
+      const next = Object.fromEntries(Object.entries(current).filter(([key]) => {
+        const thread = threads.find((item) => key === `${connection.room}:${item.id}`);
+        return thread === undefined || getAnnotation(connection.ydoc, thread.id)?.resolved !== false;
+      }));
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
+  }, [connection, threads]);
+  useEffect(() => {
+    if (focused === null || focused === handledSelection.current || (narrow && !open)
+      || !threads.some((thread) => thread.id === focused.id)) return;
+    if (threads.some((thread) => thread.id === focused.id && thread.resolved) && !showResolved) {
+      setShowResolved(true);
       return;
     }
     handledSelection.current = focused;
     scrollThreadCardIntoView(focused.id);
     if (focused.viaKeyboard) focusThreadCard(focused.id);
-  }, [focused, expanded, narrow, open, threads]);
+  }, [focused, showResolved, narrow, open, threads]);
 
-  // Clear reply intent when the thread resolves or the document becomes read-
-  // only; reopening or restoring must not resurrect a form without another
-  // Reply gesture.
-  useEffect(() => {
-    if (replyTo === null) return;
-    if (readOnly) {
-      setReplyTo(null);
-      return;
-    }
-    const thread = threads.find((candidate) => candidate.id === replyTo);
-    if (thread === undefined || thread.resolved) setReplyTo(null);
-  }, [threads, replyTo, readOnly]);
-
-  // Keep refusal only while its thread remains settled. Use the rail first
-  // and the live document during the same-task observer lag, so a remote
-  // reopen never leaves a stale refusal.
-  useEffect(() => {
-    if (refusal === null || connection === null) return;
-    const settled = threads.some(
-      (candidate) => candidate.id === refusal.id && candidate.resolved,
-    );
-    if (!settled && getAnnotation(connection.ydoc, refusal.id)?.resolved !== true) {
-      setRefusal(null);
-    }
-  }, [threads, refusal, connection]);
-
-  if (connection === null || threads.length === 0) return null;
+  if (connection === null) return null;
   const { ydoc } = connection;
+  const draftKey = (id: string): string => `${connection.room}:${id}`;
+  const setDraft = (id: string, text: string): void => {
+    setDrafts((current) => ({ ...current, [draftKey(id)]: text }));
+  };
+  const deselect = (id: string): void => {
+    onFocus(null);
+    if (narrow) onOpenChange?.(false);
+    else returnFocusToComment(id);
+  };
   const unresolved = threads.filter((thread) => !thread.resolved);
   const resolved = threads.filter((thread) => thread.resolved);
-
-  const card = (thread: ThreadView): ReactElement => (
-    <ThreadCard
-      key={thread.id}
-      thread={thread}
-      now={now}
-      focused={thread.id === focused?.id}
-      collapsed={thread.resolved && expanded !== thread.id}
-      // A resolved thread never shows a retained reply form, even when
-      // expanded.
-      replying={replyTo === thread.id && !thread.resolved}
-      draft={{ text: replyText, onChange: setReplyText }}
-      readOnly={readOnly}
-      docLinks={docLinks}
-      openDocId={openDocId}
-      hidden={hidden || (narrow && !open)}
-      // Suppress settled-thread refusal during the first reopened render,
-      // before the clearing effect runs.
-      refusal={
-        thread.resolved && refusal?.id === thread.id ? refusal.message : null
+  const card = (thread: ThreadView): ReactElement => <ThreadCard key={thread.id}
+    thread={thread} now={now} focused={thread.id === focused?.id}
+    draft={{ text: drafts[draftKey(thread.id)] ?? "", onChange: (text) => setDraft(thread.id, text) }}
+    readOnly={readOnly} docLinks={docLinks} openDocId={openDocId} hidden={hidden || (narrow && !open)}
+    refusal={thread.resolved ? refusals[draftKey(thread.id)] ?? null : null}
+    onSelect={() => { onFocus(thread.id); flashThreadHighlight(thread.id); }}
+    onReplyFocus={() => { if (focused?.id !== thread.id) onFocus(thread.id); }}
+    onDeselect={() => deselect(thread.id)}
+    onReply={(text) => {
+      if (readOnly || !connection.status.writable) return false;
+      const refuse = (message: string): false => {
+        setRefusals((current) => ({ ...current, [draftKey(thread.id)]: message }));
+        return false;
+      };
+      if (getAnnotation(ydoc, thread.id)?.resolved === true) {
+        return refuse("This comment was resolved while you wrote — reopen it to reply.");
       }
-      onSelect={() => {
-        onFocus(thread.id);
-        flashThreadHighlight(thread.id);
-        // A resolved card is collapsed, so the click that selects it is also
-        // the click that opens it — and closes it again.
-        if (thread.resolved) {
-          setExpanded((current) => (current === thread.id ? null : thread.id));
-        }
-      }}
-      onReplyOpen={() => {
-        setReplyText("");
-        setReplyTo(thread.id);
-      }}
-      onReplyClose={cancelReply}
-      onReply={(text) => {
-        if (readOnly || !connection.status.writable) return false;
-        // Re-read the live thread at submit; a remote resolve or deletion
-        // must refuse the reply.
-        if (getAnnotation(ydoc, thread.id)?.resolved === true) {
-          setRefusal({
-            id: thread.id,
-            message:
-              "This thread was resolved while you wrote — reopen it to reply.",
-          });
-          return false;
-        }
-        // addComment performs the final lookup and returns null if the thread
-        // disappeared.
-        if (writeDocument(ydoc, catalogConnection?.ydoc ?? null, () => addComment(ydoc, thread.id, author, text,
-          { kind: "person", ...(account?.state === "signed-in"
-            ? { account: account.handle, ...(account.principalId === undefined ? {} : { principalId: account.principalId }) }
-            : {}) }), undefined, canCleanupTags) === null) {
-          setRefusal({ id: thread.id, message: "This thread no longer exists." });
-          return false;
-        }
-        setReplyTo(null);
-        return true;
-      }}
-      onResolve={(next) => {
-        if (readOnly || !connection.status.writable) return;
-        writeDocument(ydoc, catalogConnection?.ydoc ?? null, () => setAnnotationResolved(ydoc, thread.id, next), undefined, canCleanupTags);
-        setReplyTo((current) => (current === thread.id ? null : current));
-        setExpanded(null);
-      }}
-    />
-  );
+      if (writeDocument(ydoc, catalogConnection?.ydoc ?? null, () => addComment(ydoc, thread.id, author, text,
+        { kind: "person", ...(account?.state === "signed-in"
+          ? { account: account.handle, ...(account.principalId === undefined ? {} : { principalId: account.principalId }) }
+          : {}) }), undefined, canCleanupTags) === null) {
+        return refuse("This comment no longer exists.");
+      }
+      return true;
+    }}
+    onResolve={(next) => {
+      if (readOnly || !connection.status.writable) return;
+      writeDocument(ydoc, catalogConnection?.ydoc ?? null, () => setAnnotationResolved(ydoc, thread.id, next), undefined, canCleanupTags);
+      if (next) {
+        focusResolvedToggle.current = true;
+        setShowResolved(false);
+        onFocus(null);
+      } else onFocus(thread.id);
+    }} />;
 
-  const content = (
-    <section className="ub-threads" aria-label="Threads">
-      {/* Count open threads only; resolved conversations are retained below. */}
-      <p className="ub-rail-head mt-0 mr-0 mb-[0.4rem] ml-0 ub-type-caption tracking-[0.06em] text-(--muted-foreground) uppercase">
-        Threads <span className="ub-muted">{unresolved.length}</span>
-      </p>
-      <ul className="m-0 flex list-none flex-col gap-2 p-0">{unresolved.map(card)}</ul>
-      {resolved.length > 0 && (
-        <>
-          <p className="ub-rail-head mt-[0.9rem] mr-0 mb-[0.4rem] ml-0 ub-type-caption tracking-[0.06em] text-(--muted-foreground) uppercase">
-            Resolved <span className="ub-muted">{resolved.length}</span>
-          </p>
-          <ul className="m-0 flex list-none flex-col gap-2 p-0">{resolved.map(card)}</ul>
-        </>
-      )}
-    </section>
-  );
-  // The editor's resolved anchors keep their appearance even while the sheet
-  // content is unmounted. This derived stylesheet belongs to the stable pane.
-  const highlights = resolved.length > 0 ? (
-    <style data-resolved-highlights="">
-      {resolvedHighlightCss(resolved.map((thread) => thread.id))}
-    </style>
-  ) : null;
-  if (narrow) {
-    return (
-      <>
-        {highlights}
-        <Sheet open={open && !hidden} onOpenChange={(shown) => onOpenChange?.(shown)}>
-          <SheetContent
-            id="ub-rail"
-            className="ub-rail ub-rail-open ub-type-ui"
-            closeLabel="Close threads"
-            aria-describedby={undefined}
-            onOpenAutoFocus={(event) => {
-              // The portal mounts after the pane's selection effect. Every
-              // anchor must reveal its card once it exists, including taps.
-              if (focused !== null) scrollThreadCardIntoView(focused.id);
-              if (focused?.viaKeyboard) {
-                event.preventDefault();
-                focusThreadCard(focused.id);
-              }
-            }}
-            onCloseAutoFocus={(event) => {
-              if (hidden) event.preventDefault();
-              else onCloseAutoFocus?.(event);
-            }}
-            onEscapeKeyDown={(event) => {
-              // Radix receives Escape in capture, before CommentForm's handler.
-              // Cancelling a visible reply is one gesture, leaving the sheet open.
-              if (
-                event.target instanceof Element &&
-                event.target.closest(".ub-comment-form textarea") !== null &&
-                !readOnly &&
-                threads.some((thread) => thread.id === replyTo && !thread.resolved)
-              ) {
-                event.preventDefault();
-                // Prevent Radix dismissal during composition too, without
-                // taking the reply draft away from the input method.
-                if (event.isComposing || event.keyCode === 229) return;
-                cancelReply();
-              }
-            }}
-          >
-            <SheetTitle className="sr-only">Threads</SheetTitle>
-            {/* Keep the fixed close target clear of the first unscrolled card. */}
-            <div className="min-h-0 flex-1 overflow-y-auto p-3 pt-4 [@media(any-pointer:coarse)]:pt-7">{content}</div>
-          </SheetContent>
-        </Sheet>
-      </>
-    );
-  }
-  return (
-    <>
-      {highlights}
-      <aside
-        id="ub-rail"
-        className="ub-rail flex min-h-0 w-full flex-1 flex-col gap-5 overflow-y-auto p-3 ub-type-ui"
-      >
-        {content}
-      </aside>
-    </>
-  );
+  const removedDrafts = Object.entries(drafts).filter(([key, text]) => text !== ""
+    && key.startsWith(`${connection.room}:`) && !threads.some((thread) => draftKey(thread.id) === key));
+  if (threads.length === 0 && removedDrafts.length === 0) return null;
+  const content = <section className="ub-threads" aria-label="Comments">
+    <ul className="m-0 flex list-none flex-col gap-2 p-0">{unresolved.map(card)}</ul>
+    {resolved.length > 0 && <Collapsible open={showResolved} onOpenChange={(shown) => {
+      setShowResolved(shown);
+      if (!shown && resolved.some((thread) => thread.id === focused?.id)) onFocus(null);
+    }}>
+      <CollapsibleTrigger asChild><Button ref={resolvedToggle} variant="plain" size="custom" className="ub-resolved-toggle ub-type-small text-(--muted-foreground)">
+        {resolved.length} resolved
+      </Button></CollapsibleTrigger>
+      <CollapsibleContent><ul className="m-0 flex list-none flex-col gap-2 p-0">{resolved.map(card)}</ul></CollapsibleContent>
+    </Collapsible>}
+    {removedDrafts.map(([key, text]) => <div key={key} className="ub-thread-unsent">
+      <p className="ub-comment-error">This comment no longer exists. Your unsent reply is kept here.</p>
+      <p className="whitespace-pre-wrap select-text">{text}</p>
+    </div>)}
+  </section>;
+  const highlights = <style data-selected-highlight="">{selectedHighlightCss(focused?.id ?? null)}</style>;
+  if (narrow) return <>
+    {highlights}
+    <Sheet open={open && !hidden} onOpenChange={(shown) => onOpenChange?.(shown)}>
+      <SheetContent id="ub-rail" className="ub-rail ub-rail-open ub-type-ui" closeLabel="Close comments"
+        aria-describedby={undefined}
+        onOpenAutoFocus={(event) => {
+          if (focused !== null) scrollThreadCardIntoView(focused.id);
+          if (focused?.viaKeyboard) { event.preventDefault(); focusThreadCard(focused.id); }
+        }}
+        onCloseAutoFocus={(event) => { if (hidden) event.preventDefault(); else onCloseAutoFocus?.(event); }}
+        onEscapeKeyDown={(event) => {
+          if (event.isComposing || event.keyCode === 229
+            || (event.target instanceof Element && event.target.closest("[data-mention-menu-open=true]"))) {
+            event.preventDefault();
+          } else onFocus(null);
+        }}>
+        <SheetTitle className="sr-only">Comments</SheetTitle>
+        <div className="min-h-0 flex-1 overflow-y-auto p-3 pt-12 [@media(any-pointer:coarse)]:pt-14">{content}</div>
+      </SheetContent>
+    </Sheet>
+  </>;
+  return <>{highlights}<aside id="ub-rail" className="ub-rail flex min-h-0 w-full flex-1 flex-col overflow-y-auto p-3 ub-type-ui">{content}</aside></>;
 }

@@ -19,7 +19,7 @@ function queryAt(field: HTMLTextAreaElement, session: Session): string | null {
 }
 
 export function CommentMentionField({
-  text, setText, placeholder, autoFocus, hidden, docLinks, openDocId, onSubmit, onCancel,
+  text, setText, placeholder, autoFocus, hidden, docLinks, openDocId, onSubmit, onCancel, compact = false, onFocus,
 }: {
   text: string;
   setText: (text: string) => void;
@@ -30,6 +30,8 @@ export function CommentMentionField({
   openDocId: string | null;
   onSubmit: () => void;
   onCancel: () => void;
+  compact?: boolean;
+  onFocus?: (() => void) | undefined;
 }): ReactElement {
   const field = useRef<HTMLTextAreaElement | null>(null);
   const members = useWorkspaceMembers();
@@ -102,17 +104,18 @@ export function CommentMentionField({
       onSubmit();
     } else if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
       onCancel();
     }
   };
   return <Popover open={open} onOpenChange={(shown) => { if (!shown) setSession(null); }}>
     <PopoverAnchor asChild>
       <Textarea ref={field} className="ub-comment-input resize-y in-[.ub-composer]:max-h-16 in-[.ub-composer]:resize-none"
-        rows={2} autoFocus={autoFocus} placeholder={placeholder} value={text}
+        rows={compact ? 1 : 2} autoFocus={autoFocus} placeholder={placeholder} value={text}
         data-mention-menu-open={open || undefined}
         aria-haspopup="listbox" aria-controls={open ? listId : undefined}
         aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
-        onChange={change} onKeyDown={keyDown}
+        onChange={change} onKeyDown={keyDown} onFocus={onFocus}
         onSelect={(event) => {
           if (session !== null && queryAt(event.currentTarget, session) !== query) setSession(null);
         }} />

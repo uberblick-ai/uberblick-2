@@ -48,7 +48,7 @@ test("a document keeps its threads column before and after the first comment", a
   const proseBefore = await prose.boundingBox();
   expect(columnBefore?.width).toBeGreaterThan(0);
   await selectParagraph(prose);
-  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).click();
   await page.getByPlaceholder(/Comment as/).fill("first conversation");
   await page.keyboard.press("Enter");
   await expect(page.locator(".ub-thread")).toHaveCount(1);
@@ -76,24 +76,24 @@ test.describe("fractional layout", () => {
       await openDocument(page);
       await page.keyboard.type("fractional layout");
       await page.keyboard.press("Shift+Home");
-      await page.getByRole("button", { name: "Comment", exact: true }).click();
+      await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).click();
       await page.getByPlaceholder(/Comment as/).fill("fractional conversation");
       await page.keyboard.press("Enter");
       const toggle = page.locator(".ub-threads-toggle");
       await expect(toggle).toBeVisible();
       await expect(page.locator("aside.ub-rail")).toHaveCount(0);
-      const sheet = page.getByRole("dialog", { name: "Threads", exact: true });
+      const sheet = page.getByRole("dialog", { name: "Comments", exact: true });
       // Creation reveals the new card. Dismiss its modal before testing the
       // background sidebar handle and the explicit rail toggle.
       await expect(sheet).toBeVisible();
       await expect(sheet).toContainText("fractional conversation");
-      await sheet.getByRole("button", { name: "Close threads" }).click();
+      await sheet.getByRole("button", { name: "Close comments" }).click();
       await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
       await toggle.click();
       await expect(sheet).toBeVisible();
       await expect(sheet).toContainText("fractional conversation");
       await expect(page.locator('[data-slot="sheet-overlay"]')).toBeVisible();
-      await sheet.getByRole("button", { name: "Close threads" }).click();
+      await sheet.getByRole("button", { name: "Close comments" }).click();
       await page.getByRole("button", { name: "Show document list", exact: true }).click();
       await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
     } finally {
@@ -110,13 +110,13 @@ for (const hasTouch of [false, true]) {
       await openDocument(page);
       await page.keyboard.insertText("thread target");
       await selectParagraph(page.locator(".ub-editor .ub-paragraph").first());
-      await page.getByRole("button", { name: "Comment", exact: true }).click();
+      await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).click();
       await page.getByPlaceholder(/Comment as/).fill("first conversation");
       await page.keyboard.press("Enter");
       await expect(page.locator(".ub-thread")).toHaveCount(1);
       await page.setViewportSize({ width: 820, height: 1180 });
-      const sheet = page.getByRole("dialog", { name: "Threads", exact: true });
-      const close = sheet.getByRole("button", { name: "Close threads", exact: true });
+      const sheet = page.getByRole("dialog", { name: "Comments", exact: true });
+      const close = sheet.getByRole("button", { name: "Close comments", exact: true });
       await expect(sheet).toBeVisible();
       for (const colorScheme of ["light", "dark"] as const) {
         await page.emulateMedia({ colorScheme });
@@ -137,7 +137,7 @@ for (const hasTouch of [false, true]) {
           probe.remove();
           return result;
         });
-        expect(surfaces).toEqual({ floating: true, closeRadius: true, threadAccent: "2px" });
+        expect(surfaces).toEqual({ floating: true, closeRadius: true, threadAccent: "1px" });
       }
       const geometry = await sheet.evaluate((node) => {
         const button = node.querySelector<HTMLElement>('[data-slot="sheet-close"]');
@@ -219,7 +219,7 @@ for (const width of [810]) {
       await page.locator(".ub-editor .ub-paragraph").first().click();
       await selectParagraph(page.locator(".ub-editor .ub-paragraph").first());
       await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("first");
-      await page.getByRole("button", { name: "Comment", exact: true }).click();
+      await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).click();
       await page.getByPlaceholder(/Comment as/).fill("first conversation");
       await page.keyboard.press("Enter");
 
@@ -228,7 +228,7 @@ for (const width of [810]) {
       await page.locator(".ub-editor .ub-paragraph").last().click();
       await selectParagraph(page.locator(".ub-editor .ub-paragraph").last());
       await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("second");
-      await page.getByRole("button", { name: "Comment", exact: true }).click();
+      await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).click();
       await page.getByPlaceholder(/Comment as/).fill("second conversation");
       await page.keyboard.press("Enter");
       await expect(page.locator(".ub-thread")).toHaveCount(2);
@@ -236,13 +236,13 @@ for (const width of [810]) {
       await page.getByRole("button", { name: "Hide document list" }).tap();
       await page.setViewportSize({ width, height: 800 });
 
-      const sheet = page.getByRole("dialog", { name: "Threads", exact: true });
+      const sheet = page.getByRole("dialog", { name: "Comments", exact: true });
       const toggle = page.locator(".ub-threads-toggle");
       // The thread selected while wide is retained when its column becomes a
       // sheet. Its close control remains reachable on the touch viewport.
       await expect(sheet).toBeVisible();
       await expect(sheet.locator('.ub-thread[aria-current="true"]')).toContainText("second conversation");
-      await sheet.getByRole("button", { name: "Close threads" }).tap();
+      await sheet.getByRole("button", { name: "Close comments" }).tap();
       await expect(sheet).toBeHidden();
 
       const opener = page.locator('[data-comment-thread]', { hasText: "second" });
@@ -268,7 +268,7 @@ for (const width of [810]) {
       await toggle.tap();
       await expect(sheet).toBeVisible();
       await expect(selected).toContainText("second conversation");
-      await sheet.getByRole("button", { name: "Close threads" }).tap();
+      await sheet.getByRole("button", { name: "Close comments" }).tap();
       await expect(sheet).toBeHidden();
     } finally {
       await context.close();
@@ -298,7 +298,7 @@ test("touch reveals a low thread in the sheet while its close control stays in v
       await page.locator(".ub-editor .ub-paragraph").nth(index).click();
       await selectParagraph(page.locator(".ub-editor .ub-paragraph").nth(index));
       await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe(anchor);
-      await page.getByRole("button", { name: "Comment", exact: true }).click();
+      await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).click();
       await page.getByPlaceholder(/Comment as/).fill(`conversation ${index + 1}`);
       await page.keyboard.press("Enter");
       // Creating a comment returns focus through Tiptap's next animation frame.
@@ -314,8 +314,9 @@ test("touch reveals a low thread in the sheet while its close control stays in v
     await page.getByRole("button", { name: "Hide document list" }).tap();
     await page.setViewportSize({ width: 820, height: 600 });
 
-    const sheet = page.getByRole("dialog", { name: "Threads", exact: true });
-    const close = sheet.getByRole("button", { name: "Close threads" });
+    const sheet = page.getByRole("dialog", { name: "Comments", exact: true });
+    const close = sheet.getByRole("button", { name: "Close comments" });
+    await page.locator(".ub-threads-toggle").tap();
     await expect(sheet).toBeVisible();
     await close.tap();
     await expect(sheet).toBeHidden();
@@ -323,11 +324,17 @@ test("touch reveals a low thread in the sheet while its close control stays in v
     for (const number of [9, 10]) {
       const anchor = anchors[number - 1];
       if (anchor === undefined) throw new Error("e2e: missing thread anchor fixture");
-      await page.locator("[data-comment-thread]", { hasText: anchor }).tap();
+      if (number === 10) {
+        await page.locator(".ub-threads-toggle").tap();
+        await sheet.getByRole("button", { name: "1 resolved", exact: true }).tap();
+        await sheet.locator(".ub-thread-resolved .ub-thread-select").tap();
+      } else {
+        await page.locator("[data-comment-thread]", { hasText: anchor }).tap();
+      }
       await expect(sheet).toBeVisible();
       const selected = sheet.locator('.ub-thread[aria-current="true"]');
       await expect(selected).toContainText(`conversation ${number}`);
-      if (number === 10) await expect(selected.getByRole("button").first()).toHaveAttribute("aria-expanded", "true");
+      if (number === 10) await expect(selected).toHaveAttribute("data-expanded", "true");
       await expect(selected).toBeInViewport({ ratio: 1 });
       await expect(sheet.locator(".ub-thread").first()).not.toBeInViewport();
       // Assert before tapping: Playwright's automatic scroll into view must

@@ -70,7 +70,7 @@ import * as Y from "yjs";
 import { placeCaret } from "./harness.js";
 import { renderedText, strokeSeparation } from "./contrast-helpers.js";
 import { alphaOf, composite, contrast, legacySrgb, lightnessLimit, oklab, pageGrounds, separation } from "../test/colour.js";
-import { cardHighlightFloor, focusedOrphanedChipFloor } from "../test/contrast-contract.js";
+import { cardHighlightFloor } from "../test/contrast-contract.js";
 
 const { harness, openApp } = setupHarness();
 
@@ -944,7 +944,7 @@ test("a multiline comment composer stays above its selected passage", async ({ b
     await page.keyboard.press("Shift+ArrowLeft");
   }
   expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(selectedPassage);
-  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).click();
   const composer = page.locator('[data-slot="selection-composer"]');
   await expect(composer.locator('[data-slot="selection-excerpt"]')).toHaveText(selectedPassage);
   await expect(composer.locator('[data-slot="selection-clamp"]')).toHaveCount(0);
@@ -2595,7 +2595,7 @@ async function contrastDocument(
     appendBlock(doc, { type: "terminal", text: "$ ub init\nworkspace ready" });
     await expect(page.locator(".ub-terminal-screen")).toBeVisible();
     if ((page.viewportSize()?.width ?? 1280) >= 1280) {
-      await expect(page.locator(".ub-thread")).toHaveCount(2);
+      await expect(page.locator(".ub-thread")).toHaveCount(1);
     }
     const catalog = (await peer(settingsRoom(harness().workspaceUuid))).doc;
     seedTagCatalog(catalog);
@@ -2994,28 +2994,20 @@ for (const scheme of ["light", "dark"] as const) {
         for (const reading of text) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
       };
       const handle = page.locator(".ub-threads-toggle");
-      await check(handle);
+      await expect(handle).toBeVisible();
+      await expect(handle).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      await expect(handle).toHaveCSS("border-width", "0px");
       await handle.click();
+      await page.getByRole("button", { name: "1 resolved", exact: true }).click();
       const resolved = page.locator(".ub-thread-resolved");
       await expect(resolved).toBeVisible();
-      const card = await paintedIn(resolved, "background-color");
-      expect(card).toBe(tokens.card);
-      await check(resolved.locator(".ub-chip"), card);
       const orphan = page.locator(".ub-thread-orphaned");
-      const chip = orphan.locator(".ub-chip-orphaned");
-      await expect(chip).toBeVisible();
-      const restingGround = await paintedIn(orphan, "background-color");
-      const restingFill = await paintedIn(chip, "background-color");
-      expect(contrast(await paintedIn(chip, "color"), restingFill)).toBeGreaterThanOrEqual(4.5);
-      await orphan.click();
+      await expect(orphan.locator(".ub-thread-gone")).toContainText("text removed");
+      await expect(orphan.locator(".ub-chip")).toHaveCount(0);
+      await orphan.locator(".ub-thread-select").click();
       await expect(orphan).toHaveAttribute("aria-current", "true");
-      const focusedGround = await paintedIn(orphan, "background-color");
-      const focusedFill = await paintedIn(chip, "background-color");
-      const focusedStep = separation(focusedFill, focusedGround);
-      expect(focusedStep).toBeGreaterThanOrEqual(focusedOrphanedChipFloor[scheme]);
-      expect(focusedStep).toBeGreaterThanOrEqual(separation(restingFill, restingGround));
-      expect(contrast(await paintedIn(chip, "color"), focusedFill)).toBeGreaterThanOrEqual(4.5);
-      await page.getByRole("button", { name: "Close threads", exact: true }).click();
+      expect(await paintedIn(orphan, "background-color")).toBe(tokens.card);
+      await page.getByRole("button", { name: "Close comments", exact: true }).click();
       await expect(handle).toBeFocused();
 
       await page.locator(".ub-editor .ub-paragraph").first().click();
@@ -3040,7 +3032,7 @@ for (const scheme of ["light", "dark"] as const) {
       await page.getByRole("textbox", { name: "External link URL", exact: true }).fill("https://example.invalid/contrast");
       await expectNeutralEmphasis(page.getByRole("button", { name: "Apply", exact: true }));
       await page.getByRole("button", { name: "Cancel", exact: true }).click();
-      await page.getByRole("button", { name: "Comment", exact: true }).click();
+      await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).click();
       const composer = page.locator('[data-slot="selection-composer"]');
       await expect(composer).toBeVisible();
       const composerGround = await paintedIn(composer, "background-color");
@@ -3172,6 +3164,7 @@ for (const scheme of ["light"] as const) {
         await page.mouse.move(1399, 999);
         enabled.push(...await renderedText(page, copy));
       }
+      await page.getByRole("button", { name: "1 resolved", exact: true }).click();
       for (const state of ["resolved", "orphaned"]) {
         const root = `.ub-thread-card:has(.ub-thread-${state})`;
         const card = page.locator(`.ub-thread-${state}`);
@@ -3179,15 +3172,15 @@ for (const scheme of ["light"] as const) {
         enabled.push(...await renderedText(page, root));
         await card.hover();
         enabled.push(...await renderedText(page, root));
-        await card.click();
-        await card.focus();
+        await card.locator(".ub-thread-select").click();
+        await card.locator(".ub-thread-select").focus();
         await expect(card).toHaveAttribute("aria-current", "true");
         enabled.push(...await renderedText(page, root));
         await collect();
         if (state === "resolved") {
           // Keep the conversation expanded while removing its selected ground,
           // so enabled author/time/body text is also read at rest and hovered.
-          await page.locator(".ub-thread-orphaned").click();
+          await page.locator(".ub-thread-orphaned .ub-thread-select").click();
           await page.mouse.move(1399, 999);
           enabled.push(...await renderedText(page, root));
           await card.hover();
@@ -3542,7 +3535,8 @@ test("the document and comments rail stay left-anchored as the viewport changes"
       second.column.left - edge(second),
       1,
     );
-    expect(first.column.width).toBeCloseTo(second.column.width, 1);
+    expect(first.column.width).toBeLessThanOrEqual(second.column.width);
+    expect(second.column.width).toBeCloseTo(second.column.maxWidth, 1);
   };
 
   // With no heading or thread the rail is genuinely absent, but the document
@@ -3564,7 +3558,7 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   await placeCaret(page);
   await page.keyboard.type("annotate me", { delay: 15 });
   await page.keyboard.press("Shift+Home");
-  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).click();
   await page.keyboard.type("keep this beside the prose", { delay: 15 });
   await page.keyboard.press("Enter");
   await expect(page.locator(".ub-thread")).toBeVisible();
@@ -3579,7 +3573,7 @@ test("the document and comments rail stay left-anchored as the viewport changes"
     expect(Math.abs(leftGap - 44)).toBeLessThanOrEqual(1);
     expect(Math.abs(rightGap - 44)).toBeLessThanOrEqual(1);
     expect(Math.abs(leftGap - rightGap)).toBeLessThanOrEqual(1);
-    expect(reading.commentsColumn.width).toBe(240);
+    expect(reading.commentsColumn.width).toBe(352);
   }
   await page.setViewportSize({ width: 1600, height: 800 });
   for (let index = 0; index < expandedPopulated.length; index += 1) {
@@ -3592,7 +3586,8 @@ test("the document and comments rail stay left-anchored as the viewport changes"
     expect(reading.rail).not.toBeNull();
   }
   const [firstPopulated, secondPopulated] = firstTwo(expandedPopulated);
-  expect(firstPopulated.column.width).toBeCloseTo(firstPopulated.column.maxWidth, 1);
+  expect(firstPopulated.column.width).toBeLessThan(firstPopulated.column.maxWidth);
+  expect(secondPopulated.column.width).toBeCloseTo(secondPopulated.column.maxWidth, 1);
   expect(constrained[0]?.column.width).toBeLessThan(firstPopulated.column.width);
   const firstGap = shownRail(firstPopulated).left - firstPopulated.column.right;
   const secondGap = shownRail(secondPopulated).left - secondPopulated.column.right;
@@ -3600,12 +3595,12 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   expect(firstGap).toBeCloseTo(secondGap, 1);
   const firstTail = firstPopulated.body.right - shownRail(firstPopulated).right;
   const secondTail = secondPopulated.body.right - shownRail(secondPopulated).right;
-  expect(secondTail - firstTail).toBeCloseTo(200, 1);
+  expect(secondTail - firstTail).toBeCloseTo(200 - (secondPopulated.column.width - firstPopulated.column.width), 1);
 
   const highlight = page.locator("[data-comment-thread]").first();
   await highlight.click();
   await expect(page.locator('.ub-thread[aria-current="true"]')).toBeVisible();
-  await expect(page.getByRole("dialog", { name: "Threads", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Comments", exact: true })).toHaveCount(0);
   await expect(page.locator('[data-slot="sheet-overlay"]')).toHaveCount(0);
 
   await page.getByRole("button", { name: "Hide document list" }).click();
@@ -3627,7 +3622,7 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   await page.getByRole("button", { name: "Show document list" }).click();
   await expect.poll(async () => (await page.locator(".ub-list").boundingBox())?.x).toBe(0);
   await page.setViewportSize({ width: 768, height: 720 });
-  await page.getByRole("button", { name: "Close threads" }).click();
+  await page.getByRole("button", { name: "Close comments" }).click();
   await expect(page.locator(".ub-rail")).not.toBeVisible();
   await expect(page.locator(".ub-threads-toggle")).toBeFocused();
   const narrow = await layout();
@@ -3647,6 +3642,6 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   expect(withDrawer.column.left).toBeCloseTo(narrow.column.left, 1);
   expect(withDrawer.column.right).toBeCloseTo(narrow.column.right, 1);
   expect(shownRail(withDrawer).right).toBeCloseTo(withDrawer.body.right, 1);
-  await page.getByRole("button", { name: "Close threads" }).click();
+  await page.getByRole("button", { name: "Close comments" }).click();
   await expect(highlight).toBeFocused();
 });

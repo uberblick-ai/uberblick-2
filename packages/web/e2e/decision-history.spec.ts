@@ -122,8 +122,8 @@ test("decision topics keep only their record timeline while regular pages retain
   await decisionWithoutDocumentHistory(page, current.uuid, currentText);
   const threadsToggle = page.locator(".ub-threads-toggle");
   if (await threadsToggle.isVisible()) await activateControl(threadsToggle);
-  await expect(page.getByRole("region", { name: "Threads", exact: true })).toContainText("The current answer's conversation remains available.");
-  await closeIfOpen(page.getByRole("button", { name: "Close threads", exact: true }), threadsToggle);
+  await expect(page.getByRole("region", { name: "Comments", exact: true })).toContainText("The current answer's conversation remains available.");
+  await closeIfOpen(page.getByRole("button", { name: "Close comments", exact: true }), threadsToggle);
 
   await page.goBack();
   await expect(page).toHaveURL(revisionAddress);
