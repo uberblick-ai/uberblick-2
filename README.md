@@ -97,11 +97,13 @@ follows the page, with no restart and no copy of the text anywhere else.
 
 ### 5. Record a decision and find it by issue
 
-Ask the agent to record an open question as a decision, linked to an issue in
-your repository, and not to decide it. Approve the record on its topic page in
-the browser. In a fresh session, `find_decisions` for that issue returns it:
-the answer, who decided and when. That is what keeps an agent from reopening a
-settled question next month.
+Ask the agent to record an open question as a decision with a proposed answer,
+linked to an issue in your repository, and not to decide it. Review the proposal,
+then tell the agent: "I accept this proposal. My name is [your name]. Record my
+answer as decided now, with this conversation as its source." Replace [your name]
+with your name. In a fresh session, `find_decisions` for that issue returns the
+answer in force, who decided and when. That is what keeps an agent from reopening
+a settled question next month.
 
 ## Read more
 
