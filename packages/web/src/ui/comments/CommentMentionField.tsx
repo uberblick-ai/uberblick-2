@@ -109,7 +109,7 @@ export function CommentMentionField({
       <Textarea ref={field} className="ub-comment-input resize-y in-[.ub-composer]:max-h-16 in-[.ub-composer]:resize-none"
         rows={2} autoFocus={autoFocus} placeholder={placeholder} value={text}
         data-mention-menu-open={open || undefined}
-        aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? listId : undefined}
+        aria-haspopup="listbox" aria-controls={open ? listId : undefined}
         aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
         onChange={change} onKeyDown={keyDown}
         onSelect={(event) => {
