@@ -33,6 +33,7 @@ export const MANAGEMENT_OPERATIONS = {
   // Promotion checks hub administration or receipt-based resumption atomically in its registry.
   "promote-workspace": { scope: "hub", role: "admin-or-receipt", target: ["workspaceId", "attemptId"], changesState: true },
   "own-role": { scope: "workspace", role: "member", target: ["workspaceId"], changesState: false },
+  "list-member-usernames": { scope: "workspace", role: "member", target: ["workspaceId"], changesState: false },
   "list-members": { scope: "workspace", role: "admin", target: ["workspaceId"], changesState: false },
   "resolve-account": { scope: "workspace", role: "admin", target: ["workspaceId", "githubUsername"], changesState: false },
   "grant-member": { scope: "workspace", role: "admin", target: ["workspaceId", "githubAccountId"], changesState: true },
@@ -201,6 +202,15 @@ export async function handleAccessManagement(
       case "own-role":
         reply(200, { status: "ok", role: workspaceRole });
         break;
+      case "list-member-usernames": {
+        const usernames = memberships.listMembers(action.workspaceId).map(member => {
+          const principal = principals.get(member.principalId);
+          if (principal === null) throw new Error("Access management: member identity is missing");
+          return principal.githubUsername;
+        });
+        reply(200, { status: "ok", usernames });
+        break;
+      }
       case "list-members": {
         const members = memberships.listMembers(action.workspaceId).map(member => {
           const principal = principals.get(member.principalId);

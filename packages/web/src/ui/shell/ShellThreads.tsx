@@ -24,6 +24,8 @@ export function ShellThreads({ shell }: { shell: AppShell }) {
           threads={threads}
           focused={focusedThread}
           author={identity.name}
+          docLinks={shell.navigation.docLinks}
+          openDocId={parseRoom(doc.room).uuid}
           readOnly={archived || !docStatus.writable || (meta?.kind === "decision" && (topic === null || topic.first === null))}
           onFocus={onFocusThread}
           narrow={narrowLayout}

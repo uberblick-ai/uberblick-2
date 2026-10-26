@@ -34,7 +34,7 @@ import { CellSelection } from "@tiptap/pm/tables";
 import { CommentComposer } from "../src/ui/comments/CommentComposer.js";
 import { ThreadsPane } from "../src/ui/comments/ThreadsPane.js";
 import { cellTextTargetOf, commentTargetOf } from "../src/editor/selection.js";
-import { withMention } from "../src/ui/comments/CommentForm.js";
+import { WorkspaceMembersContext } from "../src/ui/workspace-members.js";
 import { resolvedHighlightCss } from "../src/ui/comments/threads.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
 import { mountEditor, snapshotFragment } from "./helpers.js";
@@ -177,15 +177,14 @@ function mountComposer(
   const frame = document.createElement("div");
   document.body.appendChild(frame);
   const view = render(
-    <CommentComposer
+    <WorkspaceMembersContext value={options.mentions ?? []}><CommentComposer
       editor={editor}
       contentReadOnly={options.contentReadOnly ?? false}
       ydoc={ydoc}
       author={options.author ?? "ben"}
-      mentions={options.mentions ?? []}
       host={{ current: frame }}
       onCreated={(threadId) => created.push(threadId)}
-    />,
+    /></WorkspaceMembersContext>,
     { container: frame },
   );
   return {
@@ -201,7 +200,7 @@ function mountComposer(
           HTMLTextAreaElement.prototype,
           "value",
         )?.set?.call(field, text);
-        field.dispatchEvent(new Event("input", { bubbles: true }));
+        field.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
       });
     },
     submit: () =>
@@ -1224,8 +1223,8 @@ describe("starting a thread from the prose", () => {
     try {
       select(view.editor, 1, 4, 15);
       view.open();
-      view.type("look at this");
-      act(() => within(commentComposer()).queryByRole<HTMLButtonElement>("button", { name: "@agent-a" })?.click());
+      view.type("look at this @agent-a");
+      expect(commentComposer().querySelector(".ub-mentions")).toBeNull();
       view.submit();
 
       expect(listAnnotations(ydoc)[0]?.comments[0]?.text).toBe(
@@ -1234,9 +1233,26 @@ describe("starting a thread from the prose", () => {
     } finally {
       view.unmount();
     }
-    // The convention, in one place: a separating space where one is needed.
-    expect(withMention("", "a")).toBe("@a ");
-    expect(withMention("hi ", "a")).toBe("hi @a ");
+  });
+
+  it("dismisses the typeahead before the composer and keeps composing Escape native", () => {
+    const { ydoc } = annotatedDoc();
+    const view = mountComposer(ydoc, { mentions: ["alice"] });
+    try {
+      select(view.editor, 1, 4, 15);
+      view.open();
+      view.type("@");
+      const field = screen.getByPlaceholderText<HTMLTextAreaElement>(/^Comment as /);
+      expect(screen.getByRole("listbox", { name: "People and documents" })).toBeDefined();
+      composingKey(field, "Escape", false);
+      expect(screen.getByRole("listbox", { name: "People and documents" })).toBeDefined();
+      act(() => { field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+      expect(screen.queryByRole("listbox")).toBeNull();
+      expect(screen.getByPlaceholderText<HTMLTextAreaElement>(/^Comment as /).value).toBe("@");
+      expect(listAnnotations(ydoc)).toEqual([]);
+      act(() => { field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+      expect(screen.queryByPlaceholderText(/^Comment as /)).toBeNull();
+    } finally { view.unmount(); }
   });
 });
 

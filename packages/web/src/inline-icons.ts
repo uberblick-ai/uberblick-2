@@ -25,7 +25,7 @@ export function inlineIconSvg(name: InlineIconName, prefix: string): string {
 
 /** Read rendered text without inheriting nested comment controls' accessible names. */
 export function inlineIconAnchorLabel(anchor: HTMLElement): string | null {
-  if (anchor.querySelector(".ub-inline-icon-text, .ub-inline-icon") === null) return null;
+  if (anchor.querySelector(".ub-inline-icon-text, .ub-inline-icon, .ub-person-mention-text, .ub-person-pill") === null) return null;
   const visibleText = (node: Node): string => {
     if (node instanceof Element && node.getAttribute("aria-hidden") === "true") return "";
     if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";

@@ -348,7 +348,7 @@ describe("a keyboard reaches a thread from its range in the prose", () => {
 
     const card = threadButton(threadCard(host));
     expect(card).not.toBeNull();
-    expect(card?.textContent).toContain("why quick?");
+    expect(threadCard(host).textContent).toContain("why quick?");
     expect(document.activeElement).toBe(card);
   });
 
@@ -387,7 +387,7 @@ describe("a keyboard reaches a thread from its range in the prose", () => {
     const item = threadCard(host);
     const card = threadButton(item);
     expect(card?.getAttribute("aria-expanded")).toBe("true");
-    expect(card?.textContent).toContain("why quick?");
+    expect(item.textContent).toContain("why quick?");
     expect(scrolled).toContain(item);
     expect(getAnnotation(ydoc, threadId)?.resolved).toBe(true);
     expect(within(item!).queryByPlaceholderText("Reply…")).toBeNull();

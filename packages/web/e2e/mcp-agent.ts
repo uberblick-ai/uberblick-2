@@ -28,6 +28,8 @@ interface McpAgentOptions {
   hubUrl: string;
   authSecret: string;
   statePrefix: string;
+  /** Use a fixture machine's existing sign-in without copying its credential. */
+  configHome?: string;
 }
 
 /**
@@ -93,9 +95,9 @@ export class McpSession {
         UB_AGENT_SESSION: agentSession,
         UB_WORKSPACE_ID: options.workspace,
         UB_HUB_URL: options.hubUrl,
-        HUB_AUTH_TOKEN: options.authSecret,
+        HUB_AUTH_TOKEN: options.configHome === undefined ? options.authSecret : undefined,
         UBERBLICK_DB: join(state, "agent.sqlite"),
-        XDG_CONFIG_HOME: join(state, "config"),
+        XDG_CONFIG_HOME: options.configHome ?? join(state, "config"),
         XDG_DATA_HOME: join(state, "data"),
       },
     });

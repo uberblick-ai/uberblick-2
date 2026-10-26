@@ -322,7 +322,7 @@ test("open emoji and document menus take Enter and Tab before callout line keys"
   await page.keyboard.press("Tab");
   await expect(body.locator('.ub-inline-icon[data-icon="claude"] svg')).toBeVisible();
   await page.keyboard.type(` @${targetTitle}`);
-  const references = page.getByRole("listbox", { name: "Documents", exact: true });
+  const references = page.getByRole("listbox", { name: "People and documents", exact: true });
   await expect(references.getByRole("option", { name: targetTitle, exact: true })).toBeVisible();
   await page.keyboard.press("Enter");
   await expect(body.locator(`a[data-doc-id="${target.uuid}"]`)).toHaveText(targetTitle);

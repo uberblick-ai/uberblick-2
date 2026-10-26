@@ -22,6 +22,7 @@ import type { DocLinkContext } from "./doc-links.js";
 import { ExternalLinks } from "./external-links.js";
 import { GitHubLinks } from "./github-links.js";
 import { InlineIcons } from "./inline-icons.js";
+import { PersonMentions } from "./person-mentions.js";
 import { ListBlocks } from "./list-keys.js";
 import { chartCollections, columnWidthsCaption, copiedContent, copyNode, isColumnWidthsOnly, markTree, revisionFields, revisionPalette, revisionSchema, visibleNodes } from "./revision-view.js";
 import { CodeHighlighting } from "./syntax-highlighting.js";
@@ -363,7 +364,7 @@ function sideEditor(element: Element, content: JSONContent, data: Y.Doc, rows: r
       ...revisionPalette(data), sidePresentation(rows, side, docLinks),
       CodeHighlighting, ListBlocks, CardBlocks, TerminalBlocks, ChartBlocks, WireframeBlocks, AblaufBlocks,
       DocLinks.configure({ context: docLinks }), ExternalLinks,
-      GitHubLinks.configure({ settings: workspaceSettings }), InlineIcons, ToggleHeadings,
+      GitHubLinks.configure({ settings: workspaceSettings }), InlineIcons, PersonMentions, ToggleHeadings,
     ],
     content,
     // Native editing hosts contain selection; Tiptap's read-only renderers and transaction guard prevent editing.

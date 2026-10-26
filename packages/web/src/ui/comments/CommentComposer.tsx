@@ -20,6 +20,7 @@ import {
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
+import type { DocLinkContext } from "../../editor/doc-links.js";
 import { endUndoCapture } from "../../editor/blocks.js";
 import { cellTextTargetOf, commentTargetOf } from "../../editor/selection.js";
 import type { CardTextTarget, CellTextTarget, CommentTarget, FigmaTextTarget } from "../../editor/selection.js";
@@ -216,7 +217,8 @@ export function CommentComposer({
   catalogConnection = null,
   canCleanupTags,
   author,
-  mentions,
+  docLinks = null,
+  openDocId = null,
   host,
   onCreated,
 }: {
@@ -232,8 +234,8 @@ export function CommentComposer({
   canCleanupTags?: (() => boolean) | undefined;
   /** The awareness name this client publishes — the comment's author. */
   author: string;
-  /** Peer names offered as `@name` chips. */
-  mentions: string[];
+  docLinks?: DocLinkContext | null;
+  openDocId?: string | null;
   /** The positioned element the selection chrome is placed inside. */
   host: RefObject<HTMLElement | null>;
   /** The new thread, so the rail can focus its card. */
@@ -320,9 +322,10 @@ export function CommentComposer({
     };
     const dismiss = (event: KeyboardEvent): void => {
       const currentDraft = readDraft();
-      if (event.key !== "Escape" || currentDraft === null) return;
+      if (event.defaultPrevented || event.key !== "Escape" || currentDraft === null) return;
       const path = event.composedPath();
       if (!path.includes(editorDom) && !(floating.current && path.includes(floating.current))) return;
+      if (path.some((element) => element instanceof HTMLTextAreaElement && element.dataset.mentionMenuOpen === "true")) return;
       // This listener runs before the fields. A composing Escape belongs to
       // the input method, so leave the active form and draft intact.
       if (event.isComposing || event.keyCode === 229) return;
@@ -523,7 +526,9 @@ export function CommentComposer({
           <CommentForm
             placeholder={`Comment as ${author}…`}
             submitLabel="Comment"
-            mentions={mentions}
+            docLinks={docLinks}
+            openDocId={openDocId}
+            hidden={hidden}
             error={error}
             onSubmit={create}
             onCancel={close}

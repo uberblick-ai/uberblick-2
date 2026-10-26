@@ -35,6 +35,22 @@ describe("the browser's hub management answers", () => {
       .request({ operation: "own-hub-role" })).resolves.toEqual({ status: "ok", role: "admin", hub: null });
   });
 
+  it("keeps only usernames for the member-scoped read and drops refused or malformed claims", async () => {
+    const action: AccessAction = { operation: "list-member-usernames", workspaceId: WORKSPACE.workspaceId };
+    await expect(reply({ status: "ok", usernames: ["alice", "Bob"], members: [ADMIN], credential: "private" })
+      .request(action)).resolves.toEqual({ status: "ok", hub: null, usernames: ["alice", "Bob"] });
+    await expect(reply({ status: "forbidden", usernames: ["alice"] }).request(action))
+      .resolves.toEqual({ status: "forbidden", hub: null });
+    await expect(reply({ status: "local-only", usernames: ["alice"] }).request(action))
+      .resolves.toEqual({ status: "local-only", hub: null });
+    await expect(reply({ status: "unknown-operation", usernames: ["alice"] }).request(action))
+      .resolves.toEqual({ status: "unknown-operation", hub: null });
+    await expect(reply({ status: "ok", usernames: [{ githubUsername: "alice" }] }).request(action))
+      .rejects.toThrow("Invalid access answer");
+    await expect(reply({ status: "ok", usernames: ["bad/name"] }).request(action))
+      .rejects.toThrow("Invalid access answer");
+  });
+
   it("projects only the login handle and public device fields", async () => {
     const device = { deviceId: "device", deviceName: "Laptop", signedInAt: 1_790_000_000_000, current: true };
     await expect(reply({ status: "ok", hub: "https://bound.example", handle: "this-person",

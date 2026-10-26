@@ -44,6 +44,7 @@ export interface AccessAnswer {
   githubUsername?: string;
   member?: AccessMember;
   members?: AccessMember[];
+  usernames?: string[];
   devices?: AccessDevice[];
   handle?: string;
   admins?: HubAdmin[];
@@ -150,6 +151,12 @@ function answer(value: unknown, action: AccessAction): AccessAnswer {
     case "list-members":
       if (!Array.isArray(body.members)) throw new Error("Invalid access answer");
       parsed.members = body.members.map(member);
+      break;
+    case "list-member-usernames":
+      if (!Array.isArray(body.usernames) || !body.usernames.every(isGithubUsername)) {
+        throw new Error("Invalid access answer");
+      }
+      parsed.usernames = [...body.usernames];
       break;
     case "list-devices":
       if (!Array.isArray(body.devices) || !isGithubUsername(body.handle)) throw new Error("Invalid access answer");

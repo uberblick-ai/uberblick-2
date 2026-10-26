@@ -8,7 +8,7 @@ import { createDocumentRevisionsClient } from "../../shell/document-revisions.js
 import { useHubEndpoint, useIdentity, useLocalSessionMissing, useSetting } from "../hooks.js";
 import { parseRoute } from "../route.js";
 import { useServingAccount } from "../status/serving-account.js";
-import { useHubAdministration } from "../settings/hub-administration.js";
+import { useAccessReading, useHubAdministration } from "../settings/hub-administration.js";
 import { useSettingsAccess } from "../settings/settings-access.js";
 
 export function useShellEnvironment(path: string) {
@@ -66,6 +66,9 @@ export function useShellEnvironment(path: string) {
     [identity.name, serving, workspaceUuid],
   );
   const account = useServingAccount(accountClient);
+  const memberReading = useAccessReading(workspaceUuid, serving, identity.name, path,
+    "list-member-usernames", account.state === "signed-in" ? account.accountId ?? null : null);
+  const members = memberReading.authority?.status === "ok" ? memberReading.authority.usernames : undefined;
   const hubAdministration = useHubAdministration(workspaceUuid, serving, identity.name, path);
   const historyAvailable = hubAdministration.authority !== null && hubAdministration.authority.status !== "local-only";
   const documentRevisions = useMemo(
@@ -91,6 +94,6 @@ export function useShellEnvironment(path: string) {
   const listing = route.kind === "all" || route.kind === "list";
   return { path, hubReady, defaultIdentity, identity, configured, startupServing, defaultWorkspace,
     route, workspace, workspaceUuid, serving, remoteSignIn, sessionMissing, roomReady, endpoint,
-    statusEndpoint, documentSearch, documentRevisions, account, hubAdministration, settingsAccess, workspaceLocation, settings, listing };
+    statusEndpoint, documentSearch, documentRevisions, account, members, hubAdministration, settingsAccess, workspaceLocation, settings, listing };
 }
 export type ShellEnvironment = ReturnType<typeof useShellEnvironment>;

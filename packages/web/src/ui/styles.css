@@ -1043,12 +1043,6 @@ body {
   gap: 0.35rem;
 }
 
-.ub-mentions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-}
-
 .ub-comment-buttons {
   display: flex;
   justify-content: flex-end;
@@ -2088,6 +2082,7 @@ h6.ub-heading {
 
 /* Zero-sized text retains native character-wise caret movement. */
 .ub-github-link-text,
+.ub-person-mention-text,
 .ub-toggle-heading-marker,
 .ub-inline-icon-text {
   font-size: 0;
@@ -2136,7 +2131,8 @@ h6.ub-heading {
 }
 .ub-link:has(.ub-github-pill) { text-decoration: none; }
 
-.ub-github-pill {
+.ub-github-pill,
+.ub-person-pill {
   display: inline-flex;
   align-items: center;
   gap: 0.25em;
@@ -2150,16 +2146,15 @@ h6.ub-heading {
   text-transform: none;
   vertical-align: baseline;
   white-space: nowrap;
-  /* The pill is a link, not editable text, even inside the contenteditable editor. */
-  cursor: pointer;
 }
+.ub-github-pill { cursor: pointer; }
 
 .ub-github-pill svg { width: 1em; height: 1em; }
 .ub-github-pill-repo { color: var(--muted-foreground); }
 .ub-github-pill-number { color: var(--foreground); font-weight: 600; }
 
 /* Keep the existing thread highlight visible above the neutral pill ground. */
-.ub-comment .ub-github-pill { background: transparent; }
+.ub-comment :is(.ub-github-pill, .ub-person-pill) { background: transparent; }
 
 /* Hover and keyboard focus mark the pill as a link without changing its size. */
 .ub-link:is(:hover, :focus-visible) .ub-github-pill {

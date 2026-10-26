@@ -21,6 +21,7 @@ import type { DocLinkContext } from "./doc-links.js";
 import { ExternalLinks } from "./external-links.js";
 import { GitHubLinks } from "./github-links.js";
 import { InlineIcons } from "./inline-icons.js";
+import { PersonMentions } from "./person-mentions.js";
 import { ListBlocks } from "./list-keys.js";
 import { PROSE_MARKS } from "./marks.js";
 import { ChartBlock, paletteExtensions } from "./nodes.js";
@@ -375,7 +376,7 @@ export function createRevisionEditor(options: CreateRevisionEditorOptions): Edit
       ...revisionPalette(options.after, options.before), revisionPresentation(model.blocks),
       CodeHighlighting, ListBlocks, CardBlocks, TerminalBlocks, ChartBlocks, WireframeBlocks, AblaufBlocks, JsonTreeBlocks,
       DocLinks.configure({ context: options.docLinks ?? null }), ExternalLinks,
-      GitHubLinks.configure({ settings: options.workspaceSettings ?? null }), InlineIcons, ToggleHeadings,
+      GitHubLinks.configure({ settings: options.workspaceSettings ?? null }), InlineIcons, PersonMentions, ToggleHeadings,
     ],
     content: model.content,
     editable: false,

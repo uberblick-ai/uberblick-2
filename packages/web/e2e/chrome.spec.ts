@@ -3642,7 +3642,7 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   await page.keyboard.press("Enter");
   const selected = page.locator('.ub-thread[aria-current="true"]');
   await expect(page.locator(".ub-rail")).toBeVisible();
-  await expect(selected).toBeFocused();
+  await expect(selected.getByRole("button").first()).toBeFocused();
   const withDrawer = await layout();
   expect(withDrawer.column.left).toBeCloseTo(narrow.column.left, 1);
   expect(withDrawer.column.right).toBeCloseTo(narrow.column.right, 1);

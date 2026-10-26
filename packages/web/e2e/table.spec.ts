@@ -147,7 +147,7 @@ test("the cell @ picker takes keyboard and pointer or iPad touch picks through s
   await placeCaretIn(header, { touch });
   await expect.poll(() => wrapper.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
   await page.keyboard.type(` @${prefix}`);
-  const picker = page.getByRole("listbox", { name: "Documents" });
+  const picker = page.getByRole("listbox", { name: "People and documents" });
   await expect(picker.getByRole("option", { name: firstTitle, exact: true })).toBeVisible();
   await expect(picker.getByRole("option", { name: secondTitle, exact: true })).toBeVisible();
   const arrivedTitle = `${prefix} Gamma`;

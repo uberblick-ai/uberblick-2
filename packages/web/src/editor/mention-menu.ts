@@ -11,14 +11,15 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { endUndoCapture, isTypedHere } from "./blocks.js";
 import { replaceWithDocLink } from "./doc-links.js";
 import type { DocLinkCandidate, DocLinkContext } from "./doc-links.js";
-import { foldForTitleMatch } from "../title-fold.js";
+import { CARD_NODE_NAMES, CARD_PARTS } from "@uberblick/schema";
+import { mentionCandidates } from "../mentions.js";
 
 /** An open mention session: the block it belongs to, what was typed, and where. */
 export interface MentionTrigger {
   blockId: string;
   /** The document in which this range was validated; stale picks never write. */
   doc: ProseMirrorNode;
-  /** Cell boundaries carried through steps; prose uses its block id. */
+  /** Cell or prose-part boundaries carried through steps; top-level prose uses its block id. */
   cell: { from: number; to: number } | null;
   /** What was typed after the `@`. */
   query: string;
@@ -36,10 +37,7 @@ export interface MentionTrigger {
  */
 const MENTION_QUERY = /(?:^|\s)@([^\s@]*)$/;
 
-/**
- * Bound per-keystroke rendering; further typing narrows the directory candidates.
- */
-const MENTION_LIMIT = 8;
+const cardParts = new Set<string>(CARD_PARTS.map((part) => CARD_NODE_NAMES[part]));
 
 /**
  * Admit identified prose blocks and paragraphs in editable table cells.
@@ -57,11 +55,16 @@ export function mentionTriggerAt(editor: Editor): MentionTrigger | null {
     && $head.node(2).type.name === "tableRow"
     && ($head.node(3).type.name === "tableCell" || $head.node(3).type.name === "tableHeader")
     && $head.parent.type.name === "paragraph";
-  if ($head.depth !== 1 && !inCell) return null;
+  const inPart = $head.depth === 3 && $head.parent.type.name === "paragraph" && (
+    $head.node(1).type.name === "card" && cardParts.has($head.node(2).type.name)
+    || $head.node(1).type.name === "figma" && $head.node(2).type.name === "figmaCaption"
+  );
+  if ($head.depth !== 1 && !inCell && !inPart) return null;
 
   const block = $head.parent;
   // Read the source-text spec so picker admission stays aligned with its marks.
-  if (block.type.spec.code === true) return null;
+  if (!block.isTextblock || block.type.spec.code === true) return null;
+  if ((editor.state.storedMarks ?? $head.marks()).some((mark) => mark.type.spec.code)) return null;
   const blockId = $head.node(1).attrs.id;
   if (typeof blockId !== "string" || blockId === "") return null;
 
@@ -71,10 +74,16 @@ export function mentionTriggerAt(editor: Editor): MentionTrigger | null {
   if (match === null) return null;
 
   const query = match[1] ?? "";
+  let code = false;
+  editor.state.doc.nodesBetween($head.pos - query.length - 1, $head.pos, (node) => {
+    if (node.marks.some((mark) => mark.type.spec.code)) code = true;
+  });
+  if (code) return null;
   return {
     blockId,
     doc: editor.state.doc,
-    cell: inCell ? { from: $head.before(3), to: $head.after(3) } : null,
+    cell: inCell ? { from: $head.before(3), to: $head.after(3) }
+      : inPart ? { from: $head.before(2), to: $head.after(2) } : null,
     query,
     from: $head.pos - query.length - 1,
     to: $head.pos,
@@ -121,16 +130,33 @@ export function filterMentions(
   query: string,
   openDocId: string | null,
 ): DocLinkCandidate[] {
-  // Use the Documents page's title fold for both query and candidates.
-  const needle = foldForTitleMatch(query);
-  const found: DocLinkCandidate[] = [];
-  for (const candidate of candidates) {
-    if (candidate.docId === openDocId) continue;
-    if (!foldForTitleMatch(candidate.label).includes(needle)) continue;
-    found.push(candidate);
-    if (found.length === MENTION_LIMIT) break;
-  }
-  return found;
+  return mentionCandidates(candidates, [], query, openDocId)
+    .flatMap((candidate) => candidate.kind === "document" ? [{ docId: candidate.docId, label: candidate.label }] : []);
+}
+
+function liveMention(editor: Editor, trigger: MentionTrigger): MentionTrigger | null {
+  const live = mentionTriggerAt(editor);
+  if (live === null || live.doc !== trigger.doc || live.from !== trigger.from || live.to !== trigger.to
+    || live.blockId !== trigger.blockId || live.query !== trigger.query
+    || live.cell?.from !== trigger.cell?.from || live.cell?.to !== trigger.cell?.to) return null;
+  return live;
+}
+
+/** A picked person is ordinary text with the usual formatting inheritance. */
+export function personMentionAtTrigger(
+  editor: Editor,
+  trigger: MentionTrigger,
+  username: string,
+  members: readonly string[],
+): boolean {
+  const live = liveMention(editor, trigger);
+  const current = members.find((member) => member.toLowerCase() === username.toLowerCase());
+  if (live === null || current === undefined) return false;
+  endUndoCapture(editor.state);
+  editor.view.dispatch(editor.state.tr.insertText(`@${current}`, live.from, live.to));
+  endUndoCapture(editor.state);
+  editor.view.focus();
+  return true;
 }
 
 /**
@@ -144,14 +170,8 @@ export function linkMentionAtTrigger(
   docId: string,
   context: DocLinkContext | null,
 ): boolean {
-  const live = mentionTriggerAt(editor);
+  const live = liveMention(editor, trigger);
   if (live === null) return false;
-  // The UI carries a session through transactions before rendering. A callback
-  // from an older render must not borrow a new, identical occurrence.
-  if (live.doc !== trigger.doc || live.from !== trigger.from || live.to !== trigger.to) return false;
-  if (live.blockId !== trigger.blockId) return false;
-  if (live.query !== trigger.query) return false;
-  if (live.cell?.from !== trigger.cell?.from || live.cell?.to !== trigger.cell?.to) return false;
 
   // Undo restores @query separately from the preceding typing.
   endUndoCapture(editor.state);

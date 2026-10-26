@@ -1,7 +1,7 @@
 import { act, render } from "./react-render.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LocalServing } from "../src/config.js";
-import { useHubAdministration } from "../src/ui/settings/hub-administration.js";
+import { useAccessReading, useHubAdministration } from "../src/ui/settings/hub-administration.js";
 import type { AccessAction, AccessAnswer } from "../src/shell/workspace-access.js";
 import { SERVING_STATUS_POLL_MS, SERVING_STATUS_TIMEOUT_MS } from "../src/ui/status/serving-status.js";
 
@@ -16,6 +16,11 @@ function Reading({ serving = SERVING, path = "settings" }: { serving?: LocalServ
     <button type="button" onClick={() => { void administration.request({ operation: "list-hub-admins" }, new AbortController().signal); }}>List</button></>;
 }
 async function flush() { await act(async () => { await Promise.resolve(); }); }
+
+function Members({ workspace = WORKSPACE }: { workspace?: string }) {
+  const reading = useAccessReading(workspace, { ...SERVING, workspace }, "presence", "/doc", "list-member-usernames");
+  return <output>{reading.authority?.status === "ok" ? reading.authority.usernames?.join(",") : ""}</output>;
+}
 
 describe("bound hub authority", () => {
   afterEach(() => { vi.clearAllMocks(); vi.useRealTimers(); });
@@ -34,6 +39,22 @@ describe("bound hub authority", () => {
     view.rerender(<Reading path="settings/hub-admins" />);
     await flush();
     expect(view.container.querySelector("output")?.textContent).toBe("admin");
+  });
+
+  it("refreshes members without retaining a failed or previous workspace's list", async () => {
+    let answer: AccessAnswer = { status: "ok", hub: "https://bound.example", usernames: ["alice"] };
+    api.mockImplementation(async () => answer);
+    const view = render(<Members />);
+    await flush();
+    expect(view.container.querySelector("output")?.textContent).toBe("alice");
+    expect(api).toHaveBeenCalledWith({ operation: "list-member-usernames", workspaceId: WORKSPACE }, expect.any(AbortSignal));
+    answer = { status: "forbidden", hub: "https://bound.example" };
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(view.container.querySelector("output")?.textContent).toBe("");
+    answer = { status: "ok", hub: "https://bound.example", usernames: ["bob"] };
+    view.rerender(<Members workspace="872b46d9-5b18-4fb1-84d5-de245c337e86" />);
+    await flush();
+    expect(view.container.querySelector("output")?.textContent).toBe("bob");
   });
 
   it.each([null, { ...SERVING, remoteHubUrl: null }, { ...SERVING, rebound: true },

@@ -11,8 +11,8 @@ import type { ReactElement, RefObject } from "react";
 import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import {
-  filterMentions,
   linkMentionAtTrigger,
+  personMentionAtTrigger,
   mentionTriggerAt,
   opensMentionSession,
 } from "../../editor/mention-menu.js";
@@ -20,6 +20,9 @@ import type { MentionTrigger } from "../../editor/mention-menu.js";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import { useCaretMenuKeys } from "./caret-menu.js";
 import { CaretMenu, useCaretMenuIds } from "./CaretMenu.js";
+import { mentionCandidates } from "../../mentions.js";
+import type { MentionCandidate } from "../../mentions.js";
+import { useWorkspaceMembers } from "../workspace-members.js";
 
 interface MentionSession {
   trigger: MentionTrigger;
@@ -30,18 +33,22 @@ export function MentionMenu({
   host,
   docLinks,
   openDocId,
+  members: suppliedMembers,
 }: {
   editor: Editor;
   /** The editor frame, used to find the pane's collision boundary. */
   host: RefObject<HTMLElement | null>;
   /**
-   * Without a workspace directory the picker has no candidates and never
-   * opens.
+   * Live document references from the workspace directory.
    */
   docLinks: DocLinkContext | null;
   /** The document on screen, which is never offered as a reference target. */
   openDocId: string | null;
+  members?: readonly string[];
 }): ReactElement | null {
+  const workspaceMembers = useWorkspaceMembers();
+  const members = suppliedMembers ?? workspaceMembers;
+  const enabled = docLinks !== null || members.length > 0;
   const [session, setSession] = useState<MentionSession | null>(null);
   // Transaction listeners invalidate a session before React publishes a render.
   const liveSession = useRef<MentionSession | null>(null);
@@ -67,7 +74,7 @@ export function MentionMenu({
       liveSession.current = next;
       setSession(next);
     };
-    if (docLinks === null) {
+    if (!enabled) {
       publish(null);
       return;
     }
@@ -119,11 +126,11 @@ export function MentionMenu({
       editor.off("update", onUpdate);
       liveSession.current = null;
     };
-  }, [editor, docLinks]);
+  }, [editor, enabled]);
 
   // A document arriving while the card is open belongs on the list. Subscribed
   // only while there is a card to update.
-  const open = session !== null && docLinks !== null;
+  const open = session !== null && enabled;
   useEffect(() => {
     if (!open || docLinks === null) return;
     return docLinks.subscribe(() => setDirectoryTick((tick) => tick + 1));
@@ -131,12 +138,12 @@ export function MentionMenu({
 
   const query = session?.trigger.query ?? "";
   const entries =
-    open && docLinks !== null
-      ? filterMentions(docLinks.candidates(), query, openDocId)
+    open
+      ? mentionCandidates(docLinks?.candidates() ?? [], members, query, openDocId)
       : [];
   // Editing the query makes a different list, so the remembered position no
   // longer means anything and the first entry is highlighted again.
-  const list = `${query}:${directoryTick}`;
+  const list = JSON.stringify([query, directoryTick, members]);
   const chosen = highlight.list === list ? highlight.index : 0;
   const active = entries.length === 0 ? -1 : Math.min(chosen, entries.length - 1);
 
@@ -151,16 +158,17 @@ export function MentionMenu({
   );
 
   const choose = useCallback(
-    (docId: string | undefined): void => {
-      if (docId === undefined || session === null || liveSession.current !== session) return;
+    (entry: MentionCandidate | undefined): void => {
+      if (entry === undefined || session === null || liveSession.current !== session) return;
       // Close after either a pick or refusal. Do not remember dismissal: a
       // successful reference removes the trigger, and retaining it would
       // suppress the next @.
-      linkMentionAtTrigger(editor, session.trigger, docId, docLinks);
+      if (entry.kind === "person") personMentionAtTrigger(editor, session.trigger, entry.username, members);
+      else linkMentionAtTrigger(editor, session.trigger, entry.docId, docLinks);
       liveSession.current = null;
       setSession(null);
     },
-    [editor, session, docLinks],
+    [editor, session, docLinks, members],
   );
 
   const step = useCallback(
@@ -193,8 +201,8 @@ export function MentionMenu({
         step(-1);
         return true;
       }
-      if (key === "Enter") {
-        choose(entries[active]?.docId);
+      if (key === "Enter" || key === "Tab") {
+        choose(entries[active]);
         return true;
       }
       return false;
@@ -217,13 +225,17 @@ export function MentionMenu({
       }}
       listKey={list}
       listId={listId}
-      label="Documents"
-      options={entries.map((entry) => ({ id: entry.docId, label: entry.label }))}
+      label="People and documents"
+      options={entries.map((entry) => ({
+        id: entry.kind === "person" ? `person:${entry.username}` : entry.docId,
+        label: entry.label,
+        group: entry.kind === "person" ? "People" : "Documents",
+      }))}
       active={active}
       reveal={highlight.list === list && highlight.keyboard}
       highlightAt={highlightAt}
-      choose={(index) => choose(entries[index]?.docId)}
-      empty="No document this page knows matches."
+      choose={(index) => choose(entries[index])}
+      empty="No people or documents match."
     />
   );
 }

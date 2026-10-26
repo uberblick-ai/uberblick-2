@@ -7,6 +7,8 @@ import type * as Y from "yjs";
 import { revisionSurface } from "../../revision-attribution.js";
 import { jsonChangeStarts, openFoldedChange, spanningComparison } from "../../editor/json-compare-panel.js";
 import { createRevisionEditor } from "../../editor/revision-view.js";
+import { setEditorMembers } from "../../editor/person-mentions.js";
+import { useWorkspaceMembers } from "../workspace-members.js";
 import { alignRevisionSides, createRevisionSplit } from "../../editor/revision-split.js";
 import type { RevisionRow } from "../../editor/revision-split.js";
 import { revealFoldedTarget } from "../../editor/toggle-headings.js";
@@ -317,6 +319,10 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   const afterHost = useRef<HTMLDivElement | null>(null);
   const [failed, setFailed] = useState<DocumentHistory["selection"]>(null);
   const [editors, setEditors] = useState<{ side: string; editor: Editor }[]>([]);
+  const members = useWorkspaceMembers();
+  useEffect(() => {
+    for (const { editor } of editors) if (!editor.isDestroyed) setEditorMembers(editor, members);
+  }, [editors, members]);
   const [rows, setRows] = useState<readonly RevisionRow[]>([]);
   const header = useRef<HTMLElement | null>(null);
   // The live header this pane replaced, when a click just entered history.

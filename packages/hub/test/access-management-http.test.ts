@@ -272,6 +272,49 @@ describe("authenticated hub access management", () => {
     expect(github).not.toHaveBeenCalled();
   });
 
+  it("lets members read only current member usernames without granting the admin member list", async () => {
+    const { hub, github } = await rig();
+    const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
+    const member = person(hub, "5678", "old-login", [[WORKSPACE, "member"]]);
+    const offline = hub.principals!.identify("9012", "offline-member");
+    hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: offline.id, role: "member" });
+    person(hub, "3456", "other-workspace", [[OTHER_WORKSPACE, "member"]]);
+    hub.principals!.identify("5678", "current-login");
+    const action = { operation: "list-member-usernames", workspaceId: WORKSPACE } as const;
+    for (const actor of [member, admin]) {
+      const listed = await manage(hub, actor.issued, action);
+      expect(listed).toEqual({ code: 200,
+        result: { status: "ok", usernames: expect.arrayContaining(["admin", "current-login", "offline-member"]) } });
+      expect(listed.result.usernames).toHaveLength(3);
+    }
+    expect(await manage(hub, member.issued, { operation: "list-members", workspaceId: WORKSPACE }))
+      .toEqual({ code: 403, result: { status: "forbidden" } });
+    expect(await manage(hub, admin.issued, { operation: "list-members", workspaceId: WORKSPACE }))
+      .toMatchObject({ code: 200, result: { status: "ok", members: expect.arrayContaining([
+        { principalId: member.principal.id, githubAccountId: "5678", githubUsername: "current-login", role: "member" },
+      ]) } });
+    hub.memberships!.remove({ workspaceId: WORKSPACE, principalId: offline.id });
+    const current = await manage(hub, member.issued, action);
+    expect(current.result.usernames).toEqual(expect.arrayContaining(["admin", "current-login"]));
+    expect(current.result.usernames).toHaveLength(2);
+    expect(github).not.toHaveBeenCalled();
+  });
+
+  it("requires current membership and credential workspace scope for the usernames-only read", async () => {
+    const { hub } = await rig();
+    person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
+    const member = person(hub, "5678", "member", [[WORKSPACE, "member"]]);
+    const lateMember = person(hub, "9012", "late-member");
+    hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: lateMember.principal.id, role: "member" });
+    const action = { operation: "list-member-usernames", workspaceId: WORKSPACE } as const;
+    expect(await manage(hub, lateMember.issued, action)).toEqual({ code: 403, result: { status: "forbidden" } });
+    expect(await manage(hub, member.issued, { ...action, workspaceId: OTHER_WORKSPACE }))
+      .toEqual({ code: 403, result: { status: "forbidden" } });
+    const captured = envelope(await proof(member.issued, action), action);
+    hub.memberships!.remove({ workspaceId: WORKSPACE, principalId: member.principal.id });
+    expect(await post(hub, captured)).toEqual({ code: 403, result: { status: "forbidden" } });
+  });
+
   it("refuses a captured removal proof after the member has been granted access again", async () => {
     const { hub } = await rig();
     const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
@@ -515,7 +558,7 @@ describe("authenticated hub access management", () => {
 
   it("uses sign-in's not-configured result for every management operation", async () => {
     const { hub } = await rig({ github: false });
-    for (const operation of ["list-devices", "revoke-device", "own-role", "list-members", "change-role", "remove-member",
+    for (const operation of ["list-devices", "revoke-device", "own-role", "list-member-usernames", "list-members", "change-role", "remove-member",
       "promote-workspace", "resolve-account", "grant-member"]) {
       expect(await post(hub, { operation })).toEqual({ code: 503, result: { status: "not-configured" } });
     }

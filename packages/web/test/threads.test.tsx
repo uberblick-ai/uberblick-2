@@ -471,9 +471,9 @@ describe("the rail renders its cards", () => {
     };
   }
 
-  function cards(host: HTMLElement): HTMLButtonElement[] {
+  function cards(host: HTMLElement): HTMLElement[] {
     return within(within(host).getByRole("region", { name: "Threads" }))
-      .getAllByRole<HTMLButtonElement>("button", { name: /^Paragraph \d/ });
+      .getAllByRole("group", { name: "Comment thread" });
   }
 
   function text(card: HTMLElement, value: string | RegExp): string | null {

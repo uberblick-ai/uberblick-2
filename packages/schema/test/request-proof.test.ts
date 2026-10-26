@@ -46,6 +46,7 @@ const ACTIONS: RequestAction[] = [
   { operation: "remove-hub-admin", principalId: "principal" },
   { operation: "revoke-device", deviceId: "device" },
   { operation: "own-role", workspaceId: WORKSPACE },
+  { operation: "list-member-usernames", workspaceId: WORKSPACE },
   { operation: "list-members", workspaceId: WORKSPACE },
   { operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "octocat" },
   { operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "42", role: "member" },

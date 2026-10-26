@@ -56,6 +56,7 @@ import * as Y from "yjs";
 import { LOCAL_SESSION_KEY } from "../src/collab/local-session.js";
 import { buildAppBundle, sharedAppBundle } from "./bundle.js";
 import { activateControl } from "./input-helpers.js";
+import { McpAgent } from "./mcp-agent.js";
 
 /**
  * The hub's HMAC signing secret for the run. Not a secret in any sense worth
@@ -237,6 +238,8 @@ export type HubTextHistory = {
 };
 
 export interface Harness {
+  /** Give a separate MCP replica this fixture machine's existing sign-in. */
+  createMcpAgent(statePrefix: string): McpAgent;
   /** Public fixture identities for access-control browser proofs. */
   readonly access?: { otherDeviceId: string; legacyDeviceId: string; foreignDeviceId: string; deviceName: string };
   /** Remove the browser account's hub role while its devices and memberships stay. */
@@ -660,6 +663,10 @@ export async function startHarness(options: {
       },
       hubUrl,
       authSecret: SECRET,
+      createMcpAgent(statePrefix) {
+        return new McpAgent({ workspace, hubUrl, authSecret: SECRET, statePrefix,
+          ...(accessRole === undefined ? {} : { configHome: join(runDir, "config") }) });
+      },
       workspace,
       workspaceUuid,
       secondWorkspace,
