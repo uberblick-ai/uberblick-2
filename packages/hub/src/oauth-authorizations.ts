@@ -105,6 +105,7 @@ export class OAuthAuthorizations {
     status: "pending"; clientName: string; redirectHost: string; workspaceId: string;
     workspaceName: string | null; accessLevels: TokenScope[];
   } {
+    if (this.stopped) return { status: "unknown-request" };
     const pending = this.get(requestId);
     if (pending === null) return { status: "unknown-request" };
     if (this.memberships.roleFor(pending.workspaceId, principalId) === null) return { status: "not-a-member" };
@@ -114,6 +115,7 @@ export class OAuthAuthorizations {
   }
 
   submit(request: ConsentSubmission, principalId: string): ConsentRefusal | { status: "approved" | "denied"; redirectUrl: string } {
+    if (this.stopped) return { status: "unknown-request" };
     const db = this.database.connection;
     db.exec("BEGIN IMMEDIATE");
     try {

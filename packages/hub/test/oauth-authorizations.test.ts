@@ -40,6 +40,20 @@ afterEach(() => {
 });
 
 describe("OAuth consent persistence", () => {
+  it("fences late requests before shutdown closes storage", () => {
+    const r = rig();
+    const id = r.authorizations.create(request)!;
+    const before = snapshot(r.database);
+    r.authorizations.stop();
+    expect(r.authorizations.submit({ requestId: id, decision: "approve", accessLevel: "read-write" }, PRINCIPAL))
+      .toEqual({ status: "unknown-request" });
+    expect(snapshot(r.database)).toEqual(before);
+    r.database.close();
+    expect(r.authorizations.create(request)).toBeNull();
+    expect(r.authorizations.read(id, PRINCIPAL)).toEqual({ status: "unknown-request" });
+    expect(r.authorizations.submit({ requestId: id, decision: "deny" }, PRINCIPAL)).toEqual({ status: "unknown-request" });
+  });
+
   it("refuses capacity without evicting live requests and reuses only expired slots", () => {
     const r = rig();
     const first = r.authorizations.create(request)!;
