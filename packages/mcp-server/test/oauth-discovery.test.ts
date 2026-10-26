@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:http";
+import { createServer, request, type IncomingHttpHeaders, type Server } from "node:http";
 import { once } from "node:events";
 import { afterEach, describe, expect, it } from "vitest";
 import { OAuthMetadataSchema, OAuthProtectedResourceMetadataSchema } from "@modelcontextprotocol/sdk/shared/auth.js";
@@ -12,6 +12,21 @@ const WORKSPACE = "722007fa-8921-45ee-a580-e20311030fef";
 const ISSUER = "https://hub.example.com";
 const PATH = `/.well-known/oauth-protected-resource/mcp/${WORKSPACE}`;
 const servers: Server[] = [];
+
+function get(base: string, path: string, headers: Record<string, string>) {
+  return new Promise<{ status: number; headers: IncomingHttpHeaders; body: string }>((resolve, reject) => {
+    const outgoing = request(new URL(path, base), { headers }, response => {
+      const chunks: Buffer[] = [];
+      response.on("data", chunk => chunks.push(Buffer.from(chunk)));
+      response.on("error", reject);
+      response.on("end", () => resolve({ status: response.statusCode!, headers: response.headers,
+        body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    outgoing.on("error", reject);
+    outgoing.setTimeout(5000, () => outgoing.destroy(new Error("discovery request timed out")));
+    outgoing.end();
+  });
+}
 
 async function discovery(issuer: string | undefined): Promise<string> {
   const server = createServer((request, response) => {
@@ -82,10 +97,12 @@ describe("protected resource discovery", () => {
     { Forwarded: "host=attacker.example;proto=http" },
   ])("ignores forged URL headers %j for metadata and challenges", async headers => {
     const base = await discovery(ISSUER);
-    const metadata = await (await fetch(`${base}${PATH}`, { headers })).json();
-    expect(metadata).toEqual(await (await fetch(`${base}${PATH}`)).json());
-    const challenge = await fetch(`${base}/mcp/${WORKSPACE}`, { headers });
-    expect(challenge.headers.get("www-authenticate"))
+    const metadata = await get(base, PATH, headers);
+    expect(metadata.status).toBe(200);
+    expect(JSON.parse(metadata.body)).toEqual(await (await fetch(`${base}${PATH}`)).json());
+    const challenge = await get(base, `/mcp/${WORKSPACE}`, headers);
+    expect(challenge.status).toBe(401);
+    expect(challenge.headers["www-authenticate"])
       .toBe(`Bearer resource_metadata="${ISSUER}${PATH}", scope="docs:read docs:write"`);
   });
 
@@ -93,12 +110,12 @@ describe("protected resource discovery", () => {
     const base = await discovery(parseHubPublicUrl(undefined));
     const headers = { Host: "attacker.example", "X-Forwarded-Host": "attacker.example",
       "X-Forwarded-Proto": "https", Forwarded: "host=attacker.example;proto=https" };
-    const metadata = await fetch(`${base}${PATH}`, { headers });
+    const metadata = await get(base, PATH, headers);
     expect(metadata.status).toBe(404);
-    expect(await metadata.text()).toBe("");
-    const unauthorized = await fetch(`${base}/mcp/${WORKSPACE}`, { headers });
+    expect(metadata.body).toBe("");
+    const unauthorized = await get(base, `/mcp/${WORKSPACE}`, headers);
     expect(unauthorized.status).toBe(401);
-    expect(unauthorized.headers.get("www-authenticate")).toBeNull();
+    expect(unauthorized.headers["www-authenticate"]).toBeUndefined();
   });
 
   it("serves only GET metadata", async () => {
