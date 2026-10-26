@@ -1,5 +1,6 @@
 import type { HubLogger } from "./log.js";
 import { isLoopbackHost } from "@uberblick/schema/loopback";
+import { parseHubPublicUrl } from "@uberblick/schema/oauth";
 
 /** Loopback by default; exposing a hub requires an explicit bind address. */
 export const DEFAULT_PORT = 1234;
@@ -24,6 +25,8 @@ export interface HubConfig {
   address?: string;
   /** Only the release proxy's appended forwarded hop may select a sign-in client bucket. */
   behindReleaseProxy?: boolean;
+  /** Configured OAuth issuer origin, resolved from `HUB_PUBLIC_URL`. */
+  publicUrl?: string;
   /** SQLite file; creates its parent. `":memory:"` loses everything on restart. */
   databasePath?: string;
   /** Local-only HMAC signing secret (`HUB_AUTH_TOKEN`). */
@@ -62,6 +65,7 @@ export function resolveCoreHubConfig(
   env: NodeJS.ProcessEnv,
   databasePath: string,
 ): HubConfig {
+  const publicUrl = parseHubPublicUrl(env.HUB_PUBLIC_URL);
   const host = env.HUB_HOST?.trim();
   const address = host === undefined || host === "" ? DEFAULT_HOST : host;
   // Remote admission uses device credentials and current membership, never a leftover secret.
@@ -77,6 +81,7 @@ export function resolveCoreHubConfig(
     port: parsePort(env.PORT),
     address,
     databasePath,
+    ...(publicUrl === undefined ? {} : { publicUrl }),
     ...(env.HUB_RELEASE_PROXY === "1" ? { behindReleaseProxy: true } : {}),
     ...(authSecret === undefined ? {} : { authSecret }),
   };
