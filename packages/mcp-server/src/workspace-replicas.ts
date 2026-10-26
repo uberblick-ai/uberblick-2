@@ -6,8 +6,10 @@ import {
   type ServingReplicaRole,
 } from "./serving-role.js";
 import { MirrorStore } from "./store.js";
+import type { CredentialProvider } from "./credential-provider.js";
 
 export interface WorkspaceReplicaOptions {
+  credentialProvider?: CredentialProvider;
   /** Adopt and close this store; omitted opens `config.databasePath`. */
   store?: MirrorStore;
   /** Publish this process's directory presence; defaults to true. */
@@ -31,6 +33,9 @@ export function openWorkspaceReplicas(
   options: WorkspaceReplicaOptions = {},
 ): WorkspaceReplicaSet {
   const hubFree = options.hubFree === true;
+  if (hubFree && options.credentialProvider !== undefined) {
+    throw new Error("A hub-free workspace cannot use a credential provider.");
+  }
   if (hubFree) {
     config = { ...config, hubUrl: DEFAULT_HUB_URL, authSecret: null };
     delete config.deviceLogin;
@@ -48,6 +53,7 @@ export function openWorkspaceReplicas(
     }
     replicas = new Replicas(config, store, {
       publishOwnPresence: options.publishOwnPresence ?? true,
+      ...(options.credentialProvider === undefined ? {} : { credentialProvider: options.credentialProvider }),
     });
   } catch (error) {
     servingRole?.close();
