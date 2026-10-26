@@ -1573,6 +1573,82 @@ test.describe("document history through ub open", () => {
     await expect(page.locator(":focus")).toBeVisible();
   });
 
+  for (const scenario of [
+    { touch: false, docked: false, named: false },
+    { touch: true, docked: false, named: false },
+    { touch: true, docked: true, named: false },
+    { touch: true, docked: true, named: true },
+  ]) {
+    test(`change navigation leaves status controls uncovered with ${scenario.touch ? "coarse" : "fine"} pointers, sidebar ${scenario.docked ? "docked" : "collapsed"}, ${scenario.named ? "name" : "id"}`, { tag: "@webkit" }, async ({ browser, browserName }, info) => {
+      const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+        viewport: { width: 1366, height: 640 }, hasTouch: scenario.touch, isMobile: scenario.touch, reducedMotion: "reduce", colorScheme: browserName === "webkit" ? "dark" : "light",
+      }, beforeNavigate: async page => { await page.addInitScript(() => {
+        Object.defineProperty(navigator, "clipboard", { configurable: true,
+          value: { writeText: async (text: string) => document.documentElement.setAttribute("data-copied-revision", text) } });
+      }); } });
+      const title = docTitle("Uncovered history controls");
+      const uuid = await newDocument(page, title);
+      await serveHistory(page, [
+        { id: "latest", author: null, startedAt: 2_000, endedAt: null,
+          ...(scenario.named ? { name: { text: "Reviewed with a long revision name", namer: null, namedAt: 2_000, canManage: true } } : {}) },
+        { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+      ], foldHistory(uuid, title));
+      await previous(page);
+      await activateControl(historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true }));
+      if (!scenario.docked) await activateControl(page.getByRole("button", { name: "Hide document list", exact: true }));
+      expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(scenario.touch);
+      const pane = page.locator(".ub-revision-pane");
+      const header = page.locator(".ub-revision-header");
+      const next = header.getByRole("button", { name: "Next change", exact: true });
+      const previousChange = header.getByRole("button", { name: "Previous change", exact: true });
+      for (const width of scenario.docked ? [1280, 1366] : [1200, 900, 1024, 1194, 1279, 1280, 1366]) {
+        await page.setViewportSize({ width, height: 640 });
+        await expect(page.locator(".ub-revision-split")).toBeVisible();
+        for (const end of [false, true]) {
+          await pane.evaluate((element, end) => element.scrollTo(0, end ? element.scrollHeight : 0), end);
+          if (end) { await expect(next).toBeDisabled(); await expect(previousChange).toBeEnabled(); }
+          else { await expect(previousChange).toBeDisabled(); await expect(next).toBeEnabled(); }
+          const geometry = await header.evaluate(element => {
+            const rect = (target: Element) => {
+              const box = target.getBoundingClientRect();
+              return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height };
+            };
+            const nav = [...element.querySelectorAll(".ub-change-nav button")].map(rect);
+            const controls = [...element.querySelectorAll(".ub-history-controls button")].filter(button => button.getClientRects().length > 0);
+            const ruler = element.querySelector(".ub-revision-ruler");
+            return { nav, ruler: ruler === null ? null : rect(ruler), controls: controls.map(button => {
+              const box = rect(button);
+              return { label: button.getAttribute("aria-label") ?? button.textContent, ...box,
+                gap: Math.min(...nav.map(each => each.left - box.right)),
+                receivesPointer: [[1, box.height / 2], [box.width / 2, 1], [box.width / 2, box.height / 2], [box.width - 1, box.height / 2], [box.width / 2, box.height - 1]]
+                  .every(([x = 0, y = 0]) => button.contains(document.elementFromPoint(box.left + x, box.top + y))) };
+            }) };
+          });
+          await info.attach(`status-targets-${width}-${end ? "end" : "start"}`, { body: JSON.stringify(geometry), contentType: "application/json" });
+          for (const control of geometry.controls) {
+            expect(control.gap, `${control.label} must end before change navigation`).toBeGreaterThanOrEqual(0);
+            expect(control.receivesPointer, `${control.label} must receive pointer input throughout its target`).toBe(true);
+          }
+          for (const button of geometry.nav) {
+            expect(button.width).toBeGreaterThanOrEqual(scenario.touch ? 44 : 26);
+            expect(button.height).toBeGreaterThanOrEqual(scenario.touch ? 44 : 26);
+            expect(Math.abs((button.left + button.right) / 2 - ((geometry.ruler?.left ?? 0) + (geometry.ruler?.right ?? 0)) / 2)).toBeLessThan(1);
+          }
+          const target = scenario.docked ? history(page).getByRole("button", { name: `Copy revision ${revisionId("latest")}`, exact: true })
+            : history(page).getByRole("button", { name: "Back to now", exact: true });
+          const box = await target.boundingBox();
+          if (box === null) throw new Error("The last status control is missing");
+          const position = { x: box.width - 2, y: box.height / 2 };
+          await page.locator("html").evaluate(element => element.removeAttribute("data-copied-revision"));
+          if (scenario.touch) await target.tap({ position });
+          else await target.click({ position });
+          if (scenario.docked) await expect(page.locator("html")).toHaveAttribute("data-copied-revision", revisionId("latest"));
+          else { await expect(pane).toHaveCount(0); await previous(page); await expect(next).toBeEnabled(); }
+        }
+      }
+    });
+  }
+
   for (const width of [1440, 1200, 860]) {
     test(`the sticky history header covers comparison paint at both outer edges at ${width}px`, { tag: "@webkit" }, async ({ browser }, info) => {
       const page = await openApp(browser, "/", { readySelector: ".ub-pane",

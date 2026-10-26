@@ -208,6 +208,7 @@
   /* Permanently reserve the block gutter so revealing its + moves no prose. */
   --block-gutter: 1.75rem;
   --page-title-gap: 0.5rem;
+  --history-target: 26px;
 
   /* Product type tokens stay outside Tailwind's theme namespaces. */
   --type-caption-size: 12px;
@@ -239,6 +240,10 @@
   /* Grayscale smoothing keeps the 400 and 500 stems visually distinct. */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+@media (any-pointer: coarse) {
+  :root { --history-target: 2.75rem; }
 }
 
 /* Live and revision history controls share one quiet row. */
@@ -344,6 +349,10 @@
   gap: 0.4rem;
   white-space: nowrap;
   overflow: hidden;
+}
+/* Reserve the change buttons' target and a gap without moving their ruler. */
+.ub-revision-split-pane .ub-history-controls {
+  padding-inline-end: max(0px, calc(var(--history-target) - var(--document-rail-gap) + 1rem));
 }
 .ub-history-author,
 .ub-history-renamed,
@@ -592,16 +601,13 @@
  */
 .ub-revision-ruler {
   position: absolute;
-  inset-inline-end: calc(-1 * var(--document-rail-gap) + 0.5rem + 6px);
+  inset-inline-end: calc(-1 * var(--document-rail-gap) + 0.5rem + (var(--history-target) - 14px) / 2);
   width: 14px;
   border-radius: 3px;
   background: var(--revision-ruler-track);
   cursor: pointer;
   touch-action: none;
   user-select: none;
-}
-@media (any-pointer: coarse) {
-  .ub-revision-ruler { inset-inline-end: calc(-1 * var(--document-rail-gap) + 0.5rem + 15px); }
 }
 .ub-revision-ruler-mark {
   position: absolute;

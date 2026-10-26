@@ -15,7 +15,7 @@ import { cn } from "./cn.js";
 const variants = {
   plain: "",
   tool: "rounded-(--radius-sm) border border-(--border) bg-secondary text-secondary-foreground px-[0.45rem] py-[0.15rem] ub-type-caption [font-weight:inherit] disabled:opacity-50 in-[.ub-composer]:bg-(--card-accent) data-[emphasis=true]:bg-(--card-accent) data-[emphasis=true]:border-(--muted-foreground) data-[emphasis=true]:text-foreground",
-  history: "inline-grid size-[26px] shrink-0 place-items-center rounded-(--radius-sm) border-0 bg-transparent p-0 text-(--muted-foreground) disabled:opacity-40 hover:enabled:bg-(--card-accent) hover:enabled:text-foreground hover:enabled:opacity-100 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 [@media(any-pointer:coarse)]:size-11",
+  history: "inline-grid size-(--history-target) shrink-0 place-items-center rounded-(--radius-sm) border-0 bg-transparent p-0 text-(--muted-foreground) disabled:opacity-40 hover:enabled:bg-(--card-accent) hover:enabled:text-foreground hover:enabled:opacity-100 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2",
   default: "bg-primary text-primary-foreground hover:enabled:bg-primary/90",
   destructive: "bg-destructive text-destructive-foreground hover:enabled:bg-destructive/90",
   secondary: "bg-secondary text-secondary-foreground hover:enabled:bg-secondary/80",
