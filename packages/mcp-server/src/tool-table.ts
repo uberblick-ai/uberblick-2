@@ -21,9 +21,11 @@ import { inputSchema as annotateInput, annotateOperation } from "./tools/annotat
 import { inputSchema as archiveDocInput, archiveDocOperation } from "./tools/archive-doc.js";
 import { inputSchema as backlinksInput, backlinksOperation } from "./tools/backlinks.js";
 import { inputSchema as createDocInput, createDocOperation } from "./tools/create-doc.js";
+import { inputSchema as createTagInput, createTagOperation } from "./tools/create-tag.js";
 import { inputSchema as deleteBlockInput, deleteBlockOperation } from "./tools/delete-block.js";
 import { inputSchema as deleteDocInput, deleteDocOperation } from "./tools/delete-doc.js";
 import { inputSchema as editBlockInput, editBlockOperation } from "./tools/edit-block.js";
+import { inputSchema as editTagInput, editTagOperation } from "./tools/edit-tag.js";
 import { inputSchema as exportMarkdownInput, exportMarkdownOperation } from "./tools/export-markdown.js";
 import { inputSchema as findDecisionsInput, findDecisionsOperation } from "./tools/find-decisions.js";
 import { inputSchema as getDataInput, getDataOperation } from "./tools/get-data.js";
@@ -125,12 +127,49 @@ export const tools: readonly Tool[] = [
     title: "List assignable tags",
     description:
       "List existing tag ids, names and descriptions in name order. complete:false means the hub catalog " +
-      "has not arrived. MCP cannot curate tags; people add them in Workspace settings.",
+      "has not arrived. Descriptions guide LLMs on when to apply a tag. Reuse existing meanings and apply only " +
+      "tags that improve discovery; leaving a document untagged is valid. Use create_tag for missing categories " +
+      "and edit_tag to explicitly change usage guidance.",
     input: listTagsInput,
     operation: listTagsOperation,
     example: {},
     related: ["workspaces", "tool-contracts"],
     details: toolHelpDetails.list_tags,
+  }),
+  tool({
+    name: "create_tag",
+    title: "Create or reuse a tag",
+    description:
+      "Explicitly create a missing workspace catalog tag. Read list_tags and check complete first; an incomplete " +
+      "catalog can hide an existing or deleted name. Reuse existing meanings and keep the vocabulary small: create " +
+      "only reusable subjects or purposes, avoiding synonyms and one-off task, file, issue or version tags. Apply " +
+      "only tags that improve discovery; leaving a document untagged is valid. Names are trimmed and lowercased. " +
+      "An existing normalized name returns its canonical entry without changing its description; use edit_tag " +
+      "for that. Descriptions guide LLMs on when to apply the tag. Creation assigns no documents and retains " +
+      "Workspace settings permissions and offline recovery; local workspaces need no hub or sign-in.",
+    input: createTagInput,
+    operation: createTagOperation,
+    hints: { destructive: false, idempotent: true },
+    example: { name: "release", description: "Use for release planning and coordination across versions." },
+    related: ["list_tags", ...documentContracts],
+    details: toolHelpDetails.create_tag,
+  }),
+  tool({
+    name: "edit_tag",
+    title: "Edit a tag's usage guidance",
+    description:
+      "Explicitly replace an existing tag's description as guidance for LLMs on when to apply it. Read list_tags " +
+      "and check complete first, then use an existing id and keep its meaning. Keeps the name, identity and document " +
+      "assignments; never creates tags. Null or blank clears the description; an identical edit has no further " +
+      "effect. Reuse a small vocabulary of subjects or purposes; avoid synonyms and one-off task, file, issue or " +
+      "version tags. Use the guidance to select tags only when they improve discovery; a document may remain untagged. Retains " +
+      "Workspace settings permissions and offline recovery; local workspaces need no hub or sign-in.",
+    input: editTagInput,
+    operation: editTagOperation,
+    hints: { destructive: true, idempotent: true },
+    example: { id: targetUuid, description: "Use for release planning and coordination across versions." },
+    related: ["list_tags", "create_tag", ...documentContracts],
+    details: toolHelpDetails.edit_tag,
   }),
   tool({
     name: "create_doc",

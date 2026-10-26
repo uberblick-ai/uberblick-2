@@ -23,7 +23,7 @@ export type Operation<Args, Payload extends object = object> = (
 /**
  * What a call may write. A writing tool's failure says what became of the write.
  */
-export type Writes = "document" | "sidebar" | null;
+export type Writes = "document" | "sidebar" | "settings" | null;
 
 /** An operation together with the write class its wrapper enforces. */
 export type ToolOperation<Args, Payload extends object = object, W extends Writes = Writes> =
@@ -47,6 +47,7 @@ export const DOCUMENT_WRITE: Gates<"document"> = { writes: "document", settle: t
 export const UNSETTLED_READ: Gates<null> = { writes: null, settle: false };
 
 const SIDEBAR_WRITE: Gates<"sidebar"> = { writes: "sidebar", settle: true };
+const SETTINGS_WRITE: Gates<"settings"> = { writes: "settings", settle: true };
 
 /**
  * Callers must parse input; _input only infers Args. Keep settling here so
@@ -109,5 +110,16 @@ export function sidebarOperation<Args extends object, Payload extends object>(
     if (policy.requireStub) context.requireStub((args as Args & { uuid: string }).uuid);
     const sidebar = context.replicas.sidebar();
     return { ...body(context, args, request, sidebar), ...context.durability(sidebar) };
+  });
+}
+
+/** Settings writes use the existing hub authority and local durability path. */
+export function settingsOperation<Args extends object, Payload extends object>(
+  input: z.ZodType<Args>,
+  body: (context: ToolContext, args: Args, request: OperationRequest, settings: Replica) => Payload,
+) {
+  return operation(SETTINGS_WRITE, input, (context, args, request) => {
+    const settings = context.replicas.settings();
+    return { ...body(context, args, request, settings), ...context.durability(settings) };
   });
 }

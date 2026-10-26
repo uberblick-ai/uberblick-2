@@ -77,6 +77,103 @@ function refusals(warn: { mock: { calls: unknown[][] } }): string[] {
   return warn.mock.calls.flatMap(([message]) => typeof message === "string" && message.startsWith("The hub refused changes") ? [message] : []);
 }
 
+it("acknowledges an admin's MCP tag creation and description edit without retagging documents", async () => {
+  const { hub, config } = await fixture();
+  hub.changeRole(WORKSPACE, "admin");
+  const rig = await client(config);
+  await caughtUp(rig);
+  const created = await rig.ok("create_tag", { name: "release", description: "Use for release coordination." });
+  expect(created).toMatchObject({ name: "release", description: "Use for release coordination.", applied: true, synced: false });
+  await caughtUp(rig);
+  const assigned = await rig.ok("create_doc", {
+    title: "Release planning",
+    description: "The catalog edit preserves this assignment.",
+    tags: [created.id],
+  });
+  await caughtUp(rig);
+  const document = rig.instance.replicas.replica(assigned.uuid);
+  const updates = vi.fn();
+  document.doc.on("update", updates);
+
+  const edited = await rig.ok("edit_tag", { id: created.id, description: "Use for planning and coordinating releases." });
+  expect(edited).toMatchObject({ id: created.id, name: "release", description: "Use for planning and coordinating releases.", applied: true, synced: false });
+  await caughtUp(rig);
+  const entry = { id: created.id, name: "release", description: "Use for planning and coordinating releases." };
+  expect(hub.readRoom(settingsRoom(WORKSPACE), listTagCatalog)).toEqual([entry]);
+  expect((await rig.ok("list_tags"))).toMatchObject({ complete: true, tags: [entry] });
+  expect(await rig.ok("create_tag", { name: " RELEASE ", description: "Must not replace guidance." }))
+    .toMatchObject({ ...entry, applied: true, synced: true });
+  expect(await rig.ok("edit_tag", { id: created.id, description: entry.description }))
+    .toMatchObject({ ...entry, applied: true, synced: true });
+  expect(getMeta(document.doc).tags).toEqual([created.id]);
+  expect(updates).not.toHaveBeenCalled();
+});
+
+it.each(["create_tag", "edit_tag"] as const)("does not acknowledge a member's refused MCP %s change", async tool => {
+  const { hub, config } = await fixture();
+  hub.changeRole(WORKSPACE, "admin");
+  const rig = await client(config);
+  const existing = await rig.ok("create_tag", { name: "curated", description: "Hub guidance." });
+  const assigned = await rig.ok("create_doc", {
+    title: "Member document",
+    description: "Members retain ordinary document access after a settings refusal.",
+    tags: [existing.id],
+  });
+  await caughtUp(rig);
+  const warning = vi.spyOn(log, "warn");
+  hub.changeRole(WORKSPACE, "member");
+  const result = await rig.ok(tool, tool === "create_tag"
+    ? { name: "refused-tag", description: "Member creation." }
+    : { id: existing.id, description: "Member description." });
+  expect(result).toMatchObject({ applied: true, synced: false });
+  await waitUntil("the member's MCP tag change to be replaced", () => rig.instance.store.settingsReset() !== null);
+  await caughtUp(rig);
+  const entry = { id: existing.id, name: "curated", description: "Hub guidance." };
+  expect((await rig.ok("list_tags"))).toMatchObject({ complete: true, tags: [entry] });
+  expect(hub.readRoom(settingsRoom(WORKSPACE), listTagCatalog)).toEqual([entry]);
+  expect(refusals(warning)).toHaveLength(1);
+  expect(refusals(warning)[0]).toContain("tag catalog");
+  expect(getMeta(rig.instance.replicas.replica(assigned.uuid).doc).tags).toEqual([existing.id]);
+  expect(await rig.ok("set_metadata", { uuid: assigned.uuid, description: "A member can still edit this document." }))
+    .toMatchObject({ applied: true });
+  await caughtUp(rig);
+  expect(hub.readRoom(roomForDoc(WORKSPACE, assigned.uuid), getMeta)?.description).toBe("A member can still edit this document.");
+  expect(hub.renewalCount).toBe(0);
+});
+
+it.each([false, true])("judges offline MCP tag creation and description edits when they reach the hub after demotion=%s", async demoted => {
+  const { hub, config } = await fixture();
+  hub.changeRole(WORKSPACE, "admin");
+  const rig = await client(config);
+  const existing = await rig.ok("create_tag", { name: "curated", description: "Hub guidance." });
+  await caughtUp(rig);
+  await hub.pause();
+  await waitUntil("the tag editor to become offline", () => rig.instance.replicas.sync.state().status !== "connected");
+  expect((await rig.ok("list_tags")).complete).toBe(false);
+  const created = await rig.ok("create_tag", { name: "offline-category", description: "Offline creation." });
+  const edited = await rig.ok("edit_tag", { id: existing.id, description: "Offline guidance." });
+  expect(created).toMatchObject({ name: "offline-category", applied: true, synced: false });
+  expect(edited).toMatchObject({ id: existing.id, description: "Offline guidance.", applied: true, synced: false });
+  if (demoted) hub.changeRole(WORKSPACE, "member");
+  const warning = vi.spyOn(log, "warn");
+  await hub.resume();
+  const expected = demoted
+    ? [{ id: existing.id, name: "curated", description: "Hub guidance." }]
+    : [{ id: existing.id, name: "curated", description: "Offline guidance." },
+      { id: created.id, name: "offline-category", description: "Offline creation." }];
+  await waitUntil("the offline MCP catalog outcome", () =>
+    JSON.stringify(listTagCatalog(rig.instance.replicas.settings().doc)) === JSON.stringify(expected) &&
+    rig.instance.replicas.sync.state().status === "connected" &&
+    (!demoted || rig.instance.store.settingsReset() !== null));
+  await caughtUp(rig);
+  expect(hub.readRoom(settingsRoom(WORKSPACE), listTagCatalog)).toEqual(expected);
+  expect((await rig.ok("list_tags"))).toMatchObject({ complete: true, tags: expected });
+  expect((await rig.ok("sync_status")).pendingRooms).toEqual([]);
+  expect(refusals(warning)).toHaveLength(demoted ? 1 : 0);
+  if (demoted) expect(refusals(warning)[0]).toContain("tag catalog");
+  expect(hub.renewalCount).toBe(0);
+});
+
 it("hides legacy retired tags for members and migrates them only after an admin receives the hub catalog", async () => {
   const { hub, config } = await fixture();
   const member = await client(config);

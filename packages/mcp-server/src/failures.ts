@@ -1,5 +1,6 @@
 import {
   DataError,
+  InvalidTagDescriptionError,
   SchemaError,
 } from "@uberblick/schema";
 import { log } from "./log.js";
@@ -377,6 +378,18 @@ const RECOVERIES: Record<string, Recovery> = {
       "Call list_tags for the complete existing catalog, then call again with existing ids or names (case ignored). " +
       "Hidden references awaiting a catalog entry stay stored automatically; deleted tags cannot be assigned.",
   },
+  invalid_tag_name: {
+    recoveryClass: "manual",
+    guidance: "Supply a name that, after trimming and lowercasing, has at most 30 lowercase letters and digits with single hyphens between groups. Nothing was written.",
+  },
+  invalid_tag_description: {
+    recoveryClass: "manual",
+    guidance: "Supply one line of at most 300 characters after trimming. In edit_tag, null or blank clears the description. Nothing was written.",
+  },
+  invalid_tag_identity: {
+    recoveryClass: "reread",
+    guidance: "Read list_tags and check complete, then use an existing catalog id in edit_tag. Unknown or deleted ids cannot be edited; use create_tag only for a missing reusable category. Nothing was written.",
+  },
   supersedes_not_decision: {
     recoveryClass: "reread",
     guidance:
@@ -584,6 +597,9 @@ export function toFailure(tool: FailedTool, error: unknown): ToolFailure {
         ? { field: "tags" }
         : {}),
     });
+  }
+  if (error instanceof InvalidTagDescriptionError) {
+    return stamped(tool, { error: "invalid_tag_description", message: error.message });
   }
   if (error instanceof PersistenceError) {
     // Refuse reads too: memory ahead of the log can expose state a restart drops.

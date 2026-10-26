@@ -8,10 +8,72 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "List existing tag ids, names and descriptions in name order. complete:false means the hub catalog has not arrived. MCP cannot curate tags; people add them in Workspace settings.\n\nHelp: list_tags, workspaces, tool-contracts.",
+    "description": "List existing tag ids, names and descriptions in name order. complete:false means the hub catalog has not arrived. Descriptions guide LLMs on when to apply a tag. Reuse existing meanings and apply only tags that improve discovery; leaving a document untagged is valid. Use create_tag for missing categories and edit_tag to explicitly change usage guidance.\n\nHelp: list_tags, workspaces, tool-contracts.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "create_tag",
+    "title": "Create or reuse a tag",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Trimmed and lowercased before validation: at most 30 lowercase letters/digits with single hyphens between groups."
+        },
+        "description": {
+          "description": "Guidance for LLMs on when to apply the tag: one line, at most 300 characters after trimming.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false
+    },
+    "description": "Explicitly create a missing workspace catalog tag. Read list_tags and check complete first; an incomplete catalog can hide an existing or deleted name. Reuse existing meanings and keep the vocabulary small: create only reusable subjects or purposes, avoiding synonyms and one-off task, file, issue or version tags. Apply only tags that improve discovery; leaving a document untagged is valid. Names are trimmed and lowercased. An existing normalized name returns its canonical entry without changing its description; use edit_tag for that. Descriptions guide LLMs on when to apply the tag. Creation assigns no documents and retains Workspace settings permissions and offline recovery; local workspaces need no hub or sign-in.\n\nHelp: create_tag, list_tags, workspaces, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "edit_tag",
+    "title": "Edit a tag's usage guidance",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Existing catalog tag id from list_tags; aliases resolve to the canonical entry."
+        },
+        "description": {
+          "description": "Guidance for LLMs on when to apply the tag: one line, at most 300 characters after trimming; null or blank clears it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "description"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false
+    },
+    "description": "Explicitly replace an existing tag's description as guidance for LLMs on when to apply it. Read list_tags and check complete first, then use an existing id and keep its meaning. Keeps the name, identity and document assignments; never creates tags. Null or blank clears the description; an identical edit has no further effect. Reuse a small vocabulary of subjects or purposes; avoid synonyms and one-off task, file, issue or version tags. Use the guidance to select tags only when they improve discovery; a document may remain untagged. Retains Workspace settings permissions and offline recovery; local workspaces need no hub or sign-in.\n\nHelp: edit_tag, list_tags, create_tag, workspaces, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
       "idempotentHint": true,
       "openWorldHint": false
     }

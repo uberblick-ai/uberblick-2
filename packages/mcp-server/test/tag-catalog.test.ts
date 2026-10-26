@@ -47,6 +47,20 @@ afterEach(async () => {
 
 describe("the workspace tag catalog", () => {
 
+  it("persists explicit catalog writes across a local-only restart", async () => {
+    const databasePath = tempDatabasePath();
+    const first = await local(databasePath);
+    const tag = await first.ok("create_tag", { name: " Release " });
+    await first.ok("edit_tag", { id: tag.id, description: "Use for release coordination." });
+    const expected = (await first.ok("list_tags")).tags;
+    await first.close();
+    rigs.splice(rigs.indexOf(first), 1);
+    const restarted = await local(databasePath);
+    expect((await restarted.ok("list_tags")).tags).toEqual(expected);
+    expect((await restarted.ok("create_tag", { name: "RELEASE", description: "Do not replace." })).description)
+      .toBe("Use for release coordination.");
+  });
+
   it("lists a complete deterministic catalog and persists its offline seed", async () => {
     const databasePath = tempDatabasePath();
     const first = await local(databasePath);
@@ -139,6 +153,10 @@ describe("the workspace tag catalog", () => {
     });
 
     expect((await rig.ok("list_docs")).docs).toEqual([]);
+    const explicit = await rig.ok("create_tag", { name: "release-notes", description: "Use for release summaries." });
+    expect(explicit).toMatchObject({ name: "release-notes", applied: true, synced: false });
+    expect(await rig.ok("edit_tag", { id: explicit.id, description: null })).not.toHaveProperty("description");
+    expect(await rig.ok("list_tags")).toMatchObject({ complete: false, tags: expect.arrayContaining([{ id: explicit.id, name: "release-notes" }]) });
   });
 
   it.each([null, TEST_SECRET])("does not seed an unseeded shared workspace with admission %s", async authSecret => {

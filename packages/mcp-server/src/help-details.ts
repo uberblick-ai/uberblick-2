@@ -1,14 +1,49 @@
 /** Tool-specific constraints kept out of tools/list; read on demand through per-tool help. */
 import { BLOCK_TYPES } from "@uberblick/schema";
 
+const tagGuidance =
+  "Read list_tags and check `complete` first. Descriptions are guidance for LLMs on when to apply a tag. " +
+  "Reuse existing meanings, even when their names differ from the document's words. Keep a small vocabulary: " +
+  "create only missing, lasting, reusable subjects or purposes; avoid synonyms, alternate spellings and " +
+  "one-off task, file, issue or version tags. Apply only tags that improve discovery; leaving a document untagged is valid.";
+
+const tagAuthority =
+  "A local workspace needs no hub or sign-in. Shared workspaces retain Workspace settings' workspace-admin " +
+  "authority and offline settings handling: the hub checks authority when the change arrives. A refused " +
+  "change is discarded and the hub's settings restored; the browser reports the refusal. MCP access grants " +
+  "no extra rights. Check `applied`, `synced` and `hub`: local application is not hub acknowledgement, and " +
+  "a refused change is never reported as `synced: true`.";
+
 export const toolHelpDetails = {
   list_tags:
     "The existing workspace tag catalog is returned in deterministic name order. Each entry carries the stable canonical " +
-    "`id` documents store, its current display `name` and its optional `description`. Documents show only existing catalog tags. MCP cannot curate this catalog.\n\n" +
+    "`id` documents store, its current display `name` and its optional `description`. Documents show only existing catalog tags.\n\n" +
     "`complete` says whether this is the whole workspace vocabulary. It is false while a configured hub has " +
     "not delivered the catalog room to this replica: what is listed is then a local copy that may be missing " +
     "curated entries, and a tag value this replica has never seen is refused rather than assigned. `hub` says " +
-    "where that connection stands.",
+    "where that connection stands. Use create_tag to create a missing category, and edit_tag to explicitly " +
+    "replace an existing tag's description; neither changes document assignments.\n\n" + tagGuidance,
+  create_tag:
+    "Create a missing category in the workspace tag catalog. `name` is required: trim surrounding whitespace, " +
+    "lowercase letters, then validate at most 30 characters of lowercase letters and digits with single hyphens " +
+    "between groups. Optional `description` is one line of at most 300 characters after trimming. Invalid " +
+    "arguments and undeclared fields refuse without writing.\n\n" +
+    "Repeating an existing normalized name returns its canonical `id`, `name` and optional `description` " +
+    "without a duplicate or a description change. Use edit_tag to explicitly replace existing guidance. " +
+    "Creation changes no document's assignments; assign the resulting tag with create_doc or set_metadata. " +
+    "Unknown assignments still refuse rather than creating tags.\n\n" + tagGuidance + "\n\n" +
+    "When `complete: false`, an unseen name is not evidence that a category is missing. Creation remains " +
+    "available, but can add an identity that converges with an unseen tag of the same name or recreate a name " +
+    "deleted elsewhere. This is the existing settings-sync limit.\n\n" + tagAuthority,
+  edit_tag:
+    "Explicitly replace an existing tag's usage description, keeping its name, identity and document assignments. " +
+    "Pass the existing catalog `id` and required `description`: one line of at most 300 characters after " +
+    "trimming, or null to clear it. Blank text also clears it. Keep the guidance aligned with the tag's " +
+    "existing meaning.\n\n" +
+    "The result returns the canonical `id`, unchanged `name` and optional `description`. Repeating the same " +
+    "edit has no further effect. Unknown or deleted ids, invalid descriptions and undeclared fields refuse " +
+    "without writing; editing never creates a tag. create_tag reuses an existing normalized name without " +
+    "overwriting its description.\n\n" + tagGuidance + "\n\n" + tagAuthority,
   get_help:
     "Read bundled, version-matched product help by topic or exact registered tool name. Omit topic to list " +
     "every topic with its id, title, description and URI. The returned text is the same Markdown as " +
