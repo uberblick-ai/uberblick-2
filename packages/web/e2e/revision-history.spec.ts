@@ -932,7 +932,7 @@ test.describe("document history through ub open", () => {
     await expect.poll(() => liveText(page)).toBe("The earlier document content.");
     await expect(page.locator(".ub-title")).toHaveValue(title);
     await previous(page);
-    await expect(history(page)).toContainText("browser-person in the browser");
+    await expect(history(page)).toContainText("browser-person written by hand 👏");
     await expect(restore).toBeDisabled();
     await expect(restore).toHaveAccessibleDescription("This is the current version.");
     const drawer = await showHistoryList(page);
@@ -1366,6 +1366,7 @@ test.describe("document history through ub open", () => {
     await expect(list.locator('[aria-current="true"]')).toContainText("Current version");
     await expect(list.locator('[aria-current="true"] time')).toHaveCount(0);
     const reviewed = list.getByRole("button", { name: /Reviewed after the auth rewrite/ });
+    await expect(reviewed).toHaveAccessibleName(/browser-person written by hand 👏/);
     const name = list.locator(".ub-history-name > span:last-child");
     expect(await name.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
     await expect(name).toHaveCSS("text-overflow", "ellipsis");
@@ -1376,6 +1377,10 @@ test.describe("document history through ub open", () => {
     await expect(reviewed).toBeFocused();
     await closeHistoryList(page, drawer);
     await expect(history(page)).toContainText("2 of 3");
+    await expect(history(page).locator(".ub-history-author")).toHaveText("browser-person written by hand 👏");
+    await expect(history(page).locator(".ub-history-who")).toHaveAttribute("title", /^browser-person written by hand 👏,.*named by browser-person in the browser at /);
+    await expect(history(page).locator(".ub-history-who > .sr-only")).toContainText("browser-person written by hand 👏,");
+    await expect(history(page).locator(".ub-history-who > .sr-only")).toContainText("named by browser-person in the browser at ");
     await expect(history(page).locator(".ub-history-when")).not.toContainText("current version");
     // This revision changed the title: the header shows it as it was, the row and the entry say so.
     await expect(page.locator(".ub-revision-title")).toHaveText(title);
@@ -1385,7 +1390,7 @@ test.describe("document history through ub open", () => {
     await expect(page.locator(".ub-revision-header")).toHaveCSS("position", "sticky");
     await showHistoryList(page);
     await expect(reviewed).toContainText("renamed");
-    await expect(list.getByRole("button", { name: /Ben via Claude Code/ })).not.toContainText("renamed");
+    await expect(list.getByRole("button", { name: /Ben via Claude/ })).not.toContainText("renamed");
     const screenshotName = browserName === "webkit" ? "history-list-ipad-dark" : "history-list-desktop-light";
     const screenshot = info.outputPath(`${screenshotName}.png`);
     await page.screenshot({ path: screenshot });
@@ -3266,7 +3271,7 @@ test.describe("document history through ub open", () => {
       await page.keyboard.type("Unsynced draft: ");
       await expect(editor(page)).toContainText("Unsynced draft: Shared current content.");
       await previous(page);
-      await expect(history(page)).toContainText("Ben via Claude Code, from ");
+      await expect(history(page)).toContainText("Ben via Claude, from ");
       await expect(history(page)).toContainText("current version");
       await previous(page);
       await expect(historicalEditor(page)).toHaveText("Earlier content.");

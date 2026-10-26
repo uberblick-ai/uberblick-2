@@ -4,6 +4,7 @@ import type { Editor } from "@tiptap/core";
 import { getMeta } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import type * as Y from "yjs";
+import { revisionSurface } from "../../revision-attribution.js";
 import { jsonChangeStarts, openFoldedChange, spanningComparison } from "../../editor/json-compare-panel.js";
 import { createRevisionEditor } from "../../editor/revision-view.js";
 import { alignRevisionSides, createRevisionSplit } from "../../editor/revision-split.js";
@@ -28,13 +29,12 @@ import { handleDocLinkClick } from "./doc-link-click.js";
 
 export function revisionLabel(entry: RevisionEntry): string {
   const author = entry.author === null ? "Unknown author"
-    : entry.author.surface.kind === "browser" ? `${entry.author.githubUsername} in the browser`
-    : `${entry.author.githubUsername} via ${entry.author.surface.name || entry.author.surface.kind}`;
+    : `${entry.author.githubUsername} ${revisionSurface(entry.author.surface, "author")}`;
   const time = (value: number): string => new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(value);
   const start = entry.startedAt === null ? "unknown start" : time(entry.startedAt);
   const name = entry.name;
-  const namer = name?.namer == null ? "Unknown person" : name.namer.surface.kind === "browser"
-    ? `${name.namer.githubUsername} in the browser` : `${name.namer.githubUsername} via ${name.namer.surface.name || name.namer.surface.kind}`;
+  const namer = name?.namer == null ? "Unknown person"
+    : `${name.namer.githubUsername} ${revisionSurface(name.namer.surface, "namer")}`;
   return `${author}, ${entry.endedAt === null ? `from ${start}` : `${start} to ${time(entry.endedAt)}`}${name == null ? "" : ` · “${name.text}”, named by ${namer} at ${time(name.namedAt)}`}`;
 }
 
