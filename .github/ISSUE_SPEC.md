@@ -108,6 +108,11 @@ waives neither this ready bar nor review and merge gates.
   When the change touches a user-facing surface (a `ub` command, an MCP tool, a
   web UI flow), cite the page that owns it, even when the issue did not start
   from that page.
+  For a change people see, list the design references the outcome follows: the
+  corpus page or block that holds the wireframe or mockup, or an image attached
+  to the issue, never a private link a fresh agent cannot open. The text and the
+  picture must agree; when an intake's picture and text disagree, the picture is
+  the intent unless the filer said otherwise.
   `None.` only when the grounded change needs no additional pointers;
   explain why no corpus document governs it. Operational policy cannot
   substitute for product context. Supply enough pointers for a fresh session.

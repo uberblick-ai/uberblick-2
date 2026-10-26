@@ -13,13 +13,14 @@
    `list_tags`, then use matching existing tag names or IDs for tag-filtered
    corpus searches; package names are not assumed to be corpus tags.
    Code establishes implemented behavior, not product intent.
-   Catalog-only treatment requires intent established by authoritative sources or
-   an explicit human decision, no governing product document, and a mechanical
-   correction preserving that intent; explain why.
+   Prepare without a governing corpus document only when no such document
+   exists, authoritative sources or an explicit human decision already settle
+   the intent, and the change is a mechanical correction that keeps it; say why.
 2. **Define success.** Set the smallest useful scope and measurable or observable
-   success. Within delegated choices, choose the narrowest solution; widen only
-   for evidenced necessity, such as an inseparable guarantee. Exclude optional
-   extras. Preserve explicit requested outcomes unless settled maintainer authorization
+   success. Within delegated choices, choose the narrowest solution; widen it
+   only when evidence shows the narrow one cannot work, such as a guarantee that
+   cannot be separated from the change. Exclude optional extras. Preserve
+   explicit requested outcomes unless settled maintainer authorization
    permits deferral or removal; another issue alone is not that authorization.
    Cite agreed allocation and retain real prerequisites when avoiding duplicate work.
    When an outcome needs data or behavior another package does not supply yet,

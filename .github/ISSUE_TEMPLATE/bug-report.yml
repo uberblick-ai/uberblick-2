@@ -6,25 +6,38 @@ body:
       value: |
         For vulnerabilities, use [private vulnerability reporting](https://github.com/uberblick-ai/uberblick-2/security/advisories/new).
         Do not include credentials or private document content.
-  - type: textarea
-    id: version
+  - type: dropdown
+    id: surface
     attributes:
-      label: Uberblick version
-      description: Paste the output of ub --version.
+      label: Where did it happen?
+      options:
+        - Web app
+        - Command line (ub)
+        - MCP, through an agent
+        - Hub server
+        - Not sure
     validations:
       required: true
   - type: input
-    id: platform
+    id: version
     attributes:
-      label: Platform
-      description: Operating system, version and CPU architecture.
-      placeholder: macOS 26, Apple Silicon; or Ubuntu 24.04, x86_64
+      label: Uberblick version
+      description: Paste the output of `ub --version`, or leave blank if you only use Uberblick in the browser.
+    validations:
+      required: false
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser and version for the web app; operating system, version and CPU architecture for the command line.
+      placeholder: Firefox 144 on macOS; or Ubuntu 24.04, x86_64
     validations:
       required: true
   - type: textarea
     id: actual
     attributes:
       label: What happened?
+      description: For a problem you can see, a screenshot or short recording helps most.
     validations:
       required: true
   - type: textarea
@@ -37,6 +50,6 @@ body:
     id: reproduce
     attributes:
       label: Steps to reproduce
-      description: Include the commands or actions needed to see the problem.
+      description: Include the commands, pages or clicks needed to see the problem.
     validations:
       required: true
