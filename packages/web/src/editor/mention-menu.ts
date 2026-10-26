@@ -10,9 +10,8 @@ import type { Transaction } from "@tiptap/pm/state";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { endUndoCapture, isTypedHere } from "./blocks.js";
 import { replaceWithDocLink } from "./doc-links.js";
-import type { DocLinkCandidate, DocLinkContext } from "./doc-links.js";
+import type { DocLinkContext } from "./doc-links.js";
 import { CARD_NODE_NAMES, CARD_PARTS } from "@uberblick/schema";
-import { mentionCandidates } from "../mentions.js";
 
 /** An open mention session: the block it belongs to, what was typed, and where. */
 export interface MentionTrigger {
@@ -121,21 +120,9 @@ export function opensMentionSession(
   return wroteUpTo(transaction, trigger.to);
 }
 
-/**
- * Match directory labels only, preserving title order and excluding the open
- * document. Description/tag matches would offer references by a different name.
- */
-export function filterMentions(
-  candidates: readonly DocLinkCandidate[],
-  query: string,
-  openDocId: string | null,
-): DocLinkCandidate[] {
-  return mentionCandidates(candidates, [], query, openDocId)
-    .flatMap((candidate) => candidate.kind === "document" ? [{ docId: candidate.docId, label: candidate.label }] : []);
-}
-
 function liveMention(editor: Editor, trigger: MentionTrigger): MentionTrigger | null {
   const live = mentionTriggerAt(editor);
+  // A stale rendered option must not replace a rewritten or moved trigger.
   if (live === null || live.doc !== trigger.doc || live.from !== trigger.from || live.to !== trigger.to
     || live.blockId !== trigger.blockId || live.query !== trigger.query
     || live.cell?.from !== trigger.cell?.from || live.cell?.to !== trigger.cell?.to) return null;

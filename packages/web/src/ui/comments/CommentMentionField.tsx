@@ -87,6 +87,7 @@ export function CommentMentionField({
     setSession({ from, prefix: input.value.slice(0, from) });
   };
   const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    // Safari can send the confirming key after compositionend with only its IME keyCode set.
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (session !== null && ["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(event.key)) {
       event.preventDefault();

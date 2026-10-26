@@ -161,29 +161,4 @@ describe("the bound editor's awareness reading", () => {
     mounted!.rerender(<Page members={[]} />);
     expect(names()).toEqual([]);
   });
-
-  it("never returns peers from a replaced connection, even at the same room", () => {
-    const first = fixture();
-    const replacement = fixture();
-    const peer = awarenessFor();
-    const nextPeer = awarenessFor();
-    publish(first.awareness, peer, { user: { name: "Before", color: "#345678" } });
-    publish(replacement.awareness, nextPeer, { user: { name: "After", color: "#765432" } });
-    const seen: string[][] = [];
-    function Probe({ connection }: { connection: RoomConnection | null }): null {
-      seen.push(hooks.usePeers(connection).map(({ name }) => name));
-      return null;
-    }
-    mount(<Probe connection={first.connection} />);
-    expect(seen.at(-1)).toEqual(["Before"]);
-    const before = seen.length;
-    mounted!.rerender(<Probe connection={replacement.connection} />);
-    expect(seen[before]).toEqual([]);
-    expect(seen.at(-1)).toEqual(["After"]);
-    const settled = seen.length;
-    act(() => publish(first.awareness, peer, { user: { name: "Old source", color: "#345678" } }));
-    expect(seen).toHaveLength(settled);
-    mounted!.rerender(<Probe connection={null} />);
-    expect(seen.at(-1)).toEqual([]);
-  });
 });

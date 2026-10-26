@@ -333,44 +333,6 @@ function observeLinkConflicts(
   return () => fragment.unobserveDeep(read);
 }
 
-/** A mention candidate. `clientId` distinguishes peers whose names collide. */
-export interface Peer {
-  clientId: number;
-  name: string;
-}
-
-/** Only the identity and name matter to the editor's mention candidates. */
-function samePeerNames(previous: Peer[], next: Peer[]): boolean {
-  if (previous.length !== next.length) return false;
-  const names = new Map(next.map((peer) => [peer.clientId, peer.name]));
-  return previous.every((peer) => names.get(peer.clientId) === peer.name);
-}
-
-/** Awareness names other than our own, stable through caret/colour changes. */
-export function usePeers(connection: RoomConnection | null): Peer[] {
-  return useConnectionReading(connection, EMPTY_ARRAY, observePeers, samePeerNames)[0];
-}
-
-function observePeers(
-  connection: RoomConnection,
-  emit: (value: Peer[]) => void,
-): () => void {
-  const awareness = connection.provider.awareness ?? null;
-  if (awareness === null) return () => {};
-  const read = (): void => {
-    const out: Peer[] = [];
-    awareness.getStates().forEach((state, clientId) => {
-      const peer = parseRemoteAwareness(awareness, clientId, state);
-      if (peer === null || !peer.hasUser) return;
-      out.push({ clientId, name: peer.name });
-    });
-    emit(out);
-  };
-  read();
-  awareness.on("change", read);
-  return () => awareness.off("change", read);
-}
-
 /**
  * Count agents only when awareness publishes both user and AGENT_CLIENT.
  * Marker absence cannot infer an agent; unset connectivity probes count

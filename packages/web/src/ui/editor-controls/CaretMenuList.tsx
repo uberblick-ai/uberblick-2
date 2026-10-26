@@ -51,6 +51,7 @@ export function CaretMenuList({
       <Button variant="plain" size="custom" id={`${listId}-${index}`} type="button" role="option" tabIndex={-1}
         aria-label={option.label} aria-selected={index === active}
         className={`flex w-full items-center gap-2 rounded-(--radius-sm) border px-[0.4rem] py-[0.3rem] text-left ub-type-ui [font-family:inherit] ${index === active ? "border-(--border) bg-(--card-accent) text-(--accent-foreground)" : "border-transparent bg-transparent text-card-foreground"}`}
+        // Pick against the prose selection before focus leaves the editor.
         onMouseDown={(event) => event.preventDefault()}
         onMouseMove={() => highlightAt(index)} onClick={() => choose(index)}>
         {option.glyph}

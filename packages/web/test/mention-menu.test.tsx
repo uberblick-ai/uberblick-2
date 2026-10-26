@@ -52,6 +52,7 @@ import {
 } from "../src/editor/mention-menu.js";
 import type { MentionTrigger } from "../src/editor/mention-menu.js";
 import { MentionMenu } from "../src/ui/editor-controls/MentionMenu.js";
+import { WorkspaceMembersContext } from "../src/ui/workspace-members.js";
 import { mountEditor, snapshotFragment } from "./helpers.js";
 import { onTestCleanup } from "./test-cleanup.js";
 
@@ -106,13 +107,9 @@ function mountPicker(ydoc: Y.Doc, context: DocLinkContext, members: readonly str
   const container = document.createElement("div");
   frame.appendChild(container);
   const view = render(
-    <MentionMenu
-      editor={editor}
-      host={{ current: frame }}
-      docLinks={context}
-      openDocId={DOC}
-      members={members}
-    />,
+    <WorkspaceMembersContext value={members}>
+      <MentionMenu editor={editor} host={{ current: frame }} docLinks={context} openDocId={DOC} />
+    </WorkspaceMembersContext>,
     { container },
   );
 

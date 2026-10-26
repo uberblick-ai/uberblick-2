@@ -1,7 +1,9 @@
 import { act, render } from "./react-render.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { memo } from "react";
 import type { LocalServing } from "../src/config.js";
 import { useAccessReading, useHubAdministration } from "../src/ui/settings/hub-administration.js";
+import { WorkspaceMembersContext, useWorkspaceMembers } from "../src/ui/workspace-members.js";
 import type { AccessAction, AccessAnswer } from "../src/shell/workspace-access.js";
 import { SERVING_STATUS_POLL_MS, SERVING_STATUS_TIMEOUT_MS } from "../src/ui/status/serving-status.js";
 
@@ -17,9 +19,17 @@ function Reading({ serving = SERVING, path = "settings" }: { serving?: LocalServ
 }
 async function flush() { await act(async () => { await Promise.resolve(); }); }
 
-function Members({ workspace = WORKSPACE }: { workspace?: string }) {
+const NO_MEMBERS: readonly string[] = [];
+const MemberNames = memo(function MemberNames({ onRender }: { onRender: (() => void) | undefined }) {
+  onRender?.();
+  return <output>{useWorkspaceMembers().join(",")}</output>;
+});
+
+function Members({ workspace = WORKSPACE, onRender }: { workspace?: string; onRender?: () => void }) {
   const reading = useAccessReading(workspace, { ...SERVING, workspace }, "presence", "/doc", "list-member-usernames");
-  return <output>{reading.authority?.status === "ok" ? reading.authority.usernames?.join(",") : ""}</output>;
+  return <WorkspaceMembersContext value={reading.authority?.status === "ok" ? reading.authority.usernames ?? NO_MEMBERS : NO_MEMBERS}>
+    <MemberNames onRender={onRender} />
+  </WorkspaceMembersContext>;
 }
 
 describe("bound hub authority", () => {
@@ -55,6 +65,29 @@ describe("bound hub authority", () => {
     view.rerender(<Members workspace="872b46d9-5b18-4fb1-84d5-de245c337e86" />);
     await flush();
     expect(view.container.querySelector("output")?.textContent).toBe("bob");
+  });
+
+  it("keeps member context consumers idle on unchanged polls and updates changed or refused membership", async () => {
+    vi.useFakeTimers();
+    let usernames = ["alice"];
+    let status: AccessAnswer["status"] = "ok";
+    api.mockImplementation(async () => ({ status, hub: "https://bound.example", usernames: [...usernames] }));
+    const onRender = vi.fn();
+    const view = render(<Members onRender={onRender} />);
+    await flush();
+    expect(view.container.querySelector("output")?.textContent).toBe("alice");
+    onRender.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
+    expect(api).toHaveBeenCalledTimes(2);
+    expect(onRender).not.toHaveBeenCalled();
+    usernames = ["bob"];
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
+    expect(view.container.querySelector("output")?.textContent).toBe("bob");
+    expect(onRender).toHaveBeenCalledTimes(1);
+    status = "forbidden";
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
+    expect(view.container.querySelector("output")?.textContent).toBe("");
+    expect(onRender).toHaveBeenCalledTimes(2);
   });
 
   it.each([null, { ...SERVING, remoteHubUrl: null }, { ...SERVING, rebound: true },

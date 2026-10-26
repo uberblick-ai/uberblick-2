@@ -33,7 +33,6 @@ export function MentionMenu({
   host,
   docLinks,
   openDocId,
-  members: suppliedMembers,
 }: {
   editor: Editor;
   /** The editor frame, used to find the pane's collision boundary. */
@@ -44,10 +43,8 @@ export function MentionMenu({
   docLinks: DocLinkContext | null;
   /** The document on screen, which is never offered as a reference target. */
   openDocId: string | null;
-  members?: readonly string[];
 }): ReactElement | null {
-  const workspaceMembers = useWorkspaceMembers();
-  const members = suppliedMembers ?? workspaceMembers;
+  const members = useWorkspaceMembers();
   const enabled = docLinks !== null || members.length > 0;
   const [session, setSession] = useState<MentionSession | null>(null);
   // Transaction listeners invalidate a session before React publishes a render.
