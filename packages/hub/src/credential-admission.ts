@@ -102,8 +102,12 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     if (workspace === null || workspace !== verified.claims.workspace) {
       return refuse("workspace-mismatch");
     }
-    if (!record.workspaces.includes(workspace)) {
+    if (!record.workspaces.includes(workspace) ||
+      (record.ceiling !== undefined && record.ceiling.workspaceId !== workspace)) {
       return refuse("workspace-not-authorized");
+    }
+    if (record.ceiling?.scope === "read-only" && verified.claims.scope === "read-write") {
+      return refuse("scope-not-authorized");
     }
     // Read membership after verification's last await, from the same authority
     // management mutates. Neither token claims nor a cached role grant access.
@@ -200,9 +204,12 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     const workspace = roomWorkspace(room);
     const cause = "failure" in current
       ? current.failure
-      : workspace === null || workspace !== context.workspace || !current.record.workspaces.includes(workspace)
+      : workspace === null || workspace !== context.workspace || !current.record.workspaces.includes(workspace) ||
+        (current.record.ceiling !== undefined && current.record.ceiling.workspaceId !== workspace)
         ? "workspace-mismatch"
-        : this.memberships.roleFor(workspace, current.record.principalId) === null
+        : current.record.ceiling?.scope === "read-only" && !context.authorization.readOnly
+          ? "scope-not-authorized"
+          : this.memberships.roleFor(workspace, current.record.principalId) === null
           ? "missing-membership"
           : this.hubAdmins?.isSuspended(workspace)
             ? "workspace-suspended"

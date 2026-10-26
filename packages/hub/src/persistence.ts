@@ -29,7 +29,7 @@ import {
   roomForDoc,
 } from "@uberblick/schema";
 import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
-import { revokeHmacCredentials } from "./credentials-schema.js";
+import { addCredentialCeiling, revokeHmacCredentials } from "./credentials-schema.js";
 import { writeDatabaseRelease } from "./database-release.js";
 import { HubRevisions } from "./revisions.js";
 import type { RestoreRevisionResult } from "./revisions.js";
@@ -147,6 +147,7 @@ export class HubDatabase implements Extension {
       if (hubVersion !== undefined && durable) writeDatabaseRelease(db, hubVersion);
       db.exec(SCHEMA);
       revokeHmacCredentials(db);
+      addCredentialCeiling(db);
       this.statements = {
         select: db.prepare(SELECT_DOCUMENT),
         upsert: db.prepare(UPSERT_DOCUMENT),

@@ -108,6 +108,10 @@ export async function handleAccessManagement(
         return null;
       }
       const current = usable.record;
+      if (current.ceiling !== undefined) {
+        reply(403, { status: "forbidden" });
+        return null;
+      }
       if (policy.scope === "workspace") {
         if (!("workspaceId" in action) || !current.workspaces.includes(action.workspaceId) || hubAdmins?.isSuspended(action.workspaceId)) {
           reply(403, { status: "forbidden" });

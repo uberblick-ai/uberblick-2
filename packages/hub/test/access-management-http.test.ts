@@ -1,14 +1,16 @@
 import { credentialPrivateKey, deviceFetch as fetch } from "./device-credentials.js";
-import { issueCredential, MANAGEMENT_OPERATION_NAMES, managementAction, mintDeviceRequestProof as mintRequestProof, renewCredential,
+import { generateTestCredentialKeyPair, issueCredential, MANAGEMENT_OPERATION_NAMES, managementAction, mintDeviceRequestProof as mintRequestProof, renewCredential,
   type TestCredential as IssuedCredential } from "./device-credentials.js";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { MANAGEMENT_OPERATIONS } from "../src/access-management.js";
+import { AgentGrantRegistry } from "../src/agent-grants.js";
 import { CredentialRegistry, type CredentialRenewal } from "../src/credentials.js";
 import type { HubLogRecord } from "../src/log.js";
 import type { MembershipRole } from "../src/memberships.js";
+import { HubDatabase } from "../src/persistence.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
 import { DEVICE_CREDENTIAL_LIFETIME_MS, importCredentialKey, importRootSecret, mintToken, type RequestAction } from "@uberblick/schema/token";
@@ -108,6 +110,37 @@ function expireCredential(hub: Hub, credential: IssuedCredential): void {
 }
 
 describe("authenticated hub access management", () => {
+  it.each(["read-only", "read-write"] as const)("refuses every management operation from a %s grant even for hub and workspace admins", async scope => {
+    const { hub, github } = await rig();
+    const owner = person(hub, "1234", "owner", [[WORKSPACE, "admin"]]);
+    hub.hubAdmins!.grant(owner.principal.id);
+    const target = person(hub, "5678", "target", [[WORKSPACE, "member"]]);
+    const database = new HubDatabase(hub.databasePath, error => { throw error; });
+    database.open();
+    let issued!: IssuedCredential;
+    try {
+      const grant = new AgentGrantRegistry(database).create({
+        clientId: "hosted-agent", principalId: owner.principal.id, workspaceId: WORKSPACE, scope,
+      });
+      const pair = generateTestCredentialKeyPair();
+      const credential = hub.credentials!.issueForGrant(grant.id, pair.publicKey);
+      expect(credential).not.toBeNull();
+      issued = { ...credential!, keyBytes: pair.keyBytes };
+    } finally {
+      database.close();
+    }
+    const before = accessState(hub);
+    const targets = { workspaceId: WORKSPACE, attemptId: randomUUID(), principalId: target.principal.id,
+      deviceId: target.issued.record.deviceId, githubUsername: "new-account", githubAccountId: "9012" };
+    for (const operation of MANAGEMENT_OPERATION_NAMES) {
+      expect(await manage(hub, issued, managementAction(operation, targets)), operation)
+        .toEqual({ code: 403, result: { status: "forbidden" } });
+    }
+    expect(accessState(hub)).toEqual(before);
+    expect(github).not.toHaveBeenCalled();
+    expect(await manage(hub, owner.issued, { operation: "list-devices" })).toMatchObject({ code: 200, result: { status: "ok" } });
+  });
+
   it.each([undefined, "0.4.7"])("includes the optional release identity in signed-in device lists (%s)", async hubVersion => {
     const { hub } = await rig(hubVersion === undefined ? {} : { hubVersion });
     const owner = person(hub, "1234", "owner");

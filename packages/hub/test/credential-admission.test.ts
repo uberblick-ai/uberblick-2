@@ -1,4 +1,4 @@
-import { issueCredential, mintDeviceRequestProof as mintRequestProof, renewCredential } from "./device-credentials.js";
+import { generateTestCredentialKeyPair, issueCredential, mintDeviceRequestProof as mintRequestProof, renewCredential } from "./device-credentials.js";
 import { replacementCredential } from "./device-credentials.js";
 /**
  * Credential admission is deliberately composed here, beside HubDatabase,
@@ -26,12 +26,13 @@ import {
   type CredentialContext,
 } from "../src/credential-admission.js";
 import { CredentialRegistry } from "../src/credentials.js";
+import { AgentGrantRegistry } from "../src/agent-grants.js";
 import type { HubLogRecord } from "../src/log.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubAdminRegistry } from "../src/hub-admins.js";
 import { HubDatabase } from "../src/persistence.js";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
-import { DEVICE_CREDENTIAL_LIFETIME_MS, importCredentialKey, importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
+import { DEVICE_CREDENTIAL_LIFETIME_MS, importCredentialKey, importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken, type TokenScope } from "@uberblick/schema/token";
 import {
   OTHER_WORKSPACE,
   TEST_SECRET,
@@ -153,13 +154,13 @@ function accessEndCause(kind: AccessEnd) {
 async function credentialToken(
   credential: IssuedCredential,
   workspace = WORKSPACE,
-  options: { kid?: string | null; key?: CryptoKey; sub?: string } = {},
+  options: { kid?: string | null; key?: CryptoKey; sub?: string; scope?: TokenScope } = {},
 ) {
   return mintToken(options.key ?? await importCredentialKey(credential.keyBytes), {
     typ: "room",
     sub: options.sub ?? "client-asserted-person-and-device",
     workspace,
-    scope: "read-write",
+    scope: options.scope ?? "read-write",
     kid: options.kid === undefined ? credential.record.id : options.kid,
     lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
   });
@@ -253,6 +254,70 @@ function nextClientConnection(hocuspocus: Hocuspocus<CredentialContext>) {
 }
 
 describe("credential admission on a composed server", () => {
+  it.each([
+    ["read-only", "read-only", true],
+    ["read-only", "read-write", false],
+    ["read-write", "read-only", true],
+    ["read-write", "read-write", true],
+  ] as const)("enforces a %s grant ceiling for a %s room claim", async (ceilingScope, claimedScope, allowed) => {
+    const rig = await startServer();
+    const grant = new AgentGrantRegistry(rig.database).create({
+      clientId: "hosted-agent", principalId: "person", workspaceId: WORKSPACE, scope: ceilingScope,
+    });
+    const pair = generateTestCredentialKeyPair();
+    const issued = rig.registry.issueForGrant(grant.id, pair.publicKey);
+    expect(issued).not.toBeNull();
+    const credential = { ...issued!, keyBytes: pair.keyBytes };
+    const room = testRoom();
+    const client = connect({ port: rig.port, room,
+      token: await credentialToken(credential, WORKSPACE, { scope: claimedScope }) });
+    if (!allowed) {
+      expect(await waitFor("the grant scope escalation to be refused", client.denied)).toBe("device-credential-refused");
+      expect(client.authenticated).not.toHaveBeenCalled();
+      expect(rig.hocuspocus.documents.has(room)).toBe(false);
+      expect(rig.logs.at(-1)).toMatchObject({ cause: "scope-not-authorized" });
+      return;
+    }
+    await waitFor("the permitted grant claim to sync", client.synced);
+    const connection = rig.hocuspocus.documents.get(room)!.getConnections()[0]!;
+    expect(connection.readOnly).toBe(claimedScope === "read-only");
+    const observer = connect({ port: rig.port, room, token: await credentialToken(issue(rig.registry, "observer", [WORKSPACE], "observer")) });
+    await waitFor("the observer to sync", observer.synced);
+    observer.text.insert(0, "document access");
+    await waitUntil("the grant to receive workspace documents", () => client.text.toString() === "document access");
+    if (claimedScope === "read-write") {
+      client.text.insert(client.text.length, " + grant write");
+      await waitUntil("the grant write to reach another device", () => observer.text.toString() === "document access + grant write");
+    } else {
+      const refused = new Promise<void>(resolve => client.provider.on("message", ({ message }: onMessageParameters) => {
+        message.readVarString();
+        if (message.readVarUint() === MessageType.SyncStatus && message.readVarUint() === 0) resolve();
+      }));
+      client.text.insert(client.text.length, " + refused grant write");
+      await waitFor("the read-only claim's update to be refused", refused);
+      expect(observer.text.toString()).toBe("document access");
+      expect(rig.hocuspocus.documents.get(room)!.getText(TEXT_KEY).toString()).toBe("document access");
+    }
+  });
+
+  it.each(["read-only", "read-write"] as const)("refuses a %s grant outside its fixed workspace despite current membership", async scope => {
+    const rig = await startServer();
+    const grant = new AgentGrantRegistry(rig.database).create({
+      clientId: "hosted-agent", principalId: "person", workspaceId: WORKSPACE, scope,
+    });
+    const pair = generateTestCredentialKeyPair();
+    const issued = rig.registry.issueForGrant(grant.id, pair.publicKey);
+    expect(issued).not.toBeNull();
+    const credential = { ...issued!, keyBytes: pair.keyBytes };
+    const room = testRoom(OTHER_WORKSPACE);
+    const client = connect({ port: rig.port, room,
+      token: await credentialToken(credential, OTHER_WORKSPACE, { scope }) });
+    expect(await waitFor("the other workspace to refuse the grant", client.denied)).toBe("device-credential-refused");
+    expect(client.authenticated).not.toHaveBeenCalled();
+    expect(rig.hocuspocus.documents.has(room)).toBe(false);
+    expect(rig.logs.at(-1)).toMatchObject({ cause: "workspace-not-authorized" });
+  });
+
   it("requires both current membership and the credential's issued workspace limit, regardless of identity claims", async () => {
     const rig = await startServer();
     const nonMember = issue(rig.registry, "outsider-device", [WORKSPACE], "outsider");
