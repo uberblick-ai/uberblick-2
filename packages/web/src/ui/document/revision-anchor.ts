@@ -46,15 +46,18 @@ export function holdRevisionRow(pane: HTMLElement, header: HTMLElement, split: R
     cancelAnimationFrame(frame);
     pane.removeEventListener("wheel", stop);
     pane.removeEventListener("touchmove", stop);
-    pane.removeEventListener("pointerdown", stop, true);
+    pane.removeEventListener("pointerdown", pointerdown, true);
     pane.removeEventListener("keydown", keydown, true);
     if (previousAnchor === "") pane.style.removeProperty("overflow-anchor");
     else pane.style.setProperty("overflow-anchor", previousAnchor, previousPriority);
   };
+  const pointerdown = (event: PointerEvent): void => {
+    if (event.target instanceof Element && event.target.closest(".ub-revision-ruler") !== null) stop();
+  };
   const keydown = (event: KeyboardEvent): void => { if (SCROLL_KEYS.has(event.key)) stop(); };
   pane.addEventListener("wheel", stop, { passive: true });
   pane.addEventListener("touchmove", stop, { passive: true });
-  pane.addEventListener("pointerdown", stop, true);
+  pane.addEventListener("pointerdown", pointerdown, true);
   pane.addEventListener("keydown", keydown, true);
 
   const align = (): { key: string; top: number } | null => {

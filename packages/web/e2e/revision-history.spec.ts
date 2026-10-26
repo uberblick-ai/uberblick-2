@@ -3060,6 +3060,7 @@ test.describe("document history through ub open", () => {
       if (await collapse.getAttribute("aria-checked") === "false") {
         await activateControl(collapse);
         await comparisonDrawn(page);
+        await settleScroll();
       }
       const reader = after.locator("p").filter({ hasText: /^Final marker$/ }).nth(3).locator("xpath=preceding-sibling::*[1]");
       await reader.evaluate(element => {
@@ -3089,6 +3090,15 @@ test.describe("document history through ub open", () => {
         Element.prototype.animate = (window as unknown as { scrollOwnershipAnimate: typeof Element.prototype.animate }).scrollOwnershipAnimate;
       });
       await closeHistoryList(page, drawer);
+      // Clicking readable text does not request scrolling or end the hold.
+      const clickAt = await reader.evaluate(element => {
+        const header = element.closest(".ub-revision-pane")?.querySelector(".ub-revision-header");
+        const paragraph = element.nextElementSibling;
+        if (header == null || paragraph === null) throw new Error("The reader's paragraph is missing");
+        const box = paragraph.getBoundingClientRect();
+        return { x: box.left + 20, y: Math.max(header.getBoundingClientRect().bottom + 20, box.top + box.height / 2) };
+      });
+      await page.mouse.click(clickAt.x, clickAt.y);
       await growDrawing();
       // The no-input control proves the hold is still active at this point.
       await expect.poll(async () => Math.abs(await reader.evaluate(element => element.getBoundingClientRect().top) - top), { message: `${input}: held before reader input` }).toBeLessThanOrEqual(2);
