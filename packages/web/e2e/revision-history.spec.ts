@@ -2887,6 +2887,88 @@ test.describe("document history through ub open", () => {
     expect(Math.abs(await after.locator('.ub-revision-row-start[data-key="row-2"]').evaluate(element => element.getBoundingClientRect().top) - top)).toBeLessThanOrEqual(2);
   });
 
+  for (const openingSide of ["Before this revision", "This revision"] as const) {
+    test(`fold rows settle after a resize during motion — ${openingSide}`, { tag: "@webkit" }, async ({ browser }) => {
+      const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+        viewport: { width: 1440, height: 420 }, reducedMotion: "no-preference",
+      }, beforeNavigate: async page => {
+        await mockFigmaLookup(page);
+        await page.route("https://embed.figma.com/**", route => route.fulfill({ contentType: "text/html", body: "<p>Context design</p>" }));
+      } });
+      const title = docTitle("Resize during fold motion");
+      const uuid = await newDocument(page, title);
+      await serveHistory(page, [
+        { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+        { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+      ], embeddedFoldHistory(uuid, title));
+      await previous(page);
+      await expect(page.locator(".ub-revision-fold-button")).toHaveCount(4);
+      await comparisonDrawn(page);
+      const side = openingSide === "This revision" ? historicalEditor(page) : earlierSide(page);
+      const bar = side.locator(".ub-revision-fold-button").first();
+      await bar.scrollIntoViewIfNeeded();
+      // Motion is optional per row. Hold one side halfway and settle the other
+      // before a drawing grows, so equal transforms cannot mask layout sampling.
+      await page.locator(".ub-revision-pane").evaluate((pane, openingSide) => {
+        pane.addEventListener("click", () => {
+          for (const animation of document.getAnimations()) {
+            const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
+            if (!(target instanceof Element) || !target.matches(".ub-revision-row-start, .ub-revision-row, .ub-revision-row-end")) continue;
+            animation.pause();
+            animation.currentTime = 190;
+            if (target.parentElement?.getAttribute("aria-label") === openingSide) animation.finish();
+          }
+        }, { once: true });
+      }, openingSide);
+      await activateControl(bar);
+      await expect(historicalEditor(page)).toContainText("Opened run 1 begins here.");
+      await comparisonDrawn(page);
+      expect(await page.evaluate(() => document.getAnimations().filter(animation => animation.playState === "paused").length)).toBeGreaterThan(0);
+      const spacers = page.locator(".ub-revision-pane .ub-revision-row-end");
+      const padding = await spacers.evaluateAll(elements => elements.map(element => (element as HTMLElement).style.height));
+      await side.locator(".ub-chart").nth(1).evaluate(element => {
+        const plot = element.querySelector<HTMLElement>(".ub-chart-screen");
+        if (plot === null) throw new Error("The chart drawing is missing");
+        plot.style.minHeight = `${plot.getBoundingClientRect().height + 80}px`;
+      });
+      // The resized block's observer must have realigned the rows before motion ends.
+      await expect.poll(() => spacers.evaluateAll(elements => elements.map(element => (element as HTMLElement).style.height))).not.toEqual(padding);
+      await page.locator(".ub-revision-pane").evaluate(pane => {
+        for (const animation of pane.getAnimations({ subtree: true })) animation.finish();
+      });
+      await comparisonDrawn(page);
+      const beforeTops = await earlierSide(page).locator(".ub-revision-row-start").evaluateAll(elements => elements.map(element => element.getBoundingClientRect().top));
+      const afterTops = await historicalEditor(page).locator(".ub-revision-row-start").evaluateAll(elements => elements.map(element => element.getBoundingClientRect().top));
+      expect(beforeTops).toHaveLength(afterTops.length);
+      for (const [index, top] of beforeTops.entries()) expect(Math.abs(top - (afterTops[index] ?? 0))).toBeLessThanOrEqual(0.5);
+      const nextBar = side.locator(".ub-revision-fold-button").first();
+      await nextBar.scrollIntoViewIfNeeded();
+      const run = Number(await nextBar.getAttribute("data-fold"));
+      const positionsAbove = () => page.locator(".ub-revision-pane .ub-revision-row-start").evaluateAll((elements, run) =>
+        elements.filter(element => {
+          const key = (element as HTMLElement).dataset.key;
+          return key?.startsWith("row-") && Number(key.slice(4)) < run;
+        }).map(element => ({
+          top: element.getBoundingClientRect().top,
+          block: element.nextElementSibling?.getBoundingClientRect().top ?? 0,
+        })), run);
+      const above = await positionsAbove();
+      const pane = page.locator(".ub-revision-pane");
+      const scroll = await pane.evaluate(element => element.scrollTop);
+      expect(scroll).toBeGreaterThan(0);
+      await activateControl(nextBar);
+      await expect(historicalEditor(page)).toContainText("Opened run 2 begins here.");
+      await comparisonDrawn(page);
+      expect(await pane.evaluate(element => element.scrollTop)).toBe(scroll);
+      const settled = await positionsAbove();
+      expect(settled).toHaveLength(above.length);
+      for (const [index, position] of above.entries()) {
+        expect(Math.abs((settled[index]?.top ?? 0) - position.top)).toBeLessThanOrEqual(2);
+        expect(Math.abs((settled[index]?.block ?? 0) - position.block)).toBeLessThanOrEqual(2);
+      }
+    });
+  }
+
   for (const appearance of ["light", "dark"] as const) {
     for (const reducedMotion of ["no-preference", "reduce"] as const) {
       test(`drawn folds stay in place on either side — ${appearance}, ${reducedMotion}`, { tag: "@webkit" }, async ({ browser }) => {
