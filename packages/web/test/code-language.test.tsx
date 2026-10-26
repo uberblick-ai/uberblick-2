@@ -126,7 +126,12 @@ describe("code block language", () => {
     expect(fix.editor.state.selection.head).toBe(selection.head);
   });
 
-  it.each([["ts", "TypeScript"], ["not-supported", "Not-supported"]])("preserves stored %s on open and Escape, then returns focus to its block", async (language, label) => {
+  it.each([
+    ["ts", "TypeScript"], ["not-supported", "Not-supported"],
+    ["svg", "SVG"], ["xhtml", "XHTML"], ["rss", "XML"], ["atom", "XML"],
+    ["xjb", "XML"], ["xsd", "XML"], ["xsl", "XML"], ["plist", "XML"], ["wsf", "XML"],
+    ["shellsession", "Shell session"],
+  ])("preserves stored %s on open and Escape, then returns focus to its block", async (language, label) => {
     const fix = await fixture(language);
     const before = snapshotFragment(fix.ydoc);
     const selection = fix.editor.state.selection;

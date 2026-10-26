@@ -240,6 +240,77 @@ test("a stored multiline caption renders its line break below the preview", { ta
   expect(lines).toBe(2);
 });
 
+test("editing a multiline caption preserves stored, Enter and pasted breaks with its marks and comment anchors", { tag: "@webkit" }, async ({ browser }, info) => {
+  const session = writer();
+  const created = await create(session, [{ type: "figma", text: source().replace(CAPTION, "**Line one**\n*Line two*") }]);
+  const block = created.blocks[0];
+  if (block === undefined) throw new Error("e2e: multiline caption block is missing");
+  const doc = new Y.Doc();
+  const secret = await importRootSecret(harness().authSecret);
+  const provider = new HocuspocusProvider({
+    url: harness().hubUrl, name: roomForDoc(harness().workspaceUuid, created.uuid), document: doc,
+    token: async () => wrapToken(await mintToken(secret, {
+      typ: "room", sub: randomUUID(), workspace: harness().workspaceUuid,
+      scope: "read-write", kid: null, lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+    })),
+  });
+  try {
+    await expect.poll(() => findBlockElement(doc, block.id)).not.toBeNull();
+    const first = createAnnotation(doc, block.id, 1, 4, "Reader", "First caption line.", { part: "caption" });
+    const second = createAnnotation(doc, block.id, 10, 13, "Reader", "Second caption line.", { part: "caption" });
+    await expect.poll(async () => (await session.call<StoredDoc>("get_doc", { uuid: created.uuid })).annotations.length).toBe(2);
+    const touch = info.project.use.hasTouch === true;
+    const page = await open(browser, created.uuid, [], { touch });
+    const caption = page.locator(".ub-figma-caption p");
+    if (touch) await caption.tap();
+    else await caption.click();
+    const caret = async (offset: number): Promise<void> => setNativeSelection(caption, () => caption.evaluate((element, offset) => {
+      const root = element.closest(".ProseMirror") as HTMLElement & { editor: Editor };
+      root.editor.view.focus();
+      const position = root.editor.view.posAtDOM(element, 0) + offset;
+      const point = root.editor.view.domAtPos(position);
+      const range = document.createRange();
+      range.setStart(point.node, point.offset);
+      range.collapse(true);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return { anchor: position, head: position };
+    }, offset));
+    const typeAt = async (offset: number, text: string, expected: string): Promise<void> => {
+      await caret(offset);
+      await page.keyboard.type(text);
+      await expect.poll(() => caption.textContent()).toBe(expected);
+    };
+    await typeAt(0, "First: ", "First: Line one\nLine two");
+    await typeAt("First: Line one".length, ".", "First: Line one.\nLine two");
+    await typeAt("First: Line one.\n".length, "Second: ", "First: Line one.\nSecond: Line two");
+    await typeAt("First: Line one.\nSecond: Line two".length, ".", "First: Line one.\nSecond: Line two.");
+    await caret("First: Line one.\nSecond:".length);
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("New line");
+    await expect.poll(() => caption.textContent()).toBe("First: Line one.\nSecond:\nNew line Line two.");
+    await editor(page).evaluate((element) => {
+      const clipboard = new DataTransfer();
+      clipboard.setData("text/plain", "\r\nPasted one\r\nPasted two");
+      element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true }));
+    });
+    await page.keyboard.type("!");
+    const plain = "First: Line one.\nSecond:\nNew line\nPasted one\nPasted two! Line two.";
+    await expect.poll(() => caption.textContent()).toBe(plain);
+    expect((await caption.locator("strong").allTextContents()).join("")).toBe("First: Line one.");
+    expect((await caption.locator("em").allTextContents()).join("")).toBe("Line two.");
+    for (const thread of [first, second]) await expect(caption.locator(`[data-comment-thread="${thread.id}"]`)).toHaveText("ine");
+    await expectMcp(() => session.call<StoredDoc>("get_doc", { uuid: created.uuid }), (stored) => {
+      expect(stored.blocks[0]?.text).toBe(source().replace(CAPTION, "**First: Line one.**\nSecond:\nNew line\nPasted one\nPasted two! *Line two.*"));
+      for (const [thread, line] of [[first, "Line one"], [second, "Line two"]] as const) {
+        expect(stored.annotations.find((annotation) => annotation.id === thread.id)?.range)
+          .toEqual(expect.objectContaining({ part: "caption", start: plain.indexOf(line) + 1, end: plain.indexOf(line) + 4 }));
+      }
+    });
+  } finally { provider.destroy(); doc.destroy(); }
+});
+
 test("caption, local and remote text, undo, fields and theme preserve both clients' viewers; a changed link reloads once", { tag: "@webkit" }, async ({ browser }) => {
   const session = writer();
   const created = await create(session);

@@ -91,7 +91,9 @@ describe("code syntax highlighting", () => {
     ["json", "JSON"], ["ts", "TypeScript"], ["wireframe", "Wireframe"],
     ["php", "PHP"], ["python-repl", "Python REPL"], ["pycon", "Python REPL"],
     ["toml", "TOML"], ["ini", "INI"], ["html", "HTML"], ["xml", "XML"],
-    ["shell", "Shell session"], ["console", "Shell session"],
+    ["svg", "SVG"], ["xhtml", "XHTML"], ["rss", "XML"], ["atom", "XML"],
+    ["xjb", "XML"], ["xsd", "XML"], ["xsl", "XML"], ["plist", "XML"], ["wsf", "XML"],
+    ["shell", "Shell session"], ["console", "Shell session"], ["shellsession", "Shell session"],
     ["plaintext", "Plain text"], ["", "Plain text"], ["my-language", "My-language"],
   ])("shows the grammar's display name for %s without changing its stored id", (language, label) => {
     const ydoc = new Y.Doc();
