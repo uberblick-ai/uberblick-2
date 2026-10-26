@@ -2861,7 +2861,7 @@ test.describe("document history through ub open", () => {
     await expect(previousChange).toBeDisabled();
   });
 
-  test("opening a drawn history fold keeps the reading position", async ({ browser }) => {
+  test("opening a drawn history fold and disabling collapse keeps the reading position", async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 420 } } });
     const title = docTitle("Drawn fold position");
     const uuid = await newDocument(page, title);
@@ -2885,6 +2885,324 @@ test.describe("document history through ub open", () => {
     await expect.poll(() => runningMotion(page)).toBe(0);
     expect(await pane.evaluate(element => element.scrollTop)).toBe(scroll);
     expect(Math.abs(await after.locator('.ub-revision-row-start[data-key="row-2"]').evaluate(element => element.getBoundingClientRect().top) - top)).toBeLessThanOrEqual(2);
+    await activateControl(historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true }));
+    expect(await pane.evaluate(element => element.scrollTop)).toBe(scroll);
+    expect(Math.abs(await after.locator('.ub-revision-row-start[data-key="row-2"]').evaluate(element => element.getBoundingClientRect().top) - top)).toBeLessThanOrEqual(2);
+    await comparisonDrawn(page);
+    expect(await pane.evaluate(element => element.scrollTop)).toBe(scroll);
+    expect(Math.abs(await after.locator('.ub-revision-row-start[data-key="row-2"]').evaluate(element => element.getBoundingClientRect().top) - top)).toBeLessThanOrEqual(2);
+  });
+
+  for (const reducedMotion of ["no-preference", "reduce"] as const) {
+    test(`the collapse switch keeps the reader's row through drawings and motion — ${reducedMotion}`, { tag: "@webkit" }, async ({ browser }, info) => {
+      const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+        ...(info.project.name === "webkit-ipad" ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 420 } }),
+        colorScheme: "light", reducedMotion,
+      }, beforeNavigate: async page => {
+        await mockFigmaLookup(page);
+        await page.route("https://embed.figma.com/**", route => route.fulfill({ contentType: "text/html", body: "<p>Context design</p>" }));
+      } });
+      const title = docTitle("Collapse switch position");
+      const uuid = await newDocument(page, title);
+      await serveHistory(page, [
+        { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+        { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+      ], embeddedFoldHistory(uuid, title));
+      await previous(page);
+      await expect(page.locator(".ub-revision-split")).toBeVisible();
+      await comparisonDrawn(page);
+      const pane = page.locator(".ub-revision-pane");
+      const after = historicalEditor(page);
+      const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true });
+      const drawer = await showHistoryList(page);
+      const position = async (row: Locator, inset = 8): Promise<number> => {
+        await row.evaluate((element, offset) => {
+          const pane = element.closest(".ub-revision-pane");
+          const header = pane?.querySelector(".ub-revision-header");
+          if (pane === null || header == null) throw new Error("The comparison header is missing");
+          pane.scrollBy(0, element.getBoundingClientRect().top - header.getBoundingClientRect().bottom - offset);
+        }, inset);
+        expect(await pane.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+        const top = await row.evaluate(element => element.getBoundingClientRect().top);
+        const header = await page.locator(".ub-revision-header").evaluate(element => element.getBoundingClientRect().bottom);
+        expect(Math.abs(top - header - inset)).toBeLessThanOrEqual(2);
+        return top;
+      };
+      const key = async (row: Locator): Promise<string> => {
+        const value = await row.getAttribute("data-key");
+        if (value === null) throw new Error("The reader's row has no identity");
+        return value;
+      };
+      const startBefore = (block: Locator): Locator => block.locator("xpath=preceding-sibling::*[1]");
+      const toggle = async (folding: boolean, rowKey: string, top: number): Promise<void> => {
+        // Freeze the first frame so a later settled assertion cannot hide an initial jump.
+        await page.evaluate(() => {
+          const animate = Element.prototype.animate;
+          const animations: Animation[] = [];
+          Object.assign(window, { switchMotion: { animate, animations } });
+          Element.prototype.animate = function (this: Element, keyframes, options) {
+            const animation = animate.call(this, keyframes, options);
+            if (this.closest(".ub-revision-pane") !== null) {
+              animation.pause();
+              animation.currentTime = 0;
+              animations.push(animation);
+            }
+            return animation;
+          };
+        });
+        await activateControl(collapse);
+        await expect(collapse).toHaveAttribute("aria-checked", String(folding));
+        await expect(after.locator(".ub-revision-fold-button")).toHaveCount(folding ? 2 : 0);
+        const assertPosition = async (phase: string): Promise<void> => {
+          for (const side of [after, earlierSide(page)]) {
+            const current = await side.locator(`.ub-revision-row-start[data-key="${rowKey}"]`).evaluate(element => element.getBoundingClientRect().top);
+            const reach = await pane.evaluate((element, delta) => ({ target: element.scrollTop + delta, max: element.scrollHeight - element.clientHeight }), current - top);
+            expect.soft(Math.abs(current - top), `${phase} ${folding ? "on" : "off"} ${rowKey}: expected ${top}, received ${current}, reach ${JSON.stringify(reach)}`).toBeLessThanOrEqual(2);
+          }
+        };
+        await assertPosition("immediate");
+        const motion = await page.evaluate(() => {
+          const state = (window as unknown as { switchMotion: { animate: typeof Element.prototype.animate; animations: Animation[] } }).switchMotion;
+          Element.prototype.animate = state.animate;
+          const moved = state.animations.some(animation => animation.effect instanceof KeyframeEffect
+            && animation.effect.getKeyframes().some(frame => typeof frame.transform === "string" && /translateY\((?!0px)/.test(frame.transform)));
+          const closing = state.animations.some(animation => {
+            if (!(animation.effect instanceof KeyframeEffect) || !(animation.effect.target instanceof Element)
+              || !animation.effect.target.matches(".ub-revision-ghost")) return false;
+            const frames = animation.effect.getKeyframes();
+            return Number.parseFloat(String(frames[0]?.height)) > Number.parseFloat(String(frames.at(-1)?.height))
+              && (animation.effect.target as HTMLElement).inert;
+          });
+          for (const animation of state.animations) animation.play();
+          return { count: state.animations.length, moved, closing };
+        });
+        if (reducedMotion === "reduce") expect(motion.count).toBe(0);
+        else {
+          expect(motion.count).toBeGreaterThan(0);
+          expect(motion.moved).toBe(true);
+          if (folding) expect(motion.closing).toBe(true);
+        }
+        await comparisonDrawn(page);
+        await assertPosition("settled");
+        await expect(page.locator(".ub-revision-ghost")).toHaveCount(0);
+      };
+      // Drawings inside the first run grow above this retained row; the second run grows below it.
+      const retained = startBefore(after.locator("p").filter({ hasText: /^Final marker$/ }).nth(3));
+      const retainedKey = await key(retained);
+      const retainedTop = await position(retained);
+      await toggle(false, retainedKey, retainedTop);
+      await toggle(true, retainedKey, retainedTop);
+      // A bar becomes its first row at the same place when the switch opens every run.
+      const bar = after.locator(".ub-revision-fold-button").first();
+      const run = await bar.getAttribute("data-fold");
+      if (run === null) throw new Error("The first run has no identity");
+      const barTop = await position(after.locator(`.ub-revision-row-start[data-key="fold-${run}"]`));
+      await toggle(false, `row-${run}`, barTop);
+      // Folding the row being read replaces it with the run's fully visible bar.
+      const hidden = startBefore(after.locator("p").filter({ hasText: /^Run 1 context 4\.$/ }));
+      await toggle(true, `fold-${run}`, await position(hidden));
+      await toggle(false, `row-${run}`, barTop);
+      const coveredTop = await position(hidden, -10);
+      const headerBottom = await page.locator(".ub-revision-header").evaluate(element => element.getBoundingClientRect().bottom);
+      expect(coveredTop).toBeLessThan(headerBottom);
+      await toggle(true, `fold-${run}`, headerBottom);
+      await closeHistoryList(page, drawer);
+    });
+  }
+
+  test("the collapse switch releases its hold for reader scrolling and after drawings settle", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+      ...(info.project.name === "webkit-ipad" ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 420 } }),
+      colorScheme: "light", reducedMotion: "no-preference",
+    }, beforeNavigate: async page => {
+      await mockFigmaLookup(page);
+      await page.route("https://embed.figma.com/**", route => route.fulfill({ contentType: "text/html", body: "<p>Context design</p>" }));
+    } });
+    const title = docTitle("Collapse switch scroll ownership");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], embeddedFoldHistory(uuid, title));
+    await previous(page);
+    await comparisonDrawn(page);
+    const pane = page.locator(".ub-revision-pane");
+    const after = historicalEditor(page);
+    const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true });
+    // Isolate Uberblick's hold from browser anchoring when a drawing grows.
+    await pane.evaluate(element => { (element as HTMLElement).style.overflowAnchor = "none"; });
+    const finishMotion = () => pane.evaluate(element => {
+      for (const animation of element.getAnimations({ subtree: true })) animation.finish();
+    });
+    const growDrawing = async (): Promise<void> => {
+      const height = await pane.evaluate(element => element.scrollHeight);
+      await after.locator(".ub-chart").nth(1).evaluate(element => {
+        const plot = element.querySelector<HTMLElement>(".ub-chart-screen");
+        if (plot === null) throw new Error("The newly revealed chart is missing");
+        plot.style.minHeight = `${plot.getBoundingClientRect().height + 80}px`;
+      });
+      await expect.poll(() => pane.evaluate(element => element.scrollHeight)).toBeGreaterThan(height + 70);
+    };
+    const settleScroll = () => pane.evaluate(async element => {
+      let previous = element.scrollTop;
+      let stable = 0;
+      while (stable < 4) {
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        const current = element.scrollTop;
+        stable = Math.abs(current - previous) < 0.1 ? stable + 1 : 0;
+        previous = current;
+      }
+    });
+    for (const input of ["wheel", "keyboard", "ruler", "previous", "next", "touch", "settled"] as const) {
+      // The ruler steps aside for the iPad's native scrollbar.
+      if (input === "ruler" && info.project.name === "webkit-ipad") continue;
+      const drawer = await showHistoryList(page);
+      if (await collapse.getAttribute("aria-checked") === "false") {
+        await activateControl(collapse);
+        await comparisonDrawn(page);
+        await settleScroll();
+      }
+      const reader = after.locator("p").filter({ hasText: /^Final marker$/ }).nth(3).locator("xpath=preceding-sibling::*[1]");
+      await reader.evaluate(element => {
+        const pane = element.closest(".ub-revision-pane");
+        const header = pane?.querySelector(".ub-revision-header");
+        if (pane === null || header == null) throw new Error("The comparison header is missing");
+        pane.scrollBy(0, element.getBoundingClientRect().top - header.getBoundingClientRect().bottom - 8);
+      });
+      const top = await reader.evaluate(element => element.getBoundingClientRect().top);
+      // Keep real row motion unfinished while input and delayed drawing growth arrive.
+      await page.evaluate(() => {
+        const animate = Element.prototype.animate;
+        Object.assign(window, { scrollOwnershipAnimate: animate });
+        Element.prototype.animate = function (this: Element, keyframes, options) {
+          const animation = animate.call(this, keyframes, options);
+          if (this.closest(".ub-revision-pane") !== null) {
+            animation.pause();
+            animation.currentTime = 0;
+          }
+          return animation;
+        };
+      });
+      await activateControl(collapse);
+      await expect(collapse).toHaveAttribute("aria-checked", "false");
+      await expect(after.locator(".ub-revision-fold-button")).toHaveCount(0);
+      await page.evaluate(() => {
+        Element.prototype.animate = (window as unknown as { scrollOwnershipAnimate: typeof Element.prototype.animate }).scrollOwnershipAnimate;
+      });
+      await closeHistoryList(page, drawer);
+      // Clicking readable text does not request scrolling or end the hold.
+      const clickAt = await reader.evaluate(element => {
+        const header = element.closest(".ub-revision-pane")?.querySelector(".ub-revision-header");
+        const paragraph = element.nextElementSibling;
+        if (header == null || paragraph === null) throw new Error("The reader's paragraph is missing");
+        const box = paragraph.getBoundingClientRect();
+        return { x: box.left + 20, y: Math.max(header.getBoundingClientRect().bottom + 20, box.top + box.height / 2) };
+      });
+      await page.mouse.click(clickAt.x, clickAt.y);
+      await growDrawing();
+      // The no-input control proves the hold is still active at this point.
+      await expect.poll(async () => Math.abs(await reader.evaluate(element => element.getBoundingClientRect().top) - top), { message: `${input}: held before reader input` }).toBeLessThanOrEqual(2);
+      const heldScroll = await pane.evaluate(element => element.scrollTop);
+      if (input === "settled") {
+        await finishMotion();
+        await comparisonDrawn(page);
+        // Allow the final stable layout frames to complete before later growth.
+        await settleScroll();
+      } else if (input === "wheel") {
+        if (browserName === "webkit") {
+          // Mobile WebKit also lacks native wheel automation; check that its
+          // wheel signal relinquishes the hold before the resulting scroll.
+          await pane.dispatchEvent("wheel", { deltaY: 160 });
+          await pane.evaluate(element => element.scrollBy(0, 160));
+        } else {
+          const box = await pane.boundingBox();
+          if (box === null) throw new Error("The comparison has no box");
+          await page.mouse.move(box.x + box.width / 2, box.y + box.height - 50);
+          await page.mouse.wheel(0, 160);
+        }
+      } else if (input === "keyboard") {
+        await pane.evaluate(element => {
+          (element as HTMLElement).tabIndex = -1;
+          (element as HTMLElement).focus({ preventScroll: true });
+        });
+        await page.keyboard.press("PageDown");
+      } else if (input === "ruler") {
+        const track = await page.getByTestId("revision-ruler").boundingBox();
+        if (track === null) throw new Error("The change ruler has no box");
+        await page.mouse.click(track.x + track.width / 2, track.y + track.height * 0.8);
+      } else if (input === "previous" || input === "next") {
+        await activateControl(page.getByRole("button", { name: input === "previous" ? "Previous change" : "Next change", exact: true }));
+      } else if (browserName === "chromium") {
+        const session = await page.context().newCDPSession(page);
+        await session.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+        const box = await pane.boundingBox();
+        if (box === null) throw new Error("The comparison has no touch area");
+        const point = { x: box.x + box.width / 2, y: box.y + box.height - 70, id: 1 };
+        await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+        for (let step = 1; step <= 8; step += 1) {
+          await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ ...point, y: point.y - step * 15 }] });
+          await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+        }
+        await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        await session.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+        await session.detach();
+      } else {
+        // WebKit has no native swipe automation; cover its touch cancellation
+        // wiring and scroll outcome without claiming a native iPad gesture.
+        await pane.dispatchEvent("touchstart");
+        await pane.dispatchEvent("touchmove");
+        await pane.evaluate(element => element.scrollBy(0, 120));
+        await pane.dispatchEvent("touchend");
+      }
+      if (input !== "settled") {
+        await expect.poll(async () => Math.abs(await pane.evaluate(element => element.scrollTop) - heldScroll), { message: `${input}: reader scrolling wins` }).toBeGreaterThan(20);
+      }
+      await settleScroll();
+      const chosenScroll = await pane.evaluate(element => element.scrollTop);
+      await growDrawing();
+      await finishMotion();
+      await comparisonDrawn(page);
+      await settleScroll();
+      expect(Math.abs(await pane.evaluate(element => element.scrollTop) - chosenScroll), `${input}: later drawing growth must not reclaim scrolling`).toBeLessThanOrEqual(2);
+    }
+  });
+
+  test("the collapse switch leaves a one-column comparison and its scroll unchanged", { tag: "@webkit" }, async ({ browser }, info) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+      ...(info.project.name === "webkit-ipad" ? devices["iPad (gen 7)"] : { viewport: { width: 860, height: 640 } }),
+    } });
+    const title = docTitle("Single column collapse switch");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], drawnFoldHistory(uuid, title));
+    await previous(page);
+    await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+    await comparisonDrawn(page);
+    const view = historicalEditor(page);
+    const original = await view.elementHandle();
+    if (original === null) throw new Error("The one-column comparison is missing");
+    const content = await view.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.toJSON());
+    const pane = page.locator(".ub-revision-pane");
+    await pane.evaluate(element => { element.scrollTop = 240; });
+    const scroll = await pane.evaluate(element => element.scrollTop);
+    expect(scroll).toBeGreaterThan(0);
+    const drawer = await showHistoryList(page);
+    const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true });
+    for (const folding of [false, true]) {
+      await activateControl(collapse);
+      await expect(collapse).toHaveAttribute("aria-checked", String(folding));
+      expect(await view.evaluate((element, retained) => element === retained, original)).toBe(true);
+      expect(await pane.evaluate(element => element.scrollTop)).toBe(scroll);
+      await comparisonDrawn(page);
+      expect(await view.evaluate((element, retained) => element === retained, original)).toBe(true);
+      expect(await view.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.toJSON())).toEqual(content);
+      expect(await pane.evaluate(element => element.scrollTop)).toBe(scroll);
+      expect(await runningMotion(page)).toBe(0);
+      await expect(page.locator(".ub-revision-fold-button, .ub-revision-ghost")).toHaveCount(0);
+    }
+    await closeHistoryList(page, drawer);
   });
 
   for (const openingSide of ["Before this revision", "This revision"] as const) {
