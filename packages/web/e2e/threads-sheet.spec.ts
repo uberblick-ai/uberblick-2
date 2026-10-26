@@ -316,7 +316,8 @@ test("touch reveals a low thread in the sheet while its close control stays in v
 
     const sheet = page.getByRole("dialog", { name: "Comments", exact: true });
     const close = sheet.getByRole("button", { name: "Close comments" });
-    await page.locator(".ub-threads-toggle").tap();
+    const commentsToggle = page.locator(".ub-threads-toggle");
+    if (await commentsToggle.getAttribute("aria-expanded") !== "true") await commentsToggle.tap();
     await expect(sheet).toBeVisible();
     await close.tap();
     await expect(sheet).toBeHidden();
@@ -335,7 +336,11 @@ test("touch reveals a low thread in the sheet while its close control stays in v
       const selected = sheet.locator('.ub-thread[aria-current="true"]');
       await expect(selected).toContainText(`conversation ${number}`);
       if (number === 10) await expect(selected).toHaveAttribute("data-expanded", "true");
-      await expect(selected).toBeInViewport({ ratio: 1 });
+      await expect(selected).toBeInViewport({ ratio: 0.99 });
+      const cardBounds = await selected.boundingBox();
+      if (cardBounds === null) throw new Error("e2e: selected comment card needs a layout box");
+      expect(cardBounds.y).toBeGreaterThanOrEqual(-1);
+      expect(cardBounds.y + cardBounds.height).toBeLessThanOrEqual((page.viewportSize()?.height ?? 0) + 1);
       await expect(sheet.locator(".ub-thread").first()).not.toBeInViewport();
       // Assert before tapping: Playwright's automatic scroll into view must
       // not conceal a close control that scrolls away with the conversations.

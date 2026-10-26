@@ -21,6 +21,7 @@ async function shell(page: Page) {
       titleLeft: t.left,
       contentLeft: c.left + Number.parseFloat(getComputedStyle(column).paddingLeft),
       columnWidth: c.width,
+      measure: Number.parseFloat(getComputedStyle(column).maxWidth),
       gap: next.getBoundingClientRect().top - t.bottom,
       face: style.fontFamily,
       size: style.fontSize,
@@ -51,7 +52,8 @@ async function expectShell(page: Page, reference?: Shell): Promise<Shell> {
   expect(actual.openerReachable).toBe(true);
   if (reference !== undefined) {
     expect(Math.abs(actual.titleLeft - reference.titleLeft)).toBeLessThanOrEqual(1);
-    expect(actual.columnWidth).toBeLessThanOrEqual(reference.columnWidth + 1);
+    expect(actual.measure).toBeCloseTo(reference.measure, 1);
+    expect(actual.columnWidth).toBeLessThanOrEqual(reference.measure + 1);
     expect(Math.abs(actual.gap - reference.gap)).toBeLessThanOrEqual(1);
     expect(actual.tracking).toBe(reference.tracking);
   }

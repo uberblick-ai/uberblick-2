@@ -61,6 +61,13 @@ async function revealed(card: Locator, value: "0" | "1"): Promise<void> {
   }
 }
 
+async function inlineReply(field: Locator, send: Locator): Promise<void> {
+  const [input, button] = await Promise.all([field.boundingBox(), send.boundingBox()]);
+  if (input === null || button === null) throw new Error("e2e: reply controls need layout boxes");
+  expect(button.x).toBeGreaterThanOrEqual(input.x + input.width - 1);
+  expect(Math.abs(button.y + button.height - input.y - input.height)).toBeLessThanOrEqual(1);
+}
+
 test("comment cards reveal quiet controls through hover, keyboard and selection while drafts stay with each card", async ({ browser }) => {
   const data = await fixture();
   try {
@@ -89,6 +96,7 @@ test("comment cards reveal quiet controls through hover, keyboard and selection 
     const reply = first.getByPlaceholder("Reply…");
     await expect(reply).toBeFocused();
     const send = first.getByRole("button", { name: "Reply", exact: true });
+    await inlineReply(reply, send);
     await expect(send).toBeDisabled();
     await expect(send).toHaveCSS("opacity", "0.4");
     await reply.fill("Keep the first draft");
@@ -176,6 +184,7 @@ test("iPad taps select, reply, resolve and reopen without reviving a resolved an
     const reply = card.getByPlaceholder("Reply…");
     const send = card.getByRole("button", { name: "Reply", exact: true });
     await reply.fill("Touch reply");
+    await inlineReply(reply, send);
     for (const control of [send, card.getByRole("button", { name: "Resolve", exact: true })]) {
       const box = await control.boundingBox();
       expect(box?.width).toBeGreaterThanOrEqual(44);

@@ -1090,7 +1090,7 @@ body {
 }
 .ub-thread:has(.ub-thread-resolve) .ub-comment-opening { padding-right: 4.5rem; }
 .ub-thread-reply { min-width: 0; }
-.ub-comment-form-compact { display: flex; align-items: flex-end; }
+.ub-comment-form-compact { display: flex; flex-direction: row; align-items: flex-end; }
 .ub-comment-form-compact > [data-slot="popover-anchor"] { flex: 1; min-width: 0; }
 .ub-comment-form-compact .ub-comment-input { min-width: 0; min-height: 2.5rem; flex: 1; resize: vertical; }
 .ub-comment-send { min-width: 1.75rem; min-height: 1.75rem; color: var(--foreground); }
