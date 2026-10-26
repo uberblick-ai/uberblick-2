@@ -101,6 +101,12 @@ function ThreadCard({
         aria-current={focused ? "true" : undefined}
         aria-label="Comment thread"
         onClick={(event) => { if (!(event.target instanceof Element && event.target.closest("a"))) onSelect(); }}
+        onKeyDown={(event) => {
+          if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
+            onSelect();
+          }
+        }}
       >
         <Button variant="plain" size="custom" type="button" className="flex w-full flex-col gap-[0.35rem] text-left [font:inherit]"
           aria-labelledby={`${threadCardId(thread.id)}-head ${threadCardId(thread.id)}-comments`}
