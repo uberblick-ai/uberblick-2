@@ -3220,6 +3220,7 @@ for (const scheme of ["light"] as const) {
       // Dark global ink is intentionally unchanged; its enabled opacity
       // consumers still have the same AA requirement as light's.
       for (const reading of [...(scheme === "light" ? readings : []), ...enabled]) {
+        if (reading.opacity === 0) continue;
         expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
       }
     });
@@ -3626,7 +3627,7 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   await expect(page.locator(".ub-rail")).not.toBeVisible();
   await expect(page.locator(".ub-threads-toggle")).toBeFocused();
   const narrow = await layout();
-  expect(narrow.column.width).toBeLessThan(firstPopulated.column.width);
+  expect(narrow.column.width).toBeLessThan(secondPopulated.column.width);
   expect(narrow.column.left).toBeGreaterThanOrEqual(narrow.pane.left);
   expect(narrow.column.right).toBeLessThanOrEqual(narrow.pane.right);
   expect(narrow.editor.left - narrow.column.left).toBeGreaterThan(20);

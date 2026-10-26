@@ -385,7 +385,10 @@ describe("read-only decision records", () => {
     ]);
     await act(async () => button(item, "✓ Resolve").click());
     expect(getAnnotation(ydoc, thread.id)?.resolved).toBe(true);
-    await act(async () => card(host, thread.id).querySelector<HTMLElement>(".ub-thread")?.click());
+    expect(host.querySelector(`#${CSS.escape(threadCardId(thread.id))}`)).toBeNull();
+    expect(button(host, "1 resolved").getAttribute("aria-expanded")).toBe("false");
+    await act(async () => button(host, "1 resolved").click());
+    await act(async () => button(card(host, thread.id), "Comment").click());
     await act(async () => button(card(host, thread.id), "Reopen").click());
     expect(getAnnotation(ydoc, thread.id)?.resolved).toBe(false);
     expect(plainText(textAt(ydoc))).toBe(PROSE);
@@ -409,8 +412,12 @@ describe("read-only decision records", () => {
     expect(button(item, "Reply")).toBeDefined();
     await act(async () => button(item, "✓ Resolve").click());
     expect(getAnnotation(ydoc, thread.id)?.resolved).toBe(true);
-    await act(async () => card(host, thread.id).querySelector<HTMLElement>(".ub-thread")?.click());
-    expect(button(card(host, thread.id), "Reopen")).toBeDefined();
+    expect(host.querySelector(`#${CSS.escape(threadCardId(thread.id))}`)).toBeNull();
+    expect(button(host, "1 resolved").getAttribute("aria-expanded")).toBe("false");
+    await act(async () => button(host, "1 resolved").click());
+    await act(async () => button(card(host, thread.id), "Comment").click());
+    await act(async () => button(card(host, thread.id), "Reopen").click());
+    expect(getAnnotation(ydoc, thread.id)?.resolved).toBe(false);
     expect(findLinkConflicts(getBlocksFragment(ydoc))).toHaveLength(1);
   });
 
