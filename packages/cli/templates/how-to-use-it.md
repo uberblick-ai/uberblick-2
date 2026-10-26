@@ -76,9 +76,11 @@ Open an issue in your repository for the phone number question. Ask the agent to
 record the question as an open decision, propose "optional, delivery notifications
 only", and link the issue in the record's prose. Tell it not to decide the question.
 
-On the decision's topic page in the browser, review the proposal and approve it.
-In a fresh agent session, ask it to call `find_decisions` for that issue and read
-the returned record with `get_doc`.
+Review the proposal, then tell the agent: "I accept 'optional, delivery
+notifications only'. My name is [your name]. Record my answer as decided now,
+with this conversation as its source." Replace [your name] with your name.
+In a fresh agent session, ask it to call `find_decisions` for that issue and
+read the returned record with `get_doc`.
 
 You should see: the answer in force, who decided and when, found by the issue
 alone in a session that knows nothing about the conversation.
