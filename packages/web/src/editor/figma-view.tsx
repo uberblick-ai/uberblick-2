@@ -3,7 +3,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import type { NodeView } from "@tiptap/pm/view";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { FIGMA_DEFAULT_HEIGHT, FIGMA_PROVIDER, normalizeFigmaLink } from "@uberblick/schema";
+import { FIGMA_DEFAULT_HEIGHT, FIGMA_MIN_HEIGHT, FIGMA_MAX_HEIGHT, FIGMA_PROVIDER, normalizeFigmaLink } from "@uberblick/schema";
 import { toast } from "sonner";
 import { endUndoCapture } from "./blocks.js";
 import { FigmaFields } from "./figma-fields.js";
@@ -11,7 +11,7 @@ import type { FigmaFieldValues } from "./figma-fields.js";
 import { observeFigma } from "./figma-loading.js";
 import { lookupFigma } from "./figma-lookup.js";
 import type { FigmaLookup } from "./figma-lookup.js";
-import { figmaResize } from "./figma-resize.js";
+import { blockResize } from "./block-resize.js";
 import { figureHistory } from "./figure-history.js";
 import "../ui/figure-viewer.css";
 
@@ -130,7 +130,7 @@ class FigmaView implements NodeView {
   private destroyed = false;
   private readonly privateLoads: Map<string, string>;
   private readonly visibility: ReturnType<typeof observeFigma>;
-  private readonly resize: ReturnType<typeof figmaResize>;
+  private readonly resize: ReturnType<typeof blockResize>;
 
   constructor(private readonly props: NodeViewRendererProps) {
     this.current = props.node;
@@ -140,7 +140,11 @@ class FigmaView implements NodeView {
     if (loads === undefined) { loads = new Map(); privateLoads.set(owner, loads); }
     this.privateLoads = loads;
     if (loads.get(this.current.attrs.id) !== this.current.attrs.url) loads.delete(this.current.attrs.id);
-    this.resize = figmaResize(this.ui.handle, () => this.height(), (height) => this.showHeight(height), (height) => this.save({ height: String(height) }));
+    this.resize = blockResize(this.ui.handle, {
+      min: FIGMA_MIN_HEIGHT, max: FIGMA_MAX_HEIGHT,
+      height: () => this.height(), show: (height) => this.showHeight(height),
+      commit: (height) => this.save({ height: String(height) }), restore: () => this.showHeight(this.height()),
+    });
     this.visibility = observeFigma({
       dom: this.dom, scroller: props.editor.view.dom.closest("section.ub-document-pane"),
       load: () => this.load(), unload: () => this.unload(),

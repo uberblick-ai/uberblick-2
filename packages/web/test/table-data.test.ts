@@ -35,6 +35,12 @@ function frozen<T>(value: T): T {
 }
 
 describe("table mapping", () => {
+  it.each([100, 160, 600])("rejects chart height %s for generated tables", (height) => {
+    const source = JSON.stringify({ ...mapping, height });
+    expect(prepareTable(source, null).status).toBe("invalid-configuration");
+    expect(JSON.parse(source).height).toBe(height);
+  });
+
   it.each([1, 14, 5_001, Number.MAX_VALUE])("accepts positive integer limit %s without an authoring ceiling", (limit) => {
     expect(parseTableConfig(JSON.stringify({ ...mapping, limit }))).toMatchObject({ ok: true, config: { limit } });
   });

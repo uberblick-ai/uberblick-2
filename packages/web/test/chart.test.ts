@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, within } from "@testing-library/react";
 import * as Y from "yjs";
+import { undo } from "y-prosemirror";
 import {
-  appendBlock, applyDocData, createAnnotation, editBlock, getBlocks, getBlocksFragment,
-  initDoc, readDocData,
+  appendBlock, applyDocData, COMMENT_MARK, createAnnotation, editBlock, getBlocks, getBlocksFragment,
+  initDoc, listAnnotationRanges, readDocData,
   blockRev,
 } from "@uberblick/schema";
 import { mountEditor, typeText } from "./helpers.js";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
 import { dataRevision } from "../src/editor/render-state.js";
+import { act } from "./react-render.js";
 import type { ChartConfiguration } from "chart.js";
 
 type RecordedChart = typeof charts.instances[number];
@@ -103,6 +106,152 @@ beforeEach(() => {
     vi.mocked(readDocData).mockClear();
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+describe("chart height controls", () => {
+  it("removes both editing controls when editing stops and restores them when editing resumes", async () => {
+    const { doc, directory } = fixture();
+    let mounted!: ReturnType<typeof mountEditor>;
+    await act(async () => { mounted = mountEditor(doc); flush(); });
+    const { editor } = mounted;
+    const handle = editor.view.dom.querySelector<HTMLButtonElement>('[aria-label="Resize chart"]')!;
+    const fields = editor.view.dom.querySelector<HTMLElement>(".ub-chart-height-fields")!;
+    expect(handle.hidden).toBe(false);
+    expect(fields.hidden).toBe(false);
+    const before = Y.encodeStateAsUpdate(doc);
+    await act(async () => editor.setEditable(false));
+    expect(handle.hidden).toBe(true);
+    expect(fields.hidden).toBe(true);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    await act(async () => editor.setEditable(true));
+    expect(handle.hidden).toBe(false);
+    expect(fields.hidden).toBe(false);
+    await act(async () => editor.destroy());
+    doc.destroy(); directory.destroy();
+  });
+
+  it.each([
+    { state: "ready", source: mapping, writable: false, empty: false },
+    { state: "ready", source: tableMapping, writable: true, empty: false },
+    { state: "invalid-configuration", source: `${mapping.slice(0, -1)},"height":99}`, writable: true, empty: false },
+    { state: "collection-absent", source: mapping.replace('"trend"', '"absent"'), writable: true, empty: false },
+    { state: "mapping-incompatible", source: mapping.replace('"type":"number"', '"type":"date"'), writable: true, empty: false },
+    { state: "no-records", source: mapping, writable: true, empty: true },
+  ])("offers no height control for $state with writable=$writable and source=$source", async ({ state, source, writable, empty }) => {
+    const { doc, directory, id } = fixture();
+    if (source !== mapping) editBlock(doc, id, mapping, source);
+    if (empty) applyDocData(doc, directory, [{ collection: "trend", replaceRecords: [] }]);
+    let mounted!: ReturnType<typeof mountEditor>;
+    await act(async () => {
+      mounted = mountEditor(doc);
+      mounted.editor.setEditable(writable);
+      flush();
+    });
+    const { editor } = mounted;
+    expect(editor.view.dom.querySelector(".ub-chart-panel")?.getAttribute("data-state")).toBe(state);
+    expect(editor.view.dom.querySelector<HTMLButtonElement>('[aria-label="Resize chart"]')?.hidden).toBe(true);
+    expect(editor.view.dom.querySelector<HTMLElement>(".ub-chart-height-fields")?.hidden).toBe(true);
+    await act(async () => editor.destroy());
+    doc.destroy(); directory.destroy();
+  });
+
+  it("keeps the coarse-pointer Height field current with stored source and omits the resize handle", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(pointer: coarse)", addEventListener() {}, removeEventListener() {} }));
+    const { doc, directory, id } = fixture();
+    let mounted!: ReturnType<typeof mountEditor>;
+    await act(async () => { mounted = mountEditor(doc); flush(); });
+    const { editor } = mounted;
+    await act(async () => editor.view.dom.querySelector<HTMLButtonElement>(".ub-chart-open")!.click());
+    const input = within(editor.view.dom).getByRole<HTMLInputElement>("textbox", { name: "Height" });
+    expect(input.value).toBe("");
+    expect(editor.view.dom.querySelector<HTMLButtonElement>('[aria-label="Resize chart"]')?.hidden).toBe(true);
+    const sized = `${mapping.slice(0, -1)},"height":400}`;
+    await act(async () => { editBlock(doc, id, mapping, sized); flush(); });
+    expect(input.value).toBe("400");
+    await act(async () => { editBlock(doc, id, sized, mapping); flush(); });
+    expect(input.value).toBe("");
+    await act(async () => editor.destroy());
+    doc.destroy(); directory.destroy();
+  });
+
+  it("refuses malformed field values and saves or clears only height while preserving comments and undo", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(pointer: coarse)", addEventListener() {}, removeEventListener() {} }));
+    const { doc, directory, id } = fixture();
+    const source = `{\r\n "height" : 200,\r\n ${mapping.slice(1)}`;
+    editBlock(doc, id, mapping, source);
+    const at = source.indexOf("Delivery");
+    const thread = createAnnotation(doc, id, at, at + "Delivery".length, "Reader", "Keep this label");
+    let mounted!: ReturnType<typeof mountEditor>;
+    await act(async () => { mounted = mountEditor(doc); flush(); });
+    const { editor } = mounted;
+    const input = within(editor.view.dom).getByRole<HTMLInputElement>("textbox", { name: "Height" });
+    const original = Y.encodeStateAsUpdate(doc);
+    await act(async () => fireEvent.change(input, { target: { value: "1.5" } }));
+    await act(async () => fireEvent.submit(input.form!));
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(within(editor.view.dom).getByRole("alert").textContent).toContain("100 to 600");
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(original);
+    await act(async () => fireEvent.change(input, { target: { value: "360" } }));
+    await act(async () => { fireEvent.submit(input.form!); flush(); });
+    expect(getBlocks(doc).find(block => block.id === id)?.text).toBe(source.replace("200", "360"));
+    expect(listAnnotationRanges(doc, id)).toEqual([{ threadId: thread.id, start: at, end: at + "Delivery".length }]);
+    await act(async () => { undo(editor.state); flush(); });
+    expect(getBlocks(doc).find(block => block.id === id)?.text).toBe(source);
+    expect(input.value).toBe("200");
+    await act(async () => fireEvent.change(input, { target: { value: "" } }));
+    await act(async () => { fireEvent.submit(input.form!); flush(); });
+    const cleared = source.replace('"height" : 200,', "");
+    expect(getBlocks(doc).find(block => block.id === id)?.text).toBe(cleared);
+    expect(listAnnotationRanges(doc, id)).toEqual([{ threadId: thread.id, start: cleared.indexOf("Delivery"), end: cleared.indexOf("Delivery") + "Delivery".length }]);
+    expect(input.value).toBe("");
+    await act(async () => editor.destroy());
+    doc.destroy(); directory.destroy();
+  });
+
+  it("keeps an annotation ending at the last mapping value out of an inserted height member and restores it on undo", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(pointer: coarse)", addEventListener() {}, removeEventListener() {} }));
+    const { doc, directory, id } = fixture();
+    const start = mapping.indexOf('"y":') + '"y":'.length;
+    const end = mapping.length - 1;
+    const thread = createAnnotation(doc, id, start, end, "Reader", "This series mapping");
+    const ranges = [{ threadId: thread.id, start, end }];
+    let mounted!: ReturnType<typeof mountEditor>;
+    await act(async () => { mounted = mountEditor(doc); flush(); });
+    const { editor } = mounted;
+    const input = within(editor.view.dom).getByRole<HTMLInputElement>("textbox", { name: "Height" });
+    await act(async () => fireEvent.change(input, { target: { value: "300" } }));
+    await act(async () => { fireEvent.submit(input.form!); flush(); });
+    expect(getBlocks(doc).find(block => block.id === id)?.text).toBe(`${mapping.slice(0, -1)},"height":300}`);
+    expect(listAnnotationRanges(doc, id)).toEqual(ranges);
+    await act(async () => { undo(editor.state); flush(); });
+    expect(getBlocks(doc).find(block => block.id === id)?.text).toBe(mapping);
+    expect(listAnnotationRanges(doc, id)).toEqual(ranges);
+    await act(async () => editor.destroy());
+    doc.destroy(); directory.destroy();
+  });
+
+  it("does not transfer an unrelated stored comment mark to a replacement height value", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(pointer: coarse)", addEventListener() {}, removeEventListener() {} }));
+    const { doc, directory, id } = fixture();
+    const source = `${mapping.slice(0, -1)},"height":200}`;
+    editBlock(doc, id, mapping, source);
+    const start = source.indexOf("Delivery");
+    const thread = createAnnotation(doc, id, start, start + "Delivery".length, "Reader", "This label");
+    const ranges = listAnnotationRanges(doc, id);
+    let mounted!: ReturnType<typeof mountEditor>;
+    await act(async () => { mounted = mountEditor(doc); flush(); });
+    const { editor } = mounted;
+    const input = within(editor.view.dom).getByRole<HTMLInputElement>("textbox", { name: "Height" });
+    await act(async () => fireEvent.change(input, { target: { value: "300" } }));
+    await act(async () => editor.view.dispatch(editor.state.tr.setStoredMarks([
+      editor.state.schema.marks[COMMENT_MARK]!.create({ threadId: thread.id }),
+    ])));
+    await act(async () => { fireEvent.submit(input.form!); flush(); });
+    expect(getBlocks(doc).find(block => block.id === id)?.text).toBe(source.replace('"height":200', '"height":300'));
+    expect(listAnnotationRanges(doc, id)).toEqual(ranges);
+    await act(async () => editor.destroy());
+    doc.destroy(); directory.destroy();
+  });
+});
 
 describe("the chart's derived lifecycle", () => {
   it("draws native bars behind lines without changing mapping order in the legend or shared tooltip", () => {

@@ -374,6 +374,15 @@ it("documents the table mapping through both help routes and accepts its source 
   expect((await rig.client.readResource({ uri: "uberblick://help/data" })).contents[0]).toMatchObject({ text });
   const insertHelp = await rig.ok("get_help", { topic: "insert_block" });
   const constraints = insertHelp.text.split("## Example\n")[0];
+  for (const help of [text, constraints]) {
+    for (const guidance of [
+      "Optional height is a whole number from 100 to 600 pixels",
+      "In overlay it sizes the drawing, including axes and legend, excluding the caption row and notices",
+      "in panels it sizes each plot below its label and latest value",
+      "Without height, overlay stays at 2:1 between 200 and 300 pixels, and each panel plot stays at 150 pixels",
+      "layout and height are invalid for table mappings",
+    ]) expect(help, guidance).toContain(guidance);
+  }
   for (const guidance of [
     '"type":"table"', "one to thirty ordered columns", "text (default), number, date or link",
     "Only number accepts unit (a suffix) and decimals (an integer from zero to ten)",
