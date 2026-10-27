@@ -83,7 +83,7 @@ function compareBlock(before: RevisionBlock, after: RevisionBlock, beforeIndex: 
     result.rows = table.rows;
   } else if (before.inline !== undefined && after.inline !== undefined) {
     const spans = diffWords(before.text, after.text);
-    result.fields.push(...inlineChanges(before.inline, after.inline));
+    result.fields.push(...inlineChanges(before.inline, after.inline, spans));
     if (before.text !== after.text) result.spans = spans;
   } else if (before.type !== after.type) {
     // Cross-container replacements have no common text address space.

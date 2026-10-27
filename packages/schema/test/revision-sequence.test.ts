@@ -79,6 +79,12 @@ describe("revision sequence matching", () => {
     expectExactSequence(before, after);
   });
 
+  it("keeps sequence matches exact beyond the word comparison's work budget", () => {
+    const before = [...`${"*".repeat(1500)}!${"*".repeat(1500)}`];
+    const after = [...`${"#".repeat(1500)}!${"#".repeat(1500)}`];
+    expect(matchSequence(keys(before), keys(after))).toEqual([{ before: 1500, after: 1500 }]);
+  });
+
   it("agrees with a quadratic oracle for every small duplicate sequence", () => {
     const sequences: string[][] = [[]];
     for (let length = 1; length <= 5; length++) {
@@ -152,6 +158,80 @@ describe("revision word spans", () => {
       { kind: "removed", text: "👩🏽‍💻" },
       { kind: "added", text: "👨‍👩‍👧‍👦" },
     ]);
+  });
+
+  it("retains exact word spans when a long comparison finishes within budget", () => {
+    const shared = ` ${"shared ".repeat(1000)}`;
+    expect(diffWords(`old${shared}end`, `new${shared}last`)).toEqual([
+      { kind: "removed", text: "old" },
+      { kind: "added", text: "new" },
+      { kind: "unchanged", text: shared },
+      { kind: "removed", text: "end" },
+      { kind: "added", text: "last" },
+    ]);
+  });
+
+  it("deterministically coarsens an unresolved middle and preserves its shared ends", () => {
+    const oldMiddle = `${"*".repeat(1500)}!${"*".repeat(1500)}`;
+    const newMiddle = `${"#".repeat(1500)}!${"#".repeat(1500)}`;
+    const before = `start ${oldMiddle} end`;
+    const after = `start ${newMiddle} end`;
+    const spans = diffWords(before, after);
+    expect(spans).toEqual([
+      { kind: "unchanged", text: "start " },
+      { kind: "removed", text: oldMiddle },
+      { kind: "added", text: newMiddle },
+      { kind: "unchanged", text: " end" },
+    ]);
+    expect(diffWords(before, after)).toEqual(spans);
+    expect(spans.filter(({ kind }) => kind !== "added").map(({ text }) => text).join("")).toBe(before);
+    expect(spans.filter(({ kind }) => kind !== "removed").map(({ text }) => text).join("")).toBe(after);
+  });
+
+  it("keeps exact interior word marks at the structural JSON character bound", () => {
+    const before = `${"*".repeat(1023)}!${"*".repeat(1024)}`;
+    const after = `${"#".repeat(1023)}!${"#".repeat(1024)}`;
+    expect(before.length + after.length).toBe(4096);
+    expect(diffWords(before, after)).toEqual([
+      { kind: "removed", text: "*".repeat(1023) },
+      { kind: "added", text: "#".repeat(1023) },
+      { kind: "unchanged", text: "!" },
+      { kind: "removed", text: "*".repeat(1024) },
+      { kind: "added", text: "#".repeat(1024) },
+    ]);
+  });
+
+  it("shares one work budget across splits and preserves the remaining ranges' ends", () => {
+    const old = "*".repeat(525);
+    const next = "#".repeat(525);
+    const before = `start ${old}?${old}!${old}:${old} end`;
+    const after = `start ${next}?${next}!${next}:${next} end`;
+    const spans = diffWords(before, after);
+    expect(spans).toEqual([
+      { kind: "unchanged", text: "start " },
+      { kind: "removed", text: `${old}?${old}` },
+      { kind: "added", text: `${next}?${next}` },
+      { kind: "unchanged", text: "!" },
+      { kind: "removed", text: `${old}:${old}` },
+      { kind: "added", text: `${next}:${next}` },
+      { kind: "unchanged", text: " end" },
+    ]);
+    expect(spans.filter(({ kind }) => kind !== "added").map(({ text }) => text).join("")).toBe(before);
+    expect(spans.filter(({ kind }) => kind !== "removed").map(({ text }) => text).join("")).toBe(after);
+  });
+
+  it.each([
+    ["5,000-word log", (word: string) => JSON.stringify({ log: `${word} `.repeat(5000) })],
+    ["50-object array", (word: string) => JSON.stringify(Array.from({ length: 50 }, (_, id) => ({ id, message: `${word} `.repeat(500) })), null, 2)],
+    ["100-object array", (word: string) => JSON.stringify(Array.from({ length: 100 }, (_, id) => ({ id, message: `${word} `.repeat(500) })), null, 2)],
+  ] as const)("bounds spans and reconstructs the %s rewrite", (_, build) => {
+    const before = build("old");
+    const after = build("new");
+    const spans = diffWords(before, after);
+    expect(spans.map(({ kind }) => kind)).toEqual(["unchanged", "removed", "added", "unchanged"]);
+    expect(spans.filter(({ kind }) => kind !== "added").map(({ text }) => text).join("")).toBe(before);
+    expect(spans.filter(({ kind }) => kind !== "removed").map(({ text }) => text).join("")).toBe(after);
+    expect(diffWords(before, after)).toEqual(spans);
   });
 
   it("handles a word vocabulary larger than a UTF-16 token encoding", () => {
