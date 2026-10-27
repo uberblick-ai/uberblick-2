@@ -1316,6 +1316,7 @@ test.describe("document history through ub open", () => {
     const position = history(page).locator(".ub-history-position");
     await expect(back).toBeEnabled();
     await back.focus();
+    await expect(back).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(position).toHaveText("1 of 3 ·");
     await expect(historicalEditor(page)).toContainText("Latest content.");
