@@ -946,7 +946,7 @@ describe("decision topics in the list", () => {
     expect(topicRow(host, TWO).textContent).not.toContain("Changed after approval");
     const table = within(documentTable(host));
     expect(table.getAllByRole("columnheader")).toEqual(
-      ["Title", "Stage", "Tags", "Changed", "Actions"].map((name) => table.getByRole("columnheader", { name, exact: true })),
+      ["Title", "Stage", "Tags", "Changed", "Actions"].map((name) => table.getByRole("columnheader", { name })),
     );
     expect([ONE, TWO, THREE, FOUR, GONE].map((uuid) => topicRow(host, uuid).querySelector(".ub-docs-stage")?.textContent)).toEqual([
       "Under discussion", "In effect", "In effect", "Under discussion", "Under discussion",
