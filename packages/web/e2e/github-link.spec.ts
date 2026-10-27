@@ -287,7 +287,7 @@ async function commentPill(page: Page): Promise<void> {
   await selectLinkText(page.locator(".ub-editor a.ub-link"), STORED.length - 2, STORED.length);
   await expect.poll(() => page.evaluate(() => document.getSelection()?.toString())).toBe("12");
   await expect(page.getByRole("toolbar", { name: "Text formatting and comment" })).toBeVisible();
-  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).click();
   await page.getByPlaceholder(/Comment as/).fill("Pill evidence comment");
   await page.keyboard.press("Enter");
   await page.reload();

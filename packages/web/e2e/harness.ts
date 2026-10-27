@@ -127,8 +127,13 @@ function openEnvironment(runDir: string, bundleDir: string): NodeJS.ProcessEnv {
 /** Sessions of the `ub open` runs this worker serves, by origin. */
 const sessions = new Map<string, string>();
 const unauthorizedNewContext = new Map<Browser, Browser["newContext"]>();
+const avatarStubs = new WeakSet<BrowserContext>();
 
 async function withSessions(context: BrowserContext): Promise<void> {
+  if (!avatarStubs.has(context)) {
+    await context.route("https://avatars.githubusercontent.com/**", (route) => route.abort());
+    avatarStubs.add(context);
+  }
   await context.addInitScript(({ entries, key }) => {
     const session = new Map(entries).get(location.origin);
     if (session !== undefined) localStorage.setItem(key, session);

@@ -60,7 +60,7 @@ for (const colorScheme of ["light", "dark"] as const) {
         selection?.addRange(range);
         document.dispatchEvent(new Event("selectionchange"));
       });
-      await page.getByRole("button", { name: "Comment", exact: true }).click();
+      await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).click();
       await page.getByPlaceholder(/Comment as/).fill("Scan conversation");
       await page.keyboard.press("Enter");
       await expect(page.locator(".ub-thread")).toContainText("Scan conversation");
@@ -152,7 +152,8 @@ for (const colorScheme of ["light", "dark"] as const) {
       await scan("caret menu — document picker");
       await page.keyboard.press("Escape");
       await page.keyboard.press("Backspace");
-      await page.getByRole("button", { name: "Reply", exact: true }).click();
+      await page.locator(".ub-thread").first().click();
+      await page.getByPlaceholder("Reply…").focus();
       await expect(page.getByPlaceholder("Reply…")).toBeVisible();
       await scan("Threads and reply form — docked");
 
@@ -160,11 +161,12 @@ for (const colorScheme of ["light", "dark"] as const) {
         ["iPad", { width: 810, height: 1080 }],
       ] as const) {
         await page.setViewportSize(viewport);
-        await page.locator(".ub-threads-toggle").click();
+        const commentsToggle = page.locator(".ub-threads-toggle");
+        if (await commentsToggle.getAttribute("aria-expanded") !== "true") await commentsToggle.click();
         // The retained reply form lives in different Sheet DOM below 1280px.
-        await expect(page.getByRole("dialog", { name: "Threads", exact: true })).toBeVisible();
+        await expect(page.getByRole("dialog", { name: "Comments", exact: true })).toBeVisible();
         if (device === "iPad") await scan(`Threads drawer and reply form — ${device} ${viewport.width}px`);
-        await page.getByRole("button", { name: "Close threads", exact: true }).click();
+        await page.getByRole("button", { name: "Close comments", exact: true }).click();
         await scan(`document and closed drawers — ${device} ${viewport.width}px`);
         await page.getByRole("button", { name: "Show document list", exact: true }).click();
         await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();

@@ -186,8 +186,8 @@ test.describe("document and workspace typography", () => {
     await expectStep(page.locator(".ub-thread-text").filter({ hasText: "A UI-sized conversation." }), 14, 20);
     await expectScale(page, `comments ${viewport.width}px`);
     if (viewport.width < 1280) {
-      await activateControl(page.getByRole("button", { name: "Close threads", exact: true }));
-      await expect(page.getByRole("dialog", { name: "Threads", exact: true })).toHaveCount(0);
+      await activateControl(page.getByRole("button", { name: "Close comments", exact: true }));
+      await expect(page.getByRole("dialog", { name: "Comments", exact: true })).toHaveCount(0);
     }
 
     for (const [surface, suffix, ready] of [

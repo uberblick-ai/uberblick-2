@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AccountClient, AccountIdentity } from "../src/shell/account.js";
 import { useServingAccount } from "../src/ui/status/serving-account.js";
 import { SERVING_STATUS_POLL_MS, SERVING_STATUS_TIMEOUT_MS } from "../src/ui/status/serving-status.js";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import * as Y from "yjs";
 import { appendBlock, createAnnotation, getAnnotation, getMeta, initDoc, listAnnotations, parseRoom } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
@@ -38,7 +38,7 @@ function CommentReading({ api, connection }: { api: AccountClient | null; connec
     environment: { identity: { name: "Presence name" }, account, route: { kind: "doc", workspace: { uuid: room.workspaceId, segment: room.workspaceId }, uuid: room.uuid },
       hubReady: true, statusEndpoint: null, serving: null },
     layout: { narrowLayout: false },
-    threads: { threads, focusedThread: null, threadsOpen: false, onFocusThread: NOOP, setThreadsOpen: NOOP, restoreThreadsFocus: NOOP },
+    threads: { threads, focusedThread: null, threadsOpen: false, hasReplyDrafts: false, setHasReplyDrafts: NOOP, onFocusThread: NOOP, setThreadsOpen: NOOP, restoreThreadsFocus: NOOP },
     navigation: { docLinks: null }, history: { active: false, available: false }, historyBack: { current: null },
     sync: { syncOpen: false, setSyncOpen: NOOP }, pins: { pinned: false },
     alter: {}, archive: { restoreFocusRoom: { current: null }, archiveConfirmationFocusRoom: { current: null } },
@@ -64,13 +64,13 @@ function commentDoc(workspace: string) {
 }
 
 async function reply() {
-  await act(async () => { screen.getAllByRole<HTMLButtonElement>("button", { name: "Reply" })[0]!.click(); });
-  const field = screen.getByPlaceholderText<HTMLTextAreaElement>("Reply…");
+  const card = screen.getAllByRole("group", { name: "Comment" })[0]!;
+  const field = within(card).getByPlaceholderText<HTMLTextAreaElement>("Reply…");
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(field, "Reply");
     field.dispatchEvent(new InputEvent("input", { bubbles: true, data: "Reply", inputType: "insertText" }));
   });
-  await act(async () => { screen.getAllByRole<HTMLButtonElement>("button", { name: "Reply" })[0]!.click(); });
+  await act(async () => { within(card).getByRole<HTMLButtonElement>("button", { name: "Reply" }).click(); });
 }
 
 async function opener() {

@@ -343,7 +343,7 @@ test("touch link Cancel and Apply and Comment keep the selected words as their w
   await expect(paragraph.locator("a")).toHaveAttribute("href", "https://example.com/applied");
   await expect(paragraph).toHaveText(text);
 
-  await page.getByRole("button", { name: "Comment", exact: true }).tap();
+  await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).tap();
   const comment = page.getByPlaceholder(/Comment as/);
   await expect(comment).toBeFocused();
   await expect(card(page).locator('[data-slot="selection-excerpt"]')).toHaveText(selected);
@@ -408,7 +408,7 @@ test("focused link and comment fields follow visual viewport resize and scroll w
 
   await link.getByRole("button", { name: "Cancel", exact: true }).tap();
   await selectBlock(paragraph);
-  await page.getByRole("button", { name: "Comment", exact: true }).tap();
+  await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).tap();
   const comment = page.getByPlaceholder(/Comment as/);
   await expect(comment).toBeFocused();
   await comment.fill("a draft kept in view");
@@ -503,7 +503,7 @@ test("an overflowing comment excerpt keeps its focused field visible in a short 
   const paragraph = editor(page).locator(":scope > p").first();
   await paragraph.tap();
   await selectBlock(paragraph);
-  await page.getByRole("button", { name: "Comment", exact: true }).tap();
+  await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).tap();
   const field = page.getByPlaceholder(/Comment as/);
   await expect(field).toBeFocused();
   await field.fill("keep this focused draft visible");

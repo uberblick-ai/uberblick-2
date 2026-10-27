@@ -348,7 +348,7 @@ test("desktop and iPad wireframes fit inside their column and follow both appear
   const uuid = await wireframeDoc(session, "Wireframe fit and appearance");
   const touch = info.project.use.hasTouch === true;
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-    contextOptions: { colorScheme: "light", ...(touch ? {} : { viewport: { width: 1440, height: 900 } }) },
+    contextOptions: { colorScheme: "light", ...(touch ? {} : { viewport: { width: 1600, height: 900 } }) },
   });
   await waitForDocumentDraw(page, session, uuid);
   await expect(preview(page).locator(".wf-root")).toBeVisible();

@@ -253,7 +253,7 @@ test("comment cards and collaborator presence reveal every toggle enclosing thei
   const card = page.locator(`#ub-thread-${thread.annotation.id}`);
   await expect(target).toBeHidden();
   await expect(card).toContainText("Discuss the folded words.");
-  await card.locator(".ub-thread").click();
+  await card.locator(".ub-thread-select").click();
   await expect(control(page, "Outer", true)).toHaveAttribute("aria-expanded", "true");
   await expect(control(page, "Inner", true)).toHaveAttribute("aria-expanded", "true");
   await expect(target.locator("[data-comment-thread]")).toHaveClass(/ub-comment-flash/);

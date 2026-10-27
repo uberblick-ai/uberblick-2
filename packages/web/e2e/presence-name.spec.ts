@@ -27,7 +27,7 @@ async function comment(page: Page, block: number, passage: string, text: string,
     await page.keyboard.press("Shift+ArrowLeft");
   }
   expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(passage);
-  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).click();
   const composer = page.locator('[data-slot="selection-composer"]');
   const field = composer.getByPlaceholder(`Comment as ${author}…`, { exact: true });
   await field.fill(text);

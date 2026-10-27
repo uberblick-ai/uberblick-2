@@ -561,6 +561,7 @@ describe("following a reference", () => {
         { text: "the hub", marks: { docLink: TARGET } },
       ],
     });
+    const ordinary = appendBlock(ydoc, { type: "paragraph", text: "Outside the comment." });
     // The whole sentence is annotated, so the highlight really does wrap the
     // reference rather than merely sitting beside it.
     const block = getBlocksFragment(ydoc).get(0) as Y.XmlElement;
@@ -571,7 +572,7 @@ describe("following a reference", () => {
     const { directory, context, opened } = directoryWith([
       { uuid: TARGET, title: "The hub" },
     ]);
-    const selected: string[] = [];
+    const selected: Array<string | null> = [];
     const { container: host } = await renderSettled(
       <EditorPane
         connection={connectionFor(ydoc)}
@@ -637,6 +638,11 @@ describe("following a reference", () => {
     click(highlight);
     expect(selected).toEqual(["t-1"]);
     expect(opened).toEqual([TARGET]);
+
+    // Ordinary prose clears the previous card without navigating or editing.
+    click(host.querySelector(`#${CSS.escape(ordinary)}`));
+    expect(selected).toEqual(["t-1", null]);
+    expect(getBlocks(ydoc).at(-1)?.text).toBe("Outside the comment.");
 
     // ---- and an archived target is still somewhere you can go ----
     // Archiving says which document this is, not whether it opens: the read

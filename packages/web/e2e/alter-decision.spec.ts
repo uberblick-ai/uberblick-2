@@ -120,7 +120,7 @@ test("rich answer controls stay inside the modal on desktop keyboard and pointer
   for (let character = 0; character < 15; character += 1) await page.keyboard.press("Shift+ArrowLeft");
   const selected = await page.evaluate(() => document.getSelection()?.toString() ?? "");
   expect(selected.length).toBeGreaterThan(0);
-  await expect(page.getByRole("button", { name: "Comment", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button"))).toHaveCount(0);
   for (const name of ["Bold", "Italic", "Strikethrough", "Inline code", "External link"]) {
     await expect(dialog(page).getByRole("button", { name, exact: true })).toBeVisible();
   }

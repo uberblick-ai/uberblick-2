@@ -9,6 +9,8 @@ export interface ThreadsRail {
   threads: ThreadView[];
   focusedThread: ThreadFocus | null;
   threadsOpen: boolean;
+  hasReplyDrafts: boolean;
+  setHasReplyDrafts(present: boolean): void;
   setThreadsOpen: Dispatch<SetStateAction<boolean>>;
   closeThreads(): void;
   restoreThreadsFocus(event: Event): void;
@@ -24,6 +26,12 @@ export function useThreadsRail(doc: RoomConnection | null): ThreadsRail {
    * always remains a non-modal column.
    */
   const [threadsOpen, setThreadsOpen] = useState(false);
+  const [replyDrafts, setReplyDrafts] = useState<{ room: string | null; present: boolean }>({ room: null, present: false });
+  const room = doc?.room ?? null;
+  const hasReplyDrafts = replyDrafts.room === room && replyDrafts.present;
+  const setHasReplyDrafts = useCallback((present: boolean) => {
+    setReplyDrafts((current) => current.room === room && current.present === present ? current : { room, present });
+  }, [room]);
   const threadsOpenNow = useRef(threadsOpen);
   threadsOpenNow.current = threadsOpen;
   /**
@@ -42,13 +50,17 @@ export function useThreadsRail(doc: RoomConnection | null): ThreadsRail {
     const opener = threadsOpener.current;
     threadsOpener.current = null;
     const back =
-      opener?.isConnected === true
+      opener?.isConnected === true && !opener.hasAttribute("data-comment-resolved")
         ? opener
         : document.querySelector<HTMLElement>(".ub-threads-toggle");
     back?.focus();
   }, []);
 
   const onFocusThread = useCallback<SelectThread>((threadId, selection) => {
+    if (threadId === null) {
+      setFocusedThread(null);
+      return;
+    }
     setFocusedThread((previous) => focusThread(previous, threadId, selection));
     // The highlight is still what holds focus here — the card takes it a commit
     // later, from the rail's own effect — so this is the reader's way back.
@@ -86,11 +98,11 @@ export function useThreadsRail(doc: RoomConnection | null): ThreadsRail {
   useEffect(() => {
     // Opening for a newly created thread can precede the observer's reading.
     // Close when the rail empties, rather than when its open state changes.
-    if (threads.length === 0) closeThreads();
-  }, [threads.length, closeThreads]);
+    if (threads.length === 0 && !hasReplyDrafts) closeThreads();
+  }, [threads.length, hasReplyDrafts, closeThreads]);
 
   return {
-    threads, focusedThread, threadsOpen, setThreadsOpen, closeThreads,
+    threads, focusedThread, threadsOpen, setThreadsOpen, closeThreads, hasReplyDrafts, setHasReplyDrafts,
     restoreThreadsFocus, onFocusThread, onToggleThreads,
   };
 }

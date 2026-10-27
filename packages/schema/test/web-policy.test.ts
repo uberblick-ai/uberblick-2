@@ -11,7 +11,7 @@ describe("web Content-Security-Policy", () => {
   it("uses the exact policy and keeps accepted-link hosts out of the allowlist", () => {
     expect(WEB_CONTENT_SECURITY_POLICY).toBe(
       "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
-      "img-src 'self' data:; font-src 'self'; connect-src 'self' https://www.figma.com; " +
+      "img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://www.figma.com; " +
       "frame-src https://embed.figma.com https://www.figma.com; object-src 'none'; " +
       "base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
     );

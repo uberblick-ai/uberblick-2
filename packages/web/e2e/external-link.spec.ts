@@ -133,7 +133,7 @@ test("dragging a link selects text and the toolbar still edits its URL", { tag: 
 async function commentSentence(page: Page): Promise<void> {
   await placeCaret(page, "start");
   await page.keyboard.press("Shift+End");
-  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).click();
   await page.getByPlaceholder(/Comment as/).fill("Link overlap conversation");
   await page.keyboard.press("Enter");
   // On a narrow viewport the closed rail has no mounted cards. The prose
@@ -145,7 +145,7 @@ async function commentSentence(page: Page): Promise<void> {
 
 async function expectNoSelectedThread(page: Page): Promise<void> {
   await expect(page.locator('.ub-thread[aria-current="true"]')).toHaveCount(0);
-  await expect(page.getByRole("dialog", { name: "Threads", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Comments", exact: true })).toHaveCount(0);
 }
 
 async function archiveDoc(page: Page): Promise<void> {

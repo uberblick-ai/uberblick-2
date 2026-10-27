@@ -168,10 +168,10 @@ function setExternalLink(
 function refusal(error: unknown): string {
   if (error instanceof AnnotationRangeError) {
     return error.reason === "overlap"
-      ? "That range is already part of another thread. Comments cannot overlap — pick a range beside it."
+      ? "That range already has a comment. Comments cannot overlap — pick a range beside it."
       : "Select some text to comment on.";
   }
-  return "Could not start the thread. Re-select the range and try again.";
+  return "Could not start the comment. Re-select the range and try again.";
 }
 
 function pressed(state: MarkState): boolean | "mixed" {
@@ -517,7 +517,7 @@ export function CommentComposer({
       style={hidden ? { display: "none" } : undefined}
       data-slot="selection-composer"
       data-input={touch ? "touch" : "fine"}
-      className={`ub-composer fixed top-0 left-0 z-5 flex overflow-auto text-card-foreground shadow-(--shadow-float) ${mode === "comment" ? "w-80 flex-col [&>*]:shrink-0 gap-[0.4rem] rounded-(--radius-sm) border border-(--border) border-l-(length:--border-width-emphasis) border-l-brand bg-card px-[0.6rem] py-2 ub-type-ui" : !formatting ? "w-max bg-transparent shadow-none" : "w-max items-center rounded-(--radius-sm) border border-(--border) bg-[color-mix(in_srgb,var(--card)_95%,transparent)] p-1 backdrop-blur-[8px]"}`}
+      className={`ub-composer fixed top-0 left-0 z-5 flex overflow-auto text-card-foreground shadow-(--shadow-float) ${mode === "comment" ? "w-80 flex-col [&>*]:shrink-0 gap-[0.4rem] rounded-(--radius-sm) border border-(--border) bg-card px-[0.6rem] py-2 ub-type-ui" : !formatting ? "w-max bg-transparent shadow-none" : "w-max items-center rounded-(--radius-sm) border border-(--border) bg-[color-mix(in_srgb,var(--card)_95%,transparent)] p-1 backdrop-blur-[8px]"}`}
     >
       {mode === "comment" ? (
         <>

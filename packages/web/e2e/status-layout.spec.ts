@@ -353,7 +353,7 @@ for (const upstream of [true, false]) {
         selection.addRange(range);
         doc.dispatchEvent(new Event("selectionchange"));
       });
-      await page.getByRole("button", { name: "Comment", exact: true }).click();
+      await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).click();
       await page.getByPlaceholder(/Comment as/).fill("Status alongside the threads rail");
       await page.keyboard.press("Enter");
       await expect(page.locator("#ub-rail")).toBeVisible();

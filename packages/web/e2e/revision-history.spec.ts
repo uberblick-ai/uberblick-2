@@ -1236,7 +1236,7 @@ test.describe("document history through ub open", () => {
     await expect(page.locator('[data-slot="selection-composer"]')).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Document actions", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Insert block below", includeHidden: true })).toHaveCount(0);
-    await expect(page.getByRole("region", { name: "Threads", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Comments", exact: true })).toHaveCount(0);
     await expect(page.locator(".ub-revision-pane [data-comment-thread]")).toHaveCount(0);
 
     const snapshot = () => page.locator(".ub-revision-pane .ProseMirror").evaluateAll(elements =>
@@ -3698,23 +3698,23 @@ test.describe("document history through ub open", () => {
     await activateControl(editor(page));
     await page.keyboard.type("First comment target. Another comment target.");
     await selectPositions(editor(page), 1, 6);
-    await activateControl(page.getByRole("button", { name: "Comment", exact: true }));
+    await activateControl(page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")));
     await page.getByPlaceholder(/Comment as/).fill("A saved comment.");
     await page.keyboard.press("Enter");
-    const sheet = page.getByRole("dialog", { name: "Threads", exact: true });
-    await expect(page.getByRole("region", { name: "Threads", exact: true })).toContainText("A saved comment.");
-    await activateControl(page.getByRole("button", { name: "Reply", exact: true }));
+    const sheet = page.getByRole("dialog", { name: "Comments", exact: true });
+    await expect(page.getByRole("region", { name: "Comments", exact: true })).toContainText("A saved comment.");
+    await activateControl(page.locator(".ub-thread").first());
     await page.getByPlaceholder("Reply…").fill("An unsent reply.");
-    if (await sheet.isVisible()) await activateControl(sheet.getByRole("button", { name: "Close threads", exact: true }));
+    if (await sheet.isVisible()) await activateControl(sheet.getByRole("button", { name: "Close comments", exact: true }));
     await selectPositions(editor(page), 23, 30);
-    await activateControl(page.getByRole("button", { name: "Comment", exact: true }));
+    await activateControl(page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")));
     const comment = page.getByPlaceholder(/Comment as/);
     await comment.fill("An unsent comment.");
     await history(page).getByRole("button", { name: "Previous revision", exact: true }).focus();
     await page.keyboard.press("Enter");
     await expect(historicalEditor(page)).toHaveText("Historical text without comments.");
     await expect(comment).toBeHidden();
-    await expect(page.getByRole("region", { name: "Threads", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Comments", exact: true })).toHaveCount(0);
     await expect(sheet).toBeHidden();
     await backToNow(page);
     await expect(comment).toHaveValue("An unsent comment.");

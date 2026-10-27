@@ -327,7 +327,7 @@ test("all rows read like an ordinary table with secondary source and isolated li
   const session = writer();
   for (const appearance of ["light", "dark"] as const) {
     const page = await openApp(browser, "/", {
-      contextOptions: { colorScheme: appearance, locale: "en-US", viewport: { width: 1280, height: 1000 } },
+      contextOptions: { colorScheme: appearance, locale: "en-US", viewport: { width: 1440, height: 1000 } },
     });
     await page.context().route("https://example.invalid/**", (route) => route.fulfill({ contentType: "text/html", body: "<p>Evidence</p>" }));
     await expect(page.locator(".ub-document-sidebar")).toBeVisible();
@@ -402,6 +402,18 @@ test("all rows read like an ordinary table with secondary source and isolated li
     const generatedWidth = await table.evaluate((element) => element.getBoundingClientRect().width);
     const contentWidth = await editor(page).evaluate((element) => element.clientWidth);
     expect(Math.abs(generatedWidth - contentWidth)).toBeLessThanOrEqual(2);
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    const scroll = block.locator(".ub-table-scroll");
+    await expect.poll(() => scroll.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+    const narrowWidth = await scroll.evaluate((element) => element.getBoundingClientRect().width);
+    const narrowContentWidth = await editor(page).evaluate((element) => element.clientWidth);
+    expect(Math.abs(narrowWidth - narrowContentWidth)).toBeLessThanOrEqual(2);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await scroll.hover();
+    await page.mouse.wheel(300, 0);
+    await expect.poll(() => scroll.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await expect.poll(() => table.evaluate((element) => element.getBoundingClientRect().width)).toBe(generatedWidth);
     await expect(block.locator(".ub-table-controls, .ub-table-control, [contenteditable='true']")).toHaveCount(0);
     const notice = block.locator(".ub-chart-notice");
     await expect(notice).toHaveText("Generated from document data · read-only");

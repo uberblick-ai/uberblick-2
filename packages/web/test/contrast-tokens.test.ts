@@ -86,7 +86,7 @@ const text = (name: string, ink: string, ground: string, under?: string): Pair =
   name, ink, ground, floor: 4.5, ...(under === undefined ? {} : { under }),
 });
 
-const tableHeaderGrounds = ["--background", "--card", "--brand-subtle", "--page-ground[0]", "--page-ground[1]"];
+const tableHeaderGrounds = ["--background", "--card", "--muted", "--brand-subtle", "--page-ground[0]", "--page-ground[1]"];
 
 const pairs: Pair[] = [
   ...tableHeaderGrounds.map((ground) => text("table header ink", "--table-header-foreground", ground)),
@@ -113,9 +113,7 @@ const pairs: Pair[] = [
   // consumer receives it; the rendered proof holds that separate clause.
   { name: "card highlight", ink: "--card-accent", ground: "--card", measure: "separation", floor: cardHighlightFloor },
   text("block-menu selected entry ink", "--accent-foreground", "--card-accent"),
-  text("threads/composer/resolved-chip ink", "--secondary-foreground", "--card-accent"),
-  text("resting orphaned chip ink", "--foreground", "--status-warning-subtle", "--card"),
-  text("focused orphaned chip ink", "--brand-foreground", "--status-warning", "--brand-subtle"),
+  text("comment composer action ink", "--secondary-foreground", "--card-accent"),
   // Links retain AA on page, card, annotated-range and inline-code grounds.
   ...["--background", "--card", "--card-accent", "--sidebar", "--sidebar-accent", "--brand-subtle", "--muted", "--page-ground[0]", "--page-ground[1]"]
     .map((ground) => text("neutral link ink", "--foreground", ground)),
@@ -132,12 +130,15 @@ const pairs: Pair[] = [
     .map((ground) => text("retained functional brand ink", "--brand-ink", ground)),
   text("TL;DR tab label ink", "--brand-ink", "--card"),
   // Global muted ink is not the sidebar's muted ink. These are its actual
-  // light grounds, including code/source chrome, focused threads and stops.
+  // light grounds, including code/source chrome, focused comments and stops.
   ...["--background", "--card", "--card-accent", "--muted", "--secondary", "--brand-subtle", "--status-warning-subtle", "--destructive-subtle", "--page-ground[0]", "--page-ground[1]"]
     .map((ground): Pair => ({ ...text("full-strength light muted ink", "--muted-foreground", ground), appearance: "light" })),
   // These are enabled consumers, so card text must still clear AA at full
   // strength. CSS opacity and real backing remain browser obligations.
-  ...["--card", "--brand-subtle"].flatMap((ground) => ["--card-foreground", "--foreground", "--muted-foreground"].map((ink) => text("enabled conversation ink", ink, ground))),
+  ...["--card", "--background", "--page-ground[0]", "--page-ground[1]"]
+    .flatMap((ground) => ["--card-foreground", "--foreground", "--muted-foreground"].map((ink) => text("enabled conversation ink", ink, ground))),
+  ...["--muted", "--brand-subtle"]
+    .flatMap((ground) => ["--prose-text", "--foreground", "--muted-foreground"].map((ink) => text("comment range ink", ink, ground))),
   text("source copy ink", "--muted-foreground", "--muted"),
   // Retained avatar initials and their dashed rings use full-strength muted
   // ink on the title cluster and the overflow row, including its hover fill.

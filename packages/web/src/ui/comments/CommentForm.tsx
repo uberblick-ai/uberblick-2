@@ -18,6 +18,8 @@ export function CommentForm({
   draft,
   autoFocus = true,
   hidden = false,
+  compact = false,
+  onFocus,
   onSubmit,
   onCancel,
 }: {
@@ -32,6 +34,8 @@ export function CommentForm({
   /** Remounted reply forms let the pane focus only a new Reply gesture. */
   autoFocus?: boolean;
   hidden?: boolean;
+  compact?: boolean;
+  onFocus?: (() => void) | undefined;
   /**
    * Submit trimmed nonempty text. A refused write returns false and preserves
    * the draft.
@@ -49,7 +53,7 @@ export function CommentForm({
   };
 
   return (
-    <div className="ub-comment-form">
+    <div className={`ub-comment-form${compact ? " ub-comment-form-compact" : ""}`}>
       <CommentMentionField
         autoFocus={autoFocus}
         hidden={hidden}
@@ -60,19 +64,24 @@ export function CommentForm({
         openDocId={openDocId}
         onSubmit={submit}
         onCancel={onCancel}
+        compact={compact}
+        onFocus={onFocus}
       />
       {error != null && error !== "" && <p className="ub-comment-error">{error}</p>}
       <div className="ub-comment-buttons">
+        {!compact &&
         <Button variant="tool" size="custom" type="button" onClick={onCancel}>
           Cancel
-        </Button>
-        <Button variant="tool" size="custom"
+        </Button>}
+        <Button variant={compact ? "plain" : "tool"} size="custom"
           type="button"
-          data-emphasis="true"
+          data-emphasis={compact ? undefined : "true"}
+          aria-label={compact ? submitLabel : undefined}
+          className={compact ? "ub-comment-send" : undefined}
           disabled={body === ""}
           onClick={submit}
         >
-          {submitLabel}
+          {compact ? <span aria-hidden="true">→</span> : submitLabel}
         </Button>
       </div>
     </div>

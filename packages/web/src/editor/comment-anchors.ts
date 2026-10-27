@@ -15,9 +15,6 @@ import {
 } from "@uberblick/schema";
 import type * as Y from "yjs";
 
-const COMMENT_THREAD_LABEL = "Comment thread";
-const RESOLVED_THREAD_LABEL = "Resolved comment thread";
-
 function commentMarkViews(ydoc: Y.Doc): Plugin {
   const painters = new Set<() => void>();
   const repaint = (): void => {
@@ -29,22 +26,25 @@ function commentMarkViews(ydoc: Y.Doc): Plugin {
       markViews: {
         [COMMENT_MARK]: (mark: Mark): MarkView => {
           const dom = document.createElement("span");
-          dom.className = "ub-comment";
           const threadId =
             typeof mark.attrs.threadId === "string" ? mark.attrs.threadId : null;
           if (threadId === null) return { dom };
 
           dom.setAttribute("data-comment-thread", threadId);
-          dom.tabIndex = 0;
-          dom.setAttribute("role", "button");
           const paint = (): void => {
             const resolved = getAnnotation(ydoc, threadId)?.resolved === true;
-            dom.setAttribute(
-              "aria-label",
-              resolved ? RESOLVED_THREAD_LABEL : COMMENT_THREAD_LABEL,
-            );
-            if (resolved) dom.setAttribute("title", RESOLVED_THREAD_LABEL);
-            else dom.removeAttribute("title");
+            dom.classList.toggle("ub-comment", !resolved);
+            dom.toggleAttribute("data-comment-resolved", resolved);
+            if (resolved) {
+              dom.removeAttribute("tabindex");
+              dom.removeAttribute("role");
+              dom.removeAttribute("aria-label");
+              dom.classList.remove("ub-comment-flash");
+            } else {
+              dom.tabIndex = 0;
+              dom.setAttribute("role", "button");
+              dom.setAttribute("aria-label", "Comment");
+            }
           };
           paint();
           painters.add(paint);

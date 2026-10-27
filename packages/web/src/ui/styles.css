@@ -80,6 +80,8 @@
 
   --brand: light-dark(oklch(0.75 0.15 65), oklch(0.8 0.18 65));
   --brand-subtle: light-dark(oklch(0.95 0.03 65), oklch(0.25 0.04 65));
+  --agent-claude: #d97757;
+  --agent-codex: light-dark(#0d0d0d, #ffffff);
 
   /*
    * Use brand-ink for text and brand for non-text accents. Light ink clears
@@ -199,7 +201,7 @@
      independent of surplus viewport width. */
   --measure: 72ch;
   --sidebar-width: 18rem;
-  --document-rail-width: 15rem;
+  --document-rail-width: 22rem;
   /* The inset plus block gutter balances the rail gap and keeps the touch +
      inside the scrolling pane. */
   --pane-document-inset: 1rem;
@@ -1047,6 +1049,56 @@ body {
 
 .ub-comment-form {
   gap: 0.35rem;
+}
+
+.ub-thread {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--card-foreground);
+  cursor: pointer;
+}
+.ub-thread-focused {
+  background: var(--card);
+  box-shadow: var(--shadow-tooltip);
+}
+/* Resolved conversations fade by using quieter ink, never opacity. */
+.ub-thread-resolved { color: var(--muted-foreground); }
+.ub-thread-comment { display: flex; flex-direction: column; gap: 0.35rem; }
+.ub-thread-comment + .ub-thread-comment { border-top: 1px solid var(--border); padding-top: 0.5rem; }
+.ub-thread-text { cursor: text; }
+.ub-thread-control { opacity: 0; pointer-events: none; }
+.ub-thread:hover .ub-thread-control,
+.ub-thread:focus-within .ub-thread-control,
+.ub-thread-focused .ub-thread-control { opacity: 1; pointer-events: auto; }
+.ub-thread-resolve {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
+  padding: 0.25rem;
+}
+.ub-thread:has(.ub-thread-resolve) .ub-comment-opening { padding-right: 4.5rem; }
+.ub-thread-reply { min-width: 0; }
+.ub-comment-form-compact { display: flex; flex-direction: row; align-items: flex-end; }
+.ub-comment-form-compact > [data-slot="popover-anchor"] { flex: 1; min-width: 0; }
+.ub-comment-form-compact .ub-comment-input { min-width: 0; min-height: 2.5rem; flex: 1; resize: vertical; }
+.ub-comment-send { min-width: 1.75rem; min-height: 1.75rem; color: var(--foreground); }
+.ub-comment-send:disabled { color: var(--muted-foreground); opacity: 0.4; }
+.ub-resolved-toggle { padding: 0.5rem 0; }
+@media (any-pointer: coarse) {
+  .ub-thread-resolve, .ub-comment-send, .ub-resolved-toggle { min-width: 44px; min-height: 44px; }
+  .ub-comment-form-compact .ub-comment-input { min-height: 44px; }
 }
 
 .ub-comment-buttons {
@@ -2021,16 +2073,14 @@ h6.ub-heading {
 .ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-terminal-screen,
 .ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-terminal-toggle:not([hidden]) { display: block; }
 .ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) > .ub-terminal-source { display: none; }
-.ub-comment:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.ub-comment:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .ub-block-frame :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .ub-block-frame .ub-comment:focus-visible { animation: none; }
 
-/* Annotations retain an amber underline as well as their tinted ground.
-   Resolved ranges instead use a dotted neutral line with no ground, emitted
-   per thread by resolvedHighlightCss in ui/comments/threads.ts. */
+/* Selection alone adds amber. Resolved marks carry no highlight class. */
 .ub-comment {
-  background: var(--brand-subtle);
-  border-bottom: var(--border-width-emphasis) solid var(--brand);
+  background: var(--muted);
+  border-bottom: 1px solid var(--prose-text);
   border-radius: 2px;
   cursor: pointer;
 }
@@ -2050,7 +2100,7 @@ h6.ub-heading {
   }
   25%,
   75% {
-    outline-color: var(--brand);
+    outline-color: var(--ring);
   }
 }
 
@@ -2058,7 +2108,7 @@ h6.ub-heading {
 @media (prefers-reduced-motion: reduce) {
   .ub-comment-flash {
     animation: none;
-    outline-color: var(--brand);
+    outline-color: var(--ring);
   }
 }
 

@@ -696,7 +696,7 @@ describe("a permanently deleted document address", () => {
     expect(acquiredRooms).not.toContain(roomForDoc(WORKSPACE, ONE));
     expect(host.querySelector(".ub-document-pane button")).toBeNull();
     expect(within(host).queryByRole("textbox", { name: "Document content" })).toBeNull();
-    expect(within(host).queryByLabelText("Threads")).toBeNull();
+    expect(within(host).queryByRole("region", { name: "Comments" })).toBeNull();
   });
 
   it.each(["directory mark", "hub refusal"])("retires the open document and threads on a %s", async (evidence) => {
@@ -709,7 +709,7 @@ describe("a permanently deleted document address", () => {
     const host = await openApp(`/${WORKSPACE}/${ONE}`);
     expect(within(host).getByRole("textbox", { name: "Document content" }).textContent)
       .toContain("Content that must disappear");
-    expect(within(host).queryByLabelText("Threads")).not.toBeNull();
+    expect(within(host).queryByRole("region", { name: "Comments" })).not.toBeNull();
 
     act(() => {
       if (evidence === "directory mark") deleteDirectoryEntry(directory, ONE);
@@ -722,7 +722,7 @@ describe("a permanently deleted document address", () => {
     expect(host.querySelector(".ub-document-pane")?.textContent).toBe("This document was deleted.");
     expect(host.querySelector(".ub-document-pane button")).toBeNull();
     expect(within(host).queryByRole("textbox", { name: "Document content" })).toBeNull();
-    expect(within(host).queryByLabelText("Threads")).toBeNull();
+    expect(within(host).queryByRole("region", { name: "Comments" })).toBeNull();
     expect(host.textContent).not.toContain("Content that must disappear");
     expect(host.textContent).not.toContain("Comment that must disappear");
   });
