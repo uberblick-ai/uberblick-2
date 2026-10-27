@@ -146,6 +146,34 @@ async function serveRevisions(
   }
 }
 
+function serveSearch(
+  engine: UberblickMcpEngine,
+  target: URL,
+  reply: (status: number, body: object) => void,
+): void {
+  const query = target.searchParams.get("q");
+  if (query === null) {
+    reply(400, { error: "query_required" });
+    return;
+  }
+  if (
+    engine.health.status === "quarantined" ||
+    engine.refreshStatus.status === "failed"
+  ) {
+    reply(503, { error: "replica_unavailable" });
+    return;
+  }
+
+  try {
+    reply(200, {
+      hits: engine.store.searchUuids(query).map((uuid) => ({ uuid })),
+      capped: false,
+    });
+  } catch {
+    reply(500, { error: "search_failed" });
+  }
+}
+
 async function serveApiRequest(context: ApiRequestContext): Promise<void> {
   const { request, response, target, authenticate, replicas, statusForWorkspace,
     availableUpdate, env, expectedOrigin, document, access } = context;
@@ -284,27 +312,7 @@ async function serveApiRequest(context: ApiRequestContext): Promise<void> {
     return;
   }
 
-  const query = target.searchParams.get("q");
-  if (query === null) {
-    apiResponse(request, response, 400, { error: "query_required" });
-    return;
-  }
-  if (
-    engine.health.status === "quarantined" ||
-    engine.refreshStatus.status === "failed"
-  ) {
-    apiResponse(request, response, 503, { error: "replica_unavailable" });
-    return;
-  }
-
-  try {
-    apiResponse(request, response, 200, {
-      hits: engine.store.searchUuids(query).map((uuid) => ({ uuid })),
-      capped: false,
-    });
-  } catch {
-    apiResponse(request, response, 500, { error: "search_failed" });
-  }
+  serveSearch(engine, target, reply);
 }
 
 export function serveBoundRequest(context: BoundRequestContext): void {
