@@ -54,6 +54,15 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
             </Button>
           ))}
         </fieldset>
+        <fieldset className="ub-history-comparison-view mx-2 mb-0 flex min-w-0 rounded-(--radius-sm) border-0 bg-(--sidebar-accent) p-0.5" aria-label="Comparison view">
+          {(["split", "inline"] as const).map((value) => (
+            <Button variant="plain" size="custom" key={value} type="button" aria-pressed={history.comparisonView === value}
+              className="flex-1 rounded-[calc(var(--radius-sm)-2px)] px-2.5 py-1 ub-type-caption font-medium text-(--sidebar-muted-foreground) aria-pressed:bg-background aria-pressed:text-sidebar-foreground"
+              onClick={() => history.setComparisonView(value)}>
+              {value === "split" ? "Split" : "Inline"}
+            </Button>
+          ))}
+        </fieldset>
         <label className="ub-history-collapse flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 cursor-pointer items-center justify-between gap-2 px-2 ub-type-caption text-(--sidebar-muted-foreground)">
           Collapse unchanged
           <input type="checkbox" role="switch" className="ub-history-switch" checked={history.collapseUnchanged} aria-checked={history.collapseUnchanged}

@@ -353,7 +353,8 @@
   overflow: hidden;
 }
 /* Reserve the change buttons' target and a gap without moving their ruler. */
-.ub-revision-split-pane .ub-history-controls {
+.ub-revision-comparison-pane .ub-history-controls,
+.ub-revision-comparison-pane:not(.ub-revision-split-pane) .ub-revision-heading {
   padding-inline-end: max(0px, calc(var(--history-target) - var(--document-rail-gap) + 1rem));
 }
 .ub-history-author,
@@ -523,7 +524,7 @@
   /* Expand the touch target without changing the comparison's label row. */
   .ub-revision-side-label .ub-revision-restore::after { height: 44px; }
 }
-.ub-revision-side :is(.ProseMirror, .ub-revision-ghost) > .ub-revision-row { position: relative; }
+.ub-revision-comparison :is(.ProseMirror, .ub-revision-ghost) > .ub-revision-row { position: relative; }
 .ub-revision-side-before :is(.ProseMirror, .ub-revision-ghost) > :is(.ub-revision-row-removed, .ub-revision-row-changed) {
   background: var(--revision-removed-row);
   --ab-bg: var(--revision-removed-row);
@@ -535,9 +536,9 @@
 .ub-revision-filler { height: 0; }
 /* Rows never share a collapsed margin, so each side's spacing is its own and
    the aligner's padding moves exactly what it measures. */
-.ub-revision-side :is(.ProseMirror, .ub-revision-ghost) > .ub-revision-row { margin-bottom: 0; }
+.ub-revision-comparison :is(.ProseMirror, .ub-revision-ghost) > .ub-revision-row { margin-bottom: 0; }
 /* Rows folding away close into their bar from a clipped, inert copy. */
-.ub-revision-side .ub-editor { position: relative; }
+.ub-revision-comparison .ub-editor { position: relative; }
 .ub-revision-ghost {
   position: absolute;
   inset-inline: 0;
@@ -548,7 +549,7 @@
   line-height: var(--type-body-leading);
   white-space: pre-wrap;
 }
-.ub-revision-side .ProseMirror > .ub-revision-row-start:first-child + .ub-revision-row { margin-top: 0; }
+.ub-revision-comparison .ProseMirror > .ub-revision-row-start:first-child + .ub-revision-row { margin-top: 0; }
 .ub-revision-row-start,
 .ub-revision-row-end { padding-top: 0.1px; }
 .ub-revision-row-start > .ub-revision-fields { margin-block: 0.35rem; }
@@ -641,8 +642,8 @@
   .ub-revision-ruler { display: none; }
 }
 @media (pointer: fine) and (min-width: 768px) {
-  .ub-revision-split-pane { scrollbar-width: none; }
-  .ub-revision-split-pane::-webkit-scrollbar { display: none; }
+  .ub-revision-comparison-pane { scrollbar-width: none; }
+  .ub-revision-comparison-pane::-webkit-scrollbar { display: none; }
 }
 
 /* Drawings show their whole state on each side, without in-drawing marks. */

@@ -51,6 +51,14 @@ async function closeHistoryList(page: Page, drawer: boolean): Promise<void> {
   await expect(historyList(page)).toBeHidden();
 }
 
+async function comparisonView(page: Page, value: "Split" | "Inline"): Promise<void> {
+  const drawer = await showHistoryList(page);
+  const button = historyList(page).getByRole("button", { name: value, exact: true });
+  await activateControl(button);
+  await expect(button).toHaveAttribute("aria-pressed", "true");
+  await closeHistoryList(page, drawer);
+}
+
 /** The live status line's ‹ opens history; in history it steps to an older revision. */
 async function previous(page: Page): Promise<void> {
   await activateControl(history(page).getByRole("button", { name: "Previous revision", exact: true }));
@@ -546,8 +554,253 @@ function dataHistory(uuid: string, title: string): Record<string, string> {
   }
 }
 
+/** Whole visual versions share a logical changed row, including a chart whose source stays identical. */
+function visualHistory(uuid: string, title: string): Record<string, string> {
+  const document = new Y.Doc();
+  const directory = new Y.Doc();
+  try {
+    initDoc(document, { uuid, title });
+    const data = (value: number) => applyDocData(document, directory, [{ collection: "values",
+      schema: { version: 1, schema: { type: "object" } }, replaceRecords: [{ id: "one", value: { value } }] }]);
+    data(10);
+    const ablauf = 'flow v0\ncolumns main\nbox first "Before diagram"';
+    const wireframe = "page\n  text.title Before wireframe";
+    const json = '{"version":"before","count":10}';
+    const drawing = appendBlock(document, { type: "code", language: "ablauf", text: ablauf });
+    const wire = appendBlock(document, { type: "code", language: "wireframe", text: wireframe });
+    const chart = (name: string) => JSON.stringify({ version: 1, type: "table", collection: "values", title: name,
+      columns: [{ field: "value", label: "Value", format: "number" }] });
+    const mapped = appendBlock(document, { type: "chart", text: chart("Before chart") });
+    appendBlock(document, { type: "chart", text: chart("Data-only chart") });
+    const tree = appendBlock(document, { type: "code", language: "json-tree", text: json });
+    for (let row = 1; row <= 40; row += 1) appendBlock(document, { type: "paragraph", text: `Unchanged visual tail ${row}.` });
+    const earlier = Buffer.from(snapshotRevision(document).state).toString("base64");
+    editBlock(document, drawing, ablauf, ablauf.replace("Before", "After"));
+    editBlock(document, wire, wireframe, wireframe.replace("Before", "After"));
+    editBlock(document, mapped, chart("Before chart"), chart("After chart"));
+    editBlock(document, tree, json, json.replace("before", "after").replace("10", "20"));
+    data(20);
+    return { earlier, latest: Buffer.from(snapshotRevision(document).state).toString("base64") };
+  } finally {
+    document.destroy();
+    directory.destroy();
+  }
+}
+
 test.describe("document history through ub open", () => {
   const { harness, openApp } = setupHarness({ accessRole: "admin" });
+
+  test("the earliest revision keeps the live document's block spacing", { tag: "@webkit" }, async ({ browser }) => {
+    const uuid = randomUUID();
+    const title = docTitle("Earliest revision spacing");
+    const source = new Y.Doc();
+    let state: string;
+    const paragraphs = ["The first paragraph.", "The second paragraph.", "The third paragraph."];
+    try {
+      initDoc(source, { uuid, title });
+      for (const text of paragraphs) appendBlock(source, { type: "paragraph", text });
+      appendBlock(source, { type: "heading", level: 2, text: "A section heading" });
+      appendBlock(source, { type: "paragraph", text: "The closing paragraph." });
+      state = Buffer.from(snapshotRevision(source).state).toString("base64");
+      await harness().seedDocument(source);
+    } finally { source.destroy(); }
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      readySelector: ".ub-editor .ProseMirror", contextOptions: { reducedMotion: "reduce" },
+      beforeNavigate: async page => { await serveHistory(page, [
+        { id: "earliest", author: null, startedAt: 1_000, endedAt: null },
+      ], { earliest: state }); },
+    });
+    const blocks = [...paragraphs, "A section heading", "The closing paragraph."];
+    const blockSelector = ":scope > :is(.ub-paragraph, .ub-heading)";
+    const spacing = (view: Locator) => view.evaluate(element => {
+      const blocks = [...element.querySelectorAll(":scope > :is(.ub-paragraph, .ub-heading)")];
+      return blocks.map((block, index) => block.getBoundingClientRect().top -
+        (index === 0 ? element.getBoundingClientRect().top : blocks[index - 1]?.getBoundingClientRect().bottom ?? 0));
+    });
+    await expect(editor(page).locator(blockSelector)).toHaveText(blocks);
+    const liveSpacing: number[][] = [];
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.evaluate(() => document.fonts.ready);
+      liveSpacing.push(await spacing(editor(page)));
+    }
+    await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeEnabled();
+    await previous(page);
+    await expect(historicalEditor(page).locator(blockSelector)).toHaveText(blocks);
+    await expect.poll(() => runningMotion(page)).toBe(0);
+    for (const [index, scheme] of (["light", "dark"] as const).entries()) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.evaluate(() => document.fonts.ready);
+      const earliestSpacing = await spacing(historicalEditor(page));
+      expect(earliestSpacing).toHaveLength(blocks.length);
+      for (const [block, gap] of earliestSpacing.entries()) {
+        expect(gap, `${scheme}: space before ${blocks[block]}`).toBeCloseTo(liveSpacing[index]?.[block] ?? -1, 1);
+      }
+    }
+  });
+
+  test("comparison layout uses the shared switch and persists across history sessions, documents and reloads", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+    const touch = info.project.name === "webkit-ipad";
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+      ...(touch ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 640 } }), reducedMotion: "reduce",
+    } });
+    const title = docTitle("Remembered comparison layout");
+    const uuid = await newDocument(page, title);
+    const entries = [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ];
+    await serveHistory(page, entries, splitHistory(uuid, title));
+    await previous(page);
+    await expect(page.locator(".ub-revision-split")).toBeVisible();
+    const list = historyList(page);
+    const drawer = await showHistoryList(page);
+    const split = list.getByRole("button", { name: "Split", exact: true });
+    const inline = list.getByRole("button", { name: "Inline", exact: true });
+    await expect(split).toHaveAttribute("aria-pressed", "true");
+    await expect(inline).toHaveAttribute("aria-pressed", "false");
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.evaluate(() => document.fonts.ready);
+      const controls = await list.evaluate(element => {
+        const filter = element.querySelector(".ub-history-filter");
+        const view = element.querySelector(".ub-history-comparison-view");
+        const collapse = element.querySelector(".ub-history-collapse");
+        if (filter === null || view === null || collapse === null) throw new Error("The history switches are missing");
+        const button = (group: Element, pressed: boolean) => {
+          const button = group.querySelector(`[aria-pressed="${pressed}"]`);
+          if (button === null) throw new Error("The switch has no selected or unselected option");
+          const style = getComputedStyle(button), box = button.getBoundingClientRect();
+          return { width: box.width, height: box.height, font: style.font, padding: style.padding,
+            background: style.backgroundColor, color: style.color, radius: style.borderRadius, outline: style.outlineStyle };
+        };
+        return { filter: filter.getBoundingClientRect().bottom, viewTop: view.getBoundingClientRect().top,
+          viewBottom: view.getBoundingClientRect().bottom, collapse: collapse.getBoundingClientRect().top,
+          all: button(filter, true), named: button(filter, false), split: button(view, true), inline: button(view, false) };
+      });
+      expect(controls.viewTop).toBeGreaterThanOrEqual(controls.filter);
+      expect(controls.collapse).toBeGreaterThanOrEqual(controls.viewBottom);
+      expect(controls.split).toEqual(controls.all);
+      expect(controls.inline).toEqual(controls.named);
+      expect(controls.split.height).toBeGreaterThanOrEqual(touch ? 44 : 24);
+      expect(controls.inline.height).toBeGreaterThanOrEqual(touch ? 44 : 24);
+      expect(controls.split.outline).toBe("none");
+    }
+    const address = page.url();
+    await inline.focus();
+    await page.keyboard.press("Enter");
+    await expect(inline).toHaveAttribute("aria-pressed", "true");
+    await expect(inline).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(list.getByRole("switch", { name: "Collapse unchanged", exact: true })).toBeFocused();
+    await closeHistoryList(page, drawer);
+    await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+    await expect(historicalEditor(page).locator('[data-revision-change="removed"]').filter({ hasText: "amber" })).toHaveText("amber");
+    await expect(historicalEditor(page).locator('[data-revision-change="added"]').filter({ hasText: "blue" })).toHaveText("blue");
+    await expect(page).toHaveURL(address);
+    const header = page.locator(".ub-revision-header");
+    const targets = await header.evaluate(element => {
+      const buttons = [...element.querySelectorAll<HTMLButtonElement>("button")].filter(button => button.getClientRects().length > 0);
+      return buttons.map(button => {
+        const box = button.getBoundingClientRect();
+        return { name: button.getAttribute("aria-label") ?? button.textContent,
+          reached: button.disabled || [[1, box.height / 2], [box.width / 2, 1], [box.width / 2, box.height / 2], [box.width - 1, box.height / 2], [box.width / 2, box.height - 1]]
+            .every(([x = 0, y = 0]) => button.contains(document.elementFromPoint(box.left + x, box.top + y))),
+          clear: [...element.querySelectorAll(".ub-change-nav button")].filter(nav => nav !== button).every(nav => {
+            const other = nav.getBoundingClientRect();
+            return box.bottom <= other.top || box.top >= other.bottom || box.right <= other.left || box.left >= other.right;
+          }) };
+      });
+    });
+    for (const target of targets) {
+      expect(target.reached, `${target.name} receives pointer input when enabled`).toBe(true);
+      expect(target.clear, `${target.name} remains clear of change navigation`).toBe(true);
+    }
+    await page.reload();
+    await expect(historicalEditor(page).locator('[data-revision-change="added"]').filter({ hasText: "blue" })).toHaveText("blue");
+    await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+    await backToNow(page);
+    await previous(page);
+    await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+    await backToNow(page);
+    const secondTitle = docTitle("Second remembered comparison");
+    const second = await newDocument(page, secondTitle);
+    await serveHistory(page, entries, splitHistory(second, secondTitle));
+    await previous(page);
+    await expect(historicalEditor(page).locator('[data-revision-change="added"]').filter({ hasText: "blue" })).toHaveText("blue");
+    await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+    await comparisonView(page, "Split");
+    await expect(page.locator(".ub-revision-split")).toBeVisible();
+    await page.setViewportSize({ width: 860, height: 640 });
+    await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+    const narrowDrawer = await showHistoryList(page);
+    await expect(split).toHaveAttribute("aria-pressed", "true");
+    if (touch) await inline.tap();
+    else await inline.click();
+    await closeHistoryList(page, narrowDrawer);
+    await page.setViewportSize({ width: 1440, height: 640 });
+    await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+  });
+
+  test("one-column visual changes show whole versions in order and remain reachable by ruler and change arrows", { tag: "@webkit" }, async ({ browser }, info) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+      ...(info.project.name === "webkit-ipad" ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 420 } }), reducedMotion: "reduce",
+    } });
+    const title = docTitle("Whole inline visual versions");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], visualHistory(uuid, title));
+    await previous(page);
+    await comparisonView(page, "Inline");
+    const drawer = await showHistoryList(page);
+    await historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true }).uncheck();
+    await closeHistoryList(page, drawer);
+    await comparisonDrawn(page);
+    const view = historicalEditor(page);
+    await expect(view.locator(".ub-ablauf svg")).toContainText(["Before diagram", "After diagram"]);
+    await expect(view.locator(".ub-wireframe .wf-root")).toHaveText(["Before wireframe", "After wireframe"]);
+    await expect(view.locator(".ub-json-tree")).toHaveCount(2);
+    await expect(view.locator(".ub-json-tree").nth(0)).toContainText("before");
+    await expect(view.locator(".ub-json-tree").nth(1)).toContainText("after");
+    await expect(view.locator(".ub-json-compare")).toHaveCount(0);
+    await expect(view.locator(".ub-chart table tbody tr")).toHaveText(["10", "20", "10", "20"]);
+    await expect(view.getByRole("table", { name: "Before chart", exact: true })).toHaveCount(1);
+    await expect(view.getByRole("table", { name: "After chart", exact: true })).toHaveCount(1);
+    await expect(view.getByRole("table", { name: "Data-only chart", exact: true })).toHaveCount(2);
+    await expect(view.locator(".ub-ablauf-editing, .ub-wireframe-editing, .ub-chart-editing, .ub-json-tree-editing")).toHaveCount(0);
+    const geometry = await view.evaluate(element => [...element.querySelectorAll(":scope > .ub-ablauf, :scope > .ub-wireframe, :scope > .ub-chart, :scope > .ub-json-tree")]
+      .map(block => ({ top: block.getBoundingClientRect().top, bottom: block.getBoundingClientRect().bottom })));
+    expect(geometry).toHaveLength(10);
+    for (let index = 1; index < geometry.length; index += 1) expect(geometry[index]?.top).toBeGreaterThanOrEqual(geometry[index - 1]?.bottom ?? 0);
+    await expect(page.getByRole("button", { name: "Next change", exact: true })).toBeEnabled();
+    const pane = page.locator(".ub-revision-pane");
+    const first = await pane.evaluate(element => element.scrollTop);
+    for (let step = 0; step < 4; step += 1) {
+      const scroll = await pane.evaluate(element => element.scrollTop);
+      await activateControl(page.getByRole("button", { name: "Next change", exact: true }));
+      await expect.poll(() => pane.evaluate(element => element.scrollTop)).toBeGreaterThan(scroll);
+    }
+    await expect(page.getByRole("button", { name: "Previous change", exact: true })).toBeEnabled();
+    await activateControl(page.getByRole("button", { name: "Previous change", exact: true }));
+    await expect.poll(() => pane.evaluate(element => element.scrollTop)).toBeGreaterThan(first);
+    if (info.project.name !== "webkit-ipad") {
+      const ruler = page.getByTestId("revision-ruler");
+      await expect(ruler.locator('.ub-revision-ruler-mark:not([data-mark="same"]):not([data-mark="fold"])')).toHaveCount(5);
+      const track = await ruler.boundingBox();
+      if (track === null) throw new Error("The inline comparison ruler is missing");
+      await page.mouse.click(track.x + track.width / 2, track.y + 2);
+      await expect.poll(() => pane.evaluate(element => element.scrollTop)).toBeLessThan(40);
+    }
+    await comparisonView(page, "Split");
+    await page.setViewportSize({ width: 860, height: 640 });
+    await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+    await comparisonDrawn(page);
+    await expect(view.locator(".ub-ablauf")).toHaveCount(2);
+    await expect(view.locator(".ub-chart table tbody tr")).toHaveText(["10", "20", "10", "20"]);
+    await expect(page.getByRole("button", { name: "Next change", exact: true })).toBeEnabled();
+  });
 
   test("history controls add shareable addresses and browser Back and Forward retrace every view", { tag: "@webkit" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
@@ -2158,6 +2411,56 @@ test.describe("document history through ub open", () => {
     }
   });
 
+  test("Inline follows document links by click and Enter, and native Tab leaves lists and tables", { tag: "@webkit" }, async ({ browser }, info) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+      ...(info.project.name === "webkit-ipad" ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 900 } }), reducedMotion: "reduce",
+    } });
+    const targetTitle = docTitle("Inline link target");
+    const target = await newDocument(page, targetTitle);
+    const title = docTitle("Inline native keyboard");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], linkedHistory(uuid, title, target, randomUUID()));
+    await previous(page);
+    await comparisonView(page, "Inline");
+    const drawer = await showHistoryList(page);
+    await historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true }).uncheck();
+    await closeHistoryList(page, drawer);
+    const view = historicalEditor(page);
+    await expect(view).toHaveAttribute("contenteditable", "true");
+    await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+    const sourceAddress = page.url();
+    const original = await view.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON());
+    for (const input of ["click", "Enter"] as const) {
+      const link = view.locator(`a.ub-doclink[data-doc-id="${target}"]`);
+      await expect(link).toBeVisible();
+      if (input === "click") await link.click();
+      else {
+        await caretInComparisonLink(page, view, "the linked document");
+        await page.keyboard.press("Enter");
+      }
+      await expect(page).toHaveURL(new RegExp(`/${harness().workspace}/${target}$`));
+      await expect(page.locator(".ub-title")).toHaveValue(targetTitle);
+      await page.goBack();
+      await expect(page).toHaveURL(sourceAddress);
+      await expect(page.locator(".ub-revision-title")).toHaveText(title);
+      await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+      await expect(view.getByRole("listitem")).toBeVisible();
+    }
+    for (const [name, block] of [["list", view.getByRole("listitem")], ["table", view.locator("td").last()]] as const) {
+      for (const key of ["Tab", "Shift+Tab"]) {
+        await setPointerSelection(block, () => block.click({ position: { x: 12, y: 10 } }));
+        await expect(view).toBeFocused();
+        await page.keyboard.press(key);
+        // At the final editing region, native forward traversal can enter browser chrome.
+        await expect.poll(() => view.evaluate(element => element.contains(document.activeElement)), { message: `${key} leaves the ${name}` }).toBe(false);
+      }
+    }
+    expect(await view.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON())).toEqual(original);
+  });
+
   // Keyboard focus can remain inside a comparison side during this journey.
   test.fixme("each comparison side follows document links by click and Enter, and Tab leaves lists and tables", { tag: "@webkit" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 900 } } });
@@ -2417,7 +2720,7 @@ test.describe("document history through ub open", () => {
     }
   });
 
-  test("unchanged, added, removed and unrenderable comparison drawings keep the ordinary viewer, as does one column", async ({ browser }) => {
+  test("unchanged, added, removed and unrenderable comparison drawings keep the ordinary viewer, while narrow Split pairs changed drawings", async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 900 } },
       beforeNavigate: async page => { await page.addInitScript(() => {
         const measure = CanvasRenderingContext2D.prototype.measureText;
@@ -2468,7 +2771,9 @@ test.describe("document history through ub open", () => {
     await changed.getByRole("button", { name: "Expand ablauf diagram", exact: true }).focus();
     await page.keyboard.press("Enter");
     await expect(dialog.locator("svg")).toContainText("Changed after drawing");
-    await expect(dialog.getByRole("tab", { name: /Before|After/ })).toHaveCount(0);
+    await expect(dialog.getByRole("tab", { name: "After", exact: true })).toHaveAttribute("aria-selected", "true");
+    await activateControl(dialog.getByRole("tab", { name: "Before", exact: true }));
+    await expect(dialog.locator("svg")).toContainText("Changed before drawing");
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
   });
@@ -2940,11 +3245,13 @@ test.describe("document history through ub open", () => {
     expect(Math.abs(await after.locator('.ub-revision-row-start[data-key="row-2"]').evaluate(element => element.getBoundingClientRect().top) - top)).toBeLessThanOrEqual(2);
   });
 
+  for (const layout of ["Split", "Inline", "narrow Split"] as const) {
   for (const reducedMotion of ["no-preference", "reduce"] as const) {
-    test(`the collapse switch keeps the reader's row through drawings and motion — ${reducedMotion}`, { tag: "@webkit" }, async ({ browser }, info) => {
-      test.fixme(reducedMotion === "no-preference", "The normal-motion variant intermittently loses the reader's row.");
+    test(`the collapse switch keeps the reader's row through drawings and motion — ${layout}, ${reducedMotion}`, { tag: "@webkit" }, async ({ browser }, info) => {
+      test.fixme(layout === "Split" && reducedMotion === "no-preference", "The normal-motion variant intermittently loses the reader's row.");
       const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
-        ...(info.project.name === "webkit-ipad" ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 420 } }),
+        ...(info.project.name === "webkit-ipad" ? devices[layout === "narrow Split" ? "iPad (gen 7)" : "iPad (gen 7) landscape"]
+          : { viewport: { width: layout === "narrow Split" ? 860 : 1440, height: 420 } }),
         colorScheme: "light", reducedMotion,
       }, beforeNavigate: async page => {
         await mockFigmaLookup(page);
@@ -2957,13 +3264,17 @@ test.describe("document history through ub open", () => {
         { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
       ], embeddedFoldHistory(uuid, title));
       await previous(page);
-      await expect(page.locator(".ub-revision-split")).toBeVisible();
+      if (layout === "Inline") await comparisonView(page, "Inline");
+      await expect(page.locator(".ub-revision-split")).toHaveCount(Number(layout === "Split"));
       await comparisonDrawn(page);
       const pane = page.locator(".ub-revision-pane");
       const after = historicalEditor(page);
       const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true });
       const drawer = await showHistoryList(page);
       const position = async (row: Locator, inset = 8): Promise<number> => {
+        // A finished drawing can precede the hold's final stable frames; scripted
+        // setup scrolling must wait until that previous transition releases it.
+        await expect.poll(() => pane.evaluate(element => (element as HTMLElement).style.overflowAnchor)).toBe("");
         await row.evaluate((element, offset) => {
           const pane = element.closest(".ub-revision-pane");
           const header = pane?.querySelector(".ub-revision-header");
@@ -3002,7 +3313,7 @@ test.describe("document history through ub open", () => {
         await expect(collapse).toHaveAttribute("aria-checked", String(folding));
         await expect(after.locator(".ub-revision-fold-button")).toHaveCount(folding ? 2 : 0);
         const assertPosition = async (phase: string): Promise<void> => {
-          for (const side of [after, earlierSide(page)]) {
+          for (const side of layout === "Split" ? [after, earlierSide(page)] : [after]) {
             const current = await side.locator(`.ub-revision-row-start[data-key="${rowKey}"]`).evaluate(element => element.getBoundingClientRect().top);
             const reach = await pane.evaluate((element, delta) => ({ target: element.scrollTop + delta, max: element.scrollHeight - element.clientHeight }), current - top);
             expect.soft(Math.abs(current - top), `${phase} ${folding ? "on" : "off"} ${rowKey}: expected ${top}, received ${current}, reach ${JSON.stringify(reach)}`).toBeLessThanOrEqual(2);
@@ -3035,7 +3346,7 @@ test.describe("document history through ub open", () => {
         await expect(page.locator(".ub-revision-ghost")).toHaveCount(0);
       };
       // Drawings inside the first run grow above this retained row; the second run grows below it.
-      const retained = startBefore(after.locator("p").filter({ hasText: /^Final marker$/ }).nth(3));
+      const retained = startBefore(after.locator("p").filter({ hasText: /Final marker$/ }).nth(3));
       const retainedKey = await key(retained);
       const retainedTop = await position(retained);
       await toggle(false, retainedKey, retainedTop);
@@ -3057,8 +3368,10 @@ test.describe("document history through ub open", () => {
       await closeHistoryList(page, drawer);
     });
   }
+  }
 
-  test("the collapse switch releases its hold for reader scrolling and after drawings settle", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
+  for (const layout of ["Split", "Inline"] as const) {
+  test(`the collapse switch releases its hold for reader scrolling and after drawings settle — ${layout}`, { tag: "@webkit" }, async ({ browser, browserName }, info) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
       ...(info.project.name === "webkit-ipad" ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 420 } }),
       colorScheme: "light", reducedMotion: "no-preference",
@@ -3073,6 +3386,7 @@ test.describe("document history through ub open", () => {
       { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
     ], embeddedFoldHistory(uuid, title));
     await previous(page);
+    if (layout === "Inline") await comparisonView(page, "Inline");
     await comparisonDrawn(page);
     const pane = page.locator(".ub-revision-pane");
     const after = historicalEditor(page);
@@ -3110,7 +3424,7 @@ test.describe("document history through ub open", () => {
         await comparisonDrawn(page);
         await settleScroll();
       }
-      const reader = after.locator("p").filter({ hasText: /^Final marker$/ }).nth(3).locator("xpath=preceding-sibling::*[1]");
+      const reader = after.locator("p").filter({ hasText: /Final marker$/ }).nth(3).locator("xpath=preceding-sibling::*[1]");
       await reader.evaluate(element => {
         const pane = element.closest(".ub-revision-pane");
         const header = pane?.querySelector(".ub-revision-header");
@@ -3214,12 +3528,13 @@ test.describe("document history through ub open", () => {
       expect(Math.abs(await pane.evaluate(element => element.scrollTop) - chosenScroll), `${input}: later drawing growth must not reclaim scrolling`).toBeLessThanOrEqual(2);
     }
   });
+  }
 
-  test("the collapse switch leaves a one-column comparison and its scroll unchanged", { tag: "@webkit" }, async ({ browser }, info) => {
+  test("the one-column collapse hold stops at the nearest reachable scroll position", { tag: "@webkit" }, async ({ browser }, info) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
-      ...(info.project.name === "webkit-ipad" ? devices["iPad (gen 7)"] : { viewport: { width: 860, height: 640 } }),
+      ...(info.project.name === "webkit-ipad" ? devices["iPad (gen 7)"] : { viewport: { width: 860, height: 900 } }), reducedMotion: "reduce",
     } });
-    const title = docTitle("Single column collapse switch");
+    const title = docTitle("Single column reachable collapse hold");
     const uuid = await newDocument(page, title);
     await serveHistory(page, [
       { id: "latest", author: null, startedAt: 2_000, endedAt: null },
@@ -3229,27 +3544,36 @@ test.describe("document history through ub open", () => {
     await expect(page.locator(".ub-revision-split")).toHaveCount(0);
     await comparisonDrawn(page);
     const view = historicalEditor(page);
-    const original = await view.elementHandle();
-    if (original === null) throw new Error("The one-column comparison is missing");
-    const content = await view.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.toJSON());
     const pane = page.locator(".ub-revision-pane");
-    await pane.evaluate(element => { element.scrollTop = 240; });
-    const scroll = await pane.evaluate(element => element.scrollTop);
-    expect(scroll).toBeGreaterThan(0);
     const drawer = await showHistoryList(page);
     const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true });
-    for (const folding of [false, true]) {
-      await activateControl(collapse);
-      await expect(collapse).toHaveAttribute("aria-checked", String(folding));
-      expect(await view.evaluate((element, retained) => element === retained, original)).toBe(true);
-      expect(await pane.evaluate(element => element.scrollTop)).toBe(scroll);
-      await comparisonDrawn(page);
-      expect(await view.evaluate((element, retained) => element === retained, original)).toBe(true);
-      expect(await view.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.toJSON())).toEqual(content);
-      expect(await pane.evaluate(element => element.scrollTop)).toBe(scroll);
-      expect(await runningMotion(page)).toBe(0);
-      await expect(page.locator(".ub-revision-fold-button, .ub-revision-ghost")).toHaveCount(0);
-    }
+    const run = await view.locator(".ub-revision-fold-button").getAttribute("data-fold");
+    if (run === null) throw new Error("The unchanged visual context has no fold identity");
+    await activateControl(collapse);
+    await comparisonDrawn(page);
+    const reader = view.locator("p").filter({ hasText: /^Unchanged context 4 stays exactly as it was\.$/ });
+    // Position the next reading row after the preceding switch has released its hold.
+    await expect.poll(() => pane.evaluate(element => (element as HTMLElement).style.overflowAnchor)).toBe("");
+    await reader.evaluate(element => {
+      const pane = element.closest(".ub-revision-pane");
+      const header = pane?.querySelector(".ub-revision-header");
+      if (pane === null || header == null) throw new Error("The comparison header is missing");
+      pane.scrollBy(0, element.getBoundingClientRect().top - header.getBoundingClientRect().bottom - 8);
+    });
+    const top = await reader.evaluate(element => element.getBoundingClientRect().top);
+    expect(await pane.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+    await activateControl(collapse);
+    await comparisonDrawn(page);
+    await expect(view.locator(".ub-revision-fold-button")).toHaveCount(1);
+    const bar = view.locator(`.ub-revision-row-start[data-key="fold-${run}"]`);
+    const reach = await pane.evaluate((element, target) => {
+      const bar = element.querySelector(`.ub-revision-row-start[data-key="fold-${target.run}"]`);
+      if (bar === null) throw new Error("The reader's replacement fold bar is missing");
+      const desired = element.scrollTop + bar.getBoundingClientRect().top - target.top;
+      return { desired, scroll: element.scrollTop, max: element.scrollHeight - element.clientHeight };
+    }, { run, top });
+    expect(Math.abs(reach.scroll - Math.max(0, Math.min(reach.max, reach.desired)))).toBeLessThanOrEqual(2);
+    expect(Math.abs(await bar.evaluate(element => element.getBoundingClientRect().top) - top)).toBeGreaterThan(2);
     await closeHistoryList(page, drawer);
   });
 

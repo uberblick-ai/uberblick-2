@@ -3,11 +3,9 @@ import { Editor, Extension, Mark, Node as TiptapNode, getSchema } from "@tiptap/
 import type { Extensions, JSONContent } from "@tiptap/core";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { AllSelection, Plugin } from "@tiptap/pm/state";
+import { AllSelection, Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import {
-  COMMENT_MARK, compareRevisions, getBlocksFragment,
-} from "@uberblick/schema";
+import { COMMENT_MARK, compareRevisions, getBlocksFragment } from "@uberblick/schema";
 import type { RevisionBlockComparison, RevisionComparison, TextSpan } from "@uberblick/schema";
 import { yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
 import type * as Y from "yjs";
@@ -26,6 +24,9 @@ import { ListBlocks } from "./list-keys.js";
 import { PROSE_MARKS } from "./marks.js";
 import { ChartBlock, paletteExtensions } from "./nodes.js";
 import { findForeignBlocks } from "./palette.js";
+import { unchangedRuns } from "./revision-rows.js";
+import type { RevisionFolding, RevisionRow, RevisionRowKind, RevisionSide } from "./revision-rows.js";
+import { revisionFoldTransaction, revisionKeyboardShortcuts, revisionNativeKeyboardEvents, revisionReadOnlyProps } from "./revision-editor.js";
 import { CodeHighlighting } from "./syntax-highlighting.js";
 import { TerminalBlocks } from "./terminal.js";
 import { ToggleHeadings } from "./toggle-headings.js";
@@ -206,7 +207,10 @@ function tableChanges(before: PMNode, after: PMNode, change: RevisionBlockCompar
 }
 
 export interface RevisionBlockDetails {
-  kind: RevisionBlockComparison["kind"];
+  kind: RevisionRowKind;
+  /** Stable comparison row; a paired visual contributes two blocks to it. */
+  at: number;
+  side?: RevisionSide;
   fields: string[];
   widthsOnly: boolean;
   dataCollections: string[];
@@ -252,6 +256,8 @@ export interface RevisionViewModel {
   content: JSONContent;
   comparison: RevisionComparison | null;
   blocks: RevisionBlockDetails[];
+  rows: RevisionRow[];
+  runs: number[];
 }
 
 export function chartCollections(node: PMNode, comparison: RevisionComparison | null): string[] {
@@ -263,22 +269,87 @@ export function chartCollections(node: PMNode, comparison: RevisionComparison | 
   } catch { return []; }
 }
 
-export function revisionViewModel(before: Y.Doc | null, after: Y.Doc): RevisionViewModel {
+function visualBlock(node: PMNode): boolean {
+  return node.type.name === "chart" || node.type.name === "code" && ["ablauf", "wireframe", "json-tree"].includes(String(node.attrs.language));
+}
+
+function pairedVisuals(before: PMNode, after: PMNode): { node: PMNode; side: RevisionSide; kind: "added" | "removed" }[] {
+  const ablauf = before.type.name === "code" && after.type.name === "code"
+    && before.attrs.language === "ablauf" && after.attrs.language === "ablauf" && before.textContent !== after.textContent;
+  const version = (own: PMNode, other: PMNode, side: RevisionSide): PMNode => ablauf
+    ? own.type.create({ ...own.attrs, revisionOtherSource: other.textContent, revisionSide: side }, own.content, own.marks)
+    : visualBlock(own) ? own : markTree(own, side === "before" ? "removed" : "added");
+  return [{ node: version(before, after, "before"), side: "before", kind: "removed" },
+    { node: version(after, before, "after"), side: "after", kind: "added" }];
+}
+
+function comparisonRow(change: RevisionBlockComparison, before: PMNode | undefined, after: PMNode | undefined,
+  node: PMNode, comparison: RevisionComparison | null, at: number): RevisionRow {
+  const changed = change.kind !== "unchanged" || revisionFields(change).length > 0
+    || change.spans.some((span) => span.kind !== "unchanged")
+    || [before, after].some((entry) => entry !== undefined && chartCollections(entry, comparison).length > 0);
+  return {
+    kind: changed && change.kind === "unchanged" ? "changed" : change.kind,
+    at, changed,
+    ...(node.type.name === "heading" && node.textContent !== "" ? { heading: node.textContent } : {}),
+    before: { labels: [], filler: before === undefined }, after: { labels: [], filler: after === undefined },
+    ...(changed && (visualBlock(node) || before !== undefined && visualBlock(before)) ? { separateChange: true } : {}),
+  };
+}
+
+function foldInlineRows(rows: RevisionRow[], nodes: PMNode[], blocks: RevisionBlockDetails[],
+  runs: { start: number; end: number }[], folding: RevisionFolding): { rows: RevisionRow[]; nodes: PMNode[]; blocks: RevisionBlockDetails[] } {
+  const shown = { rows: [] as RevisionRow[], nodes: [] as PMNode[], blocks: [] as RevisionBlockDetails[] };
+  const collapsed = new Map(runs.filter((run) => folding.collapse && !folding.expanded.has(run.start)).map((run) => [run.start, run]));
+  let nodeIndex = 0;
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row === undefined) continue;
+    const run = collapsed.get(index);
+    if (run !== undefined) {
+      const count = run.end - run.start + 1;
+      const headings = rows.slice(run.start, run.end + 1).flatMap((entry) => entry.heading === undefined ? [] : [entry.heading]).join(", ");
+      const hidden = nodes.slice(nodeIndex, nodeIndex + count);
+      const levels = hidden.filter((entry) => entry.type.name === "heading").map((entry) => Number(entry.attrs.level));
+      const fold = revisionSchema.nodes.revisionFold;
+      if (fold === undefined) throw new Error("Revision fold is missing");
+      shown.nodes.push(fold.create({ run: run.start, count, headings, headingLevel: levels.length === 0 ? null : Math.min(...levels) }));
+      shown.rows.push({ kind: "folded", at: run.start, changed: false, fold: { run: run.start, count },
+        before: { labels: [], filler: false }, after: { labels: [], filler: false } });
+      shown.blocks.push({ kind: "folded", at: run.start, fields: [], widthsOnly: false, dataCollections: [], showSource: false });
+      nodeIndex += count;
+      index = run.end;
+      continue;
+    }
+    shown.rows.push(row);
+    while (blocks[nodeIndex]?.at === row.at) {
+      const block = blocks[nodeIndex];
+      const node = nodes[nodeIndex];
+      if (block !== undefined && node !== undefined) { shown.blocks.push(block); shown.nodes.push(node); }
+      nodeIndex += 1;
+    }
+  }
+  return shown;
+}
+
+export function revisionViewModel(before: Y.Doc | null, after: Y.Doc,
+  folding: RevisionFolding = { collapse: false, expanded: new Set() }): RevisionViewModel {
   const oldNodes = before === null ? [] : visibleNodes(before);
   const newNodes = visibleNodes(after);
   const comparison = before === null ? null : compareRevisions(before, after);
   const changes = comparison?.blocks ?? newNodes.map((_, index): RevisionBlockComparison => ({ kind: "unchanged", afterIndex: index, fields: [], spans: [] }));
   const nodes: PMNode[] = [];
   const blocks: RevisionBlockDetails[] = [];
-  const append = (node: PMNode, kind: RevisionBlockComparison["kind"], fields: string[], widthsOnly = false): void => {
+  const rows: RevisionRow[] = [];
+  const append = (node: PMNode, kind: RevisionRowKind, fields: string[], widthsOnly = false, side?: RevisionSide): void => {
     // A removed and an added copy can share authored identity; the live editor stays mounted too.
     nodes.push(node.type.create({
       ...node.attrs, id: `revision-${nodes.length}-${node.attrs.id ?? ""}`,
       ...(node.type.name === "chart" ? { revisionRemoved: kind === "removed" } : {}),
     }, node.content, node.marks));
     blocks.push({
-      kind, fields, widthsOnly, dataCollections: chartCollections(node, comparison),
-      showSource: SOURCE_NODES.has(node.type.name) && kind !== "unchanged",
+      kind, at: rows.length - 1, ...(side === undefined ? {} : { side }), fields, widthsOnly, dataCollections: chartCollections(node, comparison),
+      showSource: SOURCE_NODES.has(node.type.name) && !visualBlock(node) && kind !== "unchanged",
     });
   };
   for (const change of changes) {
@@ -286,19 +357,28 @@ export function revisionViewModel(before: Y.Doc | null, after: Y.Doc): RevisionV
     const newNode = change.afterIndex === undefined ? undefined : newNodes[change.afterIndex];
     let node = newNode ?? oldNode;
     if (node === undefined) throw new Error("Revision comparison refers to missing content");
+    const fields = revisionFields(change);
+    const row = comparisonRow(change, oldNode, newNode, node, comparison, rows.length);
+    rows.push(row);
+    if (oldNode && newNode && row.changed && (visualBlock(oldNode) || visualBlock(newNode))) {
+      for (const version of pairedVisuals(oldNode, newNode)) append(version.node, version.kind, fields, false, version.side);
+      continue;
+    }
     // These comparisons intentionally have no shared text address space.
     if (oldNode && newNode && (change.fields.includes("content") || change.fields.includes("columns"))) {
-      append(markTree(oldNode, "removed"), "removed", revisionFields(change));
-      append(markTree(newNode, "added"), "added", revisionFields(change));
+      append(markTree(oldNode, "removed"), "removed", fields);
+      append(markTree(newNode, "added"), "added", fields);
       continue;
     }
     if (change.kind === "removed" || change.kind === "added") node = markTree(node, change.kind);
     else if (oldNode && newNode && change.spans.length > 0 && oldNode.isTextblock && newNode.isTextblock) node = inlineChanges(oldNode, newNode, change.spans);
     else if (oldNode?.type.name === "table" && newNode?.type.name === "table") node = tableChanges(oldNode, newNode, change);
-    append(node, change.kind, revisionFields(change), node.type.name === "table" && isColumnWidthsOnly(change));
+    append(node, change.kind, fields, node.type.name === "table" && isColumnWidthsOnly(change));
   }
-  const content = revisionSchema.topNodeType.create(null, nodes.length ? Fragment.fromArray(nodes) : revisionSchema.nodes.paragraph?.create()).toJSON() as JSONContent;
-  return { content, comparison, blocks };
+  const runs = before === null ? [] : unchangedRuns(rows);
+  const shown = foldInlineRows(rows, nodes, blocks, runs, folding);
+  const content = revisionSchema.topNodeType.create(null, shown.nodes.length ? Fragment.fromArray(shown.nodes) : revisionSchema.nodes.paragraph?.create()).toJSON() as JSONContent;
+  return { content, comparison, blocks: shown.blocks, rows: shown.rows, runs: runs.map((run) => run.start) };
 }
 
 export function copiedContent(content: Fragment): Fragment {
@@ -320,35 +400,72 @@ export function copiedContent(content: Fragment): Fragment {
   return Fragment.fromArray(nodes);
 }
 
-function revisionPresentation(blocks: readonly RevisionBlockDetails[]): Extension {
+const revisionRows = new PluginKey<RevisionViewModel>("revisionInlineRows");
+
+function blockLabels(block: RevisionBlockDetails): string[] {
+  const version = block.side === "before" ? "Before" : block.side === "after" ? "After"
+    : block.kind === "added" ? "Added block" : block.kind === "removed" ? "Removed block" : null;
+  return [
+    ...(version === null ? [] : [version]),
+    ...(block.fields.length ? [`Changed: ${block.fields.join(", ")}`] : []),
+    ...block.dataCollections.map((name) => `Data changed: ${name}`),
+  ];
+}
+
+function revisionPresentation(model: RevisionViewModel, docLinks: DocLinkContext | null): Extension {
   return Extension.create({
     name: "revisionPresentation",
     priority: 2000,
+    addKeyboardShortcuts() {
+      return revisionKeyboardShortcuts(this.editor, docLinks);
+    },
     addProseMirrorPlugins() {
       return [new Plugin({
-        filterTransaction: (transaction) => !transaction.docChanged,
+        key: revisionRows,
+        state: { init: () => model, apply: (transaction, current) => transaction.getMeta(revisionRows) ?? current },
+        filterTransaction: (transaction) => !transaction.docChanged || transaction.getMeta(revisionRows) !== undefined,
         props: {
+          handleDOMEvents: revisionNativeKeyboardEvents,
           transformCopied: (slice) => new Slice(copiedContent(slice.content), slice.openStart, slice.openEnd),
           decorations(state) {
             const decorations: Decoration[] = [];
+            const current = revisionRows.getState(state);
+            if (current === undefined) return null;
+            const rowIndices = new Map(current.rows.map((row, index) => [row.at, index]));
             state.doc.forEach((node, pos, index) => {
-              const block = blocks[index];
+              const block = current.blocks[index];
               if (!block) return;
-              const classes = [`ub-revision-block-${block.kind}`];
+              const rowIndex = rowIndices.get(block.at);
+              const row = rowIndex === undefined ? undefined : current.rows[rowIndex];
+              const classes = [`ub-revision-block-${block.kind}`, "ub-revision-row", `ub-revision-row-${row?.kind ?? block.kind}`];
               if (block.showSource) classes.push("ub-revision-source-changed", "ub-ablauf-editing", "ub-json-tree-editing", "ub-wireframe-editing", "ub-terminal-editing", "ub-chart-editing");
-              decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: classes.join(" "), "data-revision-block": block.kind }));
-              const labels = [
-                ...(block.kind === "added" ? ["Added block"] : block.kind === "removed" ? ["Removed block"] : []),
-                ...(block.fields.length ? [`Changed: ${block.fields.join(", ")}`] : []),
-                ...block.dataCollections.map((name) => `Data changed: ${name}`),
-              ];
-              if (labels.length) decorations.push(Decoration.widget(pos, () => {
-                if (block.widthsOnly) return columnWidthsCaption(node);
-                const label = document.createElement("span");
-                label.className = "ub-revision-fields";
-                label.textContent = labels.join(" · ");
-                return label;
-              }, { side: -1, key: `revision-details:${index}` }));
+              decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: classes.join(" "), "data-revision-block": block.kind,
+                "data-revision-row": row?.kind ?? block.kind }));
+              if (current.comparison === null) return;
+              const labels = blockLabels(block);
+              const first = current.blocks[index - 1]?.at !== block.at;
+              const last = current.blocks[index + 1]?.at !== block.at;
+              if (first || labels.length > 0) decorations.push(Decoration.widget(pos, () => {
+                const start = document.createElement(first ? "div" : "span");
+                if (first && row !== undefined) {
+                  start.className = "ub-revision-row-start";
+                  start.dataset.row = String(rowIndex);
+                  start.dataset.key = `${row.kind === "folded" ? "fold" : "row"}-${row.at}`;
+                }
+                if (labels.length > 0) {
+                  const label = block.widthsOnly ? columnWidthsCaption(node) : document.createElement("span");
+                  if (!block.widthsOnly) { label.className = "ub-revision-fields"; label.textContent = labels.join(" · "); }
+                  start.appendChild(label);
+                }
+                return start;
+              }, { side: -1, key: `revision-row-start:${index}:${block.kind}:${block.at}:${labels.join("|")}`, ignoreSelection: true }));
+              if (last) decorations.push(Decoration.widget(pos + node.nodeSize, () => {
+                const end = document.createElement("div");
+                end.className = "ub-revision-row-end";
+                end.dataset.row = String(rowIndex);
+                end.setAttribute("aria-hidden", "true");
+                return end;
+              }, { side: -2, key: `revision-row-end:${index}:${block.kind}:${block.at}`, ignoreSelection: true }));
             });
             return DecorationSet.create(state.doc, decorations);
           },
@@ -362,28 +479,74 @@ function revisionPresentation(blocks: readonly RevisionBlockDetails[]): Extensio
 
 export interface CreateRevisionEditorOptions {
   element: Element | null;
+  ariaLabel?: string;
   before: Y.Doc | null;
   after: Y.Doc;
   docLinks?: DocLinkContext | null;
   workspaceSettings?: Y.Doc | null;
+  folding?: RevisionFolding;
+  onExpand?: (run: number) => void;
 }
 
-export function createRevisionEditor(options: CreateRevisionEditorOptions): Editor {
-  const model = revisionViewModel(options.before, options.after);
+export interface RevisionInline {
+  model: RevisionViewModel;
+  editor: Editor;
+  expand: (run: number) => void;
+  setCollapse: (collapse: boolean) => void;
+  destroy: () => void;
+}
+
+export function createRevisionInline(options: CreateRevisionEditorOptions): RevisionInline {
+  let model = revisionViewModel(options.before, options.after, options.folding);
+  const expanded = new Set(options.folding?.expanded);
   const editor = new Editor({
     element: options.element,
     extensions: [
-      ...revisionPalette(options.after, options.before), revisionPresentation(model.blocks),
+      ...revisionPalette(options.after, options.before), revisionPresentation(model, options.docLinks ?? null),
       CodeHighlighting, ListBlocks, CardBlocks, TerminalBlocks, ChartBlocks, WireframeBlocks, AblaufBlocks, JsonTreeBlocks,
       DocLinks.configure({ context: options.docLinks ?? null }), ExternalLinks,
       GitHubLinks.configure({ settings: options.workspaceSettings ?? null }), InlineIcons, PersonMentions, ToggleHeadings,
     ],
     content: model.content,
     editable: false,
+    enableCoreExtensions: { editable: false },
+    editorProps: revisionReadOnlyProps(options.ariaLabel ?? "Revision comparison"),
     enableContentCheck: true,
     injectCSS: false,
   });
   // A default text caret in the first chart would open its source on arrival.
   editor.view.dispatch(editor.state.tr.setSelection(new AllSelection(editor.state.doc)));
-  return editor;
+  const apply = (next: RevisionViewModel): void => {
+    const transaction = revisionFoldTransaction(editor, model, next, next.content);
+    editor.view.dispatch(transaction.setMeta(revisionRows, next));
+    model = next;
+  };
+  const inline: RevisionInline = {
+    get model() { return model; }, editor,
+    expand: (run) => {
+      if (!model.rows.some((row) => row.fold?.run === run)) return;
+      expanded.add(run);
+      apply(revisionViewModel(options.before, options.after, { collapse: true, expanded }));
+    },
+    setCollapse: (collapse) => {
+      expanded.clear();
+      apply(revisionViewModel(options.before, options.after, { collapse, expanded }));
+    },
+    destroy: () => { editor.destroy(); },
+  };
+  const expand = (event: MouseEvent): void => {
+    const button = event.target instanceof Element ? event.target.closest<HTMLElement>(".ub-revision-fold-button") : null;
+    if (button === null) return;
+    event.preventDefault();
+    const run = Number(button.dataset.fold);
+    if (options.onExpand !== undefined) options.onExpand(run);
+    else inline.expand(run);
+  };
+  editor.view.dom.addEventListener("click", expand);
+  editor.on("destroy", () => { editor.view.dom.removeEventListener("click", expand); });
+  return inline;
+}
+
+export function createRevisionEditor(options: CreateRevisionEditorOptions): Editor {
+  return createRevisionInline(options).editor;
 }
