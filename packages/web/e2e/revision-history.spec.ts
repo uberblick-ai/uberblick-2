@@ -2306,7 +2306,10 @@ test.describe("document history through ub open", () => {
     // The widths-only table remains visible with the unchanged middle folded.
     await expect(after.locator(".ub-revision-fold-button")).toHaveCount(1);
     await expect(after.locator(".ub-table")).toHaveCount(2);
-    const changeMarks = async () => (await rulerGeometry(page)).marks.filter(mark => mark.kind !== "same" && mark.kind !== "fold");
+    const changeMarks = async () => {
+      await expect(page.getByTestId("revision-ruler")).toBeVisible();
+      return (await rulerGeometry(page)).marks.filter(mark => mark.kind !== "same" && mark.kind !== "fold");
+    };
     await expect.poll(async () => (await changeMarks()).length).toBe(2);
     await activateControl(historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true }));
     await expect(after.locator(".ub-revision-fold-button")).toHaveCount(0);
