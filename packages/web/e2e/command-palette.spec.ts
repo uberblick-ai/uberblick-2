@@ -149,6 +149,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
     await openPalette(page);
     await expect(search(page)).toHaveValue("");
+    await expect(create).toBeEnabled();
     await search(page).press("ArrowDown");
     await page.keyboard.press("Enter");
     await expect(palette(page)).toHaveCount(0);
