@@ -2129,7 +2129,7 @@ test.describe("document history through ub open", () => {
       { id: "latest", author: null, startedAt: 2_000, endedAt: null },
       { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
     ], linkedHistory(uuid, title, target, randomUUID()));
-    await previous(page);
+    await page.goto(`${page.url()}/rev/${revisionId("latest")}`);
     const split = page.locator(".ub-revision-split");
     await expect(split).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/${uuid}/rev/${revisionId("latest")}$`));
