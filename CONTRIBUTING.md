@@ -153,7 +153,10 @@ browser or running system, such as two live clients converging on one block,
 native focus and selection, rendered geometry, and fresh or reloaded browsers
 receiving only what their server sends. Follow
 [test ownership](.agents/development.md#test-ownership) when choosing component
-versus E2E coverage or consolidating cases. Unit and component cases run through
+versus focused-browser or system E2E coverage, consolidating cases, or assessing
+test methods, fixture cost and duration budgets. That guidance owns the normal
+review budget and human escalation; this section owns runner operations, test
+helpers and quarantine. Unit and component cases run through
 `mise run test`. Arguments after
 `--` pass unchanged to Playwright; for example:
 
