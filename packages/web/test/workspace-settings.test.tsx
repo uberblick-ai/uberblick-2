@@ -204,7 +204,7 @@ it("renders only live client-held facts and preserves each unknown rule", async 
   seedDocuments(room.connection, 3);
   const host = await mount(room.connection);
   expect(within(host).getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
-    "Where it lives", "About this workspace", "Connection details",
+    "Where it lives", "About this workspace", "Connection details", "On this computer",
   ]);
   expect(within(host).getByRole("button", { name: "Connection details" }).getAttribute("aria-expanded")).toBe("false");
   expect(within(host).queryByRole("term", { name: "Address segment" })).toBeNull();

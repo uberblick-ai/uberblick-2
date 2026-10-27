@@ -18,7 +18,7 @@ vi.mock("../src/shell/account.js", () => ({ createDeviceLoginClient: () => login
 
 function Reading({ serving = SERVING, fallback = false }: { serving?: LocalServing | null; fallback?: boolean }) {
   const access = useSettingsAccess(WORKSPACE, serving, "presence", "settings", true, fallback);
-  return <output>{JSON.stringify({ admin: access.workspaceAdmin, pending: access.workspacePending, devices: access.devicesAvailable })}</output>;
+  return <output data-member={access.workspaceMember}>{JSON.stringify({ admin: access.workspaceAdmin, pending: access.workspacePending, devices: access.devicesAvailable })}</output>;
 }
 function DeviceReading() {
   const access = useAccessReading(WORKSPACE, SERVING, "presence", "settings/devices", "list-devices");
@@ -26,6 +26,7 @@ function DeviceReading() {
 }
 async function flush() { await act(async () => { await Promise.resolve(); }); }
 function value(view: ReturnType<typeof render>) { return JSON.parse(view.container.querySelector("output")?.textContent ?? "null"); }
+function member(view: ReturnType<typeof render>) { return view.container.querySelector("output")?.getAttribute("data-member") === "true"; }
 
 describe("independent settings permissions", () => {
   beforeEach(() => {
@@ -98,7 +99,7 @@ describe("independent settings permissions", () => {
     expect(value(view)).toEqual({ admin: true, pending: false, devices: true });
   });
 
-  it.each(["member", "forbidden", "sign-in-required", "hub-down"])("never grants workspace controls for %s", async (status) => {
+  it.each(["member", "forbidden", "sign-in-required", "hub-down"])("never grants workspace administration for %s", async (status) => {
     api.mockImplementation(async (action) => action.operation === "own-role"
       ? status === "member" ? { status: "ok", role: "member", hub: "https://bound.example" }
         : { status, hub: "https://bound.example" }
@@ -106,12 +107,47 @@ describe("independent settings permissions", () => {
     const view = render(<Reading />);
     await flush();
     expect(value(view)).toEqual({ admin: false, pending: false, devices: true });
+    expect(member(view)).toBe(status === "member");
+  });
+
+  it("requires a live member role again after an outage and reload", async () => {
+    vi.useFakeTimers();
+    api.mockImplementation(async (action) => action.operation === "own-role"
+      ? { status: "ok", role: "member", hub: "https://bound.example" }
+      : { status: "ok", hub: "https://bound.example", handle: "my-login", devices: [] });
+    const view = render(<Reading />);
+    await flush();
+    expect(member(view)).toBe(true);
+    api.mockResolvedValue({ status: "hub-down", hub: "https://bound.example" });
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
+    expect(member(view)).toBe(false);
+    expect(value(view).pending).toBe(false);
+    view.unmount();
+    const reloaded = render(<Reading />);
+    await flush();
+    expect(member(reloaded)).toBe(false);
+  });
+
+  it.each(["forbidden", "sign-in-required"] as const)("removes member access when device authority confirms %s", async (status) => {
+    vi.useFakeTimers();
+    api.mockImplementation(async (action) => action.operation === "own-role"
+      ? { status: "ok", role: "member", hub: "https://bound.example" }
+      : { status: "ok", hub: "https://bound.example", handle: "my-login", devices: [] });
+    const view = render(<Reading />);
+    await flush();
+    expect(member(view)).toBe(true);
+    api.mockImplementation(async (action) => action.operation === "own-role"
+      ? { status: "ok", role: "member", hub: "https://bound.example" }
+      : { status, hub: "https://bound.example" });
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
+    expect(member(view)).toBe(false);
   });
 
   it.each([null, { ...SERVING, remoteHubUrl: null }])("grants a known local workspace without a role %j", async (serving) => {
     const view = render(<Reading serving={serving} fallback />);
     await flush();
     expect(value(view)).toEqual({ admin: true, pending: false, devices: false });
+    expect(member(view)).toBe(true);
     expect(api).not.toHaveBeenCalled();
   });
 
@@ -171,6 +207,7 @@ describe("independent settings permissions", () => {
     expect(value(view).admin).toBe(true);
     view.rerender(<Reading serving={serving} />);
     expect(value(view)).toEqual({ admin: false, pending: false, devices: false });
+    expect(member(view)).toBe(false);
   });
 
   it("discards stale admin answers on a changed hub and retains confirmed authority over an outage", async () => {
@@ -204,14 +241,17 @@ describe("independent settings permissions", () => {
     const second = render(<Reading />);
     await flush();
     expect(value(second).admin).toBe(true);
+    expect(member(second)).toBe(true);
     api.mockResolvedValue({ status: "ok", role: "member", hub: "https://bound.example" });
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
     expect(value(second).admin).toBe(false);
+    expect(member(second)).toBe(true);
     second.unmount();
     api.mockResolvedValue({ status: "hub-down", hub: "https://bound.example" });
     const third = render(<Reading />);
     await flush();
     expect(value(third).admin).toBe(false);
+    expect(member(third)).toBe(false);
   });
 
   it("waits for the stored account before deciding whether an offline reload has settings access", async () => {

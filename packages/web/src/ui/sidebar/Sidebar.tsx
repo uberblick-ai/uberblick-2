@@ -116,6 +116,7 @@ type SidebarProps = {
   settingsPage: SettingsPage | null;
   hubAdmin?: boolean;
   workspaceAdmin?: boolean;
+  workspaceMember?: boolean;
   devicesAvailable?: boolean;
   /** The open document's history list; while present it replaces the documents. */
   historyPane?: ReactNode;
@@ -185,6 +186,7 @@ function SidebarContent({
   settingsPage,
   hubAdmin = false,
   workspaceAdmin = false,
+  workspaceMember = workspaceAdmin,
   devicesAvailable = false,
   historyPane = null,
 }: SidebarProps & {
@@ -383,18 +385,19 @@ function SidebarContent({
           personal={personalSettings}
           hubAdmin={hubAdmin}
           workspaceAdmin={workspaceAdmin}
+          workspaceMember={workspaceMember}
           devicesAvailable={devicesAvailable}
           onSelect={onOpenSettings}
           onBack={onBackToWorkspace}
         />
       </div>
       <SidebarFooter className="border-t border-sidebar-border" aria-hidden={collapsed} inert={collapsed}>
-        {workspace !== null && (workspaceAdmin || hubAdmin) && settingsArea !== "workspace" && (
+        {workspace !== null && (workspaceMember || hubAdmin) && settingsArea !== "workspace" && (
           <Button variant="plain" size="custom"
             type="button"
             className={`ub-settings-entry ${SIDEBAR_ROW_CLASSES} w-full`}
             data-swap-focus
-            onClick={() => onOpenSettings(workspaceAdmin ? "general" : "hub-admins")}
+            onClick={() => onOpenSettings(workspaceMember ? "general" : "hub-admins")}
           >
             <GearIcon />
             Workspace settings
@@ -454,6 +457,7 @@ function SettingsNavigation({
   personal,
   hubAdmin,
   workspaceAdmin,
+  workspaceMember,
   devicesAvailable,
   onSelect,
   onBack,
@@ -464,6 +468,7 @@ function SettingsNavigation({
   personal: boolean;
   hubAdmin: boolean;
   workspaceAdmin: boolean;
+  workspaceMember: boolean;
   devicesAvailable: boolean;
   onSelect: (page: SettingsPage) => void;
   onBack: () => void;
@@ -491,8 +496,9 @@ function SettingsNavigation({
         </Button>
       </SidebarHeader>
       <SidebarScrollContent className="px-2 pb-2 [&>*]:shrink-0">
-        {!personal && workspaceAdmin &&
-          <SettingsSection label="Workspace" links={WORKSPACE_SETTINGS} page={page} onSelect={onSelect} />}
+        {!personal && workspaceMember &&
+          <SettingsSection label="Workspace" links={workspaceAdmin ? WORKSPACE_SETTINGS : WORKSPACE_SETTINGS.filter((link) => link.page === "general")}
+            page={page} onSelect={onSelect} />}
         {personal && <SettingsSection label="User" page={page} onSelect={onSelect}
           links={USER_SETTINGS.filter((link) => link.page !== "devices" || devicesAvailable)} />}
         {!personal && hubAdmin && <SettingsSection label="Hub" links={HUB_SETTINGS} page={page} onSelect={onSelect} />}

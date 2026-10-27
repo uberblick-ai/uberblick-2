@@ -22,6 +22,7 @@ function SettingsContent({ shell, route }: { shell: AppShell; route: Extract<Rou
   ) : (
     <WorkspaceSettings
       admin={settingsAccess.workspaceAdmin}
+      member={settingsAccess.workspaceMember}
       local={settingsAccess.local}
       key={route.workspace.uuid}
       page={route.page}

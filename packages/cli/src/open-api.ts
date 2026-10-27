@@ -7,6 +7,7 @@ import * as Y from "yjs";
 import { readAccessAction, requestAccess, type AccessBinding } from "./open-access.js";
 import { requestAccount, requestDeviceLogin } from "./open-account.js";
 import { serveRevisionMutation } from "./open-revisions.js";
+import { serveLocalSettingsRequest } from "./open-local-settings.js";
 import { serveBundleRequest } from "./open-bundle.js";
 import { respond } from "./open-response.js";
 import { hasSession, serveSessionRequest, type BrowserAccess } from "./open-session.js";
@@ -16,6 +17,7 @@ const API_PREFIX = "/api/";
 const SEARCH_PATH = "/api/search";
 const REVISIONS_PATH = "/api/revisions";
 const STATUS_PATH = "/api/status";
+const LOCAL_SETTINGS_PATH = "/api/local-settings";
 const ACCESS_PATH = "/api/access";
 const ACCOUNT_PATH = "/api/account";
 const DEVICE_LOGIN_PATH = "/api/device-login";
@@ -227,6 +229,11 @@ async function serveApiRequest(context: ApiRequestContext): Promise<void> {
       return;
     }
     await serveRevisionMutation(engine, request, reply);
+    return;
+  }
+
+  if (target.pathname === LOCAL_SETTINGS_PATH) {
+    await serveLocalSettingsRequest(engine, request, expectedOrigin, workspace.binding.hubUrl !== null, reply);
     return;
   }
 

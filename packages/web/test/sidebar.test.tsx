@@ -754,7 +754,31 @@ describe("settings areas follow the selected page and independent authority", ()
     expect(within(host).getByRole("region", { name: "Workspace" })).toBeTruthy();
   });
 
-  it.each(["", "/tags", "/members"])("sends a member's direct Workspace address %s to Preferences", async (suffix) => {
+  it("opens a member's General address after role confirmation with only local settings", async () => {
+    let confirm: (() => void) | undefined;
+    const role = new Promise<void>((resolve) => { confirm = resolve; });
+    const calls = settingsHub(async () => { await role; return { status: "ok", role: "member" }; });
+    const address = `/${WORKSPACE}/settings`;
+    const host = await openApp(address);
+    expect(window.location.pathname).toBe(address);
+    expect(within(host).queryByRole("heading", { level: 1 })).toBeNull();
+    await act(async () => confirm?.());
+    await waitFor(() => expect(within(host).getByRole("heading", { level: 1, name: "General" })).toBeTruthy());
+    expect(window.location.pathname).toBe(address);
+    const settings = within(host).getByRole("navigation", { name: "Workspace settings" });
+    expect(within(settings).getAllByRole("region").map((group) => group.getAttribute("aria-label"))).toEqual(["Workspace"]);
+    expect(within(within(settings).getByRole("region", { name: "Workspace" })).getAllByRole("button")
+      .map((entry) => entry.textContent)).toEqual(["General"]);
+    expect(within(host).getByRole("heading", { name: "On this computer" })).toBeTruthy();
+    expect(within(host).queryByRole("textbox", { name: "Name" })).toBeNull();
+    expect(within(host).queryByRole("textbox", { name: "Main repository" })).toBeNull();
+    expect(within(host).queryByText("Where it lives")).toBeNull();
+    expect(within(host).queryByText("About this workspace")).toBeNull();
+    expect(within(host).queryByText("Connection details")).toBeNull();
+    expect(calls.some((action) => action.operation === "list-members")).toBe(false);
+  });
+
+  it.each(["/tags", "/members"])("sends a member's direct Workspace address %s to Preferences", async (suffix) => {
     let confirm: (() => void) | undefined;
     const role = new Promise<void>((resolve) => { confirm = resolve; });
     const calls = settingsHub(async () => { await role; return { status: "ok", role: "member" }; });
@@ -795,7 +819,7 @@ describe("settings areas follow the selected page and independent authority", ()
   it("lets a member open personal pages and returns focus to the account menu", async () => {
     settingsHub(async () => ({ status: "ok", role: "member" }));
     const host = await openApp(`/${WORKSPACE}`);
-    expect(within(host).queryByRole("button", { name: "Workspace settings" })).toBeNull();
+    expect(within(host).getByRole("button", { name: "Workspace settings" })).toBeTruthy();
     openUserMenu(host);
     act(() => screen.getByRole("menuitem", { name: "Devices" }).click());
     expect(window.location.pathname).toBe(`/${WORKSPACE}/settings/devices`);
@@ -805,7 +829,7 @@ describe("settings areas follow the selected page and independent authority", ()
       .map((entry) => entry.textContent)).toEqual(["Preferences", "Devices"]);
     expect(within(personal).getByRole("button", { name: "Devices" }).getAttribute("aria-current")).toBe("page");
     expect(within(host).queryByRole("navigation", { name: "Workspace settings" })).toBeNull();
-    expect(within(host).queryByRole("button", { name: "Workspace settings" })).toBeNull();
+    expect(within(host).getByRole("button", { name: "Workspace settings" })).toBeTruthy();
     act(() => within(personal).getByRole("button", { name: "Preferences" }).click());
     expect(window.location.pathname).toBe(`/${WORKSPACE}/settings/preferences`);
     act(() => within(personal).getByRole("button", { name: "Unnamed workspace" }).click());
@@ -826,10 +850,23 @@ describe("settings areas follow the selected page and independent authority", ()
       .map((entry) => entry.textContent)).toEqual(["Preferences"]);
   });
 
-  it("shows a member's workspace entry only after independent hub administration confirms it", async () => {
+  it("lets a member enter General from the workspace footer and Personal settings", async () => {
+    settingsHub(async () => ({ status: "ok", role: "member" }));
+    const host = await openApp(`/${WORKSPACE}`);
+    act(() => within(host).getByRole("button", { name: "Workspace settings" }).click());
+    expect(window.location.pathname).toBe(`/${WORKSPACE}/settings`);
+    expect(within(host).getByRole("heading", { level: 1, name: "General" })).toBeTruthy();
+    expect(within(host).queryByRole("button", { name: "Workspace settings" })).toBeNull();
+    openUserMenu(host);
+    act(() => screen.getByRole("menuitem", { name: "Preferences" }).click());
+    act(() => within(host).getByRole("button", { name: "Workspace settings" }).click());
+    expect(window.location.pathname).toBe(`/${WORKSPACE}/settings`);
+  });
+
+  it("shows a hub admin's workspace entry after independent authority confirms it without a workspace grant", async () => {
     let confirm: (() => void) | undefined;
     const role = new Promise<void>((resolve) => { confirm = resolve; });
-    settingsHub(async () => ({ status: "ok", role: "member" }),
+    settingsHub(async () => ({ status: "forbidden" }),
       async () => { await role; return { status: "ok", role: "admin" }; });
     const host = await openApp(`/${WORKSPACE}`);
     expect(within(host).queryByRole("button", { name: "Workspace settings" })).toBeNull();

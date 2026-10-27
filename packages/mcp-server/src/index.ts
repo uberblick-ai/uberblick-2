@@ -35,6 +35,8 @@ export type { WorkspaceForkSnapshot } from "./workspace-fork.js";
 export { getDocumentRevision, listDocumentRevisions, mutateDocumentRevision, restoreDocumentRevision, documentRevisionChecksum, RevisionClientError } from "./revision-client.js";
 export type { RevisionClientFailure, RevisionReadOptions } from "./revision-client.js";
 export { inspectExistingStore, readStoredSyncStatus, readWorkspaceName } from "./store.js";
+export { parseHistoryRetention } from "./local-settings.js";
+export type { HistoryRetention, WorkspaceSize } from "./local-settings.js";
 export { createMcpRuntime, createMcpServer } from "./server.js";
 export type { McpRuntimeOptions, UberblickMcpRuntime, UberblickMcpServer, UberblickMcpSession } from "./server.js";
 export { createLocalCredentialProvider } from "./credential-provider.js";
