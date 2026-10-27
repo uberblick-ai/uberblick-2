@@ -164,10 +164,8 @@ Confirm every issue the PR closes auto-closed, and close a parent whose last
 open sub-issue it closed. Compare every regular page in the pull request's
 `Corpus update` `Compared` list with the merged code yourself, covering its
 listed claims and paths. Then apply the proposed rewrites through MCP, checked
-against that code. Read each edited page whole afterwards; when it shows a
-reshape sign from the editing guidance in the `Writing pages` guidance page,
-found through the [corpus writing pointer](corpus-writing.md), reshape it in
-the same pass, keeping its intent. A block that describes intended behavior
+against that code. Read each edited page whole afterwards, following
+[corpus-writing.md's agent-loop rules](corpus-writing.md#in-the-agent-loop). A block that describes intended behavior
 the merged code does not deliver yet stays as it is, tracked by an issue under
 [AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action); when you cannot tell
 whether a block is intent or a wrong claim, leave it and ask the maintainers on

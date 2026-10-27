@@ -33,6 +33,9 @@
    authorization regardless of issue origin. If intake and live corpus already
    expose a maintainer choice affecting scope, split or criteria, ask under
    [human-decisions.md](human-decisions.md) before drafting the dependent contract.
+   When the issue needs product intent no page states, list the promises you
+   understand, the gaps and the decisions needed, and ask the same way; the
+   decided promise goes into the corpus page before the issue is ready.
    Stop dependent work, continue independent work and gather evidence needed for
    the question; code grounding may reveal further questions later. Missing
    required context is not waived. Ask only about unresolved choices or new conflicts.

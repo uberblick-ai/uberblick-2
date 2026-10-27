@@ -71,13 +71,9 @@ under that policy and is not requested automatically.
 
 Find the pages that describe what the change touches: search the corpus for
 each changed command, tool or screen by name, beyond the issue's Pointers.
-When the change makes a claim on one of them wrong, or adds behavior no page
-describes yet, draft the rewrite under the pull request's
-`Corpus update` on the page that owns the fact: each document by title and UUID,
-the block, and its new text. When the change grows the page, draft the page's
-reshaped sections instead of a longer block, following the editing guidance in
-the `Writing pages` guidance page, found through the
-[corpus writing pointer](../protocols/corpus-writing.md). Follow
+Draft a rewrite under the pull request's `Corpus update` only as
+[corpus-writing.md's agent-loop rules](../protocols/corpus-writing.md#in-the-agent-loop)
+allow: each document by title and UUID, the block, and its new text. Follow
 [AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action)
 and any governing authoring guidance discovered by purpose. The integrator applies it after merge,
 so the corpus never describes unmerged code. Keep it current with every revision.
