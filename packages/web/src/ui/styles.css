@@ -757,13 +757,68 @@ body {
   text-align: center;
 }
 
+/* A newer release is news, not a fault: the calm brand tint, closable. */
+.ub-update-notice {
+  position: relative;
+  flex: none;
+  margin: 0;
+  padding: 0.4rem 2.5rem;
+  border-bottom: 1px solid var(--sidebar-border);
+  background: var(--brand-subtle);
+  color: var(--foreground);
+  line-height: inherit;
+  text-align: center;
+}
+
+.ub-update-notice a {
+  color: var(--brand-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ub-update-notice-close {
+  position: absolute;
+  top: 50%;
+  right: 0.4rem;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  translate: 0 -50%;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: var(--type-h3-size);
+  line-height: 1;
+}
+
+.ub-update-notice-close:hover {
+  background: var(--card-accent);
+  color: var(--foreground);
+}
+
+/* The shared button's coarse-pointer floor needs a row tall enough to hold it. */
+@media (any-pointer: coarse) {
+  .ub-update-notice {
+    padding-block: 0.7rem;
+    padding-right: 3.25rem;
+  }
+
+  .ub-update-notice-close {
+    width: 2.75rem;
+  }
+}
+
 /* Notice leads use the 500 UI emphasis weight instead of UA bold. */
+.ub-update-notice strong,
 .ub-rebound-notice strong,
 .ub-foreign-banner strong,
 .ub-notice strong {
   font-weight: 500;
 }
 
+.ub-update-notice code,
 .ub-rebound-notice code,
 .ub-notice code {
   font-family: var(--font-mono);

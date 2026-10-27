@@ -43,6 +43,7 @@ function client(
   return {
     status: vi.fn(read),
     search: vi.fn(async () => []),
+    update: vi.fn(async () => null),
   };
 }
 

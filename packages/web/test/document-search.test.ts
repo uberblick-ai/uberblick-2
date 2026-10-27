@@ -98,3 +98,27 @@ describe("local search answers", () => {
       .search("sync", new AbortController().signal)).rejects.toThrow();
   });
 });
+
+describe("local update answers", () => {
+  function update(body: unknown) {
+    const fetchImpl = vi.fn(async () => Response.json(body));
+    return createDocumentSearchClient("workspace", "browser", fetchImpl as typeof fetch)
+      .update(new AbortController().signal);
+  }
+
+  it("keeps a complete offer", async () => {
+    const offer = { current: "0.4.11", latest: "0.4.12", notesUrl: "https://github.com/uberblick-ai/uberblick-2/blob/main/CHANGELOG.md" };
+    await expect(update({ update: offer })).resolves.toEqual(offer);
+  });
+
+  it("offers nothing for no update, an incomplete offer or a link that is not https", async () => {
+    for (const body of [
+      { update: null },
+      {},
+      { update: { current: "0.4.11", latest: "0.4.12" } },
+      { update: { current: "0.4.11", latest: "0.4.12", notesUrl: "javascript:alert(1)" } },
+    ]) {
+      await expect(update(body)).resolves.toBeNull();
+    }
+  });
+});
