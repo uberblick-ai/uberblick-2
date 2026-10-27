@@ -2130,12 +2130,13 @@ test.describe("document history through ub open", () => {
       { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
     ], linkedHistory(uuid, title, target, randomUUID()));
     await previous(page);
-    const drawer = await showHistoryList(page);
-    await activateControl(historyList(page).getByRole("switch", { name: "Collapse unchanged" }));
-    await closeHistoryList(page, drawer);
     const split = page.locator(".ub-revision-split");
     await expect(split).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/${uuid}/rev/${revisionId("latest")}$`));
+    const drawer = await showHistoryList(page);
+    await activateControl(historyList(page).getByRole("switch", { name: "Collapse unchanged" }));
+    await closeHistoryList(page, drawer);
+    await expect(split).toBeVisible();
     const sourceAddress = page.url();
     for (const side of [earlierSide(page), historicalEditor(page)]) {
       for (const open of ["click", "Enter"] as const) {
