@@ -590,6 +590,55 @@ function visualHistory(uuid: string, title: string): Record<string, string> {
 test.describe("document history through ub open", () => {
   const { harness, openApp } = setupHarness({ accessRole: "admin" });
 
+  test("the earliest revision keeps the live document's block spacing", { tag: "@webkit" }, async ({ browser }) => {
+    const uuid = randomUUID();
+    const title = docTitle("Earliest revision spacing");
+    const source = new Y.Doc();
+    let state: string;
+    const paragraphs = ["The first paragraph.", "The second paragraph.", "The third paragraph."];
+    try {
+      initDoc(source, { uuid, title });
+      for (const text of paragraphs) appendBlock(source, { type: "paragraph", text });
+      appendBlock(source, { type: "heading", level: 2, text: "A section heading" });
+      appendBlock(source, { type: "paragraph", text: "The closing paragraph." });
+      state = Buffer.from(snapshotRevision(source).state).toString("base64");
+      await harness().seedDocument(source);
+    } finally { source.destroy(); }
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      readySelector: ".ub-editor .ProseMirror", contextOptions: { reducedMotion: "reduce" },
+      beforeNavigate: async page => { await serveHistory(page, [
+        { id: "earliest", author: null, startedAt: 1_000, endedAt: null },
+      ], { earliest: state }); },
+    });
+    const blocks = [...paragraphs, "A section heading", "The closing paragraph."];
+    const blockSelector = ":scope > :is(.ub-paragraph, .ub-heading)";
+    const spacing = (view: Locator) => view.evaluate(element => {
+      const blocks = [...element.querySelectorAll(":scope > :is(.ub-paragraph, .ub-heading)")];
+      return blocks.map((block, index) => block.getBoundingClientRect().top -
+        (index === 0 ? element.getBoundingClientRect().top : blocks[index - 1]?.getBoundingClientRect().bottom ?? 0));
+    });
+    await expect(editor(page).locator(blockSelector)).toHaveText(blocks);
+    const liveSpacing: number[][] = [];
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.evaluate(() => document.fonts.ready);
+      liveSpacing.push(await spacing(editor(page)));
+    }
+    await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeEnabled();
+    await previous(page);
+    await expect(historicalEditor(page).locator(blockSelector)).toHaveText(blocks);
+    await expect.poll(() => runningMotion(page)).toBe(0);
+    for (const [index, scheme] of (["light", "dark"] as const).entries()) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.evaluate(() => document.fonts.ready);
+      const earliestSpacing = await spacing(historicalEditor(page));
+      expect(earliestSpacing).toHaveLength(blocks.length);
+      for (const [block, gap] of earliestSpacing.entries()) {
+        expect(gap, `${scheme}: space before ${blocks[block]}`).toBeCloseTo(liveSpacing[index]?.[block] ?? -1, 1);
+      }
+    }
+  });
+
   test("comparison layout uses the shared switch and persists across history sessions, documents and reloads", { tag: "@webkit-touch" }, async ({ browser }, info) => {
     const touch = info.project.name === "webkit-ipad";
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {

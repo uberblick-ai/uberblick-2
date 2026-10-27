@@ -5,9 +5,7 @@ import { Fragment, Slice } from "@tiptap/pm/model";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { AllSelection, Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import {
-  COMMENT_MARK, canonicalDocumentUuid, compareRevisions, getBlocksFragment, isExternalHref,
-} from "@uberblick/schema";
+import { COMMENT_MARK, compareRevisions, getBlocksFragment } from "@uberblick/schema";
 import type { RevisionBlockComparison, RevisionComparison, TextSpan } from "@uberblick/schema";
 import { yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
 import type * as Y from "yjs";
@@ -28,6 +26,7 @@ import { ChartBlock, paletteExtensions } from "./nodes.js";
 import { findForeignBlocks } from "./palette.js";
 import { unchangedRuns } from "./revision-rows.js";
 import type { RevisionFolding, RevisionRow, RevisionRowKind, RevisionSide } from "./revision-rows.js";
+import { revisionFoldTransaction, revisionKeyboardShortcuts, revisionNativeKeyboardEvents, revisionReadOnlyProps } from "./revision-editor.js";
 import { CodeHighlighting } from "./syntax-highlighting.js";
 import { TerminalBlocks } from "./terminal.js";
 import { ToggleHeadings } from "./toggle-headings.js";
@@ -418,23 +417,7 @@ function revisionPresentation(model: RevisionViewModel, docLinks: DocLinkContext
     name: "revisionPresentation",
     priority: 2000,
     addKeyboardShortcuts() {
-      return {
-        "Mod-a": () => this.editor.commands.selectAll(),
-        Enter: () => {
-          const { selection } = this.editor.state;
-          if (!selection.empty) return false;
-          const marks = selection.$from.marks();
-          const docId = canonicalDocumentUuid(marks.find((mark) => mark.type.name === "docLink")?.attrs.docId);
-          if (docId !== null && docLinks !== null) {
-            if (docLinks.lookup(docId).state !== "deleted") docLinks.open(docId);
-            return true;
-          }
-          const href = marks.find((mark) => mark.type.name === "link")?.attrs.href;
-          if (!isExternalHref(href)) return false;
-          window.open(href, "_blank", "noopener,noreferrer");
-          return true;
-        },
-      };
+      return revisionKeyboardShortcuts(this.editor, docLinks);
     },
     addProseMirrorPlugins() {
       return [new Plugin({
@@ -442,11 +425,7 @@ function revisionPresentation(model: RevisionViewModel, docLinks: DocLinkContext
         state: { init: () => model, apply: (transaction, current) => transaction.getMeta(revisionRows) ?? current },
         filterTransaction: (transaction) => !transaction.docChanged || transaction.getMeta(revisionRows) !== undefined,
         props: {
-          handleDOMEvents: {
-            keydown: (_view, event) => event.key === "Tab" ||
-              event.target instanceof Element && event.target.closest(".ub-revision-fold-button") !== null,
-            keypress: (_view, event) => event.target instanceof Element && event.target.closest(".ub-revision-fold-button") !== null,
-          },
+          handleDOMEvents: revisionNativeKeyboardEvents,
           transformCopied: (slice) => new Slice(copiedContent(slice.content), slice.openStart, slice.openEnd),
           decorations(state) {
             const decorations: Decoration[] = [];
@@ -462,6 +441,7 @@ function revisionPresentation(model: RevisionViewModel, docLinks: DocLinkContext
               if (block.showSource) classes.push("ub-revision-source-changed", "ub-ablauf-editing", "ub-json-tree-editing", "ub-wireframe-editing", "ub-terminal-editing", "ub-chart-editing");
               decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: classes.join(" "), "data-revision-block": block.kind,
                 "data-revision-row": row?.kind ?? block.kind }));
+              if (current.comparison === null) return;
               const labels = blockLabels(block);
               const first = current.blocks[index - 1]?.at !== block.at;
               const last = current.blocks[index + 1]?.at !== block.at;
@@ -499,6 +479,7 @@ function revisionPresentation(model: RevisionViewModel, docLinks: DocLinkContext
 
 export interface CreateRevisionEditorOptions {
   element: Element | null;
+  ariaLabel?: string;
   before: Y.Doc | null;
   after: Y.Doc;
   docLinks?: DocLinkContext | null;
@@ -529,32 +510,14 @@ export function createRevisionInline(options: CreateRevisionEditorOptions): Revi
     content: model.content,
     editable: false,
     enableCoreExtensions: { editable: false },
-    editorProps: {
-      editable: () => true,
-      attributes: { role: "textbox", "aria-label": "Revision comparison", "aria-readonly": "true", "aria-multiline": "true", inputmode: "none" },
-      handleDOMEvents: { beforeinput: (_view, event) => { event.preventDefault(); return true; } },
-    },
+    editorProps: revisionReadOnlyProps(options.ariaLabel ?? "Revision comparison"),
     enableContentCheck: true,
     injectCSS: false,
   });
   // A default text caret in the first chart would open its source on arrival.
   editor.view.dispatch(editor.state.tr.setSelection(new AllSelection(editor.state.doc)));
   const apply = (next: RevisionViewModel): void => {
-    const transaction = editor.state.tr;
-    for (const run of [...model.runs].reverse()) {
-      const oldFold = model.rows.find((row) => row.at === run)?.fold;
-      const newFold = next.rows.find((row) => row.at === run)?.fold;
-      if ((oldFold === undefined) === (newFold === undefined)) continue;
-      const index = model.blocks.findIndex((block) => block.at === run);
-      const start = next.blocks.findIndex((block) => block.at === run);
-      let position = 0;
-      for (let node = 0; node < index; node += 1) position += editor.state.doc.child(node).nodeSize;
-      let end = position;
-      for (let node = index; node < index + (oldFold === undefined ? newFold?.count ?? 0 : 1); node += 1) end += editor.state.doc.child(node).nodeSize;
-      const replacement = Fragment.fromArray((next.content.content ?? []).slice(start, start + (oldFold?.count ?? 1))
-        .map((node) => editor.schema.nodeFromJSON(node)));
-      transaction.replaceWith(position, end, replacement);
-    }
+    const transaction = revisionFoldTransaction(editor, model, next, next.content);
     editor.view.dispatch(transaction.setMeta(revisionRows, next));
     model = next;
   };

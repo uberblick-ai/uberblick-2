@@ -378,16 +378,16 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       } else {
         if (host.current === null) return;
         if (selection.before === null) {
-          const editor = createRevisionEditor({ element: host.current, before: null, after: selection.after, docLinks, workspaceSettings });
-          editor.setOptions({ editorProps: { attributes: { "aria-label": "Document revision" } } });
+          const editor = createRevisionEditor({ element: host.current, before: null, after: selection.after, docLinks, workspaceSettings,
+            ariaLabel: "Document revision" });
           const activate = (event: MouseEvent): void => { handleDocLinkClick(event, docLinks); };
           editor.view.dom.addEventListener("click", activate);
           setEditors([{ side: "single", editor }]);
           return () => { editor.view.dom.removeEventListener("click", activate); setEditors([]); editor.destroy(); };
         }
         const rendered = createRevisionInline({ element: host.current, before: selection.before, after: selection.after, docLinks, workspaceSettings,
+          ariaLabel: "Document revision",
           folding: { collapse: readCollapse(), expanded: new Set() }, onExpand });
-        rendered.editor.setOptions({ editorProps: { attributes: { "aria-label": "Document revision" } } });
         view = { get model() { return rendered.model; }, after: rendered.editor, expand: rendered.expand, setCollapse: rendered.setCollapse };
         destroy = rendered.destroy;
         setEditors([{ side: "single", editor: rendered.editor }]);

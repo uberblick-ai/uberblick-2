@@ -189,6 +189,10 @@ describe("revision comparison controls", () => {
     expect(view.container.querySelector(".ub-revision-split")).toBeNull();
     const editor = view.container.querySelector('.ProseMirror[aria-label="Document revision"]')!;
     expect(editor).not.toBeNull();
+    expect(editor.getAttribute("role")).toBe("textbox");
+    expect(editor.getAttribute("aria-readonly")).toBe("true");
+    expect(editor.getAttribute("aria-multiline")).toBe("true");
+    expect(editor.getAttribute("inputmode")).toBe("none");
     expect(editor.querySelector('[data-revision-change="removed"]')?.textContent).toBe("old");
     expect(editor.querySelector('[data-revision-change="added"]')?.textContent).toBe("new");
     const paragraph = editor.querySelector("p[data-revision-block]");
@@ -215,6 +219,10 @@ describe("revision comparison controls", () => {
     expect(screen.getByRole("group", { name: "Changes" })).not.toBeNull();
     view.rerender(<RevisionPane history={{ ...history, comparisonView: "inline", selection: { ...history.selection!, before: null } }} docLinks={null} workspaceSettings={null} />);
     expect(view.container.querySelectorAll(".ProseMirror").length).toBe(1);
+    const earliest = screen.getByRole("textbox", { name: "Document revision" });
+    expect(earliest.getAttribute("aria-readonly")).toBe("true");
+    expect(earliest.getAttribute("aria-multiline")).toBe("true");
+    expect(earliest.getAttribute("inputmode")).toBe("none");
     expect(screen.queryByRole("group", { name: "Changes" })).toBeNull();
   });
 

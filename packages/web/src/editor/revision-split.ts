@@ -11,7 +11,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { AllSelection, Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { EditorView } from "@tiptap/pm/view";
-import { canonicalDocumentUuid, compareJsonSources, compareRevisions, isExternalHref } from "@uberblick/schema";
+import { compareJsonSources, compareRevisions } from "@uberblick/schema";
 import type { RevisionBlockComparison, RevisionComparison, TextSpan } from "@uberblick/schema";
 import type * as Y from "yjs";
 import { AblaufBlocks } from "./ablauf.js";
@@ -26,6 +26,7 @@ import { PersonMentions } from "./person-mentions.js";
 import { ListBlocks } from "./list-keys.js";
 import { unchangedRuns } from "./revision-rows.js";
 import type { RevisionFolding, RevisionRow, RevisionRowKind, RevisionSide } from "./revision-rows.js";
+import { revisionFoldTransaction, revisionKeyboardShortcuts, revisionNativeKeyboardEvents, revisionReadOnlyProps } from "./revision-editor.js";
 import { chartCollections, columnWidthsCaption, copiedContent, copyNode, isColumnWidthsOnly, markTree, revisionFields, revisionPalette, revisionSchema, visibleNodes } from "./revision-view.js";
 import { CodeHighlighting } from "./syntax-highlighting.js";
 import { TerminalBlocks } from "./terminal.js";
@@ -233,23 +234,7 @@ function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docL
     name: "revisionSide",
     priority: 2000,
     addKeyboardShortcuts() {
-      return {
-        "Mod-a": () => this.editor.commands.selectAll(),
-        Enter: () => {
-          const { selection } = this.editor.state;
-          if (!selection.empty) return false;
-          const marks = selection.$from.marks();
-          const docId = canonicalDocumentUuid(marks.find((mark) => mark.type.name === "docLink")?.attrs.docId);
-          if (docId !== null && docLinks !== null) {
-            if (docLinks.lookup(docId).state !== "deleted") docLinks.open(docId);
-            return true;
-          }
-          const href = marks.find((mark) => mark.type.name === "link")?.attrs.href;
-          if (!isExternalHref(href)) return false;
-          window.open(href, "_blank", "noopener,noreferrer");
-          return true;
-        },
-      };
+      return revisionKeyboardShortcuts(this.editor, docLinks);
     },
     addProseMirrorPlugins() {
       return [new Plugin({
@@ -260,12 +245,7 @@ function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docL
         },
         filterTransaction: (transaction) => !transaction.docChanged || transaction.getMeta(revisionRows) !== undefined,
         props: {
-          handleDOMEvents: {
-            // Leave focus navigation and fold-button activation to the browser.
-            keydown: (_view, event) => event.key === "Tab" ||
-              event.target instanceof Element && event.target.closest(".ub-revision-fold-button") !== null,
-            keypress: (_view, event) => event.target instanceof Element && event.target.closest(".ub-revision-fold-button") !== null,
-          },
+          handleDOMEvents: revisionNativeKeyboardEvents,
           transformCopied: (slice) => new Slice(copiedContent(slice.content), slice.openStart, slice.openEnd),
           decorations(state) {
             const decorations: Decoration[] = [];
@@ -323,14 +303,9 @@ function sideEditor(element: Element, content: JSONContent, data: Y.Doc, rows: r
       GitHubLinks.configure({ settings: workspaceSettings }), InlineIcons, PersonMentions, ToggleHeadings,
     ],
     content,
-    // Native editing hosts contain selection; Tiptap's read-only renderers and transaction guard prevent editing.
     editable: false,
     enableCoreExtensions: { editable: false },
-    editorProps: {
-      editable: () => true,
-      attributes: { role: "textbox", "aria-label": side === "before" ? "Before this revision" : "This revision", "aria-readonly": "true", "aria-multiline": "true", inputmode: "none" },
-      handleDOMEvents: { beforeinput: (_view, event) => { event.preventDefault(); return true; } },
-    },
+    editorProps: revisionReadOnlyProps(side === "before" ? "Before this revision" : "This revision"),
     enableContentCheck: true,
     injectCSS: false,
   });
@@ -453,22 +428,7 @@ export function createRevisionSplit(options: CreateRevisionSplitOptions): Revisi
   alignRevisionSides(before.view, after.view);
   const apply = (next: RevisionSplitModel): void => {
     for (const [editor, content] of [[before, next.before], [after, next.after]] as const) {
-      const transaction = editor.state.tr;
-      for (const run of [...model.runs].reverse()) {
-        const index = model.rows.findIndex((row) => row.at === run);
-        const start = next.rows.findIndex((row) => row.at === run);
-        const oldFold = model.rows[index]?.fold;
-        const newFold = next.rows[start]?.fold;
-        if ((oldFold === undefined) === (newFold === undefined)) continue;
-        let position = 0;
-        for (let row = 0; row < index; row += 1) position += editor.state.doc.child(row).nodeSize;
-        let end = position;
-        const count = oldFold === undefined ? newFold?.count ?? 0 : 1;
-        for (let row = index; row < index + count; row += 1) end += editor.state.doc.child(row).nodeSize;
-        const replacement = Fragment.fromArray((content.content ?? []).slice(start, start + (oldFold?.count ?? 1))
-          .map((node) => editor.schema.nodeFromJSON(node)));
-        transaction.replaceWith(position, end, replacement);
-      }
+      const transaction = revisionFoldTransaction(editor, model, next, content);
       editor.view.dispatch(transaction.setMeta(revisionRows, next.rows));
     }
     model = next;
