@@ -131,7 +131,9 @@ describe("atomic insert_block batches", () => {
       { text: "Marked ", marks: { bold: true } },
       { text: "Known target", marks: { docLink: target.uuid } },
     ]);
-    expect((await rig.ok("get_doc", { uuid: page.uuid })).blocks).toMatchObject(result.blocks);
+    const read = (await rig.ok("get_doc", { uuid: page.uuid })).blocks;
+    expect(read).toMatchObject(result.blocks.map(({ id, rev }: { id: string; rev: string }) => ({ id, rev })));
+    for (const block of read) expect(block).not.toHaveProperty("chart");
     expect((await rig.ok("backlinks", { uuid: target.uuid })).backlinks)
       .toMatchObject([{ uuid: page.uuid }]);
   });

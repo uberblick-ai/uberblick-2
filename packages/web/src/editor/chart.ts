@@ -11,10 +11,11 @@ import {
   Chart, LineController, LineElement, PointElement, BarController, BarElement, LinearScale, Legend, Tooltip,
 } from "chart.js";
 import type { ChartConfiguration, ChartDataset, Scale } from "chart.js";
-import type { DocData } from "@uberblick/schema";
+import { chartViewType, prepareChartView } from "@uberblick/schema";
+import type { ChartView, DocData } from "@uberblick/schema";
 import type * as Y from "yjs";
 import {
-  prepareChart, parseChartConfig, formatChartX, formatChartNumber, chartAccessibleName,
+  parseChartConfig, formatChartX, formatChartNumber, chartAccessibleName,
   CHART_RECORD_LIMIT, chartAccessibleDescription, chartDiagnosticsText,
   CHART_MIN_HEIGHT, CHART_MAX_HEIGHT,
 } from "./chart-data.js";
@@ -22,7 +23,7 @@ import type { ChartReady } from "./chart-data.js";
 import {
   blockCaption, carriesComment, chartChrome, chromeFilters, copyButton, openSource, sourceButton, sourceEditingPlugin,
 } from "./source-chrome.js";
-import { prepareTable, tableDiagnosticsText } from "./table-data.js";
+import { tableDiagnosticsText } from "./table-data.js";
 import { dataTableView } from "./table-view.js";
 import { bindDocView } from "./view-bindings.js";
 import { observationEndpoints, observationTicks } from "./chart-ticks.js";
@@ -306,7 +307,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     let dirty = true;
     let snapshot: DocData | null = null;
     let tableSource = false;
-    let prepared: ReturnType<typeof prepareChart> | ReturnType<typeof prepareTable> | null = null;
+    let prepared: ChartView["projection"] | null = null;
     const dom = chartChrome.root();
     const contentDOM = chartChrome.content();
     const panel = document.createElement("div");
@@ -431,8 +432,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
       let succeeded = false;
       try {
         if (dirty || prepared === null || snapshot !== data) {
-          try { tableSource = JSON.parse(current.textContent)?.type === "table"; }
-          catch { tableSource = false; }
+          tableSource = chartViewType(current.textContent) === "table";
         }
         const view = tableSource ? "table" : "line";
         if (dom.dataset.view !== view) dom.dataset.view = view;
@@ -449,7 +449,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         openButton.setAttribute("aria-label", tableSource ? "Open table source" : "Open chart source");
         if (readError !== undefined) throw readError;
         if (dirty || prepared === null || snapshot !== data) {
-          prepared = tableSource ? prepareTable(current.textContent, data) : prepareChart(current.textContent, data);
+          prepared = prepareChartView(current.textContent, data).projection;
           snapshot = data;
           dirty = false;
         }
@@ -458,7 +458,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           result.config.limit !== undefined && result.config.limit <= CHART_RECORD_LIMIT);
         panel.dataset.state = result.status;
         if (result.status !== "ready") {
-          table.render(result);
+          table.clear();
           text(diagnostics, tableSource ? tableDiagnosticsText(result) : chartDiagnosticsText(result));
           releaseChart();
           screen.hidden = true;
