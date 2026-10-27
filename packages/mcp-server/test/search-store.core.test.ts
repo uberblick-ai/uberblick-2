@@ -45,9 +45,10 @@ describe("title-weighted search relevance", () => {
       row("2", "other guide", { description: "launch" }),
       row("3", "other guide", { body: "launch" }),
       row("4", "other guide", { tagNames: ["launch"] }),
+      row("5", "other guide", { blockLanguages: ["launch"] }),
+      row("0", "other guide", { blockLanguages: ["launch"] }),
     ].forEach((doc) => { store.indexDoc(doc, 1); });
-    expect(store.search("launch", 100).map((hit) => hit.uuid)[0]).toBe("1");
-    expect(store.search("launch", 100)).toHaveLength(4);
+    expect(store.search("launch", 100).map((hit) => hit.uuid)).toEqual(["1", "0", "2", "3", "4", "5"]);
   });
 
   it("finds the coding-agent decision near the top of a long query", () => {
@@ -93,32 +94,35 @@ describe("title-weighted search relevance", () => {
 });
 
 describe("web fragment UUID search", () => {
-  it("matches long fragments anywhere in all four fields and gives title matches more weight", () => {
+  it("matches long fragments in all searchable fields and gives title matches more weight", () => {
     const store = open();
     [
       row("title", "ub workspace use"),
       row("description", "Other guide", { description: "workspace" }),
       row("tags", "Other guide", { tagNames: ["workspace"] }),
       row("body", "Other guide", { body: "workspace" }),
+      row("languages", "Other guide", { blockLanguages: ["workspace"] }),
     ].forEach((doc) => { store.indexDoc(doc, 1); });
     for (const query of ["worksp", "space"]) {
       const hits = store.searchUuids(query);
       expect(hits[0]).toBe("title");
-      expect(hits.toSorted()).toEqual(["body", "description", "tags", "title"]);
+      expect(hits).toEqual(["title", "body", "description", "languages", "tags"]);
     }
   });
 
-  it("matches one- and two-character fragments only in titles and tag names, with titles first", () => {
+  it("matches short fragments in titles, tags and block languages, with titles first", () => {
     const store = open();
     [
       row("title", "MCP server tools"),
       row("tags", "Guide", { tagNames: ["mcp"] }),
+      row("languages", "Guide", { blockLanguages: ["mcp", "ts"] }),
       row("description", "Reference", { description: "MCP" }),
       row("body", "Notes", { body: "MCP" }),
     ].forEach((doc) => { store.indexDoc(doc, 1); });
-    expect(store.searchUuids("m")).toEqual(["title", "tags"]);
-    expect(store.searchUuids("mc")).toEqual(["title", "tags"]);
-    expect(store.searchUuids("mcp").toSorted()).toEqual(["body", "description", "tags", "title"]);
+    expect(store.searchUuids("m")).toEqual(["title", "languages", "tags"]);
+    expect(store.searchUuids("mc")).toEqual(["title", "languages", "tags"]);
+    expect(store.searchUuids("ts")).toEqual(["languages"]);
+    expect(store.searchUuids("mcp").toSorted()).toEqual(["body", "description", "languages", "tags", "title"]);
   });
 
   it("folds case and accents for every fragment length and eligible field", () => {
@@ -126,19 +130,20 @@ describe("web fragment UUID search", () => {
     [
       row("title", "ÜBERBLICK"),
       row("tags", "Notes", { tagNames: ["ÜBERBLICK"] }),
+      row("languages", "Notes", { blockLanguages: ["ÜBERBLICK"] }),
       row("description", "Reference", { description: "ÜBERBLICK" }),
       row("body", "Notes", { body: "ÜBERBLICK" }),
       row("accent", "Café"),
     ].forEach((doc) => { store.indexDoc(doc, 1); });
     for (const query of ["u", "Ü", "u\u0308", "ub", "ÜB", "U\u0308B"]) {
-      expect(store.searchUuids(query)).toEqual(["title", "tags"]);
+      expect(store.searchUuids(query)).toEqual(["title", "languages", "tags"]);
     }
     for (const query of ["uber", "ÜBER", "U\u0308BER"]) {
-      expect(store.searchUuids(query).toSorted()).toEqual(["body", "description", "tags", "title"]);
+      expect(store.searchUuids(query).toSorted()).toEqual(["body", "description", "languages", "tags", "title"]);
     }
     expect(store.searchUuids("cafe")).toEqual(["accent"]);
     store.indexDoc(row("unrelated", "Uplink", { body: "September" }), 1);
-    expect(store.searchUuids("U\u0308BER").toSorted()).toEqual(["body", "description", "tags", "title"]);
+    expect(store.searchUuids("U\u0308BER").toSorted()).toEqual(["body", "description", "languages", "tags", "title"]);
   });
 
   it("counts non-Latin characters and does not match only part of a composed character", () => {

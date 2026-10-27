@@ -341,7 +341,7 @@ export const tools: readonly Tool[] = [
     name: "search",
     title: "Search documents",
     description:
-      "Find live documents containing any query word in titles, descriptions, content or assigned tag names. " +
+      "Find live documents containing any query word in titles, descriptions, content, assigned tag names or code block languages. " +
       "English word forms match; case and accents fold, underscore groups match adjacent words and a trailing * " +
       "matches stem prefixes. A prefix past the stem can miss: `decisi*` can miss `decision`; search the whole word or a shorter prefix, `decis*`. " +
       "Punctuation or emoji alone matches nothing. Results use title-weighted bm25 relevance, " +
