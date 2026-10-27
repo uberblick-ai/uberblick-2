@@ -419,7 +419,7 @@ destinations right-aligned, no arrows).
 
 const wireframe = `# Wireframes
 
-A wireframe is a static UI sketch that the web editor draws from a fenced code block whose info string is exactly \`wireframe\`. This topic follows Format v0.1 of \`@uberblick/wireframe\` 0.3.1. Import, export and MCP keep the source as a code block with language \`wireframe\`. Nothing else goes on the fence line.
+A wireframe is a static UI sketch that the web editor draws from a fenced code block whose info string is exactly \`wireframe\`. This topic follows Format v0.1 of \`@uberblick/wireframe\` 0.3.2. Import, export and MCP keep the source as a code block with language \`wireframe\`. Nothing else goes on the fence line.
 
 \`\`\`wireframe
 dialog Delete “Q3 launch draft”?
@@ -446,12 +446,16 @@ Roots stand at the top level: \`dialog\`, whose label is its title; \`banner\` w
 
 | Kind | Directly inside | Variants | Label |
 | --- | --- | --- | --- |
-| \`text\` | root, dock, card, row | \`.muted\`, \`.strong\`, \`.title\`, \`.small\`, \`.red\`, \`.amber\`, \`.green\`, \`.blue\`; backgrounds \`.bg-red\`, \`.bg-amber\`, \`.bg-green\`, \`.bg-blue\` | the text |
+| \`text\` | root, dock, card, row, item | \`.muted\`, \`.strong\`, \`.title\`, \`.small\`, \`.red\`, \`.amber\`, \`.green\`, \`.blue\`; backgrounds \`.bg-red\`, \`.bg-amber\`, \`.bg-green\`, \`.bg-blue\` | the text |
 | \`row\` | root, dock, card, non-table row, table | one of \`.end\`, \`.between\`, \`.scroll\`, plus \`.stretch\`, only in roots, docks and cards; \`.head\` only in a table | none |
-| \`card\` | top level, root, dock, non-table row | none; optional \`width=\` and \`padding=\` | none: it holds text, images, rows, switches and tabs |
-| \`image\` | root, dock, card, row | \`.square\`, \`.round\`; optional \`width=\` | what it shows |
-| \`button\` | row, cell, frame | \`.primary\`, \`.danger\`, \`.link\`, \`.focus\` | the caption, or none when it holds an icon |
-| \`icon\` | root, dock, cell, button, option | \`.filled\` and the four colours | an exact kebab-case Tabler name, such as \`pin\` or \`dots-vertical\` |
+| \`card\` | top level, root, dock, non-table row | none; optional \`width=\` and \`padding=\` | none: it holds text, images, folds, items, rows, switches and tabs |
+| \`image\` | root, dock, card, row, item | \`.square\`, \`.round\`; optional \`width=\`; only \`.round\` as an item's first child | what it shows |
+| \`fold\` | root, dock, card | none | collapsed content's label, or none for an empty bar |
+| \`item\` | root, card | \`.current\` | main line; child text lines and one optional leading icon or round image |
+| \`ruler\` | last in a non-table row | none | none: holds marks |
+| \`mark\` | ruler | \`.red\`, \`.green\`; warning by default; required \`at=0\` through \`at=100\` | none |
+| \`button\` | row, cell, frame | \`.primary\`, \`.danger\`, \`.link\`, \`.focus\`, \`.disabled\` | the caption, or none when it holds an icon |
+| \`icon\` | root, dock, cell, button, option, item | \`.filled\` and the four colours; only as an item's first child | an exact kebab-case Tabler name, such as \`pin\` or \`dots-vertical\` |
 | \`input\`, \`select\` | root, dock, row | none; optional \`label=\` | the placeholder, or the chosen value |
 | \`toggle\` | root, dock, row | none | none: its choices are \`option\` lines, \`.current\` for the chosen one |
 | \`switch\` | root, dock, card, non-table row | \`.on\`; off by default | the caption, or none for a bare switch |
@@ -468,6 +472,29 @@ Write \`icon.filled pin\`, not \`pin-filled\`. Use one text or icon colour per n
 Plain rows nested in non-table rows group their children side by side as one content-width item. Row variants do not apply to these inner groups. \`row.stretch\` gives direct cards equal heights and aligns other children to the top; it combines with \`.end\` or \`.between\`, but competes with \`.scroll\` (first written wins). Fractional card widths use \`N/M\` with \`1 <= N <= M <= 9999\`, sharing the space left after gaps and fixed-width children. Their row must be directly inside a dialog, page, frame, phone, dock or card and must not scroll; banner rows and nested groups do not accept them. Unsized cards share what remains.
 
 Switches show an inert on/off state; captions wrap beside the track. Tabs underline the first \`option.current\`; later current options warn. They do not change content. An overflowing tab strip scrolls inside the drawing and becomes one native keyboard stop with a visible focus ring; fitting strips and individual tabs add none. Text backgrounds use the existing danger, warning, success and info tints, respectively. Choose one background and one text colour independently; the background alone keeps ink text.
+
+Folds are static dashed bars, not expand controls. Items stack their main line and child text; only the first direct \`item.current\` in each root or card is selected. An item's one optional icon or round image must come first. Disabled buttons combine with other button variants, mute the whole action and announce “unavailable”; they remain inert, without a role or focus target. Rulers and their marks are decorative and never scroll or accept input. A mark needs an integer \`at=\` from 0 to 100; an invalid or missing position warns and draws no mark. Folds and marks take no children.
+
+\`\`\`wireframe
+page.window width=720 Revision history
+  row.stretch
+    card width=1/3
+      item.current Reviewed
+        icon check
+        text.small.muted 2 hours ago
+      item Draft
+        text.small.muted Yesterday
+    card width=2/3
+      text.title Goals
+      fold 4 unchanged blocks · Steps, Checklist
+      text.bg-green Added text
+      row.end
+        button.disabled Restore
+    ruler
+      mark.red at=0
+      mark at=50
+      mark.green at=100
+\`\`\`
 
 \`\`\`wireframe
 page.browser app.example/documents
@@ -530,7 +557,7 @@ banner.warning
 
 Errors stop the drawing: tabs or odd indentation, a jump of more than one level, an indented first line, an unterminated quote, text after a closing quote, or an exceeded limit. Warnings still draw, but the block no longer says what you meant: an unknown kind, variant, attribute or icon, a label on a kind that takes none, or a node in the wrong place. The usual misplacements are a \`button\` outside a \`row\`, \`cell\` or \`frame\`, anything but a \`cell\` in a table's row, and a root inside another node. Fix both.
 
-MCP stores the source without checking it. The web editor lists each diagnostic with its line number. When nobody can open the editor, keep to the kinds and places above and report the wireframe as unchecked. The [full authoring primer](https://github.com/uberblick-ai/wireframe-md/blob/v0.3.1/AUTHORING.md), with every kind's drawing, phones, docks and each mistake with its diagnostic, ships as \`AUTHORING.md\` in \`@uberblick/wireframe\` 0.3.1.`;
+MCP stores the source without checking it. The web editor lists each diagnostic with its line number. When nobody can open the editor, keep to the kinds and places above and report the wireframe as unchecked. The [full authoring primer](https://github.com/uberblick-ai/wireframe-md/blob/v0.3.2/AUTHORING.md), with every kind's drawing, phones, docks and each mistake with its diagnostic, ships as \`AUTHORING.md\` in \`@uberblick/wireframe\` 0.3.2.`;
 
 const data = `# Structured data and views
 
