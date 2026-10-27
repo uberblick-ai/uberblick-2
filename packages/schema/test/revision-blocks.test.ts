@@ -8,6 +8,7 @@ import { cardPartTexts } from "../src/card.js";
 import { figmaCaptionTexts } from "../src/figma.js";
 import { compareTables, inlineChanges, snapshotBlocks } from "../src/revision-blocks.js";
 import type { RevisionBlock } from "../src/revision-blocks.js";
+import { diffWords } from "../src/revision-sequence.js";
 import type { InlineRun } from "../src/types.js";
 
 const UUID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
@@ -210,15 +211,60 @@ describe("revision table comparison", () => {
     expect(result.rows[1]?.cells?.[0]).toEqual({ column: 0, kind: "changed", spans: [], fields: ["formatting", "link"] });
     doc.destroy();
   });
+
+  it.each([3, 5000])("aligns cell marks with the displayed spans across %i rewritten words", (count) => {
+    const oldText = `Start ${"old ".repeat(count)}end`;
+    const newText = `Start ${"new ".repeat(count)}end`;
+    const { doc, element } = table([["Header"], [oldText]]);
+    const text = tableCellText(tableRows(element)[1]![0]!)!;
+    text.format(0, text.length, { bold: {} });
+    const before = first(doc);
+    text.delete(0, text.length);
+    text.insert(0, newText, { bold: {} });
+    const spans = diffWords(oldText, newText);
+    const changed = compareTables(before, first(doc)).rows[1]!.cells![0]!;
+    expect(changed).toEqual({ column: 0, kind: "changed", spans, fields: [] });
+    if (count === 5000) expect(spans).toEqual([
+      { kind: "unchanged", text: "Start " },
+      { kind: "removed", text: "old ".repeat(count).trimEnd() },
+      { kind: "added", text: "new ".repeat(count).trimEnd() },
+      { kind: "unchanged", text: " end" },
+    ]);
+    else expect(spans).toContainEqual({ kind: "unchanged", text: " " });
+    text.format(0, 5, { italic: {} });
+    text.format(newText.length - 3, 3, { link: { href: "https://example.test" } });
+    expect(compareTables(before, first(doc)).rows[1]!.cells![0]).toEqual({
+      column: 0, kind: "changed", spans, fields: ["formatting", "link"],
+    });
+    doc.destroy();
+  });
 });
 
 describe("revision inline mark comparison", () => {
   it("tracks mark positions in unchanged text and aligns marks around replaced words", () => {
     const old: InlineRun[] = [{ text: "Alpha", marks: { bold: true } }, { text: " Beta", marks: {} }];
     const replacement: InlineRun[] = [{ text: "Alpine", marks: { bold: true } }, { text: " Beta", marks: {} }];
-    expect(inlineChanges(old, replacement)).toEqual([]);
+    expect(inlineChanges(old, replacement, diffWords("Alpha Beta", "Alpine Beta"))).toEqual([]);
     const moved: InlineRun[] = [{ text: "Alpha ", marks: {} }, { text: "Beta", marks: { bold: true } }];
-    expect(inlineChanges(old, moved)).toEqual(["formatting"]);
-    expect(inlineChanges([{ text: "Alpha", marks: {} }], [{ text: "Beta", marks: { bold: true } }])).toEqual(["formatting"]);
+    expect(inlineChanges(old, moved, diffWords("Alpha Beta", "Alpha Beta"))).toEqual(["formatting"]);
+    expect(inlineChanges([{ text: "Alpha", marks: {} }], [{ text: "Beta", marks: { bold: true } }], diffWords("Alpha", "Beta"))).toEqual(["formatting"]);
+  });
+
+  it("uses the displayed coarse partition when a mark boundary moves inside a rewritten range", () => {
+    const before: InlineRun[] = [
+      { text: "Start ", marks: {} },
+      { text: "old ".repeat(2500), marks: { bold: true } },
+      { text: "old ".repeat(2500), marks: {} },
+      { text: "end", marks: {} },
+    ];
+    const after: InlineRun[] = [
+      { text: "Start ", marks: {} },
+      { text: "new ".repeat(2499), marks: { bold: true } },
+      { text: "new ".repeat(2501), marks: {} },
+      { text: "end", marks: {} },
+    ];
+    const spans = diffWords(before.map((run) => run.text).join(""), after.map((run) => run.text).join(""));
+    expect(spans.map((span) => span.kind)).toEqual(["unchanged", "removed", "added", "unchanged"]);
+    expect(inlineChanges(before, after, spans)).toEqual([]);
   });
 });

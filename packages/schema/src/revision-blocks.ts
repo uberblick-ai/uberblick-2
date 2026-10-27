@@ -195,7 +195,7 @@ function markSignature(slices: readonly MarkSlice[], field: "formatting" | "link
 }
 
 /** Align marks with equal text, so changing a word alone does not imply formatting. */
-export function inlineChanges(before: readonly InlineRun[], after: readonly InlineRun[]): string[] {
+export function inlineChanges(before: readonly InlineRun[], after: readonly InlineRun[], spans: readonly TextSpan[]): string[] {
   const readBefore = markReader(before);
   const readAfter = markReader(after);
   const changed = new Set<string>();
@@ -211,7 +211,7 @@ export function inlineChanges(before: readonly InlineRun[], after: readonly Inli
     removed = [];
     added = [];
   };
-  for (const span of diffWords(inlinePlainText(before), inlinePlainText(after))) {
+  for (const span of spans) {
     if (span.kind === "unchanged") {
       flush();
       compare(readBefore(span.text.length), readAfter(span.text.length), true);
@@ -285,11 +285,12 @@ function compareRow(before: RevisionTableRow, after: RevisionTableRow, pair: Seq
   const cells = Array.from({ length: width }, (_, column): RevisionCellComparison => {
     const oldCell = before.cells[column] ?? EMPTY_CELL;
     const newCell = after.cells[column] ?? EMPTY_CELL;
-    const fields = inlineChanges(oldCell.inline, newCell.inline);
+    const spans = diffWords(oldCell.text, newCell.text);
+    const fields = inlineChanges(oldCell.inline, newCell.inline, spans);
     const changed = oldCell.key !== newCell.key;
     return {
       column, kind: changed ? "changed" : "unchanged", fields,
-      spans: oldCell.text === newCell.text ? [] : diffWords(oldCell.text, newCell.text),
+      spans: oldCell.text === newCell.text ? [] : spans,
     };
   });
   return { kind: cells.some((cell) => cell.kind === "changed") ? "changed" : "unchanged", beforeIndex: pair.before, afterIndex: pair.after, cells };

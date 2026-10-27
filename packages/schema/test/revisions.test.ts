@@ -6,6 +6,7 @@ import {
   insertBlock, moveBlocks, setAnnotationResolved, setInlineLink, setTitle,
 } from "../src/index.js";
 import type { BlockInput, CollectionSchema, TextSpan } from "../src/index.js";
+import { diffWords } from "../src/revision-sequence.js";
 import { retype } from "./helpers.js";
 
 const UUID = "11111111-1111-4111-8111-111111111111";
@@ -42,6 +43,36 @@ describe("document revision comparison", () => {
     expect(reconstruct(change.spans, "after")).toBe("The new phrase stays here.");
     expect(change.spans).toContainEqual({ kind: "unchanged", text: "The " });
     expect(change.spans.filter((span) => span.kind === "removed").map((span) => span.text).join("")).toContain("old");
+    before.destroy(); after.destroy();
+  });
+
+  it.each([3, 5000])("aligns block marks with the displayed spans across %i rewritten words", (count) => {
+    const oldText = `Start ${"old ".repeat(count)}end`;
+    const newText = `Start ${"new ".repeat(count)}end`;
+    const before = doc();
+    const id = appendBlock(before, { type: "paragraph", inline: [{ text: oldText, marks: { bold: true } }] });
+    const after = copy(before);
+    const text = findBlockElement(after, id)!.firstChild as Y.XmlText;
+    text.delete(0, text.length);
+    text.insert(0, newText, { bold: {} });
+    const spans = diffWords(oldText, newText);
+    const changed = compareRevisions(before, after).blocks[0]!;
+    expect(changed.spans).toEqual(spans);
+    expect(changed.fields).toEqual([]);
+    expect(reconstruct(changed.spans, "before")).toBe(oldText);
+    expect(reconstruct(changed.spans, "after")).toBe(newText);
+    if (count === 5000) expect(spans).toEqual([
+      { kind: "unchanged", text: "Start " },
+      { kind: "removed", text: "old ".repeat(count).trimEnd() },
+      { kind: "added", text: "new ".repeat(count).trimEnd() },
+      { kind: "unchanged", text: " end" },
+    ]);
+    else expect(spans).toContainEqual({ kind: "unchanged", text: " " });
+    text.format(0, 5, { italic: {} });
+    text.format(newText.length - 3, 3, { link: { href: "https://example.test" } });
+    const marked = compareRevisions(before, after).blocks[0]!;
+    expect(marked.spans).toEqual(spans);
+    expect(marked.fields).toEqual(["formatting", "link"]);
     before.destroy(); after.destroy();
   });
 
