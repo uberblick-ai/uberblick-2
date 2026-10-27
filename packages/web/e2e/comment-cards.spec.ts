@@ -11,10 +11,14 @@ import {
   roomForDoc, upsertDirectoryEntry, directoryRoom,
 } from "@uberblick/schema";
 import { setupHarness } from "./app-helpers.js";
+import { renderedText } from "./contrast-helpers.js";
 
 const { harness, openApp } = setupHarness();
+const EXTERNAL = "https://example.invalid/spec";
+const GITHUB = "https://github.com/Example/SomeRepo/issues/12";
+const MARKDOWN = `**must** and *maybe* ~~old~~ \`ub update\`\n[spec](${EXTERNAL})\n${GITHUB}`;
 
-async function fixture(): Promise<{ uuid: string; first: string; second: string; close: () => void }> {
+async function fixture(openingText = "Opening conversation"): Promise<{ uuid: string; first: string; second: string; close: () => void }> {
   const uuid = randomUUID();
   const secret = await importRootSecret(harness().authSecret);
   const peers: Array<{ doc: Y.Doc; provider: HocuspocusProvider }> = [];
@@ -36,7 +40,7 @@ async function fixture(): Promise<{ uuid: string; first: string; second: string;
   const firstBlock = appendBlock(doc, { type: "paragraph", text: "First annotated range." });
   const secondBlock = appendBlock(doc, { type: "paragraph", text: "Second annotated range." });
   appendBlock(doc, { type: "paragraph", text: "Outside every comment." });
-  const first = createAnnotation(doc, firstBlock, 0, 5, "Claude Client", "Opening conversation", undefined,
+  const first = createAnnotation(doc, firstBlock, 0, 5, "Claude Client", openingText, undefined,
     { kind: "agent", account: "avatar-success", agent: "claude" });
   addComment(doc, first.id, "Codex Client", "A considered reply", { kind: "agent", account: "avatar-failure", agent: "codex" });
   const second = createAnnotation(doc, secondBlock, 0, 6, "Neutral Person", "Another opening comment");
@@ -67,6 +71,144 @@ async function inlineReply(field: Locator, send: Locator): Promise<void> {
   expect(button.x).toBeGreaterThanOrEqual(input.x + input.width - 1);
   expect(Math.abs(button.y + button.height - input.y - input.height)).toBeLessThanOrEqual(1);
 }
+
+async function inlineMarkdown(card: Locator): Promise<void> {
+  const text = card.locator(".ub-thread-text").first();
+  await expect(text.locator("strong")).toHaveText("must");
+  await expect(text.locator("em")).toHaveText("maybe");
+  await expect(text.locator("s, del")).toHaveText("old");
+  await expect(text.locator("code.ub-inline-code")).toHaveText("ub update");
+  await expect(text).toHaveCSS("white-space", "pre-wrap");
+  const external = text.getByRole("link", { name: "spec", exact: true });
+  const github = text.getByRole("link", { name: "Issue Example/SomeRepo#12", exact: true });
+  for (const [link, address] of [[external, EXTERNAL], [github, GITHUB]] as const) {
+    await expect(link).toHaveAttribute("href", address);
+    await expect(link).toHaveAttribute("target", "_blank");
+    await expect(link).toHaveAttribute("rel", /\bnoopener\b/);
+    await expect(link).toHaveAttribute("rel", /\bnoreferrer\b/);
+  }
+  await expect(github.locator(".ub-github-pill-repo")).toHaveText("SomeRepo");
+  await expect(github.locator(".ub-github-pill-number")).toHaveText("#12");
+  await expect(github.locator("svg")).toBeVisible();
+}
+
+async function externalPopup(page: Page, address: string, activate: () => Promise<unknown>): Promise<void> {
+  const [popup] = await Promise.all([
+    page.context().waitForEvent("page", { timeout: 5_000 }), activate(),
+  ]);
+  try {
+    await popup.waitForLoadState();
+    await expect(popup).toHaveURL(address);
+    expect(await popup.evaluate(() => window.opener)).toBeNull();
+    expect(await popup.evaluate(() => document.referrer)).toBe("");
+  } finally {
+    await popup.close();
+    await page.bringToFront();
+  }
+}
+
+async function destinations(page: Page): Promise<void> {
+  await avatarStubs(page);
+  await page.context().route(/https:\/\/(?:example\.invalid|github\.com)\//, (route) => route.fulfill({
+    contentType: "text/html", body: "<p>External destination</p>",
+  }));
+}
+
+async function readablePill(page: Page, selector: string, state: string): Promise<void> {
+  const paint = await renderedText(page, selector);
+  expect(paint.length, state).toBeGreaterThanOrEqual(2);
+  for (const reading of paint) expect(reading.ratio, `${state}: ${reading.where}`).toBeGreaterThanOrEqual(4.5);
+}
+
+test("comment Markdown links stay native and pills remain readable on resting, hovered and selected cards", async ({ browser }) => {
+  const data = await fixture(MARKDOWN);
+  try {
+    const page = await openApp(browser, `/${harness().workspace}/${data.uuid}`, {
+      contextOptions: { viewport: { width: 1600, height: 1000 }, hasTouch: false, isMobile: false, reducedMotion: "reduce" },
+      beforeNavigate: destinations,
+    });
+    const card = page.locator(`#ub-thread-${data.first} .ub-thread`);
+    const text = card.locator(".ub-thread-text").first();
+    const external = text.getByRole("link", { name: "spec", exact: true });
+    const github = text.getByRole("link", { name: "Issue Example/SomeRepo#12", exact: true });
+    const pill = github.locator(".ub-github-pill");
+    const outside = page.locator(".ub-editor .ub-paragraph").filter({ hasText: "Outside every comment." });
+    await inlineMarkdown(card);
+    const codeStyle = await text.locator("code").evaluate((element) => {
+      const style = getComputedStyle(element);
+      if (element.parentElement === null) throw new Error("Inline code needs its text container");
+      return { face: style.fontFamily, size: parseFloat(style.fontSize) / parseFloat(getComputedStyle(element.parentElement).fontSize) };
+    });
+    expect(codeStyle.face).toContain("Geist Mono");
+    expect(codeStyle.size).toBeCloseTo(0.85, 2);
+    await card.locator(".ub-thread-select").focus();
+    await page.keyboard.press("Tab");
+    await expect(external).toBeFocused();
+    await externalPopup(page, EXTERNAL, () => page.keyboard.press("Enter"));
+    await expect(card).not.toHaveAttribute("aria-current", "true");
+    await github.focus();
+    await externalPopup(page, GITHUB, () => page.keyboard.press("Enter"));
+    await expect(card).not.toHaveAttribute("aria-current", "true");
+    await text.locator("strong").click();
+    await expect(card).toHaveAttribute("aria-current", "true");
+    await externalPopup(page, EXTERNAL, () => external.click());
+    await expect(card).toHaveAttribute("aria-current", "true");
+    await externalPopup(page, GITHUB, () => pill.click());
+    await expect(card).toHaveAttribute("aria-current", "true");
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await outside.click();
+      await page.mouse.move(0, 0);
+      await expect(card).not.toHaveAttribute("aria-current", "true");
+      await readablePill(page, `#ub-thread-${data.first} .ub-github-pill`, `${colorScheme} resting`);
+      const resting = await pill.boundingBox();
+      await pill.hover();
+      await expect(pill).toHaveCSS("cursor", "pointer");
+      await expect(pill.locator(".ub-github-pill-number")).toHaveCSS("text-decoration-line", "underline");
+      await readablePill(page, `#ub-thread-${data.first} .ub-github-pill`, `${colorScheme} hovered`);
+      await text.locator("strong").click();
+      await page.mouse.move(0, 0);
+      await expect(card).toHaveAttribute("aria-current", "true");
+      await readablePill(page, `#ub-thread-${data.first} .ub-github-pill`, `${colorScheme} selected`);
+      const selected = await pill.boundingBox();
+      expect(selected?.width).toBe(resting?.width);
+      expect(selected?.height).toBe(resting?.height);
+    }
+  } finally { data.close(); }
+});
+
+test("iPad comment drawer renders inline Markdown and follows links without selecting or toggling the card", { tag: "@webkit-touch" }, async ({ browser }) => {
+  const data = await fixture(MARKDOWN);
+  try {
+    const page = await openApp(browser, `/${harness().workspace}/${data.uuid}`, {
+      contextOptions: { ...devices["iPad (gen 7)"], reducedMotion: "reduce" },
+      beforeNavigate: destinations,
+    });
+    await page.locator(".ub-threads-toggle").tap();
+    const sheet = page.getByRole("dialog", { name: "Comments", exact: true });
+    const card = sheet.locator(`#ub-thread-${data.first} .ub-thread`);
+    await inlineMarkdown(card);
+    const external = card.getByRole("link", { name: "spec", exact: true });
+    const github = card.getByRole("link", { name: "Issue Example/SomeRepo#12", exact: true });
+    await externalPopup(page, EXTERNAL, () => external.tap());
+    await expect(card).not.toHaveAttribute("aria-current", "true");
+    await externalPopup(page, GITHUB, () => github.tap());
+    await expect(card).not.toHaveAttribute("aria-current", "true");
+    await card.locator(".ub-thread-select").tap();
+    await expect(card).toHaveAttribute("aria-current", "true");
+    await external.focus();
+    await externalPopup(page, EXTERNAL, () => page.keyboard.press("Enter"));
+    await expect(card).toHaveAttribute("aria-current", "true");
+    await github.focus();
+    await externalPopup(page, GITHUB, () => page.keyboard.press("Enter"));
+    await expect(card).toHaveAttribute("aria-current", "true");
+    await expect(sheet).toBeVisible();
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await readablePill(page, `#ub-thread-${data.first} .ub-github-pill`, `${colorScheme} drawer selected`);
+    }
+  } finally { data.close(); }
+});
 
 test("comment cards reveal quiet controls through hover, keyboard and selection while drafts stay with each card", async ({ browser }) => {
   const data = await fixture();
