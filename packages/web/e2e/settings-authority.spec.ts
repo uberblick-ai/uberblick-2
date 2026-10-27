@@ -123,7 +123,10 @@ test("settings refusals report after a serving restart and again in the same ope
 
     await later.unroute("**/api/access");
     await later.reload();
-    await expect(later.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
+    await expect(later.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+    await expect(later.getByRole("heading", { level: 2 })).toHaveText(["On this computer"]);
+    await expect(later.getByRole("textbox", { name: "Name", exact: true })).toHaveCount(0);
+    await expect(later.getByRole("textbox", { name: "Main repository", exact: true })).toHaveCount(0);
     await expect(refusal).toHaveCount(0);
     await expect(secondRefusal).toHaveCount(0);
 
