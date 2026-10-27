@@ -253,7 +253,8 @@ for (const profile of [
         await role.selectOption("admin");
       } else {
         await role.focus();
-        await page.keyboard.press("ArrowDown");
+        // Native type-ahead selects Admin without opening the platform-owned popup.
+        await page.keyboard.press("a");
       }
       await expect.poll(() => pending !== undefined).toBe(true);
       await expect(role).toBeDisabled();

@@ -10,6 +10,7 @@ import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberbl
 import * as Y from "yjs";
 import { closeIfOpen, docTitle, editor, setupHarness } from "./app-helpers.js";
 import { renderedText } from "./contrast-helpers.js";
+import { keys } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
 import { setNativeSelection } from "./native-selection.js";
@@ -201,7 +202,7 @@ test("Done, fullscreen Close, toolbar and Tab leave a safe Figma focus target th
   for (const entry of ["Done", "Close", "Toolbar", "Tab"] as const) {
     const focused = entry === "Toolbar" ? frame.getByRole("link", { name: "Open in Figma", exact: true }) : preview;
     await editor(page).locator(":scope > p").first().click();
-    await page.keyboard.press("End");
+    await page.keyboard.press(keys.lineEnd);
     if (entry === "Done") {
       await frame.locator(".ub-figma-shield").click();
       await frame.getByRole("button", { name: "Done", exact: true }).click();
@@ -212,7 +213,11 @@ test("Done, fullscreen Close, toolbar and Tab leave a safe Figma focus target th
       await frame.getByRole("button", { name: "Close Figma viewer", exact: true }).click();
       await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
     } else if (entry === "Toolbar") await focused.focus();
-    else await page.keyboard.press("Tab");
+    else {
+      // macOS WebKit uses Option-Tab to include controls in native focus traversal.
+      const tabKey = process.platform === "darwin" && browser.browserType().name() === "webkit" ? "Alt+Tab" : "Tab";
+      await page.keyboard.press(tabKey);
+    }
     await expect(focused, entry).toBeFocused();
     for (const key of ["Backspace", "Delete", "W"]) {
       await page.keyboard.press(key);

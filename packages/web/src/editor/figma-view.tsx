@@ -164,6 +164,12 @@ class FigmaView implements NodeView {
     this.dom.addEventListener("focusin", (event) => {
       if (event.target instanceof globalThis.Node && !this.contentDOM.contains(event.target)) this.dom.ownerDocument.getSelection()?.removeAllRanges();
     });
+    // WebKit's Backspace history action must not escape a focused preview control.
+    this.dom.addEventListener("keydown", (event) => {
+      if (event.key === "Backspace" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+        && event.target instanceof Element && event.target.closest("button, a[href]") !== null
+        && !this.contentDOM.contains(event.target)) event.preventDefault();
+    });
     this.ui.edit.addEventListener("click", () => this.openFields());
     const done = (): void => {
       if (this.editing) this.ui.fields.querySelector("form")?.requestSubmit();
