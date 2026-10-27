@@ -3223,6 +3223,9 @@ test.describe("document history through ub open", () => {
       const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true });
       const drawer = await showHistoryList(page);
       const position = async (row: Locator, inset = 8): Promise<number> => {
+        // A finished drawing can precede the hold's final stable frames; scripted
+        // setup scrolling must wait until that previous transition releases it.
+        await expect.poll(() => pane.evaluate(element => (element as HTMLElement).style.overflowAnchor)).toBe("");
         await row.evaluate((element, offset) => {
           const pane = element.closest(".ub-revision-pane");
           const header = pane?.querySelector(".ub-revision-header");
@@ -3500,6 +3503,8 @@ test.describe("document history through ub open", () => {
     await activateControl(collapse);
     await comparisonDrawn(page);
     const reader = view.locator("p").filter({ hasText: /^Unchanged context 4 stays exactly as it was\.$/ });
+    // Position the next reading row after the preceding switch has released its hold.
+    await expect.poll(() => pane.evaluate(element => (element as HTMLElement).style.overflowAnchor)).toBe("");
     await reader.evaluate(element => {
       const pane = element.closest(".ub-revision-pane");
       const header = pane?.querySelector(".ub-revision-header");
