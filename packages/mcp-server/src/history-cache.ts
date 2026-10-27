@@ -134,7 +134,7 @@ export class HistoryCache {
     }
   }
 
-  /** The init lock serializes this read with login replacement and workspace moves. */
+  /** Opening holds the init lock; token operations also fence against the SQLite generation. */
   private authority(stamp: HistoryCacheStamp, existing: Header | null): void {
     const hub = readWorkspaceHub(this.workspace, this.env);
     if (stamp.workspace !== this.workspace || hub === undefined || hub === null || hubIdentity(hub) !== stamp.hub) {
@@ -160,13 +160,15 @@ export class HistoryCache {
       try {
         // Detect a future format before schema preparation, configuration checks or writes.
         this.header();
-        if (stamp !== false && (stamp !== undefined || token !== null)) {
+        if (stamp !== undefined && stamp !== false) {
           lock = tryAcquireInitLock(this.env);
           if (lock === null) {
             if (Date.now() >= deadline) throw new CacheRefusal("unavailable");
             Atomics.wait(waiter, 0, 0, 2);
             continue;
           }
+        }
+        if (stamp !== false && (stamp !== undefined || token !== null)) {
           this.authority(stamp ?? token as HistoryCacheToken, this.header());
         }
         db.exec("BEGIN IMMEDIATE");
@@ -229,11 +231,10 @@ export class HistoryCache {
 
   private cleanPriorFormats(token: HistoryCacheToken): void {
     const tables = this.read(token, db => db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all());
-    const legacy = new Set(TABLES.map(table => table.replace("history_v1_", "history_")));
     for (const { name } of tables) {
       if (typeof name !== "string") continue;
       const version = /^history_v([0-9]+)_(?:catalog_chunks|snapshot_chunks|snapshots|pages|holds|deleted)$/.exec(name);
-      if (legacy.has(name) || (version !== null && Number(version[1]) < HISTORY_CACHE_FORMAT)) {
+      if (version !== null && Number(version[1]) < HISTORY_CACHE_FORMAT) {
         this.deleteRows(token, name, "1", []);
       }
     }
@@ -247,7 +248,7 @@ export class HistoryCache {
       this.write(token, current => current.prepare(
         `DELETE FROM ${table} WHERE rowid = ? AND (${where})`,
       ).run(row.rowid as number, ...values), purge ? false : undefined);
-      // Release both locks between chunks so document writers can make progress.
+      // Release the write lock between chunks so document writers can make progress.
       Atomics.wait(waiter, 0, 0, 1);
     }
   }
@@ -480,7 +481,7 @@ export class HistoryCache {
         db.prepare("DELETE FROM history_v1_pages WHERE generation = ? AND uuid = ?").run(header.generation, uuid);
       }, false);
       for (const table of TABLES) {
-        if (table !== "history_v1_deleted") this.deleteRows(header, table, "uuid = ?", [uuid], true);
+        if (table !== "history_v1_deleted") this.deleteRows(header, table, "generation = ? AND uuid = ?", [header.generation, uuid], true);
       }
     });
   }

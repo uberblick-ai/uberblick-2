@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { RevisionEntry } from "@uberblick/schema";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { credentialsPath, removeHubLogin, writeHubLogin, type StoredHubLogin } from "../src/auth-store.js";
 import { HISTORY_CACHE_FORMAT, HistoryCache, type HistoryCacheResult, type HistoryCacheStamp, type HistoryCacheToken } from "../src/history-cache.js";
 import { acquireInitLock } from "../src/init-lock.js";
@@ -20,6 +20,7 @@ const caches: HistoryCache[] = [];
 const databases: DatabaseSync[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const cache of caches.splice(0)) cache.close();
   for (const database of databases.splice(0)) database.close();
   for (const store of stores.splice(0)) store.close();
@@ -137,6 +138,26 @@ describe("disposable history storage", () => {
     expect(test.cache.open(test.stamp)).toEqual({ status: "superseded" });
     expect(test.cache.open({ ...test.stamp, hub: OTHER_HUB, workspace: randomUUID() })).toEqual({ status: "superseded" });
     expect(ready(test.cache.open({ ...test.stamp, hub: OTHER_HUB }))).toEqual(next);
+  });
+
+  it("refuses a token if its generation changes between the authority read and the write transaction", async () => {
+    const test = await fixture();
+    catalog(test.cache, test.token, [entry("one")]);
+    const nextGeneration = randomUUID();
+    const original = DatabaseSync.prototype.exec;
+    let reset = false;
+    vi.spyOn(DatabaseSync.prototype, "exec").mockImplementation(function(this: DatabaseSync, sql: string) {
+      if (sql === "BEGIN IMMEDIATE" && !reset) {
+        reset = true;
+        test.database.prepare("UPDATE history_cache SET generation = ?").run(nextGeneration);
+      }
+      return original.call(this, sql);
+    });
+    expect(test.cache.markRefreshFailed(test.token, PAGE)).toEqual({ status: "superseded" });
+    expect(reset).toBe(true);
+    expect(test.database.prepare("SELECT failed FROM history_v1_pages WHERE generation = ? AND uuid = ?")
+      .get(test.token.generation, PAGE)?.failed).toBe(0);
+    expect(test.database.prepare("SELECT generation FROM history_cache").get()?.generation).toBe(nextGeneration);
   });
 
   it("keeps the generation and downloaded content through logout and login renewal by the same account", async () => {

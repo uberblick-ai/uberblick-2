@@ -48,6 +48,26 @@ if (mode === "lock") {
     process.on("message", (message: { type: string }) => {
       if (message.type === "close") finish({ type: "done" });
     });
+  } else if (mode === "crash-write") {
+    ready(cache.putCatalog(token, PAGE, { revisions: revisions(), version: "version", refreshedAt: 1, complete: true, failed: false }));
+    process.send?.({ type: "ready" });
+    process.on("message", (message: { type: string }) => {
+      if (message.type !== "start") return;
+      const original = DatabaseSync.prototype.exec;
+      let writes = 0;
+      DatabaseSync.prototype.exec = function exec(sql) {
+        const result = original.call(this, sql);
+        if (sql === "BEGIN IMMEDIATE" && ++writes === 2) {
+          process.send?.({ type: "writing" });
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30_000);
+          throw new Error("The parent did not terminate the cache writer.");
+        }
+        return result;
+      };
+      try { ready(cache!.putSnapshot(token, PAGE, "revision-0", CHECKSUM, new Uint8Array(150_000))); }
+      finally { DatabaseSync.prototype.exec = original; }
+      finish({ type: "done" });
+    });
   } else if (mode === "exercise") {
     const state = new Uint8Array(4 * 1024 * 1024).fill(71);
     const pages = [PAGE, "20526151-0db8-4132-8d0f-1220069e5482", "76a1c93c-2616-46fc-9671-e275dc64c710", "de7cbcae-008c-4921-8334-82dca17e742a"];

@@ -146,18 +146,42 @@ describe("history staging cleanup", () => {
     lateHold?.release();
   });
 
+  it("uses indexed lookups for repeated permanent deletions and preserves other pages", async () => {
+    const test = await fixture();
+    catalog(test.cache, test.token, [entry("one")]);
+    ready(test.cache.putSnapshot(test.token, PAGE, "one", CHECKSUM, new Uint8Array([1])));
+    const held = ready(test.cache.hold(test.token, PAGE, "one"));
+    const otherPage = randomUUID();
+    ready(test.cache.putCatalog(test.token, otherPage, {
+      revisions: [entry("other")], version: "other", refreshedAt: 123, complete: true, failed: false,
+    }));
+    ready(test.cache.putSnapshot(test.token, otherPage, "other", CHECKSUM, new Uint8Array([2])));
+    const prepare = vi.spyOn(DatabaseSync.prototype, "prepare");
+    ready(test.cache.purgeDoc(PAGE));
+    ready(test.cache.purgeDoc(PAGE));
+    const lookups = new Set(prepare.mock.calls.map(([sql]) => sql).filter(sql => sql.startsWith("SELECT rowid FROM history_v1_")));
+    expect(lookups.size).toBe(5);
+    for (const sql of lookups) {
+      const parameters = Array.from(sql.matchAll(/\?/g), () => null);
+      const plan = test.database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters);
+      expect(plan).toHaveLength(1);
+      expect(plan[0]?.detail).toMatch(/^SEARCH /);
+    }
+    held.release();
+    expect(ready(test.cache.readCatalog(test.token, PAGE))).toBeNull();
+    expect(ready(test.cache.readSnapshot(test.token, PAGE, "one"))).toBeNull();
+    expect(ready(test.cache.readCatalog(test.token, otherPage))?.revisions).toEqual([entry("other")]);
+    expect(ready(test.cache.readSnapshot(test.token, otherPage, "other"))?.state).toEqual(Buffer.from([2]));
+  });
+
   it("rebuilds a format using its own tables when an older format has an incompatible physical layout", async () => {
     const test = await fixture();
     test.database.exec("DROP TABLE history_v1_pages; DROP TABLE history_v1_catalog_chunks; DROP TABLE history_v1_snapshots; DROP TABLE history_v1_snapshot_chunks; DROP TABLE history_v1_holds; DROP TABLE history_v1_deleted");
-    test.database.exec("CREATE TABLE history_pages (incompatible TEXT); CREATE TABLE history_snapshots (incompatible TEXT); CREATE TABLE history_catalog_chunks (incompatible TEXT); CREATE TABLE history_snapshot_chunks (incompatible TEXT)");
-    test.database.exec("INSERT INTO history_pages VALUES ('old metadata'); INSERT INTO history_snapshots VALUES ('old snapshot'); INSERT INTO history_catalog_chunks VALUES ('old catalog'); INSERT INTO history_snapshot_chunks VALUES ('old chunk')");
     test.database.exec("CREATE TABLE history_v0_snapshot_chunks (old_layout BLOB); INSERT INTO history_v0_snapshot_chunks VALUES (X'0102')");
     test.database.prepare("UPDATE history_cache SET format = ?").run(HISTORY_CACHE_FORMAT - 1);
     const next = ready(test.cache.open(test.stamp));
     expect(next.generation).not.toBe(test.token.generation);
-    for (const table of ["history_pages", "history_snapshots", "history_catalog_chunks", "history_snapshot_chunks", "history_v0_snapshot_chunks"]) {
-      expect(test.database.prepare(`SELECT * FROM ${table}`).all()).toEqual([]);
-    }
+    expect(test.database.prepare("SELECT * FROM history_v0_snapshot_chunks").all()).toEqual([]);
     catalog(test.cache, next, [entry("one")]);
     ready(test.cache.putSnapshot(next, PAGE, "one", CHECKSUM, new Uint8Array([1])));
     expect(ready(test.cache.readSnapshot(next, PAGE, "one"))?.state).toEqual(Buffer.from([1]));

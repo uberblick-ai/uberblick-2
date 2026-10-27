@@ -57,7 +57,7 @@ async function fixture() {
   const cache = new HistoryCache(path, WORKSPACE, env);
   caches.push(cache);
   const token = ready(cache.open({ hub: HUB, workspace: WORKSPACE, account: "123" }));
-  return { directory, path, store, cache, token };
+  return { directory, env, path, store, cache, token };
 }
 
 function worker(mode: string, path: string, directory: string) {
@@ -92,6 +92,21 @@ function worker(mode: string, path: string, directory: string) {
 }
 
 describe("history cache between processes", () => {
+  it("leaves configuration and cache writes available after a downloader is killed inside a chunk transaction", async () => {
+    const test = await fixture();
+    const downloader = worker("crash-write", test.path, test.directory);
+    expect(await downloader.next()).toEqual({ type: "ready" });
+    downloader.child.send({ type: "start" });
+    expect(await downloader.next()).toEqual({ type: "writing" });
+    downloader.child.kill("SIGKILL");
+    await downloader.exited;
+    const lock = await acquireInitLock(test.env, { command: "ub auth login", waitMs: 0 });
+    try { ready(test.cache.markRefreshFailed(test.token, PAGE)); }
+    finally { lock.release(); }
+    ready(test.cache.putSnapshot(test.token, PAGE, "revision-0", CHECKSUM, new Uint8Array([9])));
+    expect(ready(test.cache.readSnapshot(test.token, PAGE, "revision-0"))?.state).toEqual(Buffer.from([9]));
+  });
+
   it("retries a cache write after a separate document writer releases contention", async () => {
     const test = await fixture();
     ready(test.cache.putCatalog(test.token, PAGE, { revisions: [], version: "version", refreshedAt: 1, complete: true, failed: false }));
