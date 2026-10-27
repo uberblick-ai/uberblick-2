@@ -365,6 +365,15 @@ for (const role of ["member", "none"] as const) {
         for (const colorScheme of ["light", "dark"] as const) {
           await page.emulateMedia({ colorScheme });
           for (const control of [mode, period, named, save]) await expect(control).toBeVisible();
+          await expect(save).toBeDisabled();
+          await expect(save).toHaveCSS("border-top-width", "1px");
+          await expect(save).toHaveCSS("border-top-style", "solid");
+          await expect(save).toHaveCSS("opacity", "0.5");
+          await period.selectOption("7");
+          await expect(save).toBeEnabled();
+          await expect(save).toHaveCSS("opacity", "1");
+          await period.selectOption("30");
+          await expect(save).toBeDisabled();
           if (colorScheme === "dark") {
             await expect.poll(() => mode.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(backgrounds[0]);
           }

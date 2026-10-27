@@ -102,7 +102,7 @@ export function LocalComputerSettings({ workspace, serving, subject, local }: {
           Keep named revisions
         </label>
       </>}
-      <Button type="button" variant="plain" size="sm" disabled={disabled || JSON.stringify(saved) === JSON.stringify(draft)} onClick={save}>Save history retention</Button>
+      <Button type="button" variant="outline" size="sm" disabled={disabled || JSON.stringify(saved) === JSON.stringify(draft)} onClick={save}>Save history retention</Button>
       <FeedbackLine feedback={mutation.feedback} />
     </div>}
     <dl className="m-0 grid" data-settings-facts>
@@ -114,7 +114,7 @@ export function LocalComputerSettings({ workspace, serving, subject, local }: {
     {!available && <p className="ub-type-ui">Open this workspace with ub open to read settings on this computer.</p>}
     {readFailed && <div className="flex flex-wrap items-baseline gap-2">
       <p className="ub-type-ui" role="alert">Couldn't read settings on this computer. Try again.</p>
-      <Button type="button" variant="plain" size="sm" disabled={mutation.busy} onClick={() => void mutation.run(load)}>Retry</Button>
+      <Button type="button" variant="outline" size="sm" disabled={mutation.busy} onClick={() => void mutation.run(load)}>Retry</Button>
     </div>}
   </section>;
 }
