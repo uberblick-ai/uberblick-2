@@ -170,6 +170,37 @@ function blockSchema(withLinks: boolean, withRev = true) {
   ]);
 }
 const writtenBlock = z.object({ id: z.string(), rev: blockFields.rev }).strict();
+const chartWarnings = z.array(z.string()).describe("Warnings about an empty view or a y field without numeric points; never a refusal or rollback.");
+const chartSeries = z.array(z.object({
+  field: z.string().describe("Literal y field from the mapping, in mapping order."),
+  pointCount: count.describe("Plotted numeric y values; null gaps are not points."),
+}).strict());
+const chartCounts = {
+  recordCount: count.describe("Total records in the bound collection on this replica."),
+  plottedCount: count.describe("Selected records with a valid x and at least one numeric y."),
+  series: chartSeries,
+};
+const tableCounts = {
+  recordCount: chartCounts.recordCount,
+  rowCount: count.describe("Rows shown after schema omissions, sorting and the mapping's limit."),
+  invalidRecordCount: count.describe("Schema-invalid records omitted from the table."),
+};
+const xEndpoint = z.union([z.number().finite(), z.string()])
+  .describe("First or last plotted x: a number for numeric x, or an ISO date/date-time string for date x; never epoch milliseconds.");
+const chartWriteSummary = z.union([
+  z.object({ status: z.literal("ready"), warnings: chartWarnings, ...chartCounts, firstX: xEndpoint, lastX: xEndpoint }).strict(),
+  z.object({ status: z.literal("ready"), warnings: chartWarnings, ...tableCounts }).strict(),
+  z.object({ status: z.literal("no-records"), message: z.string(), warnings: chartWarnings, ...chartCounts }).strict(),
+  z.object({ status: z.literal("no-records"), message: z.string(), warnings: chartWarnings, ...tableCounts }).strict(),
+  z.object({ status: z.literal("collection-absent"), message: z.string(), warnings: chartWarnings,
+    collections: z.array(z.string()).describe("Available collection names in this document; empty when it has no data.") }).strict(),
+  z.object({ status: z.enum(["invalid-configuration", "collection-unusable", "mapping-incompatible"]),
+    message: z.string(), warnings: chartWarnings }).strict(),
+]);
+export type ChartWriteSummary = z.infer<typeof chartWriteSummary>;
+const authoredBlock = writtenBlock.extend({
+  chart: chartWriteSummary.optional().describe("Chart-block projection of this replica's data at write time, shared with the web. Other block types omit it. Contains no record values beyond plotted x endpoints; summary failures leave the applied write and durability unchanged."),
+}).strict();
 const readBlocks = z.array(blockSchema(true)).describe("Visible document blocks in stored order.");
 const annotation = z.object({
   id: z.string(),
@@ -344,7 +375,7 @@ export const outputSchemas = {
     tldr: tldr.optional(),
     tldrHint: contentReview.tldrHint.optional(),
     ...decisionAuthority,
-    blocks: z.array(writtenBlock).describe("Created blocks in order; read their content with get_doc."),
+    blocks: z.array(authoredBlock).describe("Created blocks in order; read their content with get_doc."),
     sidebar: z.object({ group: groupIdentity, position: z.number().int() }).strict().optional(),
   }).strict(),
   get_doc: z.object({
@@ -403,8 +434,8 @@ export const outputSchemas = {
     github_ref: z.string(),
     decisions: z.array(z.object({ uuid, title: z.string(), status: status.nullable() }).strict()),
   }).strict(),
-  edit_block: z.object({ uuid, block: writtenBlock.nullable(), ...documentDurability, ...contentReview }).strict(),
-  insert_block: z.object({ uuid, blocks: z.array(writtenBlock).min(1), ...documentDurability, ...contentReview }).strict(),
+  edit_block: z.object({ uuid, block: authoredBlock.nullable(), ...documentDurability, ...contentReview }).strict(),
+  insert_block: z.object({ uuid, blocks: z.array(authoredBlock).min(1), ...documentDurability, ...contentReview }).strict(),
   move_block: z.object({
     uuid,
     blocks: z.array(writtenBlock).min(1),

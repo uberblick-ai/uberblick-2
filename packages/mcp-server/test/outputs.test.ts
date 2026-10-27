@@ -56,6 +56,52 @@ afterEach(async () => {
 afterAll(removeTempDirs);
 
 describe("successful MCP output contracts", () => {
+  it("delivers chart seed, batch and edit summaries through the schema-aware SDK client", async () => {
+    const rig = await startServer();
+    close.push(() => rig.close());
+    const success = async (name: string, args: Record<string, unknown>) => {
+      const result = await rig.client.callTool({ name, arguments: args }) as CallToolResult;
+      expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+      const payload = textPayload(result);
+      expect(result.structuredContent).toEqual(payload);
+      return payload;
+    };
+    const line = JSON.stringify({ version: 1, type: "line", collection: "observations",
+      x: { field: "day", type: "date" }, y: [{ field: "count" }] });
+    const table = JSON.stringify({ version: 1, type: "table", collection: "observations",
+      columns: [{ field: "count", format: "number" }] });
+    const created = await success("create_doc", {
+      title: "Chart output contract", description: "Chart summaries pass the advertised output schemas.",
+      blocks: [{ type: "chart", text: line }, { type: "chart", text: "{ incomplete" }],
+    });
+    expect(created.blocks.map((block: { chart: { status: string } }) => block.chart.status))
+      .toEqual(["collection-absent", "invalid-configuration"]);
+    await success("update_data", { uuid: created.uuid, operations: [{
+      collection: "observations", schema: { version: 1, schema: { type: "object" } },
+      upsert: [{ id: "point", value: { day: "2026-09-10", count: 17 } }],
+    }] });
+    const inserted = await success("insert_block", { uuid: created.uuid, blocks: [
+      { type: "paragraph", text: "Context" }, { type: "chart", text: line }, { type: "chart", text: table },
+    ] });
+    expect(inserted.blocks[0]).not.toHaveProperty("chart");
+    expect(inserted.blocks[1].chart).toMatchObject({ status: "ready", recordCount: 1, plottedCount: 1,
+      series: [{ field: "count", pointCount: 1 }], firstX: "2026-09-10", lastX: "2026-09-10" });
+    expect(inserted.blocks[2].chart).toEqual({ status: "ready", recordCount: 1, rowCount: 1, invalidRecordCount: 0, warnings: [] });
+    const empty = line.replace('"count"', '"coutn"');
+    const edited = await success("edit_block", { uuid: created.uuid,
+      block_id: inserted.blocks[1].id, rev: inserted.blocks[1].rev, old_text: line, new_text: empty });
+    expect(edited.block.chart).toMatchObject({ status: "no-records", recordCount: 1, plottedCount: 0,
+      series: [{ field: "coutn", pointCount: 0 }] });
+    const emptyTable = await success("create_doc", {
+      title: "Empty table output", description: "Empty table projections retain their own counts.",
+    });
+    await success("update_data", { uuid: emptyTable.uuid, operations: [{
+      collection: "observations", schema: { version: 1, schema: { type: "object" } },
+    }] });
+    const noRows = await success("insert_block", { uuid: emptyTable.uuid, blocks: [{ type: "chart", text: table }] });
+    expect(noRows.blocks[0].chart).toMatchObject({ status: "no-records", recordCount: 0, rowCount: 0, invalidRecordCount: 0 });
+  });
+
   it("delivers callout prose, attributes and document links in current and historical reads", async () => {
     const rig = await startServer();
     close.push(() => rig.close());
