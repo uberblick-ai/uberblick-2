@@ -45,6 +45,7 @@ mise.local.toml
 # playwright run artifacts (traces, screenshots, HTML report)
 test-results/
 playwright-report/
+packages/web/scenario-evidence/
 
 # editor / OS
 .DS_Store

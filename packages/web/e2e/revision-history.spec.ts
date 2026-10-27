@@ -13,6 +13,7 @@ import { setPointerSelection } from "./native-selection.js";
 import { mockFigmaLookup } from "./figma-fixtures.js";
 import { renderedText } from "./contrast-helpers.js";
 import { alphaOf } from "../test/colour.js";
+import { recordScenario } from "./scenario-recording.js";
 
 function history(page: Page): Locator {
   return page.getByRole("group", { name: "Document history", exact: true });
@@ -877,7 +878,9 @@ test.describe("document history through ub open", () => {
     await expect(editor(page)).toContainText("Later collaborator change:");
   });
 
-  test("restores a past version, syncs open clients, reports no-op and restores the pre-restore state", { tag: "@webkit-touch" }, async ({ browser, browserName }) => {
+  test("restores a past version, syncs open clients, reports no-op and restores the pre-restore state", {
+    tag: "@webkit-touch", annotation: { type: "scenario", description: "history-restore" },
+  }, async ({ browser, browserName }, info) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
     await page.emulateMedia({ colorScheme: browserName === "webkit" ? "dark" : "light" });
     const title = docTitle("Restore baseline");
@@ -891,6 +894,10 @@ test.describe("document history through ub open", () => {
       await expect(input).toHaveCount(0);
     };
     await activateControl(editor(page));
+    await page.keyboard.type("The original document content.");
+    await expect.poll(() => harness().hubText(room)).toBe("The original document content.");
+    await nameCurrent("Original draft");
+    await selectPositions(editor(page), 1, 31);
     await page.keyboard.type("The earlier document content.");
     await expect.poll(() => harness().hubText(room)).toBe("The earlier document content.");
     await nameCurrent("Baseline to restore");
@@ -901,77 +908,103 @@ test.describe("document history through ub open", () => {
     await nameCurrent("Before the restore");
     const peer = await openApp(browser, new URL(page.url()).pathname, { readySelector: ".ub-editor .ProseMirror" });
     await expect.poll(() => liveText(peer)).toBe("The newer document content.");
-    await previous(page);
-    const restore = page.getByRole("button", { name: "Restore this version", exact: true });
-    await expect(restore).toBeDisabled();
-    await expect(restore).toHaveAccessibleDescription("This is the current version.");
-    const sinceDrawer = await showHistoryList(page);
-    await activateControl(historyList(page).getByRole("listitem").filter({ hasText: "Baseline to restore" })
-      .getByRole("button", { name: "Changes since this name", exact: true }));
-    await closeHistoryList(page, sinceDrawer);
-    await expect(history(page)).toContainText("compared with “Baseline to restore”");
-    const restoreBaseline = page.getByRole("button", { name: "Restore “Baseline to restore”", exact: true });
-    await expect(restoreBaseline).toBeEnabled();
-    await expect(restoreBaseline).toHaveText("Restore “Baseline to restore”");
-    if (await page.locator(".ub-revision-split").isVisible()) {
-      await expect(page.locator(".ub-revision-side-label").first().getByRole("button")).toHaveAccessibleName("Restore “Baseline to restore”");
-      await expect(page.locator(".ub-revision-side-label").last().getByRole("button")).toHaveCount(0);
-    } else {
-      await expect(page.locator(".ub-revision-header").getByRole("button", { name: "Restore “Baseline to restore”", exact: true })).toBeEnabled();
+    const capture = await recordScenario(page, info);
+    try {
+      await capture.moment("Existing document — R3 is current");
+      await previous(page);
+      const restore = page.getByRole("button", { name: "Restore this version", exact: true });
+      await expect(restore).toBeDisabled();
+      await expect(restore).toHaveAccessibleDescription("This is the current version.");
+      const initialDrawer = await showHistoryList(page);
+      await expect(historyList(page).getByRole("listitem")).toHaveCount(3);
+      await closeHistoryList(page, initialDrawer);
+      await capture.moment("History opens at R3 — three revisions");
+      await previous(page);
+      await expect(historicalEditor(page).locator('[data-revision-change="added"]')).toHaveText("earlier");
+      await capture.moment("One step back — R2");
+      await previous(page);
+      await expect(historicalEditor(page)).toContainText("The original document content.");
+      await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeDisabled();
+      await capture.moment("Two steps back — R1");
+      await activateControl(history(page).getByRole("button", { name: "Next revision", exact: true }));
+      await expect(historicalEditor(page).locator('[data-revision-change="added"]')).toHaveText("earlier");
+      await capture.moment("Return to R2 — the version to restore");
+      const sinceDrawer = await showHistoryList(page);
+      await activateControl(historyList(page).getByRole("listitem").filter({ hasText: "Baseline to restore" })
+        .getByRole("button", { name: "Changes since this name", exact: true }));
+      await closeHistoryList(page, sinceDrawer);
+      await expect(history(page)).toContainText("compared with “Baseline to restore”");
+      const restoreBaseline = page.getByRole("button", { name: "Restore “Baseline to restore”", exact: true });
+      await expect(restoreBaseline).toBeEnabled();
+      await expect(restoreBaseline).toHaveText("Restore “Baseline to restore”");
+      if (await page.locator(".ub-revision-split").isVisible()) {
+        await expect(page.locator(".ub-revision-side-label").first().getByRole("button")).toHaveAccessibleName("Restore “Baseline to restore”");
+        await expect(page.locator(".ub-revision-side-label").last().getByRole("button")).toHaveCount(0);
+      } else {
+        await expect(page.locator(".ub-revision-header").getByRole("button", { name: "Restore “Baseline to restore”", exact: true })).toBeEnabled();
+      }
+      const fixedComparison = new URL(page.url()).pathname;
+      const selectedAfter = fixedComparison.split("/since/")[0] ?? "";
+      await capture.moment("R2 before, R3 after — Restore names its target");
+      if (browserName === "chromium") {
+        await restoreBaseline.focus();
+        await page.keyboard.press("Enter");
+      } else await activateControl(restoreBaseline);
+      await expect(page.getByText("Document restored to this version", { exact: true })).toBeVisible();
+      await capture.moment("Restore confirmed");
+      await expect.poll(() => liveText(peer)).toBe("The earlier document content.");
+      await expect(peer.locator(".ub-title")).toHaveValue(title);
+      await backToNow(page);
+      await expect.poll(() => liveText(page)).toBe("The earlier document content.");
+      await expect(page.locator(".ub-title")).toHaveValue(title);
+      await capture.moment("Back to now — restored R2 content");
+      await previous(page);
+      await expect(history(page)).toContainText("browser-person written by hand 👏");
+      await expect(restore).toBeDisabled();
+      await expect(restore).toHaveAccessibleDescription("This is the current version.");
+      const drawer = await showHistoryList(page);
+      const count = await historyList(page).getByRole("listitem").count();
+      expect(count).toBe(4);
+      await capture.moment("R4 is newest — all three earlier revisions remain");
+      await capture.stop();
+      await activateControl(historyList(page).getByRole("button", { name: /Baseline to restore/ }));
+      await closeHistoryList(page, drawer);
+      await expect(restore).toBeEnabled();
+      await activateControl(restore);
+      await expect(page.getByText("The document already has this version. Nothing changed.", { exact: true })).toBeVisible();
+      const noOpDrawer = await showHistoryList(page);
+      await expect(historyList(page).getByRole("listitem")).toHaveCount(count);
+      await closeHistoryList(page, noOpDrawer);
+      // This shared comparison still names its original After, even after the restore added a newer revision.
+      await page.goto(new URL(fixedComparison, harness().appUrl).href);
+      await expect(history(page).getByRole("button", { name: /Copy revision/ })).toHaveText("Before the restore");
+      await expect(history(page)).toContainText("compared with “Baseline to restore”");
+      await expect(historicalEditor(page).locator('[data-revision-change="added"]').filter({ hasText: "newer" })).toHaveText("newer");
+      await expect(earlierSide(page).locator('[data-revision-change="removed"]').filter({ hasText: "earlier" })).toHaveText("earlier");
+      await expect(restoreBaseline).toBeEnabled();
+      // Step to the original After itself to restore the state just before the first restore.
+      await page.goto(new URL(selectedAfter, harness().appUrl).href);
+      await expect(history(page).getByRole("button", { name: /Copy revision/ })).toHaveText("Before the restore");
+      await expect(restore).toBeEnabled();
+      await activateControl(restore);
+      await expect.poll(() => liveText(peer)).toBe("The newer document content.");
+      await expect(peer.locator(".ub-title")).toHaveValue(`${title} newer`);
+      await backToNow(page);
+      await expect.poll(() => liveText(page)).toBe("The newer document content.");
+      // Archived history remains readable, with an explanation on the visible restore control.
+      await activateControl(page.getByRole("button", { name: "Document actions", exact: true }));
+      await activateControl(page.getByRole("menuitem", { name: "Archive document", exact: true }));
+      await activateControl(page.getByRole("alertdialog", { name: `Archive “${title} newer”?` }).getByRole("button", { name: "Archive", exact: true }));
+      await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
+      await previous(page);
+      await expect(restore).toBeDisabled();
+      await expect(restore).toHaveAccessibleDescription("This document is archived. Restore the document first, then restore a revision.");
+      const reason = page.getByText("This document is archived. Restore the document first, then restore a revision.", { exact: true });
+      await expect(reason).toBeVisible();
+      expect((await reason.boundingBox())?.height).toBeGreaterThan(10);
+    } finally {
+      await capture.finish();
     }
-    const fixedComparison = new URL(page.url()).pathname;
-    const selectedAfter = fixedComparison.split("/since/")[0] ?? "";
-    if (browserName === "chromium") {
-      await restoreBaseline.focus();
-      await page.keyboard.press("Enter");
-    } else await activateControl(restoreBaseline);
-    await expect(page.getByText("Document restored to this version", { exact: true })).toBeVisible();
-    await expect.poll(() => liveText(peer)).toBe("The earlier document content.");
-    await expect(peer.locator(".ub-title")).toHaveValue(title);
-    await backToNow(page);
-    await expect.poll(() => liveText(page)).toBe("The earlier document content.");
-    await expect(page.locator(".ub-title")).toHaveValue(title);
-    await previous(page);
-    await expect(history(page)).toContainText("browser-person written by hand 👏");
-    await expect(restore).toBeDisabled();
-    await expect(restore).toHaveAccessibleDescription("This is the current version.");
-    const drawer = await showHistoryList(page);
-    const count = await historyList(page).getByRole("listitem").count();
-    await activateControl(historyList(page).getByRole("button", { name: /Baseline to restore/ }));
-    await closeHistoryList(page, drawer);
-    await expect(restore).toBeEnabled();
-    await activateControl(restore);
-    await expect(page.getByText("The document already has this version. Nothing changed.", { exact: true })).toBeVisible();
-    const noOpDrawer = await showHistoryList(page);
-    await expect(historyList(page).getByRole("listitem")).toHaveCount(count);
-    await closeHistoryList(page, noOpDrawer);
-    // This shared comparison still names its original After, even after the restore added a newer revision.
-    await page.goto(new URL(fixedComparison, harness().appUrl).href);
-    await expect(history(page).getByRole("button", { name: /Copy revision/ })).toHaveText("Before the restore");
-    await expect(history(page)).toContainText("compared with “Baseline to restore”");
-    await expect(historicalEditor(page).locator('[data-revision-change="added"]').filter({ hasText: "newer" })).toHaveText("newer");
-    await expect(earlierSide(page).locator('[data-revision-change="removed"]').filter({ hasText: "earlier" })).toHaveText("earlier");
-    await expect(restoreBaseline).toBeEnabled();
-    // Step to the original After itself to restore the state just before the first restore.
-    await page.goto(new URL(selectedAfter, harness().appUrl).href);
-    await expect(history(page).getByRole("button", { name: /Copy revision/ })).toHaveText("Before the restore");
-    await expect(restore).toBeEnabled();
-    await activateControl(restore);
-    await expect.poll(() => liveText(peer)).toBe("The newer document content.");
-    await expect(peer.locator(".ub-title")).toHaveValue(`${title} newer`);
-    await backToNow(page);
-    await expect.poll(() => liveText(page)).toBe("The newer document content.");
-    // Archived history remains readable, with an explanation on the visible restore control.
-    await activateControl(page.getByRole("button", { name: "Document actions", exact: true }));
-    await activateControl(page.getByRole("menuitem", { name: "Archive document", exact: true }));
-    await activateControl(page.getByRole("alertdialog", { name: `Archive “${title} newer”?` }).getByRole("button", { name: "Archive", exact: true }));
-    await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
-    await previous(page);
-    await expect(restore).toBeDisabled();
-    await expect(restore).toHaveAccessibleDescription("This document is archived. Restore the document first, then restore a revision.");
-    const reason = page.getByText("This document is archived. Restore the document first, then restore a revision.", { exact: true });
-    await expect(reason).toBeVisible();
-    expect((await reason.boundingBox())?.height).toBeGreaterThan(10);
   });
 
   test("refuses restore after a collaborator changes the live document and refreshes the history list", async ({ browser }) => {
