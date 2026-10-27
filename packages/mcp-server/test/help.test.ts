@@ -75,6 +75,20 @@ it.each(["get_doc", "list_docs"])("describes %s timestamps as ISO 8601 UTC", asy
   expect(tool?.description).toContain("ISO 8601 UTC");
 });
 
+it("documents searchable code languages on every search help surface and excludes record values", async () => {
+  const rig = await local();
+  const { text } = await rig.ok("get_help", { topic: "search" });
+  const tool = (await rig.client.listTools()).tools.find(({ name }) => name === "search")!;
+  const query = tool.inputSchema.properties?.query as { description?: string };
+  for (const description of [tool.description, query.description, text]) {
+    expect(description).toContain("code block languages");
+  }
+  expect(text).toContain("`chart` and `terminal`");
+  expect(text).toContain("`ts` does not match `typescript`");
+  expect(text).toContain("Record values are not searched");
+  expect((await rig.ok("get_help", { topic: "data" })).text).toContain("not record values");
+});
+
 it("teaches deliberate catalog creation, explicit guidance editing and sparse document tagging", async () => {
   const rig = await local();
   for (const topic of ["list_tags", "create_tag", "edit_tag"]) {

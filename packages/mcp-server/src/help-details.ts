@@ -309,7 +309,9 @@ export const toolHelpDetails = {
     "catalog does not have is refused rather than answered with an empty listing. Each returned assignment " +
     "carries its canonical id, current name and optional description. Only existing catalog tags are displayed.",
   search:
-    "Full-text search over live document titles, descriptions, content and assigned tag names, from the local FTS5 index. The index " +
+    "Full-text search over live document titles, descriptions, content, assigned tag names and code block languages, from the local FTS5 index. " +
+    "Languages use their Markdown fence names, including `chart` and `terminal`, without aliases: `ts` does not match `typescript`. " +
+    "Record values are not searched. The index " +
     "is derived from the replicas and updated as updates are observed, so it reflects edits from any client " +
     "this replica has seen. Archived documents stay out until restored; use `list_docs` with `include_deleted` " +
     "to find them.\n\n" +

@@ -714,7 +714,7 @@
         "query": {
           "type": "string",
           "minLength": 1,
-          "description": "Match any word in title, description, content or assigned tag names, including English word forms. Case and accents fold; `release_plan` matches adjacent `release plan`, and a trailing * matches stem prefixes. A prefix past the stem can miss: `decisi*` can miss `decision`; search the whole word or a shorter prefix, `decis*`. Results use title-weighted bm25 relevance."
+          "description": "Match any word in title, description, content, assigned tag names or code block languages, including English word forms. Case and accents fold; `release_plan` matches adjacent `release plan`, and a trailing * matches stem prefixes. A prefix past the stem can miss: `decisi*` can miss `decision`; search the whole word or a shorter prefix, `decis*`. Results use title-weighted bm25 relevance."
         },
         "limit": {
           "description": "Maximum hits, from 1 to 100; defaults to 20 after filters.",
@@ -754,7 +754,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Find live documents containing any query word in titles, descriptions, content or assigned tag names. English word forms match; case and accents fold, underscore groups match adjacent words and a trailing * matches stem prefixes. A prefix past the stem can miss: `decisi*` can miss `decision`; search the whole word or a shorter prefix, `decis*`. Punctuation or emoji alone matches nothing. Results use title-weighted bm25 relevance, without a strict title-first or matched-word-count order. Optional kind narrows to regular documents or decision records. Optional tag accepts one catalog id or current name (case ignored), or a list: any listed tag matches and more listed tags boost relevance; unknown tags refuse. Every hit includes kind and canonical tags; decision hits include current record state, including superseded and conflict. No hits does not prove the index is empty or the replica complete. If a needed page is missing, ask whether to create it.\n\nHelp: search, workspaces, tool-contracts, decisions.",
+    "description": "Find live documents containing any query word in titles, descriptions, content, assigned tag names or code block languages. English word forms match; case and accents fold, underscore groups match adjacent words and a trailing * matches stem prefixes. A prefix past the stem can miss: `decisi*` can miss `decision`; search the whole word or a shorter prefix, `decis*`. Punctuation or emoji alone matches nothing. Results use title-weighted bm25 relevance, without a strict title-first or matched-word-count order. Optional kind narrows to regular documents or decision records. Optional tag accepts one catalog id or current name (case ignored), or a list: any listed tag matches and more listed tags boost relevance; unknown tags refuse. Every hit includes kind and canonical tags; decision hits include current record state, including superseded and conflict. No hits does not prove the index is empty or the replica complete. If a needed page is missing, ask whether to create it.\n\nHelp: search, workspaces, tool-contracts, decisions.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,

@@ -38,7 +38,27 @@ function downgrade(path: string): void {
   db.close();
 }
 
-function olderPeerIndex(db: DatabaseSync, doc: IndexedDoc, throughSeq: number, catalogThroughSeq: number): void {
+function downgradeLanguages(path: string): void {
+  const db = new DatabaseSync(path);
+  try {
+    db.exec(
+      "BEGIN IMMEDIATE; " +
+        "CREATE TEMP TABLE old_rows AS SELECT rowid, uuid, title, body, description, tag_names FROM docs_fts; " +
+        "DROP TABLE docs_fts; " +
+        "CREATE VIRTUAL TABLE docs_fts USING fts5(uuid UNINDEXED, title, body, description, tag_names, tokenize = 'porter unicode61'); " +
+        "INSERT INTO docs_fts (rowid, uuid, title, body, description, tag_names) SELECT * FROM old_rows; DROP TABLE old_rows; " +
+        "CREATE TEMP TABLE old_fragments AS SELECT rowid, uuid, title, body, description, tag_names, indexed_through_seq, catalog_through_seq FROM docs_fragment_fts; " +
+        "DROP TABLE docs_fragment_fts; " +
+        "CREATE VIRTUAL TABLE docs_fragment_fts USING fts5(uuid UNINDEXED, title, body, description, tag_names, indexed_through_seq UNINDEXED, catalog_through_seq UNINDEXED, tokenize = 'trigram remove_diacritics 1'); " +
+        "INSERT INTO docs_fragment_fts (rowid, uuid, title, body, description, tag_names, indexed_through_seq, catalog_through_seq) SELECT * FROM old_fragments; " +
+        "DROP TABLE old_fragments; COMMIT;",
+    );
+  } finally {
+    db.close();
+  }
+}
+
+function olderPeerIndex(db: DatabaseSync, doc: IndexedDoc, throughSeq: number, catalogThroughSeq: number, fragment = false): void {
   db.exec("BEGIN IMMEDIATE");
   db.prepare(
     "INSERT INTO doc_index_seq (uuid, indexed_through_seq, catalog_through_seq, github_refs_indexed) VALUES (?, ?, ?, 1) " +
@@ -57,6 +77,15 @@ function olderPeerIndex(db: DatabaseSync, doc: IndexedDoc, throughSeq: number, c
   const inserted = db.prepare(
     "INSERT INTO docs_fts (uuid, title, body, description, tag_names) VALUES (?, ?, ?, ?, ?)",
   ).run(doc.uuid, doc.title, doc.body, doc.description, (doc.tagNames ?? []).join("\n"));
+  if (fragment) {
+    db.prepare("DELETE FROM docs_fragment_fts WHERE uuid = ?").run(doc.uuid);
+    db.prepare(
+      "INSERT OR REPLACE INTO docs_fragment_fts " +
+        "(rowid, uuid, title, body, description, tag_names, indexed_through_seq, catalog_through_seq) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(inserted.lastInsertRowid, doc.uuid, doc.title, doc.body, doc.description,
+      (doc.tagNames ?? []).join("\n"), throughSeq, catalogThroughSeq);
+  }
   db.prepare("UPDATE doc_index_seq SET search_rowid = ? WHERE uuid = ?").run(inserted.lastInsertRowid, doc.uuid);
   db.exec("COMMIT");
 }
@@ -162,6 +191,123 @@ describe("search index upgrade", () => {
     } finally {
       peer.close();
     }
+  });
+});
+
+describe("block language index upgrade", () => {
+  it("preserves old searchable fields and permits only one equal-cut language enrichment", () => {
+    const path = tempDatabasePath();
+    const doc = row("1", "Orchard", {
+      body: "Apple", description: "Harvest", tagNames: ["Fruit"], blockLanguages: ["wireframe", "ts"],
+    });
+    const before = open(path);
+    before.indexDoc(doc, 2, 7);
+    before.close();
+    downgradeLanguages(path);
+
+    const store = open(path);
+    for (const query of ["orchard", "apple", "harvest", "fruit"]) {
+      expect(titles(store, query)).toEqual(["Orchard"]);
+      expect(store.searchUuids(query.slice(0, 3))).toEqual(["1"]);
+    }
+    expect(titles(store, "wireframe")).toEqual([]);
+    expect(store.searchUuids("ts")).toEqual([]);
+    expect(store.indexDoc({ ...doc, title: "Stale" }, 1, 7)).toBe(false);
+    expect(store.indexDoc({ ...doc, title: "Stale" }, 2, 6)).toBe(false);
+    expect(store.indexDoc(doc, 2, 7)).toBe(true);
+    expect(titles(store, "wireframe")).toEqual(["Orchard"]);
+    expect(store.searchUuids("wire")).toEqual(["1"]);
+    expect(store.searchUuids("ts")).toEqual(["1"]);
+    store.close();
+
+    const reopened = open(path);
+    reopened.indexDoc({ ...doc, blockLanguages: ["wrong"] }, 2, 7);
+    expect(titles(reopened, "wireframe")).toEqual(["Orchard"]);
+    expect(reopened.searchUuids("ts")).toEqual(["1"]);
+    expect(titles(reopened, "wrong")).toEqual([]);
+  });
+
+  it.each([[2, 7], [3, 7], [2, 8], [0, 0]])("repairs older-peer writes to both indexes at cuts (%i, %i), including reused rowids", (throughSeq, catalogThroughSeq) => {
+    const path = tempDatabasePath();
+    const doc = row("1", "Orchard", { blockLanguages: ["wireframe", "ts"] });
+    const store = open(path);
+    store.indexDoc(doc, Math.min(2, throughSeq), Math.min(7, catalogThroughSeq));
+    const old = new DatabaseSync(path);
+    try {
+      const previous = old.prepare("SELECT rowid FROM docs_fts WHERE uuid = '1'").get();
+      olderPeerIndex(old, doc, throughSeq, catalogThroughSeq, true);
+      expect(old.prepare("SELECT rowid FROM docs_fts WHERE uuid = '1'").get()).toEqual(previous);
+      expect(titles(store, "wireframe")).toEqual([]);
+      expect(store.searchUuids("wire")).toEqual([]);
+      expect(store.indexDoc({ ...doc, blockLanguages: ["stale"] }, throughSeq - 1, catalogThroughSeq)).toBe(false);
+      expect(store.indexDoc({ ...doc, blockLanguages: ["stale"] }, throughSeq, catalogThroughSeq - 1)).toBe(false);
+      store.indexDoc(doc, throughSeq, catalogThroughSeq);
+      expect(titles(store, "wireframe")).toEqual(["Orchard"]);
+      expect(store.searchUuids("wire")).toEqual(["1"]);
+      expect(store.searchUuids("ts")).toEqual(["1"]);
+      expect(titles(store, "stale")).toEqual([]);
+      store.indexDoc({ ...doc, blockLanguages: ["wrong"] }, throughSeq, catalogThroughSeq);
+      expect(titles(store, "wrong")).toEqual([]);
+    } finally {
+      old.close();
+    }
+  });
+
+  it("repairs language fields independently when a previous peer replaces only one search table", () => {
+    const path = tempDatabasePath();
+    const store = open(path);
+    const doc = row("1", "Orchard", { blockLanguages: ["ts"] });
+    store.indexDoc(doc, 2, 7);
+    const old = new DatabaseSync(path);
+    try {
+      old.exec("UPDATE docs_fragment_fts SET block_languages = NULL WHERE uuid = '1'");
+      expect(store.searchUuids("ts")).toEqual([]);
+      expect(titles(store, "ts")).toEqual(["Orchard"]);
+      store.indexDoc(doc, 2, 7);
+      expect(store.searchUuids("ts")).toEqual(["1"]);
+      old.exec("UPDATE docs_fts SET block_languages = NULL WHERE uuid = '1'");
+      expect(titles(store, "ts")).toEqual([]);
+      store.indexDoc(doc, 2, 7);
+      expect(titles(store, "ts")).toEqual(["Orchard"]);
+    } finally {
+      old.close();
+    }
+  });
+
+  it.each(["docs_fts", "docs_fragment_fts"] as const)("rolls back a failed %s upgrade and completes it on retry", (table) => {
+    const path = tempDatabasePath();
+    const doc = row("1", "Orchard", { body: "Apple", blockLanguages: ["ts"] });
+    const before = open(path);
+    before.indexDoc(doc, 2, 7);
+    downgradeLanguages(path);
+    const migration = before as unknown as {
+      db: DatabaseSync;
+      migrateSearchIndex(): void;
+      migrateFragmentSearchIndex(): void;
+    };
+    if (table === "docs_fragment_fts") migration.migrateSearchIndex();
+    migration.db.setAuthorizer((action, target) => action === constants.SQLITE_INSERT && target === table
+      ? constants.SQLITE_DENY : constants.SQLITE_OK);
+    try {
+      expect(() => table === "docs_fts" ? migration.migrateSearchIndex() : migration.migrateFragmentSearchIndex()).toThrow();
+    } finally {
+      migration.db.setAuthorizer(null);
+      before.close();
+    }
+    const inspect = new DatabaseSync(path);
+    try {
+      expect(inspect.prepare(`SELECT body FROM ${table} WHERE uuid = '1'`).get()).toEqual({ body: "Apple" });
+      expect(inspect.prepare("SELECT indexed_through_seq, catalog_through_seq FROM doc_index_seq WHERE uuid = '1'").get())
+        .toEqual({ indexed_through_seq: 2, catalog_through_seq: 7 });
+      expect(inspect.prepare("SELECT name FROM pragma_table_info(?) WHERE name = 'block_languages'").get(table)).toBeUndefined();
+    } finally {
+      inspect.close();
+    }
+    const store = open(path);
+    store.indexDoc(doc, 2, 7);
+    expect(titles(store, "apple")).toEqual(["Orchard"]);
+    expect(titles(store, "ts")).toEqual(["Orchard"]);
+    expect(store.searchUuids("ts")).toEqual(["1"]);
   });
 });
 
@@ -293,23 +439,30 @@ describe("fragment index upgrade", () => {
 
   it("rolls back both search indexes and their cuts when fragment indexing fails", () => {
     const store = open();
-    const doc = row("1", "Workspace", { body: "previous" });
+    const doc = row("1", "Workspace", { body: "previous", blockLanguages: ["wireframe"] });
     store.indexDoc(doc, 2, 7);
     const db = (store as unknown as { db: DatabaseSync }).db;
     db.setAuthorizer((action, table) => action === constants.SQLITE_INSERT && table === "docs_fragment_fts"
       ? constants.SQLITE_DENY : constants.SQLITE_OK);
     try {
-      expect(() => store.indexDoc({ ...doc, title: "Replacement" }, 3, 8)).toThrow();
+      expect(() => store.indexDoc({ ...doc, title: "Replacement", blockLanguages: ["ts"] }, 3, 8)).toThrow();
     } finally {
       db.setAuthorizer(null);
     }
     expect(store.searchUuids("worksp")).toEqual(["1"]);
     expect(store.searchUuids("replace")).toEqual([]);
     expect(titles(store, "workspace")).toEqual(["Workspace"]);
+    expect(titles(store, "wireframe")).toEqual(["Workspace"]);
+    expect(store.searchUuids("wire")).toEqual(["1"]);
+    expect(titles(store, "ts")).toEqual([]);
+    expect(store.searchUuids("ts")).toEqual([]);
     expect(db.prepare("SELECT indexed_through_seq, catalog_through_seq FROM doc_index_seq WHERE uuid = ?").get("1"))
       .toEqual({ indexed_through_seq: 2, catalog_through_seq: 7 });
-    store.indexDoc({ ...doc, title: "Replacement" }, 3, 8);
+    store.indexDoc({ ...doc, title: "Replacement", blockLanguages: ["ts"] }, 3, 8);
     expect(store.searchUuids("worksp")).toEqual([]);
     expect(store.searchUuids("replace")).toEqual(["1"]);
+    expect(titles(store, "wireframe")).toEqual([]);
+    expect(titles(store, "ts")).toEqual(["Replacement"]);
+    expect(store.searchUuids("ts")).toEqual(["1"]);
   });
 });

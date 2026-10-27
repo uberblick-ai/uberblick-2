@@ -171,7 +171,7 @@ test("MCP decision adoption reaches an open regular page and the directory", asy
   await expect(page.locator(".ub-docs-row", { hasText: title })).toHaveCount(1);
 });
 
-test("the list and palette search fragments through the serving replica", async ({ browser }) => {
+test("the list and palette search fragments and block languages through the serving replica", async ({ browser }) => {
   const writer = agent().open({ name: "fragment-search-e2e" });
   const suffix = Date.now();
   const titleHit = `ub workspace use ${suffix}`;
@@ -179,6 +179,7 @@ test("the list and palette search fragments through the serving replica", async 
   const descriptionHit = `Description guide ${suffix}`;
   const tagHit = `Tag guide ${suffix}`;
   const shortTitleHit = `Überblick MCP server tools ${suffix}`;
+  const languageHit = `Diagram guide ${suffix}`;
   for (const fixture of [
     { title: titleHit, description: "A title match.", text: "Neutral content." },
     { title: bodyHit, description: "A body match.", text: "workspace mc" },
@@ -192,27 +193,34 @@ test("the list and palette search fragments through the serving replica", async 
       ...(fixture.tags === undefined ? {} : { tags: fixture.tags }),
     });
   }
+  await writer.call("create_doc", {
+    title: languageHit, description: "A drawing and a code sample.",
+    blocks: [
+      { type: "code", language: "wireframe", text: "page\n  text Hello" },
+      { type: "code", language: "ts", text: "const value = 1;" },
+    ],
+  });
   const page = await openApp(browser, `/${harness().workspace}/all`, { readySelector: ".ub-docs-heading" });
-  for (const title of [titleHit, bodyHit, descriptionHit, tagHit, shortTitleHit]) {
+  for (const title of [titleHit, bodyHit, descriptionHit, tagHit, shortTitleHit, languageHit]) {
     await expect(listedTitles(page).filter({ hasText: title })).toBeVisible();
   }
   const listSearch = page.getByRole("searchbox", { name: "Search", exact: true });
-  async function searchList(query: string): Promise<void> {
+  async function search(input: Locator, query: string): Promise<void> {
     await Promise.all([
       page.waitForResponse((response) => {
         const url = new URL(response.url());
         return url.pathname === "/api/search" && url.searchParams.get("q") === query && response.status() === 200;
       }),
-      listSearch.fill(query),
+      input.fill(query),
     ]);
   }
   for (const query of ["worksp", "space"]) {
-    await searchList(query);
+    await search(listSearch, query);
     for (const title of [titleHit, bodyHit, descriptionHit]) {
       await expect(listedTitles(page).filter({ hasText: title })).toBeVisible();
     }
   }
-  await searchList("mc");
+  await search(listSearch, "mc");
   for (const title of [shortTitleHit, tagHit]) {
     await expect(listedTitles(page).filter({ hasText: title })).toBeVisible();
   }
@@ -220,8 +228,12 @@ test("the list and palette search fragments through the serving replica", async 
     await expect(listedTitles(page).filter({ hasText: title })).toHaveCount(0);
   }
   for (const query of ["ub", "uber"]) {
-    await searchList(query);
+    await search(listSearch, query);
     await expect(listedTitles(page).filter({ hasText: shortTitleHit })).toBeVisible();
+  }
+  for (const query of ["wire", "ts"]) {
+    await search(listSearch, query);
+    await expect(listedTitles(page).filter({ hasText: languageHit })).toBeVisible();
   }
 
   // The palette uses the same live endpoint; its existing navigation matrix
@@ -230,9 +242,14 @@ test("the list and palette search fragments through the serving replica", async 
   await page.keyboard.press(apple ? "Meta+k" : "Control+k");
   const palette = page.getByRole("dialog", { name: "Command palette", exact: true });
   await expect(palette).toBeVisible();
-  await palette.getByRole("combobox", { name: "Search documents and decisions", exact: true }).fill("worksp");
+  const paletteSearch = palette.getByRole("combobox", { name: "Search documents and decisions", exact: true });
+  await search(paletteSearch, "worksp");
   for (const title of [titleHit, bodyHit, descriptionHit]) {
     await expect(palette.getByRole("option", { name: `${title} Document`, exact: true })).toBeVisible();
+  }
+  for (const query of ["wire", "ts"]) {
+    await search(paletteSearch, query);
+    await expect(palette.getByRole("option", { name: `${languageHit} Document`, exact: true })).toBeVisible();
   }
 });
 
