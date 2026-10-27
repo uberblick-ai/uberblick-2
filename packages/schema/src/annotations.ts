@@ -148,12 +148,73 @@ function isComment(value: unknown): value is Pick<AnnotationComment, "author" | 
   );
 }
 
+type StoredComment = Pick<AnnotationComment, "author" | "text" | "createdAt"> & Record<string, unknown>;
+type CommentRow = {
+  id: string;
+  value: StoredComment;
+  indices: [number, ...number[]];
+  item: { client: number; clock: number };
+};
+
+function isEditTime(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return false;
+  if (!Number.isFinite(Date.parse(value))) return false;
+  // Date parsing normalizes impossible dates, which must not become edit times.
+  return new Date(`${value.slice(0, 19)}Z`).toISOString().slice(0, 19) === value.slice(0, 19);
+}
+
+/** The original Yjs item identifies even legacy comments with equal contents. */
+function rowIdentity(rows: Y.Array<unknown>, index: number): { client: number; clock: number } {
+  const item = Y.createRelativePositionFromTypeIndex(rows, index).item;
+  if (item === null) throw new Error("Comment row has no Yjs identity");
+  return item;
+}
+
+function commentIdentity(row: StoredComment, item: { client: number; clock: number }): string {
+  return typeof row.commentId === "string" && /^\d+:\d+$/.test(row.commentId)
+    ? row.commentId : `${item.client}:${item.clock}`;
+}
+
+/** Collapse replacement rows without sorting the converged reply sequence. */
+function readCommentRows(rows: Y.Array<unknown>): CommentRow[] {
+  const comments = new Map<string, CommentRow>();
+  rows.toArray().forEach((value, index) => {
+    if (!isComment(value)) return;
+    const item = rowIdentity(rows, index);
+    const id = commentIdentity(value, item);
+    const prior = comments.get(id);
+    if (prior === undefined) {
+      comments.set(id, { id, value, indices: [index], item });
+      return;
+    }
+    prior.indices.push(index);
+    const time = isEditTime(value.editedAt) ? Date.parse(value.editedAt) : -Infinity;
+    const priorTime = isEditTime(prior.value.editedAt) ? Date.parse(prior.value.editedAt) : -Infinity;
+    if (time > priorTime || (time === priorTime &&
+        (item.client > prior.item.client || (item.client === prior.item.client && item.clock > prior.item.clock)))) {
+      prior.value = value;
+      prior.item = item;
+    }
+  });
+  return [...comments.values()];
+}
+
+/** Stable identity at the shared reader's index, including after edit collapse. */
+export function getAnnotationCommentId(ydoc: Y.Doc, threadId: string, index: number): string | null {
+  return getAnnotationCommentIds(ydoc, threadId)[index] ?? null;
+}
+
+/** Comment identities in the same order and with the same collapse as readers. */
+export function getAnnotationCommentIds(ydoc: Y.Doc, threadId: string): string[] {
+  const thread = threadMap(ydoc, threadId);
+  return thread === null ? [] : readCommentRows(commentRows(thread)).map((comment) => comment.id);
+}
+
 /** A stored thread as a reader sees it: metadata joined with its comments. */
 function readThread(thread: ThreadMap): Annotation {
   const comments: AnnotationComment[] = [];
-  for (const value of commentRows(thread).toArray()) {
-    if (!isComment(value)) continue;
-    const { author, text, createdAt, account, agent, principalId, kind } = value;
+  for (const { value } of readCommentRows(commentRows(thread))) {
+    const { author, text, createdAt, account, agent, principalId, kind, editedAt } = value;
     comments.push({
       author,
       text,
@@ -162,6 +223,7 @@ function readThread(thread: ThreadMap): Annotation {
       ...(agent === "claude" || agent === "codex" ? { agent } : {}),
       ...(isUuid(principalId) ? { principalId } : {}),
       ...(kind === "person" || kind === "agent" ? { kind } : {}),
+      ...(isEditTime(editedAt) ? { editedAt } : {}),
     });
   }
   const resolved = thread.get("resolved");
@@ -428,6 +490,28 @@ export function addComment(
   };
   ydoc.transact(() => {
     commentRows(thread).push([comment]);
+  });
+  return readThread(thread);
+}
+
+/** Replace only this account's comment, retaining attribution and array position. */
+export function editComment(
+  ydoc: Y.Doc,
+  threadId: string,
+  commentId: string,
+  account: string,
+  text: string,
+): Annotation | null {
+  const thread = threadMap(ydoc, threadId);
+  if (thread === null || thread.get("resolved") === true || !isGithubUsername(account) || text.trim() === "") return null;
+  const rows = commentRows(thread);
+  const comment = readCommentRows(rows).find((entry) => entry.id === commentId);
+  if (comment === undefined || !isGithubUsername(comment.value.account) ||
+      comment.value.account.toLowerCase() !== account.toLowerCase()) return null;
+  const replacement = { ...comment.value, text, commentId, editedAt: new Date().toISOString() };
+  ydoc.transact(() => {
+    for (const index of [...comment.indices].reverse()) rows.delete(index, 1);
+    rows.insert(comment.indices[0], [replacement]);
   });
   return readThread(thread);
 }

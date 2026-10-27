@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, within } from "@testing-library/react";
 import type { AnnotationComment } from "@uberblick/schema";
 import { act, render } from "./react-render.js";
-import { CommentByline } from "../src/ui/comments/CommentByline.js";
+import { CommentByline, CommentEdited } from "../src/ui/comments/CommentByline.js";
 
 const now = Date.parse("2026-10-26T12:00:00Z");
 const comment: AnnotationComment = {
@@ -14,6 +14,18 @@ const comment: AnnotationComment = {
 beforeEach(() => vi.spyOn(navigator, "onLine", "get").mockReturnValue(true));
 
 describe("comment attribution", () => {
+  it("shows a muted inline edit marker with the edit time as its tooltip", () => {
+    const editedAt = "2026-10-26T11:55:00Z";
+    const { container } = render(<span>Revised text <CommentEdited editedAt={editedAt} now={now} /></span>);
+    const marker = within(container).getByText("(edited)");
+    expect(marker.tagName).toBe("TIME");
+    expect(marker.getAttribute("dateTime")).toBe("2026-10-26T11:55:00.000Z");
+    expect(marker.className).toContain("text-(--muted-foreground)");
+    expect(marker.getAttribute("title")).toBe(new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium", timeStyle: "short",
+    }).format(Date.parse(editedAt)));
+  });
+
   it("keeps the stored author and uses the newest time beneath an opener", () => {
     const { container } = render(<CommentByline comment={{ ...comment, account: "bk-one" }} now={now} updatedAt="2026-10-26T11:55:00Z" />);
     expect(container.querySelector(".ub-thread-author")?.textContent).toBe("Ben Kubota");
