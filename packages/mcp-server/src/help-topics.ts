@@ -121,7 +121,7 @@ A topic is the question; it keeps its identity while its answer changes. The fir
 
 ## Changing a decided answer
 
-A decided record's answer is read-only: content writes refuse with \`decision_read_only\`. Title, description, tags, links and comments stay editable, and a rename keeps the approval. To change the answer, create a successor with \`create_doc\`, \`kind: "decision"\` and \`supersedes\` naming the record it replaces. It joins the same topic, and the current answer stays in force while the successor is open. State the changed outcome and why. An answer edit that still arrives, for example from an offline editor, shows \`approvalChanged: true\` until a person's answer is recorded again.
+A decided record's answer is read-only: content writes refuse with \`decision_read_only\`. Title, description, tags, links and comments stay editable, and a rename keeps the approval. To change the answer, create a successor with \`create_doc\`, \`kind: "decision"\` and \`supersedes\` naming the record it replaces. It joins the same topic, and the current answer stays in force while the successor is open. State only the changed decision in the successor's answer; put the reasoning in the successor's own linked RFC. An answer edit that still arrives, for example from an offline editor, shows \`approvalChanged: true\` until a person's answer is recorded again.
 
 ## Discussion and related pages
 
