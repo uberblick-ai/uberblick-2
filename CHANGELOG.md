@@ -5,6 +5,36 @@ first. The first paragraph of each release is its summary; uberblick.ai shows
 the five newest. Upgrade steps appear only when a release needs more than
 updating the client and the hub.
 
+## v0.4.11 — 2026-10-27
+
+Callout blocks, clearer comments and mentions, more useful history comparisons, wireframe.md 0.3.2, and fixes that keep local replicas and everyday editing reliable.
+
+### Added
+
+- Callout blocks with GitHub alert Markdown, light and dark rendering, a variant/icon menu and MCP authoring help (#2327, #2328, #2329, #2341).
+- Wireframe.md 0.3.2: folds, compact list items, overview rulers and disabled buttons, with updated MCP authoring help; sized pages, browser/window frames, tabs and switches also fit inside the document column (#2304, #2306, #2400).
+- Edit your own comments. Comment cards gain roomier spacing, account avatars, agent attribution, inline Markdown and GitHub link pills; people and documents share the @ mention picker (#2372, #2374, #2376, #2389, #2348).
+- Set a chart's height in its mapping or resize it in the editor. MCP source writes report what the chart mapping will draw (#2386, #2388).
+- MCP tools to create tags and explicitly edit their usage descriptions, and valid-argument lists when a tool refuses an unknown argument (#2368, #2315).
+- A banner in `ub open` when a newer Uberblick version is available, larger terminal sign-in approval codes, and `ub workspace rm` as an alias for `remove` (#2397, #2390, #2177).
+- Build-provenance attestations for Homebrew payloads and hub images, with verified draft-first release publishing (#2312, #2313).
+
+### Improved
+
+- Workspace members can see this computer’s workspace-file size and save a computer-local history-retention preference in General settings (#2395).
+- Named history compares the states between named anchors; document writers can rename or remove revision names, and open readers learn when names change (#2330, #2344, #2345).
+- History shows recognizable edit sources, keeps continuously edited revisions open, and explains table comparisons where only column widths changed (#2347, #2346, #2331).
+- History restoration sits on the version it restores, including the named Before state; drawings retain zoom and position while comparing versions (#2317, #2326, #2314).
+
+### Fixed
+
+- A brief SQLite write lock from another process now waits instead of quarantining the local replica (#2394).
+- Edits inside a commented range keep its anchor contiguous rather than splitting the comment (#2371).
+- History folds retain the reader's place and row alignment through drawing layout and motion; change-navigation controls and the sticky header stay clear (#2309, #2336, #2363, #2366, #2369, #2305).
+- Read-only JSON comparison panes recover from IME composition input without changing the stored document (#2334).
+- Figma caption line breaks survive editing, and code-caption aliases have recognizable names (#2367).
+- Decision answer times stay accurate across MCP and web, with decision attribution shown in history (#2303, #2301).
+
 ## v0.4.10 — 2026-10-24
 
 Document history on team hubs (browse every revision, compare it side by side, name reviewed states, restore an earlier version and link to any view), sync protocol 8 with permanent deletion of archived decision topics, JSON trees, and an emoji and icon picker.
