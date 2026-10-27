@@ -2362,6 +2362,56 @@ test.describe("document history through ub open", () => {
     }
   });
 
+  test("Inline follows document links by click and Enter, and native Tab leaves lists and tables", { tag: "@webkit" }, async ({ browser }, info) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+      ...(info.project.name === "webkit-ipad" ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 900 } }), reducedMotion: "reduce",
+    } });
+    const targetTitle = docTitle("Inline link target");
+    const target = await newDocument(page, targetTitle);
+    const title = docTitle("Inline native keyboard");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], linkedHistory(uuid, title, target, randomUUID()));
+    await previous(page);
+    await comparisonView(page, "Inline");
+    const drawer = await showHistoryList(page);
+    await historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true }).uncheck();
+    await closeHistoryList(page, drawer);
+    const view = historicalEditor(page);
+    await expect(view).toHaveAttribute("contenteditable", "true");
+    await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+    const sourceAddress = page.url();
+    const original = await view.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON());
+    for (const input of ["click", "Enter"] as const) {
+      const link = view.locator(`a.ub-doclink[data-doc-id="${target}"]`);
+      await expect(link).toBeVisible();
+      if (input === "click") await link.click();
+      else {
+        await caretInComparisonLink(page, view, "the linked document");
+        await page.keyboard.press("Enter");
+      }
+      await expect(page).toHaveURL(new RegExp(`/${harness().workspace}/${target}$`));
+      await expect(page.locator(".ub-title")).toHaveValue(targetTitle);
+      await page.goBack();
+      await expect(page).toHaveURL(sourceAddress);
+      await expect(page.locator(".ub-revision-title")).toHaveText(title);
+      await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+      await expect(view.getByRole("listitem")).toBeVisible();
+    }
+    for (const [name, block] of [["list", view.getByRole("listitem")], ["table", view.locator("td").last()]] as const) {
+      for (const key of ["Tab", "Shift+Tab"]) {
+        await setPointerSelection(block, () => block.click({ position: { x: 12, y: 10 } }));
+        await expect(view).toBeFocused();
+        await page.keyboard.press(key);
+        // At the final editing region, native forward traversal can enter browser chrome.
+        await expect.poll(() => view.evaluate(element => element.contains(document.activeElement)), { message: `${key} leaves the ${name}` }).toBe(false);
+      }
+    }
+    expect(await view.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON())).toEqual(original);
+  });
+
   // Keyboard focus can remain inside a comparison side during this journey.
   test.fixme("each comparison side follows document links by click and Enter, and Tab leaves lists and tables", { tag: "@webkit" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 900 } } });
