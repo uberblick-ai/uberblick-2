@@ -1,7 +1,7 @@
 /** Drafts belong to conversations, outside the drawer's mount lifetime. */
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { addComment, getAnnotation, setAnnotationResolved } from "@uberblick/schema";
+import { addComment, getAnnotation, getWorkspaceMainRepository, setAnnotationResolved } from "@uberblick/schema";
 import type { RoomConnection } from "../../collab/rooms.js";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import { writeDocument } from "../../collab/document-write.js";
@@ -21,10 +21,11 @@ import { Button } from "../shadcn/button.js";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../shadcn/collapsible.js";
 import { Sheet, SheetContent, SheetTitle } from "../shadcn/sheet.js";
 import { useTimestampClock } from "../timestamps.js";
+import { useWorkspaceSetting } from "../workspace-setting.js";
 
 function ThreadCard({
   thread, now, focused, draft, readOnly, refusal, onSelect, onReply,
-  onDeselect, onReplyFocus, onResolve, docLinks, openDocId, hidden,
+  onDeselect, onReplyFocus, onResolve, docLinks, openDocId, hidden, mainRepository,
 }: {
   thread: ThreadView;
   now: number;
@@ -40,6 +41,7 @@ function ThreadCard({
   docLinks: DocLinkContext | null;
   openDocId: string | null;
   hidden: boolean;
+  mainRepository: string | null;
 }): ReactElement {
   const comments = focused ? thread.comments : thread.comments.slice(0, 1);
   const newest = thread.comments.at(-1)?.createdAt ?? "";
@@ -65,7 +67,7 @@ function ThreadCard({
           aria-label="Comment" aria-expanded={focused} onClick={onSelect}>
           <CommentByline comment={comment} now={now} updatedAt={newest} />
         </Button> : <CommentByline comment={comment} now={now} />}
-        <div className="ub-thread-text whitespace-pre-wrap"><CommentText text={comment.text} docLinks={docLinks} /></div>
+        <div className="ub-thread-text whitespace-pre-wrap"><CommentText text={comment.text} docLinks={docLinks} mainRepository={mainRepository} /></div>
       </div>)}
       {!focused && thread.replyCount > 0 && <span className="ub-thread-replies ub-type-small text-(--muted-foreground)">
         {thread.replyCount} {thread.replyCount === 1 ? "reply" : "replies"}
@@ -119,6 +121,7 @@ export function ThreadsPane({
   const resolvedToggle = useRef<HTMLButtonElement>(null);
   const focusResolvedToggle = useRef(false);
   const now = useTimestampClock();
+  const mainRepository = useWorkspaceSetting(catalogConnection, getWorkspaceMainRepository);
   useEffect(() => {
     if (!focusResolvedToggle.current || !threads.some((thread) => thread.resolved) || resolvedToggle.current === null) return;
     focusResolvedToggle.current = false;
@@ -166,7 +169,7 @@ export function ThreadsPane({
   const card = (thread: ThreadView): ReactElement => <ThreadCard key={thread.id}
     thread={thread} now={now} focused={thread.id === focused?.id}
     draft={{ text: drafts[draftKey(thread.id)] ?? "", onChange: (text) => setDraft(thread.id, text) }}
-    readOnly={readOnly} docLinks={docLinks} openDocId={openDocId} hidden={hidden || (narrow && !open)}
+    readOnly={readOnly} docLinks={docLinks} openDocId={openDocId} hidden={hidden || (narrow && !open)} mainRepository={mainRepository}
     refusal={thread.resolved ? refusals[draftKey(thread.id)] ?? null : null}
     onSelect={() => { onFocus(thread.id); flashThreadHighlight(thread.id); }}
     onReplyFocus={() => { if (focused?.id !== thread.id) onFocus(thread.id); }}

@@ -6,6 +6,7 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { COMMENT_MARK, getWorkspaceMainRepository, githubItemUrl } from "@uberblick/schema";
 import type { GitHubItem } from "@uberblick/schema";
 import type * as Y from "yjs";
+import { githubLinkNamesItem, githubPillPresentation } from "../github-pill.js";
 import { inlineIconAnchorLabel } from "../inline-icons.js";
 
 interface LinkRange {
@@ -49,25 +50,13 @@ function linkRanges(doc: ProseMirrorNode): LinkRange[] {
   return ranges;
 }
 
-function namesItem(text: string, href: string, item: GitHubItem): boolean {
-  if (text === href) return true;
-  const match = /^(?:(?:([^/\s#]+)\/)?([^/\s#]+))?#([0-9]+)$/.exec(text);
-  if (match === null) return false;
-  const [, owner, repo, number] = match;
-  return (
-    number?.replace(/^0+(?=\d)/, "") === item.number &&
-    (owner === undefined || owner.toLowerCase() === item.owner.toLowerCase()) &&
-    (repo === undefined || repo.toLowerCase() === item.repo.toLowerCase())
-  );
-}
-
 function pill(item: GitHubItem, mainRepository: string | null): HTMLElement {
+  const presentation = githubPillPresentation(item, mainRepository);
   const dom = document.createElement("span");
   dom.className = "ub-github-pill";
-  const label = `${item.kind === "issue" ? "Issue" : "Pull request"} ${item.owner}/${item.repo}#${item.numberText}`;
   // The mark view gives the native anchor this label, including through comments.
   dom.setAttribute("aria-hidden", "true");
-  dom.title = label;
+  dom.title = presentation.label;
   const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   icon.setAttribute("viewBox", "0 0 16 16");
   icon.setAttribute("aria-hidden", "true");
@@ -75,11 +64,9 @@ function pill(item: GitHubItem, mainRepository: string | null): HTMLElement {
   icon.setAttribute("stroke", "currentColor");
   icon.setAttribute("stroke-width", "1.5");
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", item.kind === "issue"
-    ? "M8 1.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13"
-    : "M4 5v6M4 2a1.5 1.5 0 1 0 0 3a1.5 1.5 0 0 0 0-3M4 11a1.5 1.5 0 1 0 0 3a1.5 1.5 0 0 0 0-3M12 11a1.5 1.5 0 1 0 0 3a1.5 1.5 0 0 0 0-3M12 11V6a3 3 0 0 0-3-3H8M10 1L8 3l2 2");
+  path.setAttribute("d", presentation.path);
   icon.append(path);
-  if (item.kind === "issue") {
+  if (presentation.issueDot) {
     // GitHub's issue mark is a ring around a solid dot, not an exclamation mark.
     const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
     dot.setAttribute("cx", "8");
@@ -91,14 +78,14 @@ function pill(item: GitHubItem, mainRepository: string | null): HTMLElement {
   }
   const repo = document.createElement("span");
   repo.className = "ub-github-pill-repo";
-  repo.textContent = item.repo;
+  repo.textContent = presentation.visibleRepo;
   repo.setAttribute("aria-hidden", "true");
   const number = document.createElement("span");
   number.className = "ub-github-pill-number";
-  number.textContent = `#${item.numberText}`;
+  number.textContent = presentation.number;
   number.setAttribute("aria-hidden", "true");
   dom.append(icon);
-  if (`${item.owner}/${item.repo}`.toLowerCase() !== mainRepository?.toLowerCase()) dom.append(repo);
+  if (presentation.visibleRepo !== null) dom.append(repo);
   dom.append(number);
   return dom;
 }
@@ -110,7 +97,7 @@ function decorations(state: EditorState, focused: boolean, mainRepository: strin
     const href: unknown = range.link.attrs.href;
     if (typeof href !== "string") continue;
     const item = githubItemUrl(href);
-    if (item === null || !namesItem(range.text, href, item)) continue;
+    if (item === null || !githubLinkNamesItem(range.text, href, item)) continue;
     const editing = selection.empty
       ? range.from < selection.from && selection.from < range.to
       : selection.from < range.to && range.from < selection.to;
