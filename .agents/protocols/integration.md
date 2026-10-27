@@ -112,6 +112,10 @@ while you were elsewhere.
 
 ## Immediately before merging
 
+For corpus questions carried in `Corpus update` or a review verdict, apply
+[corpus-writing.md's hold or post-merge question route](corpus-writing.md#in-the-agent-loop).
+Every other gate below still applies.
+
 Re-read the PR with the launcher's `read` command: its `comments`, `reviews`
 and `review_comments` (the inline review threads) are already filtered to
 trusted authors. Confirm zero unanswered remarks from trusted authors, including any

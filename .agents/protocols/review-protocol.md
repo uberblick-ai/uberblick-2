@@ -49,8 +49,10 @@ states, one that misstates the change, or one that removes intent the code does
 not yet deliver, is a finding. So is a rewrite that breaks the
 [corpus-writing.md agent-loop rules](corpus-writing.md#in-the-agent-loop) or the
 `Writing pages` guidance page they point to: for example, a fact written on a
-page that doesn't own it, or a sentence that describes how a screen looks or
-how a feature is built instead of what a person can rely on.
+page that doesn't own it, or screen or implementation description outside a
+feature page's notes instead of what a person can rely on. Surface presentation
+and decided layout behavior on their owning surface or dedicated layout page
+remain allowed under `Writing pages`.
 
 A corrections review asks a narrower question: for each finding id the
 revision lists, does the corrected head resolve it, or is the implementer's
