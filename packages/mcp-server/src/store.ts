@@ -305,9 +305,10 @@ interface Prepared<P extends SQLInputValue[]> {
 }
 
 /**
- * Deferred reads pin a snapshot without blocking writers; writes enter the
- * queue on their first statement. Immediate migrations lock before checking.
- * Do not nest wrappers: BEGIN fails before try and leaves the outer transaction
+ * Deferred reads pin a snapshot without blocking writers. Every write is
+ * immediate: SQLite skips the busy handler when a read transaction upgrades
+ * to a write, so a deferred body that reads first fails at once with
+ * "database is locked" while another process commits. Do not nest wrappers: BEGIN fails before try and leaves the outer transaction
  * intact to roll back. A successful body commits; a thrown body rolls back.
  */
 function transactional<A extends unknown[], R>(
@@ -789,6 +790,7 @@ export class MirrorStore {
         }
         return seq;
       },
+      "immediate",
     );
 
     // Atomically snapshot then prune: a crash must not drop uncovered updates.
@@ -806,6 +808,7 @@ export class MirrorStore {
         this.statements.pruneUpdates.run(room, throughSeq);
         return written;
       },
+      "immediate",
     );
 
     // Pin snapshot and tail together so concurrent compaction cannot prune an
@@ -909,7 +912,7 @@ export class MirrorStore {
       );
       this.statements.markSearch.run(indexed.lastInsertRowid, doc.uuid);
       return true;
-    });
+    }, "immediate");
 
     this.unindexTx = transactional(this.db, (uuid: string) => {
       this.statements.dropFts.run(uuid);
@@ -919,7 +922,7 @@ export class MirrorStore {
       this.statements.dropGithubRefs.run(uuid);
       this.statements.dropDoc.run(uuid);
       this.statements.dropIndexSeq.run(uuid);
-    });
+    }, "immediate");
   }
 
   /**
@@ -982,7 +985,7 @@ export class MirrorStore {
       this.statements.putSnapshot.run(room, state, seq, Date.now());
       this.db.prepare("INSERT INTO meta (key, value) VALUES ('settings_reset', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
         .run(JSON.stringify({ seq, notice }));
-    })();
+    }, "immediate")();
     for (const listener of [...this.appendListeners]) {
       try { listener(); }
       catch (error) { log.warn("an update-log append observer failed", error); }
@@ -1197,7 +1200,7 @@ export class MirrorStore {
       this.db.prepare("DELETE FROM sync_acknowledgements WHERE room = ?").run(room);
       this.db.prepare("DELETE FROM snapshots WHERE room = ?").run(room);
       this.db.prepare("DELETE FROM pending_rooms WHERE room = ?").run(room);
-    })();
+    }, "immediate")();
   }
 
   private pruneOrphanFragments(): void {
@@ -1225,7 +1228,7 @@ export class MirrorStore {
           "DELETE FROM doc_links; DELETE FROM decision_github_refs; DELETE FROM docs_fts; " +
           "DELETE FROM docs_fragment_fts;",
       );
-    })();
+    }, "immediate")();
   }
 
   search(
