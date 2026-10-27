@@ -8,22 +8,28 @@ and owns technical grounding, acceptance criteria, dependencies and implementati
 ## Narrow the intent
 
 Identify the core problem and smallest useful outcome, separating essentials
-from optional ambitions. Never invent intent. Use evidence for factual gaps and
-ask one focused human question when the answer changes outcome, scope or tradeoff;
-clear intent needs no questionnaire or repeated approval.
+from optional ambitions. Never invent intent. During interactive exploration,
+propose a smaller useful scope early when it would materially simplify the work
+while still meeting the need, before asking about mechanisms within the larger
+scope. Explain the tradeoff, preserve essential constraints and keep cohesive work
+together. Clear intent can still have excessive scope; a clear, bounded request
+needs no mandatory challenge.
+
+Use evidence for factual gaps and ask one focused human question when the answer
+changes outcome, scope or tradeoff. Clear intent needs no questionnaire or repeated
+approval.
 
 Treat suggested mechanisms as clues unless the human makes them binding.
 Distinguish facts, human decisions and inferences; leave engineering choices to
 preparation and implementation, without architecture, file lists or exhaustive
 edge cases. Preserve requested behavior, safety and data-preservation guarantees.
-During interactive exploration, actively propose smaller useful scopes and
-meaningful alternative ways to achieve the goal, with their implications and
-tradeoffs. Corpus or code evidence may support a materially different approach.
-Help the human choose or refine the outcome; do not silently decide
-or force options on already-clear intent. Unattended preparation uses
-[human-decisions.md](human-decisions.md) for unresolved choices, without waiting
-for live dialogue. Defer optional follow-ups without automatically filing them
-or fragmenting cohesive work. Reopen settled choices
+Offer meaningful alternative ways to achieve the goal when their implications
+would help the person choose; corpus or code evidence may support a materially
+different approach. Help the human choose or refine the outcome; do not silently
+decide or force alternatives on a request that is already sufficient. Unattended
+preparation uses [human-decisions.md](human-decisions.md) for unresolved choices,
+without waiting for live dialogue. Defer optional follow-ups without automatically
+filing them or fragmenting cohesive work. Reopen settled choices
 only for new evidence or changed direction, naming the conflict.
 
 ## Keep the effort oriented
@@ -57,6 +63,9 @@ authorizes `ready` or implementation. Read [rfc-resumption.md](rfc-resumption.md
 only for shared RFCs, resumption by UUID or intakes from an RFC.
 
 ## Record durable choices
+
+A lasting choice can emerge during discussion. Distinguish it from the original
+request and carry forward the person's confirmed choice.
 
 Consult bundled `get_help({topic: "decisions"})` for the initial-record
 threshold and short answer guidance, and
