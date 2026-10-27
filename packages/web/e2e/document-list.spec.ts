@@ -573,6 +573,84 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
   });
 }
 
+for (const touch of [false, true]) {
+  test(`a decision row opens the current answer and browser history restores the list on ${touch ? "iPad touch" : "desktop keyboard"}${touch ? " @webkit-touch" : ""}`, async ({ browser }) => {
+    const writer = agent().open({ name: "decision-list-history-e2e" });
+    const title = docTitle("decisionhistory").replaceAll("-", "");
+    const approval = { who: "A workspace member", when: "2026-10-04T12:00:00Z", where: "https://example.org/team/decision" };
+    const first = await decision(writer, title, "Earlier answer is history.", { status: "decided", answer: approval });
+    const answer = "Current answer stays in force during review.";
+    const current = await decision(writer, undefined, answer, {
+      status: "decided", supersedes: first.uuid, answer: approval, tags: ["auth"],
+    });
+    await decision(writer, undefined, "Pending proposal must not become the list answer.", { supersedes: current.uuid });
+    const page = await openApp(browser, `/${harness().workspace}/all`, {
+      readySelector: ".ub-docs-heading",
+      contextOptions: touch ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 1000 } },
+    });
+    const type = page.getByRole("tab", { name: /^Decisions/ });
+    const search = page.getByRole("searchbox", { name: "Search", exact: true });
+    const tags = page.getByRole("button", { name: "Filter by tags", exact: true });
+    const state = page.getByRole("combobox", { name: "Decision state", exact: true });
+    const titleHeading = page.getByRole("columnheader", { name: /^Title/ });
+
+    // These changes exercise the application's history writer as well as its reader.
+    // Native control composition and filter permutations have focused owners.
+    await activateControl(type, { touch });
+    await search.fill(title);
+    await activateControl(tags, { touch });
+    await activateControl(page.getByRole("option", { name: "auth", exact: true }), { touch });
+    await page.keyboard.press("Escape");
+    await state.selectOption("under-review");
+    await activateControl(titleHeading.getByRole("button", { name: "Title", exact: true }), { touch });
+    await expect(listedTitles(page)).toHaveText([title]);
+    const open = page.locator(".ub-docs-open");
+    if (touch) await open.tap();
+    else { await open.focus(); await open.press("Enter"); }
+    await expect(page).toHaveURL(new RegExp(`/${first.uuid}$`));
+    await expect(page.getByRole("textbox", { name: "Document title" })).toHaveValue(title);
+    await expect(editor(page)).toHaveText(answer);
+    await expect(page.locator(`.ub-decision-timeline > li[data-record="${current.uuid}"] .ub-decision-record`)).toHaveAttribute("aria-current", "true");
+    await expect(page.locator(".ub-decision-timeline")).not.toContainText("viewing");
+
+    async function restoredVisit(): Promise<void> {
+      await expect(page).toHaveURL(new RegExp(`/${harness().workspace}/all$`));
+      await expect(type).toHaveAttribute("aria-selected", "true");
+      await expect(search).toHaveValue(title);
+      await expect(tags).toContainText("auth");
+      await expect(state).toHaveValue("under-review");
+      await expect(titleHeading).toHaveAttribute("aria-sort", "ascending");
+      await expect(listedTitles(page)).toHaveText([title]);
+    }
+    async function defaults(): Promise<void> {
+      await expect(page.getByRole("tab", { name: /^Documents/ })).toHaveAttribute("aria-selected", "true");
+      await expect(search).toHaveValue("");
+      await expect(tags).toContainText("Tag Any");
+      await expect(state).toHaveCount(0);
+      await expect(page.getByRole("columnheader", { name: /^Changed/ })).toHaveAttribute("aria-sort", "descending");
+    }
+
+    await page.goBack();
+    await restoredVisit();
+    await page.goForward();
+    await expect(page.getByRole("textbox", { name: "Document title" })).toHaveValue(title);
+    if (touch) await page.getByRole("button", { name: "Show document list", exact: true }).tap();
+    const all = page.getByRole("button", { name: "All documents", exact: true });
+    if (touch) await all.tap();
+    else { await all.focus(); await all.press("Enter"); }
+    await defaults();
+    await page.goBack();
+    await page.goBack();
+    await restoredVisit();
+    await page.goForward();
+    await page.goForward();
+    await defaults();
+    await page.goBack();
+    await page.goBack();
+    await restoredVisit();
+  });
+}
+
 test("tag overflow recalculates when the bundled UI font loads @webkit", async ({ browser }) => {
   const title = docTitle("tagfontload");
   const writer = agent().open({ name: "tag-font-load-e2e" });

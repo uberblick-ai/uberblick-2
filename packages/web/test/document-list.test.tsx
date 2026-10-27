@@ -944,8 +944,10 @@ describe("decision topics in the list", () => {
     expect(topicRow(host, THREE).textContent).not.toContain("Agent stance");
     expect(topicRow(host, GONE).textContent).not.toContain("Nothing is in force");
     expect(topicRow(host, TWO).textContent).not.toContain("Changed after approval");
-    expect(within(documentTable(host)).getAllByRole("columnheader").map((cell) => cell.textContent)).toContain("Stage");
-    expect(within(documentTable(host)).queryByRole("columnheader", { name: "Group" })).toBeNull();
+    const table = within(documentTable(host));
+    expect(table.getAllByRole("columnheader")).toEqual(
+      ["Title", "Stage", "Tags", "Changed", "Actions"].map((name) => table.getByRole("columnheader", { name, exact: true })),
+    );
     expect([ONE, TWO, THREE, FOUR, GONE].map((uuid) => topicRow(host, uuid).querySelector(".ub-docs-stage")?.textContent)).toEqual([
       "Under discussion", "In effect", "In effect", "Under discussion", "Under discussion",
     ]);
@@ -963,6 +965,11 @@ describe("decision topics in the list", () => {
     await act(async () => typeInto(filter(host), "no such title"));
     expect(rowUuids(host)).toEqual([]);
     expect(within(documentTable(host)).getByText(/Changed after approval/).textContent).toContain("Changed after approval");
+    expect(documentTable(host).textContent).not.toContain("No decision records in this workspace");
+    await chooseState(host, "agent-stance");
+    expect(rowUuids(host)).toEqual([]);
+    expect(documentTable(host).textContent).toContain('with state "Agent stance"');
+    expect(documentTable(host).textContent).toContain('match "no such title"');
     expect(documentTable(host).textContent).not.toContain("No decision records in this workspace");
     await act(async () => typeInto(filter(host), ""));
     await chooseState(host, "conflict");
