@@ -11,6 +11,7 @@ import type {
   StatementResultingChanges,
 } from "node:sqlite";
 import { log } from "./log.js";
+import { HistoryCache } from "./history-cache.js";
 import { parseHistoryRetention, type HistoryRetention, type WorkspaceSize } from "./local-settings.js";
 
 const BUSY_TIMEOUT_MS = 5_000;
@@ -478,6 +479,7 @@ export function inspectExistingStore(databasePath: string, workspaceId: string):
 }
 
 export class MirrorStore {
+  readonly history: HistoryCache;
   readonly databasePath: string;
 
   private readonly db: DatabaseSync;
@@ -569,6 +571,7 @@ export class MirrorStore {
   // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
   constructor(databasePath: string, private readonly workspaceId: string) {
     this.databasePath = databasePath;
+    this.history = new HistoryCache(databasePath, workspaceId);
     // Owner-only: this tree holds the corpus and may later receive credentials.
     const durable = databasePath !== ":memory:";
     const fresh = durable && !existsSync(databasePath);
@@ -1206,6 +1209,7 @@ export class MirrorStore {
   /** Only a deletion mark or authenticated room refusal authorizes removing authoritative rows. */
   purgeDoc(room: string, uuid: string): void {
     this.assertWorkspacePresent();
+    this.history.purgeDoc(uuid);
     this.pruneOrphanFragments();
     const tables = [
       ["updates", "room", room], ["snapshots", "room", room],
@@ -1503,6 +1507,7 @@ export class MirrorStore {
   /** Both server shutdown and the supplying owner may close; keep it idempotent. */
   close(): void {
     this.appendListeners.clear();
+    this.history.close();
     try {
       if (this.db.isOpen) this.db.close();
     } finally {
