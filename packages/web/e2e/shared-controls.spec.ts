@@ -3,18 +3,21 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test } from "@playwright/test";
-import type { Browser, BrowserContext, Locator, Page } from "@playwright/test";
+import { devices, expect, test } from "@playwright/test";
+import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } from "@playwright/test";
 import { build, preview } from "vite";
 import type { PreviewServer } from "vite";
+import { activateControl } from "./input-helpers.js";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let scratch: string | null = null;
 let server: PreviewServer | null = null;
 let fixtureUrl = "";
+let calloutFixtureUrl = "";
 const contexts: BrowserContext[] = [];
 
 test.beforeAll(async () => {
+  const started = performance.now();
   scratch = mkdtempSync(join(tmpdir(), `uberblick-controls-${process.env.UB_AGENTS_RUN ?? "local"}-`));
   const configFile = join(packageRoot, "vite.config.ts");
   await build({
@@ -24,7 +27,10 @@ test.beforeAll(async () => {
     build: {
       outDir: scratch,
       emptyOutDir: true,
-      rolldownOptions: { input: join(packageRoot, "e2e/fixtures/controls.html") },
+      rolldownOptions: { input: [
+        join(packageRoot, "e2e/fixtures/controls.html"),
+        join(packageRoot, "e2e/fixtures/callout-controls.html"),
+      ] },
     },
   });
   server = await preview({
@@ -37,6 +43,8 @@ test.beforeAll(async () => {
   const base = server.resolvedUrls?.local[0];
   if (base === undefined) throw new Error("e2e: no fixture serving address");
   fixtureUrl = new URL("e2e/fixtures/controls.html", base).href;
+  calloutFixtureUrl = new URL("e2e/fixtures/callout-controls.html", base).href;
+  console.log(`e2e timing: controls fixture startup ${Math.round(performance.now() - started)} ms`);
 });
 
 test.afterEach(async () => {
@@ -72,6 +80,95 @@ async function openFixture(browser: Browser, coarse: boolean, width: number): Pr
   expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(coarse);
   return page;
 }
+
+async function openCalloutFixture(browser: Browser, options: BrowserContextOptions): Promise<Page> {
+  const context = await browser.newContext(options);
+  contexts.push(context);
+  const page = await context.newPage();
+  await page.goto(calloutFixtureUrl);
+  await expect(page.locator("[data-callout-controls-ready=true]")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Callout variant", exact: true })).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  return page;
+}
+
+function calloutEditor(page: Page): Locator {
+  return page.locator(".ub-editor .ProseMirror");
+}
+
+function calloutMenu(page: Page): Locator {
+  return page.getByRole("menu", { name: "Callout variant", exact: true });
+}
+
+async function openCalloutIcons(page: Page, touch: boolean): Promise<Locator> {
+  await activateControl(page.getByRole("button", { name: "Callout variant", exact: true }), { touch });
+  await activateControl(calloutMenu(page).getByRole("menuitem", { name: "Change icon…", exact: true }), { touch });
+  const search = page.getByRole("combobox", { name: "Search icons", exact: true });
+  await expect(search).toBeFocused();
+  return search;
+}
+
+test("callout captions take native desktop keyboard input and return focus to the editor", async ({ browser }) => {
+  const page = await openCalloutFixture(browser, { viewport: { width: 1280, height: 900 }, hasTouch: false, isMobile: false });
+  const frame = page.getByRole("note");
+  await frame.locator(".ub-callout-body").click();
+  await expect(calloutEditor(page)).toBeFocused();
+  await page.keyboard.press("Shift+F10");
+  await expect(calloutMenu(page).getByRole("menuitem").first()).toBeFocused();
+  await page.keyboard.press("w");
+  await expect(calloutMenu(page).getByRole("menuitem", { name: "Warning", exact: true })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(frame).toHaveAccessibleName("Warning");
+  await expect(calloutEditor(page)).toBeFocused();
+  await page.keyboard.press("Shift+F10");
+  await expect(calloutMenu(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(calloutMenu(page)).toHaveCount(0);
+  await expect(calloutEditor(page)).toBeFocused();
+});
+
+test("callout caption and icon menus fit both appearances with native pointer or iPad touch", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const touch = info.project.use.hasTouch === true;
+  const page = await openCalloutFixture(browser, touch ? devices["iPad (gen 7)"] : {
+    viewport: { width: 1280, height: 900 }, hasTouch: false, isMobile: false,
+  });
+  const frame = page.getByRole("note");
+  await activateControl(frame.locator(".ub-callout-body"), { touch });
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await activateControl(page.getByRole("button", { name: "Callout variant", exact: true }), { touch });
+    await expect(calloutMenu(page)).toBeInViewport({ ratio: 1 });
+    await page.keyboard.press("Escape");
+    await expect(calloutMenu(page)).toHaveCount(0);
+    await expect(calloutEditor(page)).toBeFocused();
+  }
+
+  const search = await openCalloutIcons(page, touch);
+  await expect(search).toBeInViewport({ ratio: 1 });
+  if (touch) expect(await search.evaluate(element => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
+  await search.fill("cla");
+  const claude = page.getByRole("option", { name: "Claude", exact: true });
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expect(claude).toBeInViewport();
+    await expect(claude.locator("svg")).toBeVisible();
+    await expect(claude.locator("svg")).toBeInViewport({ ratio: 1 });
+  }
+  await activateControl(claude, { touch });
+  await expect(frame).toHaveAttribute("data-icon", ":claude:");
+  await expect(calloutEditor(page)).toBeFocused();
+  await openCalloutIcons(page, touch);
+  await search.fill("smi");
+  await expect(page.getByRole("option", { name: "smiley", exact: true })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(frame).toHaveAttribute("data-icon", "😃");
+  await expect(calloutEditor(page)).toBeFocused();
+  await openCalloutIcons(page, touch);
+  await activateControl(page.getByRole("button", { name: "Use default icon", exact: true }), { touch });
+  await expect(frame).not.toHaveAttribute("data-icon");
+  await expect(frame.locator(".ub-callout-icon svg")).toBeVisible();
+  await expect(calloutEditor(page)).toBeFocused();
+});
 
 for (const { coarse, widths } of [
   { coarse: true, widths: [1366] },
