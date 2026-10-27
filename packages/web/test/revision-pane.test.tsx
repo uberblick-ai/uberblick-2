@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import * as Y from "yjs";
 import { toast } from "sonner";
-import { appendBlock, initDoc, type RevisionEntry } from "@uberblick/schema";
+import { appendBlock, editBlock, initDoc, type RevisionEntry } from "@uberblick/schema";
 import { act, cleanup, render } from "./react-render.js";
 import type { DocumentHistory } from "../src/ui/document/document-history.js";
 import { RevisionPane } from "../src/ui/document/RevisionPane.js";
@@ -16,10 +16,13 @@ const entries: RevisionEntry[] = [
     name: { text: "Reviewed", namer: person, namedAt: 20, canManage: false } },
 ];
 const documents: Y.Doc[] = [];
+const nativeAnimations = Object.getOwnPropertyDescriptor(Element.prototype, "getAnimations");
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  if (nativeAnimations === undefined) Reflect.deleteProperty(Element.prototype, "getAnimations");
+  else Object.defineProperty(Element.prototype, "getAnimations", nativeAnimations);
   for (const doc of documents.splice(0)) doc.destroy();
 });
 
@@ -35,7 +38,7 @@ function historyAt(index: number, since = false, busy = false): DocumentHistory 
   const baseline = entries[3]!;
   return {
     entries, entry: entries[index]!, titles: {}, active: true, available: true, busy, error: null,
-    filter: "all", setFilter: vi.fn(), canBack: index < entries.length - 1, canForward: true,
+    filter: "all", setFilter: vi.fn(), comparisonView: "split", setComparisonView: vi.fn(), canBack: index < entries.length - 1, canForward: true,
     selection: { index, before: snapshot(since ? baseline.id : entries[index + 1]!.id), after: snapshot(entries[index]!.id),
       ...(since ? { comparedWith: baseline } : {}) },
     collapseUnchanged: true, setCollapseUnchanged: vi.fn(), back: vi.fn(), forward: vi.fn(), open: vi.fn(),
@@ -164,6 +167,57 @@ describe("revision restore control states", () => {
 });
 
 describe("revision comparison controls", () => {
+  it.each([
+    { width: 1200, preference: "inline" as const },
+    { width: 700, preference: "split" as const },
+  ])("composes inline word marks, folding and change navigation at $width with $preference selected", async ({ width, preference }) => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, width, 900));
+    Object.defineProperty(Element.prototype, "getAnimations", { configurable: true, value: () => [] });
+    const history = historyAt(1);
+    const before = snapshot("Reading");
+    const changed = appendBlock(before, { type: "paragraph", text: "Keep old words." });
+    for (let index = 0; index < 12; index += 1) appendBlock(before, { type: "paragraph", text: `Unchanged ${index}` });
+    const last = appendBlock(before, { type: "paragraph", text: "Earlier ending" });
+    const after = new Y.Doc();
+    documents.push(after);
+    Y.applyUpdate(after, Y.encodeStateAsUpdate(before));
+    editBlock(after, changed, "Keep old words.", "Keep new words.");
+    editBlock(after, last, "Earlier ending", "Later ending");
+    history.selection = { index: 1, before, after };
+    history.comparisonView = preference;
+    const view = render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);
+    expect(view.container.querySelector(".ub-revision-split")).toBeNull();
+    const editor = view.container.querySelector('.ProseMirror[aria-label="Document revision"]')!;
+    expect(editor).not.toBeNull();
+    expect(editor.querySelector('[data-revision-change="removed"]')?.textContent).toBe("old");
+    expect(editor.querySelector('[data-revision-change="added"]')?.textContent).toBe("new");
+    const paragraph = editor.querySelector("p[data-revision-block]");
+    expect(editor.querySelectorAll(".ub-revision-fold-button").length).toBeGreaterThan(0);
+    expect(editor.querySelectorAll(".ub-revision-row-start").length).toBeGreaterThan(0);
+    expect(screen.getByRole("group", { name: "Changes" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Restore this version" }).closest("header")).not.toBeNull();
+    view.rerender(<RevisionPane history={{ ...history, collapseUnchanged: false }} docLinks={null} workspaceSettings={null} writable />);
+    expect(editor.querySelectorAll(".ub-revision-fold-button").length).toBe(0);
+    expect(editor.querySelector("p[data-revision-block]")).toBe(paragraph);
+    expect(editor.textContent).toContain("Unchanged 6");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Next change" })));
+    expect(history.setComparisonView).not.toHaveBeenCalled();
+  });
+
+  it("uses split when it fits, changes to Inline on request and leaves the earliest revision without comparison controls", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1200, 900));
+    const history = historyAt(1);
+    const view = render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} />);
+    expect(view.container.querySelectorAll(".ub-revision-split .ProseMirror").length).toBe(2);
+    view.rerender(<RevisionPane history={{ ...history, comparisonView: "inline" }} docLinks={null} workspaceSettings={null} />);
+    expect(view.container.querySelector(".ub-revision-split")).toBeNull();
+    expect(view.container.querySelectorAll(".ProseMirror").length).toBe(1);
+    expect(screen.getByRole("group", { name: "Changes" })).not.toBeNull();
+    view.rerender(<RevisionPane history={{ ...history, comparisonView: "inline", selection: { ...history.selection!, before: null } }} docLinks={null} workspaceSettings={null} />);
+    expect(view.container.querySelectorAll(".ProseMirror").length).toBe(1);
+    expect(screen.queryByRole("group", { name: "Changes" })).toBeNull();
+  });
+
   it("identifies the named endpoints and their authors, keeps the all-revision position and restores Before", async () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1200, 900));
     const history = historyAt(1, true);

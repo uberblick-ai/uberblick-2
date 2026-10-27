@@ -7,12 +7,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
 import * as Y from "yjs";
 import type { RevisionEntry } from "@uberblick/schema";
-import { cleanup, render } from "./react-render.js";
-import type { DocumentHistory } from "../src/ui/document/document-history.js";
+import { act, cleanup, render } from "./react-render.js";
+import { useDocumentHistory, type DocumentHistory } from "../src/ui/document/document-history.js";
+import type { DocumentRevisionsClient } from "../src/shell/document-revisions.js";
 import { revisionAuthor, revisionGroups } from "../src/ui/document/revision-list.js";
 import { HistorySidebar } from "../src/ui/sidebar/HistorySidebar.js";
 
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 const NOW = new Date(2026, 9, 23, 15, 0).getTime();
 const HOUR = 60 * 60 * 1000;
@@ -31,11 +32,18 @@ const entries: RevisionEntry[] = [
 function fakeHistory(overrides: Partial<DocumentHistory> = {}): DocumentHistory {
   return {
     filter: "all", setFilter: vi.fn(),
+    comparisonView: "split", setComparisonView: vi.fn(),
     entries, selection: null, busy: false, error: null, titles: {}, collapseUnchanged: true, setCollapseUnchanged: vi.fn(), available: true, active: true, entry: null,
     back: vi.fn(), forward: vi.fn(), open: vi.fn(), sinceLastNamed: vi.fn(), sinceNamed: vi.fn(),
     name: vi.fn(), rename: vi.fn(), removeName: vi.fn(), now: vi.fn(), retry: vi.fn(), refresh: vi.fn(),
     ...overrides,
   } as unknown as DocumentHistory;
+}
+
+function StoredHistory({ api, uuid }: { api: DocumentRevisionsClient; uuid: string }) {
+  const history = useDocumentHistory(api, uuid, `/document/${uuid}`);
+  return history.active ? <HistorySidebar history={history} title="Auth plan" />
+    : <button type="button" onClick={() => history.open(0)}>Open history</button>;
 }
 
 describe("revision list model", () => {
@@ -78,6 +86,61 @@ describe("revision list model", () => {
 });
 
 describe("history sidebar", () => {
+  it("keeps the comparison choice through comparisons, history sessions, documents and reloads", async () => {
+    vi.stubGlobal("localStorage", window.localStorage);
+    localStorage.clear();
+    const api: DocumentRevisionsClient = {
+      list: vi.fn(async () => entries), get: vi.fn(async () => new Y.Doc()),
+      name: vi.fn(), rename: vi.fn(), removeName: vi.fn(), restore: vi.fn(),
+    };
+    const openHistory = async (): Promise<void> => {
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Open history" })); });
+    };
+    const view = render(<StoredHistory api={api} uuid="first-document" />);
+    await act(async () => {});
+    await openHistory();
+    expect(screen.getByRole("button", { name: "Split" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Inline" }));
+    await act(async () => { fireEvent.click(within(screen.getAllByRole("listitem")[1]!).getAllByRole("button")[0]!); });
+    expect(screen.getByRole("button", { name: "Inline" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Back to now" }));
+    await openHistory();
+    expect(screen.getByRole("button", { name: "Inline" }).getAttribute("aria-pressed")).toBe("true");
+    view.rerender(<StoredHistory api={api} uuid="second-document" />);
+    await act(async () => {});
+    await openHistory();
+    expect(screen.getByRole("button", { name: "Inline" }).getAttribute("aria-pressed")).toBe("true");
+    view.unmount();
+
+    const reload = render(<StoredHistory api={api} uuid="third-document" />);
+    await act(async () => {});
+    await openHistory();
+    expect(screen.getByRole("button", { name: "Inline" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    reload.unmount();
+    render(<StoredHistory api={api} uuid="first-document" />);
+    await act(async () => {});
+    await openHistory();
+    expect(screen.getByRole("button", { name: "Split" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("offers Split and Inline between the revision filter and collapse switch", () => {
+    const history = fakeHistory();
+    const view = render(<HistorySidebar history={history} title="Auth plan" />);
+    const controls = screen.getByRole("group", { name: "Comparison view" });
+    expect(controls.previousElementSibling).toBe(screen.getByRole("group", { name: "Show revisions" }));
+    expect(controls.nextElementSibling?.contains(screen.getByRole("switch", { name: "Collapse unchanged" }))).toBe(true);
+    expect(within(controls).getByRole("button", { name: "Split" }).getAttribute("aria-pressed")).toBe("true");
+    expect(within(controls).getByRole("button", { name: "Inline" }).getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(within(controls).getByRole("button", { name: "Inline" }));
+    expect(history.setComparisonView).toHaveBeenCalledWith("inline");
+    view.rerender(<HistorySidebar history={{ ...history, comparisonView: "inline" }} title="Auth plan" />);
+    expect(screen.getByRole("button", { name: "Inline" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Split" }).getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
+    expect(history.setComparisonView).toHaveBeenCalledWith("split");
+  });
+
   it("lists every revision, marks the open head and the selected entry, and opens what is clicked", () => {
     vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
     const history = fakeHistory({ selection: { index: 2, after: new Y.Doc(), before: null } as DocumentHistory["selection"] });

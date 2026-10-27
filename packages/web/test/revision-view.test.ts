@@ -6,7 +6,8 @@ import {
 } from "@uberblick/schema";
 import { parseWireframe } from "@uberblick/wireframe";
 import { AllSelection } from "@tiptap/pm/state";
-import { createRevisionEditor, revisionViewModel } from "../src/editor/revision-view.js";
+import { createRevisionEditor, createRevisionInline, revisionViewModel } from "../src/editor/revision-view.js";
+import { revisionSplitModel } from "../src/editor/revision-split.js";
 import { findForeignBlocks } from "../src/editor/palette.js";
 import { createUberblickEditor, uberblickSchema } from "../src/editor/create-editor.js";
 
@@ -37,6 +38,80 @@ function mount(before: Y.Doc | null, after: Y.Doc) {
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("the detached revision view", () => {
+  it("folds the same unchanged runs as Split and retains paired drawings through in-place expansion", async () => {
+    const before = new Y.Doc();
+    for (let index = 0; index < 5; index += 1) appendBlock(before, { type: index === 0 ? "heading" : "paragraph", text: `Opening ${index}` });
+    const source = "dialog Before\n  text Earlier";
+    const current = "dialog After\n  text Current";
+    const drawing = appendBlock(before, { type: "code", language: "wireframe", text: source });
+    for (let index = 0; index < 6; index += 1) appendBlock(before, { type: "paragraph", text: `Closing ${index}` });
+    const after = clone(before);
+    editBlock(after, drawing, source, current);
+    const element = document.body.appendChild(document.createElement("div"));
+    const view = createRevisionInline({ element, before, after, folding: { collapse: true, expanded: new Set() } });
+    const oldState = Y.encodeStateAsUpdate(before);
+    const newState = Y.encodeStateAsUpdate(after);
+    try {
+      await vi.dynamicImportSettled();
+      expect(view.model.rows).toMatchObject(revisionSplitModel(before, after, { collapse: true, expanded: new Set() }).rows
+        .map(({ before: _before, after: _after, ...row }) => row));
+      expect(view.model.runs).toEqual([0, 7]);
+      expect(view.model.rows.find((row) => row.at === 5)).toMatchObject({ changed: true, separateChange: true });
+      const drawings = [...element.querySelectorAll(".wf-root")];
+      const editor = view.editor;
+      expect(drawings).toHaveLength(2);
+      expect([...element.querySelectorAll(".ub-revision-row-start")].map((marker) => marker.getAttribute("data-key")))
+        .toEqual(["fold-0", "row-4", "row-5", "row-6", "fold-7"]);
+      (element.querySelector('[data-fold="0"]') as HTMLButtonElement).click();
+      expect(view.model.rows[0]?.kind).toBe("unchanged");
+      expect(element.querySelector('[data-fold="7"]')).not.toBeNull();
+      view.expand(7);
+      expect(element.querySelector(".ub-revision-fold")).toBeNull();
+      view.setCollapse(true);
+      expect(element.querySelectorAll(".ub-revision-fold-button")).toHaveLength(2);
+      view.setCollapse(false);
+      expect(view.editor).toBe(editor);
+      expect([...element.querySelectorAll(".wf-root")]).toEqual(drawings);
+      expect(view.model.rows).toHaveLength(12);
+      expect(element.querySelectorAll(".ub-revision-row-start")).toHaveLength(12);
+      expect(element.querySelectorAll(".ub-revision-row-end")).toHaveLength(12);
+      view.editor.commands.insertContent("not authored");
+      expect(Y.encodeStateAsUpdate(before)).toEqual(oldState);
+      expect(Y.encodeStateAsUpdate(after)).toEqual(newState);
+      view.editor.commands.selectAll();
+      const copied = view.editor.view.serializeForClipboard(view.editor.state.selection.content());
+      expect(copied.text).not.toContain("unchanged blocks");
+      expect(copied.text).not.toContain("not authored");
+    } finally { view.destroy(); element.remove(); before.destroy(); after.destroy(); }
+  });
+
+  it("keeps whole JSON versions and an ablauf viewer's paired sources on individual changed rows", () => {
+    const before = new Y.Doc();
+    const oldDrawing = "a: Earlier\nb: End\na -> b";
+    const newDrawing = "a: Later\nb: End\na -> b";
+    const drawing = appendBlock(before, { type: "code", language: "ablauf", text: oldDrawing });
+    const tree = appendBlock(before, { type: "code", language: "json-tree", text: '{"value":1}' });
+    const after = clone(before);
+    editBlock(after, drawing, oldDrawing, newDrawing);
+    editBlock(after, tree, '{"value":1}', '{"value":2}');
+    try {
+      const model = revisionViewModel(before, after);
+      expect(model.rows.map((row) => ({ changed: row.changed, separateChange: row.separateChange }))).toEqual([
+        { changed: true, separateChange: true }, { changed: true, separateChange: true },
+      ]);
+      expect(model.blocks.map((block) => ({ side: block.side, at: block.at, showSource: block.showSource }))).toEqual([
+        { side: "before", at: 0, showSource: false }, { side: "after", at: 0, showSource: false },
+        { side: "before", at: 1, showSource: false }, { side: "after", at: 1, showSource: false },
+      ]);
+      const content = model.content.content ?? [];
+      expect(content[0]?.attrs).toMatchObject({ revisionSide: "before", revisionOtherSource: newDrawing, revisionSource: oldDrawing });
+      expect(content[1]?.attrs).toMatchObject({ revisionSide: "after", revisionOtherSource: oldDrawing, revisionSource: newDrawing });
+      expect(content.slice(2).map((node) => ({ type: node.type, text: node.content?.[0]?.text }))).toEqual([
+        { type: "code", text: '{"value":1}' }, { type: "code", text: '{"value":2}' },
+      ]);
+    } finally { before.destroy(); after.destroy(); }
+  });
+
   it.each([
     { field: "variant", options: { variant: "tip" as const }, label: "Tip", icon: "💡" },
     { field: "icon", options: { icon: ":claude:" }, label: "Note", icon: null },
@@ -236,7 +311,8 @@ describe("the detached revision view", () => {
       { fields: ["formatting"] }, { fields: ["indent", "list"] }, { fields: ["title"] }, { fields: ["title"] }, { kind: "unchanged" },
     ]);
     expect(model.blocks[4]?.dataCollections).toEqual(["values"]);
-    expect(model.content.content?.map((node) => node.attrs?.id)).toEqual([prose, list, card, figma, chart].map((id, index) => `revision-${index}-${id}`));
+    expect(model.content.content?.map((node) => node.attrs?.id)).toEqual([prose, list, card, figma, chart, chart].map((id, index) => `revision-${index}-${id}`));
+    expect(model.blocks.slice(4).map((block) => block.side)).toEqual(["before", "after"]);
     before.destroy(); after.destroy(); directory.destroy();
   });
 
@@ -409,7 +485,7 @@ describe("the detached revision view", () => {
     } finally { view.destroy(); before.destroy(); after.destroy(); }
   });
 
-  it("draws the selected diagram source without removed text while retaining that text in the document", async () => {
+  it("shows the whole earlier drawing above the later drawing without marked source", async () => {
     const before = new Y.Doc();
     const source = "dialog Before\n  text Earlier";
     const current = "dialog After\n  text Current";
@@ -420,9 +496,18 @@ describe("the detached revision view", () => {
     try {
       await vi.dynamicImportSettled();
       expect(parseWireframe).toHaveBeenLastCalledWith(current);
-      expect(view.element.querySelector(".ub-wireframe-source")?.textContent).toContain("BeforeAfter");
-      expect(view.element.querySelector(".wf-root")?.textContent).toContain("Current");
-      expect(view.element.querySelector(".wf-root")?.textContent).not.toContain("Earlier");
+      const drawings = view.element.querySelectorAll(".wf-root");
+      expect(drawings).toHaveLength(2);
+      expect(drawings[0]?.textContent).toContain("Earlier");
+      expect(drawings[0]?.textContent).not.toContain("Current");
+      expect(drawings[1]?.textContent).toContain("Current");
+      expect(drawings[1]?.textContent).not.toContain("Earlier");
+      expect(view.element.querySelector(".ub-revision-source-changed")).toBeNull();
+      expect([...view.element.querySelectorAll(".ub-revision-fields")].map((label) => label.textContent)).toEqual(["Before", "After"]);
+      expect([...view.element.querySelectorAll(".ub-revision-row-start")].map((marker) => marker.getAttribute("data-key"))).toEqual(["row-0"]);
+      expect(view.element.querySelectorAll(".ub-revision-row-end")).toHaveLength(1);
+      expect(view.editor.state.doc.child(0).textContent).toBe(source);
+      expect(view.editor.state.doc.child(1).textContent).toBe(current);
     } finally { view.destroy(); before.destroy(); after.destroy(); }
   });
 
@@ -437,9 +522,15 @@ describe("the detached revision view", () => {
     const view = mount(before, after);
     try {
       await new Promise((resolve) => requestAnimationFrame(resolve));
-      expect(view.element.querySelector(".ub-chart-panel")?.textContent).toContain("42");
-      expect(view.element.querySelector(".ub-chart-panel")?.textContent).not.toContain("7");
-      expect(view.element.querySelector(".ub-revision-fields")?.textContent).toBe("Data changed: values");
+      const charts = view.element.querySelectorAll(".ub-chart-panel");
+      expect(charts).toHaveLength(2);
+      expect(charts[0]?.textContent).toContain("7");
+      expect(charts[0]?.textContent).not.toContain("42");
+      expect(charts[1]?.textContent).toContain("42");
+      expect([...view.element.querySelectorAll(".ub-revision-fields")].map((label) => label.textContent)).toEqual([
+        "Before · Data changed: values", "After · Data changed: values",
+      ]);
+      expect(view.element.querySelector(".ub-revision-source-changed")).toBeNull();
     } finally { view.destroy(); before.destroy(); after.destroy(); directory.destroy(); }
   });
 
@@ -459,10 +550,11 @@ describe("the detached revision view", () => {
     try {
       await new Promise((resolve) => requestAnimationFrame(resolve));
       const charts = view.element.querySelectorAll(".ub-chart-panel");
-      expect(charts).toHaveLength(2);
+      expect(charts).toHaveLength(3);
       expect(charts[0]?.textContent).toContain("7");
       expect(charts[0]?.getAttribute("data-state")).toBe("ready");
-      expect(charts[1]?.getAttribute("data-state")).toBe("collection-absent");
+      expect(charts[1]?.textContent).toContain("7");
+      expect(charts[2]?.getAttribute("data-state")).toBe("collection-absent");
       expect(Y.encodeStateAsUpdate(before)).toEqual(oldState);
       expect(Y.encodeStateAsUpdate(after)).toEqual(newState);
     } finally { view.destroy(); before.destroy(); after.destroy(); directory.destroy(); }

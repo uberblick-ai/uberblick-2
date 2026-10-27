@@ -6,11 +6,11 @@ import type { RevisionEntry } from "@uberblick/schema";
 import type * as Y from "yjs";
 import { revisionSurface } from "../../revision-attribution.js";
 import { jsonChangeStarts, openFoldedChange, spanningComparison } from "../../editor/json-compare-panel.js";
-import { createRevisionEditor } from "../../editor/revision-view.js";
+import { createRevisionEditor, createRevisionInline } from "../../editor/revision-view.js";
 import { setEditorMembers } from "../../editor/person-mentions.js";
 import { useWorkspaceMembers } from "../workspace-members.js";
 import { alignRevisionSides, createRevisionSplit } from "../../editor/revision-split.js";
-import type { RevisionRow, RevisionSplit } from "../../editor/revision-split.js";
+import type { RevisionRow } from "../../editor/revision-split.js";
 import { revealFoldedTarget } from "../../editor/toggle-headings.js";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import { toast } from "sonner";
@@ -29,7 +29,7 @@ import { animateRows, cancelRowMotion, morphFromLive, morphToLive, reducedMotion
 import type { HeaderMorph } from "./revision-motion.js";
 import { handleDocLinkClick } from "./doc-link-click.js";
 import { holdRevisionRow, REVISION_READING_INSET } from "./revision-anchor.js";
-import type { RevisionRowHold } from "./revision-anchor.js";
+import type { RevisionComparisonView, RevisionRowHold } from "./revision-anchor.js";
 
 export function revisionLabel(entry: RevisionEntry): string {
   const author = entry.author === null ? "Unknown author"
@@ -176,9 +176,10 @@ function spanned(row: RevisionRow | undefined): boolean {
   return row?.after.spanned === true;
 }
 
-/** Each run of consecutive changed rows is one change to step to; a JSON comparison brings its own. */
+/** Consecutive prose changes share a stop; whole visuals and JSON comparisons have their own. */
 function changeStarts(rows: readonly RevisionRow[]): number[] {
-  return rows.flatMap((row, index) => row.changed && (!rows[index - 1]?.changed || spanned(row) || spanned(rows[index - 1])) ? [index] : []);
+  return rows.flatMap((row, index) => row.changed && (!rows[index - 1]?.changed || row.separateChange || rows[index - 1]?.separateChange
+    || spanned(row) || spanned(rows[index - 1])) ? [index] : []);
 }
 
 function nextChangeTarget<T extends { top: number }>(list: readonly T[]): T | undefined {
@@ -193,7 +194,7 @@ function nextChangeTarget<T extends { top: number }>(list: readonly T[]): T | un
  */
 function ChangeNavigation({ pane, header, before, after, rows, onNavigate }: {
   pane: { current: HTMLElement | null }; header: { current: HTMLElement | null };
-  before: Editor; after: Editor; rows: readonly RevisionRow[];
+  before: Editor | undefined; after: Editor; rows: readonly RevisionRow[];
   onNavigate: () => void;
 }): ReactElement {
   const side = after.view.dom;
@@ -246,11 +247,12 @@ function ChangeNavigation({ pane, header, before, after, rows, onNavigate }: {
     // A change can span several rows under different nested toggle headings.
     for (let row = target.row; rows[row]?.changed; row += 1) {
       for (const editor of [before, after]) {
+        if (editor === undefined) continue;
         const start = editor.view.dom.querySelector<HTMLElement>(`:scope > .ub-revision-row-start[data-row="${row}"]`);
         if (start !== null) revealFoldedTarget(start);
       }
     }
-    alignRevisionSides(before.view, after.view);
+    if (before !== undefined) alignRevisionSides(before.view, after.view);
     // Revealing moves the change, and can redraw its row.
     const visible = targets();
     const revealed = visible.find((entry) => entry.element === target.element)
@@ -330,7 +332,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   // The live header this pane replaced, when a click just entered history.
   const [live] = useState(takeLiveHeader);
   const morph = useRef<HeaderMorph | null>(null);
-  const comparison = useRef<RevisionSplit | null>(null);
+  const comparison = useRef<RevisionComparisonView | null>(null);
   const heldRow = useRef<RevisionRowHold | null>(null);
   const stopHolding = useCallback((): void => { heldRow.current?.stop(); heldRow.current = null; }, []);
   const readCollapse = useEffectEvent(() => collapseUnchanged);
@@ -341,7 +343,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   const title = selection === null ? "" : getMeta(selection.after).title;
   const available = useAvailableWidth(pane, history.active);
   // The earliest revision has nothing to compare; narrow panes keep one column.
-  const split = selection?.before != null && available !== null && available >= SPLIT_MIN_WIDTH;
+  const split = selection?.before != null && history.comparisonView !== "inline" && available !== null && available >= SPLIT_MIN_WIDTH;
   // Starts before the first paint, so the outgoing content never shows under the new header.
   useLayoutEffect(() => {
     if (selection === null) return;
@@ -353,44 +355,61 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   useEffect(() => {
     if (selection === null) return;
     try {
+      const onExpand = (run: number): void => {
+        const view = comparison.current;
+        if (view === null) return;
+        stopHolding();
+        const sides = view.before === undefined ? [view.after.view.dom] : [view.before.view.dom, view.after.view.dom];
+        const previous = pane.current === null ? null : snapshotRows(sides, pane.current);
+        view.expand(run);
+        setRows(view.model.rows);
+        if (previous !== null && pane.current !== null) animateRows(sides, previous, pane.current);
+      };
+      let view: RevisionComparisonView;
+      let destroy: () => void;
       if (split && selection.before !== null && beforeHost.current !== null && afterHost.current !== null) {
-        const view = createRevisionSplit({ beforeElement: beforeHost.current, afterElement: afterHost.current,
+        const rendered = createRevisionSplit({ beforeElement: beforeHost.current, afterElement: afterHost.current,
           before: selection.before, after: selection.after, docLinks, workspaceSettings,
           folding: { collapse: readCollapse(), expanded: new Set() },
-          onExpand: (run) => {
-            stopHolding();
-            const previous = pane.current === null ? null : snapshotRows(sides, pane.current);
-            view.expand(run);
-            setRows(view.model.rows);
-            if (previous !== null && pane.current !== null) animateRows(sides, previous, pane.current);
-          } });
-        const sides = [view.before.view.dom, view.after.view.dom];
-        comparison.current = view;
-        const activate = (event: MouseEvent): void => { handleDocLinkClick(event, docLinks); };
-        for (const side of sides) side.addEventListener("click", activate);
-        setEditors([{ side: "before", editor: view.before }, { side: "after", editor: view.after }]);
-        setRows(view.model.rows);
-        return () => {
-          stopHolding();
-          comparison.current = null;
-          for (const side of sides) side.removeEventListener("click", activate);
-          setEditors([]);
-          setRows([]);
-          view.destroy();
-        };
+          onExpand });
+        view = rendered;
+        destroy = rendered.destroy;
+        setEditors([{ side: "before", editor: rendered.before }, { side: "after", editor: rendered.after }]);
+      } else {
+        if (host.current === null) return;
+        if (selection.before === null) {
+          const editor = createRevisionEditor({ element: host.current, before: null, after: selection.after, docLinks, workspaceSettings });
+          editor.setOptions({ editorProps: { attributes: { "aria-label": "Document revision" } } });
+          setEditors([{ side: "single", editor }]);
+          return () => { setEditors([]); editor.destroy(); };
+        }
+        const rendered = createRevisionInline({ element: host.current, before: selection.before, after: selection.after, docLinks, workspaceSettings,
+          folding: { collapse: readCollapse(), expanded: new Set() }, onExpand });
+        rendered.editor.setOptions({ editorProps: { attributes: { "aria-label": "Document revision" } } });
+        view = { get model() { return rendered.model; }, after: rendered.editor, expand: rendered.expand, setCollapse: rendered.setCollapse };
+        destroy = rendered.destroy;
+        setEditors([{ side: "single", editor: rendered.editor }]);
       }
-      if (host.current === null) return;
-      const editor = createRevisionEditor({ element: host.current, before: selection.before, after: selection.after, docLinks, workspaceSettings });
-      editor.setOptions({ editorProps: { attributes: { "aria-label": "Document revision" } } });
-      setEditors([{ side: "single", editor }]);
-      return () => { setEditors([]); editor.destroy(); };
+      const sides = view.before === undefined ? [view.after.view.dom] : [view.before.view.dom, view.after.view.dom];
+      comparison.current = view;
+      const activate = (event: MouseEvent): void => { handleDocLinkClick(event, docLinks); };
+      for (const side of sides) side.addEventListener("click", activate);
+      setRows(view.model.rows);
+      return () => {
+        stopHolding();
+        comparison.current = null;
+        for (const side of sides) side.removeEventListener("click", activate);
+        setEditors([]);
+        setRows([]);
+        destroy();
+      };
     } catch { setFailed(selection); }
   }, [selection, split, docLinks, workspaceSettings, stopHolding]);
   useLayoutEffect(() => {
     const view = comparison.current;
     if (view === null || pane.current === null) return;
     stopHolding();
-    const sides = [view.before.view.dom, view.after.view.dom];
+    const sides = view.before === undefined ? [view.after.view.dom] : [view.before.view.dom, view.after.view.dom];
     const previous = snapshotRows(sides, pane.current);
     const hold = header.current === null ? null : holdRevisionRow(pane.current, header.current, view);
     heldRow.current = hold;
@@ -428,7 +447,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   const predecessor = selection === null ? undefined : selection.comparedWith ?? entries?.[selection.index + 1];
   const total = entries?.length ?? 0;
   const before = editors.find((entry) => entry.side === "before")?.editor;
-  const after = editors.find((entry) => entry.side === "after")?.editor;
+  const after = editors.find((entry) => entry.side === (split ? "after" : "single"))?.editor;
   const restoreUnavailable = restoreUnavailableReason(history, writable, archived);
   const restore = async (): Promise<void> => {
     if (restoreUnavailable !== null || restoreTarget === undefined) return;
@@ -440,7 +459,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
     }
   };
   const restoreButton = <RevisionRestoreButton label={restoreLabel} unavailable={restoreUnavailable} reasonId={restoreReason} restore={restore} />;
-  return <section ref={pane} className={`ub-pane ub-page-pane ub-document-pane ub-revision-pane${split ? " ub-revision-split-pane" : ""}`}>
+  return <section ref={pane} className={`ub-pane ub-page-pane ub-document-pane ub-revision-pane${selection?.before != null ? " ub-revision-comparison-pane" : ""}${split ? " ub-revision-split-pane" : ""}`}>
     <div className="ub-column">
       {/* Stays in view while the comparison scrolls; revisions keep no tags. */}
       <header ref={header} className="ub-revision-header">
@@ -451,13 +470,13 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
         {restoreUnavailable !== null && <p id={restoreReason} className={archived || !writable ? "m-0 ub-type-small text-(--muted-foreground)" : "sr-only"}>{restoreUnavailable}</p>}
         {selection === null ? <p role="status" className="ub-history-controls ub-type-small">Loading history…</p>
           : <RevisionStatus history={history} writable={writable} />}
-        {split && before !== undefined && after !== undefined && rows.length > 0 && <>
+        {selection?.before != null && after !== undefined && rows.length > 0 && <>
           <ChangeNavigation pane={pane} header={header} before={before} after={after} rows={rows} onNavigate={stopHolding} />
           <RevisionRuler pane={pane} header={header} side={after.view.dom} rows={rows} />
         </>}
       </header>
       {selection !== null && failed === selection && <p role="status">This client cannot display this revision. Update the client and try again.</p>}
-      {selection === null ? null : split ? <div ref={body} className="ub-revision-split">
+      {selection === null ? null : split ? <div ref={body} className="ub-revision-split ub-revision-comparison">
         <div className="ub-revision-side-label">
           <span>Before · {authorName(predecessor, predecessor !== undefined && predecessor.id === entries?.[total - 1]?.id)}{namedComparison && predecessor?.name != null && <> · “{predecessor.name.text}”</>}</span>
           {comparedWith !== undefined && restoreButton}
@@ -472,7 +491,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
         <div className="ub-revision-side ub-revision-side-after">
           <div className="ub-editor-frame ub-revision-view"><div className="ub-editor" ref={afterHost} /></div>
         </div>
-      </div> : <div ref={body} className="ub-editor-frame ub-revision-view"><div className="ub-editor" ref={host} /></div>}
+      </div> : <div ref={body} className={`ub-editor-frame ub-revision-view${selection.before !== null ? " ub-revision-inline ub-revision-comparison" : ""}`}><div className="ub-editor" ref={host} /></div>}
       {editors.map(({ side, editor }) => <CardButtonControls key={side} editor={editor} canWrite={() => false} />)}
     </div>
   </section>;

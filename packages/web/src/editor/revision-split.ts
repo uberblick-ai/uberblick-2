@@ -24,37 +24,16 @@ import { GitHubLinks } from "./github-links.js";
 import { InlineIcons } from "./inline-icons.js";
 import { PersonMentions } from "./person-mentions.js";
 import { ListBlocks } from "./list-keys.js";
+import { unchangedRuns } from "./revision-rows.js";
+import type { RevisionFolding, RevisionRow, RevisionRowKind, RevisionSide } from "./revision-rows.js";
 import { chartCollections, columnWidthsCaption, copiedContent, copyNode, isColumnWidthsOnly, markTree, revisionFields, revisionPalette, revisionSchema, visibleNodes } from "./revision-view.js";
 import { CodeHighlighting } from "./syntax-highlighting.js";
 import { TerminalBlocks } from "./terminal.js";
 import { ToggleHeadings } from "./toggle-headings.js";
 import { WireframeBlocks } from "./wireframe.js";
 
-export type RevisionSide = "before" | "after";
-export type RevisionRowKind = "unchanged" | "changed" | "added" | "removed" | "folded";
-
-export interface RevisionSideCell {
-  /** Captions above the block: what kind of change, fields, data. */
-  labels: string[];
-  widthsOnly?: boolean;
-  filler: boolean;
-  /** The other side's block spans this cell. */
-  spanned?: boolean;
-}
-
-export interface RevisionRow {
-  kind: RevisionRowKind;
-  /** The row's place in the full comparison; a folded run's first row. */
-  at: number;
-  /** The heading this row shows, for fold labels. */
-  heading?: string;
-  /** A folded run: the full model's first row and how many rows it hides. */
-  fold?: { run: number; count: number };
-  /** Any visible difference: text, fields, rows, cells or data. Folding and change navigation use this. */
-  changed: boolean;
-  before: RevisionSideCell;
-  after: RevisionSideCell;
-}
+export { unchangedRuns } from "./revision-rows.js";
+export type { RevisionFolding, RevisionRow, RevisionRowKind, RevisionSide, RevisionSideCell } from "./revision-rows.js";
 
 export interface RevisionSplitModel {
   comparison: RevisionComparison;
@@ -128,29 +107,6 @@ function identified(node: PMNode, index: number): PMNode {
 
 function document(nodes: PMNode[], rows: readonly RevisionRow[]): JSONContent {
   return revisionSchema.topNodeType.create(null, Fragment.fromArray(nodes.map((node, index) => identified(node, rows[index]?.at ?? index)))).toJSON() as JSONContent;
-}
-
-export interface RevisionFolding {
-  /** Fold unchanged runs at all. */
-  collapse: boolean;
-  /** Runs shown again, by their first row. */
-  expanded: ReadonlySet<number>;
-}
-
-/**
- * Runs of at least two rows without any change, each more than one row from a
- * change; the row next to a change stays as context.
- */
-export function unchangedRuns(rows: readonly Pick<RevisionRow, "changed">[]): { start: number; end: number }[] {
-  const quiet = rows.map((row, index) => !row.changed && !rows[index - 1]?.changed && !rows[index + 1]?.changed);
-  const runs: { start: number; end: number }[] = [];
-  quiet.forEach((value, index) => {
-    if (!value) return;
-    const last = runs.at(-1);
-    if (last?.end === index - 1) last.end = index;
-    else runs.push({ start: index, end: index });
-  });
-  return runs.filter((run) => run.end > run.start);
 }
 
 function foldNode(run: number, count: number, headings: string, nodes: readonly PMNode[]): PMNode {

@@ -41,14 +41,14 @@ function measure(scroller: HTMLElement, header: HTMLElement, side: HTMLElement, 
   const scrolled = (top: number): number => top - paneTop + scroller.scrollTop;
   const starts = [...side.querySelectorAll<HTMLElement>(":scope > .ub-revision-row-start")];
   const last = [...side.querySelectorAll<HTMLElement>(":scope > .ub-revision-row-end")].at(-1);
-  const split = side.closest(".ub-revision-split");
-  if (starts.length === 0 || last === undefined || split === null) return null;
+  const comparison = side.closest(".ub-revision-comparison");
+  if (starts.length === 0 || last === undefined || comparison === null) return null;
   const tops = starts.map((start) => scrolled(start.getBoundingClientRect().top));
   const base = tops[0] ?? 0;
   const end = scrolled(last.getBoundingClientRect().bottom);
   const span = Math.max(1, end - base);
   // The track starts level with the first row while the pane is at its top.
-  const naturalBottom = scrolled(split.getBoundingClientRect().top) - (Number.parseFloat(getComputedStyle(header).marginBottom) || 0);
+  const naturalBottom = scrolled(comparison.getBoundingClientRect().top) - (Number.parseFloat(getComputedStyle(header).marginBottom) || 0);
   const gap = base - naturalBottom;
   const headerBottom = header.getBoundingClientRect().bottom - paneTop;
   const height = Math.max(40, scroller.clientHeight - headerBottom - gap - RULER_INSET);
