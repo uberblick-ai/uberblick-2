@@ -391,6 +391,13 @@ syncBuiltinESMExports();
     withDatabase(box, OTHER);
     withDatabase(box, UNRELATED);
     for (const path of replicaFiles(box).slice(1)) writeFileSync(path, "");
+    const historyHolds = `${databasePath(box)}.history-holds`;
+    mkdirSync(historyHolds);
+    writeFileSync(join(historyHolds, "abandoned-session.sqlite"), "");
+    const unrelatedHistoryHolds = `${databasePath(box, UNRELATED)}.history-holds`;
+    mkdirSync(unrelatedHistoryHolds);
+    const unrelatedHistoryHold = join(unrelatedHistoryHolds, "other-session.sqlite");
+    writeFileSync(unrelatedHistoryHold, "other workspace's hold");
     const otherProject = join(box.cwd, "other-project", ".uberblick.json");
     mkdirSync(dirname(otherProject), { recursive: true });
     writeFileSync(otherProject, JSON.stringify({ workspaceId: OTHER, hubUrl: HUB }));
@@ -398,6 +405,7 @@ syncBuiltinESMExports();
       join(box.cwd, ".uberblick.json"), otherProject,
       join(box.configHome, "uberblick", "config.json"),
       join(box.configHome, "uberblick", "credentials.json"), databasePath(box, UNRELATED),
+      unrelatedHistoryHold,
     ];
     const before = protectedPaths.map(path => readFileSync(path));
     const run = await runInProcess(["workspace", command, operand, "--yes"], box);
@@ -405,6 +413,7 @@ syncBuiltinESMExports();
     expect(run.stdout).toBe(`removed ${OTHER} from this computer\n`);
     expect(run.stderr).toBe("");
     expect(replicaFiles(box).map(path => existsSync(path))).toEqual([false, false, false, false]);
+    expect(existsSync(historyHolds)).toBe(false);
     expect(readWorkspaceHub(OTHER, box.env)).toBeUndefined();
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(HUB);
     expect(readWorkspaceHub(UNRELATED, box.env)).toBeNull();
