@@ -4,6 +4,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { renderAuthCode } from "../src/auth-code-output.js";
 import { removeTempDirs, sandbox, UB_BIN, waitUntil, type Run, type Sandbox } from "./helpers.js";
 
 const URL = "https://github.com/login/device";
@@ -93,7 +94,7 @@ process.exit(0);
 }
 
 function run(box: Sandbox, origin: string, browser: string, tty = true,
-  extraEnv: NodeJS.ProcessEnv = {}, synchronousFailure = false, interrupt = false) {
+  extraEnv: NodeJS.ProcessEnv = {}, synchronousFailure = false, interrupt = false, columns?: number) {
   const shim = join(box.cwd, "terminal.mjs");
   const trace = join(box.cwd, "opener-trace.jsonl");
   const pidRecord = join(box.cwd, "opener-pid.txt");
@@ -103,6 +104,7 @@ function run(box: Sandbox, origin: string, browser: string, tty = true,
 import { appendFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 Object.defineProperty(process.stdout, 'isTTY', { value: ${tty} });
+Object.defineProperty(process.stdout, 'columns', { value: ${columns} });
 let output = ''; const write = process.stdout.write;
 process.stdout.write = function(chunk, ...args) { output += chunk.toString(); return write.call(this, chunk, ...args); };
 const spawn = cp.spawn;
@@ -144,6 +146,25 @@ function expectStored(box: Sandbox, origin: string) {
 }
 
 describe("login browser handoff", () => {
+  it.each([
+    ["local terminal", true, 66, {}, true],
+    ["SSH terminal", true, 80, { SSH_CONNECTION: "remote connection" }, true],
+    ["narrow terminal", true, 65, {}, false],
+    ["captured output", false, 80, {}, false],
+  ] as const)("shows large letters only with enough terminal width: %s", async (_name, tty, columns, env, large) => {
+    const remote = await hub(); const box = sandbox();
+    const cli = run(box, remote.origin, "none", tty, env, false, false, columns);
+    const result = await cli.result;
+    expect(result.status, result.stderr).toBe(0);
+    const block = `\n${renderAuthCode(started.userCode).join("\n")}\n\n`;
+    expect(result.stdout).toBe(large
+      ? stdout(remote.origin).replace("code       ABCD-EFGH\n", `${block}code       ABCD-EFGH\n`)
+      : stdout(remote.origin));
+    expect(result.stderr).toBe("");
+    expect(cli.calls()).toEqual([]);
+    expectStored(box, remote.origin);
+  });
+
   it("opens once after guidance with the unclaimed notice", async () => {
     const remote = await hub(started, true, true);
     const box = sandbox(); const browser = recorder(box);
