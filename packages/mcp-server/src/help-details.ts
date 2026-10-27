@@ -512,7 +512,10 @@ export const toolHelpDetails = {
     "missing (gap or connect, default gap) control presentation. Optional layout is overlay or panels, default overlay. " +
     "panels draws one compact line or bar chart per y series in mapping order, in a responsive grid; each panel shows its label " +
     "and latest plotted value. Panels share the x range and share y ranges within each unit group. " +
-    "layout is invalid for table mappings. Each y series optionally accepts range [min, max], exactly two finite numbers " +
+    "Optional height is a whole number from 100 to 600 pixels. In overlay it sizes the drawing, including axes and legend, " +
+    "excluding the caption row and notices; in panels it sizes each plot below its label and latest value. " +
+    "Without height, overlay stays at 2:1 between 200 and 300 pixels, and each panel plot stays at 150 pixels. " +
+    "layout and height are invalid for table mappings. Each y series optionally accepts range [min, max], exactly two finite numbers " +
     "with min lower than max, and reference, one finite number. In overlay, both apply to the series' left or right value axis. " +
     "In panels, range applies to the series' unit group and reference draws only on that series' own panel. " +
     "A range is a minimum span: the axis covers every declared range, and plotted or reference values outside it widen the axis. " +

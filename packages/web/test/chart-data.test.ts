@@ -34,6 +34,27 @@ function ready(data: DocData, config = mapping): ChartReady {
 }
 
 describe("chart mapping", () => {
+  it.each(["overlay", "panels"] as const)("accepts optional whole-pixel heights in %s without adding a default", (layout) => {
+    for (const height of [100, 150, 160, 300, 600]) {
+      expect(parseChartConfig(JSON.stringify({ ...mapping, layout, height })))
+        .toMatchObject({ ok: true, config: { height, layout } });
+    }
+    const parsed = parseChartConfig(JSON.stringify({ ...mapping, layout }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.config).not.toHaveProperty("height");
+  });
+
+  it.each([99, 601, -100, 100.5, "160", null, true, [], {}])("refuses unsupported chart height %j", (height) => {
+    const source = JSON.stringify({ ...mapping, height });
+    expect(prepareChart(source, null)).toMatchObject({ status: "invalid-configuration" });
+    expect(JSON.parse(source).height).toEqual(height);
+  });
+
+  it("refuses a non-finite JSON height", () => {
+    const source = JSON.stringify(mapping).replace('"version":1', '"version":1,"height":1e400');
+    expect(prepareChart(source, null).status).toBe("invalid-configuration");
+  });
+
   it.each(["overlay", "panels"] as const)("defaults absent series types in a detached %s view", (layout) => {
     const source = JSON.stringify({ ...mapping, layout, y: [{ field: "y" }, { field: "z", type: "bar" }] });
     const parsed = parseChartConfig(source);
