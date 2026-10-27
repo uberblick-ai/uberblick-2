@@ -217,6 +217,7 @@ export class HistoryCache {
         return next;
       }, normalized);
       this.cleanObsolete(token);
+      this.cleanPriorFormats(token);
       this.collectGarbage(token);
       return { hub: token.hub, workspace: token.workspace, account: token.account, generation: token.generation };
     });
@@ -226,7 +227,19 @@ export class HistoryCache {
     for (const table of TABLES) this.deleteRows(token, table, "generation <> ?", [token.generation]);
   }
 
-  private deleteRows(token: HistoryCacheToken, table: typeof TABLES[number], where: string,
+  private cleanPriorFormats(token: HistoryCacheToken): void {
+    const tables = this.read(token, db => db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all());
+    const legacy = new Set(TABLES.map(table => table.replace("history_v1_", "history_")));
+    for (const { name } of tables) {
+      if (typeof name !== "string") continue;
+      const version = /^history_v([0-9]+)_(?:catalog_chunks|snapshot_chunks|snapshots|pages|holds|deleted)$/.exec(name);
+      if (legacy.has(name) || (version !== null && Number(version[1]) < HISTORY_CACHE_FORMAT)) {
+        this.deleteRows(token, name, "1", []);
+      }
+    }
+  }
+
+  private deleteRows(token: HistoryCacheToken, table: string, where: string,
     values: SQLInputValue[], purge = false): void {
     for (;;) {
       const row = this.read(token, db => db.prepare(`SELECT rowid FROM ${table} WHERE ${where} LIMIT 1`).get(...values), purge);

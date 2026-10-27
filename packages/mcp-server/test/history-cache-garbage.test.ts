@@ -150,9 +150,14 @@ describe("history staging cleanup", () => {
     const test = await fixture();
     test.database.exec("DROP TABLE history_v1_pages; DROP TABLE history_v1_catalog_chunks; DROP TABLE history_v1_snapshots; DROP TABLE history_v1_snapshot_chunks; DROP TABLE history_v1_holds; DROP TABLE history_v1_deleted");
     test.database.exec("CREATE TABLE history_pages (incompatible TEXT); CREATE TABLE history_snapshots (incompatible TEXT); CREATE TABLE history_catalog_chunks (incompatible TEXT); CREATE TABLE history_snapshot_chunks (incompatible TEXT)");
+    test.database.exec("INSERT INTO history_pages VALUES ('old metadata'); INSERT INTO history_snapshots VALUES ('old snapshot'); INSERT INTO history_catalog_chunks VALUES ('old catalog'); INSERT INTO history_snapshot_chunks VALUES ('old chunk')");
+    test.database.exec("CREATE TABLE history_v0_snapshot_chunks (old_layout BLOB); INSERT INTO history_v0_snapshot_chunks VALUES (X'0102')");
     test.database.prepare("UPDATE history_cache SET format = ?").run(HISTORY_CACHE_FORMAT - 1);
     const next = ready(test.cache.open(test.stamp));
     expect(next.generation).not.toBe(test.token.generation);
+    for (const table of ["history_pages", "history_snapshots", "history_catalog_chunks", "history_snapshot_chunks", "history_v0_snapshot_chunks"]) {
+      expect(test.database.prepare(`SELECT * FROM ${table}`).all()).toEqual([]);
+    }
     catalog(test.cache, next, [entry("one")]);
     ready(test.cache.putSnapshot(next, PAGE, "one", CHECKSUM, new Uint8Array([1])));
     expect(ready(test.cache.readSnapshot(next, PAGE, "one"))?.state).toEqual(Buffer.from([1]));
