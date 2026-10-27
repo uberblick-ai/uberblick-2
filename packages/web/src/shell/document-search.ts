@@ -1,4 +1,4 @@
-/** The browser-side client for `ub open`'s local search and status endpoints. */
+/** The browser-side client for `ub open`'s local search, status and update endpoints. */
 
 import { mintHubAuthMessage } from "../collab/rooms.js";
 import { localSessionHeaders } from "../collab/local-session.js";
@@ -9,6 +9,13 @@ export interface DocumentSearchStatus {
   /** Why this serving run cannot share local edits; null when it can. */
   readonly notSharedReason?: NotSharedReason | null;
   readonly replicaUnavailable?: ReplicaUnavailable | null;
+}
+
+/** A newer client than the one serving this page, offered with its release notes. */
+export interface AvailableUpdate {
+  readonly current: string;
+  readonly latest: string;
+  readonly notesUrl: string;
 }
 
 export type ReplicaUnavailable = "replica-held" | "replica-quarantined" | "replica-failed";
@@ -33,6 +40,7 @@ function isNotSharedReason(value: unknown): value is NotSharedReason {
 export interface DocumentSearchClient {
   status(signal: AbortSignal): Promise<DocumentSearchStatus>;
   search(query: string, signal: AbortSignal): Promise<string[]>;
+  update(signal: AbortSignal): Promise<AvailableUpdate | null>;
 }
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -80,6 +88,16 @@ function searchStatus(body: Record<string, unknown>): DocumentSearchStatus {
   };
 }
 
+/** An unusable answer offers nothing: the notice is optional, never an error. */
+function availableUpdate(body: Record<string, unknown>): AvailableUpdate | null {
+  const update = object(body.update);
+  if (update === null) return null;
+  const { current, latest, notesUrl } = update;
+  return typeof current === "string" && typeof latest === "string" &&
+    typeof notesUrl === "string" && notesUrl.startsWith("https://")
+    ? { current, latest, notesUrl } : null;
+}
+
 function searchHits(body: Record<string, unknown>): string[] {
   // Filtering happens after this read; a truncated answer cannot establish
   // that a matching document is absent.
@@ -123,5 +141,6 @@ export function createDocumentSearchClient(
   return {
     status: async (signal) => searchStatus(await get("/api/status", signal)),
     search: async (query, signal) => searchHits(await get(`/api/search?q=${encodeURIComponent(query)}`, signal)),
+    update: async (signal) => availableUpdate(await get("/api/update", signal)),
   };
 }

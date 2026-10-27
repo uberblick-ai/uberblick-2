@@ -212,6 +212,7 @@ function localSearch(answers: Readonly<Record<string, readonly string[]>>) {
   const client = {
     search: vi.fn(async (query: string) => [...(answers[query] ?? [])]),
     status: async () => ({ caughtUp: true, rooms: {} }),
+    update: async () => null,
   };
   vi.spyOn(config, "localServing").mockReturnValue(serving);
   vi.spyOn(documentSearch, "createDocumentSearchClient").mockReturnValue(client);
