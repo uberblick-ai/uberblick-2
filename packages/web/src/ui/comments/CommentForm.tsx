@@ -19,6 +19,7 @@ export function CommentForm({
   autoFocus = true,
   hidden = false,
   compact = false,
+  showCancel = !compact,
   onFocus,
   onSubmit,
   onCancel,
@@ -35,6 +36,7 @@ export function CommentForm({
   autoFocus?: boolean;
   hidden?: boolean;
   compact?: boolean;
+  showCancel?: boolean;
   onFocus?: (() => void) | undefined;
   /**
    * Submit trimmed nonempty text. A refused write returns false and preserves
@@ -69,8 +71,8 @@ export function CommentForm({
       />
       {error != null && error !== "" && <p className="ub-comment-error">{error}</p>}
       <div className="ub-comment-buttons">
-        {!compact &&
-        <Button variant="tool" size="custom" type="button" onClick={onCancel}>
+        {showCancel &&
+        <Button variant="tool" size="custom" type="button" className={compact ? "ub-comment-edit-cancel" : undefined} onClick={onCancel}>
           Cancel
         </Button>}
         <Button variant={compact ? "plain" : "tool"} size="custom"

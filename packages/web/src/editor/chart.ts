@@ -11,23 +11,29 @@ import {
   Chart, LineController, LineElement, PointElement, BarController, BarElement, LinearScale, Legend, Tooltip,
 } from "chart.js";
 import type { ChartConfiguration, ChartDataset, Scale } from "chart.js";
-import type { DocData } from "@uberblick/schema";
+import { chartViewType, prepareChartView } from "@uberblick/schema";
+import type { ChartView, DocData } from "@uberblick/schema";
 import type * as Y from "yjs";
 import {
-  prepareChart, formatChartX, formatChartNumber, chartAccessibleName,
+  parseChartConfig, formatChartX, formatChartNumber, chartAccessibleName,
   CHART_RECORD_LIMIT, chartAccessibleDescription, chartDiagnosticsText,
+  CHART_MIN_HEIGHT, CHART_MAX_HEIGHT,
 } from "./chart-data.js";
 import type { ChartReady } from "./chart-data.js";
 import {
   blockCaption, carriesComment, chartChrome, chromeFilters, copyButton, openSource, sourceButton, sourceEditingPlugin,
 } from "./source-chrome.js";
-import { prepareTable, tableDiagnosticsText } from "./table-data.js";
+import { tableDiagnosticsText } from "./table-data.js";
 import { dataTableView } from "./table-view.js";
 import { bindDocView } from "./view-bindings.js";
 import { observationEndpoints, observationTicks } from "./chart-ticks.js";
 import { chartAxes, chartPanelRanges, chartValueRanges, chartPointRadius, formatChartTick } from "./chart-presentation.js";
 import type { ChartAxes, ChartPanelRange } from "./chart-presentation.js";
 import { DRAW_ATTRIBUTES, recordDraw } from "./render-state.js";
+import { endUndoCapture } from "./blocks.js";
+import { blockResize } from "./block-resize.js";
+import { chartHeightEdits } from "./chart-height.js";
+import { chartHeightField } from "./chart-height-field.js";
 
 // Both axes are linear. Epoch milliseconds plus Intl date labels require no
 // date adapter. No auto registry, decimator, transform or chart plugin package.
@@ -301,7 +307,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     let dirty = true;
     let snapshot: DocData | null = null;
     let tableSource = false;
-    let prepared: ReturnType<typeof prepareChart> | ReturnType<typeof prepareTable> | null = null;
+    let prepared: ChartView["projection"] | null = null;
     const dom = chartChrome.root();
     const contentDOM = chartChrome.content();
     const panel = document.createElement("div");
@@ -317,13 +323,20 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     openButton.className = "ub-chart-open";
     const screen = document.createElement("div");
     screen.className = "ub-chart-screen";
+    const handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "ub-chart-resize";
+    handle.setAttribute("aria-label", "Resize chart");
+    handle.tabIndex = -1;
+    handle.hidden = true;
+    handle.addEventListener("mousedown", event => event.preventDefault());
     const canvas = document.createElement("canvas");
     canvas.setAttribute("role", "img");
     const description = document.createElement("p");
     description.className = "ub-chart-description ub-sr-only";
     description.id = `chart-description-${crypto.randomUUID()}`;
     canvas.setAttribute("aria-describedby", description.id);
-    screen.append(canvas);
+    screen.append(canvas, handle);
     const table = dataTableView();
     table.element.hidden = true;
     const message = document.createElement("p");
@@ -343,14 +356,66 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     panel.append(screen, table.element, description, message, diagnostics, notice, probe);
     const copy = copyButton(() => current.textContent);
     header.actions.append(copy.element, openButton);
-    dom.append(header.row, panel, footer, contentDOM);
+    const fields = chartHeightField(saveHeight);
+    dom.append(header.row, panel, footer, fields.element, contentDOM);
+    const coarse = typeof matchMedia === "function" ? matchMedia("(pointer: coarse)") : null;
+    const storedConfig = () => {
+      const parsed = parseChartConfig(current.textContent);
+      return parsed.ok ? parsed.config : null;
+    };
+    const showHeight = (height: number | undefined): void => {
+      screen.classList.toggle("ub-chart-sized", height !== undefined);
+      if (height === undefined) screen.style.removeProperty("--chart-height");
+      else screen.style.setProperty("--chart-height", `${height}px`);
+    };
+    const restoreHeight = (): void => showHeight(storedConfig()?.height);
+    const resize = blockResize(handle, {
+      min: CHART_MIN_HEIGHT, max: CHART_MAX_HEIGHT,
+      height: () => storedConfig()?.height ?? (drawnLayout === "panels" ? 150 : screen.getBoundingClientRect().height),
+      show: showHeight, restore: restoreHeight, commit: saveHeight,
+      rows: () => Math.max(1, new Set(seriesPanels.map(target => target.header.getBoundingClientRect().top)).size),
+    });
+    const syncControls = (): void => {
+      const config = storedConfig();
+      const enabled = editor.isEditable && panel.dataset.state === "ready" && !tableSource && config !== null;
+      handle.hidden = !enabled || coarse?.matches === true;
+      resize.setDisabled(handle.hidden);
+      fields.element.hidden = !enabled;
+      fields.update(config?.height);
+      if (!resize.isDragging()) restoreHeight();
+    };
+    function saveHeight(height: number | undefined): void {
+      if (!editor.isEditable || panel.dataset.state !== "ready" || tableSource) return;
+      const at = getPos();
+      if (at === undefined) return;
+      const { state } = editor;
+      const node = state.doc.nodeAt(at);
+      if (node?.type !== current.type || node.attrs.id !== current.attrs.id) return;
+      const edits = chartHeightEdits(node.textContent, height);
+      if (edits === null || edits.length === 0) return;
+      const transaction = state.tr;
+      for (const edit of edits) {
+        const from = at + 1 + edit.from;
+        const to = at + 1 + edit.to;
+        // A new member must not inherit an adjacent comment or the caret's
+        // stored marks. Replaced values retain their own source marks.
+        const marks = from === to ? [] : transaction.doc.resolve(from).marksAcross(transaction.doc.resolve(to)) ?? [];
+        if (edit.text === "") transaction.delete(from, to);
+        else transaction.replaceWith(from, to, state.schema.text(edit.text, marks));
+      }
+      endUndoCapture(state);
+      editor.view.dispatch(transaction);
+      endUndoCapture(editor.state);
+    }
+    // Noneditable fields must not leave WebKit's native selection in the source.
+    fields.element.addEventListener("focusin", () => dom.ownerDocument.getSelection()?.removeAllRanges());
 
     const releaseChart = (): void => {
       for (const instance of instances) instance.destroy();
       instances = [];
       drawnLayout = null;
       seriesPanels = [];
-      screen.replaceChildren(canvas);
+      screen.replaceChildren(canvas, handle);
       screen.classList.remove("ub-chart-panels");
       screen.removeAttribute("role");
       screen.removeAttribute("aria-label");
@@ -367,8 +432,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
       let succeeded = false;
       try {
         if (dirty || prepared === null || snapshot !== data) {
-          try { tableSource = JSON.parse(current.textContent)?.type === "table"; }
-          catch { tableSource = false; }
+          tableSource = chartViewType(current.textContent) === "table";
         }
         const view = tableSource ? "table" : "line";
         if (dom.dataset.view !== view) dom.dataset.view = view;
@@ -385,7 +449,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         openButton.setAttribute("aria-label", tableSource ? "Open table source" : "Open chart source");
         if (readError !== undefined) throw readError;
         if (dirty || prepared === null || snapshot !== data) {
-          prepared = tableSource ? prepareTable(current.textContent, data) : prepareChart(current.textContent, data);
+          prepared = prepareChartView(current.textContent, data).projection;
           snapshot = data;
           dirty = false;
         }
@@ -394,7 +458,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           result.config.limit !== undefined && result.config.limit <= CHART_RECORD_LIMIT);
         panel.dataset.state = result.status;
         if (result.status !== "ready") {
-          table.render(result);
+          table.clear();
           text(diagnostics, tableSource ? tableDiagnosticsText(result) : chartDiagnosticsText(result));
           releaseChart();
           screen.hidden = true;
@@ -446,8 +510,10 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
               screen.append(element);
               return { header, canvas: seriesCanvas };
             });
+            screen.append(handle);
           }
         }
+        if (!resize.isDragging()) showHeight(config.height);
         (layout === "panels" ? screen : canvas).setAttribute("aria-label", chartAccessibleName(config));
         const colors = getComputedStyle(probe);
         const dark = document.documentElement.dataset.theme === "dark" ||
@@ -488,6 +554,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         panel.dataset.state = "collection-unusable";
         text(message, `Chart unavailable: ${error instanceof Error ? error.message : "Rendering failed"}`);
       } finally {
+        syncControls();
         recordDraw(dom, { type: "chart", text: current.textContent }, dataRev, succeeded);
       }
     };
@@ -501,10 +568,15 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     // Reuse the shared frame and snapshot; a removed view schedules nothing.
     void document.fonts?.ready.then(schedule);
 
-    screen.addEventListener("mousedown", open);
+    const openDrawing = (event: Event): void => { if (event.target !== handle) open(event); };
+    screen.addEventListener("mousedown", openDrawing);
+    coarse?.addEventListener("change", syncControls);
+    editor.on("transaction", syncControls);
+    editor.on("update", syncControls);
     const syncChrome = (): void => {
       chartChrome.sync(current, dom);
       dom.setAttribute("data-annotated", String(carriesComment(current)));
+      syncControls();
     };
     syncChrome();
     schedule();
@@ -524,14 +596,19 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         return true;
       },
       // The derived root presentation is chrome too, never content to reparse.
-      ...chromeFilters(dom, [header.row, panel, footer], ["data-view", ...DRAW_ATTRIBUTES]),
+      ...chromeFilters(dom, [header.row, panel, footer, fields.element], ["data-view", ...DRAW_ATTRIBUTES]),
       destroy: () => {
         destroyed = true;
         binding.destroy();
+        resize.destroy();
+        fields.destroy();
         releaseChart();
         theme.disconnect();
         appearance?.removeEventListener("change", schedule);
-        screen.removeEventListener("mousedown", open);
+        screen.removeEventListener("mousedown", openDrawing);
+        coarse?.removeEventListener("change", syncControls);
+        editor.off("transaction", syncControls);
+        editor.off("update", syncControls);
       },
     };
   };

@@ -1075,6 +1075,9 @@ body {
 .ub-thread-comment { display: flex; flex-direction: column; gap: 0.35rem; }
 .ub-thread-comment + .ub-thread-comment { border-top: 1px solid var(--border); padding-top: 0.5rem; }
 .ub-thread-text { cursor: text; }
+.ub-comment-edit { align-self: flex-end; padding: 0.25rem; opacity: 0; pointer-events: none; }
+.ub-thread-comment:hover .ub-comment-edit,
+.ub-thread-comment:focus-within .ub-comment-edit { opacity: 1; pointer-events: auto; }
 .ub-thread-control { opacity: 0; pointer-events: none; }
 .ub-thread:hover .ub-thread-control,
 .ub-thread:focus-within .ub-thread-control,
@@ -1097,7 +1100,8 @@ body {
 .ub-comment-send:disabled { color: var(--muted-foreground); opacity: 0.4; }
 .ub-resolved-toggle { padding: 0.5rem 0; }
 @media (any-pointer: coarse) {
-  .ub-thread-resolve, .ub-comment-send, .ub-resolved-toggle { min-width: 44px; min-height: 44px; }
+  .ub-thread-resolve, .ub-comment-send, .ub-resolved-toggle, .ub-comment-edit, .ub-comment-edit-cancel { min-width: 44px; min-height: 44px; }
+  .ub-thread-focused .ub-comment-edit { opacity: 1; pointer-events: auto; }
   .ub-comment-form-compact .ub-comment-input { min-height: 44px; }
 }
 
@@ -1637,6 +1641,7 @@ h6.ub-heading {
 .ub-chart-panel { color: var(--prose-text); }
 .ub-chart-title { margin: 0; color: var(--prose-text); font-weight: 500; }
 .ub-chart-screen { position: relative; width: 100%; aspect-ratio: 2 / 1; min-height: 200px; max-height: 300px; }
+.ub-chart-screen.ub-chart-sized:not(.ub-chart-panels) { height: var(--chart-height); aspect-ratio: auto; min-height: 0; max-height: none; }
 .ub-chart-panels {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
@@ -1654,7 +1659,20 @@ h6.ub-heading {
   font: var(--type-small-size)/var(--type-small-leading) var(--font-sans);
 }
 .ub-chart-series-header strong { font-size: var(--type-h3-size); line-height: var(--type-h3-leading); font-weight: 600; }
-.ub-chart-series-plot { position: relative; height: 150px; }
+.ub-chart-series-plot { position: relative; height: var(--chart-height, 150px); }
+.ub-chart-resize { position: absolute; bottom: 0; left: 0; display: block; width: 100%; height: 12px; padding: 0; border: 0; background: transparent; color: transparent; cursor: ns-resize; touch-action: none; opacity: 0; }
+.ub-chart:is(:hover, :focus-within) .ub-chart-resize { opacity: 1; }
+.ub-chart-resize::after { content: ""; display: block; width: 3rem; height: 3px; margin: auto; border-radius: 2px; background: var(--muted-foreground); }
+.ub-chart .ub-chart-resize[hidden], .ub-chart .ub-chart-height-fields[hidden] { display: none; }
+.ub-chart-height-fields { display: none; }
+.ub-chart-height-fields form, .ub-chart-height-fields label { display: grid; gap: 0.5rem; }
+.ub-chart-height-fields label { font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans); }
+.ub-chart-height-fields [role="alert"] { color: var(--destructive); }
+@media (pointer: coarse) {
+  .ub-chart-resize { display: none; }
+  .ub-chart-editing > .ub-chart-height-fields:not([hidden]),
+  .ub-chart[data-annotated="true"] > .ub-chart-height-fields:not([hidden]) { display: block; margin-bottom: 0.5rem; }
+}
 /* Generated tables keep their existing footer controls outside block chrome. */
 .ub-chart-footer > .ub-chart-open,
 .ub-chart-footer > .ub-copy {

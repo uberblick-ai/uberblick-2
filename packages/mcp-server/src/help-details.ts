@@ -59,6 +59,9 @@ export const toolHelpDetails = {
     "creates a nested ordered item. " +
     "Figma seeds take the :::figma body without delimiters, as insert_block does; invalid_figma refuses " +
     "before creating anything. See markdown for keys, accepted links and normalization. " +
+    "Chart seeds return a `chart` summary beside each block's id and rev, using this replica's current data. " +
+    "A new document has no data yet: a valid mapping reports collection-absent, and invalid JSON reports " +
+    "invalid-configuration. These are warnings that leave creation applied. See data for summary fields. " +
     "Optional `tldr` supplies a regular document's person-facing summary under set_metadata rules and limit. " +
     "Before creating a decision topic, consult [When to create a decision record](uberblick://help/decisions). " +
     "For decision answer guidance, see [Decision records](uberblick://help/decisions). " +
@@ -351,6 +354,10 @@ export const toolHelpDetails = {
   edit_block:
     "Replace one block's text by diff-and-splice: only the characters that actually changed are touched, so a " +
     "concurrent human edit elsewhere in the block survives.\n\n" +
+    "Editing a chart also returns a `chart` summary beside the block's id and rev, using the web's projection " +
+    "of this replica's current document data. It reports status, counts and warnings; a ready line mapping " +
+    "includes its first and last x, with no other record values. Warnings and summary failures never refuse " +
+    "or roll back the edit, or change its durability result. See data for the full summary contract.\n\n" +
     "For an existing list item, optional `list` (`bullet` or `ordered`) and `indent` (integer 0–3) change " +
     "its style and depth in place, together with a text edit or alone. To re-indent without changing text, " +
     "pass the same read text as `old_text` and `new_text`, the read `rev`, and the new `indent`. " +
@@ -459,6 +466,10 @@ export const toolHelpDetails = {
     "Insert the ordered, nonempty `blocks` array consecutively after `after_block_id`, or at the top " +
     "when it is omitted. Each entry has the same shape as a `create_doc` seed; a single block uses a " +
     "one-entry array. The answer's `blocks` lists the inserted blocks in order, each with id and rev. " +
+    "Each chart entry also has a `chart` summary of the web's projection of this replica's current data: " +
+    "status, counts and warnings, plus first and last x for ready line mappings. It returns no other record values; " +
+    "warnings and summary failures never refuse or roll back the batch or change its durability result. " +
+    "See data for the summary fields. " +
     "Every entry is checked before the live write. A refusal retains its error code, gives the " +
     "1-based `entry_index` in both the message and structured detail, says what to do next and that " +
     "nothing was written. Call-level refusals, such as an unknown anchor or a content lock, have no " +
@@ -512,7 +523,10 @@ export const toolHelpDetails = {
     "missing (gap or connect, default gap) control presentation. Optional layout is overlay or panels, default overlay. " +
     "panels draws one compact line or bar chart per y series in mapping order, in a responsive grid; each panel shows its label " +
     "and latest plotted value. Panels share the x range and share y ranges within each unit group. " +
-    "layout is invalid for table mappings. Each y series optionally accepts range [min, max], exactly two finite numbers " +
+    "Optional height is a whole number from 100 to 600 pixels. In overlay it sizes the drawing, including axes and legend, " +
+    "excluding the caption row and notices; in panels it sizes each plot below its label and latest value. " +
+    "Without height, overlay stays at 2:1 between 200 and 300 pixels, and each panel plot stays at 150 pixels. " +
+    "layout and height are invalid for table mappings. Each y series optionally accepts range [min, max], exactly two finite numbers " +
     "with min lower than max, and reference, one finite number. In overlay, both apply to the series' left or right value axis. " +
     "In panels, range applies to the series' unit group and reference draws only on that series' own panel. " +
     "A range is a minimum span: the axis covers every declared range, and plotted or reference values outside it widen the axis. " +

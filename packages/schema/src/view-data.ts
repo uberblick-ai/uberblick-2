@@ -1,6 +1,8 @@
 /** Shared read-only binding rules for document-owned data views. */
-import { DATA_LIMITS, validateCollectionSchema } from "@uberblick/schema";
-import type { DataCollection, DataSchema, DocData, JSONObject } from "@uberblick/schema";
+import { DATA_LIMITS } from "./data.js";
+import { validateCollectionSchema } from "./data-schema.js";
+import type { DataCollection, DocData } from "./data.js";
+import type { DataSchema, JSONObject } from "./data-schema.js";
 
 export function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

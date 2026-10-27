@@ -44,12 +44,15 @@ Product intent is read, not inferred from the issue text: read the corpus the
 issue's Pointers cite wherever the change touches its product meaning, under
 [AGENTS.md's read rules](../../AGENTS.md#read-for-the-action). The pull request's `Corpus update` is part of the change: search the corpus
 for each changed command, tool or screen by name; a missing rewrite for a claim
-the change makes wrong or for behavior no page describes, one that misstates
-the change, or one that removes intent the code does not yet deliver, is a
-finding. So is a rewrite that breaks a rule in the `Writing pages` guidance
-page, found through the [corpus writing pointer](corpus-writing.md): for
-example, a fact written on a page that doesn't own it, or a page grown past
-the reshape signs without being reshaped.
+the change makes wrong or for a product decision the issue carries that no page
+states, one that misstates the change, or one that removes intent the code does
+not yet deliver, is a finding. So is a rewrite that breaks the
+[corpus-writing.md agent-loop rules](corpus-writing.md#in-the-agent-loop) or the
+`Writing pages` guidance page they point to: for example, a fact written on a
+page that doesn't own it, or screen or implementation description outside a
+feature page's notes instead of what a person can rely on. Surface presentation
+and decided layout behavior on their owning surface or dedicated layout page
+remain allowed under `Writing pages`.
 
 A corrections review asks a narrower question: for each finding id the
 revision lists, does the corrected head resolve it, or is the implementer's

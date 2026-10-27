@@ -2,6 +2,8 @@
 import { tableCellFormatter, tableAccessibleName, sortTableRows } from "./table-data.js";
 import type { TableCell, TableColumnMapping, TableProjection, TableReady } from "./table-data.js";
 
+type TableViewProjection = TableReady | Pick<Exclude<TableProjection, TableReady>, "status" | "message">;
+
 function renderCell(cell: HTMLTableCellElement, value: TableCell, format: TableColumnMapping["format"] | undefined): void {
   if (cell.dataset.state !== value.state) cell.dataset.state = value.state;
   let content = cell.firstElementChild as HTMLElement | null;
@@ -32,7 +34,7 @@ function renderCell(cell: HTMLTableCellElement, value: TableCell, format: TableC
 
 export function dataTableView(): {
   element: HTMLElement;
-  render: (projection: TableProjection) => void;
+  render: (projection: TableViewProjection) => void;
   clear: () => void;
   resetSort: () => void;
 } {
@@ -60,7 +62,7 @@ export function dataTableView(): {
     body.replaceChildren();
     rendered.clear();
   };
-  const render = (next: TableProjection): void => {
+  const render = (next: TableViewProjection): void => {
     element.hidden = next.status !== "ready";
     if (next.status !== "ready") {
       clear();

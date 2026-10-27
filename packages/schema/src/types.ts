@@ -296,6 +296,8 @@ export interface AnnotationComment extends Partial<CommentAttribution> {
   text: string;
   /** ISO-8601 timestamp. */
   createdAt: string;
+  /** ISO-8601 timestamp of the latest edit, when present and valid. */
+  editedAt?: string;
 }
 
 /**

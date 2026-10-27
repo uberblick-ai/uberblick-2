@@ -59,6 +59,13 @@ async function avatarStubs(page: Page): Promise<void> {
   });
 }
 
+async function ownAccount(page: Page): Promise<void> {
+  await avatarStubs(page);
+  await page.route("**/api/account", (route) => route.fulfill({
+    json: { state: "signed-in", handle: "AVATAR-success" },
+  }));
+}
+
 async function revealed(card: Locator, value: "0" | "1"): Promise<void> {
   for (const control of await card.locator(".ub-thread-control").all()) {
     await expect(control).toHaveCSS("opacity", value);
@@ -306,6 +313,127 @@ test("comment cards reveal quiet controls through hover, keyboard and selection 
     await page.keyboard.press("Enter");
     await expect(second).toHaveAttribute("aria-current", "true");
     await expect(page.locator(`[data-comment-thread="${data.second}"]`)).toHaveAttribute("tabindex", "0");
+  } finally { data.close(); }
+});
+
+test("your comment exposes a quiet Edit action and keyboard saves and cancels in place", async ({ browser }) => {
+  const data = await fixture();
+  try {
+    const page = await openApp(browser, `/${harness().workspace}/${data.uuid}`, {
+      contextOptions: { viewport: { width: 1600, height: 1000 }, hasTouch: false, isMobile: false, reducedMotion: "reduce" },
+      beforeNavigate: ownAccount,
+    });
+    const card = page.locator(`#ub-thread-${data.first} .ub-thread`);
+    const opening = card.locator(".ub-thread-comment").first();
+    const edit = opening.getByRole("button", { name: "Edit", exact: true });
+    await expect(card.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
+    await card.locator(".ub-thread-text").first().click();
+    await expect(card).toHaveAttribute("aria-current", "true");
+    await expect(card.getByRole("button", { name: "Edit", exact: true })).toHaveCount(1);
+    await page.mouse.move(0, 0);
+    await expect(edit).toHaveCSS("opacity", "0");
+    await opening.hover();
+    await expect(edit).toHaveCSS("opacity", "1");
+    await page.mouse.move(0, 0);
+    await opening.locator(".ub-thread-select").focus();
+    await expect(edit).toHaveCSS("opacity", "1");
+    await page.keyboard.press("Tab");
+    await expect(edit).toBeFocused();
+    await page.keyboard.press("Enter");
+    const field = opening.getByPlaceholder("Edit comment…");
+    await expect(field).toBeFocused();
+    await expect(field).toHaveValue("Opening conversation");
+    await field.fill("An abandoned correction");
+    await field.press("Escape");
+    await expect(field).toHaveCount(0);
+    await expect(opening.locator(".ub-thread-text")).toHaveText("Opening conversation");
+    await expect(card).toHaveAttribute("aria-current", "true");
+    await expect(opening.locator(".ub-comment-edited")).toHaveCount(0);
+    await edit.focus();
+    await page.keyboard.press("Enter");
+    await field.fill("Edited opening");
+    await field.press("Enter");
+    await expect(field).toHaveCount(0);
+    await expect(card.locator(".ub-thread-text")).toHaveCount(2);
+    await expect(opening.locator(".ub-thread-text")).toContainText("Edited opening");
+    await expect(card.locator(".ub-thread-text").last()).toHaveText("A considered reply");
+    await expect(opening.getByRole("img", { name: "via Claude" })).toBeVisible();
+    const marker = opening.locator(".ub-comment-edited");
+    await expect(marker).toHaveText("(edited)");
+    const editedAt = await marker.getAttribute("datetime");
+    expect(Number.isFinite(Date.parse(editedAt ?? ""))).toBe(true);
+    await expect(opening.locator(".ub-thread-byline time")).toHaveAttribute("datetime", editedAt ?? "");
+    await marker.hover();
+    await expect(page.getByRole("tooltip")).toHaveText(await marker.getAttribute("title") ?? "");
+    await edit.focus();
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      const paint = await renderedText(page, `#ub-thread-${data.first} .ub-comment-edit`);
+      const markerPaint = await renderedText(page, `#ub-thread-${data.first} .ub-comment-edited`);
+      expect(paint.length).toBeGreaterThan(0);
+      expect(markerPaint.length).toBeGreaterThan(0);
+      for (const reading of [...paint, ...markerPaint]) {
+        expect(reading.ratio, `${colorScheme}: ${reading.where}`).toBeGreaterThanOrEqual(4.5);
+      }
+      const inline = await marker.evaluate((node) => {
+        const text = node.parentElement?.firstChild;
+        if (text === null || text === undefined) throw new Error("e2e: edited comment needs text before its marker");
+        const range = node.ownerDocument.createRange();
+        range.selectNodeContents(text);
+        const before = range.getBoundingClientRect();
+        const marker = node.getBoundingClientRect();
+        const probe = node.ownerDocument.createElement("span");
+        probe.style.color = "var(--muted-foreground)";
+        node.ownerDocument.body.append(probe);
+        const muted = getComputedStyle(probe).color;
+        probe.remove();
+        return { after: marker.left >= before.right - 1, sameRow: Math.abs(marker.bottom - before.bottom) <= 4,
+          muted: getComputedStyle(node).color === muted };
+      });
+      expect(inline).toEqual({ after: true, sameRow: true, muted: true });
+    }
+  } finally { data.close(); }
+});
+
+test("iPad touch can start, cancel and save an own comment edit with shared targets", { tag: "@webkit-touch" }, async ({ browser }) => {
+  const data = await fixture();
+  try {
+    const page = await openApp(browser, `/${harness().workspace}/${data.uuid}`, {
+      contextOptions: { ...devices["iPad (gen 7)"], reducedMotion: "reduce" },
+      beforeNavigate: ownAccount,
+    });
+    await page.locator(".ub-threads-toggle").tap();
+    const sheet = page.getByRole("dialog", { name: "Comments", exact: true });
+    const card = sheet.locator(`#ub-thread-${data.first} .ub-thread`);
+    const opening = card.locator(".ub-thread-comment").first();
+    const edit = opening.getByRole("button", { name: "Edit", exact: true });
+    await card.locator(".ub-thread-text").first().tap();
+    const editBox = await edit.boundingBox();
+    expect(editBox?.width).toBeGreaterThanOrEqual(44);
+    expect(editBox?.height).toBeGreaterThanOrEqual(44);
+    await edit.tap();
+    const field = opening.getByPlaceholder("Edit comment…");
+    await expect(field).toHaveValue("Opening conversation");
+    await field.fill("Touch correction to cancel");
+    const save = opening.getByRole("button", { name: "Save", exact: true });
+    const cancel = opening.getByRole("button", { name: "Cancel", exact: true });
+    for (const control of [save, cancel]) {
+      const target = await control.boundingBox();
+      expect(target?.width).toBeGreaterThanOrEqual(44);
+      expect(target?.height).toBeGreaterThanOrEqual(44);
+    }
+    await cancel.tap();
+    await expect(field).toHaveCount(0);
+    await expect(sheet).toBeVisible();
+    await expect(opening.locator(".ub-thread-text")).toHaveText("Opening conversation");
+    await edit.tap();
+    await field.fill("Touch correction saved");
+    await save.tap();
+    await expect(field).toHaveCount(0);
+    await expect(opening.locator(".ub-thread-text")).toContainText("Touch correction saved");
+    await expect(opening.locator(".ub-comment-edited")).toHaveText("(edited)");
+    await expect(card.locator(".ub-thread-text").last()).toHaveText("A considered reply");
+    await expect(sheet).toBeVisible();
   } finally { data.close(); }
 });
 

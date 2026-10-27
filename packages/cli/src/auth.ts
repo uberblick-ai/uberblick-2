@@ -15,6 +15,7 @@ import {
 import { budget } from "./budget.js";
 import { resolveProjectBinding } from "@uberblick/mcp-server/project-binding";
 import { openBrowser } from "./browser.js";
+import { renderAuthCode } from "./auth-code-output.js";
 import { type Io, shellArgument } from "./io.js";
 import { useField } from "./workspace-use-output.js";
 import { assertHubTransport, authenticationOrigin, hubTransportProblem, normalizeRemoteUrl } from "@uberblick/mcp-server/remote-url";
@@ -39,7 +40,8 @@ The hub can be a bare host, an http(s) address or a ws(s) endpoint.
 Open the displayed GitHub URL and approve the code in any browser;
 this command completes automatically and never asks for keyboard input.
 In a local terminal, the approval page opens automatically after the guidance.
-Over SSH or when stdout is not a terminal, only the URL and code are displayed.
+In a terminal at least 66 columns wide, the code also appears in large letters.
+Over SSH or when stdout is not a terminal, open the displayed URL yourself.
 BROWSER names the opener command; BROWSER=none skips automatic opening.
 GitHub's approval page shows the app's name, not the hub.
 Approve only a code you just started yourself for the displayed hub.
@@ -610,6 +612,9 @@ async function login(selection: Selection, io: Io, collectTimeoutMs?: number): P
     io.out("approve only a code you just started yourself\n");
     if (unclaimed) io.out("this hub is unclaimed: the first account to approve becomes hub admin and admin of its default workspace\n");
     authField(io, "open", started.verificationUri);
+    if (process.stdout.isTTY && (process.stdout.columns ?? 0) >= 66) {
+      io.out(`\n${renderAuthCode(started.userCode).join("\n")}\n\n`);
+    }
     authField(io, "code", started.userCode);
     io.out("waiting for approval…\n");
     if (shouldOpenLoginBrowser(process.stdout.isTTY, process.env)) {

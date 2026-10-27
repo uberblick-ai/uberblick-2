@@ -13,6 +13,7 @@ import { blockInputSchema, decisionAnswerArg, descriptionArg, documentKindArg, d
 import { DOCUMENT_WRITE, operation } from "./operation.js";
 import type { ToolContext } from "./context.js";
 import { discussionTarget } from "./discussion.js";
+import { summarizeWrittenBlocks } from "./chart-summary.js";
 
 const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
   {
@@ -358,7 +359,7 @@ export const createDocOperation = operation(DOCUMENT_WRITE, inputSchema, (contex
     ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
     ...(tldr === undefined ? {} : { tldr: getMeta(replica.doc, replica.id).tldr }),
     ...decisionAuthorityJson(replica),
-    blocks: getBlocks(replica.doc).map(({ id, rev }) => ({ id, rev })),
+    blocks: summarizeWrittenBlocks(replica.doc, getBlocks(replica.doc)),
     ...(placement === null ? {} : { sidebar: placement }),
     ...durabilityAcross(replica, completed),
     // A TL;DR written with the content needs no review prompt.

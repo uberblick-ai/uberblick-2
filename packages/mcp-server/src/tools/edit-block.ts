@@ -5,6 +5,7 @@ import { strictInput } from "../inputs.js";
 import { listIndentArg, listStyleArg, uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
 import { preservingOpenAnchors } from "./anchor-protection.js";
+import { summarizeWrittenBlocks } from "./chart-summary.js";
 
 export const inputSchema = strictInput({
   uuid: uuidArg,
@@ -48,6 +49,6 @@ export const editBlockOperation = documentOperation({ content: true, contentDura
   const edited = getBlock(replica.doc, block_id);
   return {
     uuid,
-    block: edited === null ? null : { id: edited.id, rev: edited.rev },
+    block: edited === null ? null : summarizeWrittenBlocks(replica.doc, [edited])[0],
   };
 });
