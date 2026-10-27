@@ -83,8 +83,9 @@ test("members pick people and documents in prose, new comments and replies while
   const agentCard = page.locator(".ub-thread-card").filter({ hasText: "Agent @other-admin" });
   await expect(agentCard.locator(".ub-person-pill")).toHaveText("@other-admin");
   await expect(agentCard.getByRole("link", { name: title, exact: true })).toBeVisible();
-  await expect(agentCard).toContainText("**plain** [external](https://example.com)");
-  await expect(agentCard.getByRole("link")).toHaveCount(1);
+  await expect(agentCard.locator("strong")).toHaveText("plain");
+  await expect(agentCard.getByRole("link", { name: "external", exact: true })).toHaveAttribute("href", "https://example.com");
+  await expect(agentCard.getByRole("link")).toHaveCount(2);
 
   await placeCaretIn(prose.nth(1));
   await page.keyboard.type("@other");
