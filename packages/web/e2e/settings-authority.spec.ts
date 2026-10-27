@@ -1,12 +1,32 @@
 import { expect, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { setupHarness } from "./app-helpers.js";
 
 const { harness, openApp } = setupHarness({ accessRole: "admin" });
 
+async function waitForConfirmedAdmin(page: Page): Promise<void> {
+  const key = `uberblick:settings-admin-account:${JSON.stringify([new URL(harness().hubUrl).href, harness().workspaceUuid, "1234"])}`;
+  await expect.poll(() => page.evaluate((storedKey) => localStorage.getItem(storedKey), key)).toBe("true");
+}
+
 test("a confirmed admin edits settings offline and keeps access after reloading", async ({ browser }) => {
-  const page = await openApp(browser, `/${harness().workspace}/settings`);
+  let releaseLogin: () => void = () => {};
+  const loginReady = new Promise<void>((resolve) => { releaseLogin = resolve; });
+  const page = await openApp(browser, `/${harness().workspace}/settings`, {
+    beforeNavigate: async (opening) => {
+      await opening.route("**/api/device-login", async (route) => {
+        await loginReady;
+        await route.continue();
+      });
+    },
+  });
   const name = page.getByRole("textbox", { name: "Name", exact: true });
-  await expect(name).toBeEnabled();
+  try {
+    await expect(name).toBeEnabled();
+  } finally {
+    releaseLogin();
+  }
+  await waitForConfirmedAdmin(page);
   await harness().stopHub();
   try {
     const offlineRole = page.waitForResponse(async (response) => response.url().endsWith("/api/access") &&
@@ -70,6 +90,7 @@ test("settings refusals report after a serving restart and again in the same ope
   const name = page.getByRole("textbox", { name: "Name", exact: true });
   const repository = page.getByRole("textbox", { name: "Main repository", exact: true });
   await expect(name).toBeEnabled();
+  await waitForConfirmedAdmin(page);
   const originalName = await name.inputValue();
   const originalRepository = await repository.inputValue();
   const originalHub = harness().hubWorkspaceSettings();
