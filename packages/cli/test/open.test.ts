@@ -220,6 +220,7 @@ describe("ub open", () => {
           `api/search?q=nothing${sample.suffix ?? ""}`,
           `api/revisions?uuid=7a819902-f86e-45d1-84d3-58d8f979a503${sample.suffix ?? ""}`,
           `api/status${sample.suffix?.replace(/^&/, "?") ?? ""}`,
+          `api/update${sample.suffix?.replace(/^&/, "?") ?? ""}`,
         ];
         for (const path of paths) {
           const response = await fetch(

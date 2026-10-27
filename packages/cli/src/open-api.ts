@@ -9,6 +9,7 @@ import { requestAccount, requestDeviceLogin } from "./open-account.js";
 import { serveRevisionMutation } from "./open-revisions.js";
 import { serveBundleRequest } from "./open-bundle.js";
 import { respond } from "./open-response.js";
+import type { AvailableUpdate } from "./open-update.js";
 import { hasSession, serveSessionRequest, type BrowserAccess } from "./open-session.js";
 import { BrowserReplicaUnavailable, type BrowserReplicas, type ServedWorkspace } from "./open-workspaces.js";
 
@@ -19,6 +20,7 @@ const STATUS_PATH = "/api/status";
 const ACCESS_PATH = "/api/access";
 const ACCOUNT_PATH = "/api/account";
 const DEVICE_LOGIN_PATH = "/api/device-login";
+const UPDATE_PATH = "/api/update";
 const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
 
 type ApiAuthenticator = (authMessage: string) => Promise<string | null>;
@@ -100,6 +102,7 @@ interface ApiRequestContext {
   authenticate: ApiAuthenticator;
   replicas: BrowserReplicas;
   statusForWorkspace: (workspace: string) => ServingSyncStatus;
+  availableUpdate: () => AvailableUpdate | null;
   env: NodeJS.ProcessEnv;
   expectedOrigin: string;
   document: () => string;
@@ -143,7 +146,7 @@ async function serveRevisions(
 
 async function serveApiRequest(context: ApiRequestContext): Promise<void> {
   const { request, response, target, authenticate, replicas, statusForWorkspace,
-    env, expectedOrigin, document, access } = context;
+    availableUpdate, env, expectedOrigin, document, access } = context;
   const reply = (status: number, body: object, headers?: Record<string, string>) =>
     apiResponse(request, response, status, body, headers);
   if (await serveSessionRequest(access, request, target.pathname, expectedOrigin, reply)) return;
@@ -178,6 +181,14 @@ async function serveApiRequest(context: ApiRequestContext): Promise<void> {
     const rebound = replicas.workspaces.keys().next().value === workspaceId &&
       JSON.parse(document()).rebound === true;
     apiResponse(request, response, 200, requestDeviceLogin({ workspaceId, hubUrl: workspace.binding.hubUrl, env }, rebound));
+    return;
+  }
+  if (target.pathname === UPDATE_PATH) {
+    if (request.method !== "GET") {
+      apiResponse(request, response, 405, { error: "method_not_allowed" }, { allow: "GET" });
+      return;
+    }
+    apiResponse(request, response, 200, { update: availableUpdate() });
     return;
   }
   let engine: UberblickMcpEngine;

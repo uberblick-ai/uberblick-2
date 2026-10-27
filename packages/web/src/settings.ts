@@ -22,6 +22,8 @@ export interface Settings {
   presenceName: string | null;
   /** Null follows the system's appearance preference. */
   appearance: Appearance | null;
+  /** The newest version whose update notice was closed; a newer one shows again. */
+  dismissedUpdate: string | null;
 }
 
 /** What every field reads as when storage holds nothing usable for it. */
@@ -29,6 +31,7 @@ const DEFAULTS: Readonly<Settings> = {
   presenceColor: null,
   presenceName: null,
   appearance: null,
+  dismissedUpdate: null,
 };
 
 type Listener = () => void;
@@ -73,6 +76,7 @@ function readAll(): Settings {
     presenceColor: storedColor(stored.presenceColor),
     presenceName: storedName(stored.presenceName),
     appearance: storedAppearance(stored.appearance),
+    dismissedUpdate: typeof stored.dismissedUpdate === "string" ? stored.dismissedUpdate : null,
   };
 }
 

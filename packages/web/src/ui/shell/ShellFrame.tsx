@@ -1,6 +1,6 @@
 import { CommandPalette } from "../CommandPalette.js";
 import { SidebarProvider } from "../shadcn/sidebar.js";
-import { REPLICA_UNAVAILABLE_DETAIL, ReboundNotice } from "./ShellNotices.js";
+import { REPLICA_UNAVAILABLE_DETAIL, ReboundNotice, UpdateNotice } from "./ShellNotices.js";
 import { ShellSidebar } from "./ShellSidebar.js";
 import { ShellContent } from "./ShellContent.js";
 import { ShellThreads } from "./ShellThreads.js";
@@ -19,6 +19,7 @@ export function ShellFrame({ shell }: { shell: AppShell }) {
       {workspace !== null && <CommandPalette key={workspace.uuid} entries={allEntries} searchClient={documentSearch ?? null}
         writable={directoryStatus.writable} onSelect={onSelect} onCreate={onCreate} />}
       <ReboundNotice serving={startupServing} />
+      <UpdateNotice client={documentSearch} />
       {servingStatus?.replicaUnavailable && (
         <p className="ub-replica-unavailable" role="status">
           {REPLICA_UNAVAILABLE_DETAIL[servingStatus.replicaUnavailable]}
