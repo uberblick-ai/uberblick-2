@@ -59,7 +59,11 @@ async function expectShell(page: Page, reference?: Shell): Promise<Shell> {
   }
   if (reference !== undefined && await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)) {
     const shortControls = await page.locator(".ub-pane button:visible, .ub-pane input:visible, .ub-pane select:visible, .ub-pane textarea:visible")
-      .evaluateAll((elements) => elements.filter((element) => element.getBoundingClientRect().height < 44).map((element) => element.getAttribute("aria-label") ?? element.id ?? element.textContent));
+      .evaluateAll((elements) => elements
+        .map((element) => element instanceof HTMLInputElement && element.type === "checkbox"
+          ? element.labels?.[0] ?? element : element)
+        .filter((element) => element.getBoundingClientRect().height < 44)
+        .map((element) => element.getAttribute("aria-label") ?? element.id ?? element.textContent));
     expect(shortControls).toEqual([]);
   }
   return actual;

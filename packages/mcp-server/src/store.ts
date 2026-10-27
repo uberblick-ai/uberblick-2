@@ -11,6 +11,7 @@ import type {
   StatementResultingChanges,
 } from "node:sqlite";
 import { log } from "./log.js";
+import { parseHistoryRetention, type HistoryRetention, type WorkspaceSize } from "./local-settings.js";
 
 const BUSY_TIMEOUT_MS = 5_000;
 const WAL_RETRY_MS = 10;
@@ -954,6 +955,37 @@ export class MirrorStore {
   settingsReset(): SettingsReset | null {
     const row = this.db.prepare("SELECT value FROM meta WHERE key = 'settings_reset'").get();
     return row === undefined ? null : JSON.parse(String(row.value)) as SettingsReset;
+  }
+
+  /** Machine-local policy stays outside collaborative rooms and disposable history. */
+  readHistoryRetention(): HistoryRetention {
+    const row = this.db.prepare("SELECT value FROM meta WHERE key = 'history_retention'").get();
+    if (row === undefined) return { mode: "recent", days: 30, keepNamed: true };
+    const retention = parseHistoryRetention(JSON.parse(String(row.value)));
+    if (retention === null) throw new Error("Invalid stored history retention");
+    return retention;
+  }
+
+  setHistoryRetention(value: HistoryRetention): void {
+    this.assertWorkspacePresent();
+    const retention = parseHistoryRetention(value);
+    if (retention === null) throw new Error("Invalid history retention");
+    this.db.prepare("INSERT INTO meta (key, value) VALUES ('history_retention', ?) " +
+      "ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(JSON.stringify(retention));
+  }
+
+  workspaceSize(): WorkspaceSize | null {
+    if (this.databasePath === ":memory:") return null;
+    this.assertWorkspacePresent();
+    const pages = this.db.prepare(
+      "SELECT page_count, freelist_count FROM pragma_page_count(), pragma_freelist_count()",
+    ).get() as { page_count: number; freelist_count: number };
+    const bytes = statSync(this.databasePath).size +
+      (statSync(`${this.databasePath}-wal`, { throwIfNoEntry: false })?.size ?? 0);
+    return {
+      bytes,
+      usedFraction: pages.page_count === 0 ? 0 : (pages.page_count - pages.freelist_count) / pages.page_count,
+    };
   }
 
   /** Claim a refusal notice once across local processes without clearing its generation. */

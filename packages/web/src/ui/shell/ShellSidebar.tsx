@@ -57,6 +57,7 @@ export function ShellSidebar({ shell }: { shell: AppShell }) {
       settingsPage={route.kind === "settings" ? route.page : null}
       hubAdmin={hubAdministration.admin}
       workspaceAdmin={settingsAccess.workspaceAdmin}
+      workspaceMember={settingsAccess.workspaceMember}
       devicesAvailable={settingsAccess.devicesAvailable}
       historyPane={historyOpen ? <HistorySidebar history={shell.history} title={meta?.title ?? ""} onNow={() => {
         if (narrowLayout && sidebarOpen) closeSidebarDrawer(shell.historyBack.current);

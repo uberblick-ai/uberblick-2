@@ -92,11 +92,13 @@ export function useShellNavigation(env: ShellEnvironment, rooms: ShellRooms, nav
 
   const workspaceSettingsPage = route.kind === "settings" &&
     (route.page === "general" || route.page === "tags" || route.page === "members");
+  const workspacePageAvailable = route.kind === "settings" && route.page === "general"
+    ? settingsAccess.workspaceMember : settingsAccess.workspaceAdmin;
   useEffect(() => {
-    if (workspaceSettingsPage && !settingsAccess.workspacePending && !settingsAccess.workspaceAdmin && segment !== null) {
+    if (workspaceSettingsPage && !settingsAccess.workspacePending && !workspacePageAvailable && segment !== null) {
       navigate(settingsPath(segment, "preferences"), "replace");
     }
-  }, [navigate, segment, settingsAccess.workspaceAdmin, settingsAccess.workspacePending, workspaceSettingsPage]);
+  }, [navigate, segment, settingsAccess.workspacePending, workspacePageAvailable, workspaceSettingsPage]);
 
   return { workspaces, workspaceNames, setWorkspaceMenuOpen, onSwitchWorkspace, onSelect, docLinks, onOpenAll, onOpenSettings, onBackToWorkspace };
 }

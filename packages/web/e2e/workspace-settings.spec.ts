@@ -59,7 +59,7 @@ for (const touch of [false, true]) {
       await expect(name).toBeEnabled();
       await expect(name).toHaveAccessibleDescription("Shown in the sidebar header and the workspace menu.");
       await expect(pane.getByRole("heading", { level: 2 })).toHaveText([
-        "Where it lives", "About this workspace", "Connection details",
+        "Where it lives", "About this workspace", "Connection details", "On this computer",
       ]);
       await expect(pane.locator('[class~="bg-card"], [data-slot="card"]')).toHaveCount(0);
       await expect(pane.locator('button[data-variant="default"]')).toHaveText("Save");
@@ -105,7 +105,9 @@ for (const touch of [false, true]) {
             paneOverflow: element.scrollWidth - element.clientWidth,
             rowsOverflowing: [...element.querySelectorAll<HTMLElement>("[data-settings-facts] > div")]
               .filter((row) => row.offsetHeight > 0 && row.scrollWidth > row.clientWidth + 1).map((row) => row.textContent),
-            shortControls: [...element.querySelectorAll<HTMLElement>("button, input")]
+            shortControls: [...element.querySelectorAll<HTMLElement>("button, input, select")]
+              .map((control) => control instanceof HTMLInputElement && control.type === "checkbox"
+                ? control.labels?.[0] ?? control : control)
               .filter((control) => control.offsetHeight > 0 && control.getBoundingClientRect().height < 44).map((control) => control.textContent),
           }));
           expect(geometry.pageOverflow).toBeLessThanOrEqual(1);
