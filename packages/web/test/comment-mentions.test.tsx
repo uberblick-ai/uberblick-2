@@ -232,7 +232,7 @@ describe("comment inline Markdown", () => {
 
   it("keeps bracketed citations outside the URL and preserves URL punctuation within its path", () => {
     const view = render(<CommentText text="[https://example.com/a] https://example.com/a*b*c https://[::1]/a" docLinks={null} />);
-    const anchor = screen.getByRole<HTMLAnchorElement>("link", { name: "https://example.com/a", exact: true });
+    const anchor = screen.getByRole<HTMLAnchorElement>("link", { name: "https://example.com/a" });
     expect(anchor.getAttribute("href")).toBe("https://example.com/a");
     expect(anchor.previousSibling?.textContent).toBe("[");
     expect(anchor.nextSibling?.textContent).toBe("] ");
