@@ -29,7 +29,9 @@ import {
   createAnnotation,
   deleteBlock,
   editBlock,
+  editComment,
   getAnnotation,
+  getAnnotationCommentId,
   getBlock,
   getBlocks,
   initDoc,
@@ -556,6 +558,28 @@ describe("the rail renders its cards", () => {
     }
   });
 
+  it("updates the opener from an earlier comment's edit time and keeps the comment key", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime("2026-10-27T10:00:00Z");
+      const { ydoc, blocks } = annotatedDoc();
+      const thread = createAnnotation(ydoc, blocks[1]!, 4, 15, "Ben", "Opening", undefined, { kind: "person", account: "bk-one" });
+      vi.setSystemTime("2026-10-27T10:05:00Z");
+      addComment(ydoc, thread.id, "Peer", "Reply");
+      const priorKey = threadsFromDoc(ydoc)[0]!.comments[0]!.key;
+      vi.setSystemTime("2026-10-27T10:10:00Z");
+      const view = renderRail(ydoc, focusThread(null, thread.id));
+      try {
+        expect(within(view.host).getAllByRole("time")[0]!.getAttribute("dateTime")).toBe("2026-10-27T10:05:00.000Z");
+        await act(async () => editComment(ydoc, thread.id, getAnnotationCommentId(ydoc, thread.id, 0)!, "bk-one", "Revised opening"));
+        expect(threadsFromDoc(ydoc)[0]!.comments[0]!.key).toBe(priorKey);
+        expect(within(view.host).getAllByRole("time")[0]!.getAttribute("dateTime")).toBe("2026-10-27T10:10:00.000Z");
+        expect(within(view.host).getByText("(edited)")).toBeDefined();
+        expect(view.host.querySelectorAll(".ub-comment-edited")).toHaveLength(1);
+      } finally { view.unmount(); ydoc.destroy(); }
+    } finally { vi.useRealTimers(); }
+  });
+
   /**
    * The reply arrives inside the thread's own nested array, which a shallow
    * observer on the annotations map does not see — so a card open on screen
@@ -728,7 +752,7 @@ describe("a highlight and its card focus each other", () => {
     const focus: string[] = [];
     const view = render(
       <LiveThreadsPane
-        connection={{ room: `${WORKSPACE}/doc-1`, ydoc } as unknown as RoomConnection}
+        connection={{ room: `${WORKSPACE}/doc-1`, ydoc, status: { writable: true } } as unknown as RoomConnection}
         focused={null}
         author="ben"
         onFocus={(threadId) => { if (threadId !== null) focus.push(threadId); }}
@@ -766,7 +790,7 @@ describe("a highlight and its card focus each other", () => {
     const { editor, element } = mountEditor(ydoc);
     const view = render(
       <LiveThreadsPane
-        connection={{ room: `${WORKSPACE}/doc-1`, ydoc } as unknown as RoomConnection}
+        connection={{ room: `${WORKSPACE}/doc-1`, ydoc, status: { writable: true } } as unknown as RoomConnection}
         focused={null}
         author="ben"
         onFocus={() => {}}
