@@ -406,11 +406,18 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
 
   /**
    * doc_links exposes prose ranges; table links stay in GFM text and its rev.
+   * Formatted prose also returns its runs in insert_block's shape, so a read
+   * shows where marks landed; plain prose keeps the answer to its text.
    */
   const blocksJson = (replica: Pick<Replica, "doc">): Record<string, unknown>[] =>
     getBlocksWithInline(replica.doc).map(({ block, inline }) => {
       const links = docLinkRanges(block, inline);
-      return { ...block, ...(links.length === 0 ? {} : { doc_links: links }) };
+      const formatted = isProseBlockType(block.type) && inline.some(run => Object.keys(run.marks).length > 0);
+      return {
+        ...block,
+        ...(links.length === 0 ? {} : { doc_links: links }),
+        ...(formatted ? { inline: inline.map(({ text, marks }) => ({ text, marks: { ...marks } })) } : {}),
+      };
     });
 
   /**

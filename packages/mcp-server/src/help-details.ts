@@ -62,6 +62,8 @@ export const toolHelpDetails = {
     "Chart seeds return a `chart` summary beside each block's id and rev, using this replica's current data. " +
     "A new document has no data yet: a valid mapping reports collection-absent, and invalid JSON reports " +
     "invalid-configuration. These are warnings that leave creation applied. See data for summary fields. " +
+    "Ablauf and wireframe code seeds return a `drawing` summary with the diagnostics the web editor lists; " +
+    "they never refuse creation either. " +
     "Optional `tldr` supplies a regular document's person-facing summary under set_metadata rules and limit. " +
     "Before creating a decision topic, consult [When to create a decision record](uberblick://help/decisions). " +
     "For decision answer guidance, see [Decision records](uberblick://help/decisions). " +
@@ -148,7 +150,7 @@ export const toolHelpDetails = {
     "## What comes back\n" +
     "\n" +
     "- Metadata: `title`, `description` and `tldr` (null when unwritten), `tags`, `links` and, when known, `createdAt`: the creation time as an ISO 8601 UTC string on the creating replica's clock, such as `2026-10-21T18:36:13.213Z`. It is omitted when unknown or outside the supported date range. A regular page whose TL;DR a person removed on purpose returns `tldrOptOut: true`; set_metadata explains opting back in.\n" +
-    "- Blocks with `id`, `type`, `text` and `rev`. Prose text is plain; tables return GFM, and cards and embeds return their container content; see markdown. Prose that links other documents carries `doc_links` ranges.\n" +
+    "- Blocks with `id`, `type`, `text` and `rev`. Prose `text` is plain; a prose block with inline formatting also carries `inline`, its equally-marked runs in insert_block's shape, so a read shows where bold, code and links landed. Tables return GFM, and cards and embeds return their container content; see markdown. Prose that links other documents carries `doc_links` ranges.\n" +
     "- Comment threads with their anchors, for annotate to reply to, resolve or move. A thread's `blockId` names the block holding its `range`; with no anchor left, `range` is null.\n" +
     "- `code_check` on regular pages: the latest comparison per repository, or [] when never checked.\n" +
     "- Decision context: a regular page lists the topics it owns (related) and the topics that link to it (linked), one list_docs topic row each that names the topic's records by UUID in `inForce`, `pending` and `conflicts`. A decision record returns its status, related pages in `related` (omitted when it has none), discussion, predecessors, successors and `resolution`: its topic's `inForce`, `pending` and `conflicts` as record UUIDs, plus `archived`. Predecessor and successor entries carry `createdAt` and `updatedAt`, topic rows `updatedAt`, when known, as ISO 8601 UTC strings; timestamps outside the supported date range are omitted. It is context, not permission to act; see decisions.\n" +
@@ -359,7 +361,9 @@ export const toolHelpDetails = {
     "Editing a chart also returns a `chart` summary beside the block's id and rev, using the web's projection " +
     "of this replica's current document data. It reports status, counts and warnings; a ready line mapping " +
     "includes its first and last x, with no other record values. Warnings and summary failures never refuse " +
-    "or roll back the edit, or change its durability result. See data for the full summary contract.\n\n" +
+    "or roll back the edit, or change its durability result. See data for the full summary contract. " +
+    "Editing an ablauf or wireframe code block returns a `drawing` summary instead: `status` and the " +
+    "diagnostics the web editor lists, advisory like the chart summary.\n\n" +
     "For an existing list item, optional `list` (`bullet` or `ordered`) and `indent` (integer 0–3) change " +
     "its style and depth in place, together with a text edit or alone. To re-indent without changing text, " +
     "pass the same read text as `old_text` and `new_text`, the read `rev`, and the new `indent`. " +
@@ -373,7 +377,7 @@ export const toolHelpDetails = {
     "formatting and annotation anchors alike — exactly where it was. A splice that touches a mark's edge " +
     "re-anchors it: rewrite a bolded term, or the separator between two marked ones, and the mark can open " +
     "mid-word, swallow the punctuation beside it, or spread over text nobody formatted. The marks survived; " +
-    "the formatting is now wrong, and nothing here detects that.\n\n" +
+    "the formatting is now wrong. get_doc's `inline` runs show where each mark now sits.\n\n" +
     "So edit a block that carries formatting only where the changed range lies strictly inside unmarked text. " +
     "For anything else — a marked span itself, or a range whose edges touch one — delete_block plus " +
     "insert_block writes plain text, losing the formatting instead of corrupting it. An open comment's last " +
@@ -471,7 +475,9 @@ export const toolHelpDetails = {
     "Each chart entry also has a `chart` summary of the web's projection of this replica's current data: " +
     "status, counts and warnings, plus first and last x for ready line mappings. It returns no other record values; " +
     "warnings and summary failures never refuse or roll back the batch or change its durability result. " +
-    "See data for the summary fields. " +
+    "See data for the summary fields. Each code entry in language ablauf or wireframe has a `drawing` " +
+    "summary instead: `status` (`clean`, `warnings` or `errors`) and the diagnostics the web editor lists, " +
+    "with their source lines. It never refuses or rolls back the batch. " +
     "Every entry is checked before the live write. A refusal retains its error code, gives the " +
     "1-based `entry_index` in both the message and structured detail, says what to do next and that " +
     "nothing was written. Call-level refusals, such as an unknown anchor or a content lock, have no " +
