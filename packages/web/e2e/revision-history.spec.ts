@@ -4247,12 +4247,13 @@ test.describe("document history through ub open", () => {
     await expect(history(page).locator(".ub-history-when time")).toHaveAttribute("datetime", new Date(4_000).toISOString());
     let drawer = await showHistoryList(page);
     const list = historyList(page);
-    const middle = list.getByRole("button", { name: /Middle author/ });
-    const renamed = list.getByRole("button", { name: /Rename author/ });
+    const revisions = list.locator(".ub-history-entry:not(.ub-history-session-entry)");
+    const middle = revisions.filter({ hasText: "Middle author" });
+    const renamed = revisions.filter({ hasText: "Rename author" });
     await expect(renamed).toContainText("renamed");
     await expect(middle).not.toContainText("renamed");
     expect(snapshotReads).toEqual(["latest", "middle"]);
-    await expect(list.getByRole("button", { name: /Latest author/ })).toContainText("renamed");
+    await expect(revisions.filter({ hasText: "Latest author" })).toContainText("renamed");
     await activateControl(middle);
     await expect(historicalEditor(page)).toContainText("Middle content.");
     await closeHistoryList(page, drawer);
@@ -4271,7 +4272,10 @@ test.describe("document history through ub open", () => {
     await expect(history(page)).toContainText("compared with “Kickoff”");
     await expect(history(page).locator(".ub-history-renamed s")).toHaveText("Beta");
     await expect(history(page).locator(".ub-history-when")).toContainText("· current version");
-    await expect(history(page).locator(".ub-history-when time")).toHaveAttribute("datetime", new Date(4_000).toISOString());
+    await expect(history(page).locator(".ub-history-author")).toHaveText(
+      "Latest author written by hand 👏, Middle author written by hand 👏, Rename author written by hand 👏");
+    const span = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).formatRange(new Date(1_500), new Date(4_000));
+    await expect(history(page).locator(".ub-history-when span[title]")).toHaveText(span);
     await showHistoryList(page);
     await expect(renamed).toContainText("renamed");
     await expect(middle).not.toContainText("renamed");
