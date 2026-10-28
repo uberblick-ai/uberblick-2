@@ -12,7 +12,6 @@ const { harness, openApp } = setupHarness({ scope: "test" });
 
 for (const colorScheme of ["light", "dark"] as const) {
   test(`WCAG A/AA on the composed web surfaces — ${colorScheme}`, async ({ browser }, info) => {
-    test.setTimeout(120_000);
     const page = await openApp(browser, "/", {
       upstream: true,
       contextOptions: { colorScheme, viewport: { width: 1280, height: 800 } },

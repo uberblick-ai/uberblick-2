@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { vitestBudgets } from "../../scripts/vitest-budget-config.mjs";
 
 // `mise run test-os`, the macOS CI job, runs only the suites whose behaviour
 // can differ by OS: file modes, locks and paths, signals and process
@@ -22,17 +23,7 @@ export default defineConfig({
         ? osSensitive.map((name) => `test/${name}.test.ts`)
         : ["test/**/*.test.ts", "src/**/*.test.ts"],
     environment: "node",
-    // CI output, as in packages/schema/vitest.config.ts.
-    reporters: [
-      process.env.CI ? "dot" : "default",
-      ...(process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_TEMP
-        ? [["junit", {
-            outputFile: `${process.env.RUNNER_TEMP}/vitest-results/hub.xml`,
-            includeConsoleOutput: false,
-            classnameTemplate: "",
-          }] as const]
-        : []),
-    ],
+    ...vitestBudgets("hub"),
     silent: "passed-only",
     execArgv: ["--no-experimental-webstorage"],
     // Every suite binds real sockets and opens real SQLite files. They use

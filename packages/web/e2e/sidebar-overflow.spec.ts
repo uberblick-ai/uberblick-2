@@ -164,7 +164,6 @@ async function addGroup(page: Page, name: string): Promise<void> {
 }
 
 test("empty and long-label sidebars fit narrow and docked layouts in both modes", async ({ page }) => {
-  test.setTimeout(120_000);
   for (const content of ["empty", "long labels"]) {
     if (content === "long labels") {
       await page.setViewportSize({ width: 1280, height: 832 });

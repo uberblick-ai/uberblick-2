@@ -86,7 +86,6 @@ test.describe("one page shell", () => {
   });
 
   test("documents, list and Settings keep one frame", { tag: "@webkit" }, async ({ browser }, info) => {
-    test.setTimeout(120_000);
     const touch = info.project.use.hasTouch === true;
     const page = await openApp(browser, `/${harness().workspace}/${documentUuid}`, {
       contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1440, height: 900 } }), reducedMotion: "reduce" },
@@ -146,7 +145,6 @@ test.describe("one page shell", () => {
   });
 
   test("loading and unavailable Settings retain the document frame", { tag: "@webkit" }, async ({ browser }, info) => {
-    test.setTimeout(90_000);
     const touch = info.project.use.hasTouch === true;
     const contextOptions = { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1440, height: 900 } }), reducedMotion: "reduce" as const };
     const referencePage = await openApp(browser, `/${harness().workspace}/${documentUuid}`, { contextOptions, readySelector: ".ub-editor .ProseMirror" });

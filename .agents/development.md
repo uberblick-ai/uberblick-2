@@ -65,7 +65,7 @@ table. A focused browser fixture supplies browser proof through the existing
 Playwright projects under `mise run e2e`, but cannot prove system boundaries it
 omits. Preserve the desktop Chromium, iPad WebKit, input
 and appearance coverage required by live product guidance. Existing coverage
-supplies proof only when it asserts the changed outcome. These rules do not
+supplies proof only when it asserts the changed outcome. These coverage rules do not
 change runtime configuration, timeouts, required CI jobs or merge gates.
 
 ### Use the smallest adequate setup
@@ -120,11 +120,14 @@ an unexplained defect.
 
 ### Bound duration and verify the improvement
 
-The normal review budget is **60 seconds per test, including its own setup and
-cleanup**. Most tests should finish well below it. This is a review budget,
-not a claim that current runner timeouts enforce it. Assess total duration;
-hooks and teardown may have separate timeouts. Measure shared setup separately
-and include it in CI wall time.
+The normal budget is **60 seconds per test, including its own setup and
+cleanup**. Most tests should finish well below it. The Vitest, Playwright and
+script runners fail complete attempts that exceed it, including per-test hooks
+and fixtures. This applies on every host: CI, local runs, `mise run ci` and the
+isolated `mise run review` gate use the same enforcement. Framework phase
+timeouts still provide earlier diagnostics; they do not replace the complete
+attempt check. Shared file/run hooks, harness startup and bundle builds are
+reported separately and remain part of CI wall time.
 Do not move scenario work into shared hooks to evade the budget.
 
 Investigate layer, setup and waits before increasing a budget. Splitting tests
@@ -132,7 +135,11 @@ helps only when it improves diagnosis or ownership without unnecessarily
 repeating setup. Do not weaken assertions or shrink a required workload merely
 to meet the limit. Necessary longer-running verification needs a clear purpose
 and a human-approved budget; existing longer allowances need explicit
-assessment, not automatic removal of their coverage.
+assessment, not automatic removal of their coverage. Declare each exception
+with its purpose, allowance and maintainer approval or open decision. An open
+decision preserves an existing allowance at its current ceiling pending a
+maintainer answer; it does not authorize increasing one. Shared-setup timeout
+allowances name their purpose and never extend an individual test's budget.
 
 If a test needed to verify new functionality repeatedly exceeds the 60-second
 review budget or repeatedly times out, escalate it to a human maintainer before

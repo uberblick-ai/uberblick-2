@@ -15,6 +15,7 @@
 
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { vitestBudgetException } from "../../../scripts/test-duration-budget.mjs";
 import {
   existsSync,
   mkdirSync,
@@ -1356,19 +1357,23 @@ describe("ub workspace use <link>", () => {
       "use",
       localJoinUrl(remote, local, OTHER_SECRET),
     ];
-    const deadline = Date.now() + LARGE_CORPUS_JOIN_RECOVERY_TIMEOUT_MS;
+    // The opt-in scale proof retains its independently declared allowance.
+    // Ordinary joins must name their failing wait inside the normal budget.
+    const recoveryTimeoutMs = count === 5_000 ? LARGE_CORPUS_JOIN_RECOVERY_TIMEOUT_MS : 45_000;
+    const attemptTimeoutMs = count === 5_000 ? LARGE_CORPUS_JOIN_ATTEMPT_TIMEOUT_MS : 40_000;
+    const deadline = Date.now() + recoveryTimeoutMs;
     const runAttempt = async () => {
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
         throw new Error(
-          `timed out waiting for the ${count}-document join recovery within ${LARGE_CORPUS_JOIN_RECOVERY_TIMEOUT_MS}ms`,
+          `timed out waiting for the ${count}-document join recovery within ${recoveryTimeoutMs}ms`,
         );
       }
       return await runUbAsync(
         args,
         local,
-        { UB_TEST_MAX_WAIT_MS: "15000" },
-        Math.min(LARGE_CORPUS_JOIN_ATTEMPT_TIMEOUT_MS, remaining),
+        { UB_TEST_MAX_WAIT_MS: count === 5_000 ? "15000" : "2000" },
+        Math.min(attemptTimeoutMs, remaining),
       );
     };
 
@@ -1402,10 +1407,14 @@ describe("ub workspace use <link>", () => {
   // Opt-in (UB_SLOW_TESTS=1): ~30 s of scale proof, not of behaviour.
   it.runIf(process.env.UB_SLOW_TESTS === "1")(
     "joins 5,000 local documents and persists the verified binding",
+    vitestBudgetException({
+      purpose: "Verify joining and binding a complete 5,000-document local corpus on explicit scale-proof opt-in",
+      allowanceMs: LARGE_CORPUS_TEST_TIMEOUT_MS,
+      decision: "https://github.com/uberblick-ai/uberblick-2/issues/2458",
+    }),
     async () => {
       await joinLocalCorpus(5_000);
     },
-    LARGE_CORPUS_TEST_TIMEOUT_MS,
   );
 
   it("adds the remote as a second workspace, leaving the seeded one intact", async () => {

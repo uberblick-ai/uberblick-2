@@ -38,7 +38,6 @@ async function statusGeometry(page: Page) {
 }
 
 test("local-only edits survive a restart and reach the hub after authentication returns", async ({ browser }) => {
-  test.setTimeout(90_000);
   const page = await openApp(browser, "/", { contextOptions: { reducedMotion: "reduce" } });
   // A shared-secret connection has no GitHub account to claim, even though
   // the hub accepts edits from this running local service.
@@ -117,7 +116,6 @@ test("local-only edits survive a restart and reach the hub after authentication 
 });
 
 test("local-only status answers leave the readings and prose in place", async ({ browser }) => {
-  test.setTimeout(90_000);
   const seed = await openApp(browser);
   const titles = [docTitle("geometry-a"), docTitle("geometry-b")] as const;
   const paths: string[] = [];
@@ -212,7 +210,6 @@ test("local-only status answers leave the readings and prose in place", async ({
 
 
 test("device recovery notices auto-close while tablet status retains recovery", async ({ browser }) => {
-  test.setTimeout(90_000);
   await harness().restartOpen({ authenticated: true });
   let notSharedReason: "no-hub-credentials" | "sign-in-required" | "no-workspace-access" | "credential-store" | "renewal-unavailable" | null = null;
   const page = await openApp(browser, "/", {

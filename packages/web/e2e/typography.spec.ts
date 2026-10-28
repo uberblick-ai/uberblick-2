@@ -111,7 +111,6 @@ test.describe("document and workspace typography", () => {
   test.afterAll(async () => { await agent?.close(); agent = null; });
 
   test("one scale on reading and workspace surfaces", { tag: "@webkit" }, async ({ browser }, info) => {
-    test.setTimeout(120_000);
     const touch = info.project.use.hasTouch === true;
     const page = await openApp(browser, `/${harness().workspace}/${documentUuid}`, {
       contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1280, height: 800 } }), reducedMotion: "reduce" },
@@ -248,7 +247,6 @@ test.describe("document and workspace typography", () => {
 test.describe("authenticated Settings typography", () => {
   const { harness, openApp } = setupHarness({ accessRole: "admin", hubAdmin: true });
   test("one scale on access and hub Settings", { tag: "@webkit" }, async ({ browser }, info) => {
-    test.setTimeout(120_000);
     const touch = info.project.use.hasTouch === true;
     const page = await openApp(browser, `/${harness().workspace}/settings/members`, {
       contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1280, height: 800 } }), reducedMotion: "reduce" },

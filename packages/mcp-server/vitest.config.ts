@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { vitestBudgets } from "../../scripts/vitest-budget-config.mjs";
 
 // `mise run test-os`, the macOS CI job, runs only the suites whose behaviour
 // can differ by OS: file modes, locks and paths, signals and process
@@ -48,17 +49,7 @@ function suites(suffix: string): string[] {
 export default defineConfig({
   test: {
     environment: "node",
-    // CI output, as in packages/schema/vitest.config.ts.
-    reporters: [
-      process.env.CI ? "dot" : "default",
-      ...(process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_TEMP
-        ? [["junit", {
-            outputFile: `${process.env.RUNNER_TEMP}/vitest-results/mcp-server.xml`,
-            includeConsoleOutput: false,
-            classnameTemplate: "",
-          }] as const]
-        : []),
-    ],
+    ...vitestBudgets("mcp-server"),
     silent: "passed-only",
     execArgv: ["--no-experimental-webstorage"],
     // Standalone runs use one worker per core; root runs share a machine budget.
@@ -87,8 +78,8 @@ export default defineConfig({
           exclude: [core, processes],
           isolate: true,
           // Exceed the named real-time waits so their diagnostics arrive first.
-          testTimeout: 120_000,
-          hookTimeout: 120_000,
+          testTimeout: 60_000,
+          hookTimeout: 60_000,
         },
       },
       {
@@ -98,8 +89,8 @@ export default defineConfig({
           include: suites(".process"),
           isolate: true,
           globalSetup: ["test/process-setup.ts"],
-          testTimeout: 120_000,
-          hookTimeout: 120_000,
+          testTimeout: 60_000,
+          hookTimeout: 60_000,
         },
       },
     ],

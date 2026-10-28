@@ -37,7 +37,6 @@ async function switchToSecond(page: Page, keyboard = false): Promise<void> {
 }
 
 test("opening the switcher leaves the other project's replica free to serve", async ({ page }) => {
-  test.setTimeout(90_000);
   const fresh = await startHarness({ multiWorkspace: true });
   try {
     await page.goto(fresh.appUrl);
@@ -72,7 +71,6 @@ test("opening the switcher leaves the other project's replica free to serve", as
 });
 
 test("switching by keyboard uses the selected replica, hub and account while another tab keeps syncing", async ({ browser }) => {
-  test.setTimeout(90_000);
   const context = await browser.newContext({ colorScheme: "dark", reducedMotion: "reduce" });
   contexts.push(context);
   const page = await context.newPage();

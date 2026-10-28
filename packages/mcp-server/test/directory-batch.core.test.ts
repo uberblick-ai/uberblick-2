@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
+import { vitestBudgetException } from "../../../scripts/test-duration-budget.mjs";
 import {
   directoryRoom, getDirectoryEntry, getDirectoryMap, getMetaMap,
   initDoc, listDirectory,
@@ -132,7 +133,11 @@ describe("one directory batch", () => {
   });
 
   // UB_DIRECTORY_BENCH=1 mise exec -- pnpm --filter @uberblick/mcp-server exec vitest run test/directory-batch.core.test.ts --silent=false -t measures
-  it.skipIf(process.env.UB_DIRECTORY_BENCH !== "1")("measures the 8,000-stub update on receipt and both reopen paths", async () => {
+  it.skipIf(process.env.UB_DIRECTORY_BENCH !== "1")("measures the 8,000-stub update on receipt and both reopen paths", vitestBudgetException({
+      purpose: "Measure the complete 8,000-stub directory update and both real reopen paths on explicit opt-in",
+      allowanceMs: 300_000,
+      decision: "https://github.com/uberblick-ai/uberblick-2/issues/2458",
+  }), async () => {
     const update = batch(8_000, false);
     expect(update.byteLength).toBe(752_006);
     const times: Record<string, number> = { bytes: update.byteLength };
@@ -164,5 +169,5 @@ describe("one directory batch", () => {
       } finally { await opened.close(); }
     }
     console.info(JSON.stringify(times));
-  }, 300_000);
+  });
 });
