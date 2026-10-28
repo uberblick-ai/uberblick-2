@@ -118,5 +118,4 @@ it(
     new MirrorStore(existing, WORKSPACE).close();
     await expectConcurrentOpens((round) => (round % 2 === 0 ? tempDatabasePath() : existing));
   },
-  120_000,
 );

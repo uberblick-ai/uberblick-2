@@ -1,25 +1,14 @@
 import { defineConfig } from "vitest/config";
+import { vitestBudgets } from "../../scripts/vitest-budget-config.mjs";
 
 export default defineConfig({
   test: {
     include: ["test/**/*.test.ts", "src/**/*.test.ts"],
     environment: "node",
-    // Output shaped like ub-agents' CI: one dot per test under CI, and a
-    // test's console output only when it fails. Node 25+ enables Web Storage by
+    // A test's console output is shown only when it fails. Node 25+ enables Web Storage by
     // default and warns once per worker that no `--localstorage-file` was given;
     // no suite uses Node's localStorage, so the workers run without it.
-    // The suite name carries the file; omitting duplicate class names and
-    // console output keeps the full job's JUnit reports below 1 MB.
-    reporters: [
-      process.env.CI ? "dot" : "default",
-      ...(process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_TEMP
-        ? [["junit", {
-            outputFile: `${process.env.RUNNER_TEMP}/vitest-results/schema.xml`,
-            includeConsoleOutput: false,
-            classnameTemplate: "",
-          }] as const]
-        : []),
-    ],
+    ...vitestBudgets("schema"),
     silent: "passed-only",
     execArgv: ["--no-experimental-webstorage"],
   },

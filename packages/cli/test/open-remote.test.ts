@@ -409,7 +409,7 @@ describe("ub open: sharing through the upstream hub", () => {
       const outcome = JSON.parse(readFileSync(outcomePath, "utf8"));
       outcome.retryAt = 0;
       writeFileSync(outcomePath, JSON.stringify(outcome), { mode: 0o600 });
-      await waitUntil("later grant to sync without restart", async () => (await status()).caughtUp, 80_000);
+      await waitUntil("later grant to sync without restart", async () => (await status()).caughtUp, 20_000);
       await waitUntil("pending browser edit at remote hub", () => {
         const remote = hub.hocuspocus.documents.get(room);
         return remote !== undefined && getBlocks(remote)[0]?.text === "pending before login";
@@ -437,7 +437,7 @@ describe("ub open: sharing through the upstream hub", () => {
       if (refusal === "revocation") hub.credentials!.revoke(current.credential.record.id);
       else hub.memberships!.remove({ workspaceId: WORKSPACE, principalId: person.id });
       // Renewal cooldown plus the random polling ceiling can span two bands.
-      await waitUntil("live remote authority ended", async () => (await status()).notSharedReason === (refusal === "revocation" ? "sign-in-required" : "no-workspace-access"), 80_000);
+      await waitUntil("live remote authority ended", async () => (await status()).notSharedReason === (refusal === "revocation" ? "sign-in-required" : "no-workspace-access"), 20_000);
       const remedy = refusal === "revocation"
         ? `ub open: hub ${origin} refused this machine's sign-in, changes stay here; run \`ub auth login\``
         : "ask a workspace admin";
@@ -455,7 +455,7 @@ describe("ub open: sharing through the upstream hub", () => {
       browser.destroy(); document.destroy();
       expect((await app.interrupt()).status).toBe(0);
     }
-  }, 220_000);
+  });
 
   it.each(["hub-down", "no-credentials"])("bridges durable browser and MCP edits through the shared store (%s)", async (mode) => {
     const { box, env } = configured();

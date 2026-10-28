@@ -126,6 +126,8 @@ describe("the built web bundle", () => {
   /** The one build of the real app every claim below reads. */
   let outDir = "";
 
+  // Shared setup allowance: build the real app once for every assertion in
+  // this file; it is measured separately and grants no test extra time.
   beforeAll(async () => {
     outDir = scratch();
     await withSecretInEnvironment(async () => {
@@ -228,4 +230,4 @@ it("a release build has no endpoint or workspace fallback, and takes every deplo
     Object.assign(process.env, before);
     rmSync(releaseDir, { recursive: true, force: true });
   }
-}, 120_000);
+});

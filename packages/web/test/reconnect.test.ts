@@ -150,23 +150,9 @@ const WAIT_TIMEOUT_MS = 20_000;
  */
 const REJOIN_REPAIR_TIMEOUT_MS = 45_000;
 
-/**
- * Vitest's own budget per test.
- *
- * The rule: above the longest chain of named waits a test here makes in
- * sequence, so whichever timeout fires first is the one that can explain the
- * failure. "Test timed out" explains nothing; "timed out waiting for the second
- * close to reach the tab" is a diagnosis.
- *
- * The chain that sets the number is "repairs a document close that arrives
- * during the forced-drop cooldown": eight waits end to end — two in
- * `seedDocument`, four in the test body, two in `expectLiveWrite` — at
- * WAIT_TIMEOUT_MS each, so 160s. The runner-up is "leaves the socket alone…",
- * whose five WAIT_TIMEOUT_MS waits sit beside one REJOIN_REPAIR_TIMEOUT_MS:
- * 145s. Change any of the three constants and check that this one is still the
- * larger.
- */
-const TEST_TIMEOUT_MS = 180_000;
+// Named conditions retain their diagnostics; the runner separately checks the
+// complete attempt after all real-hub shutdowns finish.
+const TEST_TIMEOUT_MS = 60_000;
 
 async function waitFor(
   label: string,

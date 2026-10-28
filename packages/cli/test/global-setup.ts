@@ -36,12 +36,13 @@
 
 import { build } from "esbuild";
 import type { TestProject } from "vitest/node";
+import { measureSharedSetup } from "../../../scripts/report-shared-setup.mjs";
 import { BUILT_UB, PACKAGE_ROOT, TEST_PORTS } from "./helpers.js";
 
 export default async function setup(project: TestProject): Promise<void> {
   // One rotation per run, shared by its workers: see `freePort`.
   project.provide("testPortOffset", Math.floor(Math.random() * TEST_PORTS.count));
-  await build({
+  await measureSharedSetup("cli: shared ub bundle build", "setup", () => build({
     entryPoints: [`${PACKAGE_ROOT}/src/main.ts`],
     outfile: BUILT_UB,
     bundle: true,
@@ -61,5 +62,5 @@ export default async function setup(project: TestProject): Promise<void> {
     // bytes to runs that do not request maps.
     minify: true,
     sourcemap: true,
-  });
+  }));
 }

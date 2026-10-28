@@ -21,7 +21,6 @@ const SECRET = "uberblick-dev-csp-e2e-secret";
 interface Violation { directive: string; blocked: string; disposition: string }
 
 test("Vite syncs, loads Figma and applies Fast Refresh without CSP violations", async ({ page }) => {
-  test.setTimeout(120_000);
   const scratch = mkdtempSync(join(process.env.UB_AGENTS_SCRATCH ?? tmpdir(),
     `uberblick-dev-csp-${process.env.UB_AGENTS_RUN ?? "local"}-`));
   const workspace = `dev-csp-${randomUUID()}`;

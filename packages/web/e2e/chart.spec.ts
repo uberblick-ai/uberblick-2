@@ -1072,7 +1072,6 @@ test("a record limit follows the latest x values with a neutral count and unchan
 });
 
 test("daily observation labels fit at desktop and iPad widths", { tag: "@webkit" }, async ({ browser }, info) => {
-  test.setTimeout(120_000);
   const session = writer();
   const uuid = await chartDoc(session, "Daily chart observations");
   const observations = Array.from({ length: 7 }, (_, index) => ({

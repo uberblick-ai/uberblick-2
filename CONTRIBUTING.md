@@ -208,7 +208,18 @@ interactive projects. Retries stay disabled, and sharding keeps each file's
 tests together. Interactive projects retain a Playwright trace only for failed
 tests, including browser contexts a test creates itself; passing tests discard
 their recordings. Workload probes stay untraced so recording does not distort
-their timings. A flaky test is quarantined instead: when a test fails on
+their timings. Every completed attempt also records its complete duration in
+`test-results/test-durations.json`: setup, body and cleanup count together,
+including fixtures with separate timeout slots. File hooks and shared browser
+services are measured separately. Harness and controls startup, plus the shared
+bundle build and global setup/cleanup, have named timing records; these are
+components of their enclosing intervals and must not be summed twice.
+An ordinary attempt over 60 seconds fails the suite. The mixed workload's
+existing exception uses a `test-budget` annotation whose JSON description names
+`purpose`, `allowanceMs` and the maintainer approval or open `decision`.
+The [duration policy](.agents/development.md#bound-duration-and-verify-the-improvement)
+also applies to local and isolated-review runs.
+A flaky test is quarantined instead: when a test fails on
 `main` and no change explains the failure, mark it `test.fixme` (Playwright)
 or `it.skip` (Vitest) in its own pull request, linking a new issue that fixes
 or deletes it. `main` stays green, and the skip records the coverage it lost.
@@ -379,22 +390,27 @@ Unit-test jobs keep their dot logs and upload
 `hub-schema-scripts`) and `vitest-macOS-<run>-attempt-<n>` artifacts, including
 on test failure. Each package's JUnit XML gives the test file (the suite name),
 full test name, result,
-duration and failure details. Shared package runs also include
-`package-times.json` with package wall times.
+duration and failure details. `<package>-durations.json` records complete
+attempt durations and budgets, file timing diagnostics and shared file hooks;
+`shared-setup.jsonl` records shared CLI/MCP bundle builds and run fixtures.
+Script suites retain `node-test-durations.json` in the same artifact. Shared
+package runs also include `package-times.json` with package wall times.
 Rerunning failed or selected jobs (`gh run rerun <run> --failed` or `--job <job-id>`)
 keeps earlier attempts' reports beside the new reports. A failed Linux package
 job reruns with its aggregate, leaving successful jobs alone. Uploads are best
 effort and cannot change a job's conclusion. "Re-run all jobs" deletes
 earlier attempts' reports. A process killed before reporting, or a job timeout,
 can leave a missing report; check its log for the cause.
-Reports live in the Actions runner's temporary directory; local runs, including
-`CI=true mise run ci`, create no reports in the checkout.
+Unit and script reports live in the Actions runner's temporary directory;
+local runs, including `CI=true mise run ci`, create no unit/script reports in
+the checkout. Report generation is best effort too; its warnings do not change
+the test outcome.
 
-Each failed browser suite uploads `packages/web/test-results/` as
-`playwright-<job>-<run>-attempt-<n>`, with its failure traces and other test output.
-This includes the workload job's output, without traces. Green browser jobs
-upload nothing. Uploads are best effort and cannot change the job's result or
-the required `browser e2e` result. Rerunning failed or selected jobs keeps earlier
+Every browser suite uploads `packages/web/test-results/` as
+`playwright-<job>-<run>-attempt-<n>`, including green jobs. It contains the
+duration report and any failure traces and other test output; workload output
+stays untraced. Report generation and uploads are best effort and cannot change
+the job's result or the required `browser e2e` result. Rerunning failed or selected jobs keeps earlier
 attempts' artifacts beside the new ones; "Re-run all jobs" deletes earlier
 attempts' artifacts. A job timeout or cancellation can prevent an upload.
 
@@ -405,6 +421,13 @@ cores among its slots: up to four concurrent suites for `pnpm test`, and two for
 two slots. `pnpm --filter <package> test`, including each standalone Linux
 package job, uses that package's standalone worker setting. Local
 `mise run test`, `mise run ci` and `mise run review` retain the full suites.
+Their Vitest, Playwright and script runners all enforce the same complete
+60-second attempt budget after cleanup. Phase timeouts can still fail earlier.
+Vitest exceptions use `meta.testBudget` with `purpose`, `allowanceMs` and
+`decision`; a phase timeout never grants an exception by itself. Explicit local
+Vitest retries/repeats share the measured aggregate budget; CI enables neither.
+Shared setup/cleanup is reported outside test budgets, without a new numeric
+limit on shared setup or total job time.
 
 Merging also requires CodeQL code scanning results: a pull request that introduces
 a security alert at high or above cannot merge. Lower-severity and non-security

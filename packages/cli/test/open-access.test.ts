@@ -261,11 +261,11 @@ describe("ub open: live Access bridge", () => {
       expect(await account()).toEqual({ state: "signed-out" });
       const replacement = issue(hub, "9876", "replacement-person", "member");
       await writeHubLogin(origin, replacement, box.env);
-      await waitUntil("replacement account without restart", async () => (await account()).handle === "replacement-person", 80_000);
+      await waitUntil("replacement account without restart", async () => (await account()).handle === "replacement-person", 20_000);
       hub.memberships!.remove({ workspaceId: WORKSPACE, principalId: replacement.identity.id });
       expect(await account()).toEqual({ state: "unavailable" });
       await writeHubLogin(origin, login, box.env);
-      await waitUntil("original account returns", async () => (await account()).handle === "this-person", 80_000);
+      await waitUntil("original account returns", async () => (await account()).handle === "this-person", 20_000);
       hub.credentials!.revoke(login.credential.record.id);
       expect(await account()).toEqual({ state: "signed-out" });
     } finally { expect((await app.interrupt()).status).toBe(0); }

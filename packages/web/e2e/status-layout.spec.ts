@@ -150,7 +150,6 @@ for (const upstream of [true, false]) {
     browser, browserName, contextOptions, viewport, hasTouch, isMobile,
     deviceScaleFactor, userAgent,
   }) => {
-    test.setTimeout(90_000);
     // openApp owns fresh contexts; pass the project's device/input explicitly.
     const device = {
       ...contextOptions, viewport, hasTouch, isMobile,

@@ -114,7 +114,6 @@ for (const scheme of ["light", "dark"] as const) {
   test(`quiet header sync, revision and narrow-iPad controls — ${scheme} @webkit`, async ({
     browser, contextOptions, viewport, hasTouch, isMobile, deviceScaleFactor, userAgent,
   }, info) => {
-    test.setTimeout(90_000);
     const input = {
       ...contextOptions, viewport, hasTouch, isMobile, colorScheme: scheme,
       ...(deviceScaleFactor === undefined ? {} : { deviceScaleFactor }),

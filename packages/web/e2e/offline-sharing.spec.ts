@@ -22,7 +22,6 @@ async function documentText(page: Page): Promise<string | null> {
 }
 
 test("offline admission proof rejects premature sharing hidden by held observer delivery", async ({ browser }) => {
-  test.setTimeout(90_000);
   const page = await openApp(browser);
   const uuid = await createDoc(page, docTitle("offline-admission"));
   const baseline = "before restart";

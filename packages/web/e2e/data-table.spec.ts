@@ -1090,7 +1090,17 @@ async function publishTimings(info: TestInfo, result: Timings, label: string, ph
 // Chart.js drawing in the mixed view. Deterministic shared-read, one-read-per-
 // update and no-write invariants belong to test/chart.test.ts (Chart.js mocked).
 for (const mixed of [false, true]) {
-  test(`${mixed ? "ten tables and ten charts" : "one continuous table"} render and update at scale in Chromium`, { tag: "@workload" }, async ({ browser }, info) => {
+  test(`${mixed ? "ten tables and ten charts" : "one continuous table"} render and update at scale in Chromium`, {
+    tag: "@workload",
+    annotation: mixed ? {
+      type: "test-budget",
+      description: JSON.stringify({
+        purpose: "Native layout of 403,500 cells and ten real Chart.js charts",
+        allowanceMs: 360_000,
+        decision: "https://github.com/uberblick-ai/uberblick-2/issues/2440",
+      }),
+    } : [],
+  }, async ({ browser }, info) => {
     if (mixed) {
       // Required native layout of 403,500 cells plus ten real charts exceeds
       // 60 s on CI; retain its existing allowance pending maintainer assessment.

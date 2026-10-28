@@ -12,7 +12,6 @@ function roleToast(page: Page): Locator {
 }
 
 test("confirm a GitHub account, manage membership, and revoke only your devices", async ({ browser }) => {
-  test.setTimeout(120_000);
   const access = harness().access;
   if (access === undefined) throw new Error("Access fixture is missing");
   const page = await openApp(browser, `/${harness().workspace}/settings`);
@@ -193,7 +192,6 @@ for (const profile of [
   { name: "narrow iPad touch", touch: true, width: 600 },
 ] as const) {
   test(`member controls work with ${profile.name}`, { tag: profile.touch ? "@webkit-touch" : [] }, async ({ browser }, info) => {
-    test.setTimeout(120_000);
     for (const colorScheme of ["light", "dark"] as const) {
       const page = await openApp(browser, `/${harness().workspace}/settings/members`, {
         contextOptions: {

@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { vitestBudgets } from "../../scripts/vitest-budget-config.mjs";
 
 // `mise run test-os`, the macOS CI job, runs only the suites whose behaviour
 // can differ by OS: file modes, locks and paths, signals and process
@@ -55,17 +56,7 @@ export default defineConfig({
         ? osSensitive.map((name) => `test/${name}.test.ts`)
         : ["test/**/*.test.ts", "src/**/*.test.ts"],
     environment: "node",
-    // CI output, as in packages/schema/vitest.config.ts.
-    reporters: [
-      process.env.CI ? "dot" : "default",
-      ...(process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_TEMP
-        ? [["junit", {
-            outputFile: `${process.env.RUNNER_TEMP}/vitest-results/cli.xml`,
-            includeConsoleOutput: false,
-            classnameTemplate: "",
-          }] as const]
-        : []),
-    ],
+    ...vitestBudgets("cli"),
     silent: "passed-only",
     execArgv: ["--no-experimental-webstorage"],
     // Builds the `ub` the spawning suites run, once for the whole run. See
@@ -73,21 +64,10 @@ export default defineConfig({
     // it does.
     // The binding setup checks the shared parent's bytes after all workers finish.
     globalSetup: ["test/global-setup.ts", "test/binding-fixtures.ts"],
-    // Most suites here spawn the real `ub` binary, which boots the MCP server,
-    // opens a real SQLite file and gives the hub a bounded chance to answer.
-    // Temp XDG directories and dead ports keep them safe in parallel, but the
-    // timeouts have to allow a full spawn/connect/shutdown round trip.
-    //
-    // Deliberately well above the sum of the waits any one test makes in
-    // sequence — concurrent workspace creation is bounded by the 25 s
-    // `runUbAsync` gives each spawned run, and
-    // `ub open`'s port-release test (two starts and two interrupts, each
-    // bounded by WAIT_TIMEOUT_MS in test/helpers.ts). Whichever timeout fires
-    // first is the one that gets to explain the failure, and a bare "test timed
-    // out in 30000ms" names nothing. The named wait says which condition never
-    // arrived so the failure can be diagnosed.
-    testTimeout: 150_000,
-    hookTimeout: 150_000,
+    // Named waits expire inside the complete-attempt budget so their own
+    // condition names remain visible when setup or shutdown fails.
+    testTimeout: 60_000,
+    hookTimeout: 60_000,
     // Standalone runs use one worker per core. The root test commands supply
     // an integer VITEST_MAX_WORKERS from their shared machine budget.
     maxWorkers: "100%",

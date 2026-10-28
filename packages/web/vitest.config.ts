@@ -1,6 +1,7 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
+import { vitestBudgets } from "../../scripts/vitest-budget-config.mjs";
 
 export default defineConfig({
   plugins: [tailwindcss(), react()],
@@ -22,26 +23,11 @@ export default defineConfig({
     testTimeout: 20_000,
     setupFiles: ["test/setup-dom.ts"],
     include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
-    // CI output, as in packages/schema/vitest.config.ts.
-    reporters: [
-      process.env.CI ? "dot" : "default",
-      ...(process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_TEMP
-        ? [["junit", {
-            outputFile: `${process.env.RUNNER_TEMP}/vitest-results/web.xml`,
-            includeConsoleOutput: false,
-            classnameTemplate: "",
-          }] as const]
-        : []),
-    ],
+    ...vitestBudgets("web"),
     silent: "passed-only",
     execArgv: ["--no-experimental-webstorage"],
-    // The reconnect suite runs real hubs on real sockets, and its `afterEach`
-    // stops two of them. Vitest's default 5s hook budget is what a shutdown
-    // under load overruns, and it overruns it anonymously — the hook has no
-    // label to fail with. Matches packages/mcp-server, for the same reason: the
-    // timeout that fires first is the one that gets to explain itself, so the
-    // anonymous one is kept out of the way.
-    hookTimeout: 120_000,
+    // Real-hub shutdown hooks share the complete-attempt budget with the body.
+    hookTimeout: 60_000,
     // Standalone runs use one worker per core for jsdom and editor imports.
     // Root runs supply their shared budget through VITEST_MAX_WORKERS instead.
     maxWorkers: "100%",

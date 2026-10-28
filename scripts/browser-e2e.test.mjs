@@ -67,7 +67,7 @@ test("WebKit images match the pinned browser package and need no host-package in
 	}
 });
 
-test("failed browser suites upload isolated attempt output without changing their result", { skip: absentWorkflow }, () => {
+test("every browser suite uploads isolated attempt results without changing its result", { skip: absentWorkflow }, () => {
 	for (const id of browserJobs) {
 		const body = job(id);
 		assert.doesNotMatch(body, /^ {4}(?:if|continue-on-error):/m);
@@ -80,7 +80,7 @@ test("failed browser suites upload isolated attempt output without changing thei
 		assert.equal(uploads.length, 1, `${id} has one output upload`);
 		const [upload] = uploads;
 		assert.ok(steps.indexOf(upload) > steps.indexOf(suite));
-		assert.match(upload, /^ {8}if: \$\{\{ always\(\) && steps\.browser-suite\.outcome == 'failure' \}\}$/m);
+		assert.match(upload, /^ {8}if: \$\{\{ always\(\) && \(steps\.browser-suite\.outcome == 'success' \|\| steps\.browser-suite\.outcome == 'failure'\) \}\}$/m);
 		assert.match(upload, /^ {8}continue-on-error: true$/m);
 		assert.match(upload, /^ {8}timeout-minutes: 1$/m);
 		assert.match(upload, /^ {8}uses: actions\/upload-artifact@[a-f0-9]{40}(?: #.*)?$/m);
@@ -138,7 +138,6 @@ function cases(report) {
 
 test("CI selections partition the full browser suite exactly once without splitting shared files", {
 	skip: absentWorkflow,
-	timeout: 120_000,
 }, () => {
 	const argumentsByJob = browserJobs.map((id) => {
 		const body = job(id);
@@ -169,7 +168,6 @@ test("CI selections partition the full browser suite exactly once without splitt
 
 test("a new spec runs on exactly one Chromium job without changing the workflow or file list", {
 	skip: absentWorkflow,
-	timeout: 120_000,
 }, () => {
 	const directory = mkdtempSync(join(tmpdir(), "browser-partition-"));
 	try {

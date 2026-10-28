@@ -21,6 +21,7 @@
  */
 
 import { defineConfig, devices } from "@playwright/test";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -30,9 +31,11 @@ export default defineConfig({
   retries: 0,
   use: { trace: "retain-on-failure" },
   forbidOnly: process.env.CI !== undefined,
-  reporter: [["list"], ["./e2e/timing-reporter.ts"]],
-  // Generous per test, not per run: the whole file is meant to finish in well
-  // under 90s, and a stuck test should fail rather than hang the suite.
+  reporter: [["list"], ["./e2e/timing-reporter.ts", {
+    outputFile: fileURLToPath(new URL("./test-results/test-durations.json", import.meta.url)),
+  }]],
+  // The reporter also enforces complete setup/body/cleanup cost on every host;
+  // Playwright's separate teardown timeout cannot extend the test's budget.
   timeout: 60_000,
   // Convergence over a websocket is not instant.
   expect: { timeout: 20_000 },
