@@ -15,6 +15,7 @@ const osSensitive = [
   "history-cache",
   "history-cache-garbage",
   "history-holds",
+  "history-mirror-cache",
   "log",
   "pending-shutdown",
   "search-store",
@@ -27,6 +28,7 @@ const osSensitive = [
   "store",
   "store-open",
   "workspace-fork",
+  "workspace-history",
   "workspace-removal",
 ];
 

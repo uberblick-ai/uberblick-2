@@ -81,6 +81,7 @@ it("ends the first and later settles on a failed dial, then syncs when the hub o
     expect(instance.state()).toMatchObject({ status: "hub-down", url: hubUrl(endpoint.port) });
     expect(instance.state()).toMatchObject({ cause: "refused", detail: `ECONNREFUSED 127.0.0.1:${endpoint.port}` });
     expect(instance.isRoomQuiet(name)).toBe(false);
+    expect(instance.isQuiet()).toBe(false);
   }
 
   const hub = await startHub({ port: endpoint.port });
@@ -88,6 +89,7 @@ it("ends the first and later settles on a failed dial, then syncs when the hub o
   await waitUntil("the retry to open", () => instance.state().status === "connected");
   await instance.waitForQuiet();
   expect(instance.isRoomQuiet(name)).toBe(true);
+  expect(instance.isQuiet()).toBe(true);
   expect(instance.state()).not.toHaveProperty("cause");
   expect(instance.state()).not.toHaveProperty("detail");
 });

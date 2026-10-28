@@ -31,7 +31,7 @@ import { log } from "./log.js";
 import { HubConnection } from "./hub-connection.js";
 import type { HubFailureCause } from "./hub-failure.js";
 import { createHash, randomUUID } from "node:crypto";
-import { encodeOriginUpdate, readOriginAck, encodeRevisionRequest, createRevisionResponseReader } from "@uberblick/schema";
+import { encodeOriginUpdate, readOriginAck, encodeRevisionRequest, createRevisionResponseReader, readRevisionCatalogChanged } from "@uberblick/schema";
 import type { RevisionRequest, RevisionResponse } from "@uberblick/schema";
 import type { LogSlice } from "./store.js";
 import { RevisionClientError } from "./revision-client.js";
@@ -442,6 +442,8 @@ export class HubSync {
   private readonly roomQuietListeners = new Set<() => void>();
 
   private readonly stateListeners = new Set<() => void>();
+
+  private readonly revisionCatalogListeners = new Set<(room: string) => void>();
 
   private readonly revisionReplies = new Map<string, { room: string; receive: (payload: string) => void }>();
 
@@ -1030,6 +1032,9 @@ export class HubSync {
       },
       onStateless: ({ payload }) => {
         provider.acknowledgeLog(payload);
+        if (readRevisionCatalogChanged(payload) !== null) {
+          for (const listener of this.revisionCatalogListeners) listener(room);
+        }
         for (const pending of this.revisionReplies.values()) {
           if (pending.room === room) pending.receive(payload);
         }
@@ -1381,6 +1386,7 @@ export class HubSync {
     room: string,
     operation: Omit<RevisionRequest, "requestId">,
     timeoutMs = 5_000,
+    options: { background?: boolean } = {},
   ): Promise<RevisionResponse> {
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) {
       return Promise.reject(new RangeError("Revision timeout must be between 1 and 2147483647 milliseconds."));
@@ -1422,6 +1428,7 @@ export class HubSync {
         // Admission is sufficient for a read-only client; update acknowledgements
         // and queued writes are unrelated to whether it may request history.
         if (provider?.hasCurrentSync() !== true) return;
+        if (options.background === true && (operation.operation === "list" || operation.operation === "get") && !this.isQuiet()) return;
         if (operation.operation !== "list" && operation.operation !== "get") {
           if (!this.isRoomQuiet(room)) { fail("stale-state"); return; }
           if (!this.canWriteRoom(room)) { fail("forbidden"); return; }
@@ -1475,6 +1482,13 @@ export class HubSync {
     return () => { this.stateListeners.delete(listener); };
   }
 
+  /** Observe revision names changed through an already attached room. */
+  onRevisionCatalogChanged(listener: (room: string) => void): () => void {
+    if (this.destroyed) return () => {};
+    this.revisionCatalogListeners.add(listener);
+    return () => { this.revisionCatalogListeners.delete(listener); };
+  }
+
   /** Wake work that can advance once a provider has no outstanding messages. */
   onRoomQuiet(listener: () => void): () => void {
     if (this.destroyed) return () => {};
@@ -1511,6 +1525,11 @@ export class HubSync {
       }
     }
     return true;
+  }
+
+  /** Background requests yield to room admission and live document updates. */
+  isQuiet(): boolean {
+    return this.state().status === "connected" && this.allQuiet();
   }
 
   /**
@@ -1625,6 +1644,7 @@ export class HubSync {
       };
       close(() => this.stateChanged());
       this.stateListeners.clear();
+      this.revisionCatalogListeners.clear();
       close(() => this.stopDeviceWork());
       this.roomQuietListeners.clear();
       if (this.rebuildTimer !== null) {

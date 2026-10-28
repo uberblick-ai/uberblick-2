@@ -204,6 +204,17 @@ export class HistoryCache {
     }
   }
 
+  /** Resume the retained stamp after sign-out, still checking the current binding and login. */
+  resume(): HistoryCacheResult<HistoryCacheToken | null> {
+    return this.result(() => {
+      const header = this.header();
+      if (header === null) return null;
+      const opened = this.open({ hub: header.hub, workspace: header.workspace, account: header.account });
+      if (opened.status !== "ready") throw new CacheRefusal(opened.status);
+      return opened.value;
+    });
+  }
+
   open(stamp: HistoryCacheStamp): HistoryCacheResult<HistoryCacheToken> {
     return this.result(() => {
       const normalized = { ...stamp, hub: hubIdentity(stamp.hub) };
@@ -427,6 +438,17 @@ export class HistoryCache {
       if (state.byteLength !== row.byte_length) throw new CacheRefusal("unavailable");
       return { state, checksum: row.checksum as string };
     }));
+  }
+
+  listPages(token: HistoryCacheToken): HistoryCacheResult<string[]> {
+    return this.result(() => this.read(token, db => db.prepare("SELECT uuid FROM history_v1_pages WHERE generation = ? ORDER BY uuid")
+      .all(token.generation).map(row => String(row.uuid))));
+  }
+
+  hasSnapshot(token: HistoryCacheToken, uuid: string, revision: string, checksum: string): HistoryCacheResult<boolean> {
+    return this.result(() => this.read(token, db => db.prepare("SELECT 1 FROM history_v1_snapshots WHERE generation = ? AND uuid = ? AND revision = ? AND checksum = ? " +
+      "AND NOT EXISTS (SELECT 1 FROM history_v1_deleted WHERE generation = ? AND uuid = ?)")
+      .get(token.generation, uuid, revision, checksum, token.generation, uuid) !== undefined));
   }
 
   evict(token: HistoryCacheToken, uuid: string, retention: HistoryRetention, now: number): HistoryCacheResult<void> {
