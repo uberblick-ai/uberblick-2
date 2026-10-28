@@ -41,7 +41,7 @@ interface TableProblem {
   invalidSchema?: number;
 }
 export type TableProjection = TableReady | TableNoRecords | TableProblem;
-function column(value: unknown): boolean {
+export function tableColumn(value: unknown): boolean {
   if (!object(value) || !name(value.field) || !optionalText(value, "label")) return false;
   const format = value.format ?? "text";
   if (format !== "text" && format !== "number" && format !== "date" && format !== "link") return false;
@@ -61,7 +61,7 @@ export function parseTableConfig(source: string):
   if (!object(value) || !keys(value, ["version", "type", "collection", "columns", "title", "sort", "pageSize", "limit"]) ||
       value.version !== 1 || value.type !== "table" || !name(value.collection) ||
       !Array.isArray(value.columns) || value.columns.length < 1 || value.columns.length > 30 ||
-      !value.columns.every(column) || !optionalText(value, "title") ||
+      !value.columns.every(tableColumn) || !optionalText(value, "title") ||
       (Object.hasOwn(value, "limit") && (typeof value.limit !== "number" || !Number.isInteger(value.limit) || value.limit < 1)) ||
       (Object.hasOwn(value, "pageSize") && (typeof value.pageSize !== "number" ||
         !Number.isInteger(value.pageSize) || value.pageSize < 1 || value.pageSize > 100)) ||

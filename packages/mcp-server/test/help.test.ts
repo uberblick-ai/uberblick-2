@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
-import { createTagCatalogEntry, setTags } from "@uberblick/schema";
+import { createTagCatalogEntry, parseScatterConfig, setTags } from "@uberblick/schema";
 import { parseWireframe } from "@uberblick/wireframe";
 import { afterEach, expect, it, vi } from "vitest";
 import { FAILURE_INSTRUCTIONS } from "../src/failures.js";
@@ -410,4 +410,29 @@ it("documents the table mapping through both help routes and accepts its source 
   expect(JSON.parse(insertSource!)).not.toHaveProperty("pageSize");
   expect((await rig.client.readResource({ uri: "uberblick://help/insert_block" })).contents[0])
     .toMatchObject({ text: insertHelp.text });
+});
+
+it("teaches valid scatter mappings and value-free write summaries through data and insert help", () => {
+  const help = new HelpCatalog();
+  const data = help.read("data").text;
+  const scatter = data.split("### Scatter plots\n")[1]?.split("### Data tables\n")[0];
+  const source = scatter?.match(/```json\n([\s\S]*?)\n```/)?.[1];
+  expect(source).toBeDefined();
+  expect(parseScatterConfig(source!)).toMatchObject({ ok: true, config: {
+    type: "scatter", label: "name", group: "tier",
+    y: { lower: "quality_low", upper: "quality_high", range: [0, 100] },
+    details: [{ field: "sample_size", format: "number" }, { field: "source", format: "link" }],
+  } });
+  const insert = toolNamed("insert_block").details!;
+  const insertSource = insert.match(/`(\{"version":1,"type":"scatter"[^`]+)`/)?.[1];
+  expect(insertSource).toBeDefined();
+  expect(parseScatterConfig(insertSource!)).toMatchObject({ ok: true });
+  for (const text of [scatter, insert]) {
+    expect(text).toContain("recordCount");
+    expect(text).toContain("plottedCount");
+    expect(text).toContain("without record values");
+    expect(text).toMatch(/warning nam(?:es|ing) the group field/);
+    expect(text).toContain("layout, limit, missing, reference");
+    expect(text).toContain("record-id order");
+  }
 });

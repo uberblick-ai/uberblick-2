@@ -377,7 +377,8 @@ export const toolHelpDetails = {
     "concurrent human edit elsewhere in the block survives.\n\n" +
     "Editing a chart also returns a `chart` summary beside the block's id and rev, using the web's projection " +
     "of this replica's current document data. It reports status, counts and warnings; a ready line mapping " +
-    "includes its first and last x, with no other record values. Warnings and summary failures never refuse " +
+    "includes its first and last x, with no other record values. A bound scatter mapping reports recordCount " +
+    "and plottedCount without record values, and warns when its group field has more than eight values. Warnings and summary failures never refuse " +
     "or roll back the edit, or change its durability result. See data for the full summary contract. " +
     "Editing an ablauf or wireframe code block returns a `drawing` summary instead: `status` and the " +
     "diagnostics the web editor lists, advisory like the chart summary.\n\n" +
@@ -490,7 +491,9 @@ export const toolHelpDetails = {
     "when it is omitted. Each entry has the same shape as a `create_doc` seed; a single block uses a " +
     "one-entry array. The answer's `blocks` lists the inserted blocks in order, each with id and rev. " +
     "Each chart entry also has a `chart` summary of the web's projection of this replica's current data: " +
-    "status, counts and warnings, plus first and last x for ready line mappings. It returns no other record values; " +
+    "status, counts and warnings, plus first and last x for ready line mappings. Bound scatter mappings report " +
+    "recordCount and plottedCount without record values, and warn when their group field has more than eight values. " +
+    "It returns no other record values; " +
     "warnings and summary failures never refuse or roll back the batch or change its durability result. " +
     "See data for the summary fields. Each code entry in language ablauf or wireframe has a `drawing` " +
     "summary instead: `status` (`clean`, `warnings` or `errors`) and the diagnostics the web editor lists, " +
@@ -560,6 +563,24 @@ export const toolHelpDetails = {
     "each distinct reference value appears once per axis or panel. A panel's reference value also widens its unit group's shared range. " +
     "range and reference are invalid on x and in table mappings. Optional limit is an integer of 1 or more " +
     "and selects the latest N records with a valid x in x-then-record-id order, still at most 5,000. " +
+    "A scatter plot uses type scatter, for example " +
+    "`{\"version\":1,\"type\":\"scatter\",\"collection\":\"options\",\"x\":{\"field\":\"cost\"}," +
+    "\"y\":{\"field\":\"quality\",\"unit\":\"%\",\"lower\":\"quality_low\",\"upper\":\"quality_high\",\"range\":[0,100]}," +
+    "\"label\":\"name\",\"group\":\"tier\",\"details\":[{\"field\":\"source\",\"format\":\"link\"}]}`. " +
+    "Both axes are numeric: each takes field and optional label, unit, range, lower and upper. " +
+    "The required label field uses table text-cell formatting; colliding on-plot labels are hidden. " +
+    "A numeric bound on the correct side draws a whisker and widens the domain; absent or null bounds draw nothing, " +
+    "and wrong-type or wrong-side bounds are omitted and counted. range remains a minimum span widened by points and bounds. " +
+    "Optional group assigns up to eight values distinct colour and shape pairs with a legend; points without a value are neutral. " +
+    "More than eight values makes every point neutral and adds a warning naming the group field. " +
+    "Optional details accepts at most eight table-column mappings. Optional title and height behave as for a line overlay. " +
+    "layout, limit, missing, reference and unknown keys are invalid for scatter. Each schema-valid record with numeric x and y " +
+    "draws one unconnected point; no values are coerced, aggregated or calculated. At most 5,000 points appear in record-id order, " +
+    "with shown/total counts when capped and omissions counted by reason. Every point can be selected by click, tap or keyboard, " +
+    "including points with identical coordinates. Other plot clicks and Open chart source open the source in editable and read-only documents. " +
+    "Selection details show label, mapped group, x and y with labels, units and stored bounds inline, then details fields in mapping order, " +
+    "using table-cell formatting and links. At narrow widths details sit below the plot. Selection is never saved, follows its record through " +
+    "data updates, clears when no longer plotted, and resets on a mapping edit, remount or reload. " +
     "A data table also uses a chart block, " +
     "for example `{\"version\":1,\"type\":\"table\",\"collection\":\"observations\",\"columns\":[{\"field\":\"day\",\"format\":\"date\"}," +
     "{\"field\":\"count\",\"label\":\"Count\",\"format\":\"number\"}],\"sort\":{\"field\":\"day\",\"direction\":\"desc\"}}`. " +
@@ -572,11 +593,11 @@ export const toolHelpDetails = {
     "with no pager or page state; when limit hides rows, the footnote includes shown and total valid-record counts. " +
     "Open table source appears on hover or keyboard focus and stays reachable without hover. " +
     "Existing pageSize values remain accepted as integers from one to one hundred for compatibility and never affect display; " +
-    "omit pageSize from new mappings. For both views, limit has no upper bound of its own. Records hidden by " +
+    "omit pageSize from new mappings. For line and table views, limit has no upper bound of its own. Records hidden by " +
     "the author limit are not omissions. When it hides chart records, a muted note shows the latest shown and " +
     "total valid-x counts; when it hides nothing, no count appears. The chart's 5,000 cap retains its existing " +
     "notice and diagnostics when N exceeds 5,000. update_data recomputes a limited window without changing its source. " +
-    "Unknown mapping keys and options are invalid. Both views only " +
+    "Unknown mapping keys and options are invalid. All views only " +
     "read their document's collection and contain no record values; use update_data to write records. Invalid mappings stay " +
     "editable source and show a problem message. Every block has one text an agent can edit.",
   set_metadata:

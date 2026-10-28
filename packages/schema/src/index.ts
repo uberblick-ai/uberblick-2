@@ -35,6 +35,11 @@ export type {
 } from "./chart-data.js";
 export { parseTableConfig, prepareTable, sortTableRows } from "./table-data.js";
 export type { TableColumnMapping, TableConfig, TableNoRecords, TableProjection, TableReady } from "./table-data.js";
+export { parseScatterConfig, prepareScatter } from "./scatter-data.js";
+export type {
+  ScatterAxisMapping, ScatterConfig, ScatterPoint, ScatterAxisDiagnostics, ScatterDiagnostics,
+  ScatterReady, ScatterNoRecords, ScatterProjection,
+} from "./scatter-data.js";
 export { chartViewType, prepareChartView } from "./chart-view.js";
 export type { ChartView } from "./chart-view.js";
 export { decisionCurrentRecord, decisionRelations, decisionTopicState, decisionTopicTitle, readDecisions, relatedDecisionTopics, resolveDecisionTopics } from "./decisions.js";
