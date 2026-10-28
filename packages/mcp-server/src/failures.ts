@@ -7,7 +7,7 @@ import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
 import { RevisionClientError, type RevisionClientFailure } from "./revision-client.js";
 import { ServerShuttingDownError } from "./server-work.js";
-import { WorkspaceRemovedError } from "./store.js";
+import { WorkspaceDetachedError, WorkspaceRemovedError } from "./store.js";
 import type { Writes } from "./tools/operation.js";
 
 /** Keep unclassified exception text out of caller-visible failures. */
@@ -161,6 +161,10 @@ const RECOVERIES: Record<string, Recovery> = {
   workspace_removed: {
     recoveryClass: "manual",
     guidance: "Restart the MCP server to open a new copy of the workspace before writing again.",
+  },
+  workspace_detached: {
+    recoveryClass: "manual",
+    guidance: "Restart the MCP server to use the workspace's current selection before reading or writing again.",
   },
   stale_block: {
     recoveryClass: "reread",
@@ -593,6 +597,10 @@ function stamped(
 }
 
 export function toFailure(tool: FailedTool, error: unknown): ToolFailure {
+  if (error instanceof WorkspaceDetachedError ||
+    (error instanceof PersistenceError && error.cause instanceof WorkspaceDetachedError)) {
+    return stamped(tool, { error: "workspace_detached", message: new WorkspaceDetachedError().message });
+  }
   if (error instanceof WorkspaceRemovedError ||
     (error instanceof PersistenceError && error.cause instanceof WorkspaceRemovedError)) {
     return stamped(tool, { error: "workspace_removed", message: new WorkspaceRemovedError().message });

@@ -86,8 +86,8 @@ export class WorkspaceBindingMismatch extends Error {
     const clear = source === "environment" ? "env -u UB_WORKSPACE_ID -u UB_HUB_URL " : "";
     const fix = binding.hubUrl === null
       ? source === "environment"
-        ? "Moving a hub workspace to local isn't supported yet. Restore the recorded selection: unset UB_WORKSPACE_ID UB_HUB_URL"
-        : `Moving a hub workspace to local isn't supported yet. Restore the recorded selection: ub workspace use ${id}`
+        ? `Make this computer's copy local with ub workspace detach ${id}. To keep syncing, restore the recorded selection: unset UB_WORKSPACE_ID UB_HUB_URL`
+        : `Make this computer's copy local with ub workspace detach ${id}. To keep syncing, restore the recorded selection: ub workspace use ${id}`
       : `To move this machine's copy, run:\n  ${clear}ub workspace use '${destination.replace(/'/g, "'\\''")}/${id}'\n` +
         `This destination comes from ${origin}. Moving can upload this copy's content; only move a copy you trust to a hub you trust. ` +
         "Re-fetch an untrusted copy on a clean machine instead.";
@@ -141,7 +141,7 @@ export function forgetWorkspace(id: string, env: NodeJS.ProcessEnv = process.env
 /**
  * Caller holds the init lock. Publish records first; restore them if binding publication fails.
  * Keep the callback synchronous so publication and restoration cannot interleave.
- * Only verified promotion, fetch or completed init attach may replace an existing hub.
+ * Only verified promotion, fetch, completed init attach or explicit detach may replace an existing hub.
  */
 export function withWorkspaceBindings<T>(
   bindings: readonly ProjectBinding[],

@@ -175,7 +175,7 @@ describe("ub mcp serve", () => {
     expect(run.stdout).toBe("");
     expect(run.stderr).toContain(WORKSPACE);
     expect(run.stderr).toContain(DEAD_HUB_URL);
-    expect(run.stderr).toMatch(/local.*(?:not|isn't) supported/is);
+    expect(run.stderr).toContain(`ub workspace detach ${WORKSPACE}`);
     expect(run.stderr).toContain("UB_WORKSPACE_ID");
     expect(run.stderr).toContain("UB_HUB_URL");
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(DEAD_HUB_URL);

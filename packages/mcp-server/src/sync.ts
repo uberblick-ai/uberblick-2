@@ -156,9 +156,24 @@ export interface AttachOptions {
 
 /** Drop closing-window frames; the next sync handshake reconciles their state. */
 class UnqueuedHocuspocusProviderWebsocket extends HocuspocusProviderWebsocket {
+  private canExchange: (() => boolean) | undefined;
+
+  useFence(canExchange: () => boolean): void { this.canExchange = canExchange; }
+
+  override createWebSocketConnection(): ReturnType<HocuspocusProviderWebsocket["createWebSocketConnection"]> {
+    if (this.canExchange?.() === false) return Promise.reject(new Error("workspace session requires restart"));
+    return super.createWebSocketConnection();
+  }
+
+  override onMessage(event: MessageEvent): void {
+    if (this.canExchange?.() === false) return;
+    super.onMessage(event);
+  }
+
   override send(
     message: Parameters<HocuspocusProviderWebsocket["send"]>[0],
   ): void {
+    if (this.canExchange?.() === false) return;
     const socket = this.webSocket;
     if (socket === null || socket.readyState !== socket.OPEN) {
       return;
@@ -408,6 +423,8 @@ class AdmittedHocuspocusProvider extends HocuspocusProvider {
 }
 
 export interface HubSyncOptions {
+  /** Durable workspace generation, checked at every transport boundary. */
+  canSync?: () => boolean;
   credentialProvider?: CredentialProvider;
   readLog?: (room: string, seq: number) => LogSlice;
   acknowledgeLog?: (room: string, seq: number) => void;
@@ -458,6 +475,7 @@ export class HubSync {
   private readonly onSettingsReset: ((state: Uint8Array, refused: Y.Doc) => void) | undefined;
   private readonly readLog: HubSyncOptions["readLog"];
   private readonly acknowledgeLog: HubSyncOptions["acknowledgeLog"];
+  private readonly canSync: HubSyncOptions["canSync"];
 
   private settingsRecovery: { doc: Y.Doc; awareness: Awareness; refused: Y.Doc } | null = null;
 
@@ -489,6 +507,7 @@ export class HubSync {
    * room attachment or dialling, including continuations resumed after an await.
    */
   private get stopped(): boolean {
+    if (!this.destroyed && !this.quarantined && this.canSync?.() === false) this.quarantine();
     return this.destroyed || this.quarantined || this.hubProtocolVersion !== null;
   }
 
@@ -583,6 +602,7 @@ export class HubSync {
     this.onSettingsReset = options.onSettingsReset;
     this.readLog = options.readLog;
     this.acknowledgeLog = options.acknowledgeLog;
+    this.canSync = options.canSync;
     if (options.credentialProvider !== undefined || !isLoopbackEndpoint(config.hubUrl)) {
       config = { ...config, authSecret: null, deviceLogin: config.deviceLogin ?? {} };
     }
@@ -625,7 +645,8 @@ export class HubSync {
       return;
     }
 
-    this.socket = new UnqueuedHocuspocusProviderWebsocket({
+    const socket = new UnqueuedHocuspocusProviderWebsocket({
+      autoConnect: false,
       url: config.hubUrl,
       WebSocketPolyfill: this.connection.websocket(),
       ...backoff,
@@ -680,6 +701,8 @@ export class HubSync {
         this.stateChanged();
       },
     });
+    this.socket = socket;
+    socket.useFence(() => !this.stopped);
 
     // Subscribe after construction: configured onOpen runs before the socket
     // saves its payload. This listener runs with that payload, ahead of providers.
@@ -689,6 +712,8 @@ export class HubSync {
       }
       this.pumpAdmissions();
     });
+    // Install the durable fence before even the first websocket dial.
+    void socket.connect().catch(() => { /* The socket owns retrying failed dials. */ });
   }
 
   /**
@@ -1282,6 +1307,8 @@ export class HubSync {
    * Add our protocol version centrally so every reading, including offline, carries it.
    */
   state(): HubState {
+    // Diagnostics also discover detachment while the connection is otherwise idle.
+    void this.stopped;
     const reach = this.reach();
     return {
       protocolVersion: SYNC_PROTOCOL_VERSION,

@@ -115,7 +115,7 @@ describe("passive commands preserve this machine's workspace hub", () => {
       const output = mismatch(run, command.name);
       expect(output).toContain(WORKSPACE);
       expect(output).toContain(RECORDED_HUB);
-      expect(output).toMatch(/local.*(?:not|isn't) supported/is);
+      expect(output).toContain(`ub workspace detach ${WORKSPACE}`);
       expect(output).toContain(source === "project" ? `ub workspace use ${WORKSPACE}` : "unset UB_WORKSPACE_ID UB_HUB_URL");
       expect(readFileSync(defaultWorkspaceDatabasePath(WORKSPACE, box.env))).toEqual(databaseBefore);
       expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(registryBefore);

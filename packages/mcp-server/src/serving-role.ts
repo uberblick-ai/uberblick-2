@@ -70,7 +70,7 @@ function openServingLock(lockPath: string): {
 }
 
 /** Hold the same exclusion as ub open until synchronous removal finishes. */
-export function acquireWorkspaceRemovalRole(databasePath: string): { close(): void } {
+export function acquireWorkspaceRemovalRole(databasePath: string, action: "removing" | "detaching" = "removing"): { close(): void } {
   const lockPath = `${databasePath}.serving-lock`;
   mkdirSync(dirname(lockPath), { recursive: true, mode: 0o700 });
   const { lock, assertCurrent } = openServingLock(lockPath);
@@ -81,7 +81,7 @@ export function acquireWorkspaceRemovalRole(databasePath: string): { close(): vo
   } catch (error) {
     lock.close();
     if (isBusy(error)) {
-      throw new Error("a running `ub open` is serving this workspace; stop that run before removing it");
+      throw new Error(`a running \`ub open\` is serving this workspace; stop that run before ${action} it`);
     }
     throw error;
   }

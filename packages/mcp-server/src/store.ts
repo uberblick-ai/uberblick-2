@@ -1,8 +1,9 @@
 import { chmodSync, closeSync, existsSync, fstatSync, openSync, statSync } from "node:fs";
 import { dirname } from "node:path";
+import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { createDataDirectory } from "@uberblick/mcp-server/storage";
-import { getWorkspaceName, settingsRoom } from "@uberblick/schema";
+import { directoryRoom, getWorkspaceName, listDeletedDirectoryUuids, settingsRoom } from "@uberblick/schema";
 import type { UpdateOriginMetadata } from "@uberblick/schema";
 import * as Y from "yjs";
 import type {
@@ -11,8 +12,10 @@ import type {
   StatementResultingChanges,
 } from "node:sqlite";
 import { log } from "./log.js";
-import { HistoryCache } from "./history-cache.js";
+import { discardDownloadedHistory, HistoryCache } from "./history-cache.js";
 import { parseHistoryRetention, type HistoryRetention, type WorkspaceSize } from "./local-settings.js";
+import { workspaceDetachGeneration, WorkspaceDetachedError } from "./workspace-generation.js";
+export { WorkspaceDetachedError } from "./workspace-generation.js";
 
 const BUSY_TIMEOUT_MS = 5_000;
 const WAL_RETRY_MS = 10;
@@ -494,6 +497,8 @@ export class MirrorStore {
   private readonly fileIdentity: { dev: bigint; ino: bigint } | null;
 
   private removed = false;
+  private detachGeneration: string | null | undefined;
+  private detached = false;
 
   private fragmentPruneVersion: number | null = null;
 
@@ -575,7 +580,6 @@ export class MirrorStore {
   // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
   constructor(databasePath: string, private readonly workspaceId: string) {
     this.databasePath = databasePath;
-    this.history = new HistoryCache(databasePath, workspaceId);
     // Owner-only: this tree holds the corpus and may later receive credentials.
     const durable = databasePath !== ":memory:";
     const fresh = durable && !existsSync(databasePath);
@@ -624,6 +628,8 @@ export class MirrorStore {
         .get() !== undefined;
     // Refuse foreign workspaces before any corpus schema, index or migration writes.
     this.db.exec(META_SCHEMA);
+    this.detachGeneration = workspaceDetachGeneration(this.db);
+    this.history = new HistoryCache(databasePath, workspaceId, process.env, undefined, this.detachGeneration);
     this.claimWorkspace(workspaceId, preexisting);
     this.db.exec(SCHEMA);
     this.migrateDirectoryIndexSequence();
@@ -780,6 +786,7 @@ export class MirrorStore {
     this.appendTx = transactional(
       this.db,
       (room: string, payload: Uint8Array, origin: UpdateOrigin, settingsResetSeq?: number, metadata?: UpdateOriginMetadata): number => {
+        this.assertWorkspacePresent();
         if (settingsResetSeq !== undefined && settingsResetSeq !== (this.settingsReset()?.seq ?? 0)) {
           throw new SettingsResetError();
         }
@@ -807,6 +814,7 @@ export class MirrorStore {
     this.compactTx = transactional(
       this.db,
       (room: string, state: Uint8Array, throughSeq: number, settingsResetSeq?: number): boolean => {
+        this.assertWorkspacePresent();
         if (settingsResetSeq !== undefined && settingsResetSeq !== (this.settingsReset()?.seq ?? 0)) {
           throw new SettingsResetError();
         }
@@ -1085,6 +1093,7 @@ export class MirrorStore {
 
   /** Merge only the acknowledged prefix on admission; leave pending rows exact. */
   readForSync(room: string, seq: number): LogSlice {
+    this.assertWorkspacePresent();
     return this.readSinceTx(room, seq, true);
   }
 
@@ -1519,6 +1528,36 @@ export class MirrorStore {
 
   assertWorkspacePresent(): void {
     if (this.isRemoved()) throw new WorkspaceRemovedError();
+    if (this.isDetached()) throw new WorkspaceDetachedError();
+  }
+
+  /** A session stays fenced even after the workspace reconnects to its old hub. */
+  isDetached(): boolean {
+    if (!this.detached && this.detachGeneration !== undefined) {
+      this.detached = workspaceDetachGeneration(this.db) !== this.detachGeneration;
+    }
+    return this.detached;
+  }
+
+  /** Fence stale peers and discard history with the caller's binding publication. */
+  detachWorkspace(action: (deletedUuids: readonly string[]) => void = () => {}): void {
+    this.assertWorkspacePresent();
+    transactional(this.db, () => {
+      this.assertWorkspacePresent();
+      const directory = new Y.Doc();
+      let deleted: string[];
+      try {
+        const room = directoryRoom(this.workspaceId);
+        const snapshot = this.snapshot(room);
+        if (snapshot !== null) Y.applyUpdate(directory, snapshot.state);
+        for (const update of this.updatesAfter(room, snapshot?.throughSeq ?? 0)) Y.applyUpdate(directory, update.payload);
+        deleted = listDeletedDirectoryUuids(directory);
+      } finally { directory.destroy(); }
+      discardDownloadedHistory(this.db);
+      this.db.prepare("INSERT INTO meta (key, value) VALUES ('workspace_detach_generation', ?) " +
+        "ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(randomUUID());
+      action(deleted);
+    }, "immediate")();
   }
 
   /** Both server shutdown and the supplying owner may close; keep it idempotent. */
@@ -1532,4 +1571,11 @@ export class MirrorStore {
       this.identityFd = null;
     }
   }
+}
+
+export function detachWorkspaceCopy(databasePath: string, workspaceId: string,
+  action: (deletedUuids: readonly string[]) => void): void {
+  const store = new MirrorStore(databasePath, workspaceId);
+  try { store.detachWorkspace(action); }
+  finally { store.close(); }
 }

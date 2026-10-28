@@ -4,7 +4,7 @@ import { PERSISTENCE_ERROR_MESSAGE } from "./failures.js";
 import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
 import { ServerShuttingDownError } from "./server-work.js";
-import { WorkspaceRemovedError } from "./store.js";
+import { WorkspaceDetachedError, WorkspaceRemovedError } from "./store.js";
 
 /** Only deliberate resource refusals may carry their message and data through. */
 export class ClientSafeResourceError extends McpError {}
@@ -21,7 +21,10 @@ export function guardedResource<Args extends unknown[], Result>(
     } catch (error) {
       if (error instanceof ClientSafeResourceError || error instanceof ServerShuttingDownError) throw error;
       let message: string;
-      if (error instanceof WorkspaceRemovedError ||
+      if (error instanceof WorkspaceDetachedError ||
+        (error instanceof PersistenceError && error.cause instanceof WorkspaceDetachedError)) {
+        message = new WorkspaceDetachedError().message;
+      } else if (error instanceof WorkspaceRemovedError ||
         (error instanceof PersistenceError && error.cause instanceof WorkspaceRemovedError)) {
         message = new WorkspaceRemovedError().message;
       } else if (error instanceof PersistenceError) {

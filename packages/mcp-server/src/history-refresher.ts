@@ -39,7 +39,7 @@ export function startHistoryRefresher(replicas: Replicas): { close(): Promise<vo
     immediate = null;
     if (closed || stopping !== null) return;
     try {
-      if (store.isRemoved() || replicas.persistenceError() !== null) {
+      if (store.isRemoved() || store.isDetached() || replicas.persistenceError() !== null) {
         // Existing sessions stay refused even when another start recreates the path.
         sync.quarantine();
         stop();
