@@ -165,18 +165,22 @@ function projectScatter(config: ScatterConfig, data: DocData | null): ScatterPro
   };
   const invalid = new Set(collection.invalidRecordIds);
   const eligible: ScatterPoint[] = [];
-  const groupValues = new Map<string, JSONValue>();
   for (const record of collection.records) {
     if (invalid.has(record.id) || !object(record.value)) { diagnostics.invalidSchema += 1; continue; }
     const x = coordinate(own(record.value, config.x.field), diagnostics.axes.x);
     const y = coordinate(own(record.value, config.y.field), diagnostics.axes.y);
     if (x === undefined || y === undefined) continue;
-    const validRecord = record as DataRecord;
-    const point: ScatterPoint = { id: record.id, record: validRecord, x, y };
-    const xLower = bound(validRecord, config.x, "lower", x, diagnostics.axes.x);
-    const xUpper = bound(validRecord, config.x, "upper", x, diagnostics.axes.x);
-    const yLower = bound(validRecord, config.y, "lower", y, diagnostics.axes.y);
-    const yUpper = bound(validRecord, config.y, "upper", y, diagnostics.axes.y);
+    eligible.push({ id: record.id, record: record as DataRecord, x, y });
+  }
+  eligible.sort((a, b) => compareCodePoints(a.id, b.id));
+  const points = eligible.slice(0, CHART_RECORD_LIMIT);
+  const groupValues = new Map<string, JSONValue>();
+  for (const point of points) {
+    const { record, x, y } = point;
+    const xLower = bound(record, config.x, "lower", x, diagnostics.axes.x);
+    const xUpper = bound(record, config.x, "upper", x, diagnostics.axes.x);
+    const yLower = bound(record, config.y, "lower", y, diagnostics.axes.y);
+    const yUpper = bound(record, config.y, "upper", y, diagnostics.axes.y);
     if (xLower !== undefined) point.xLower = xLower;
     if (xUpper !== undefined) point.xUpper = xUpper;
     if (yLower !== undefined) point.yLower = yLower;
@@ -186,10 +190,7 @@ function projectScatter(config: ScatterConfig, data: DocData | null): ScatterPro
       point.groupKey = canonicalJson(groupValue);
       groupValues.set(point.groupKey, groupValue as JSONValue);
     }
-    eligible.push(point);
   }
-  eligible.sort((a, b) => compareCodePoints(a.id, b.id));
-  const points = eligible.slice(0, CHART_RECORD_LIMIT);
   diagnostics.limited = eligible.length - points.length;
   diagnostics.groupOverflow = groupValues.size > 8;
   const warnings = diagnostics.groupOverflow

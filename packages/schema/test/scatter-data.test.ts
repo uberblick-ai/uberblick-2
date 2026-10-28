@@ -142,13 +142,25 @@ describe("shared scatter projection", () => {
     });
   });
 
-  it("takes at most 5,000 qualifying records by id, with a shown/total notice and domain from drawn points", () => {
-    const records = Array.from({ length: 5_002 }, (_, index) =>
-      record(String(index).padStart(4, "0"), { x: index, y: -index, label: index }));
-    const projection = prepareScatter(source(), snapshot(records.reverse()));
+  it("takes at most 5,000 qualifying records by id, with a shown/total notice and domain, groups and bounds from drawn points", () => {
+    const records = Array.from({ length: 5_000 }, (_, index) =>
+      record(String(index).padStart(4, "0"), { x: index, y: -index, label: index, group: "kept" }));
+    records.push(...Array.from({ length: 9 }, (_, index) => record(String(index + 5_000), {
+      x: index + 5_000, y: -index - 5_000, group: index,
+      xlo: "bad", xhi: -1, ylo: 1, yhi: false,
+    })));
+    const projection = prepareScatter(source({
+      group: "group", x: { field: "x", lower: "xlo", upper: "xhi" },
+      y: { field: "y", lower: "ylo", upper: "yhi" },
+    }), snapshot(records.reverse()));
     expect(projection).toMatchObject({
-      status: "ready", recordCount: 5_002, eligibleCount: 5_002, plottedCount: 5_000, notPlotted: 2,
-      diagnostics: { limited: 2 }, notice: "Showing 5,000 of 5002 records", domain: { x: [0, 4_999], y: [-4_999, -0] },
+      status: "ready", recordCount: 5_009, eligibleCount: 5_009, plottedCount: 5_000, notPlotted: 9,
+      groups: [{ key: '"kept"', value: "kept" }], warnings: [],
+      diagnostics: { limited: 9, groupOverflow: false, axes: {
+        x: { bounds: { lower: { invalid: 0, wrongSide: 0 }, upper: { invalid: 0, wrongSide: 0 } } },
+        y: { bounds: { lower: { invalid: 0, wrongSide: 0 }, upper: { invalid: 0, wrongSide: 0 } } },
+      } },
+      notice: "Showing 5,000 of 5009 records", domain: { x: [0, 4_999], y: [-4_999, -0] },
     });
     if (projection.status !== "ready") throw new Error("Expected ready scatter");
     expect(projection.points[0]?.id).toBe("0000");

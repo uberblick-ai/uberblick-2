@@ -28,7 +28,8 @@ Views whose assertions read series or reference colours run in both:
 ungrouped record sharing another record's coordinates. Native canvas strokes
 establish that stored bounds widen the declared ranges and remain visible;
 text paint establishes that colliding labels are hidden and legend text stays
-neutral in both appearances. Pointer and touch input cycle through the two
+neutral in both appearances. Label ink stays clear of its own whisker segments
+and selection ring. Pointer and touch input cycle through the two
 overlapping records. A separate paint case checks eight group colours, then
 the neutral fallback and field-naming diagnostic for nine groups.
 The native selector reaches every record from the keyboard and lets Tab leave

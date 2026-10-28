@@ -295,7 +295,7 @@ describe("the scatter chart's composed presentation and lifecycle", () => {
     expect(selector.value).toBe("a");
     const rows = [...details.querySelectorAll("dt")].map(term => [term.textContent, term.nextElementSibling?.textContent]);
     expect(rows).toEqual([
-      ["Label", "Duplicate"], ["Record", "a"], ["Group", "Core"],
+      ["Label", "Duplicate"], ["Group", "Core"],
       ["Weekly cost", "12 €"], ["Quality", "82 % (76–87 %)"],
       ["Sample size", "1,234 people"], ["Absent value", "Absent"], ["Null value", "Null"],
       ["Wrong value", "Invalid: not numeric"], ["Source", "https://example.com/source"],
@@ -311,7 +311,7 @@ describe("the scatter chart's composed presentation and lifecycle", () => {
     expect(within(details).getAllByRole("link")).toHaveLength(1);
     await act(async () => fireEvent.change(selector, { target: { value: "b" } }));
     expect(selector.value).toBe("b");
-    expect(details.querySelector("dl")?.textContent).toContain('RecordbGroupNull');
+    expect(details.querySelector("dl")?.textContent).toContain('LabelDuplicateGroupNull');
     expect(details.querySelector("dl")?.textContent).toContain('{"nested":false}');
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
     await act(async () => editor.destroy());

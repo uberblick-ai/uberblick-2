@@ -3,6 +3,7 @@ import { Chart, ScatterController } from "chart.js";
 import type { ChartConfiguration, Plugin, PointStyle } from "chart.js";
 import type { ScatterAxisMapping, ScatterPoint, ScatterProjection, ScatterReady } from "@uberblick/schema";
 import { createRoot } from "react-dom/client";
+import { Fragment } from "react";
 import type { ReactElement } from "react";
 import { NativeSelect } from "../ui/shadcn/native-select.js";
 import { tableCellFormatter } from "./table-data.js";
@@ -77,13 +78,12 @@ function Details({ result, selected, select }: {
     </NativeSelect>
     {point !== undefined && <dl>
       <dt>Label</dt><dd><Cell cell={textCell(point, config.label)} /></dd>
-      <dt>Record</dt><dd>{point.id}</dd>
       {config.group !== undefined && <><dt>Group</dt><dd><Cell cell={textCell(point, config.group)} /></dd></>}
       <dt>{config.x.label || config.x.field}</dt><dd>{scatterAxisText(point, config.x)}</dd>
       <dt>{config.y.label || config.y.field}</dt><dd>{scatterAxisText(point, config.y)}</dd>
-      {details.map(({ column, key }) => <div className="ub-scatter-detail" key={key}>
+      {details.map(({ column, key }) => <Fragment key={key}>
         <dt>{column.label || column.field}</dt><dd><Cell cell={tableCellFormatter(column)(point.record)} /></dd>
-      </div>)}
+      </Fragment>)}
     </dl>}
   </>;
 }
@@ -164,9 +164,11 @@ export function scatterView(canvas: HTMLCanvasElement): {
         }
         const lines = textCell(point, config.label).text.split(/\r?\n/);
         const width = Math.max(...lines.map(line => ctx.measureText(line).width));
-        const left = x + 8 + width <= chartArea.right ? x + 8 : x - 8 - width;
-        const top = y - lineHeight / 2;
-        const rect = { left, right: left + width, top, bottom: top + lines.length * lineHeight };
+        const height = lines.length * lineHeight;
+        // Clear the selection ring and both axes' whiskers, including end caps.
+        const left = x + 12 + width <= chartArea.right ? x + 12 : x - 12 - width;
+        const top = y - 12 - height >= chartArea.top ? y - 12 - height : y + 12;
+        const rect = { left, right: left + width, top, bottom: top + height };
         if (left < chartArea.left || rect.right > chartArea.right || top < chartArea.top || rect.bottom > chartArea.bottom) return;
         const first = Math.floor(top / lineHeight);
         const last = Math.floor(rect.bottom / lineHeight);

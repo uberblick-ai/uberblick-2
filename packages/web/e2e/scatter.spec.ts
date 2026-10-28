@@ -51,7 +51,7 @@ const RECORDS = [
 ];
 interface DocPayload { blocks: { id: string; type: string; text: string; rev: string }[] }
 interface PaintPoint { x: number; y: number; radius: number; colour: string }
-interface PaintText { text: string; x: number; y: number; left: number; right: number; colour: string }
+interface PaintText { text: string; x: number; y: number; left: number; right: number; top: number; bottom: number; colour: string }
 interface PaintLine { from: { x: number; y: number }; to: { x: number; y: number }; colour: string }
 interface PaintProbe { points: PaintPoint[]; texts: PaintText[]; lines: PaintLine[]; fills: string[] }
 
@@ -106,7 +106,9 @@ async function installPaintProbe(page: Page): Promise<void> {
         const metrics = this.measureText(args[0]);
         probe.texts.push({ text: args[0], colour: String(this.fillStyle), ...position(this, args[1], args[2]),
           left: position(this, args[1] - metrics.actualBoundingBoxLeft, args[2]).x,
-          right: position(this, args[1] + metrics.actualBoundingBoxRight, args[2]).x });
+          right: position(this, args[1] + metrics.actualBoundingBoxRight, args[2]).x,
+          top: position(this, args[1], args[2] - metrics.actualBoundingBoxAscent).y,
+          bottom: position(this, args[1], args[2] + metrics.actualBoundingBoxDescent).y });
       }
       fillText.apply(this, args);
     };
@@ -141,15 +143,37 @@ async function paint(page: Page): Promise<PaintProbe> {
   return page.evaluate(() => (window as unknown as { scatterPaint: PaintProbe }).scatterPaint);
 }
 
+function besideLabel(point: { x: number; y: number }, label: PaintText): boolean {
+  return point.x < label.left && label.left - point.x < 30
+    && point.y > label.top - 20 && point.y < label.bottom + 20;
+}
+
 function alphaPoint(probe: PaintProbe): PaintPoint {
   const label = probe.texts.find(entry => entry.text === "Alpha");
   if (label === undefined) throw new Error("e2e: scatter Alpha label was not painted");
-  const point = probe.points.find(entry => entry.x < label.left && label.left - entry.x < 30 && Math.abs(entry.y - label.y) < 15);
+  const point = probe.points.find(entry => besideLabel(entry, label));
   if (point !== undefined) return point;
-  const whisker = probe.lines.find(line => line.from.x < label.left && label.left - line.from.x < 30
-    && Math.abs(line.from.y - label.y) < 15 && Math.abs(line.from.y - line.to.y) < 0.1 && Math.abs(line.from.x - line.to.x) > 20);
+  const whisker = probe.lines.find(line => besideLabel(line.from, label)
+    && Math.abs(line.from.y - line.to.y) < 0.1 && Math.abs(line.from.x - line.to.x) > 20);
   if (whisker === undefined) throw new Error("e2e: scatter Alpha has no nearby painted point or whisker");
   return { ...whisker.from, radius: 4, colour: whisker.colour };
+}
+
+function expectAlphaLabelClear(probe: PaintProbe): void {
+  const alpha = alphaPoint(probe);
+  const label = probe.texts.find(entry => entry.text === "Alpha");
+  if (label === undefined) throw new Error("e2e: scatter Alpha label was not painted");
+  const stem = probe.lines.find(line => Math.abs(line.from.x - alpha.x) < 1 && Math.abs(line.from.y - alpha.y) < 1);
+  if (stem === undefined) throw new Error("e2e: scatter Alpha whiskers were not painted");
+  const whiskers = probe.lines.filter(line => line.colour === stem.colour);
+  expect(whiskers.length).toBeGreaterThan(0);
+  for (const line of whiskers) {
+    expect(Math.max(line.from.x, line.to.x) < label.left || Math.min(line.from.x, line.to.x) > label.right
+      || Math.max(line.from.y, line.to.y) < label.top || Math.min(line.from.y, line.to.y) > label.bottom).toBe(true);
+  }
+  const ring = probe.points.find(point => point.radius === 9 && Math.abs(point.x - alpha.x) < 1 && Math.abs(point.y - alpha.y) < 1);
+  if (ring === undefined) throw new Error("e2e: selected Alpha ring was not painted");
+  expect(label.left).toBeGreaterThan(alpha.x + ring.radius + 1);
 }
 
 async function selectAlpha(page: Page, touch: boolean): Promise<void> {
@@ -204,8 +228,7 @@ test("scatter bounds, groups, collision hiding and selected details paint in bot
     }
     const alpha = alphaPoint(probe);
     const twinLabel = probe.texts.find(entry => entry.text === "Beta" || entry.text === "Beta twin");
-    const twin = probe.points.find(entry => twinLabel !== undefined && entry.x < twinLabel.left
-      && twinLabel.left - entry.x < 30 && Math.abs(entry.y - twinLabel.y) < 15);
+    const twin = probe.points.find(entry => twinLabel !== undefined && besideLabel(entry, twinLabel));
     if (twin === undefined) throw new Error("e2e: equal-valued neutral point was not painted");
     const boundX = alpha.x + (-20 - 20) / (50 - 20) * (twin.x - alpha.x);
     const boundY = alpha.y + (120 - 82) / (50 - 82) * (twin.y - alpha.y);
@@ -226,12 +249,13 @@ test("scatter bounds, groups, collision hiding and selected details paint in bot
       }
     }
     await selectAlpha(page, touch);
+    expectAlphaLabelClear(await paint(page));
     const details = page.locator(".ub-scatter-details");
     await expect(details).toContainText("Alpha");
     await expect(details).toContainText("Standard");
     await expect(details).toContainText("20 EUR (-20–35 EUR)");
     await expect(details).toContainText("82 % (76–120 %)");
-    await expect(details.locator("dt")).toHaveText(["Label", "Record", "Group", "Weekly cost", "Quality", "Sample size", "Source", "Missing detail", "Null detail", "Invalid number"]);
+    await expect(details.locator("dt")).toHaveText(["Label", "Group", "Weekly cost", "Quality", "Sample size", "Source", "Missing detail", "Null detail", "Invalid number"]);
     await expect(details).toContainText("Absent");
     await expect(details).toContainText("Null");
     await expect(details).toContainText("Invalid: twelve");

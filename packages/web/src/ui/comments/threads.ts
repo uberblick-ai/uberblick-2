@@ -59,8 +59,9 @@ export function blockRefLabel(type: BlockType, index: number, source = ""): stri
   if (type === "chart") {
     try {
       const mapping: unknown = JSON.parse(source);
-      if (mapping !== null && typeof mapping === "object" && "type" in mapping && mapping.type === "table") {
-        label = "Data table";
+      if (mapping !== null && typeof mapping === "object" && "type" in mapping) {
+        if (mapping.type === "table") label = "Data table";
+        else if (mapping.type === "scatter") label = "Scatter plot";
       }
     } catch { /* Incomplete source keeps the chart label. */ }
   }
