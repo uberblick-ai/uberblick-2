@@ -502,6 +502,76 @@ describe("address-controlled history views", () => {
     expect(first.before!.isDestroyed).toBe(true);
   });
 
+  it("selects a session's fixed endpoints without refreshing its list or snapshots, and steps from its last revision", async () => {
+    const api = client();
+    const revisions = anchorHistory();
+    vi.mocked(api.list).mockResolvedValue(revisions);
+    const fix = mountRouted(api, { revision: "release" });
+    await act(async () => {});
+    const release = fix.reading().selection!.after;
+    const later = { ...revisions[0]!, id: "later" };
+    vi.mocked(api.list).mockResolvedValue([later, ...revisions]);
+
+    await act(async () => fix.reading().openSession(1, "review-edit"));
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "release", since: "review-edit" });
+    expect(fix.reading().selection).toMatchObject({ index: 1, after: release, comparedWith: revisions[4] });
+    const before = fix.reading().selection!.before;
+    expect(getMeta(before!).title).toBe("review-edit");
+    expect(fix.reading().entries).toBe(revisions);
+
+    await act(async () => fix.reading().back());
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "release-edit" });
+    expect(fix.reading().selection?.comparedWith).toBeUndefined();
+    fix.visit({ revision: "release", since: "review-edit" });
+    await act(async () => {});
+    expect(fix.reading().selection).toMatchObject({ index: 1, after: release, before });
+    await act(async () => fix.reading().forward());
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "newest" });
+    fix.visit({ revision: "release", since: "review-edit" });
+    await act(async () => {});
+    expect(fix.reading().selection).toMatchObject({ index: 1, after: release, before });
+    expect(api.list).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.get).mock.calls.filter(call => call[1] === "release")).toHaveLength(1);
+    expect(vi.mocked(api.get).mock.calls.filter(call => call[1] === "review-edit")).toHaveLength(1);
+    expect(release.isDestroyed).toBe(false);
+  });
+
+  it("keeps addressed comparison endpoints when removing the baseline's name", async () => {
+    const api = client();
+    const earliest = { ...entries[2]!, name: { text: "Reviewed", namer: null, namedAt: 50, canManage: true } };
+    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, earliest]);
+    const fix = mountRouted(api, { revision: "middle", since: "earliest" });
+    await act(async () => {});
+    const selected = fix.reading().selection!;
+    const unnamed = { ...earliest, name: null };
+    vi.mocked(api.removeName).mockResolvedValue(unnamed);
+
+    await act(async () => fix.reading().removeName("earliest"));
+    expect(fix.reading()).toMatchObject({ active: true, busy: false, error: null });
+    expect(fix.reading().selection).toMatchObject({ index: 1, after: selected.after, before: selected.before, comparedWith: unnamed });
+    expect(fix.navigate).not.toHaveBeenCalled();
+  });
+
+  it("refreshes the list and newest snapshot for Changes since this name after a session comparison", async () => {
+    const api = client();
+    const revisions = anchorHistory();
+    vi.mocked(api.list).mockResolvedValue(revisions);
+    const fix = mountRouted(api, { revision: "release", since: "review-edit" });
+    await act(async () => {});
+    const release = fix.reading().selection!.after;
+    const later = { ...revisions[0]!, id: "later" };
+    const refreshed = [later, ...revisions];
+    vi.mocked(api.list).mockResolvedValue(refreshed);
+
+    await act(async () => fix.reading().sinceNamed("review"));
+    expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "later", since: "review" });
+    expect(fix.reading().entries).toBe(refreshed);
+    expect(getMeta(fix.reading().selection!.after).title).toBe("later");
+    expect(getMeta(fix.reading().selection!.before!).title).toBe("review");
+    expect(api.list).toHaveBeenCalledTimes(2);
+    expect(release.isDestroyed).toBe(true);
+  });
+
   it("writes resolved revision and comparison ends when history controls change the view", async () => {
     const api = client();
     const earliest = { ...entries[2]!, name: { text: "Reviewed", namer: null, namedAt: 50, canManage: false } };

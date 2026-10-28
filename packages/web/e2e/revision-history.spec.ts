@@ -974,9 +974,9 @@ test.describe("document history through ub open", () => {
     await shared.goto(new URL(unnamedComparison, harness().appUrl).href);
     await assertComparison(shared, "Unnamed baseline content.");
     await expect(history(shared)).not.toContainText("compared with");
-    await expect(shared.locator(".ub-revision-side-label").first()
+    await expect(shared.locator(".ub-revision-side-label").first().getByRole("button")).toHaveCount(0);
+    await expect(shared.locator(".ub-revision-side-label").last()
       .getByRole("button", { name: "Restore this version", exact: true })).toBeEnabled();
-    await expect(shared.locator(".ub-revision-side-label").last().getByRole("button")).toHaveCount(0);
     await shared.reload();
     await assertComparison(shared, "Unnamed baseline content.");
     await expect(shared).toHaveURL(new URL(unnamedComparison, harness().appUrl).href);
@@ -1743,6 +1743,158 @@ test.describe("document history through ub open", () => {
     await expect(historicalEditor(page)).toHaveCount(0);
     await expect(list).toBeHidden();
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+  });
+
+  test("history sessions expand with native input and retain their comparison, names and selected revisions", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+    const touch = info.project.name === "webkit-ipad";
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+      ...(touch ? { ...devices["iPad Pro 11"], viewport: { width: 1366, height: 1024 } }
+        : { viewport: { width: 1440, height: 900 } }), reducedMotion: "reduce",
+    } });
+    const title = docTitle("Session history");
+    const uuid = await newDocument(page, title);
+    const path = new URL(page.url()).pathname;
+    const person = { githubUsername: "Lena", surface: { kind: "browser" as const, name: "Browser" } };
+    const agent = { githubUsername: "Ben", surface: { kind: "mcp" as const, name: "Codex" } };
+    const now = Date.now();
+    await serveHistory(page, [
+      { id: "latest", title, author: person, startedAt: now - 60_000, endedAt: null },
+      { id: "session-end", title, author: agent, startedAt: now - 600_000, endedAt: now - 540_000,
+        name: { text: "Accepted checkpoint", namer: person, namedAt: now - 540_000, canManage: true } },
+      { id: "session-start", title, author: person, startedAt: now - 780_000, endedAt: now - 720_000,
+        name: { text: "Early checkpoint", namer: person, namedAt: now - 720_000, canManage: true } },
+      { id: "earlier", title, author: null, startedAt: null, endedAt: now - 1_800_000 },
+    ], {
+      latest: savedState(uuid, title, "Current content."),
+      "session-end": savedState(uuid, title, "Accepted session content."),
+      "session-start": savedState(uuid, title, "Early session content."),
+      earlier: savedState(uuid, title, "Before the session."),
+    });
+    const comparison = `${path}/rev/${revisionId("session-end")}/since/${revisionId("earlier")}`;
+    const single = `${path}/rev/${revisionId("session-start")}`;
+    await previous(page);
+    let drawer = await showHistoryList(page);
+    const list = historyList(page);
+    const session = list.locator(".ub-history-session");
+    const summary = session.locator(".ub-history-session-entry");
+    const expand = session.getByRole("button", { name: /Expand session/ });
+    const collapse = session.getByRole("button", { name: /Collapse session/ });
+    const first = session.locator(".ub-history-entry:not(.ub-history-session-entry)").filter({ hasText: "Early checkpoint" });
+    await expect(expand).toHaveAttribute("aria-expanded", "false");
+    await expect(summary).toContainText("Lena");
+    await expect(summary).toContainText("Ben");
+    await expect(summary).toContainText("Early checkpoint");
+    await expect(summary).toContainText("Accepted checkpoint");
+    await expect(first).toBeHidden();
+
+    await list.locator('[aria-current="true"]').focus();
+    for (let tab = 0; tab < 3 && !await expand.evaluate(element => element === document.activeElement); tab += 1) {
+      await page.keyboard.press("Tab");
+    }
+    await expect(expand).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(collapse).toHaveAttribute("aria-expanded", "true");
+    await expect(collapse).toBeFocused();
+    await expect(first).toBeVisible();
+    await page.keyboard.press("Space");
+    await expect(expand).toHaveAttribute("aria-expanded", "false");
+    await expect(first).toBeHidden();
+    await activateControl(expand);
+    await expect(first).toBeVisible();
+    await activateControl(collapse);
+    await expect(first).toBeHidden();
+    await list.getByRole("button", { name: /Earlier content/ }).focus();
+    await page.keyboard.press("Tab");
+    await expect.poll(() => list.evaluate(element => !element.contains(document.activeElement))).toBe(true);
+    await activateControl(summary);
+    await expect(summary).toHaveAttribute("aria-current", "true");
+    await closeHistoryList(page, drawer);
+    await expect(page).toHaveURL(new URL(comparison, harness().appUrl).href);
+    await expect(historicalEditor(page)).toContainText("Accepted session content.");
+    await expect(earlierSide(page)).toContainText("Before the session.");
+    await expect(history(page)).toContainText("Lena");
+    await expect(history(page)).toContainText("Ben");
+    const after = page.locator(".ub-revision-side-label").last();
+    await expect(after).toContainText("Lena");
+    await expect(after).toContainText("Ben");
+    await expect(after.getByRole("button", { name: "Restore this version", exact: true })).toBeEnabled();
+    await expect(page.locator(".ub-revision-side-label").first().getByRole("button")).toHaveCount(0);
+
+    drawer = await showHistoryList(page);
+    await page.evaluate(() => document.fonts.ready);
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      const boxes = await session.evaluate(element => {
+        const summary = element.querySelector(".ub-history-session-entry");
+        const trigger = element.querySelector("[aria-expanded]");
+        const sidebar = element.closest(".ub-history-sidebar");
+        if (summary === null || trigger === null || sidebar === null) throw new Error("The session is missing its controls");
+        const bounds = sidebar.getBoundingClientRect();
+        return [summary, trigger].map(control => {
+          const box = control.getBoundingClientRect();
+          const x = box.left + box.width / 2;
+          const y = box.top + box.height / 2;
+          return { width: box.width, height: box.height,
+            contained: box.left >= bounds.left && box.right <= bounds.right,
+            reachable: control.contains(document.elementFromPoint(x, y)) };
+        });
+      });
+      for (const box of boxes) {
+        expect(box.contained).toBe(true);
+        expect(box.reachable).toBe(true);
+        expect(box.width).toBeGreaterThanOrEqual(touch ? 44 : 24);
+        expect(box.height).toBeGreaterThanOrEqual(touch ? 44 : 24);
+      }
+      const avatars = await summary.locator(".ub-history-avatar").evaluateAll(elements => elements.map(element => {
+        const box = element.getBoundingClientRect();
+        return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+      }));
+      expect(avatars).toHaveLength(2);
+      const [newerAvatar, olderAvatar] = avatars;
+      if (newerAvatar === undefined || olderAvatar === undefined) throw new Error("A session is missing an author's avatar");
+      expect(Math.max(newerAvatar.left, olderAvatar.left)).toBeLessThan(Math.min(newerAvatar.right, olderAvatar.right));
+      expect(Math.max(newerAvatar.top, olderAvatar.top)).toBeLessThan(Math.min(newerAvatar.bottom, olderAvatar.bottom));
+      expect([newerAvatar.left, newerAvatar.top]).not.toEqual([olderAvatar.left, olderAvatar.top]);
+      const readings = await renderedText(page, ".ub-history-session");
+      expect(readings.length).toBeGreaterThan(0);
+      for (const reading of readings) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
+    }
+    const scan = await new AxeBuilder({ page }).include(".ub-history-sidebar").withTags(WCAG_TAGS).analyze();
+    assertNoViolations(scan.violations);
+    await closeHistoryList(page, drawer);
+
+    await page.reload();
+    await expect(page).toHaveURL(new URL(comparison, harness().appUrl).href);
+    await expect(historicalEditor(page)).toContainText("Accepted session content.");
+    await expect(earlierSide(page)).toContainText("Before the session.");
+    drawer = await showHistoryList(page);
+    await expect(summary).toHaveAttribute("aria-current", "true");
+    await expect(expand).toHaveAttribute("aria-expanded", "false");
+    await closeHistoryList(page, drawer);
+    await previous(page);
+    await expect(page).toHaveURL(new URL(single, harness().appUrl).href);
+    await expect(historicalEditor(page)).toContainText("Early session content.");
+    drawer = await showHistoryList(page);
+    await expect(first).toBeVisible();
+    await expect(first).toHaveAttribute("aria-current", "true");
+    await closeHistoryList(page, drawer);
+    await page.goBack();
+    await expect(page).toHaveURL(new URL(comparison, harness().appUrl).href);
+    drawer = await showHistoryList(page);
+    await expect(summary).toHaveAttribute("aria-current", "true");
+    await activateControl(collapse);
+    await expect(first).toBeHidden();
+    await closeHistoryList(page, drawer);
+    await page.goForward();
+    await expect(page).toHaveURL(new URL(single, harness().appUrl).href);
+    await showHistoryList(page);
+    await expect(first).toBeVisible();
+    await expect(first).toHaveAttribute("aria-current", "true");
+    await activateControl(list.getByRole("button", { name: "Named", exact: true }));
+    await expect(session).toHaveCount(0);
+    await expect(list.locator(".ub-history-entry")).toHaveCount(2);
+    await expect(list.getByRole("button", { name: /Early checkpoint/ })).toBeVisible();
+    await expect(list.getByRole("button", { name: /Accepted checkpoint/ })).toBeVisible();
   });
 
   // Restore-label contrast is unstable during this journey in CI.

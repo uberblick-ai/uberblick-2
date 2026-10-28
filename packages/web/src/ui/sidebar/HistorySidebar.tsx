@@ -1,18 +1,101 @@
 /**
  * The sidebar pane that replaces the document list while history is open:
- * every revision newest first, grouped by day, each opening that revision.
+ * newest-first sessions and individual revisions, grouped by day.
  */
 
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import { renamedFrom } from "../document/document-history.js";
 import type { DocumentHistory } from "../document/document-history.js";
-import { revisionAuthor, revisionGroups, revisionTime } from "../document/revision-list.js";
+import { revisionAuthor, revisionAuthors, revisionGroups, revisionSpan, revisionTime, type RevisionAuthor, type RevisionItem } from "../document/revision-list.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
 import { SidebarContent as SidebarScrollContent, SidebarHeader } from "../shadcn/sidebar.js";
 import { Button } from "../shadcn/button.js";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../shadcn/collapsible.js";
 import { PreviousIcon, TagIcon } from "../document/history-icons.js";
 
 const ROW_CLASSES = "ub-history-entry flex w-full min-w-0 items-center gap-2.5 px-4 py-2 text-left text-(--sidebar-row-foreground) min-h-11 enabled:hover:bg-(--sidebar-accent) aria-[current=true]:bg-(--sidebar-accent) aria-[current=true]:text-sidebar-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-sidebar-ring";
+
+function Avatars({ authors }: { authors: (RevisionAuthor & { key: string })[] }): ReactElement {
+  return <span className="ub-history-avatars flex shrink-0 flex-col -space-y-3" aria-hidden="true">
+    {authors.map(author => <span key={author.key} className={`ub-history-avatar bg-sidebar${author.agent ? " ub-history-avatar-agent" : ""}`}>{author.initial}</span>)}
+  </span>;
+}
+
+function RevisionRow({ item: { entry, index }, history, selected, now }: {
+  item: RevisionItem; history: DocumentHistory; selected: number | null; now: number;
+}): ReactElement {
+  const entries = history.entries ?? [];
+  const author = revisionAuthor(entry, index === entries.length - 1);
+  const time = revisionTime(entry);
+  const latest = index === 0;
+  const when = entry.endedAt === null || time === null ? null : formatTimestamp(time, now);
+  const name = entry.name?.text;
+  const renamed = renamedFrom(entries, history.titles, index) !== null;
+  return <li>
+    <Button variant="plain" size="custom" type="button" className={ROW_CLASSES} aria-current={index === selected ? "true" : undefined}
+      onClick={() => history.open(index)}>
+      <Avatars authors={[{ ...author, key: entry.id }]} />
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        {name !== undefined && <span className="ub-history-name flex min-w-0 items-center gap-1.5 ub-type-ui font-semibold text-sidebar-foreground" title={name}>
+          <TagIcon /><span className="min-w-0 truncate">{name}</span>
+        </span>}
+        <span className={`min-w-0 truncate ${name === undefined ? "ub-type-ui font-medium text-sidebar-foreground" : "ub-type-caption text-(--sidebar-muted-foreground)"}`}>
+          {author.name}{author.surface !== "" && <span className="font-normal text-(--sidebar-muted-foreground)"> {author.surface}</span>}
+        </span>
+        {(latest || when !== null || renamed) && <span className="ub-type-caption text-(--sidebar-muted-foreground)">
+          {latest && "Current version"}{latest && when !== null && " · "}
+          {when !== null && <time dateTime={when.dateTime} title={when.title}>{when.label}</time>}
+          {renamed && <span className="ub-history-renamed-tag">{latest || when !== null ? " · renamed" : "renamed"}</span>}
+        </span>}
+      </span>
+    </Button>
+    {name !== undefined && index > 0 && <Button variant="plain" size="custom" type="button" className="ub-history-since mb-1 ml-[3.25rem] p-0 ub-type-caption text-(--sidebar-muted-foreground) underline-offset-2 hover:underline aria-[current=true]:text-sidebar-foreground"
+      aria-current={history.selection?.index === 0 && history.selection.comparedWith?.id === entry.id ? "true" : undefined}
+      onClick={() => history.sinceNamed(entry.id)}>Changes since this name</Button>}
+  </li>;
+}
+
+function SessionRow({ item, history, selected, revealIndex, now }: {
+  item: RevisionItem; history: DocumentHistory; selected: number | null; revealIndex: number | null; now: number;
+}): ReactElement {
+  const revisions = item.revisions ?? [];
+  const revealed = revisions.find(revision => revision.index === revealIndex);
+  const reveal = revealed?.entry.id ?? null;
+  const [expansion, setExpansion] = useState({ open: reveal !== null, reveal });
+  if (expansion.reveal !== reveal) setExpansion({ open: reveal !== null || expansion.open, reveal });
+  const open = expansion.open || (reveal !== expansion.reveal && reveal !== null);
+  const authors = revisionAuthors(revisions.map(revision => revision.entry));
+  const span = revisionSpan(revisions.map(revision => revision.entry), now);
+  const current = history.selection?.index === item.index && history.selection.comparedWith?.id === item.before?.id;
+  return <Collapsible asChild open={open} onOpenChange={open => setExpansion({ open, reveal })}>
+    <li className="ub-history-session">
+      <div className="flex min-w-0 items-start">
+        <Button variant="plain" size="custom" type="button" className={`${ROW_CLASSES} ub-history-session-entry flex-1 pr-1`}
+          aria-current={current ? "true" : undefined} onClick={() => { if (item.before !== undefined) history.openSession(item.index, item.before.id); }}>
+          <Avatars authors={authors} />
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            {revisions.flatMap(({ entry }) => entry.name == null ? [] : [<span key={entry.id} className="ub-history-name flex min-w-0 items-start gap-1.5 ub-type-ui font-semibold text-sidebar-foreground">
+              <TagIcon /><span className="min-w-0 wrap-anywhere">{entry.name.text}</span>
+            </span>])}
+            <span className="ub-type-ui font-medium text-sidebar-foreground wrap-anywhere">{authors.map(author => `${author.name}${author.surface === "" ? "" : ` ${author.surface}`}`).join(", ")}</span>
+            <span className="ub-type-caption text-(--sidebar-muted-foreground)" title={span.title}>{item.index === 0 && "Current version · "}{span.label}</span>
+          </span>
+        </Button>
+        <CollapsibleTrigger asChild>
+          <Button variant="plain" size="custom" type="button" aria-label={open ? "Collapse session" : "Expand session"}
+            className="grid min-h-11 w-8.5 shrink-0 place-items-center text-(--sidebar-muted-foreground) hover:bg-(--sidebar-accent) [@media(any-pointer:coarse)]:w-11">
+            <span className={`[&_svg]:size-4 ${open ? "-rotate-90" : "rotate-180"}`}><PreviousIcon /></span>
+          </Button>
+        </CollapsibleTrigger>
+      </div>
+      <CollapsibleContent><ul className="m-0 list-none p-0 pl-4">
+        {revisions.map(revision => <RevisionRow key={revision.entry.id} item={revision} history={history} selected={selected} now={now} />)}
+      </ul></CollapsibleContent>
+      {/* Collapsing hides the other revisions without changing or hiding the selected view. */}
+      {!open && revealed !== undefined && <ul className="m-0 list-none p-0 pl-4"><RevisionRow item={revealed} history={history} selected={selected} now={now} /></ul>}
+    </li>
+  </Collapsible>;
+}
 
 export function HistorySidebar({ history, title, onNow = history.now }: {
   history: DocumentHistory;
@@ -24,6 +107,8 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
   const entries = history.entries ?? [];
   const groups = revisionGroups(entries, now, filter === "named");
   const selected = filter === "named" || history.selection?.comparedWith === undefined ? history.selection?.index ?? null : null;
+  const revealIndex = selected ?? (history.selection?.index === 0 && history.selection.comparedWith?.name != null
+    ? entries.findIndex(entry => entry.id === history.selection?.comparedWith?.id) : null);
   const count = entries.length === 1 ? "1 revision" : `${entries.length} revisions`;
   return (
     <>
@@ -89,49 +174,9 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
           <section key={group.label} aria-label={group.label}>
             <h3 className="m-0 px-4 pt-3.5 pb-1.5 ub-type-caption font-medium text-(--sidebar-muted-foreground)">{group.label}</h3>
             <ul className="m-0 list-none p-0">
-              {group.items.map(({ entry, index }) => {
-                const author = revisionAuthor(entry, index === entries.length - 1);
-                const time = revisionTime(entry);
-                // The newest entry is what the live document shows, even while its revision is still open.
-                const latest = index === 0;
-                const when = entry.endedAt === null || time === null ? null : formatTimestamp(time, now);
-                const name = entry.name?.text;
-                const current = index === selected;
-                const renamed = renamedFrom(entries, history.titles, index) !== null;
-                return (
-                  <li key={entry.id}>
-                    <Button variant="plain" size="custom" type="button" className={ROW_CLASSES} aria-current={current ? "true" : undefined}
-                      onClick={() => history.open(index)}>
-                      <span className={`ub-history-avatar${author.agent ? " ub-history-avatar-agent" : ""}`} aria-hidden="true">{author.initial}</span>
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        {name !== undefined && (
-                          <span className="ub-history-name flex min-w-0 items-center gap-1.5 ub-type-ui font-semibold text-sidebar-foreground" title={name}>
-                            <TagIcon />
-                            <span className="min-w-0 truncate">{name}</span>
-                          </span>
-                        )}
-                        <span className={`min-w-0 truncate ${name === undefined ? "ub-type-ui font-medium text-sidebar-foreground" : "ub-type-caption text-(--sidebar-muted-foreground)"}`}>
-                          {author.name}{author.surface !== "" && <span className="font-normal text-(--sidebar-muted-foreground)"> {author.surface}</span>}
-                        </span>
-                        {(latest || when !== null || renamed) && (
-                          <span className="ub-type-caption text-(--sidebar-muted-foreground)">
-                            {latest && "Current version"}{latest && when !== null && " · "}
-                            {when !== null && <time dateTime={when.dateTime} title={when.title}>{when.label}</time>}
-                            {renamed && <span className="ub-history-renamed-tag">{latest || when !== null ? " · renamed" : "renamed"}</span>}
-                          </span>
-                        )}
-                      </span>
-                    </Button>
-                    {name !== undefined && index > 0 && (
-                      <Button variant="plain" size="custom" type="button" className="ub-history-since mb-1 ml-[3.25rem] p-0 ub-type-caption text-(--sidebar-muted-foreground) underline-offset-2 hover:underline aria-[current=true]:text-sidebar-foreground"
-                        aria-current={history.selection?.index === 0 && history.selection.comparedWith?.id === entry.id ? "true" : undefined}
-                        onClick={() => history.sinceNamed(entry.id)}>
-                        Changes since this name
-                      </Button>
-                    )}
-                  </li>
-                );
-              })}
+              {group.items.map(item => item.revisions === undefined
+                ? <RevisionRow key={item.entry.id} item={item} history={history} selected={selected} now={now} />
+                : <SessionRow key={item.entry.id} item={item} history={history} selected={selected} revealIndex={revealIndex} now={now} />)}
             </ul>
           </section>
         ))}

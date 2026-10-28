@@ -363,6 +363,9 @@
 .ub-history-author { color: var(--foreground); font-weight: 500; }
 .ub-history-when,
 .ub-history-who > svg { flex: none; }
+.ub-history-who.ub-history-span { flex-wrap: wrap; white-space: normal; overflow: visible; }
+.ub-history-span .ub-history-author { overflow: visible; overflow-wrap: anywhere; }
+.ub-history-span .ub-history-when { flex: 0 1 auto; }
 .ub-history-state:empty { display: none; }
 .ub-history-position { font-family: var(--font-mono); font-size: var(--type-caption-size); white-space: nowrap; }
 .ub-history-tag { flex: none; }
@@ -504,6 +507,7 @@
   font: 500 var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
 }
 .ub-revision-side-label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ub-revision-side-label > .ub-history-span { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
 .ub-revision-side-label .ub-revision-restore {
   position: relative;
   z-index: 1;

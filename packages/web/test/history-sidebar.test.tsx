@@ -10,7 +10,7 @@ import type { RevisionEntry } from "@uberblick/schema";
 import { act, cleanup, render } from "./react-render.js";
 import { useDocumentHistory, type DocumentHistory } from "../src/ui/document/document-history.js";
 import type { DocumentRevisionsClient } from "../src/shell/document-revisions.js";
-import { revisionAuthor, revisionGroups } from "../src/ui/document/revision-list.js";
+import { revisionAuthor, revisionAuthors, revisionGroups, revisionSpan } from "../src/ui/document/revision-list.js";
 import { HistorySidebar } from "../src/ui/sidebar/HistorySidebar.js";
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -34,7 +34,7 @@ function fakeHistory(overrides: Partial<DocumentHistory> = {}): DocumentHistory 
     filter: "all", setFilter: vi.fn(),
     comparisonView: "split", setComparisonView: vi.fn(),
     entries, selection: null, busy: false, error: null, titles: {}, collapseUnchanged: true, setCollapseUnchanged: vi.fn(), available: true, active: true, entry: null,
-    back: vi.fn(), forward: vi.fn(), open: vi.fn(), sinceLastNamed: vi.fn(), sinceNamed: vi.fn(),
+    back: vi.fn(), forward: vi.fn(), open: vi.fn(), openSession: vi.fn(), sinceLastNamed: vi.fn(), sinceNamed: vi.fn(),
     name: vi.fn(), rename: vi.fn(), removeName: vi.fn(), now: vi.fn(), retry: vi.fn(), refresh: vi.fn(),
     ...overrides,
   } as unknown as DocumentHistory;
@@ -62,6 +62,44 @@ describe("revision list model", () => {
     expect(revisionGroups(entries, NOW, true)).toEqual([{ label: "Today", items: [{ entry: entries[1], index: 1 }] }]);
   });
 
+  it("chains gaps through two minutes across authors, surfaces and midnight, leaving the oldest revision separate", () => {
+    const midnight = new Date(2026, 9, 23).getTime();
+    const revisions: RevisionEntry[] = [
+      { id: "newest", author: agent, startedAt: midnight + 60_000, endedAt: null },
+      { id: "handover", author: browser, startedAt: midnight - 120_000, endedAt: midnight - 60_000, name: named("Reviewed") },
+      { id: "start", author: { ...browser, githubUsername: "lena" }, startedAt: midnight - 180_000, endedAt: midnight - 120_000 },
+      { id: "separate", author: browser, startedAt: midnight - HOUR, endedAt: midnight - 300_001 },
+      { id: "oldest", author: browser, startedAt: midnight - 2 * HOUR, endedAt: midnight - HOUR },
+    ];
+    const groups = revisionGroups(revisions, NOW);
+    expect(groups.map(group => [group.label, group.items.map(item => item.entry.id)])).toEqual([
+      ["Today", ["newest"]], ["Yesterday", ["separate", "oldest"]],
+    ]);
+    expect(groups[0]!.items[0]!.revisions?.map(item => [item.entry.id, item.index])).toEqual([["newest", 0], ["handover", 1], ["start", 2]]);
+    expect(groups[0]!.items[0]!.before?.id).toBe("separate");
+    expect(groups[1]!.items.every(item => item.revisions === undefined)).toBe(true);
+    expect(revisionGroups(revisions, NOW, true).flatMap(group => group.items)).toEqual([{ entry: revisions[1], index: 1 }]);
+  });
+
+  it("keeps entries without a start time separate on either side", () => {
+    const revisions = [
+      { ...entries[0]!, startedAt: NOW },
+      { ...entries[1]!, startedAt: null, endedAt: NOW },
+      { ...entries[2]!, startedAt: NOW, endedAt: NOW },
+      { ...entries[3]!, startedAt: NOW, endedAt: NOW },
+    ];
+    expect(revisionGroups(revisions, NOW).flatMap(group => group.items).map(item => item.revisions)).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
+  it("attributes spans by account and surface, without counting the baseline", () => {
+    const revisions = [entries[0]!, entries[1]!, { ...entries[0]!, id: "duplicate", startedAt: NOW - 4 * HOUR }];
+    expect(revisionAuthors(revisions).map(({ key: _key, ...author }) => author)).toEqual([revisionAuthor(entries[0]!, false), revisionAuthor(entries[1]!, false)]);
+    const span = revisionSpan(revisions, NOW);
+    expect(span.label).toContain("now");
+    expect(span.title).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).formatRange(new Date(NOW - 4 * HOUR), new Date(NOW)));
+    expect(revisionSpan([{ ...entries[0]!, startedAt: NOW + HOUR }], NOW).label).toContain("now");
+  });
+
   it("says who and where when known, and never invents an author", () => {
     expect(revisionAuthor(entries[0]!, false)).toEqual({ name: "ben", surface: "via Claude", agent: true, initial: "B" });
     expect(revisionAuthor(entries[1]!, false)).toEqual({ name: "ben", surface: "written by hand 👏", agent: false, initial: "B" });
@@ -86,6 +124,46 @@ describe("revision list model", () => {
 });
 
 describe("history sidebar", () => {
+  it("shows names on collapsed sessions and keeps their selected revision or named shortcut visible", () => {
+    const revisions = [
+      { ...entries[0]!, startedAt: NOW, endedAt: NOW, name: named("Accepted") },
+      { ...entries[1]!, startedAt: NOW - HOUR, endedAt: NOW },
+      entries[5]!,
+    ];
+    const history = fakeHistory({ entries: revisions, selection: { index: 0, after: new Y.Doc(), before: new Y.Doc(), comparedWith: revisions[2]! } });
+    const view = render(<HistorySidebar history={history} title="Auth plan" />);
+    expect(screen.getByRole("button", { name: "Expand session" })).toBeTruthy();
+    const session = document.querySelector<HTMLButtonElement>(".ub-history-session-entry")!;
+    expect(session.textContent).toContain("Accepted");
+    expect(session.textContent).toContain("Reviewed after the auth rewrite");
+    expect(session.querySelectorAll(".ub-history-avatar")).toHaveLength(2);
+    expect(session.getAttribute("aria-current")).toBe("true");
+    fireEvent.click(session);
+    expect(history.openSession).toHaveBeenCalledWith(0, "first");
+    fireEvent.click(screen.getByRole("button", { name: "Expand session" }));
+    expect(screen.getByRole("button", { name: "Collapse session" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse session" }));
+
+    view.rerender(<HistorySidebar history={{ ...history, selection: { index: 1, after: new Y.Doc(), before: new Y.Doc() } }} title="Auth plan" />);
+    const selected = document.querySelector<HTMLButtonElement>("[aria-current=true]")!;
+    expect(selected.textContent).toContain("Reviewed after the auth rewrite");
+    expect(screen.getByRole("button", { name: "Collapse session" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse session" }));
+    expect(document.querySelector("[aria-current=true]")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Expand session" })).toBeTruthy();
+    expect(document.querySelectorAll(".ub-history-entry:not(.ub-history-session-entry)")).toHaveLength(2);
+
+    view.rerender(<HistorySidebar history={{ ...history, selection: { index: 0, after: new Y.Doc(), before: new Y.Doc(), comparedWith: revisions[1]! } }} title="Auth plan" />);
+    expect(screen.getByRole("button", { name: "Changes since this name" }).getAttribute("aria-current")).toBe("true");
+    expect(screen.getByRole("button", { name: "Expand session" })).toBeTruthy();
+  });
+
+  it("does not mark a saved session address after that newest session has grown", () => {
+    const revisions = [{ ...entries[0]!, startedAt: NOW }, { ...entries[1]!, endedAt: NOW }, entries[2]!, entries[5]!];
+    render(<HistorySidebar history={fakeHistory({ entries: revisions, selection: { index: 1, after: new Y.Doc(), before: new Y.Doc(), comparedWith: revisions[2]! } })} title="Auth plan" />);
+    expect(document.querySelector("[aria-current=true]")).toBeNull();
+  });
+
   it("keeps the comparison choice through comparisons, history sessions, documents and reloads", async () => {
     vi.stubGlobal("localStorage", window.localStorage);
     localStorage.clear();
