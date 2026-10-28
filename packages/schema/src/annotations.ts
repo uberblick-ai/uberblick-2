@@ -504,6 +504,18 @@ export function addComment(
   return readThread(thread);
 }
 
+export type CommentEditRefusal =
+  | "thread_not_found"
+  | "comment_not_found"
+  | "thread_resolved"
+  | "account_required"
+  | "comment_account_missing"
+  | "comment_not_owned"
+  | "empty_text";
+
+export type EditCommentResult = { ok: false; reason: CommentEditRefusal }
+  | { ok: true; annotation: Annotation };
+
 /** Replace only this account's comment, retaining attribution and array position. */
 export function editComment(
   ydoc: Y.Doc,
@@ -511,19 +523,42 @@ export function editComment(
   commentId: string,
   account: string,
   text: string,
-): Annotation | null {
+): Annotation | null;
+export function editComment(
+  ydoc: Y.Doc,
+  threadId: string,
+  commentId: string,
+  account: string | undefined,
+  text: string,
+  options: { reportRefusal: true },
+): EditCommentResult;
+export function editComment(
+  ydoc: Y.Doc,
+  threadId: string,
+  commentId: string,
+  account: string | undefined,
+  text: string,
+  options?: { reportRefusal: true },
+): Annotation | null | EditCommentResult {
+  const refuse = (reason: CommentEditRefusal): EditCommentResult | null =>
+    options?.reportRefusal === true ? { ok: false, reason } : null;
   const thread = threadMap(ydoc, threadId);
-  if (thread === null || thread.get("resolved") === true || !isGithubUsername(account) || text.trim() === "") return null;
+  if (thread === null) return refuse("thread_not_found");
   const rows = commentRows(thread);
   const comment = readCommentRows(rows).find((entry) => entry.id === commentId);
-  if (comment === undefined || !isGithubUsername(comment.value.account) ||
-      comment.value.account.toLowerCase() !== account.toLowerCase()) return null;
+  if (comment === undefined) return refuse("comment_not_found");
+  if (thread.get("resolved") === true) return refuse("thread_resolved");
+  if (!isGithubUsername(account)) return refuse("account_required");
+  if (!isGithubUsername(comment.value.account)) return refuse("comment_account_missing");
+  if (comment.value.account.toLowerCase() !== account.toLowerCase()) return refuse("comment_not_owned");
+  if (text.trim() === "") return refuse("empty_text");
   const replacement = { ...comment.value, text, commentId, editedAt: new Date().toISOString() };
   ydoc.transact(() => {
     for (const index of [...comment.indices].reverse()) rows.delete(index, 1);
     rows.insert(comment.indices[0], [replacement]);
   });
-  return readThread(thread);
+  const annotation = readThread(thread);
+  return options?.reportRefusal === true ? { ok: true, annotation } : annotation;
 }
 
 export type CommentDeleteRefusal =

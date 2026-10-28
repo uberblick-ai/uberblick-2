@@ -117,22 +117,40 @@ describe("annotations", () => {
     b.destroy();
   });
 
-  it.each(["other account", "legacy", "empty", "missing thread", "missing comment", "resolved"])(
-    "refuses %s edits without changing the document", (reason) => {
+  it.each([
+    ["other account", "comment_not_owned"],
+    ["legacy", "comment_account_missing"],
+    ["whitespace", "empty_text"],
+    ["empty string", "empty_text"],
+    ["missing thread", "thread_not_found"],
+    ["missing comment", "comment_not_found"],
+    ["resolved", "thread_resolved"],
+    ["signed out", "account_required"],
+    ["invalid account", "account_required"],
+  ] as const)(
+    "refuses %s edits with a reason and without changing the document", (scenario, reason) => {
       const { a, b, threadId } = editablePair();
       let id = getAnnotationCommentId(a, threadId, 0)!;
-      if (reason === "legacy") {
+      if (scenario === "legacy") {
         addComment(a, threadId, "Legacy", "No account");
         id = getAnnotationCommentId(a, threadId, 1)!;
       }
-      if (reason === "missing thread") getAnnotationsMap(a).delete(threadId);
-      if (reason === "missing comment") storedComments(a, threadId).delete(0, 1);
-      if (reason === "resolved") setAnnotationResolved(a, threadId, true);
+      if (scenario === "missing thread") getAnnotationsMap(a).delete(threadId);
+      if (scenario === "missing comment") storedComments(a, threadId).delete(0, 1);
+      if (scenario === "resolved") setAnnotationResolved(a, threadId, true);
       const before = Y.encodeStateAsUpdate(a);
+      const update = vi.fn();
+      a.on("update", update);
+      const account = scenario === "signed out" ? undefined
+        : scenario === "invalid account" ? "invalid account"
+        : scenario === "other account" ? "someone" : "octocat";
+      const text = scenario === "whitespace" ? " \n\t "
+        : scenario === "empty string" ? "" : "Correction";
 
-      expect(editComment(a, threadId, id, reason === "other account" ? "someone" : "octocat",
-        reason === "empty" ? " \n\t " : "Correction")).toBeNull();
+      expect(editComment(a, threadId, id, account ?? "", text)).toBeNull();
+      expect(editComment(a, threadId, id, account, text, { reportRefusal: true })).toEqual({ ok: false, reason });
       expect(Y.encodeStateAsUpdate(a)).toEqual(before);
+      expect(update).not.toHaveBeenCalled();
       a.destroy();
       b.destroy();
     },
@@ -143,7 +161,9 @@ describe("annotations", () => {
     addComment(a, threadId, "Display name", "Second", { kind: "person", account: "octocat" });
     syncDocs(a, b);
     const id = getAnnotationCommentId(a, threadId, index)!;
-    editComment(a, threadId, id, "octocat", "Corrected");
+    expect(editComment(a, threadId, id, "octocat", "Corrected", { reportRefusal: true })).toEqual({
+      ok: true, annotation: getAnnotation(a, threadId),
+    });
     addComment(b, threadId, "Other", "First concurrent reply");
     addComment(b, threadId, "Other", "Second concurrent reply");
     syncDocs(a, b);

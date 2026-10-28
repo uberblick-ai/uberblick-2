@@ -580,20 +580,18 @@ export const tools: readonly Tool[] = [
   }),
   tool({
     name: "annotate",
-    title: "Comment, reply, resolve, move or delete your comment",
+    title: "Comment, reply, resolve, move, edit or delete your comment",
     description:
-      "Open with block_id/start/end; reply with thread_id; move with thread_id plus block_id/start/end. " +
-      "These modes require text; author is optional. Only replies accept resolved to resolve or reopen. " +
-      "Moves replace all marks and keep the thread id, replies and resolution, including orphaned threads. " +
-      "Permanently delete with action: delete, thread_id and comment_id, without text or other fields. Yours " +
-      "means the stored account matches this session's signed-in GitHub account, ignoring case; no account " +
-      "means no delete. The opening comment removes the thread only while every reply is yours. " +
-      "Resolved comments cannot be deleted. " +
-      "Table targets need zero-based row/column, header 0; offsets count displayed characters and stored " +
-      "edge whitespace. Coordinates follow cells; orphaned ranges are null. Bad cell coordinates refuse " +
-      "with annotation_cell; empty or other-thread overlap ranges with annotation_range. Opening or moving " +
-      "into cards/Figma refuses with annotation_card/annotation_figma; their existing threads allow replies, " +
-      "resolution and moves to prose/table cells. See help for offset details.",
+      "Open with block_id/start/end, reply with thread_id, or move with both; text required, author optional. " +
+      "Only replies accept resolved. Moves replace all marks, keeping id, replies and resolution, even when orphaned. " +
+      "Edit with action: edit, thread_id, comment_id and text; no author, range or resolved fields. " +
+      "Text is replaced; no earlier version is kept. Delete permanently with action: delete and both ids, " +
+      "without other mode fields. Yours means stored account matches this session's workspace sign-in GitHub " +
+      "account, ignoring case, including agent and hand-written comments. No account (signed out/local) " +
+      "means no edit/delete. Resolved threads refuse both. Deleting the opener removes the thread only if " +
+      "every reply is yours. Tables need zero-based row/column (header 0); offsets count displayed characters " +
+      "and stored edge whitespace. Cards/Figma refuse opening/moving in; existing threads permit replies, " +
+      "resolution and moves to prose/tables. See help for ranges, offsets and refusal codes.",
     input: annotateInput,
     operation: annotateOperation,
     // Replies can overwrite thread resolution; repeating adds another comment.

@@ -244,10 +244,11 @@ const annotation = z.object({
   id: z.string(),
   blockId: z.string().describe("Block containing range; the recorded block id when range is null."),
   comments: z.array(z.object({
-    id: z.string().describe("Stable comment identity used by annotate's delete shape; survives edits and concurrent reply changes."),
+    id: z.string().describe("Stable comment identity used by annotate's edit and delete shapes; survives edits and concurrent reply changes."),
     author: z.string(),
     text: z.string(),
     createdAt: z.string(),
+    editedAt: z.string().optional().describe("Last edit time as an ISO 8601 UTC string; present only on edited comments, matching the web's (edited) marker."),
     account: z.string().optional().describe("The writing client's signed-in GitHub username, when known; display data, not verified authorship."),
     agent: z.enum(["claude", "codex"]).optional().describe("Recognized MCP client product; display data, not verified authorship."),
   }).strict()),
