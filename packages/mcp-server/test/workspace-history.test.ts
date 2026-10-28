@@ -10,7 +10,7 @@ import { createMcpEngine } from "../src/engine.js";
 import { HistoryCache, type HistoryCacheResult } from "../src/history-cache.js";
 import { tryAcquireHistoryRefresherRole } from "../src/history-refresher-role.js";
 import { acquireInitLock } from "../src/init-lock.js";
-import { getDocumentRevision, listDocumentRevisions, mutateDocumentRevision } from "../src/revision-client.js";
+import { mutateDocumentRevision, readDocumentHistory, readDocumentRevision } from "../src/revision-client.js";
 import { rememberWorkspaceBindings } from "../src/workspace-registry.js";
 import { cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, startServer, tempDir, testConfig, waitUntil, WORKSPACE } from "./helpers.js";
 
@@ -181,6 +181,15 @@ it("mirrors from an idle MCP server, hands cached history to a browser contender
   expect(catalog(survivor.uuid)?.complete).toBe(true);
   const retained = snapshot(survivor.uuid, survivorRevision.id);
   expect(retained).not.toBeNull();
+  const requestsAfterRefusal = browserRequests.mock.calls.length;
+  const offlineHistory = await readDocumentHistory(browser.replicas, survivor.uuid);
+  expect(offlineHistory).toMatchObject({ history: { complete: true, offline: true,
+    newestDownloadedRevision: survivorRevision.id } });
+  expect(offlineHistory.revisions.some(revision => revision.id === survivorRevision.id)).toBe(true);
+  const { doc: downloaded } = await readDocumentRevision(browser.replicas, survivor.uuid, survivorRevision.id);
+  try { expect(getMeta(downloaded).title).toBe("Retained offline"); }
+  finally { downloaded.destroy(); }
+  expect(browserRequests.mock.calls).toHaveLength(requestsAfterRefusal);
   await browser.close();
   const reopened = await startServer(servingConfig);
   clients.push(() => reopened.close());
@@ -229,13 +238,15 @@ it("keeps foreground revision reads independent of a stalled mirror and fences a
     expect(ready(cache.readSnapshot(token, live.uuid, latest.id))).toBeNull();
 
     for (const rig of [reader, follower]) {
-      const revisions = await listDocumentRevisions(rig.instance.replicas, live.uuid, { timeoutMs: 2_000 });
+      const { revisions } = await readDocumentHistory(rig.instance.replicas, live.uuid, { timeoutMs: 2_000 });
       expect(revisions.some(revision => revision.id === latest.id)).toBe(true);
-      const selected = await getDocumentRevision(rig.instance.replicas, live.uuid, latest.id, { timeoutMs: 2_000 });
+      const { doc: selected } = await readDocumentRevision(rig.instance.replicas, live.uuid, latest.id, { timeoutMs: 2_000 });
       try { expect(getMeta(selected).title).toBe("Foreground reads this state"); }
       finally { selected.destroy(); }
     }
-    expect(ready(cache.readSnapshot(token, live.uuid, latest.id))).toBeNull();
+    const downloaded = ready(cache.readSnapshot(token, live.uuid, latest.id));
+    expect(downloaded).not.toBeNull();
+    expect(snapshotTitle(downloaded!.state)).toBe("Foreground reads this state");
 
     for (const suffix of ["", "-wal", "-shm", ".history-refresher-lock"]) {
       rmSync(readerConfig.databasePath + suffix, { force: true });

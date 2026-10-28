@@ -214,8 +214,9 @@ export const tools: readonly Tool[] = [
     name: "list_revisions",
     title: "List document revisions",
     description:
-      "List hub revisions newest first, including archived documents, with names, namers and times or null. " +
-      "IDs work with get_revision/get_data/restore_revision. Empty means hub-confirmed no history. " +
+      "List this computer's cached revision catalog newest first, including archived documents, with cache freshness. " +
+      "Missing history downloads when connected; cached reads work offline. Use refresh: true to check an unknown mutation outcome. " +
+      "IDs work with get_revision/get_data/restore_revision. Empty means a complete downloaded catalog has no history. " +
       "Listing a decision record refuses with decision_no_history.",
     input: listRevisionsInput,
     operation: listRevisionsOperation,
@@ -255,8 +256,8 @@ export const tools: readonly Tool[] = [
     name: "get_revision",
     title: "Read a document revision",
     description:
-      "Read a hub revision from list_revisions: title, visible blocks without rev, and data summary. " +
-      "Archived documents work. Page records with get_data and the same revision. " +
+      "Read a cached revision from list_revisions: title, visible blocks without rev, data summary and cache freshness. " +
+      "Missing snapshots download when connected; downloaded history works offline. Archived documents work. Page records with get_data and the same revision. " +
       "Reading a decision record's revision refuses with decision_no_history.",
     input: getRevisionInput,
     operation: getRevisionOperation,
@@ -269,8 +270,8 @@ export const tools: readonly Tool[] = [
     title: "Read document data",
     description:
       "Read a data summary, or name collection for bounded records and diagnostics. limit: 0 reads schema; " +
-      "follow next_after until complete. Optional revision uses a hub ID from list_revisions, including " +
-      "archived documents; omission reads live data. Live data and open revisions can change between calls. " +
+      "follow next_after until complete. Optional revision reads this computer's cached snapshot using an ID from list_revisions, " +
+      "fetching it when connected if missing, including archived documents; omission reads live data. Live data and open revisions can change between calls. " +
       "Historical decision data refuses with decision_no_history.",
     input: getDataInput,
     operation: getDataOperation,

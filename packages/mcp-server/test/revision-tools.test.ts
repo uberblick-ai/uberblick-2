@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
-  encodeRevisionResponseFrames, getMeta, getMetaMap, readRevisionRequest, readRevisionResponse, roomForDoc,
+  encodeRevisionResponseFrames, getMeta, readRevisionRequest, readRevisionResponse, roomForDoc,
   snapshotRevision, tombstoneDirectoryEntry, upsertDirectoryEntry,
   type RevisionRequest, type RevisionResponse,
 } from "@uberblick/schema";
@@ -11,10 +11,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { writeHubLogin } from "../src/auth-store.js";
 import { RevisionClientError } from "../src/revision-client.js";
+import { acquireInitLock } from "../src/init-lock.js";
+import { tryAcquireHistoryRefresherRole } from "../src/history-refresher-role.js";
+import { MirrorStore } from "../src/store.js";
+import { rememberWorkspaceBindings } from "../src/workspace-registry.js";
 import { tools } from "../src/tool-table.js";
 import {
-  cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, startHub, startServer,
-  tempDir, TEST_SECRET, testConfig, WAIT_TIMEOUT_MS,
+  cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, startServer,
+  tempDir, testConfig, WAIT_TIMEOUT_MS, waitUntil,
   type Rig, type TestConfigOptions, type ToolCall, WORKSPACE,
 } from "./helpers.js";
 
@@ -38,9 +42,24 @@ async function server(options: TestConfigOptions = {}): Promise<Rig> {
 }
 
 async function admitted() {
-  const hub = await startHub();
+  const hub = await createTeamHub({ address: "127.0.0.1", port: 0, databasePath: ":memory:",
+    github: { clientId: "Iv1.0123456789abcdef" }, log() {} }, { deviceCredentials: true });
   hubs.push(() => hub.stop());
-  const rig = await server({ authSecret: TEST_SECRET, hubUrl: hubUrl(hub.port), ...LIVE_HUB_SETTLE });
+  const principal = hub.principals!.identify("12345", "history-reader");
+  hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: principal.id, role: "admin" });
+  const issued = issueCredential(hub.credentials!, { principalId: principal.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
+  const env = await historyEnv(hubUrl(hub.port));
+  const { replacedAt: _replacedAt, ...record } = issued.record;
+  await writeHubLogin(`http://127.0.0.1:${hub.port}`, { identity: principal,
+    credential: { record, key: Buffer.from(issued.keyBytes).toString("base64url") } }, env);
+  const config = () => ({ ...testConfig({ hubUrl: hubUrl(hub.port), ...LIVE_HUB_SETTLE }), deviceLogin: { env } });
+  const configured = config();
+  new MirrorStore(configured.databasePath, WORKSPACE).close();
+  const role = tryAcquireHistoryRefresherRole(configured.databasePath);
+  if (role === null) throw new Error("The fixture could not hold the background history role.");
+  clients.push(() => role.close());
+  const rig = await startServer(configured);
+  clients.push(() => rig.close());
   const created = await rig.ok("create_doc", {
     title: "Current document", description: "Historical MCP reads fixture.",
     blocks: [{ type: "paragraph", text: "Current content" }],
@@ -51,7 +70,7 @@ async function admitted() {
   const connection = hub.hocuspocus.documents.get(room)?.getConnections()[0];
   if (connection === undefined) throw new Error("The document did not retain its admitted connection.");
   return {
-    rig, uuid: created.uuid, hub,
+    rig, uuid: created.uuid, hub, config, configured, principal, issued,
     reply(handler: (request: RevisionRequest, send: (response: RevisionResponse) => void) => void) {
       const original = connection.callbacks.statelessCallback;
       connection.onStatelessCallback(async payload => {
@@ -63,6 +82,15 @@ async function admitted() {
       });
     },
   };
+}
+
+async function historyEnv(endpoint: string) {
+  const root = tempDir();
+  const env = { XDG_CONFIG_HOME: root, XDG_DATA_HOME: root, HOME: root };
+  const lock = await acquireInitLock(env);
+  try { rememberWorkspaceBindings([{ workspaceId: WORKSPACE, hubUrl: endpoint }], env, WORKSPACE); }
+  finally { lock.release(); }
+  return env;
 }
 
 function calls(uuid: string): Array<[string, Record<string, unknown>]> {
@@ -100,7 +128,7 @@ describe("historical reads through the MCP boundary", () => {
     const principal = hub.principals!.identify("12345", "revision-restorer");
     hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: principal.id, role: "admin" });
     const issued = issueCredential(hub.credentials!, { principalId: principal.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
-    const env = { XDG_CONFIG_HOME: tempDir() };
+    const env = await historyEnv(hubUrl(hub.port));
     const { replacedAt: _replacedAt, ...record } = issued.record;
     await writeHubLogin(`http://127.0.0.1:${hub.port}`, { identity: principal,
       credential: { record, key: Buffer.from(issued.keyBytes).toString("base64url") } }, env);
@@ -120,7 +148,7 @@ describe("historical reads through the MCP boundary", () => {
     await rig.ok("update_data", { uuid, operations: [{ collection: "observations",
       upsert: [{ id: "value", value: { text: "Latest data" } }] }] });
     expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
-    const before = (await rig.ok("list_revisions", { uuid })).revisions;
+    const before = (await rig.ok("list_revisions", { uuid, refresh: true })).revisions;
     const peer = await startServer(config());
     clients.push(() => peer.close());
     expect((await peer.ok("get_doc", { uuid })).title).toBe("Latest title");
@@ -135,7 +163,7 @@ describe("historical reads through the MCP boundary", () => {
       blocks: [{ text: "Earlier prose" }, { id: original.blocks[1].id, rev: original.blocks[1].rev, text: "Retained prose" }] });
     expect((await peer.ok("get_data", { uuid, collection: "observations" })).records)
       .toMatchObject([{ id: "value", value: { text: "Earlier data" } }]);
-    const history = (await rig.ok("list_revisions", { uuid })).revisions;
+    const history = (await rig.ok("list_revisions", { uuid, refresh: true })).revisions;
     expect(history).toHaveLength(before.length + 1);
     expect(history[0]).toEqual(restored.revision);
     expect(history.slice(1).map((entry: { id: string }) => entry.id)).toEqual(before.map((entry: { id: string }) => entry.id));
@@ -146,7 +174,7 @@ describe("historical reads through the MCP boundary", () => {
     await peer.ok("edit_block", { uuid, block_id: remote.blocks[1].id, old_text: remote.blocks[1].text,
       new_text: "Later peer edit", rev: remote.blocks[1].rev });
     expect(await peer.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
-    expect((await rig.ok("list_revisions", { uuid })).revisions[0]).toMatchObject({ endedAt: null });
+    expect((await rig.ok("list_revisions", { uuid, refresh: true })).revisions[0]).toMatchObject({ endedAt: null });
     expect((await rig.ok("get_doc", { uuid })).blocks[1].text).toBe("Later peer edit");
     await rig.ok("restore_revision", { uuid, revision: before[0].id });
     expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
@@ -174,6 +202,59 @@ describe("historical reads through the MCP boundary", () => {
       payload: { error: "revision_restore_outcome_unknown", applied: null, partial: false, synced: false,
         recoveryClass: "reread", reason: "unreachable" } });
   });
+
+  it("settles lost naming and restore replies with an explicit catalog refresh instead of a stale cached list", async () => {
+    const { rig, uuid } = await admitted();
+    const beforeName = await rig.ok("list_revisions", { uuid, refresh: true });
+    const request = rig.instance.replicas.sync.requestRevisions.bind(rig.instance.replicas.sync);
+    let loseReply: "name" | "restore" | null = "name";
+    const applied = new Map<string, string>();
+    const requests = vi.spyOn(rig.instance.replicas.sync, "requestRevisions").mockImplementation(async (...args) => {
+      const response = await request(...args);
+      const operation = args[1].operation;
+      if ((operation === "name" || operation === "restore") && loseReply === operation &&
+        response.ok && "revision" in response) {
+        loseReply = null;
+        applied.set(operation, response.revision.id);
+        throw new RevisionClientError(operation === "name" ? "naming-outcome-unknown" : "restore-outcome-unknown",
+          { applied: null, reason: "unreachable" });
+      }
+      return response;
+    });
+
+    expect(await rig.call("name_revision", { uuid, name: "Applied without a reply" })).toMatchObject({ isError: true,
+      payload: { error: "revision_naming_outcome_unknown", applied: null, synced: false,
+        recovery: expect.stringContaining("refresh: true") } });
+    const afterNameRequest = requests.mock.calls.length;
+    expect((await rig.ok("list_revisions", { uuid })).revisions).toEqual(beforeName.revisions);
+    expect(requests).toHaveBeenCalledTimes(afterNameRequest);
+    const named = (await rig.ok("list_revisions", { uuid, refresh: true })).revisions[0];
+    expect(named).toMatchObject({ id: applied.get("name"), name: { text: "Applied without a reply" } });
+    await rig.ok("get_revision", { uuid, revision: named.id });
+
+    const original = await rig.ok("get_doc", { uuid });
+    await rig.ok("set_metadata", { uuid, title: "Changed after naming" });
+    await rig.ok("edit_block", { uuid, block_id: original.blocks[0].id, old_text: original.blocks[0].text,
+      new_text: "Changed content", rev: original.blocks[0].rev });
+    expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+    const beforeRestore = await rig.ok("list_revisions", { uuid, refresh: true });
+    expect(beforeRestore.revisions[0].id).not.toBe(named.id);
+    loseReply = "restore";
+    expect(await rig.call("restore_revision", { uuid, revision: named.id })).toMatchObject({ isError: true,
+      payload: { error: "revision_restore_outcome_unknown", applied: null, synced: false,
+        recovery: expect.stringContaining("refresh: true") } });
+    const afterRestoreRequest = requests.mock.calls.length;
+    expect((await rig.ok("list_revisions", { uuid })).revisions).toEqual(beforeRestore.revisions);
+    expect(requests).toHaveBeenCalledTimes(afterRestoreRequest);
+    const restored = (await rig.ok("list_revisions", { uuid, refresh: true })).revisions[0];
+    expect(restored).toMatchObject({ id: applied.get("restore"), endedAt: expect.any(String), name: null });
+    expect(restored.id).not.toBe(beforeRestore.revisions[0].id);
+    expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+    expect(await rig.ok("get_doc", { uuid })).toMatchObject({ title: "Current document", blocks: [{ text: "Current content" }] });
+    expect(requests.mock.calls.filter(([, operation]) => operation.operation === "name")).toHaveLength(1);
+    expect(requests.mock.calls.filter(([, operation]) => operation.operation === "restore")).toHaveLength(1);
+  });
+
   it("serves recorded team-hub revisions, refuses foreign IDs, and reads archived history on a fresh replica", async () => {
     const hub = await createTeamHub({
       address: "127.0.0.1", port: 0, databasePath: ":memory:",
@@ -185,7 +266,7 @@ describe("historical reads through the MCP boundary", () => {
     const author = hub.principals.identify("12345", "revision-author");
     hub.memberships.grant({ workspaceId: WORKSPACE, principalId: author.id, role: "admin" });
     const issued = issueCredential(hub.credentials, { principalId: author.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
-    const env = { XDG_CONFIG_HOME: tempDir() };
+    const env = await historyEnv(hubUrl(hub.port));
     const { replacedAt: _replacedAt, ...record } = issued.record;
     await writeHubLogin(`http://127.0.0.1:${hub.port}`, {
       identity: { id: author.id, githubAccountId: "12345", githubUsername: "revision-author" },
@@ -230,7 +311,7 @@ describe("historical reads through the MCP boundary", () => {
     await rig.ok("update_data", { uuid, operations: [{ collection: "observations", deleteRecords: ["earlier"],
       upsert: [{ id: "live", value: { text: "live team data" } }] }] });
     expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
-    const listed = await rig.ok("list_revisions", { uuid });
+    const listed = await rig.ok("list_revisions", { uuid, refresh: true });
     expect(listed.revisions).toHaveLength(2);
     expect(listed.revisions[0]).toMatchObject({ endedAt: null, startedAt: expect.any(String) });
     expect(listed.revisions[1]).toMatchObject({ id, endedAt: expect.any(String) });
@@ -280,11 +361,11 @@ describe("historical reads through the MCP boundary", () => {
     for (const spy of dropped) spy.mockRestore();
     const afterLoss = await startServer(config());
     clients.push(() => afterLoss.close());
-    expect((await afterLoss.ok("list_revisions", { uuid })).revisions[0])
+    expect((await afterLoss.ok("list_revisions", { uuid, refresh: true })).revisions[0])
       .toMatchObject({ name: { text: "Committed before the reply was lost" } });
   });
 
-  it("reads hub history in get_doc block shapes and pages historical data independently of live content", async () => {
+  it("reads downloaded history in get_doc block shapes and pages cached data independently of live content", async () => {
     const fixture = await admitted();
     const { rig, uuid } = fixture;
     const target = await rig.ok("create_doc", { title: "Linked target", description: "An inline link target." });
@@ -305,7 +386,9 @@ describe("historical reads through the MCP boundary", () => {
     ] }] });
     const earlier = await rig.ok("get_doc", { uuid });
     const earlierData = await rig.ok("get_data", { uuid });
-    const snapshot = snapshotRevision(document).state;
+    const captured = snapshotRevision(document);
+    const snapshot = captured.state;
+    const checksum = createHash("sha256").update(captured.checksum).digest("hex");
     const expectedBlocks = earlier.blocks.map(({ rev: _rev, ...block }: Record<string, unknown>) => block);
     await rig.ok("set_metadata", { uuid, title: "Live title" });
     await rig.ok("edit_block", { uuid, block_id: earlier.blocks[0].id, old_text: earlier.blocks[0].text,
@@ -314,25 +397,27 @@ describe("historical reads through the MCP boundary", () => {
       { id: "a", value: { text: "live a" } },
     ] }] });
     const entries = [
-      { id: "current-open", author: { githubUsername: "current-handle", surface: { kind: "mcp", name: "Codex" } }, startedAt: 200, endedAt: null },
-      { id: revision, author: { githubUsername: "person", surface: { kind: "web", name: "Browser" } }, startedAt: 100, endedAt: 200 },
-      { id: "before-history", author: null, startedAt: null, endedAt: 100 },
+      { id: "current-open", author: { githubUsername: "current-handle", surface: { kind: "mcp", name: "Codex" } }, startedAt: 200, endedAt: null, checksum },
+      { id: revision, author: { githubUsername: "person", surface: { kind: "web", name: "Browser" } }, startedAt: 100, endedAt: 200, checksum },
+      { id: "before-history", author: null, startedAt: null, endedAt: 100, checksum },
     ];
     const requests: RevisionRequest[] = [];
     fixture.reply((request, send) => {
       requests.push(request);
       send(request.operation === "list"
-        ? { requestId: request.requestId, ok: true, revisions: entries }
-        : { requestId: request.requestId, ok: true, state: snapshot });
+        ? { requestId: request.requestId, ok: true, revisions: entries, version: "historical-version" }
+        : { requestId: request.requestId, ok: true, state: snapshot, revisionId: request.revisionId!, checksum });
     });
     const liveState = Y.encodeStateAsUpdate(document);
-    expect(await rig.ok("list_revisions", { uuid })).toEqual({ uuid, revisions: [
-      { ...entries[0], startedAt: "1970-01-01T00:00:00.200Z", name: null },
-      { ...entries[1], startedAt: "1970-01-01T00:00:00.100Z", endedAt: "1970-01-01T00:00:00.200Z", name: null },
-      { ...entries[2], endedAt: "1970-01-01T00:00:00.100Z", name: null },
-    ] });
+    const listed = await rig.ok("list_revisions", { uuid });
+    expect(listed).toMatchObject({ uuid, revisions: [
+      { id: "current-open", startedAt: "1970-01-01T00:00:00.200Z", endedAt: null, name: null },
+      { id: revision, startedAt: "1970-01-01T00:00:00.100Z", endedAt: "1970-01-01T00:00:00.200Z", name: null },
+      { id: "before-history", startedAt: null, endedAt: "1970-01-01T00:00:00.100Z", name: null },
+    ], history: { complete: true, lastRefresh: expect.any(String), offline: false, refreshFailed: false, newestDownloadedRevision: null } });
     const historical = await rig.ok("get_revision", { uuid, revision });
-    expect(historical).toEqual({ uuid, revision, title: "Earlier title", blocks: expectedBlocks, data: earlierData.data });
+    expect(historical).toEqual({ uuid, revision, title: "Earlier title", blocks: expectedBlocks, data: earlierData.data,
+      history: { ...listed.history, newestDownloadedRevision: revision } });
     expect(historical.blocks.find((block: { type: string }) => block.type === "paragraph" && "doc_links" in block)?.doc_links)
       .toEqual([{ start: 8, end: 14, docId: target.uuid }]);
     expect(historical.blocks.find((block: { type: string }) => block.type === "table").text)
@@ -341,7 +426,7 @@ describe("historical reads through the MCP boundary", () => {
       .toBe("label: Label\ntitle: **Earlier card**\nfooter: Foot\n\nA *body*.");
     expect(historical.blocks.find((block: { type: string }) => block.type === "figma").figma)
       .toEqual({ kind: "frame", file: "k3Lm9QzT2x", fileName: "Checkout flow", node: "12:345" });
-    expect(await rig.ok("get_data", { uuid, revision })).toEqual({ ...earlierData, revision });
+    expect(await rig.ok("get_data", { uuid, revision })).toEqual({ ...earlierData, revision, history: historical.history });
     const first = await rig.ok("get_data", { uuid, revision, collection: "observations", limit: 1 });
     expect(first).toMatchObject({ uuid, revision, recordCount: 3, records: [{ id: "a", value: { text: "earlier a" } }], complete: false, next_after: "a" });
     const next = await rig.ok("get_data", { uuid, revision, collection: "observations", after: first.next_after, limit: 1 });
@@ -351,8 +436,8 @@ describe("historical reads through the MCP boundary", () => {
     const missing = await rig.call("get_data", { uuid, revision, collection: "absent" });
     refusal(missing, "data_collection_not_found");
     expect(missing.payload).toMatchObject({ uuid, revision, collection: "absent", recovery: expect.stringContaining("uuid and revision") });
-    expect(requests).toHaveLength(7);
-    for (const request of requests.slice(1)) expect(request).toMatchObject({ operation: "get", revisionId: revision });
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toMatchObject({ operation: "get", revisionId: revision });
     expect(Y.encodeStateAsUpdate(document)).toEqual(liveState);
     expect(getMeta(document).title).toBe("Live title");
     expect((await rig.ok("get_data", { uuid, collection: "observations" })).records)
@@ -362,8 +447,9 @@ describe("historical reads through the MCP boundary", () => {
   it("returns an empty history only after a positive hub reply", async () => {
     const fixture = await admitted();
     let requests = 0;
-    fixture.reply((request, send) => { requests += 1; send({ requestId: request.requestId, ok: true, revisions: [] }); });
-    expect(await fixture.rig.ok("list_revisions", { uuid: fixture.uuid })).toEqual({ uuid: fixture.uuid, revisions: [] });
+    fixture.reply((request, send) => { requests += 1; send({ requestId: request.requestId, ok: true, revisions: [], version: "empty" }); });
+    expect(await fixture.rig.ok("list_revisions", { uuid: fixture.uuid })).toMatchObject({ uuid: fixture.uuid, revisions: [],
+      history: { complete: true, lastRefresh: expect.any(String), refreshFailed: false } });
     expect(requests).toBe(1);
   });
 
@@ -399,14 +485,14 @@ describe("historical reads through the MCP boundary", () => {
     fixture.reply((request, send) => {
       if (request.operation === "list") {
         expect(request).toMatchObject({ includeNames: true });
-        expect(request).not.toHaveProperty("includeTitles");
+        expect(request).toMatchObject({ includeTitles: true });
       }
       send(request.operation === "list"
-        ? { requestId: request.requestId, ok: true, revisions: entries }
+        ? { requestId: request.requestId, ok: true, revisions: entries, version: "projection" }
         : { requestId: request.requestId, ok: true,
           revision: request.name === "Named state" ? entries[0]! : entries[1]! });
     });
-    expect(await rig.ok("list_revisions", { uuid })).toEqual({ uuid, revisions: expected });
+    expect(await rig.ok("list_revisions", { uuid })).toMatchObject({ uuid, revisions: expected });
     for (const entry of expected.slice(0, 2)) {
       const named = await rig.ok("name_revision", { uuid, name: entry.name!.text });
       expect(named).toMatchObject({ uuid, applied: true, synced: true });
@@ -420,14 +506,14 @@ describe("historical reads through the MCP boundary", () => {
       name: { text: "Named state", namer: null, namedAt: 100, canManage: true } };
     let entry = base;
     fixture.reply((request, send) => send(request.operation === "list"
-      ? { requestId: request.requestId, ok: true, revisions: [entry] }
+      ? { requestId: request.requestId, ok: true, revisions: [entry], version: randomUUID() }
       : { requestId: request.requestId, ok: true, revision: entry }));
     for (const stamp of [Number.MAX_VALUE, 100.5]) {
       for (const field of ["startedAt", "endedAt", "namedAt"]) {
         entry = field === "namedAt" ? { ...base, name: { ...base.name, namedAt: stamp } }
           : { ...base, [field]: stamp };
         for (const [tool, args] of [
-          ["list_revisions", { uuid: fixture.uuid }],
+          ["list_revisions", { uuid: fixture.uuid, refresh: true }],
           ["name_revision", { uuid: fixture.uuid, name: "Named state" }],
         ] as const) {
           expect(await fixture.rig.call(tool, args), `${tool} accepted unrepresentable ${field}: ${stamp}`)
@@ -508,25 +594,32 @@ describe("historical reads through the MCP boundary", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it("reads a known archived document without depending on live room hydration", async () => {
-    const rig = await server({ authSecret: TEST_SECRET, hubUrl: "ws://127.0.0.1:1" });
-    const uuid = randomUUID();
-    upsertDirectoryEntry(rig.instance.replicas.directory().doc, { uuid, title: "Archived elsewhere" });
-    tombstoneDirectoryEntry(rig.instance.replicas.directory().doc, uuid);
-    expect(rig.instance.replicas.hydrated(uuid)).toBe(false);
-    const snapshot = new Y.Doc();
-    clients.push(() => snapshot.destroy());
-    getMetaMap(snapshot).set("title", "Earlier archived title");
-    const state = Y.encodeStateAsUpdate(snapshot);
-    const request = vi.spyOn(rig.instance.replicas.sync, "requestRevisions").mockImplementation(async (_room, operation) =>
-      operation.operation === "list"
-        ? { requestId: "fixture", ok: true, revisions: [] }
-        : { requestId: "fixture", ok: true, state });
-    expect(await rig.ok("list_revisions", { uuid })).toEqual({ uuid, revisions: [] });
-    expect(await rig.ok("get_revision", { uuid, revision })).toEqual({ uuid, revision, title: "Earlier archived title", blocks: [], data: null });
-    expect(await rig.ok("get_data", { uuid, revision })).toEqual({ uuid, revision, data: null });
-    expect(request).toHaveBeenCalledTimes(3);
-    expect(rig.instance.replicas.hydrated(uuid)).toBe(false);
+  it("reads downloaded archived history offline without live room hydration or hub requests", async () => {
+    const fixture = await admitted();
+    const { rig, uuid } = fixture;
+    const named = await rig.ok("name_revision", { uuid, name: "Downloaded" });
+    await rig.ok("list_revisions", { uuid, refresh: true });
+    await rig.ok("get_revision", { uuid, revision: named.revision.id });
+    await rig.ok("archive_doc", { uuid });
+    await rig.close();
+    await fixture.hub.stop();
+    hubs.pop();
+    const fresh = await startServer(fixture.configured);
+    clients.push(() => fresh.close());
+    expect(fresh.instance.replicas.hydrated(uuid)).toBe(false);
+    await waitUntil("the offline reader to observe its disconnected hub", () =>
+      fresh.instance.replicas.sync.state().status === "hub-down");
+    const request = vi.spyOn(fresh.instance.replicas.sync, "requestRevisions");
+    const listed = await fresh.ok("list_revisions", { uuid });
+    expect(listed).toMatchObject({ uuid, revisions: [named.revision], history: { complete: true,
+      lastRefresh: expect.any(String), offline: true, newestDownloadedRevision: named.revision.id } });
+    expect(await fresh.ok("get_revision", { uuid, revision: named.revision.id })).toMatchObject({ uuid,
+      title: "Current document", blocks: [{ text: "Current content" }], history: listed.history });
+    expect(await fresh.ok("get_data", { uuid, revision: named.revision.id })).toEqual({ uuid,
+      revision: named.revision.id, data: null, history: listed.history });
+    refusal(await fresh.call("get_revision", { uuid, revision: "not-cached" }), "revisions_not_downloaded");
+    expect(request).not.toHaveBeenCalled();
+    expect(fresh.instance.replicas.hydrated(uuid)).toBe(false);
   });
 
   it.each([
@@ -559,7 +652,7 @@ describe("historical reads through the MCP boundary", () => {
       payload: { error: "doc_deleted", uuid, applied: false, partial: false, synced: false } });
   });
 
-  it("distinguishes a local-only workspace from missing sign-in for all historical reads", async () => {
+  it("distinguishes local-only history, never-downloaded history and a forced refresh requiring sign-in", async () => {
     const local = await server();
     const uuid = randomUUID();
     upsertDirectoryEntry(local.instance.replicas.directory().doc, { uuid, title: "Known local document" });
@@ -571,7 +664,12 @@ describe("historical reads through the MCP boundary", () => {
     const noLogin = await startServer(loginConfig);
     clients.push(() => noLogin.close());
     upsertDirectoryEntry(noLogin.instance.replicas.directory().doc, { uuid, title: "Known team document" });
-    for (const [tool, args] of calls(uuid)) refusal(await noLogin.call(tool, args), "revisions_sign_in_required");
+    for (const [tool, args] of calls(uuid)) {
+      const result = await noLogin.call(tool, args);
+      refusal(result, "revisions_not_downloaded");
+      expect(result.payload.message).toContain("Connect once to download history.");
+    }
+    refusal(await noLogin.call("list_revisions", { uuid, refresh: true }), "revisions_sign_in_required");
   });
 
   it("advertises revision help and permits historical writes only through restore_revision", async () => {

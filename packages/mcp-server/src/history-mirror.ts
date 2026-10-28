@@ -9,7 +9,7 @@ type RequestHistory = (operation: Omit<RevisionRequest, "requestId">) => Promise
 export type MirrorCache = Pick<HistoryMirrorCache, "open" | "resume" | "readCatalog" | "putCatalog" | "markRefreshFailed" |
   "listPages" | "hasSnapshot" | "putVerifiedSnapshot" | "evict" | "close">;
 
-class CacheError extends Error {
+export class CacheError extends Error {
   constructor(readonly status: string) { super(`History cache ${status}`); }
 }
 function ready<T>(result: HistoryCacheResult<T>): T {
@@ -31,13 +31,15 @@ export async function revalidateHistoryCatalog(cache: MirrorCache, uuid: string,
     const revisions = "revisions" in response ? response.revisions
       : "unchanged" in response && previous?.complete ? previous.revisions : null;
     if (revisions === null) throw new RevisionClientError("unsupported");
-    ready(await cache.putCatalog(uuid, { revisions,
+    const publication = await cache.putCatalog(uuid, { revisions,
       version: "version" in response ? response.version ?? null : null,
-      refreshedAt: now(), complete: true, failed: false }));
+      refreshedAt: now(), complete: true, failed: false });
+    if (publication.status !== "superseded") ready(publication);
     const catalog = ready(await cache.readCatalog(uuid));
     if (catalog === null) throw new CacheError("superseded");
     return catalog;
   } catch (error) {
+    if (error instanceof CacheError && error.status === "superseded") throw error;
     if (previous === null) {
       await cache.putCatalog(uuid, { revisions: [], version: null, refreshedAt: null, complete: false, failed: true });
     } else await cache.markRefreshFailed(uuid);
@@ -53,9 +55,12 @@ export async function downloadHistorySnapshot(cache: MirrorCache, uuid: string,
   const response = await request({ operation: "get", revisionId: revision.id });
   requireResponse(response);
   if (!("state" in response)) throw new RevisionClientError("unsupported");
+  if (response.checksum === undefined) throw new RevisionClientError("unsupported");
   if (response.checksum !== revision.checksum ||
     (response.revisionId !== undefined && response.revisionId !== revision.id)) return false;
-  return ready(await cache.putVerifiedSnapshot(uuid, revision.id, revision.checksum, response.state));
+  const publication = await cache.putVerifiedSnapshot(uuid, revision.id, revision.checksum, response.state);
+  return publication.status === "superseded"
+    ? ready(await cache.hasSnapshot(uuid, revision.id, revision.checksum)) : ready(publication);
 }
 
 export interface HistoryMirrorPage {

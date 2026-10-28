@@ -243,6 +243,14 @@ const RECOVERIES: Record<string, Recovery> = {
     recoveryClass: "retry",
     guidance: "Call again once the hub is reachable; sync_status reports the connection state.",
   },
+  revisions_downloading: {
+    recoveryClass: "retry",
+    guidance: "History is still downloading into this computer's cache. Retry the same read after the download finishes; the download continues after this wait ends.",
+  },
+  revisions_not_downloaded: {
+    recoveryClass: "manual",
+    guidance: "Connect to the team hub to download this history, then repeat the read. Connect once to download history.",
+  },
   revisions_sign_in_required: {
     recoveryClass: "manual",
     guidance: "Run ub auth login to sign in, restart the MCP server, then read revisions again.",
@@ -269,11 +277,11 @@ const RECOVERIES: Record<string, Recovery> = {
   },
   revision_naming_outcome_unknown: {
     recoveryClass: "reread",
-    guidance: "Call list_revisions to check whether the hub applied the name before trying again. A missing reply does not establish that nothing changed; reason distinguishes a silent admitted hub from a lost connection.",
+    guidance: "Call list_revisions with this uuid and refresh: true, and wait for a successful refresh before deciding whether the hub applied the name or trying again. A cached list cannot settle a missing reply; reason distinguishes a silent admitted hub from a lost connection.",
   },
   revision_restore_outcome_unknown: {
     recoveryClass: "reread",
-    guidance: "Read list_revisions and get_doc before retrying: the restore may have committed even though its reply was lost. Update the hub if reason is unsupported.",
+    guidance: "Call list_revisions with this uuid and refresh: true, wait for a successful refresh, and read get_doc before retrying: the restore may have committed even though its reply was lost. A cached list cannot settle this outcome. Update the hub if reason is unsupported.",
   },
   revision_not_found: {
     recoveryClass: "reread",
@@ -496,6 +504,8 @@ export const FAILURE_CODES: readonly string[] = [
 const REVISION_FAILURE_CODES: Record<RevisionClientFailure, string> = {
   "local-only": "revisions_local_only",
   unreachable: "revisions_unreachable",
+  downloading: "revisions_downloading",
+  "not-downloaded": "revisions_not_downloaded",
   "sign-in-required": "revisions_sign_in_required",
   forbidden: "revisions_forbidden",
   deleted: "doc_deleted",
@@ -526,7 +536,7 @@ export const FAILURE_INSTRUCTIONS =
   "some of it is — `completed` names the rooms that are) and `synced`; `applied: false, partial: false` means " +
   "nothing changed locally, and nothing is ever rolled back — a partial write is finished by following `recovery`. " +
   "A failure of a reading tool carries none of those three: there was no write to report on. The hub-only " +
-  "name_revision and restore_revision report applied: null when a sent request has no acknowledged outcome; read list_revisions and get_doc before retrying. `internal_error` is " +
+  "name_revision and restore_revision report applied: null when a sent request has no acknowledged outcome; call list_revisions with refresh: true and wait for success, and read get_doc for a restore, before retrying. `internal_error` is " +
   "the one code with no class and no detail — an unmapped crash cannot honestly say what it did — and arguments " +
   "that do not match a tool's input schema never reach the tool at all: the MCP layer rejects them with its own " +
   "plain-text validation error, and nothing durable changes.";

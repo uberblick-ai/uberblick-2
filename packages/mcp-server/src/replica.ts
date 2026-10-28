@@ -50,6 +50,7 @@ import {
 import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
 import type { Block, CardPart, CommentAttribution, DocMeta, InlineRun, UpdateOriginMetadata, UpdateSurface } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
+import { closeDocumentHistory } from "./revision-client.js";
 import { log } from "./log.js";
 import { collectReplicaSyncState } from "./status.js";
 import type { MirrorStore, UpdateOrigin } from "./store.js";
@@ -1380,7 +1381,7 @@ export class Replicas {
       clearTimeout(timer);
     }
     this.presenceTimers.clear();
-    this.closing = this.sync.destroy();
+    this.closing = Promise.all([this.sync.destroy(), closeDocumentHistory(this)]).then(() => {});
     for (const replica of this.replicas.values()) {
       replica.awareness.destroy();
       replica.doc.destroy();

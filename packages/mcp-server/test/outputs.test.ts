@@ -17,6 +17,8 @@ import { removeTempDirs, startServer, toolNamed } from "./helpers.js";
 
 const close: (() => Promise<void>)[] = [];
 const hub = { status: "disabled", url: null, protocolVersion: 1 };
+const history = { complete: true, lastRefresh: "2026-10-28T00:00:00.000Z",
+  refreshFailed: false, offline: true, newestDownloadedRevision: null };
 
 function textPayload(result: CallToolResult): any {
   expect(result.content).toHaveLength(1);
@@ -118,10 +120,10 @@ describe("successful MCP output contracts", () => {
       return { id, type: "callout", text: "Read the page", variant, ...(icon === undefined ? {} : { icon }),
         doc_links: [{ start: 5, end: 13, docId }] };
     });
-    vi.spyOn(revisionClient, "getDocumentRevision").mockImplementation(async () => {
+    vi.spyOn(revisionClient, "readDocumentRevision").mockImplementation(async () => {
       const snapshot = new Y.Doc();
       Y.applyUpdate(snapshot, Y.encodeStateAsUpdate(document));
-      return snapshot;
+      return { doc: snapshot, history };
     });
     for (const name of ["get_doc", "get_revision"]) {
       const result = await rig.client.callTool({ name, arguments: { uuid: created.uuid,
@@ -168,11 +170,11 @@ describe("successful MCP output contracts", () => {
     });
     const uuid = created.uuid;
     const read = await success("get_doc", { uuid });
-    vi.spyOn(revisionClient, "listDocumentRevisions").mockResolvedValue([]);
-    vi.spyOn(revisionClient, "getDocumentRevision").mockImplementation(async () => {
+    vi.spyOn(revisionClient, "readDocumentHistory").mockResolvedValue({ revisions: [], history });
+    vi.spyOn(revisionClient, "readDocumentRevision").mockImplementation(async () => {
       const snapshot = new Y.Doc();
       Y.applyUpdate(snapshot, Y.encodeStateAsUpdate(rig.instance.replicas.replica(uuid).doc));
-      return snapshot;
+      return { doc: snapshot, history };
     });
     await success("list_revisions", { uuid });
     vi.spyOn(revisionClient, "mutateDocumentRevision").mockResolvedValue({ id: "fixture-revision", author: null,
@@ -326,7 +328,7 @@ describe("successful MCP output contracts", () => {
       records: [{ id: "row", value: [null, { freeForm: true }], valid: false, errors: [] }],
       bytes: 42, complete: true, next_after: null,
     };
-    for (const payload of [summary, page]) {
+    for (const payload of [summary, page, { ...summary, revision: "snapshot", history }, { ...page, revision: "snapshot", history }]) {
       const result = await probe("get_data", payload);
       expect(result.isError).not.toBe(true);
       expect(result.structuredContent).toEqual(payload);
@@ -343,10 +345,32 @@ describe("successful MCP output contracts", () => {
       { ...page, records: [{ id: "row", valid: false, errors: [] }] },
       { ...page, records: [{ ...page.records[0], extra: true }] },
       { ...page, errors: [{ ...page.errors[0], extra: true }] },
+      { ...summary, revision: "snapshot" },
+      { ...summary, history },
+      { ...page, revision: "snapshot", history: { ...history, extra: true } },
     ]) {
       const result = await probe("get_data", payload);
       expect(result.isError).toBe(true);
       expect(result).not.toHaveProperty("structuredContent");
+      expect(textPayload(result)).toEqual({ error: "internal_error", message: INTERNAL_ERROR_MESSAGE });
+    }
+    expect(stderr).toHaveBeenCalled();
+  });
+
+  it("requires cache freshness on catalog and snapshot results", async () => {
+    const catalog = { uuid: randomUUID(), revisions: [], history };
+    const snapshot = { uuid: catalog.uuid, revision: "snapshot", title: "Downloaded", blocks: [], data: null, history };
+    for (const [name, payload] of [["list_revisions", catalog], ["get_revision", snapshot]] as const) {
+      const result = await probe(name, payload);
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toEqual(payload);
+    }
+    const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const [name, payload] of [["list_revisions", catalog], ["get_revision", snapshot]] as const) {
+      const missing: Record<string, unknown> = { ...payload };
+      delete missing.history;
+      const result = await probe(name, missing);
+      expect(result.isError).toBe(true);
       expect(textPayload(result)).toEqual({ error: "internal_error", message: INTERNAL_ERROR_MESSAGE });
     }
     expect(stderr).toHaveBeenCalled();
