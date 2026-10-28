@@ -173,7 +173,11 @@ function blockSchema(withLinks: boolean, withRev = true) {
     z.object({ ...prose, type: z.literal("list-item"), list: z.enum(LIST_STYLES), indent: z.number().int().min(0).max(MAX_LIST_INDENT) }).strict(),
     z.object({ ...fields, type: z.literal("code"), language: z.string() }).strict(),
     z.object({ ...fields, type: z.literal("divider"), text: z.literal("") }).strict(),
-    z.object({ ...fields, type: z.enum(["table", "terminal", "chart", "card"]) }).strict(),
+    z.object({ ...fields, type: z.literal("table"), ...(withRev ? {
+      column_widths: z.array(z.number().nonnegative().refine(Number.isInteger).meta({ type: "integer" }).nullable())
+        .describe("Header-row column widths rounded to whole CSS pixels, one per projected column; null means unsized. Widths do not affect text rev hashes."),
+    } : {}) }).strict(),
+    z.object({ ...fields, type: z.enum(["terminal", "chart", "card"]) }).strict(),
     z.object({ ...fields, type: z.literal("figma"), figma: z.object({
       kind: z.enum(["frame", "file", "prototype", "board", "slides", "community file"]),
       file: z.string(),

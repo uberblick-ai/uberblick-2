@@ -13,7 +13,7 @@ import {
 import * as Y from "yjs";
 import { editor, setupHarness } from "./app-helpers.js";
 import { placeCaretIn } from "./harness.js";
-import { waitForAcknowledged } from "./settle.js";
+import { expectMcp, waitForAcknowledged } from "./settle.js";
 
 const { harness, openApp, ws } = setupHarness();
 const SOURCE = "| **A** | B | C |\n| --- | --- | --- |\n| alpha | [one](https://example.com) | first |\n| beta | two | second |\n| gamma | three | third |";
@@ -92,7 +92,11 @@ async function columnWidths(table: Locator): Promise<number[]> {
 }
 
 async function content(table: Locator): Promise<string[]> {
-  return table.locator("th p, td p").evaluateAll(paragraphs => paragraphs.map(paragraph => paragraph.innerHTML));
+  return table.locator("th p, td p").evaluateAll(paragraphs => paragraphs.map(paragraph => {
+    const copy = paragraph.cloneNode(true) as HTMLElement;
+    for (const widget of copy.querySelectorAll(".ProseMirror-widget, .ProseMirror-separator, .ProseMirror-trailingBreak")) widget.remove();
+    return copy.innerHTML;
+  }));
 }
 
 async function boundary(table: Locator, column = 0): Promise<{ x: number; y: number }> {
@@ -172,6 +176,67 @@ test("mouse resizing shares one column, contains overflow and undoes separately 
     expect(await content(table)).toEqual(beforeContent);
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   } finally { fixture.close(); }
+});
+
+test("MCP reads dragged widths and changes only column layout without invalidating text revisions", { tag: "@webkit" }, async ({ page }) => {
+  const fixture = await publishTable();
+  const agent = harness().createMcpAgent("uberblick-e2e-table-widths-");
+  try {
+    const table = await openTable(page, fixture.uuid);
+    await page.evaluate(() => document.fonts.ready);
+    const writer = agent.open({ name: "table-widths-e2e" });
+    type StoredDoc = { rev: string; blocks: Array<{ id: string; text: string; rev: string; column_widths: Array<number | null> }> };
+    const read = () => writer.call<StoredDoc>("get_doc", { uuid: fixture.uuid });
+    const observed: { doc?: StoredDoc } = {};
+    await expectMcp(read, doc => {
+      expect(doc.blocks[0]?.column_widths).toEqual([null, null, null]);
+      observed.doc = doc;
+    });
+    const initial = observed.doc;
+    const block = initial?.blocks[0];
+    if (initial === undefined || block === undefined) throw new Error("e2e: MCP table read is missing");
+    const beforeContent = await content(table);
+    const beforeWidths = await columnWidths(table);
+
+    await resize(page, table, 40);
+    await expect.poll(() => widths(fixture.doc)[0]?.[0]).not.toBeNull();
+    const saved = widths(fixture.doc)[0]?.[0];
+    if (!Array.isArray(saved)) throw new Error("e2e: dragged column width was not saved");
+    const dragged = Math.round(Number(saved[0]));
+    await expectMcp(read, doc => {
+      expect(doc.blocks[0]?.column_widths).toEqual([dragged, null, null]);
+      expect(doc.blocks[0]?.rev).toBe(block.rev);
+      expect(doc.rev).toBe(initial.rev);
+    });
+
+    await writer.call("edit_block", { uuid: fixture.uuid, block_id: block.id,
+      old_text: block.text, new_text: block.text, rev: block.rev, column_widths: [120, null, null] });
+    await expect.poll(async () => Math.round((await columnWidths(table))[0] ?? 0)).toBe(120);
+    const sized = await columnWidths(table);
+    expect(Math.abs((sized[1] ?? 0) - (sized[2] ?? 0))).toBeLessThanOrEqual(1);
+    expect((sized[1] ?? 0)).toBeGreaterThan(120);
+    expect(await content(table)).toEqual(beforeContent);
+    await expect(table.locator("[data-comment-thread]")).toHaveText("alpha");
+    await expectMcp(read, doc => {
+      expect(doc.blocks[0]).toMatchObject({ text: block.text, rev: block.rev, column_widths: [120, null, null] });
+      expect(doc.rev).toBe(initial.rev);
+    });
+
+    await writer.call("edit_block", { uuid: fixture.uuid, block_id: block.id,
+      old_text: block.text, new_text: block.text, rev: block.rev, column_widths: [null, null, null] });
+    await expect.poll(() => columnWidths(table)).toEqual(beforeWidths);
+    await page.reload();
+    await expect(table.locator("tr")).toHaveCount(4);
+    await expect.poll(() => columnWidths(table)).toEqual(beforeWidths);
+    expect(await content(table)).toEqual(beforeContent);
+    await expectMcp(read, doc => {
+      expect(doc.blocks[0]).toMatchObject({ text: block.text, rev: block.rev, column_widths: [null, null, null] });
+      expect(doc.rev).toBe(initial.rev);
+    });
+  } finally {
+    await agent.close();
+    fixture.close();
+  }
 });
 
 test("resized boundaries keep pills, column moves and row dragging aligned", { tag: "@webkit" }, async ({ page }) => {

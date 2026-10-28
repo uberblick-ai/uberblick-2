@@ -157,6 +157,12 @@ A \`json-tree\` fence is an ordinary code block that the web editor shows as a f
 
 Prose supports \`**bold**\`, \`*italic*\`, \`~~strikethrough~~\`, inline code, \`[label](https://example.com)\` and \`[label](document-uuid)\` document links. Underscore emphasis (\`__bold__\` and \`_italic_\`) is also read; export uses asterisks. Source blocks keep literal text. Tables read inline Markdown inside cells and escape literal punctuation and pipes. Alignment markers are accepted but not stored. Table rows are projected to the widest row with virtual empty padding.
 
+**Column widths.** Unsized columns share the width equally. After writing a table, give each short column (names, labels, states, dates, numbers) the width of its longest cell, header included: about 8 px per character plus 32 px, at least 120 px. Leave the prose column unsized so it takes the rest; when two columns hold prose, leave both unsized. Never narrow a prose column to fit more columns: if a row still reads badly at full width, use a list or split the table.
+
+Example: in a table with columns \`Circle\` and \`Who is in it\`, the longest Circle value is "Subscribers" (11 × 8 + 32 = 120), so the agent sends \`{ "column_widths": [120, null] }\`.
+
+\`get_doc\` returns \`column_widths\` on each table. Set the optional list with \`insert_block\` or \`edit_block\`: one positive whole CSS pixel value or \`null\` per column; \`null\` clears a width and omission keeps existing widths. Repeat \`old_text\` as \`new_text\` to change only widths. \`create_doc\` seed blocks take no widths; size their tables with \`edit_block\` afterwards. Markdown import and export omit widths.
+
 ### GitHub references
 
 To cite a GitHub issue or pull request, write an external link to the item's \`github.com\` address with the reference as its text: \`owner/repo#n\`, \`repo#n\`, \`#n\` or the URL itself. The text must name the same item as the address. The web shows it as a pill; everywhere else it stays an ordinary link. Pills need no special syntax or mark.

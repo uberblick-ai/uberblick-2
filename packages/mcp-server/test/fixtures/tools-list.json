@@ -218,7 +218,7 @@
                 ]
               },
               "text": {
-                "description": "Block text. Prose blocks take plain text; use `inline` for formatting. Code, terminal and chart take literal source. A table takes exactly one GFM table with inline Markdown in its cells. A card or figma block takes the content between its opening `:::card` or `:::figma` line and the closing `:::`; markdown help gives their keys, buttons and accepted links, and invalid content refuses with invalid_card or invalid_figma before writing.",
+                "description": "Plain prose (`inline` supplies formatting), literal code/terminal/chart source, exactly one GFM table, or :::card/:::figma content without delimiters. See markdown help for cell formatting, container keys, buttons and links. Invalid content refuses with invalid_table, invalid_card or invalid_figma before writing.",
                 "type": "string"
               },
               "level": {
@@ -254,7 +254,7 @@
                 "type": "string"
               },
               "inline": {
-                "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote, callout), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, terminal and chart hold source text and ignore it; tables, cards and figma also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card/:::figma and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
+                "description": "Prose (paragraph, heading, list-item, quote, callout) runs `[{text, marks}]`: marks are bold, italic, strike, inlineCode, link (external http(s) URL) or docLink (document UUID). Replaces `text` with joined run texts. Code, terminal and chart ignore it and use literal `text`; tables, cards and figma ignore it and parse inline Markdown from `text` (one GFM table or content inside :::card/:::figma). Empty docLink text takes the target's current title. A target unknown to this replica's directory refuses with doclink_target_not_known_locally before writing; archived targets are accepted.",
                 "type": "array",
                 "items": {
                   "type": "object",
@@ -368,7 +368,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Read live metadata, blocks with edit-assertion rev hashes, comment threads and decision context. Creation time createdAt and decision entries' createdAt/updatedAt are ISO 8601 UTC strings when known and representable. Data lists collections/counts; use get_data for records. Use get_revision for a historical state.\n\nHelp: get_doc, edit_doc, workspaces, tool-contracts, decisions, markdown, data.",
+    "description": "Read live metadata, blocks with edit-assertion rev hashes, table column_widths, comment threads and decision context. Creation time createdAt and decision entries' createdAt/updatedAt are ISO 8601 UTC strings when known and representable. Data lists collections/counts; use get_data for records. Use get_revision for a historical state.\n\nHelp: get_doc, edit_doc, workspaces, tool-contracts, decisions, markdown, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -842,7 +842,7 @@
         },
         "new_text": {
           "type": "string",
-          "description": "Replacement text. Repeat old_text to change only list style, depth, callout variant or icon."
+          "description": "Replacement text. Repeat old_text to change only list style, depth, callout variant, icon or table column widths."
         },
         "list": {
           "description": "New list style on an existing list item; omitted keeps its style. Refused on other block types.",
@@ -913,6 +913,21 @@
             "columns"
           ],
           "additionalProperties": false
+        },
+        "column_widths": {
+          "description": "Tables only: one positive whole CSS-pixel width or null per table column. Null clears; omission keeps widths. Sizing guidance: markdown help.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
         }
       },
       "required": [
@@ -924,7 +939,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Change one block's text by diff-and-splice, so concurrent edits elsewhere in the block survive; a list item's `list` and `indent` can also change in place. Assert `old_text` and preferably the `rev` from get_doc: a mismatch refuses with stale_block or old_text_mismatch and returns currentText and currentRev to re-diff against. The assertion checks this replica only. A splice that touches a formatting mark's edge can re-anchor the mark, so check formatted text with export_markdown afterwards. An edit that would remove an open thread's last anchor refuses with open_thread_anchored; resolve the thread or move its anchor with annotate first. Tables take GFM and need `table_mapping` for structural or multi-cell edits. Card and Figma blocks take their `:::` content and cannot be converted to or from other types. New document-link targets must be known to this replica.\n\nHelp: edit_block, edit_doc, workspaces, tool-contracts, decisions, markdown.",
+    "description": "Change one block's text by diff-and-splice, so concurrent edits elsewhere in the block survive; a list item's `list` and `indent` can also change in place. Assert `old_text` and preferably the `rev` from get_doc: a mismatch refuses with stale_block or old_text_mismatch and returns currentText and currentRev to re-diff against. The assertion checks this replica only. A splice that touches a formatting mark's edge can re-anchor the mark, so check formatted text with export_markdown afterwards. An edit that would remove an open thread's last anchor refuses with open_thread_anchored; resolve the thread or move its anchor with annotate first. Tables take GFM and need `table_mapping` for structural or multi-cell edits; `column_widths` sizes columns (see markdown help). Card and Figma blocks take their `:::` content and cannot be converted to or from other types. New document-link targets must be known to this replica.\n\nHelp: edit_block, edit_doc, workspaces, tool-contracts, decisions, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -980,7 +995,7 @@
                 ]
               },
               "text": {
-                "description": "Block text. Prose blocks take plain text; use `inline` for formatting. Code, terminal and chart take literal source. A table takes exactly one GFM table with inline Markdown in its cells. A card or figma block takes the content between its opening `:::card` or `:::figma` line and the closing `:::`; markdown help gives their keys, buttons and accepted links, and invalid content refuses with invalid_card or invalid_figma before writing.",
+                "description": "Plain prose (`inline` supplies formatting), literal code/terminal/chart source, exactly one GFM table, or :::card/:::figma content without delimiters. See markdown help for cell formatting, container keys, buttons and links. Invalid content refuses with invalid_table, invalid_card or invalid_figma before writing.",
                 "type": "string"
               },
               "level": {
@@ -1016,7 +1031,7 @@
                 "type": "string"
               },
               "inline": {
-                "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote, callout), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, terminal and chart hold source text and ignore it; tables, cards and figma also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card/:::figma and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
+                "description": "Prose (paragraph, heading, list-item, quote, callout) runs `[{text, marks}]`: marks are bold, italic, strike, inlineCode, link (external http(s) URL) or docLink (document UUID). Replaces `text` with joined run texts. Code, terminal and chart ignore it and use literal `text`; tables, cards and figma ignore it and parse inline Markdown from `text` (one GFM table or content inside :::card/:::figma). Empty docLink text takes the target's current title. A target unknown to this replica's directory refuses with doclink_target_not_known_locally before writing; archived targets are accepted.",
                 "type": "array",
                 "items": {
                   "type": "object",
@@ -1058,6 +1073,21 @@
                   ],
                   "additionalProperties": false
                 }
+              },
+              "column_widths": {
+                "description": "Tables only: one positive whole CSS-pixel width or null per table column. Null clears; omission keeps widths. Sizing guidance: markdown help.",
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
               }
             },
             "required": [
@@ -1075,7 +1105,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Insert a nonempty blocks array consecutively after after_block_id, or at the top when omitted. Use the same entries as create_doc; one block is a one-entry array. Returns the new blocks in order, each with id and rev. Every entry is checked before anything is written: a refusal keeps its error code, names the 1-based entry_index and says nothing was written. Decision answers must keep their supported shape across the whole batch. Success sends one document update and moves the cursor once, to the end of the last inserted block's stored text. Lists use adjacent list-item entries with list/indent (default bullet/0). Container syntax lives in each entry's text field. Document-link targets must be known locally; chart source stays literal. For links and GitHub references, see markdown.\n\nHelp: insert_block, edit_doc, workspaces, tool-contracts, decisions, markdown.",
+    "description": "Insert a nonempty blocks array consecutively after after_block_id, or at the top when omitted. Use the same entries as create_doc; one block is a one-entry array. Returns the new blocks in order, each with id and rev. Every entry is checked before anything is written: a refusal keeps its error code, names the 1-based entry_index and says nothing was written. Decision answers must keep their supported shape across the whole batch. Success sends one document update and moves the cursor once, to the end of the last inserted block's stored text. Lists use adjacent list-item entries with list/indent (default bullet/0). Container syntax lives in each entry's text field. Document-link targets must be known locally; chart source stays literal. Tables accept column_widths for immediate sizing. For column sizing, links and GitHub references, see markdown.\n\nHelp: insert_block, edit_doc, workspaces, tool-contracts, decisions, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,

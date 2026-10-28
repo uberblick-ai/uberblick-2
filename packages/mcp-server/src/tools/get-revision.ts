@@ -13,7 +13,7 @@ export const getRevisionOperation = operation(READ, inputSchema, async (context,
   try {
     return {
       uuid, revision, history, title: getMeta(doc).title,
-      blocks: context.blocksJson({ doc }).map(({ rev: _rev, ...block }) => block),
+      blocks: context.blocksJson({ doc }).map(({ rev: _rev, column_widths: _widths, ...block }) => block),
       data: dataSummary(readDocData(doc)),
     };
   } finally {

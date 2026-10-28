@@ -250,6 +250,7 @@ export {
   InlineLinkRangeError,
   InvalidListAttributesError,
   InvalidCalloutError,
+  InvalidColumnWidthsError,
   InvalidWorkspaceIdError,
   OldTextMismatchError,
   SchemaError,

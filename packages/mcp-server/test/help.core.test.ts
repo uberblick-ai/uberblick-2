@@ -93,6 +93,21 @@ it("documents dividers and their distinction from setext headings", async () => 
   }
 });
 
+it("teaches column sizing and accepts the suggested widths through both writing tools", async () => {
+  const rig = await local();
+  const { text } = await rig.ok("get_help", { topic: "markdown" });
+  expect(text).toContain("**Column widths.** Unsized columns share the width equally. After writing a table, give each short column (names, labels, states, dates, numbers) the width of its longest cell, header included: about 8 px per character plus 32 px, at least 120 px. Leave the prose column unsized so it takes the rest; when two columns hold prose, leave both unsized. Never narrow a prose column to fit more columns: if a row still reads badly at full width, use a list or split the table.");
+  const widths = JSON.parse(text.match(/`(\{ "column_widths": \[120, null\] \})`/)![1]!);
+  const table = "| Circle | Who is in it |\n| --- | --- |\n| Subscribers | Everyone who follows the page |";
+  const page = await rig.ok("create_doc", { title: "Sized table example", description: "The help example sizes a short label column." });
+  const inserted = await rig.ok("insert_block", { uuid: page.uuid, blocks: [{ type: "table", text: table, ...widths }] });
+  const block = (await rig.ok("get_doc", { uuid: page.uuid })).blocks[0];
+  expect(block.column_widths).toEqual([120, null]);
+  const edited = await rig.ok("edit_block", { uuid: page.uuid, block_id: block.id, old_text: block.text,
+    new_text: block.text, rev: block.rev, ...widths });
+  expect(edited.block).toEqual(inserted.blocks[0]);
+});
+
 it("writes the markdown help's GitHub reference example as an ordinary external link", async () => {
   const rig = await local();
   const { text } = await rig.ok("get_help", { topic: "markdown" });
