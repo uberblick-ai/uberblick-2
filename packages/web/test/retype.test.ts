@@ -23,6 +23,7 @@ import {
   resolveAnnotationRange,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
+import { retypeBlockInTransaction } from "../src/editor/retype.js";
 import { mountEditor, retypeAtCaret } from "./helpers.js";
 
 let editors: Editor[] = [];
@@ -45,6 +46,21 @@ function docWithParagraph(): { ydoc: Y.Doc; blockId: string; editor: Editor } {
 }
 
 describe("retypeBlockInTransaction", () => {
+  it("refuses generic retyping to or from a divider without changing the transaction", () => {
+    const { ydoc, editor } = docWithParagraph();
+    let tr = editor.state.tr;
+    expect(retypeBlockInTransaction(tr, 0, "divider")).toBe(false);
+    expect(tr.docChanged).toBe(false);
+    const divider = editor.state.schema.nodes.divider;
+    if (divider === undefined) throw new Error("missing divider node");
+    editor.view.dispatch(editor.state.tr.replaceWith(0, editor.state.doc.child(0).nodeSize,
+      divider.create({ id: getBlocks(ydoc)[0]?.id })));
+    tr = editor.state.tr;
+    expect(retypeBlockInTransaction(tr, 0, "paragraph")).toBe(false);
+    expect(tr.docChanged).toBe(false);
+    expect(getBlocks(ydoc)[0]?.type).toBe("divider");
+  });
+
   it("keeps the block id, the text and the annotation mark when promoting to a heading", () => {
     const ydoc = new Y.Doc();
     initDoc(ydoc, { uuid: "retype-doc", title: "Retype" });

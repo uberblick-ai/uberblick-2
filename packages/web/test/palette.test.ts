@@ -50,6 +50,7 @@ describe("the editor palette and stored block types", () => {
       "cardTitle",
       "chart",
       "code",
+      "divider",
       "doc",
       "figma",
       "figmaCaption",
@@ -81,7 +82,6 @@ describe("the editor palette and stored block types", () => {
       "blockquote",
       "codeBlock",
       "horizontalRule",
-      "divider",
       "hardBreak",
       "image",
       "mermaid",
@@ -101,6 +101,7 @@ describe("the editor palette and stored block types", () => {
       expect(type).toBeDefined();
       expect(type?.allowsMarkType(uberblickSchema.marks[COMMENT_MARK]!)).toBe(true);
     }
+    expect(uberblickSchema.nodes.divider?.allowsMarkType(uberblickSchema.marks[COMMENT_MARK]!)).toBe(false);
 
     // Inline marks are prose only: a source block's text is source. The split is
     // prose vs source, which is why a list item and a quote take the whole set.
@@ -255,8 +256,8 @@ describe("document links in table cells", () => {
   });
 });
 
-describe("foreign blocks already in the document", () => {
-  it.each([false, true])("preserves a divider without binding when it arrives during editing: %s", (arrivesWhileBound) => {
+describe("stored dividers", () => {
+  it.each([false, true])("binds a childless divider when it arrives during editing: %s", (arrivesWhileBound) => {
     const ydoc = new Y.Doc();
     const peer = new Y.Doc();
     initDoc(ydoc, { uuid: "divider-palette", title: "Divider safety" });
@@ -276,20 +277,56 @@ describe("foreign blocks already in the document", () => {
       Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(peer));
       if (!arrivesWhileBound) {
         binding = bindGuardedEditor({ element: host, fragment: getBlocksFragment(ydoc), awareness: null });
+      }
+      expect(binding?.refused).toBe(false);
+      expect(binding?.editor).not.toBeNull();
+      expect(unbound).toEqual([]);
+      const stored = getBlocksFragment(ydoc).get(1) as Y.XmlElement;
+      expect(stored.nodeName).toBe("divider");
+      expect(stored.getAttributes()).toEqual({ id });
+      expect(stored.length).toBe(0);
+      expect(getBlocks(ydoc)).toMatchObject([{ type: "paragraph", text: "Context" }, { id, type: "divider", text: "" }]);
+      expect(findForeignBlocks(getBlocksFragment(ydoc))).toEqual([]);
+      expect(binding?.editor?.state.doc.child(1).type.name).toBe("divider");
+      expect(host.querySelector("hr, [role=separator]")).not.toBeNull();
+    } finally { binding?.destroy(); host.remove(); ydoc.destroy(); peer.destroy(); }
+  });
+
+  it.each([false, true])("preserves a divider's child without binding when it arrives during editing: %s", (arrivesWhileBound) => {
+    const ydoc = new Y.Doc();
+    const peer = new Y.Doc();
+    initDoc(ydoc, { uuid: "divider-children", title: "Older client safety" });
+    appendBlock(ydoc, { type: "paragraph", text: "Context" });
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+    const host = document.body.appendChild(document.createElement("div"));
+    const unbound: string[] = [];
+    let binding: GuardedBinding | null = null;
+    try {
+      if (arrivesWhileBound) {
+        binding = bindGuardedEditor({ element: host, fragment: getBlocksFragment(ydoc), awareness: null,
+          onUnbind: () => unbound.push("unbound") });
+        expect(binding.editor).not.toBeNull();
+      }
+      const id = appendBlock(peer, { type: "divider" });
+      const divider = getBlocksFragment(peer).get(1) as Y.XmlElement;
+      divider.insert(0, [new Y.XmlText("Written by an older client")]);
+      Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(peer));
+      if (!arrivesWhileBound) {
+        binding = bindGuardedEditor({ element: host, fragment: getBlocksFragment(ydoc), awareness: null });
         expect(binding.refused).toBe(true);
         expect(binding.editor).toBeNull();
       } else expect(unbound).toEqual(["unbound"]);
       const stored = getBlocksFragment(ydoc).get(1) as Y.XmlElement;
       expect(stored.nodeName).toBe("divider");
       expect(stored.getAttributes()).toEqual({ id });
-      expect(stored.length).toBe(0);
-      expect(getBlocks(ydoc)).toMatchObject([{ type: "paragraph", text: "Context" }, { id, type: "divider", text: "" }]);
-      const foreign = findForeignBlocks(getBlocksFragment(ydoc));
-      expect(foreign).toMatchObject([{ index: 1, nodeName: "divider", id }]);
-      expect(describeForeignBlocks(foreign)).toContain("unsupported type (divider)");
+      expect(stored.length).toBe(1);
+      expect(stored.firstChild?.toString()).toBe("Written by an older client");
+      expect(findForeignBlocks(getBlocksFragment(ydoc))).toMatchObject([{ index: 1, nodeName: "#divider-shape", id }]);
     } finally { binding?.destroy(); host.remove(); ydoc.destroy(); peer.destroy(); }
   });
+});
 
+describe("foreign blocks already in the document", () => {
   it.each([false, true])("preserves an unsupported figma shape without binding when it arrives %s", (arrivesWhileBound) => {
     const ydoc = new Y.Doc();
     const peer = new Y.Doc();

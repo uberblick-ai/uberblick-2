@@ -38,3 +38,12 @@ if (globalThis.ResizeObserver === undefined) {
     disconnect(): void {}
   };
 }
+
+// ProseMirror's gap cursor measures text ranges for vertical arrow movement.
+// Browser tests own that geometry; jsdom supplies no painted rectangles.
+if (typeof Range !== "undefined" && Range.prototype.getClientRects === undefined) {
+  Range.prototype.getClientRects = () => Object.assign([], { item: () => null });
+}
+if (typeof Range !== "undefined" && Range.prototype.getBoundingClientRect === undefined) {
+  Range.prototype.getBoundingClientRect = () => new DOMRect();
+}

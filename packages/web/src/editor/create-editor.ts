@@ -35,6 +35,7 @@ import { CardBlocks } from "./card.js";
 import { CalloutBlocks } from "./callout-keys.js";
 import { FigmaBlocks } from "./figma.js";
 import { FigmaCreation } from "./figma-creation.js";
+import { DividerBlocks } from "./divider.js";
 import { ySyncPluginKey } from "y-prosemirror";
 import { cleanupDeletedDocumentTags } from "@uberblick/schema";
 import { setEditorTagCatalog } from "./document-write.js";
@@ -103,6 +104,9 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     TableBlocks,
     CardBlocks,
     CalloutBlocks,
+    DividerBlocks.configure({
+      allowPaste: options.blockMenuEntries?.some((entry) => entry.type === "divider") ?? true,
+    }),
     FigmaBlocks,
     FigmaCreation,
     // Opening transcript source also pauses its derived playback.

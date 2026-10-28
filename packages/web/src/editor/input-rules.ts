@@ -1,6 +1,6 @@
 /**
- * Read literal triggers from BLOCK_MENU_ENTRIES. Retype via setNodeMarkup so
- * the original block id and anchors survive; textblockTypeInputRule replaces it.
+ * Read literal triggers from BLOCK_MENU_ENTRIES. Preserve the original block
+ * id through prose retyping and divider replacement.
  *
  * Dispatch the completed prefix first, close undo capture, then dispatch its
  * conversion. y-prosemirror folds one dispatch into one Yjs transaction, so two
@@ -11,10 +11,11 @@
  */
 
 import { Extension } from "@tiptap/core";
-import { Plugin, TextSelection } from "@tiptap/pm/state";
+import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import type { Transaction } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
-import { BLOCK_MENU_ENTRIES } from "./block-menu.js";
+import { BLOCK_MENU_ENTRIES, replaceParagraphWithDivider } from "./block-menu.js";
 import type { BlockMenuEntry } from "./block-menu.js";
 import { endUndoCapture, findBlockById } from "./blocks.js";
 import { retypeBlockInTransaction } from "./retype.js";
@@ -37,13 +38,11 @@ function entryForTrigger(
  * Return an identified block: typing dispatches before conversion, so saved
  * positions can become stale. Unidentified blocks must wait for BlockIds.
  */
-function conversionFor(
+function typedBlockAt(
   view: EditorView,
   from: number,
   to: number,
-  text: string,
-  entries: readonly BlockMenuEntry[],
-): { blockId: string; entry: BlockMenuEntry } | null {
+): { blockId: string; block: ProseMirrorNode } | null {
   // An input method mid-composition is not finished typing; taking the
   // keystroke here would commit half a character.
   if (view.composing || !view.editable) return null;
@@ -59,12 +58,42 @@ function conversionFor(
   // prefix — there is text in front of it.
   if ($from.parentOffset !== block.content.size) return null;
 
-  const entry = entryForTrigger(block.textContent + text, block.type.name, entries);
-  if (entry === null) return null;
   const blockId = block.attrs.id;
   if (typeof blockId !== "string" || blockId === "") return null;
 
-  return { blockId, entry };
+  return { blockId, block };
+}
+
+interface DividerPrefix {
+  blockId: string;
+  text: string;
+}
+
+const blockInputRuleKey = new PluginKey<DividerPrefix | null>("uberblickBlockInputRules");
+
+function startsOrContinuesDivider(
+  typed: { blockId: string; block: ProseMirrorNode },
+  prefix: DividerPrefix | null,
+): boolean {
+  return typed.block.type.name === "paragraph" && (typed.block.content.size === 0 ||
+    (prefix?.blockId === typed.blockId && prefix.text === typed.block.textContent));
+}
+
+function conversionFor(
+  view: EditorView,
+  from: number,
+  to: number,
+  text: string,
+  entries: readonly BlockMenuEntry[],
+): { blockId: string; entry: BlockMenuEntry } | null {
+  const typed = typedBlockAt(view, from, to);
+  if (typed === null) return null;
+  const entry = entryForTrigger(typed.block.textContent + text, typed.block.type.name, entries);
+  if (entry === null) return null;
+  if (entry.type === "divider" &&
+    !startsOrContinuesDivider(typed, blockInputRuleKey.getState(view.state) ?? null)) return null;
+
+  return { blockId: typed.blockId, entry };
 }
 
 /**
@@ -87,17 +116,32 @@ function convertOnTrigger(
   const tr = view.state.tr;
   const contentStart = found.pos + 1;
   tr.delete(contentStart, contentStart + found.node.content.size);
-  // If retyping refuses, keep the already-dispatched prefix as prose.
-  if (!retypeBlockInTransaction(tr, found.pos, entry.type, entry.attrs)) {
+  // If conversion refuses, keep the already-dispatched prefix as prose.
+  if (entry.type === "divider") {
+    if (!replaceParagraphWithDivider(tr, found.pos)) return true;
+  } else if (!retypeBlockInTransaction(tr, found.pos, entry.type, entry.attrs)) {
     return true;
+  } else {
+    tr.setSelection(TextSelection.near(tr.doc.resolve(contentStart)));
   }
-  tr.setSelection(TextSelection.near(tr.doc.resolve(contentStart)));
   view.dispatch(tr);
   return true;
 }
 
 function blockInputRulePlugin(entries: readonly BlockMenuEntry[] = BLOCK_MENU_ENTRIES): Plugin {
-  return new Plugin({
+  return new Plugin<DividerPrefix | null>({
+    key: blockInputRuleKey,
+    state: {
+      init: () => null,
+      // Keep provenance only while the paragraph still holds the typed prefix.
+      apply: (tr, prefix) => {
+        const typed = tr.getMeta(blockInputRuleKey) as DividerPrefix | undefined;
+        if (typed !== undefined) return typed;
+        if (prefix === null || !tr.docChanged) return prefix;
+        const found = findBlockById(tr.doc, prefix.blockId);
+        return found?.node.type.name === "paragraph" && found.node.textContent === prefix.text ? prefix : null;
+      },
+    },
     props: {
       handleKeyDown(view, event) {
         if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229) return false;
@@ -108,7 +152,18 @@ function blockInputRulePlugin(entries: readonly BlockMenuEntry[] = BLOCK_MENU_EN
       },
       handleTextInput(view, from, to, text, defaultTransaction) {
         const conversion = conversionFor(view, from, to, text, entries);
-        if (conversion === null) return false;
+        if (conversion === null) {
+          const typed = typedBlockAt(view, from, to);
+          if (entries.some((entry) => entry.type === "divider") && typed !== null &&
+            startsOrContinuesDivider(typed, blockInputRuleKey.getState(view.state) ?? null)) {
+            const next = typed.block.textContent + text;
+            if (next === "-" || next === "--") {
+              view.dispatch(defaultTransaction().setMeta(blockInputRuleKey, { blockId: typed.blockId, text: next }));
+              return true;
+            }
+          }
+          return false;
+        }
         return convertOnTrigger(
           view,
           conversion.blockId,
