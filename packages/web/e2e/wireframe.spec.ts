@@ -584,8 +584,11 @@ function median(values: number[]): number {
   return ordered[Math.floor(ordered.length / 2)] ?? Infinity;
 }
 
-test("100 wireframes do no rendering work during prose typing and record comparable ordinary-code typing costs", { tag: "@workload" }, async ({ browser }, info) => {
-  test.setTimeout(120_000);
+// Native keyboard prose input and resulting layout beside 100 mounted previews
+// need a real browser. packages/web/test/wireframe.test.ts owns the deterministic
+// no-parse/render invariant in "does no parse or render work for prose typing and
+// selection changes with 100 previews", using programmatic typing and spies.
+test("native prose typing beside 100 wireframes records ordinary-code comparison timings", { tag: "@workload" }, async ({ browser }, info) => {
   const session = writer();
   const pages: Page[] = [];
   let wireframeUuid: string | null = null;
