@@ -94,7 +94,7 @@ function namedBaseline(entries: readonly RevisionEntry[], since: string | null):
 }
 
 function refreshesList(target: Target, relist: boolean, active: boolean): boolean {
-  return "since" in target || relist || !active;
+  return ("since" in target && !("id" in target)) || relist || !active;
 }
 
 async function getRevision(owner: Session, id: string, operation: number, documents: Map<string, Y.Doc>): Promise<Y.Doc> {
@@ -125,10 +125,9 @@ function captureStartingPoint(owner: Session, document: Y.Doc | null, needed = t
 type Update = (owner: Session, changes: Partial<HistoryState>) => void;
 type Fail = (owner: Session, error: unknown) => void;
 
-async function selectionEntries(owner: Session, target: Target, relist: boolean, fromRoute: boolean): Promise<RevisionEntry[]> {
-  if (fromRoute && owner.listing !== null && owner.state.entries === null && !relist) return owner.listing;
-  return "since" in target || relist || owner.state.selection === null
-    ? owner.client.list(owner.uuid, owner.signal) : owner.state.entries ?? [];
+async function selectionEntries(owner: Session, refresh: boolean, fromRoute: boolean): Promise<RevisionEntry[]> {
+  if (fromRoute && owner.listing !== null && owner.state.entries === null) return owner.listing;
+  return refresh ? owner.client.list(owner.uuid, owner.signal) : owner.state.entries ?? [];
 }
 
 function comparisonBaseline(target: Target, entries: RevisionEntry[], index: number): RevisionEntry | undefined {
@@ -146,14 +145,16 @@ async function selectTarget(owner: Session | null, target: Target, liveDocument:
   update: Update, fail: Fail, navigate: HistoryRoute["navigate"], relist = false, fromRoute = false): Promise<void> {
   if (owner === null || (owner.state.busy && !fromRoute)) return;
   const operation = ++owner.operation;
-  captureStartingPoint(owner, liveDocument, refreshesList(target, relist, owner.state.active));
-  const fresh = "since" in target ? new Map<string, Y.Doc>() : null;
+  const refresh = refreshesList(target, relist, owner.state.active);
+  captureStartingPoint(owner, liveDocument, refresh);
+  const fresh = "since" in target && refresh ? new Map<string, Y.Doc>() : null;
   let adopted = false;
   owner.retryTarget = target;
   update(owner, { busy: true, error: null, active: true });
   try {
-    const entries = await selectionEntries(owner, target, relist, fromRoute);
+    const entries = await selectionEntries(owner, refresh, fromRoute);
     if (owner.operation !== operation) return;
+    if (owner.state.entries === null) update(owner, { entries, titles: listedTitles(entries) });
     if (owner.state.selection === null && fresh === null) destroyDocuments(owner.documents);
     const index = targetIndex(target, owner.state.selection, entries);
     if ("id" in target && index < 0) throw new DocumentHistoryError("revision-not-found");
@@ -277,11 +278,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
       const replacement = replaceEntries(owner, next);
       const selection = replacement.selection;
       update(owner, { busy: false, ...replacement,
-        ...(selection?.comparedWith?.id === revision.id ? (revision.name == null ? { selection: null, active: false } : { selection: { ...selection, comparedWith: revision } }) : {}) });
-      if (selection?.comparedWith?.id === revision.id && revision.name == null) {
-        owner.requestedView = null;
-        routing.current?.navigate(null);
-      }
+        ...(selection?.comparedWith?.id === revision.id ? { selection: { ...selection, comparedWith: revision } } : {}) });
     } catch (error) { if (owner.operation === operation) update(owner, { busy: false }); throw error; }
   };
   const reload = (owner: Session, operation: number): Promise<void> => reloadSelection(owner, operation, update);
@@ -378,6 +375,10 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
       else void select({ step: -1, named: filter === "named" });
     },
     open: (index: number) => { void select({ index, named: filter === "named" }); },
+    openSession: (index: number, since: string) => {
+      const entry = entries?.[index];
+      if (entry !== undefined) void select({ id: entry.id, since });
+    },
     sinceLastNamed: () => { void select({ since: null }); },
     sinceNamed: (id: string) => { void select({ since: id }); },
     name: (name: string, checksum: string) => mutate(owner => owner.client.name(owner.uuid, name, checksum, owner.signal)),

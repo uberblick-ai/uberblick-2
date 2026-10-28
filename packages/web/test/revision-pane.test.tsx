@@ -41,7 +41,7 @@ function historyAt(index: number, since = false, busy = false): DocumentHistory 
     filter: "all", setFilter: vi.fn(), comparisonView: "split", setComparisonView: vi.fn(), canBack: index < entries.length - 1, canForward: true,
     selection: { index, before: snapshot(since ? baseline.id : entries[index + 1]!.id), after: snapshot(entries[index]!.id),
       ...(since ? { comparedWith: baseline } : {}) },
-    collapseUnchanged: true, setCollapseUnchanged: vi.fn(), back: vi.fn(), forward: vi.fn(), open: vi.fn(),
+    collapseUnchanged: true, setCollapseUnchanged: vi.fn(), back: vi.fn(), forward: vi.fn(), open: vi.fn(), openSession: vi.fn(),
     sinceLastNamed: vi.fn(), sinceNamed: vi.fn(), name: vi.fn(async () => {}), rename: vi.fn(async () => {}),
     removeName: vi.fn(async () => {}), restore: vi.fn(async () => true), now: vi.fn(), retry: vi.fn(), refresh: vi.fn(),
   };
@@ -73,6 +73,44 @@ describe("revision attribution", () => {
     expect(label).toContain(`ben ${authorLabel}, `);
     expect(label).toContain(`“Accepted”, named by alice ${namerLabel} at `);
     expect(header.querySelector(".sr-only")?.textContent).toBe(label);
+  });
+
+  it.each(["all", "named"] as const)("attributes every intervening account and surface in a non-adjacent %s comparison", filter => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1200, 900));
+    const start = Date.UTC(2026, 9, 28, 9);
+    vi.spyOn(Date, "now").mockReturnValue(start + 30 * 60_000);
+    const named = entries[3]!.name!;
+    const revisions: RevisionEntry[] = [
+      { id: "outside", author: { ...person, githubUsername: "zoe" }, startedAt: start + 12 * 60_000, endedAt: null },
+      { id: "selected", author: person, startedAt: start + 8 * 60_000, endedAt: start + 10 * 60_000, name: { ...named, text: "Release" } },
+      { id: "agent", author: { githubUsername: "uberblick-agent", surface: { kind: "mcp", name: "Claude Code" } }, startedAt: start + 6 * 60_000, endedAt: start + 8 * 60_000 },
+      { id: "same-account-another-surface", author: { ...person, surface: { kind: "mcp", name: "Codex" } }, startedAt: start + 4 * 60_000, endedAt: start + 6 * 60_000 },
+      { id: "same-author-again", author: person, startedAt: start + 2 * 60_000, endedAt: start + 4 * 60_000 },
+      { id: "baseline", author: { ...person, githubUsername: "lena" }, startedAt: start, endedAt: start + 2 * 60_000, name: named },
+    ];
+    const history = historyAt(1, true);
+    history.entries = revisions;
+    history.entry = revisions[1]!;
+    history.filter = filter;
+    history.selection = { ...history.selection!, comparedWith: revisions[5]! };
+    const view = render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);
+    const header = view.container.querySelector(".ub-history-who")!;
+    const authors = "ben written by hand 👏, uberblick-agent via Claude, ben via Codex";
+    expect(header.querySelector(".ub-history-author")?.textContent).toBe(authors);
+    const label = header.getAttribute("title")!;
+    const exact = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+    expect(label).toContain(exact.formatRange(start + 2 * 60_000, start + 10 * 60_000));
+    expect(label).not.toContain(exact.formatRange(start, start + 10 * 60_000));
+    expect(label).not.toContain("zoe");
+    expect(label).toContain("“Release”, named by ben in the browser");
+    expect(header.querySelector(".sr-only")?.textContent).toBe(label);
+    const after = view.container.querySelectorAll(".ub-revision-side-label")[1]!;
+    expect(after.textContent).toContain(`After · ${authors}`);
+    expect(after.textContent).toContain("“Release”");
+    const span = header.querySelector(".ub-history-when span")!;
+    expect(span.textContent).not.toBe("");
+    expect(after.textContent).toContain(span.textContent);
+    expect(screen.getByText("Before · lena · “Reviewed”")).not.toBeNull();
   });
 });
 
@@ -138,8 +176,9 @@ describe("revision restore control states", () => {
     expect(history.restore).toHaveBeenCalledExactlyOnceWith("baseline");
   });
 
-  it("keeps restoring Before when its name disappears, including an unnamed since address", async () => {
-    const history = historyAt(0, true);
+  it.each([700, 1200])("restores After when the baseline loses its name at width %s", async width => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, width, 900));
+    const history = historyAt(1, true);
     const view = render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);
     expect(screen.getByRole("button", { name: "Restore “Reviewed”" })).not.toBeNull();
     const unnamed = { ...entries[3]!, name: null };
@@ -147,8 +186,21 @@ describe("revision restore control states", () => {
     view.rerender(<RevisionPane history={updated} docLinks={null} workspaceSettings={null} writable />);
     const button = screen.getByRole<HTMLButtonElement>("button", { name: "Restore this version" });
     expect(button.disabled).toBe(false);
+    expect(button.closest(width < 900 ? "header" : ".ub-revision-side-label")?.textContent).toContain(width < 900 ? "selected" : "After ·");
     await act(async () => fireEvent.click(button));
-    expect(history.restore).toHaveBeenCalledExactlyOnceWith("baseline");
+    expect(history.restore).toHaveBeenCalledExactlyOnceWith("selected");
+  });
+
+  it("disables restoring the current After in an unnamed comparison", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1200, 900));
+    const history = historyAt(0, true);
+    history.selection = { ...history.selection!, comparedWith: { ...entries[3]!, name: null } };
+    render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);
+    const button = screen.getByRole<HTMLButtonElement>("button", { name: "Restore this version", description: "This is the current version." });
+    expect(button.disabled).toBe(true);
+    expect(button.closest(".ub-revision-side-label")?.textContent).toContain("After ·");
+    await act(async () => fireEvent.click(button));
+    expect(history.restore).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -237,7 +289,8 @@ describe("revision comparison controls", () => {
     history.selection = { ...history.selection!, comparedWith: baseline };
     const view = render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);
     expect(screen.getByText("Before · lena · “Reviewed”")).not.toBeNull();
-    expect(screen.getByText("After · ben · “Release”")).not.toBeNull();
+    expect(view.container.querySelectorAll(".ub-revision-side-label")[1]?.textContent).toContain("After · ben written by hand 👏");
+    expect(view.container.querySelectorAll(".ub-revision-side-label")[1]?.textContent).toContain("“Release”");
     expect(screen.getByText("· compared with “Reviewed” · lena")).not.toBeNull();
     expect(screen.getByText("2 of 4 ·")).not.toBeNull();
     const restore = screen.getByRole("button", { name: "Restore “Reviewed”" });
