@@ -1,7 +1,8 @@
 /** Drafts belong to conversations, outside the drawer's mount lifetime. */
 import { useEffect, useRef, useState } from "react";
-import type { ReactElement } from "react";
-import { addComment, editComment, getAnnotation, getWorkspaceMainRepository, setAnnotationResolved } from "@uberblick/schema";
+import type { Dispatch, ReactElement, SetStateAction } from "react";
+import { addComment, deleteComment, editComment, getAnnotation, getCommentDeleteEligibility, getWorkspaceMainRepository, setAnnotationResolved } from "@uberblick/schema";
+import type { CommentDeleteRefusal } from "@uberblick/schema";
 import type { RoomConnection } from "../../collab/rooms.js";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import { writeDocument } from "../../collab/document-write.js";
@@ -18,6 +19,7 @@ import {
 } from "./threads.js";
 import type { ThreadComment, ThreadFocus, ThreadView } from "./threads.js";
 import { Button } from "../shadcn/button.js";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle } from "../shadcn/alert-dialog.js";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../shadcn/collapsible.js";
 import { Sheet, SheetContent, SheetTitle } from "../shadcn/sheet.js";
 import { useTimestampClock } from "../timestamps.js";
@@ -31,10 +33,93 @@ interface CommentEdit {
   autoFocus: boolean;
 }
 
+const deleteRefusal: Record<CommentDeleteRefusal, string> = {
+  thread_not_found: "This comment no longer exists.",
+  comment_not_found: "This comment no longer exists.",
+  thread_resolved: "This conversation was resolved. Your comment was not deleted.",
+  account_required: "Sign in to delete your comment.",
+  comment_account_missing: "This comment was written without an account and cannot be deleted.",
+  comment_not_owned: "This comment belongs to a different account.",
+  reply_account_missing: "A reply was written without an account, so this conversation cannot be deleted.",
+  reply_not_owned: "Someone else replied, so this conversation cannot be deleted.",
+};
+
+function removeOwnComment({ connection, catalogConnection, readOnly, account, threadId, commentId, canCleanupTags }: {
+  connection: RoomConnection;
+  catalogConnection: RoomConnection | null;
+  readOnly: boolean;
+  account: string | null;
+  threadId: string;
+  commentId: string;
+  canCleanupTags: (() => boolean) | undefined;
+}): { ok: true; removed: "comment" | "thread" } | { ok: false; message: string } {
+  if (readOnly || !connection.status.writable) return { ok: false, message: "This document is read-only. Your comment was not deleted." };
+  const result = writeDocument(connection.ydoc, catalogConnection?.ydoc ?? null,
+    () => deleteComment(connection.ydoc, threadId, commentId, account ?? undefined), undefined, canCleanupTags);
+  return result.ok ? result : { ok: false, message: deleteRefusal[result.reason] };
+}
+
+function DeleteConfirmation({ open, replyCount, narrow, onClose, onDelete }: {
+  open: boolean;
+  replyCount: number;
+  narrow: boolean;
+  onClose: () => void;
+  onDelete: () => string | null;
+}): ReactElement {
+  const deleted = useRef<string | null>(null);
+  return <AlertDialog open={open} onOpenChange={(shown) => { if (!shown) onClose(); }}>
+    <AlertDialogContent onCloseAutoFocus={(event) => {
+      if (deleted.current === null) return;
+      event.preventDefault();
+      const toggle = narrow ? document.querySelector<HTMLElement>(".ub-threads-toggle") : null;
+      if (toggle !== null) toggle.focus();
+      else returnFocusToComment(deleted.current);
+      deleted.current = null;
+    }}>
+      <AlertDialogTitle>Delete this conversation?</AlertDialogTitle>
+      <AlertDialogDescription>
+        This permanently deletes the opening comment and {replyCount} {replyCount === 1 ? "reply" : "replies"}. This cannot be undone.
+      </AlertDialogDescription>
+      <AlertDialogFooter>
+        <AlertDialogCancel>Cancel</AlertDialogCancel>
+        <AlertDialogAction variant="destructive" onClick={() => { deleted.current = onDelete(); }}>Delete</AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>;
+}
+
+function useRecoveredCommentRefusals(connection: RoomConnection | null, threads: readonly ThreadView[],
+  setRefusals: Dispatch<SetStateAction<Record<string, string>>>, setEdits: Dispatch<SetStateAction<Record<string, CommentEdit>>>): void {
+  useEffect(() => {
+    if (connection === null) return;
+    setRefusals((current) => {
+      const next = Object.fromEntries(Object.entries(current).filter(([key]) => {
+        const thread = threads.find((item) => key === `${connection.room}:${item.id}`);
+        return thread === undefined || getAnnotation(connection.ydoc, thread.id)?.resolved !== false;
+      }));
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
+    setEdits((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const [key, edit] of Object.entries(current)) {
+        const thread = threads.find((item) => key.startsWith(`${connection.room}:`) && item.id === edit.threadId);
+        if (edit.refusal !== null && thread !== undefined && !thread.resolved
+          && thread.comments.some((comment) => comment.key === edit.commentId)) {
+          next[key] = { ...edit, refusal: null };
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [connection, threads, setRefusals, setEdits]);
+}
+
 function ThreadCard({
   thread, now, focused, draft, readOnly, refusal, onSelect, onReply,
   onDeselect, onReplyFocus, onResolve, docLinks, openDocId, hidden, mainRepository,
   account, edits, onStartEdit, onEditText, onEditFocus, onSaveEdit, onCancelEdit,
+  canDelete, onDelete, deletionRefusal,
 }: {
   thread: ThreadView;
   now: number;
@@ -58,6 +143,9 @@ function ThreadCard({
   onEditFocus: (commentId: string) => void;
   onSaveEdit: (commentId: string, text: string) => boolean;
   onCancelEdit: (commentId: string) => void;
+  canDelete: (commentId: string) => boolean;
+  onDelete: (commentId: string) => void;
+  deletionRefusal: string | null;
 }): ReactElement {
   const comments = focused ? thread.comments : thread.comments.slice(0, 1);
   const newest = thread.comments.flatMap((comment) => [comment.createdAt, comment.editedAt])
@@ -106,8 +194,12 @@ function ThreadCard({
             <div className="ub-thread-text whitespace-pre-wrap"><CommentText text={comment.text} docLinks={docLinks} mainRepository={mainRepository} />
               {comment.editedAt !== undefined && <> <CommentEdited editedAt={comment.editedAt} now={now} /></>}
             </div>
-            {canEdit(comment) && <Button variant="plain" size="custom" type="button" className="ub-comment-edit ub-type-small text-(--muted-foreground)"
-              onClick={() => onStartEdit(comment)}>Edit</Button>}
+            {canEdit(comment) && <div className="flex justify-end gap-1">
+              <Button variant="plain" size="custom" type="button" className="ub-comment-action ub-comment-edit ub-type-small text-(--muted-foreground)"
+                onClick={() => onStartEdit(comment)}>Edit</Button>
+              {canDelete(comment.key) && <Button variant="plain" size="custom" type="button" className="ub-comment-action ub-comment-delete ub-type-small text-(--muted-foreground)"
+                onClick={() => onDelete(comment.key)}>Delete</Button>}
+            </div>}
           </>}
       </div>;
       })}
@@ -129,6 +221,7 @@ function ThreadCard({
         {thread.resolved ? "Reopen" : "✓ Resolve"}
       </Button>}
       {refusal !== null && <p className="ub-comment-error">{refusal}</p>}
+      {deletionRefusal !== null && <p className="ub-comment-error" role="alert">{deletionRefusal}</p>}
       {thread.resolved && draft.text !== "" && <div className="ub-thread-unsent ub-type-small">
         <span className="text-(--muted-foreground)">Unsent reply — reopen to continue</span>
         <p className="m-0 whitespace-pre-wrap">{draft.text}</p>
@@ -169,6 +262,8 @@ export function ThreadsPane({
   const [edits, setEdits] = useState<Record<string, CommentEdit>>({});
   const [showResolved, setShowResolved] = useState(false);
   const [refusals, setRefusals] = useState<Record<string, string>>({});
+  const [deleteRefusals, setDeleteRefusals] = useState<Record<string, string>>({});
+  const [pendingDelete, setPendingDelete] = useState<{ room: string; threadId: string; commentId: string; replyCount: number } | null>(null);
   const handledSelection = useRef<ThreadFocus | null>(null);
   const resolvedToggle = useRef<HTMLButtonElement>(null);
   const focusResolvedToggle = useRef(false);
@@ -184,29 +279,7 @@ export function ThreadsPane({
       key.startsWith(`${connection.room}:`) && text !== "")
       || Object.keys(edits).some((key) => key.startsWith(`${connection.room}:`))));
   }, [connection, drafts, edits, onDraftsChange]);
-  useEffect(() => {
-    if (connection === null) return;
-    setRefusals((current) => {
-      const next = Object.fromEntries(Object.entries(current).filter(([key]) => {
-        const thread = threads.find((item) => key === `${connection.room}:${item.id}`);
-        return thread === undefined || getAnnotation(connection.ydoc, thread.id)?.resolved !== false;
-      }));
-      return Object.keys(next).length === Object.keys(current).length ? current : next;
-    });
-    setEdits((current) => {
-      let changed = false;
-      const next = { ...current };
-      for (const [key, edit] of Object.entries(current)) {
-        const thread = threads.find((item) => key.startsWith(`${connection.room}:`) && item.id === edit.threadId);
-        if (edit.refusal !== null && thread !== undefined && !thread.resolved
-          && thread.comments.some((comment) => comment.key === edit.commentId)) {
-          next[key] = { ...edit, refusal: null };
-          changed = true;
-        }
-      }
-      return changed ? next : current;
-    });
-  }, [connection, threads]);
+  useRecoveredCommentRefusals(connection, threads, setRefusals, setEdits);
   useEffect(() => {
     if (focused === null || focused === handledSelection.current || (narrow && !open)
       || !threads.some((thread) => thread.id === focused.id)) return;
@@ -243,19 +316,31 @@ export function ThreadsPane({
   };
   const roomEdits = Object.entries(edits).filter(([key]) => key.startsWith(`${connection.room}:`));
   const ownAccount = account?.state === "signed-in" ? account.handle : null;
-  const setDraft = (id: string, text: string): void => {
-    setDrafts((current) => ({ ...current, [draftKey(id)]: text }));
-  };
   const deselect = (id: string): void => {
     onFocus(null);
     if (narrow) onOpenChange?.(false);
     else returnFocusToComment(id);
   };
+  const removeComment = (threadId: string, commentId: string): boolean => {
+    const result = removeOwnComment({ connection, catalogConnection, readOnly, account: ownAccount, threadId, commentId, canCleanupTags });
+    if (!result.ok) {
+      setDeleteRefusals((current) => ({ ...current, [draftKey(threadId)]: result.message }));
+      return false;
+    }
+    setDeleteRefusals((current) => {
+      const next = { ...current };
+      delete next[draftKey(threadId)];
+      return next;
+    });
+    if (result.removed === "thread") deselect(threadId);
+    else requestAnimationFrame(() => focusThreadCard(threadId));
+    return true;
+  };
   const unresolved = threads.filter((thread) => !thread.resolved);
   const resolved = threads.filter((thread) => thread.resolved);
   const card = (thread: ThreadView): ReactElement => <ThreadCard key={thread.id}
     thread={thread} now={now} focused={thread.id === focused?.id}
-    draft={{ text: drafts[draftKey(thread.id)] ?? "", onChange: (text) => setDraft(thread.id, text) }}
+    draft={{ text: drafts[draftKey(thread.id)] ?? "", onChange: (text) => setDrafts((current) => ({ ...current, [draftKey(thread.id)]: text })) }}
     readOnly={readOnly || !connection.status.writable} docLinks={docLinks} openDocId={openDocId} hidden={hidden || (narrow && !open)} mainRepository={mainRepository}
     account={ownAccount} edits={roomEdits.map(([, edit]) => edit).filter((edit) => edit.threadId === thread.id)}
     onStartEdit={(comment) => setEdits((current) => ({ ...current, [editKey(thread.id, comment.key)]: {
@@ -264,6 +349,14 @@ export function ThreadsPane({
     onEditText={(commentId, text) => updateEdit(thread.id, commentId, { text })}
     onEditFocus={(commentId) => updateEdit(thread.id, commentId, { autoFocus: false })}
     onCancelEdit={(commentId) => cancelEdit(thread.id, commentId)}
+    canDelete={(commentId) => getCommentDeleteEligibility(ydoc, thread.id, commentId, ownAccount ?? undefined).ok}
+    deletionRefusal={deleteRefusals[draftKey(thread.id)] ?? null}
+    onDelete={(commentId) => {
+      const eligible = getCommentDeleteEligibility(ydoc, thread.id, commentId, ownAccount ?? undefined);
+      if (eligible.ok && eligible.removed === "thread" && eligible.replyCount > 0) {
+        setPendingDelete({ room: connection.room, threadId: thread.id, commentId, replyCount: eligible.replyCount });
+      } else removeComment(thread.id, commentId);
+    }}
     onSaveEdit={(commentId, text) => {
       if (readOnly || !connection.status.writable || ownAccount === null) return false;
       const refuse = (message: string): false => {
@@ -314,7 +407,9 @@ export function ThreadsPane({
   const removedDrafts = Object.entries(drafts).filter(([key, text]) => text !== ""
     && key.startsWith(`${connection.room}:`) && !threads.some((thread) => draftKey(thread.id) === key));
   const removedEdits = roomEdits.filter(([, edit]) => !threads.some((thread) => thread.id === edit.threadId));
-  if (threads.length === 0 && removedDrafts.length === 0 && removedEdits.length === 0) return null;
+  const removedRefusals = Object.entries(deleteRefusals).filter(([key]) => key.startsWith(`${connection.room}:`)
+    && !threads.some((thread) => draftKey(thread.id) === key));
+  if (threads.length === 0 && removedDrafts.length === 0 && removedEdits.length === 0 && removedRefusals.length === 0 && pendingDelete === null) return null;
   const content = <section className="ub-threads" aria-label="Comments">
     <ul className="m-0 flex list-none flex-col gap-2 p-0">{unresolved.map(card)}</ul>
     {resolved.length > 0 && <Collapsible open={showResolved} onOpenChange={(shown) => {
@@ -335,10 +430,16 @@ export function ThreadsPane({
       <p className="whitespace-pre-wrap select-text">{edit.text}</p>
       <Button variant="tool" size="custom" onClick={() => cancelEdit(edit.threadId, edit.commentId)}>Cancel</Button>
     </div>)}
+    {removedRefusals.map(([key, message]) => <p key={key} className="ub-comment-error" role="alert">{message}</p>)}
   </section>;
   const highlights = <style data-selected-highlight="">{selectedHighlightCss(focused?.id ?? null)}</style>;
+  const pendingReplyCount = threads.find((thread) => thread.id === pendingDelete?.threadId)?.replyCount ?? pendingDelete?.replyCount ?? 0;
+  const confirmation = <DeleteConfirmation open={pendingDelete !== null && pendingDelete.room === connection.room && !hidden}
+    narrow={narrow} replyCount={pendingReplyCount} onClose={() => setPendingDelete(null)}
+    onDelete={() => pendingDelete !== null && removeComment(pendingDelete.threadId, pendingDelete.commentId) ? pendingDelete.threadId : null} />;
   if (narrow) return <>
     {highlights}
+    {confirmation}
     <Sheet open={open && !hidden} onOpenChange={(shown) => onOpenChange?.(shown)}>
       <SheetContent id="ub-rail" className="ub-rail ub-rail-open ub-type-ui" closeLabel="Close comments"
         aria-describedby={undefined}
@@ -367,5 +468,5 @@ export function ThreadsPane({
       </SheetContent>
     </Sheet>
   </>;
-  return <>{highlights}<aside id="ub-rail" className="ub-rail flex min-h-0 w-full flex-1 flex-col overflow-y-auto p-3 ub-type-ui">{content}</aside></>;
+  return <>{highlights}{confirmation}<aside id="ub-rail" className="ub-rail flex min-h-0 w-full flex-1 flex-col overflow-y-auto p-3 ub-type-ui">{content}</aside></>;
 }

@@ -32,6 +32,7 @@ import { within } from "@testing-library/react";
 import * as Y from "yjs";
 import {
   appendBlock,
+  createAnnotation,
   deleteDirectoryEntry,
   getBlocks,
   getBlocksFragment,
@@ -554,7 +555,7 @@ describe("following a reference", () => {
   it("navigates in-app, and never also opens the thread it sits in", async () => {
     const ydoc = new Y.Doc();
     initDoc(ydoc, { uuid: DOC, title: "References" });
-    appendBlock(ydoc, {
+    const commented = appendBlock(ydoc, {
       type: "paragraph",
       inline: [
         { text: "see ", marks: {} },
@@ -564,10 +565,7 @@ describe("following a reference", () => {
     const ordinary = appendBlock(ydoc, { type: "paragraph", text: "Outside the comment." });
     // The whole sentence is annotated, so the highlight really does wrap the
     // reference rather than merely sitting beside it.
-    const block = getBlocksFragment(ydoc).get(0) as Y.XmlElement;
-    (block.firstChild as Y.XmlText).format(0, 11, {
-      comment: { threadId: "t-1" },
-    });
+    const thread = createAnnotation(ydoc, commented, 0, 11, "Reader", "Comment on this reference");
 
     const { directory, context, opened } = directoryWith([
       { uuid: TARGET, title: "The hub" },
@@ -636,12 +634,12 @@ describe("following a reference", () => {
     const highlight = host.querySelector("[data-comment-thread]");
     expect(highlight).not.toBeNull();
     click(highlight);
-    expect(selected).toEqual(["t-1"]);
+    expect(selected).toEqual([thread.id]);
     expect(opened).toEqual([TARGET]);
 
     // Ordinary prose clears the previous card without navigating or editing.
     click(host.querySelector(`#${CSS.escape(ordinary)}`));
-    expect(selected).toEqual(["t-1", null]);
+    expect(selected).toEqual([thread.id, null]);
     expect(getBlocks(ydoc).at(-1)?.text).toBe("Outside the comment.");
 
     // ---- and an archived target is still somewhere you can go ----

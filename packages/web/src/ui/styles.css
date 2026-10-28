@@ -1135,9 +1135,9 @@ body {
 .ub-thread-comment { display: flex; flex-direction: column; gap: 0.35rem; }
 .ub-thread-comment + .ub-thread-comment { border-top: 1px solid var(--border); padding-top: 0.5rem; }
 .ub-thread-text { cursor: text; }
-.ub-comment-edit { align-self: flex-end; padding: 0.25rem; opacity: 0; pointer-events: none; }
-.ub-thread-comment:hover .ub-comment-edit,
-.ub-thread-comment:focus-within .ub-comment-edit { opacity: 1; pointer-events: auto; }
+.ub-comment-action { align-self: flex-end; padding: 0.25rem; opacity: 0; pointer-events: none; }
+.ub-thread-comment:hover .ub-comment-action,
+.ub-thread-comment:focus-within .ub-comment-action { opacity: 1; pointer-events: auto; }
 .ub-thread-control { opacity: 0; pointer-events: none; }
 .ub-thread:hover .ub-thread-control,
 .ub-thread:focus-within .ub-thread-control,
@@ -1160,8 +1160,8 @@ body {
 .ub-comment-send:disabled { color: var(--muted-foreground); opacity: 0.4; }
 .ub-resolved-toggle { padding: 0.5rem 0; }
 @media (any-pointer: coarse) {
-  .ub-thread-resolve, .ub-comment-send, .ub-resolved-toggle, .ub-comment-edit, .ub-comment-edit-cancel { min-width: 44px; min-height: 44px; }
-  .ub-thread-focused .ub-comment-edit { opacity: 1; pointer-events: auto; }
+  .ub-thread-resolve, .ub-comment-send, .ub-resolved-toggle, .ub-comment-action, .ub-comment-edit-cancel { min-width: 44px; min-height: 44px; }
+  .ub-thread-focused .ub-comment-action { opacity: 1; pointer-events: auto; }
   .ub-comment-form-compact .ub-comment-input { min-height: 44px; }
 }
 

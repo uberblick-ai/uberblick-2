@@ -233,13 +233,18 @@ describe("comment edit eligibility in the shell", () => {
     const shell = shellFor(connection, thread.id);
     const { container, rerender } = await renderSettled(<ShellThreads shell={shell} />);
     expect(within(container).getAllByRole("button", { name: "Edit" })).toHaveLength(2);
+    const deletions = within(container).getAllByRole("button", { name: "Delete" });
+    expect(deletions).toHaveLength(1);
+    expect(deletions[0]?.closest(".ub-thread-comment")?.textContent).toContain("Agent wrote this");
     expect(container.querySelector(".ub-thread-select .ub-comment-edit")).toBeNull();
+    expect(container.querySelector(".ub-thread-select .ub-comment-delete")).toBeNull();
     shell.threads.focusedThread = null;
     rerender(<ShellThreads shell={shell} />);
     expect(within(container).queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(within(container).queryByRole("button", { name: "Delete" })).toBeNull();
   });
 
-  it.each(["signed-out", "unavailable", "archived", "unwritable", "decision-without-first-record", "resolved"] as const)("hides Edit in %s state", async (state) => {
+  it.each(["signed-out", "unavailable", "archived", "unwritable", "decision-without-first-record", "resolved"] as const)("hides Edit and Delete in %s state", async (state) => {
     const connection = room(roomForDoc(WORKSPACE, UUID));
     initDoc(connection.ydoc, { uuid: UUID, title: "Edit access" });
     const block = appendBlock(connection.ydoc, { type: "paragraph", text: "Prose" });
@@ -256,7 +261,25 @@ describe("comment edit eligibility in the shell", () => {
     const { container } = await renderSettled(<ShellThreads shell={shell} />);
     expect(within(container).getByText("Own comment")).toBeDefined();
     expect(within(container).queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(within(container).queryByRole("button", { name: "Delete" })).toBeNull();
     expect(within(container).queryByPlaceholderText("Edit comment…")).toBeNull();
+  });
+
+  it("offers an opening Delete only while every reply belongs to the signed-in account", async () => {
+    const connection = room(roomForDoc(WORKSPACE, UUID));
+    initDoc(connection.ydoc, { uuid: UUID, title: "Deletion access" });
+    const block = appendBlock(connection.ydoc, { type: "paragraph", text: "Prose" });
+    const thread = createAnnotation(connection.ydoc, block, 0, 5, "Reader", "Own opening", undefined, { account: "bk-one", kind: "person" });
+    addComment(connection.ydoc, thread.id, "Agent", "Own reply", { account: "BK-ONE", kind: "agent", agent: "codex" });
+    const shell = shellFor(connection, thread.id);
+    const { container, rerender } = await renderSettled(<ShellThreads shell={shell} />);
+    expect(within(container).getAllByRole("button", { name: "Delete" })).toHaveLength(2);
+    addComment(connection.ydoc, thread.id, "Legacy", "No account reply");
+    shell.threads.threads = threadsFromDoc(connection.ydoc);
+    rerender(<ShellThreads shell={shell} />);
+    const actions = within(container).getAllByRole("button", { name: "Delete" });
+    expect(actions).toHaveLength(1);
+    expect(actions[0]?.closest(".ub-thread-comment")?.textContent).toContain("Own reply");
   });
 });
 

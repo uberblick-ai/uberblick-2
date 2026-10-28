@@ -101,10 +101,12 @@ export {
   addComment,
   annotationAnchors,
   createAnnotation,
+  deleteComment,
   editComment,
   getAnnotation,
   getAnnotationCommentId,
   getAnnotationCommentIds,
+  getCommentDeleteEligibility,
   listAnnotationRanges,
   listAnnotations,
   moveAnnotation,
@@ -112,7 +114,7 @@ export {
   resolveAnnotationRange,
   setAnnotationResolved,
 } from "./annotations.js";
-export type { AnnotationAnchor } from "./annotations.js";
+export type { AnnotationAnchor, CommentDeleteEligibility, CommentDeleteRefusal, DeleteCommentResult } from "./annotations.js";
 
 export { listNumbers } from "./lists.js";
 export type { ListMarkerInput } from "./lists.js";

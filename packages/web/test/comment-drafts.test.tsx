@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { useState } from "react";
 import type { ComponentProps, ReactElement } from "react";
-import { fireEvent, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import * as Y from "yjs";
-import { addComment, appendBlock, createAnnotation, getAnnotation, getAnnotationsMap, initDoc, setAnnotationResolved } from "@uberblick/schema";
+import { addComment, appendBlock, createAnnotation, deleteComment, getAnnotation, getAnnotationCommentId, getAnnotationsMap, initDoc, setAnnotationResolved } from "@uberblick/schema";
 import { act, render } from "./react-render.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
 import { ThreadsPane } from "../src/ui/comments/ThreadsPane.js";
@@ -205,6 +205,67 @@ describe("comment edit drafts", () => {
       expect(within(comments).queryByPlaceholderText("Edit comment…")).toBeNull();
       if (!whole) expect(getAnnotation(view.ydoc, view.first.id)?.comments.map((comment) => comment.text)).toEqual(["Surviving reply"]);
       expect(within(view.container).getByLabelText("Reply draft state").textContent).toBe("Drafts retained");
+    } finally { view.close(); }
+  });
+});
+
+describe("comment deletion", () => {
+  it("deletes a reply immediately and confirms the exact opening reply count before permanent removal", async () => {
+    const view = mountComments(1);
+    try {
+      await act(async () => {
+        addComment(view.ydoc, view.first.id, "Agent", "Own reply", { account: "reader-one", kind: "agent", agent: "codex" });
+        addComment(view.ydoc, view.first.id, "Reader", "Second reply", { account: "READER-ONE", kind: "person" });
+      });
+      const item = view.card(view.first.id);
+      select(item);
+      const reply = within(item).getByText("Own reply").closest(".ub-thread-comment")! as HTMLElement;
+      await act(async () => fireEvent.click(within(reply).getByRole("button", { name: "Delete" })));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(getAnnotation(view.ydoc, view.first.id)?.comments.map((comment) => comment.text)).toEqual(["First question", "Second reply"]);
+      const opening = item.querySelector<HTMLElement>(".ub-thread-comment")!;
+      fireEvent.click(within(opening).getByRole("button", { name: "Delete" }));
+      const dialog = screen.getByRole("alertdialog", { name: "Delete this conversation?" });
+      expect(within(dialog).getByText(/opening comment and 1 reply/)).toBeDefined();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      expect(getAnnotation(view.ydoc, view.first.id)?.comments).toHaveLength(2);
+      fireEvent.click(within(opening).getByRole("button", { name: "Delete" }));
+      await act(async () => fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" })));
+      expect(getAnnotation(view.ydoc, view.first.id)).toBeNull();
+      expect(view.container.querySelector(".ub-thread-card")).toBeNull();
+    } finally { view.close(); }
+  });
+
+  it("deletes an opening comment without replies immediately while keeping its unsent reply", async () => {
+    const view = mountComments(1);
+    try {
+      const item = view.card(view.first.id);
+      select(item);
+      fireEvent.input(field(item), { target: { value: "Recover my unsent reply" } });
+      await act(async () => fireEvent.click(within(item).getByRole("button", { name: "Delete" })));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(getAnnotation(view.ydoc, view.first.id)).toBeNull();
+      expect(within(view.container).getByText("Recover my unsent reply")).toBeDefined();
+    } finally { view.close(); }
+  });
+
+  it.each(["resolved", "other-reply", "gone", "read-only"] as const)("refuses an opening delete after %s changes while its confirmation is open", async (change) => {
+    const view = mountComments(1);
+    try {
+      await act(async () => addComment(view.ydoc, view.first.id, "Reader", "Own reply", { account: "reader-one", kind: "person" }));
+      const item = view.card(view.first.id);
+      select(item);
+      fireEvent.click(within(item.querySelector<HTMLElement>(".ub-thread-comment")!).getByRole("button", { name: "Delete" }));
+      if (change === "resolved") await act(async () => setAnnotationResolved(view.remote, view.first.id, true));
+      if (change === "other-reply") await act(async () => addComment(view.remote, view.first.id, "Peer", "Their reply", { account: "peer", kind: "person" }));
+      if (change === "gone") await act(async () => deleteComment(view.remote, view.first.id, getAnnotationCommentId(view.remote, view.first.id, 0)!, "reader-one"));
+      if (change === "read-only") view.reconfigure({ readOnly: true });
+      const before = [...Y.encodeStateAsUpdate(view.ydoc)];
+      await act(async () => fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" })));
+      expect([...Y.encodeStateAsUpdate(view.ydoc)]).toEqual(before);
+      if (change === "resolved") fireEvent.click(within(view.container).getByRole("button", { name: "1 resolved" }));
+      const expected = { resolved: "This conversation was resolved. Your comment was not deleted.", "other-reply": "Someone else replied, so this conversation cannot be deleted.", gone: "This comment no longer exists.", "read-only": "This document is read-only. Your comment was not deleted." };
+      expect(within(view.container).getByRole("alert").textContent).toBe(expected[change]);
     } finally { view.close(); }
   });
 });

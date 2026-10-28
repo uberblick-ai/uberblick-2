@@ -1496,7 +1496,7 @@
   },
   {
     "name": "annotate",
-    "title": "Annotate a range, reply, resolve or move a thread's anchor",
+    "title": "Comment, reply, resolve, move or delete your comment",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1507,12 +1507,22 @@
           "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
         "text": {
+          "description": "The comment body; required except when action is delete.",
           "type": "string",
-          "minLength": 1,
-          "description": "The comment body."
+          "minLength": 1
+        },
+        "action": {
+          "description": "Permanent delete; requires thread_id/comment_id and forbids other mode fields.",
+          "type": "string",
+          "const": "delete"
+        },
+        "comment_id": {
+          "description": "Delete only: stable id from get_doc or annotate.",
+          "type": "string",
+          "minLength": 1
         },
         "thread_id": {
-          "description": "Reply to or move this existing thread.",
+          "description": "Reply to, move or delete a comment in this existing thread.",
           "type": "string",
           "minLength": 1
         },
@@ -1555,13 +1565,12 @@
         }
       },
       "required": [
-        "uuid",
-        "text"
+        "uuid"
       ],
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Open a thread with block_id/start/end; reply with thread_id and no range fields; move an anchor with thread_id plus block_id/start/end. text adds a comment in every mode; author is optional. Only replies accept resolved to resolve or reopen. Moves remove all previous marks in the document and keep the thread's id, earlier replies and resolution, including for orphaned threads. Incomplete ranges refuse. Table targets need zero-based row/column GFM projection indices including header row 0. Offsets count displayed characters, including stored edge whitespace: remove exactly the GFM padding before decoding inline syntax. Coordinates follow moved cells; orphaned ranges are null. Bad or missing cell coordinates refuse with annotation_cell; empty or other-thread overlap ranges with annotation_range. Offsets clamp to text; a move may overlap its own anchor. Opening or moving into cards/Figma refuses with annotation_card/annotation_figma. Existing card/Figma threads accept replies, resolution, reopening or moves to prose/table cells; Figma ranges name caption.\n\nHelp: annotate, edit_doc, workspaces, tool-contracts, decisions, markdown.",
+    "description": "Open with block_id/start/end; reply with thread_id; move with thread_id plus block_id/start/end. These modes require text; author is optional. Only replies accept resolved to resolve or reopen. Moves replace all marks and keep the thread id, replies and resolution, including orphaned threads. Permanently delete with action: delete, thread_id and comment_id, without text or other fields. Yours means the stored account matches this session's signed-in GitHub account, ignoring case; no account means no delete. The opening comment removes the thread only while every reply is yours. Resolved comments cannot be deleted. Table targets need zero-based row/column, header 0; offsets count displayed characters and stored edge whitespace. Coordinates follow cells; orphaned ranges are null. Bad cell coordinates refuse with annotation_cell; empty or other-thread overlap ranges with annotation_range. Opening or moving into cards/Figma refuses with annotation_card/annotation_figma; their existing threads allow replies, resolution and moves to prose/table cells. See help for offset details.\n\nHelp: annotate, edit_doc, workspaces, tool-contracts, decisions, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,

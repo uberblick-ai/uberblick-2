@@ -244,6 +244,7 @@ const annotation = z.object({
   id: z.string(),
   blockId: z.string().describe("Block containing range; the recorded block id when range is null."),
   comments: z.array(z.object({
+    id: z.string().describe("Stable comment identity used by annotate's delete shape; survives edits and concurrent reply changes."),
     author: z.string(),
     text: z.string(),
     createdAt: z.string(),
@@ -538,7 +539,16 @@ export const outputSchemas = {
     deleted: z.literal(true).describe("The archived document or decision topic was permanently deleted; its record UUIDs cannot be restored or reused."),
     ...multipleRoomDurability,
   }).strict(),
-  annotate: z.object({ uuid, annotation, ...documentDurability }).strict(),
+  annotate: z.object({
+    uuid,
+    annotation: annotation.optional().describe("The current thread; omitted only after deleting its opening comment and whole thread."),
+    removed: z.enum(["comment", "thread"]).optional().describe("Delete only: whether one reply or the whole thread was permanently removed."),
+    ...documentDurability,
+  }).strict().superRefine((result, context) => {
+    if ((result.annotation === undefined) !== (result.removed === "thread")) {
+      context.addIssue({ code: "custom", path: ["annotation"], message: "Return annotation except when the whole thread was removed." });
+    }
+  }),
   link_range: z.object({ uuid, blockId: z.string(), docId: z.string(), title: z.string(), rev: z.string(), ...documentDurability }).strict(),
   export_markdown: z.object({ uuid, markdown: z.string() }).strict(),
   sync_status: z.object({

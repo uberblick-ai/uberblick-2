@@ -51,8 +51,10 @@ export function useThreadsRail(doc: RoomConnection | null): ThreadsRail {
     threadsOpener.current = null;
     const back =
       opener?.isConnected === true && !opener.hasAttribute("data-comment-resolved")
+        && (!opener.hasAttribute("data-comment-thread") || opener.classList.contains("ub-comment"))
         ? opener
-        : document.querySelector<HTMLElement>(".ub-threads-toggle");
+        : document.querySelector<HTMLElement>(".ub-threads-toggle")
+          ?? document.querySelector<HTMLElement>(".ub-editor .tiptap");
     back?.focus();
   }, []);
 
