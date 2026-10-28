@@ -51,7 +51,7 @@ describe("comment attribution through MCP", () => {
     ["cOdEx desktop", "codex"],
     ["Cursor", undefined],
     ["Codex and Claude", "claude"],
-  ])("stores agent kind for every %s comment mode, independently of the author", async (name, agent) => {
+  ])("stores agent kind and client name for every %s comment mode, independently of the author", async (name, agent) => {
     const client = await rig(testConfig(), name);
     const doc = await document(client);
     const opened = await client.ok("annotate", {
@@ -70,7 +70,7 @@ describe("comment attribution through MCP", () => {
       { author: name, text: "Move" },
     ].map(comment => ({ ...comment, createdAt: expect.any(String), ...(agent === undefined ? {} : { agent }) }));
     const stored = getAnnotation(client.instance.replicas.replica(doc.uuid).doc, opened.annotation.id)!;
-    expect(stored.comments).toEqual(expected.map(comment => ({ ...comment, kind: "agent" })));
+    expect(stored.comments).toEqual(expected.map(comment => ({ ...comment, kind: "agent", clientName: name })));
     expect(moved.annotation.comments).toEqual(expected.map(comment => ({ ...comment, id: expect.any(String) })));
     expect((await client.ok("get_doc", { uuid: doc.uuid })).annotations[0].comments).toEqual(moved.annotation.comments);
   });
@@ -94,8 +94,8 @@ describe("comment attribution through MCP", () => {
     const comments = getAnnotation(client.instance.replicas.replica(doc.uuid).doc, opened.annotation.id)!.comments;
     expect(comments[0]).toMatchObject({ kind: "agent", agent: "claude", account: login.identity.githubUsername, principalId: login.identity.id });
     expect(comments[1]).toMatchObject({ kind: "agent", agent: "claude", account: "another-person", principalId: replacement.identity.id });
-    expect(comments[2]).toEqual({ author: "Claude Code", text: "Signed out", createdAt: expect.any(String), kind: "agent", agent: "claude" });
-    expect(moved.annotation.comments).toEqual(comments.map(({ kind: _kind, principalId: _principalId, ...comment }) => ({ ...comment, id: expect.any(String) })));
+    expect(comments[2]).toEqual({ author: "Claude Code", text: "Signed out", createdAt: expect.any(String), kind: "agent", agent: "claude", clientName: "Claude Code" });
+    expect(moved.annotation.comments).toEqual(comments.map(({ kind: _kind, principalId: _principalId, clientName: _clientName, ...comment }) => ({ ...comment, id: expect.any(String) })));
   });
 
   it("ignores a stored hub sign-in for a local workspace", async () => {
@@ -106,7 +106,7 @@ describe("comment attribution through MCP", () => {
       uuid: doc.uuid, block_id: doc.blocks[0].id, start: 0, end: 3, text: "Local comment",
     });
     expect(getAnnotation(client.instance.replicas.replica(doc.uuid).doc, opened.annotation.id)!.comments).toEqual([{
-      author: "Claude Code", text: "Local comment", createdAt: expect.any(String), kind: "agent", agent: "claude",
+      author: "Claude Code", text: "Local comment", createdAt: expect.any(String), kind: "agent", agent: "claude", clientName: "Claude Code",
     }]);
   });
 
@@ -123,15 +123,17 @@ describe("comment attribution through MCP", () => {
 
     const cursor = await rig(config, "Cursor");
     await cursor.ok("annotate", { uuid: doc.uuid, thread_id: thread.id, text: "Other MCP reply" });
-    const comments = getAnnotation(cursor.instance.replicas.replica(doc.uuid).doc, thread.id)!.comments;
+    await cursor.close();
+    const reopened = await rig(config, "Reopened reader");
+    const comments = getAnnotation(reopened.instance.replicas.replica(doc.uuid).doc, thread.id)!.comments;
     expect(comments).toEqual([
       { author: "Presence name", text: "Browser opener", createdAt: expect.any(String), ...person },
-      { author: "Claude Code", text: "Claude reply", createdAt: expect.any(String), kind: "agent", agent: "claude", account: login.identity.githubUsername, principalId: login.identity.id },
+      { author: "Claude Code", text: "Claude reply", createdAt: expect.any(String), kind: "agent", agent: "claude", clientName: "Claude Code", account: login.identity.githubUsername, principalId: login.identity.id },
       { author: "Old reader", text: "Legacy reply", createdAt: expect.any(String) },
-      { author: "Cursor", text: "Other MCP reply", createdAt: expect.any(String), kind: "agent", account: login.identity.githubUsername, principalId: login.identity.id },
+      { author: "Cursor", text: "Other MCP reply", createdAt: expect.any(String), kind: "agent", clientName: "Cursor", account: login.identity.githubUsername, principalId: login.identity.id },
     ]);
-    const read = await cursor.ok("get_doc", { uuid: doc.uuid });
-    expect(read.annotations[0].comments).toEqual(comments.map(({ kind: _kind, principalId: _principalId, ...comment }) => ({ ...comment, id: expect.any(String) })));
+    const read = await reopened.ok("get_doc", { uuid: doc.uuid });
+    expect(read.annotations[0].comments).toEqual(comments.map(({ kind: _kind, principalId: _principalId, clientName: _clientName, ...comment }) => ({ ...comment, id: expect.any(String) })));
   });
 
   it("uses the runtime's fixed agent name instead of a session's reported product", async () => {
@@ -149,7 +151,7 @@ describe("comment attribution through MCP", () => {
     const doc = await call("create_doc", { title: "Fixed runtime", description: "One shared write identity.", blocks: [{ type: "paragraph", text: "Context" }] });
     const opened = await call("annotate", { uuid: doc.uuid, block_id: doc.blocks[0].id, start: 0, end: 3, text: "Runtime comment" });
     expect(getAnnotation(runtime.replicas.replica(doc.uuid).doc, opened.annotation.id)!.comments).toEqual([{
-      author: "Claude grant", text: "Runtime comment", createdAt: expect.any(String), kind: "agent", agent: "claude",
+      author: "Claude grant", text: "Runtime comment", createdAt: expect.any(String), kind: "agent", agent: "claude", clientName: "Claude grant",
     }]);
   });
 });

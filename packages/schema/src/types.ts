@@ -297,6 +297,7 @@ export interface CommentAttribution {
   account?: string;
   principalId?: string;
   agent?: "claude" | "codex";
+  clientName?: string;
 }
 
 export interface AnnotationComment extends Partial<CommentAttribution> {

@@ -227,13 +227,14 @@ export function getAnnotationCommentIds(ydoc: Y.Doc, threadId: string): string[]
 function readThread(thread: ThreadMap): Annotation {
   const comments: AnnotationComment[] = [];
   for (const { value } of readCommentRows(commentRows(thread))) {
-    const { author, text, createdAt, account, agent, principalId, kind, editedAt } = value;
+    const { author, text, createdAt, account, agent, clientName, principalId, kind, editedAt } = value;
     comments.push({
       author,
       text,
       createdAt,
       ...(isGithubUsername(account) ? { account } : {}),
       ...(agent === "claude" || agent === "codex" ? { agent } : {}),
+      ...(typeof clientName === "string" ? { clientName } : {}),
       ...(isUuid(principalId) ? { principalId } : {}),
       ...(kind === "person" || kind === "agent" ? { kind } : {}),
       ...(isEditTime(editedAt) ? { editedAt } : {}),
