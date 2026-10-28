@@ -24,7 +24,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, TestRunner, vi } from "vitest";
 import { HocuspocusProvider, HocuspocusProviderWebsocket, MessageType } from "@hocuspocus/provider";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
@@ -122,6 +122,7 @@ function sleep(ms: number): Promise<void> {
  * the condition that never arrived.
  */
 const WAIT_TIMEOUT_MS = 20_000;
+const WAIT_POLL_INTERVAL_MS = 50;
 
 /**
  * The one deadline that has to outlast a repair rather than interrupt it.
@@ -159,12 +160,33 @@ async function waitFor(
   predicate: () => boolean,
   timeoutMs = WAIT_TIMEOUT_MS,
 ): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
+  const currentTest = TestRunner.getCurrentTest();
+  const testStartedAt = currentTest?.result?.startTime;
+  // Leave two polling ticks for this condition's diagnostic to arrive before
+  // the runner's deadline, even after earlier conditions consumed their waits.
+  const testDeadline = testStartedAt === undefined
+    ? Number.POSITIVE_INFINITY
+    : testStartedAt + Math.min(currentTest?.timeout ?? TEST_TIMEOUT_MS, TEST_TIMEOUT_MS) - 2 * WAIT_POLL_INTERVAL_MS;
+  const deadline = Math.min(Date.now() + timeoutMs, testDeadline);
   while (!predicate()) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${label}`);
-    await sleep(50);
+    await sleep(WAIT_POLL_INTERVAL_MS);
   }
 }
+
+it("names a failing condition before the remaining test deadline", async () => {
+  const testStartedAt = TestRunner.getCurrentTest()?.result?.startTime;
+  if (testStartedAt === undefined) throw new Error("the runner did not expose the test start time");
+  const clock = vi.spyOn(Date, "now").mockReturnValue(testStartedAt + TEST_TIMEOUT_MS - WAIT_POLL_INTERVAL_MS);
+  try {
+    await expect(waitFor("the repair acknowledgement near the test deadline", () => false, REJOIN_REPAIR_TIMEOUT_MS))
+      .rejects.toThrow("timed out waiting for the repair acknowledgement near the test deadline");
+  } finally {
+    clock.mockRestore();
+  }
+  let checks = 0;
+  await waitFor("a condition while test time remains", () => ++checks === 2, REJOIN_REPAIR_TIMEOUT_MS);
+}, TEST_TIMEOUT_MS);
 
 /** A second client, on its own socket, standing in for an agent or a peer tab. */
 function peer(port: number, room: string): { doc: Y.Doc; destroy(): void } {

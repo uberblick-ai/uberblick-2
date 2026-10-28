@@ -1372,7 +1372,7 @@ describe("ub workspace use <link>", () => {
       return await runUbAsync(
         args,
         local,
-        { UB_TEST_MAX_WAIT_MS: "15000" },
+        { UB_TEST_MAX_WAIT_MS: count === 5_000 ? "15000" : "2000" },
         Math.min(attemptTimeoutMs, remaining),
       );
     };
