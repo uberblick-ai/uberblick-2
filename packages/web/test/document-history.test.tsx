@@ -4,7 +4,7 @@ import { useState } from "react";
 import * as Y from "yjs";
 import { getMeta, initDoc, setTitle, type RevisionEntry } from "@uberblick/schema";
 import * as revisionClient from "../src/shell/document-revisions.js";
-import { DocumentHistoryError, type DocumentRevisionsClient } from "../src/shell/document-revisions.js";
+import { DocumentHistoryError, type DocumentHistoryList, type DocumentHistoryStatus, type DocumentRevisionsClient } from "../src/shell/document-revisions.js";
 import { renamedFrom, useDocumentHistory, type DocumentHistory } from "../src/ui/document/document-history.js";
 import type { RevisionView } from "../src/ui/route.js";
 
@@ -16,7 +16,10 @@ const entries: RevisionEntry[] = [
   { id: "earliest", title: "earliest", author: null, startedAt: null, endedAt: 50 },
 ];
 const documents: Y.Doc[] = [];
-afterEach(() => { for (const doc of documents.splice(0)) if (!doc.isDestroyed) doc.destroy(); });
+afterEach(() => { vi.useRealTimers(); for (const doc of documents.splice(0)) if (!doc.isDestroyed) doc.destroy(); });
+
+const history: DocumentHistoryStatus = { complete: true, lastRefresh: "2026-10-28T17:00:00.000Z", refreshFailed: false, offline: false, newestDownloadedRevision: "newest" };
+function listed(revisions: RevisionEntry[], status: DocumentHistoryStatus = history): DocumentHistoryList { return { revisions, history: status }; }
 
 function document(title: string): Y.Doc {
   const doc = new Y.Doc();
@@ -33,7 +36,7 @@ function deferred<T>() {
 }
 
 function client(read: DocumentRevisionsClient["get"] = async (_uuid, id) => document(id)): DocumentRevisionsClient {
-  return { list: vi.fn(async () => entries), get: vi.fn(read), name: vi.fn(), rename: vi.fn(), removeName: vi.fn(), restore: vi.fn() };
+  return { list: vi.fn(async () => listed(entries)), get: vi.fn(read), name: vi.fn(), rename: vi.fn(), removeName: vi.fn(), restore: vi.fn() };
 }
 
 function mount(api: DocumentRevisionsClient | null, uuid: string | null = UUID, path = "/document/one", liveDocument: Y.Doc | null = null): {
@@ -88,7 +91,7 @@ describe("named history navigation", () => {
   it("opens named comparisons and steps between anchors from After, stopping at both ends", async () => {
     const api = client();
     const revisions = anchorHistory();
-    vi.mocked(api.list).mockResolvedValue(revisions);
+    vi.mocked(api.list).mockResolvedValue(listed(revisions));
     const fix = mountRouted(api, null);
     await act(async () => {});
     await act(async () => fix.reading().open(1));
@@ -130,7 +133,7 @@ describe("named history navigation", () => {
     const api = client();
     const revisions = anchorHistory();
     revisions[6] = { ...revisions[6]!, name: { text: "Beginning", namer: null, namedAt: 40, canManage: true } };
-    vi.mocked(api.list).mockResolvedValue(revisions);
+    vi.mocked(api.list).mockResolvedValue(listed(revisions));
     const fix = mountRouted(api, { revision: "kickoff" });
     await act(async () => {});
     await act(async () => fix.reading().setFilter("named"));
@@ -154,7 +157,7 @@ describe("named history navigation", () => {
 
   it("changes a selected anchor's baseline on filter switches and preserves an unnamed selection", async () => {
     const api = client();
-    vi.mocked(api.list).mockResolvedValue(anchorHistory());
+    vi.mocked(api.list).mockResolvedValue(listed(anchorHistory()));
     const fix = mountRouted(api, { revision: "review" });
     await act(async () => {});
     await act(async () => fix.reading().setFilter("named"));
@@ -186,7 +189,7 @@ describe("named history navigation", () => {
     { index: 6, canBack: false, canForward: true, direction: "forward" as const, address: { revision: "kickoff", since: "earliest" } },
   ])("steps toward names from unnamed revision $index with the opposite control disabled", async ({ index, canBack, canForward, direction, address }) => {
     const api = client();
-    vi.mocked(api.list).mockResolvedValue(anchorHistory());
+    vi.mocked(api.list).mockResolvedValue(listed(anchorHistory()));
     const fix = mountRouted(api, null);
     await act(async () => {});
     await act(async () => fix.reading().open(index));
@@ -198,7 +201,7 @@ describe("named history navigation", () => {
 
   it("renders addressed endpoints under either filter, including browser navigation to a plain named revision", async () => {
     const api = client();
-    vi.mocked(api.list).mockResolvedValue(anchorHistory());
+    vi.mocked(api.list).mockResolvedValue(listed(anchorHistory()));
     const fix = mountRouted(api, { revision: "release", since: "kickoff" });
     await act(async () => {});
     expect(fix.reading().filter).toBe("all");
@@ -231,7 +234,7 @@ describe("named history navigation", () => {
 
   it.each(["all", "named"] as const)("keeps Changes since this name fixed when switching from %s", async filter => {
     const api = client();
-    vi.mocked(api.list).mockResolvedValue(anchorHistory());
+    vi.mocked(api.list).mockResolvedValue(listed(anchorHistory()));
     const fix = mountRouted(api, { revision: "review" });
     await act(async () => {});
     await act(async () => fix.reading().setFilter(filter));
@@ -250,7 +253,7 @@ describe("named history navigation", () => {
     const checksum = vi.spyOn(revisionClient, "documentRevisionChecksum").mockImplementation(async doc => getMeta(doc).title);
     try {
       const api = client();
-      vi.mocked(api.list).mockResolvedValue(anchorHistory());
+      vi.mocked(api.list).mockResolvedValue(listed(anchorHistory()));
       vi.mocked(api.restore).mockResolvedValue({ revision: entries[0]!, applied: false });
       const live = document("State when history opened");
       const fix = mountRouted(api, { revision: "release" }, live);
@@ -315,7 +318,7 @@ describe("address-controlled history views", () => {
   it.each([false, true])("opens fixed comparison ends with a named baseline: %s", async named => {
     const api = client();
     const earliest = { ...entries[2]!, ...(named ? { name: { text: "Reviewed", namer: null, namedAt: 50, canManage: false } } : {}) };
-    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, earliest]);
+    vi.mocked(api.list).mockResolvedValue(listed([entries[0]!, entries[1]!, earliest]));
     const fix = mountRouted(api, { revision: "middle", since: "earliest" });
     await act(async () => {});
     expect(fix.reading()).toMatchObject({ active: true, busy: false, error: null });
@@ -336,7 +339,8 @@ describe("address-controlled history views", () => {
     await act(async () => {});
     expect(fix.reading()).toMatchObject({ active: true, busy: false, selection: null });
     expect(fix.reading().error).toBeTruthy();
-    expect(api.get).not.toHaveBeenCalled();
+    if (address.revision === "gone" || address.since === "gone") expect(api.get).toHaveBeenCalledWith(UUID, "gone", expect.any(AbortSignal));
+    else expect(api.get).not.toHaveBeenCalled();
     expect(fix.navigate).not.toHaveBeenCalled();
     act(() => fix.reading().now());
     expect(fix.navigate).toHaveBeenLastCalledWith(null);
@@ -352,7 +356,7 @@ describe("address-controlled history views", () => {
 
     const later: RevisionEntry = { ...entries[0]!, id: "later", title: "Later changes" };
     const currentEntries = [later, { ...entries[0]!, endedAt: 150 }, ...entries.slice(1)];
-    vi.mocked(api.list).mockResolvedValue(currentEntries);
+    vi.mocked(api.list).mockResolvedValue(listed(currentEntries));
     if (navigation === "control") await act(async () => fix.reading().back());
     else {
       fix.visit({ revision: "later" });
@@ -386,16 +390,16 @@ describe("address-controlled history views", () => {
   it("refreshes baseline naming metadata while keeping the addressed comparison ends", async () => {
     const api = client();
     const earliest = { ...entries[2]!, name: { text: "Reviewed", namer: null, namedAt: 50, canManage: false } };
-    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, earliest]);
+    vi.mocked(api.list).mockResolvedValue(listed([entries[0]!, entries[1]!, earliest]));
     const fix = mountRouted(api, { revision: "middle", since: "earliest" });
     await act(async () => {});
     const selected = fix.reading().selection!;
     const renamed = { ...earliest, name: { ...earliest.name, text: "Renamed review" } };
-    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, renamed]);
+    vi.mocked(api.list).mockResolvedValue(listed([entries[0]!, entries[1]!, renamed]));
     await act(async () => fix.reading().refresh());
     expect(fix.reading().selection).toMatchObject({ after: selected.after, before: selected.before, comparedWith: renamed });
     const unnamed = { ...earliest, name: null };
-    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, unnamed]);
+    vi.mocked(api.list).mockResolvedValue(listed([entries[0]!, entries[1]!, unnamed]));
     await act(async () => fix.reading().refresh());
     expect(fix.reading().selection).toMatchObject({ after: selected.after, before: selected.before, comparedWith: unnamed });
     expect(fix.reading()).toMatchObject({ active: true, busy: false, error: null });
@@ -419,7 +423,7 @@ describe("address-controlled history views", () => {
     const fix = mountRouted(api, address);
     await act(async () => {});
     expect(fix.reading().selection).not.toBeNull();
-    vi.mocked(api.list).mockResolvedValue(remaining);
+    vi.mocked(api.list).mockResolvedValue(listed(remaining));
     await act(async () => fix.reading().refresh());
     expect(fix.reading()).toMatchObject({ active: true, busy: false, selection: null });
     expect(fix.reading().error).toBeTruthy();
@@ -427,13 +431,13 @@ describe("address-controlled history views", () => {
   });
 
   it("uses the latest address when browser navigation changes during the initial list read", async () => {
-    const list = deferred<RevisionEntry[]>();
+    const list = deferred<DocumentHistoryList>();
     const api = client();
     vi.mocked(api.list).mockReturnValue(list.promise);
     const fix = mountRouted(api, { revision: "newest" });
     fix.visit({ revision: "middle" });
     fix.visit({ revision: "earliest" });
-    await act(async () => list.resolve(entries));
+    await act(async () => list.resolve(listed(entries)));
     expect(fix.reading()).toMatchObject({ active: true, busy: false, error: null });
     expect(fix.reading().entry?.id).toBe("earliest");
     expect(fix.reading().selection?.before).toBeNull();
@@ -505,12 +509,12 @@ describe("address-controlled history views", () => {
   it("selects a session's fixed endpoints without refreshing its list or snapshots, and steps from its last revision", async () => {
     const api = client();
     const revisions = anchorHistory();
-    vi.mocked(api.list).mockResolvedValue(revisions);
+    vi.mocked(api.list).mockResolvedValue(listed(revisions));
     const fix = mountRouted(api, { revision: "release" });
     await act(async () => {});
     const release = fix.reading().selection!.after;
     const later = { ...revisions[0]!, id: "later" };
-    vi.mocked(api.list).mockResolvedValue([later, ...revisions]);
+    vi.mocked(api.list).mockResolvedValue(listed([later, ...revisions]));
 
     await act(async () => fix.reading().openSession(1, "review-edit"));
     expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "release", since: "review-edit" });
@@ -539,7 +543,7 @@ describe("address-controlled history views", () => {
   it("keeps addressed comparison endpoints when removing the baseline's name", async () => {
     const api = client();
     const earliest = { ...entries[2]!, name: { text: "Reviewed", namer: null, namedAt: 50, canManage: true } };
-    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, earliest]);
+    vi.mocked(api.list).mockResolvedValue(listed([entries[0]!, entries[1]!, earliest]));
     const fix = mountRouted(api, { revision: "middle", since: "earliest" });
     await act(async () => {});
     const selected = fix.reading().selection!;
@@ -555,13 +559,13 @@ describe("address-controlled history views", () => {
   it("refreshes the list and newest snapshot for Changes since this name after a session comparison", async () => {
     const api = client();
     const revisions = anchorHistory();
-    vi.mocked(api.list).mockResolvedValue(revisions);
+    vi.mocked(api.list).mockResolvedValue(listed(revisions));
     const fix = mountRouted(api, { revision: "release", since: "review-edit" });
     await act(async () => {});
     const release = fix.reading().selection!.after;
     const later = { ...revisions[0]!, id: "later" };
     const refreshed = [later, ...revisions];
-    vi.mocked(api.list).mockResolvedValue(refreshed);
+    vi.mocked(api.list).mockResolvedValue(listed(refreshed));
 
     await act(async () => fix.reading().sinceNamed("review"));
     expect(fix.navigate).toHaveBeenLastCalledWith({ revision: "later", since: "review" });
@@ -575,7 +579,7 @@ describe("address-controlled history views", () => {
   it("writes resolved revision and comparison ends when history controls change the view", async () => {
     const api = client();
     const earliest = { ...entries[2]!, name: { text: "Reviewed", namer: null, namedAt: 50, canManage: false } };
-    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, earliest]);
+    vi.mocked(api.list).mockResolvedValue(listed([entries[0]!, entries[1]!, earliest]));
     const fix = mountRouted(api, null);
     await act(async () => {});
     await act(async () => fix.reading().back());
@@ -593,6 +597,186 @@ describe("address-controlled history views", () => {
 });
 
 describe("document history navigation", () => {
+  it("opens history through Previous while the initial catalog is still loading", async () => {
+    const pending = deferred<DocumentHistoryList>();
+    const api = client();
+    vi.mocked(api.list).mockReturnValue(pending.promise);
+    const fix = mount(api);
+    expect(fix.reading()).toMatchObject({ active: false, busy: true, entries: null });
+    await act(async () => fix.reading().back());
+    expect(fix.reading()).toMatchObject({ active: true, busy: true, entries: null });
+    expect(api.list).toHaveBeenCalledTimes(1);
+    await act(async () => pending.resolve(listed(entries)));
+    expect(fix.reading()).toMatchObject({ active: true, busy: false, error: null });
+    expect(fix.reading().entry?.id).toBe("newest");
+    expect(getMeta(fix.reading().selection!.before!).title).toBe("middle");
+    expect(api.list).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows cache publications while keeping the displayed comparison and attribution fixed until another pick", async () => {
+    vi.useFakeTimers();
+    let version = 1;
+    const api = client(async (_uuid, id) => document(`${id} version ${version}`));
+    vi.mocked(api.list).mockResolvedValue(listed([{ ...entries[0]!, checksum: "one" }, ...entries.slice(1)]));
+    const fix = mount(api);
+    await act(async () => {});
+    await act(async () => fix.reading().open(0));
+    const selected = fix.reading().selection!;
+    const changed = { ...entries[0]!, checksum: "two", title: "Renamed by another writer", author: null };
+    const head = { ...entries[0]!, id: "later", title: "Later" };
+    vi.mocked(api.list).mockResolvedValue(listed([head, changed, ...entries.slice(1)]));
+    version = 2;
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(fix.reading().entries?.[0]).toEqual(head);
+    expect(fix.reading().selection).toMatchObject({ index: 1, entry: selected.entry, entries: selected.entries, after: selected.after, before: selected.before });
+    expect(fix.reading().entry?.title).toBe("newest");
+    expect(api.get).toHaveBeenCalledTimes(2);
+    await act(async () => fix.reading().open(1));
+    expect(getMeta(fix.reading().selection!.after).title).toBe("newest version 2");
+    expect(fix.reading().entry).toEqual(changed);
+    expect(selected.after.isDestroyed).toBe(false);
+    fix.view.unmount();
+    expect(selected.after.isDestroyed).toBe(true);
+  });
+
+  it("starts both comparison downloads and opens automatically after their bounded waits", async () => {
+    vi.useFakeTimers();
+    let downloaded = false;
+    const api = client(async (_uuid, id) => {
+      if (!downloaded) throw new DocumentHistoryError("downloading", undefined, { revision: id, history });
+      return document(id);
+    });
+    const fix = mountRouted(api, { revision: "newest", since: "earliest" });
+    await act(async () => {});
+    expect(vi.mocked(api.get).mock.calls.map(call => call[1])).toEqual(["newest", "earliest"]);
+    expect(fix.reading()).toMatchObject({ active: true, busy: false, downloading: true, selection: null });
+    downloaded = true;
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(fix.reading()).toMatchObject({ downloading: false, error: null, busy: false });
+    expect(getMeta(fix.reading().selection!.before!).title).toBe("earliest");
+    expect(getMeta(fix.reading().selection!.after).title).toBe("newest");
+    expect(fix.navigate).not.toHaveBeenCalled();
+  });
+
+  it("downloads shared endpoints absent from the initial catalog before resolving the comparison", async () => {
+    let catalogReady = false;
+    const api = client(async (_uuid, id) => { catalogReady = true; return document(id); });
+    vi.mocked(api.list).mockImplementation(async () => listed(catalogReady ? entries : []));
+    const fix = mountRouted(api, { revision: "newest", since: "earliest" });
+    await act(async () => {});
+    expect(vi.mocked(api.get).mock.calls.map(call => call[1])).toEqual(["newest", "earliest"]);
+    expect(fix.reading()).toMatchObject({ error: null, busy: false });
+    expect(fix.reading().selection?.comparedWith?.id).toBe("earliest");
+  });
+
+  it("retains one downloaded endpoint while the other comparison endpoint is still downloading", async () => {
+    vi.useFakeTimers();
+    let downloaded = false;
+    const after = document("After downloaded once");
+    const api = client(async (_uuid, id) => {
+      if (id === "newest") return after;
+      if (!downloaded) throw new DocumentHistoryError("downloading", undefined, { revision: id, history });
+      return document(id);
+    });
+    const fix = mountRouted(api, { revision: "newest", since: "earliest" });
+    await act(async () => {});
+    expect(fix.reading().downloading).toBe(true);
+    expect(after.isDestroyed).toBe(false);
+    downloaded = true;
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(fix.reading().selection?.after).toBe(after);
+    expect(vi.mocked(api.get).mock.calls.filter(call => call[1] === "newest")).toHaveLength(1);
+  });
+
+  it("identifies a missing shared endpoint offline even when no catalog was downloaded", async () => {
+    const offline = { ...history, complete: false, offline: true, lastRefresh: null, newestDownloadedRevision: null };
+    const api = client(async (_uuid, id) => { throw new DocumentHistoryError("not-downloaded", undefined, { revision: id, history: offline }); });
+    vi.mocked(api.list).mockRejectedValue(new DocumentHistoryError("not-downloaded", undefined, { history: offline }));
+    const fix = mountRouted(api, { revision: "newest", since: "earliest" });
+    await act(async () => {});
+    expect(vi.mocked(api.get).mock.calls.map(call => call[1])).toEqual(["newest", "earliest"]);
+    expect(fix.reading().error).toMatch(/newest.*not downloaded/);
+    expect(fix.reading()).toMatchObject({ connected: false, history: offline, downloading: false });
+  });
+
+  it("replaces a downloading message when the background read later fails", async () => {
+    vi.useFakeTimers();
+    const api = client();
+    vi.mocked(api.list).mockRejectedValueOnce(new DocumentHistoryError("downloading", undefined, { history }))
+      .mockRejectedValue(new DocumentHistoryError("forbidden", undefined, { history: { ...history, refreshFailed: true } }));
+    const fix = mount(api);
+    await act(async () => {});
+    expect(fix.reading().downloading).toBe(true);
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(fix.reading().error).toMatch(/refused access/);
+    expect(fix.reading()).toMatchObject({ downloading: false, history: { refreshFailed: true } });
+  });
+
+  it("continues a slow explicit refresh until the client supplies its completed catalog", async () => {
+    vi.useFakeTimers();
+    let published = false;
+    const refreshed = { ...history, lastRefresh: "2026-10-28T17:01:00.000Z" };
+    const api = client();
+    vi.mocked(api.list).mockImplementation(async (_uuid, _signal, options) => {
+      if (options?.refresh && !published) throw new DocumentHistoryError("downloading", undefined, { history });
+      return listed(entries, published ? refreshed : history);
+    });
+    const fix = mount(api);
+    await act(async () => {});
+    await act(async () => fix.reading().open(0));
+    const before = fix.reading().selection!.after;
+    await act(async () => fix.reading().refresh());
+    expect(fix.reading().downloading).toBe(true);
+    await act(async () => vi.advanceTimersByTimeAsync(2000));
+    expect(vi.mocked(api.list).mock.calls.filter(call => call[2]?.refresh)).toHaveLength(3);
+    published = true;
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(vi.mocked(api.list).mock.calls.filter(call => call[2]?.refresh)).toHaveLength(4);
+    expect(fix.reading()).toMatchObject({ downloading: false, error: null, history: refreshed });
+    expect(fix.reading().selection!.after).not.toBe(before);
+  });
+
+  it("keeps acknowledged names through stale publications until a successful confirmation refresh", async () => {
+    vi.useFakeTimers();
+    const acknowledged: RevisionEntry = { ...entries[1]!, name: { text: "Reviewed", namer: null, namedAt: 120, canManage: true } };
+    const later = { ...entries[0]!, id: "later" };
+    let confirmed = false;
+    let publication = history;
+    const api = client();
+    vi.mocked(api.rename).mockResolvedValue(acknowledged);
+    vi.mocked(api.list).mockImplementation(async (_uuid, _signal, options) => {
+      if (options?.refresh && !confirmed) throw new DocumentHistoryError("downloading", undefined, { history: publication });
+      return listed([later, ...entries], publication);
+    });
+    const fix = mount(api);
+    await act(async () => {});
+    await act(async () => fix.reading().rename("middle", "Reviewed"));
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    publication = { ...history, lastRefresh: "2026-10-28T17:02:00.000Z" };
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(fix.reading().entries?.find(entry => entry.id === "middle")?.name?.text).toBe("Reviewed");
+    confirmed = true;
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(fix.reading().entries?.find(entry => entry.id === "middle")?.name).toBeUndefined();
+    expect(vi.mocked(api.list).mock.calls.filter(call => call[2]?.refresh)).toHaveLength(3);
+  });
+
+  it.each(["restore-outcome-unknown", "unreachable"])("explicitly refreshes the cached list after an uncertain restore: %s", async reason => {
+    const checksum = vi.spyOn(revisionClient, "documentRevisionChecksum").mockResolvedValue("expected");
+    try {
+      const api = client();
+      const fix = mount(api, UUID, "/document/one", document("Live document"));
+      await act(async () => {});
+      await act(async () => fix.reading().open(1));
+      const restored = { ...entries[0]!, id: "restored" };
+      vi.mocked(api.restore).mockRejectedValue(new DocumentHistoryError(reason));
+      vi.mocked(api.list).mockImplementation(async (_uuid, _signal, options) => listed(options?.refresh ? [restored, ...entries] : entries));
+      await act(async () => { await expect(fix.reading().restore("middle")).rejects.toBeInstanceOf(DocumentHistoryError); });
+      expect(api.list).toHaveBeenLastCalledWith(UUID, expect.any(AbortSignal), { refresh: true });
+      expect(fix.reading().entries?.[0]).toEqual(restored);
+    } finally { checksum.mockRestore(); }
+  });
+
   it("restores from the state when history opened, then refreshes a stale list and starting point", async () => {
     const checksum = vi.spyOn(revisionClient, "documentRevisionChecksum").mockImplementation(async doc => getMeta(doc).title);
     try {
@@ -604,13 +788,14 @@ describe("document history navigation", () => {
       const displayed = fix.reading().selection?.after;
       setTitle(live, "New collaborator changes");
       const newer: RevisionEntry = { ...entries[0]!, id: "newer", title: "New collaborator changes" };
-      vi.mocked(api.list).mockResolvedValue([newer, ...entries]);
+      vi.mocked(api.list).mockResolvedValue(listed([newer, ...entries]));
       vi.mocked(api.restore).mockRejectedValueOnce(new DocumentHistoryError("stale-state"));
       await act(async () => {
         await expect(fix.reading().restore("middle")).rejects.toBeInstanceOf(DocumentHistoryError);
       });
       expect(api.restore).toHaveBeenLastCalledWith(UUID, "middle", "State when history opened", expect.any(AbortSignal));
       expect(fix.reading().entries?.[0]).toEqual(newer);
+      expect(api.list).toHaveBeenLastCalledWith(UUID, expect.any(AbortSignal), { refresh: true });
       expect(fix.reading().selection?.after).toBe(displayed);
       expect(fix.reading().entry?.id).toBe("middle");
       vi.mocked(api.restore).mockResolvedValue({ revision: newer, applied: true });
@@ -648,7 +833,7 @@ describe("document history navigation", () => {
     const named: RevisionEntry = { ...entries[2]!, name: {
       text: "Reviewed", namer: { githubUsername: "ben", surface: { kind: "browser", name: "Browser" } }, namedAt: 50, canManage: true,
     } };
-    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, named]);
+    vi.mocked(api.list).mockResolvedValue(listed([entries[0]!, entries[1]!, named]));
     const fix = mount(api);
     await act(async () => {});
     await act(async () => fix.reading().sinceLastNamed());
@@ -674,7 +859,7 @@ describe("document history navigation", () => {
     const named: RevisionEntry = { ...entries[2]!, name: {
       text: "Reviewed", namer: null, namedAt: 50, canManage: false,
     } };
-    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, named]);
+    vi.mocked(api.list).mockResolvedValue(listed([entries[0]!, entries[1]!, named]));
     const newer = document("Refreshed newest");
     vi.mocked(api.get).mockResolvedValueOnce(newer).mockRejectedValueOnce(new DocumentHistoryError("unreachable"));
     await act(async () => fix.reading().sinceLastNamed());
@@ -696,7 +881,7 @@ describe("document history navigation", () => {
     await act(async () => fix.reading().name("Reviewed", "checksum"));
     expect(api.name).toHaveBeenCalledWith(UUID, "Reviewed", "checksum", expect.any(AbortSignal));
     expect(fix.reading().entries?.[0]).toEqual(named);
-    vi.mocked(api.list).mockResolvedValue([named, ...entries.slice(1)]);
+    vi.mocked(api.list).mockResolvedValue(listed([named, ...entries.slice(1)]));
     await act(async () => fix.reading().back());
     const snapshot = fix.reading().selection?.after;
     await act(async () => {
@@ -735,7 +920,7 @@ describe("document history navigation", () => {
 
   it("distinguishes no revisions from unavailable history and permits a later retry", async () => {
     const api = client();
-    vi.mocked(api.list).mockResolvedValueOnce([]).mockRejectedValueOnce(new DocumentHistoryError("forbidden")).mockResolvedValue(entries);
+    vi.mocked(api.list).mockResolvedValueOnce(listed([])).mockRejectedValueOnce(new DocumentHistoryError("forbidden")).mockResolvedValue(listed(entries));
     const fix = mount(api);
     await act(async () => {});
     expect(fix.reading()).toMatchObject({ entries: [], error: null, busy: false });
@@ -747,21 +932,21 @@ describe("document history navigation", () => {
   });
 
   it("never shows a late list answer or failure from a previous route, even before effects settle", async () => {
-    const stale = deferred<RevisionEntry[]>();
+    const stale = deferred<DocumentHistoryList>();
     const old = client();
     vi.mocked(old.list).mockReturnValue(stale.promise);
     const next = client();
-    vi.mocked(next.list).mockResolvedValue([]);
+    vi.mocked(next.list).mockResolvedValue(listed([]));
     const fix = mount(old);
     const oldSignal = vi.mocked(old.list).mock.calls[0]![1];
     const firstReplacement = fix.seen.length;
     fix.visit(next, OTHER_UUID, "/document/two");
     expect(fix.seen[firstReplacement]).toMatchObject({ entries: null, selection: null, active: false });
     expect(oldSignal.aborted).toBe(true);
-    await act(async () => stale.resolve(entries));
+    await act(async () => stale.resolve(listed(entries)));
     expect(fix.reading()).toMatchObject({ entries: [], error: null, active: false });
 
-    const lateFailure = deferred<RevisionEntry[]>();
+    const lateFailure = deferred<DocumentHistoryList>();
     vi.mocked(old.list).mockReturnValue(lateFailure.promise);
     fix.visit(old, UUID, "/document/one");
     fix.visit(next, OTHER_UUID, "/document/two");
@@ -909,7 +1094,7 @@ describe("document history navigation", () => {
     const middle: RevisionEntry = { ...entries[1]!, name: {
       text: "Reviewed", namer: null, namedAt: 100, canManage: true,
     } };
-    vi.mocked(api.list).mockResolvedValue([entries[0]!, middle, entries[2]!]);
+    vi.mocked(api.list).mockResolvedValue(listed([entries[0]!, middle, entries[2]!]));
     const fix = mount(api);
     await act(async () => {});
     await act(async () => fix.reading().open(0));
@@ -920,7 +1105,7 @@ describe("document history navigation", () => {
     unavailable = false;
     const recovered = [entries[0]!, middle, entries[2]!];
     if (prepend) recovered.unshift({ ...entries[0]!, id: "new-head" });
-    vi.mocked(api.list).mockResolvedValue(recovered);
+    vi.mocked(api.list).mockResolvedValue(listed(recovered));
     await act(async () => fix.reading().retry());
     const expected = index === 1 ? middle : entries[2]!;
     expect(fix.reading()).toMatchObject({ error: null, busy: false, entry: expected });
@@ -940,7 +1125,7 @@ describe("document history navigation", () => {
     await act(async () => fix.reading().open(1));
     const snapshot = fix.reading().selection!.after;
     const head: RevisionEntry = { ...entries[0]!, id: "new-head" };
-    vi.mocked(api.list).mockResolvedValue([head, ...entries]);
+    vi.mocked(api.list).mockResolvedValue(listed([head, ...entries]));
     await act(async () => fix.reading().refresh());
     expect(fix.reading().entry?.id).toBe("middle");
     expect(fix.reading().selection).toMatchObject({ index: 2, after: snapshot });
@@ -958,7 +1143,7 @@ describe("document history navigation", () => {
     const name = (text: string) => ({ text, namer: { githubUsername: "ben", surface: { kind: "browser" as const, name: "Browser" } }, namedAt: 50, canManage: true });
     const middle: RevisionEntry = { ...entries[1]!, name: name("Draft") };
     const earliest: RevisionEntry = { ...entries[2]!, name: name("Kickoff") };
-    vi.mocked(api.list).mockResolvedValue([entries[0]!, middle, earliest]);
+    vi.mocked(api.list).mockResolvedValue(listed([entries[0]!, middle, earliest]));
     const fix = mount(api);
     await act(async () => {});
     await act(async () => fix.reading().sinceNamed("earliest"));
@@ -972,10 +1157,10 @@ describe("document history navigation", () => {
   it.each([true, false])("loads only supplied sidebar rename information through named comparisons, with list titles: %s", async includeTitles => {
     const api = client(async (_uuid, id) => document(id === "earliest" || (!includeTitles && id === "newest") ? "Alpha" : "Beta"));
     const baseline = { ...entries[2]!, title: "Alpha", name: { text: "Kickoff", namer: null, namedAt: 50, canManage: false } };
-    const listed = [{ ...entries[0]!, title: "Beta" }, { ...entries[1]!, title: "Beta" }, baseline];
-    vi.mocked(api.list).mockResolvedValue(includeTitles ? listed : listed.map(({ id, author, startedAt, endedAt, name }) => ({
+    const revisions = [{ ...entries[0]!, title: "Beta" }, { ...entries[1]!, title: "Beta" }, baseline];
+    vi.mocked(api.list).mockResolvedValue(listed(includeTitles ? revisions : revisions.map(({ id, author, startedAt, endedAt, name }) => ({
       id, author, startedAt, endedAt, ...(name === undefined ? {} : { name }),
-    })));
+    }))));
     const fix = mount(api);
     await act(async () => {});
     expect(api.get).not.toHaveBeenCalled();
@@ -1003,7 +1188,7 @@ describe("document history navigation", () => {
       ...(includeTitles ? { title: index % 2 === 0 ? "Alpha" : "Beta" } : {}),
     }));
     const api = client();
-    vi.mocked(api.list).mockResolvedValue(revisions);
+    vi.mocked(api.list).mockResolvedValue(listed(revisions));
     const fix = mount(api);
     await act(async () => {});
     expect(api.get).not.toHaveBeenCalled();
@@ -1023,9 +1208,9 @@ describe("document history navigation", () => {
       if (id === "earliest") throw new DocumentHistoryError("unreachable");
       return document(id);
     });
-    vi.mocked(api.list).mockResolvedValue([entries[0]!, entries[1]!, {
+    vi.mocked(api.list).mockResolvedValue(listed([entries[0]!, entries[1]!, {
       id: "earliest", author: null, startedAt: null, endedAt: 50,
-    }]);
+    }]));
     const fix = mount(api);
     await act(async () => {});
     await act(async () => fix.reading().back());
@@ -1053,7 +1238,7 @@ describe("document history navigation", () => {
     vi.mocked(api.rename).mockResolvedValue(named);
     await act(async () => fix.reading().rename("middle", "Reviewed"));
     expect(fix.reading().titles.middle).toBe("middle");
-    vi.mocked(api.list).mockResolvedValue([named]);
+    vi.mocked(api.list).mockResolvedValue(listed([named]));
     await act(async () => fix.reading().refresh());
     expect(fix.reading().titles).toEqual({});
   });

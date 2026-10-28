@@ -34,7 +34,7 @@ function fakeHistory(overrides: Partial<DocumentHistory> = {}): DocumentHistory 
   return {
     filter: "all", setFilter: vi.fn(),
     comparisonView: "split", setComparisonView: vi.fn(),
-    entries, selection: null, busy: false, error: null, titles: {}, collapseUnchanged: true, setCollapseUnchanged: vi.fn(), available: true, active: true, entry: null,
+    entries, selection: null, busy: false, error: null, titles: {}, collapseUnchanged: true, setCollapseUnchanged: vi.fn(), available: true, active: true, connected: true, history: null, downloading: false, entry: null,
     back: vi.fn(), forward: vi.fn(), open: vi.fn(), openSession: vi.fn(), sinceLastNamed: vi.fn(), sinceNamed: vi.fn(),
     name: vi.fn(), rename: vi.fn(), removeName: vi.fn(), now: vi.fn(), retry: vi.fn(), refresh: vi.fn(),
     ...overrides,
@@ -130,13 +130,43 @@ describe("revision list model", () => {
 });
 
 describe("history sidebar", () => {
+  it.each([
+    { offline: true, complete: true, refreshFailed: false, message: "Offline. Showing downloaded history." },
+    { offline: false, complete: false, refreshFailed: false, message: "History is still downloading…" },
+    { offline: false, complete: true, refreshFailed: true, message: "Last history refresh failed." },
+  ])("shows $message and qualifies the newest downloaded revision and session", ({ message, ...status }) => {
+    const history = fakeHistory({ history: { ...status, lastRefresh: new Date(NOW).toISOString(), newestDownloadedRevision: entries[0]!.id } });
+    const view = render(<HistorySidebar history={history} title="Plan" />);
+    expect(screen.getByText(message)).toBeTruthy();
+    if (status.refreshFailed) {
+      fireEvent.click(screen.getByRole("button", { name: "Refresh history" }));
+      expect(history.refresh).toHaveBeenCalledOnce();
+    }
+    expect(screen.getByText("Newest downloaded state")).toBeTruthy();
+    expect(screen.queryByText(/Current version/)).toBeNull();
+    const revisions = [{ ...entries[0]!, startedAt: NOW, endedAt: NOW }, { ...entries[1]!, endedAt: NOW }, entries[5]!];
+    view.rerender(<HistorySidebar history={{ ...history, entries: revisions }} title="Plan" />);
+    expect(document.querySelector(".ub-history-session-entry")?.textContent).toContain("Newest downloaded state");
+    expect(screen.queryByText(/Current version/)).toBeNull();
+  });
+
+  it("does not claim an empty incomplete catalog has no revisions, and keeps missing-revision details visible", () => {
+    const history = fakeHistory({ entries: [], history: { complete: false, lastRefresh: null, refreshFailed: false, offline: false, newestDownloadedRevision: null } });
+    const view = render(<HistorySidebar history={history} title="Plan" />);
+    expect(screen.getByRole("status").textContent).toBe("History is still downloading…");
+    expect(screen.queryByText("No revisions yet")).toBeNull();
+    view.rerender(<HistorySidebar history={{ ...history, error: "Revision “missing-before” is not downloaded on this computer. Connect to download it.", history: { ...history.history!, offline: true } }} title="Plan" />);
+    expect(screen.getByText(/Revision “missing-before” is not downloaded/)).toBeTruthy();
+    expect(screen.getByText("Offline. History is not fully downloaded.")).toBeTruthy();
+  });
+
   it("shows names on collapsed sessions and keeps their selected revision or named shortcut visible", () => {
     const revisions = [
       { ...entries[0]!, startedAt: NOW, endedAt: NOW, name: named("Accepted") },
       { ...entries[1]!, startedAt: NOW - HOUR, endedAt: NOW },
       entries[5]!,
     ];
-    const history = fakeHistory({ entries: revisions, selection: { index: 0, after: new Y.Doc(), before: new Y.Doc(), comparedWith: revisions[2]! } });
+    const history = fakeHistory({ entries: revisions, selection: { index: 0, entry: revisions[0]!, entries: revisions, after: new Y.Doc(), before: new Y.Doc(), comparedWith: revisions[2]! } });
     const view = render(<HistorySidebar history={history} title="Auth plan" />);
     expect(screen.getByRole("button", { name: "Expand session" })).toBeTruthy();
     const session = document.querySelector<HTMLButtonElement>(".ub-history-session-entry")!;
@@ -150,7 +180,7 @@ describe("history sidebar", () => {
     expect(screen.getByRole("button", { name: "Collapse session" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Collapse session" }));
 
-    view.rerender(<HistorySidebar history={{ ...history, selection: { index: 1, after: new Y.Doc(), before: new Y.Doc() } }} title="Auth plan" />);
+    view.rerender(<HistorySidebar history={{ ...history, selection: { index: 1, entry: revisions[1]!, entries: revisions, after: new Y.Doc(), before: new Y.Doc() } }} title="Auth plan" />);
     const selected = document.querySelector<HTMLButtonElement>("[aria-current=true]")!;
     expect(selected.textContent).toContain("Reviewed after the auth rewrite");
     expect(screen.getByRole("button", { name: "Collapse session" })).toBeTruthy();
@@ -159,14 +189,14 @@ describe("history sidebar", () => {
     expect(screen.getByRole("button", { name: "Expand session" })).toBeTruthy();
     expect(document.querySelectorAll(".ub-history-entry:not(.ub-history-session-entry)")).toHaveLength(2);
 
-    view.rerender(<HistorySidebar history={{ ...history, selection: { index: 0, after: new Y.Doc(), before: new Y.Doc(), comparedWith: revisions[1]! } }} title="Auth plan" />);
+    view.rerender(<HistorySidebar history={{ ...history, selection: { index: 0, entry: revisions[0]!, entries: revisions, after: new Y.Doc(), before: new Y.Doc(), comparedWith: revisions[1]! } }} title="Auth plan" />);
     expect(screen.getByRole("button", { name: "Changes since this name" }).getAttribute("aria-current")).toBe("true");
     expect(screen.getByRole("button", { name: "Expand session" })).toBeTruthy();
   });
 
   it("does not mark a saved session address after that newest session has grown", () => {
     const revisions = [{ ...entries[0]!, startedAt: NOW }, { ...entries[1]!, endedAt: NOW }, entries[2]!, entries[5]!];
-    render(<HistorySidebar history={fakeHistory({ entries: revisions, selection: { index: 1, after: new Y.Doc(), before: new Y.Doc(), comparedWith: revisions[2]! } })} title="Auth plan" />);
+    render(<HistorySidebar history={fakeHistory({ entries: revisions, selection: { index: 1, entry: revisions[1]!, entries: revisions, after: new Y.Doc(), before: new Y.Doc(), comparedWith: revisions[2]! } })} title="Auth plan" />);
     expect(document.querySelector("[aria-current=true]")).toBeNull();
   });
 
@@ -174,7 +204,7 @@ describe("history sidebar", () => {
     vi.stubGlobal("localStorage", window.localStorage);
     localStorage.clear();
     const api: DocumentRevisionsClient = {
-      list: vi.fn(async () => entries), get: vi.fn(async () => new Y.Doc()),
+      list: vi.fn(async () => ({ revisions: entries, history: { complete: true, lastRefresh: new Date(NOW).toISOString(), refreshFailed: false, offline: false, newestDownloadedRevision: entries[0]!.id } })), get: vi.fn(async () => new Y.Doc()),
       name: vi.fn(), rename: vi.fn(), removeName: vi.fn(), restore: vi.fn(),
     };
     const openHistory = async (): Promise<void> => {
@@ -253,7 +283,7 @@ describe("history sidebar", () => {
   });
 
   it("marks Changes since this name only when the comparison ends at the newest revision", () => {
-    const selection = { index: 0, after: new Y.Doc(), before: null, comparedWith: entries[1]! };
+    const selection = { index: 0, entry: entries[0]!, entries, after: new Y.Doc(), before: null, comparedWith: entries[1]! };
     const view = render(<HistorySidebar history={fakeHistory({ selection })} title="Auth plan" />);
     expect(screen.getByRole("button", { name: "Changes since this name" }).getAttribute("aria-current")).toBe("true");
 
@@ -268,7 +298,7 @@ describe("history sidebar", () => {
   });
 
   it("marks the named After entry as current while showing its comparison", () => {
-    const history = fakeHistory({ filter: "named", selection: { index: 1, after: new Y.Doc(), before: new Y.Doc(), comparedWith: entries[5]! } });
+    const history = fakeHistory({ filter: "named", selection: { index: 1, entry: entries[1]!, entries, after: new Y.Doc(), before: new Y.Doc(), comparedWith: entries[5]! } });
     render(<HistorySidebar history={history} title="Auth plan" />);
     const row = screen.getByRole("listitem");
     const button = within(row).getByRole("button", { name: /Reviewed after the auth rewrite/ });

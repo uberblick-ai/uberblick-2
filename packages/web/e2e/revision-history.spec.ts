@@ -123,6 +123,9 @@ function revisionId(name: string): string {
 
 async function serveHistory(page: Page, revisions: RevisionEntry[], states: Record<string, string>): Promise<string[]> {
   const snapshotReads: string[] = [];
+  let servedCatalog = (): void => {};
+  const catalog = new Promise<void>(resolve => { servedCatalog = resolve; });
+  const reading = page.url().startsWith("http");
   await page.route("**/api/revisions?**", async route => {
     const revision = new URL(route.request().url()).searchParams.get("revision");
     const name = revision === null ? null : Object.keys(states).find(name => revisionId(name) === revision) ?? revision;
@@ -130,10 +133,15 @@ async function serveHistory(page: Page, revisions: RevisionEntry[], states: Reco
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(name === null ? { revisions: revisions.map(entry => ({ ...entry, id: revisionId(entry.id) })) }
-        : { state: states[name] }),
+      body: JSON.stringify({ history: { complete: true, lastRefresh: new Date().toISOString(), refreshFailed: false,
+        offline: false, newestDownloadedRevision: revisions[0] === undefined ? null : revisionId(revisions[0].id) },
+        ...(name === null ? { revisions: revisions.map(entry => ({ ...entry, id: revisionId(entry.id) })) }
+        : { state: states[name] }) }),
     });
+    if (revision === null) servedCatalog();
   });
+  // An already mounted page may still be finishing its real initial catalog.
+  if (reading) await catalog;
   return snapshotReads;
 }
 
@@ -589,6 +597,46 @@ function visualHistory(uuid: string, title: string): Record<string, string> {
 
 test.describe("document history through ub open", () => {
   const { harness, openApp } = setupHarness({ accessRole: "admin" });
+
+  test("downloaded history survives an upstream outage and follows cache publications without changing the shown comparison", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const uuid = await newDocument(page, docTitle("Offline downloaded history"));
+    const path = new URL(page.url()).pathname;
+    const room = `${harness().workspaceUuid}/${uuid}`;
+    await activateControl(editor(page));
+    await page.keyboard.type("Downloaded original.");
+    await waitForAcknowledged(page, { path: "upstream" });
+    await harness().nameRevisionAsOther(uuid, "Downloaded baseline");
+    await previous(page);
+    await expect(historicalEditor(page)).toContainText("Downloaded original.");
+    const address = page.url();
+    const peer = await openApp(browser, path, { readySelector: ".ub-editor .ProseMirror" });
+    await activateControl(editor(peer));
+    await peer.keyboard.press("ControlOrMeta+End");
+    await peer.keyboard.type(" Later state.");
+    await expect.poll(() => harness().hubText(room)).toBe("Downloaded original. Later state.");
+    await harness().nameRevisionAsOther(uuid, "Later downloaded state");
+    const drawer = await showHistoryList(page);
+    await expect(historyList(page)).toContainText("Later downloaded state");
+    await closeHistoryList(page, drawer);
+    // The later catalog reached this reader, but its addressed snapshot stays fixed.
+    await expect(historicalEditor(page)).toContainText("Downloaded original.");
+    await expect(historicalEditor(page)).not.toContainText("Later state.");
+    await expect(page).toHaveURL(address);
+    await harness().stopHub();
+    try {
+      await page.reload();
+      await expect(historicalEditor(page)).toContainText("Downloaded original.");
+      const offlineDrawer = await showHistoryList(page);
+      await expect(historyList(page)).toContainText("Offline");
+      await expect(historyList(page)).toContainText("Newest downloaded state");
+      await closeHistoryList(page, offlineDrawer);
+      await expect(history(page).getByRole("button", { name: "Rename revision", exact: true })).toHaveCount(0);
+      await backToNow(page);
+      await expect(editor(page)).toContainText("Downloaded original. Later state.");
+      await expect(history(page).getByRole("button", { name: "Name current revision", exact: true })).toHaveCount(0);
+    } finally { await harness().startHub(); }
+  });
 
   test("divider revisions draw and label added and removed lines in Split and Inline and fold unchanged dividers", { tag: "@webkit" }, async ({ browser }) => {
     const uuid = randomUUID();
@@ -1497,6 +1545,12 @@ test.describe("document history through ub open", () => {
     await expect.poll(() => harness().hubText(room)).toContain("A surviving paragraph.");
 
     // Archiving closes the actual hub's authored stretch without a fake clock.
+    const catalogReady = page.waitForResponse(async response => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET" && url.pathname === "/api/revisions" &&
+        url.searchParams.get("uuid") === uuid && !url.searchParams.has("revision") && response.ok() &&
+        (await response.json()).revisions?.length === 2;
+    });
     await archiveAndRestore(page, title);
     await selectPositions(live, 5, 10);
     await page.keyboard.type("blue");
@@ -1509,6 +1563,7 @@ test.describe("document history through ub open", () => {
     await page.keyboard.press("Backspace");
     await expect(live.locator(":scope > p")).toHaveText(["The blue fox stays.", "A surviving paragraph."]);
     await expect.poll(() => harness().hubText(room)).not.toContain("A removed paragraph.");
+    await catalogReady;
 
     const path = new URL(page.url()).pathname;
     const peer = await openApp(browser, path, { readySelector: ".ub-editor .ProseMirror" });

@@ -21,6 +21,7 @@ import { formatTimestamp, useTimestampClock } from "../timestamps.js";
 import type { FormattedTimestamp } from "../timestamps.js";
 import type { DocumentHistory } from "./document-history.js";
 import { renamedFrom } from "./document-history.js";
+import { historyCacheMessage, newestHistoryLabel } from "./history-presentation.js";
 import { ClockIcon, DownIcon, NextIcon, PreviousIcon, TagIcon, UpIcon } from "./history-icons.js";
 import { revisionAuthor, revisionAuthors, revisionSpan, revisionTime } from "./revision-list.js";
 import { RevisionNameControls } from "./RevisionNameControls.js";
@@ -88,11 +89,13 @@ function attribution(entry: RevisionEntry, earliest: boolean, now: number): { la
 }
 
 function comparisonAttribution(history: DocumentHistory, now: number): { label: string; span: { label: string; title: string } } | null {
-  const { entries, selection } = history;
-  if (entries === null || selection?.comparedWith === undefined) return null;
+  const { selection } = history;
+  if (selection?.comparedWith === undefined) return null;
+  const entries = selection.entries;
+  const selected = entries.findIndex(entry => entry.id === selection.entry.id);
   const baseline = entries.findIndex((entry) => entry.id === selection.comparedWith?.id);
-  if (baseline <= selection.index + 1) return null;
-  const revisions = entries.slice(selection.index, baseline);
+  if (baseline <= selected + 1) return null;
+  const revisions = entries.slice(selected, baseline);
   return {
     label: revisionAuthors(revisions).map((author) => [author.name, author.surface].filter(Boolean).join(" ")).join(", "),
     span: revisionSpan(revisions, now),
@@ -101,7 +104,7 @@ function comparisonAttribution(history: DocumentHistory, now: number): { label: 
 
 /** One row under the revision title: who, when, where in the list, and which revision. */
 function RevisionStatus({ history, writable, now }: { history: DocumentHistory; writable: boolean; now: number }): ReactElement | null {
-  const { selection, entries, busy, error, entry } = history;
+  const { selection, busy, error, entry } = history;
   const group = useRef<HTMLFieldSetElement | null>(null);
   const back = useRef<HTMLButtonElement | null>(null);
   const forward = useRef<HTMLButtonElement | null>(null);
@@ -120,24 +123,27 @@ function RevisionStatus({ history, writable, now }: { history: DocumentHistory; 
     // Named history can have no revision in either direction.
     [requested, back.current, forward.current, copyRevision.current].find((button) => button !== null && !button.disabled)?.focus({ preventScroll: true });
   }, [busy, selection]);
-  if (selection === null || entries === null || entry === null) return null;
+  if (selection === null || entry === null) return null;
+  const entries = selection.entries;
+  const selected = entries.findIndex(item => item.id === entry.id);
   const total = entries.length;
-  const oldest = selection.index >= total - 1;
+  const oldest = selected >= total - 1;
   const { label, time } = attribution(entry, oldest, now);
   const comparison = comparisonAttribution(history, now);
   const fullLabel = comparison === null ? revisionLabel(entry) : `${comparison.label}, ${comparison.span.title}${revisionNameLabel(entry)}`;
   const compared = selection.comparedWith;
-  const renamed = renamedFrom(entries, history.titles, selection.index);
+  const renamed = renamedFrom(entries, Object.fromEntries(entries.flatMap(item => item.title === undefined ? [] : [[item.id, item.title]])), selected);
+  const cacheMessage = historyCacheMessage(history);
   return <fieldset ref={group} aria-label="Document history" className="ub-history-controls ub-type-small">
     <span className={`ub-history-who${comparison === null ? "" : " ub-history-span"}`} title={fullLabel}>
       <ClockIcon />
       <span className="sr-only">{fullLabel}</span>
       <span className="ub-history-author" aria-hidden="true">{comparison?.label ?? label}</span>
-      <span className="ub-history-when" aria-hidden="true">{selection.index === 0 && "· current version "}{comparison !== null ? <>· <span title={comparison.span.title}>{comparison.span.label}</span></> : time !== null && <>· <time dateTime={time.dateTime} title={time.title}>{time.label}</time></>}</span>
+      <span className="ub-history-when" aria-hidden="true">{selection.index === 0 && `· ${newestHistoryLabel(history).toLowerCase()} `}{comparison !== null ? <>· <span title={comparison.span.title}>{comparison.span.label}</span></> : time !== null && <>· <time dateTime={time.dateTime} title={time.title}>{time.label}</time></>}</span>
       {renamed !== null && <span className="ub-history-renamed">· renamed from <s>{renamed || "Untitled"}</s></span>}
       {compared !== undefined && (compared.name != null || entry.name != null) && <span className="ub-history-compared">· compared with {compared.name != null && <>“{compared.name.text}” · </>}{authorName(compared, compared.id === entries[total - 1]?.id)}</span>}
     </span>
-    <span role="status" className="ub-history-state">{error ?? (busy ? "Loading…" : "")}</span>
+    <span role="status" className="ub-history-state">{[cacheMessage, error ?? (busy ? "Loading…" : null)].filter(Boolean).join(" ")}</span>
     <span className="ub-history-steps">
       <Button variant="history" size="custom" ref={back} type="button" aria-label="Previous revision" title="Previous revision"
         disabled={busy || !history.canBack} onClick={() => { focus.current = "back"; history.back(); }}><PreviousIcon /></Button>
@@ -145,9 +151,9 @@ function RevisionStatus({ history, writable, now }: { history: DocumentHistory; 
         title={history.filter === "all" && selection.index === 0 ? "Back to the current version" : "Next revision"} disabled={!history.canForward || (busy && selection.index > 0)}
         onClick={() => { focus.current = "forward"; history.forward(); }}><NextIcon /></Button>
     </span>
-    <span className="ub-history-position">{selection.index + 1} of {total} ·</span>
+    <span className="ub-history-position">{selected + 1} of {total} ·</span>
     {/* A named revision shows its name where the id would be; writers can rename it with the tag. */}
-    {entry.name != null && !(writable && entry.name.canManage) && <TagIcon />}
+    {entry.name != null && !(history.connected && writable && entry.name.canManage) && <TagIcon />}
     <RevisionNameControls history={history} liveDocument={null} writable={writable} />
     <Button variant="plain" size="custom" type="button" className={`shrink-0 min-w-0 rounded-(--radius-sm) border-0 bg-transparent px-0 py-1 whitespace-nowrap focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 ub-history-rev${entry.name != null ? " inline-flex max-w-44 -ml-[0.35rem] text-foreground font-medium [&>span]:min-w-0 [&>span]:overflow-hidden [&>span]:text-ellipsis ub-history-named" : " text-inherit"}`} aria-label={`Copy revision ${entry.id}`}
       ref={copyRevision} title={entry.name != null ? `${entry.name.text} · rev ${entry.id.slice(0, 8)}` : `Copy revision ${entry.id}`}
@@ -160,11 +166,14 @@ function RevisionStatus({ history, writable, now }: { history: DocumentHistory; 
 
 /** Shown while history is open without a revision: loading, unavailable, or empty. */
 function HistoryState({ history }: { history: DocumentHistory }): ReactElement {
-  const message = history.error ?? (history.busy ? "Loading history…" : history.entries?.length === 0 ? "No revisions yet" : "Document history");
+  const cacheMessage = historyCacheMessage(history);
+  const message = history.error ?? (history.busy ? "Loading history…" : history.entries?.length === 0 && history.history?.complete !== false ? "No revisions yet" : cacheMessage ?? "Document history");
   return <div className="ub-history-empty ub-type-ui">
     <p role="status" className="m-0">{message}</p>
+    {cacheMessage !== null && cacheMessage !== message && <p role="status" className="m-0">{cacheMessage}</p>}
     <div className="flex gap-2">
       {history.error !== null && <Button variant="secondary" size="sm" onClick={history.retry}>Try again</Button>}
+      {history.history?.refreshFailed === true && <Button variant="secondary" size="sm" onClick={history.refresh}>Refresh history</Button>}
       <Button variant="secondary" size="sm" onClick={history.now}>Back to now</Button>
     </div>
   </div>;
@@ -346,13 +355,13 @@ function RevisionRestoreButton({ label, unavailable, reasonId, restore }: {
 export function RevisionPane({ history, docLinks, workspaceSettings, writable = false, archived = false }: {
   history: DocumentHistory; docLinks: DocLinkContext | null; workspaceSettings: Y.Doc | null; writable?: boolean; archived?: boolean;
 }): ReactElement | null {
-  const { selection, entries, collapseUnchanged } = history;
+  const { selection, collapseUnchanged } = history;
   const now = useTimestampClock();
   const pane = useRef<HTMLElement | null>(null);
   const host = useRef<HTMLDivElement | null>(null);
   const beforeHost = useRef<HTMLDivElement | null>(null);
   const afterHost = useRef<HTMLDivElement | null>(null);
-  const [failed, setFailed] = useState<DocumentHistory["selection"]>(null);
+  const [failed, setFailed] = useState<Y.Doc | null>(null);
   const [editors, setEditors] = useState<{ side: string; editor: Editor }[]>([]);
   const members = useWorkspaceMembers();
   useEffect(() => {
@@ -372,6 +381,8 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   const body = useRef<HTMLDivElement | null>(null);
   const restoreReason = useId();
   const title = selection === null ? "" : getMeta(selection.after).title;
+  const beforeDocument = selection?.before ?? null;
+  const afterDocument = selection?.after ?? null;
   const available = useAvailableWidth(pane, history.active);
   // The earliest revision has nothing to compare; narrow panes keep one column.
   const split = selection?.before != null && history.comparisonView !== "inline" && available !== null && available >= SPLIT_MIN_WIDTH;
@@ -381,10 +392,11 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
     const from = stepped.current;
     stepped.current = selection;
     if (from === null || body.current === null) return;
+    if (from.before === selection.before && from.after === selection.after) return;
     revealRevision(body.current, selection.index > from.index ? "older" : selection.index < from.index ? "newer" : null);
   }, [selection]);
   useEffect(() => {
-    if (selection === null) return;
+    if (afterDocument === null) return;
     try {
       const onExpand = (run: number): void => {
         const view = comparison.current;
@@ -398,9 +410,9 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       };
       let view: RevisionComparisonView;
       let destroy: () => void;
-      if (split && selection.before !== null && beforeHost.current !== null && afterHost.current !== null) {
+      if (split && beforeDocument !== null && beforeHost.current !== null && afterHost.current !== null) {
         const rendered = createRevisionSplit({ beforeElement: beforeHost.current, afterElement: afterHost.current,
-          before: selection.before, after: selection.after, docLinks, workspaceSettings,
+          before: beforeDocument, after: afterDocument, docLinks, workspaceSettings,
           folding: { collapse: readCollapse(), expanded: new Set() },
           onExpand });
         view = rendered;
@@ -408,15 +420,15 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
         setEditors([{ side: "before", editor: rendered.before }, { side: "after", editor: rendered.after }]);
       } else {
         if (host.current === null) return;
-        if (selection.before === null) {
-          const editor = createRevisionEditor({ element: host.current, before: null, after: selection.after, docLinks, workspaceSettings,
+        if (beforeDocument === null) {
+          const editor = createRevisionEditor({ element: host.current, before: null, after: afterDocument, docLinks, workspaceSettings,
             ariaLabel: "Document revision" });
           const activate = (event: MouseEvent): void => { handleDocLinkClick(event, docLinks); };
           editor.view.dom.addEventListener("click", activate);
           setEditors([{ side: "single", editor }]);
           return () => { editor.view.dom.removeEventListener("click", activate); setEditors([]); editor.destroy(); };
         }
-        const rendered = createRevisionInline({ element: host.current, before: selection.before, after: selection.after, docLinks, workspaceSettings,
+        const rendered = createRevisionInline({ element: host.current, before: beforeDocument, after: afterDocument, docLinks, workspaceSettings,
           ariaLabel: "Document revision",
           folding: { collapse: readCollapse(), expanded: new Set() }, onExpand });
         view = { get model() { return rendered.model; }, after: rendered.editor, expand: rendered.expand, setCollapse: rendered.setCollapse };
@@ -436,8 +448,8 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
         setRows([]);
         destroy();
       };
-    } catch { setFailed(selection); }
-  }, [selection, split, docLinks, workspaceSettings, stopHolding]);
+    } catch { setFailed(afterDocument); }
+  }, [beforeDocument, afterDocument, split, docLinks, workspaceSettings, stopHolding]);
   useLayoutEffect(() => {
     const view = comparison.current;
     if (view === null || pane.current === null) return;
@@ -472,13 +484,15 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   if (selection === null && !arriving) return <section ref={pane} className="ub-pane ub-page-pane ub-document-pane ub-revision-pane">
     <div className="ub-column"><HistoryState history={history} /></div>
   </section>;
-  const entry = selection === null ? undefined : entries?.[selection.index];
+  const entry = selection?.entry;
+  const entries = selection?.entries;
+  const selected = entries?.findIndex(item => item.id === entry?.id) ?? -1;
   const comparedWith = selection?.comparedWith;
   const comparedAttribution = comparisonAttribution(history, now);
   const restoreBefore = comparedWith?.name != null;
   const restoreTarget = restoreBefore ? comparedWith : entry;
   const restoreLabel = comparedWith?.name == null ? "Restore this version" : `Restore “${comparedWith.name.text}”`;
-  const predecessor = selection === null ? undefined : selection.comparedWith ?? entries?.[selection.index + 1];
+  const predecessor = selection === null ? undefined : selection.comparedWith ?? entries?.[selected + 1];
   const total = entries?.length ?? 0;
   const before = editors.find((entry) => entry.side === "before")?.editor;
   const after = editors.find((entry) => entry.side === (split ? "after" : "single"))?.editor;
@@ -503,20 +517,20 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
         </div>
         {restoreUnavailable !== null && <p id={restoreReason} className={archived || !writable ? "m-0 ub-type-small text-(--muted-foreground)" : "sr-only"}>{restoreUnavailable}</p>}
         {selection === null ? <p role="status" className="ub-history-controls ub-type-small">Loading history…</p>
-          : <RevisionStatus history={history} writable={writable} now={now} />}
+          : <RevisionStatus history={history} writable={writable && !archived} now={now} />}
         {selection?.before != null && after !== undefined && rows.length > 0 && <>
           <ChangeNavigation pane={pane} header={header} before={before} after={after} rows={rows} onNavigate={stopHolding} />
           <RevisionRuler pane={pane} header={header} side={after.view.dom} rows={rows} />
         </>}
       </header>
-      {selection !== null && failed === selection && <p role="status">This client cannot display this revision. Update the client and try again.</p>}
+      {selection !== null && failed === selection.after && <p role="status">This client cannot display this revision. Update the client and try again.</p>}
       {selection === null ? null : split ? <div ref={body} className="ub-revision-split ub-revision-comparison">
         <div className="ub-revision-side-label">
           <span>Before · {authorName(predecessor, predecessor !== undefined && predecessor.id === entries?.[total - 1]?.id)}{comparedWith !== undefined && predecessor?.name != null && <> · “{predecessor.name.text}”</>}</span>
           {restoreBefore && restoreButton}
         </div>
         <div className="ub-revision-side-label">
-          <RevisionAfterLabel entry={entry} earliest={selection.index + 1 >= total} comparison={comparedAttribution} showName={comparedWith !== undefined} />
+          <RevisionAfterLabel entry={entry} earliest={selected + 1 >= total} comparison={comparedAttribution} showName={comparedWith !== undefined} />
           {!restoreBefore && restoreButton}
         </div>
         <div className="ub-revision-side ub-revision-side-before">
