@@ -1566,8 +1566,7 @@ test.describe("document history through ub open", () => {
     await expect(editor(page).locator("[data-revision-change]")).toHaveCount(0);
   });
 
-  // Comparison text can satisfy this journey's wait before the selected revision settles.
-  test.fixme("keyboard history navigation retains control focus and moves to an available control at either boundary", { tag: "@webkit" }, async ({ browser }) => {
+  test("keyboard history navigation retains control focus and moves to an available control at either boundary", { tag: "@webkit" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
     const title = docTitle("Keyboard revision navigation");
     const uuid = await newDocument(page, title);
@@ -1580,24 +1579,38 @@ test.describe("document history through ub open", () => {
       middle: savedState(uuid, title, "Middle content."),
       earliest: savedState(uuid, title, "Earliest content."),
     });
+    // Loading the middle revision needs this baseline while the old comparison still contains its text.
+    await page.route(url => url.pathname === "/api/revisions" && url.searchParams.get("revision") === revisionId("earliest"), async route => {
+      await new Promise(resolve => setTimeout(resolve, 2_000));
+      await route.fallback();
+    });
     const back = history(page).getByRole("button", { name: "Previous revision", exact: true });
     const forward = history(page).getByRole("button", { name: "Next revision", exact: true });
+    const position = history(page).locator(".ub-history-position");
+    // The live Previous control stays enabled during the initial history list read.
+    await expect(history(page).getByRole("button", { name: "Name current revision", exact: true })).toBeEnabled();
     await expect(back).toBeEnabled();
     await back.focus();
+    await expect(back).toBeFocused();
     await page.keyboard.press("Enter");
+    await expect(position).toHaveText("1 of 3 ·");
     await expect(historicalEditor(page)).toContainText("Latest content.");
     await expect(back).toBeFocused();
     await page.keyboard.press("Enter");
+    await expect(position).toHaveText("2 of 3 ·");
     await expect(historicalEditor(page)).toContainText("Middle content.");
     await expect(back).toBeFocused();
     await page.keyboard.press("Enter");
+    await expect(position).toHaveText("3 of 3 ·");
     await expect(historicalEditor(page)).toHaveText("Earliest content.");
     await expect(back).toBeDisabled();
     await expect(forward).toBeFocused();
     await page.keyboard.press("Enter");
+    await expect(position).toHaveText("2 of 3 ·");
     await expect(historicalEditor(page)).toContainText("Middle content.");
     await expect(forward).toBeFocused();
     await page.keyboard.press("Enter");
+    await expect(position).toHaveText("1 of 3 ·");
     await expect(historicalEditor(page)).toContainText("Latest content.");
     await expect(forward).toBeFocused();
     // Next from the newest revision returns to the live document and its ‹.
@@ -1605,6 +1618,7 @@ test.describe("document history through ub open", () => {
     await expect(historicalEditor(page)).toHaveCount(0);
     await expect(back).toBeFocused();
     await page.keyboard.press("Enter");
+    await expect(position).toHaveText("1 of 3 ·");
     await expect(historicalEditor(page)).toContainText("Latest content.");
     await page.getByRole("button", { name: "Back to now", exact: true }).first().focus();
     await page.keyboard.press("Enter");
