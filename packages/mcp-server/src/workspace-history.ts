@@ -30,9 +30,12 @@ export function startWorkspaceHistory(replicas: Replicas, isCurrent: () => boole
   const stamp = () => workspaceHistoryStamp(replicas);
   const requireAccount = (room: string): void => {
     const current = stamp();
-    if (current === null || sync.historyAccount(room) !== current.account) {
+    const admitted = sync.historyAccount(room);
+    if (current === null || (admitted !== null && admitted !== current.account)) {
       throw new RevisionClientError("sign-in-required");
     }
+    // Deletion or a connection interruption can remove just this room's admission.
+    if (admitted === null) throw new RevisionClientError("unreachable");
   };
   const mirror = new HistoryMirror({
     pages: () => {

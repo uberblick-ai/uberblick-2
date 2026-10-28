@@ -256,6 +256,63 @@ it("keeps foreground revision reads independent of a stalled mirror and fences a
   } finally { release(); }
 });
 
+it("keeps mirroring after a page is deleted during a background download without reconnecting", async () => {
+  const { env, endpoint, config } = await historyWorkspace();
+  const author = await startServer(config());
+  clients.push(() => author.close());
+  const live = await author.ok("create_doc", { title: "Deleted during download", description: "Deleting one room must not refuse history for the workspace.",
+    blocks: [{ type: "paragraph", text: "Earlier content" }] });
+  expect(await author.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+  const earlier = (await author.ok("name_revision", { uuid: live.uuid, name: "Earlier" })).revision;
+  const readerConfig = config();
+  const reader = await startServer(readerConfig);
+  clients.push(() => reader.close());
+  const cache = new HistoryCache(readerConfig.databasePath, WORKSPACE, env);
+  clients.push(() => cache.close());
+  const token = ready(cache.open({ hub: endpoint, workspace: WORKSPACE, account: "12345" }));
+  await waitUntil("the initial snapshot to arrive before the deletion race", () => ready(cache.readSnapshot(token, live.uuid, earlier.id)) !== null);
+
+  const sync = reader.instance.replicas.sync;
+  const room = roomForDoc(WORKSPACE, live.uuid);
+  const connectionStates: string[] = [];
+  const unsubscribe = sync.onStateChange(() => connectionStates.push(sync.state().status));
+  let release = () => {};
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let held = false;
+  const request = sync.requestRevisions.bind(sync);
+  vi.spyOn(sync, "requestRevisions").mockImplementation(async (...args) => {
+    const response = await request(...args);
+    if (!held && args[0] === room && args[1].operation === "get" && args[3]?.background === true) {
+      held = true;
+      await gate;
+    }
+    return response;
+  });
+  try {
+    await author.ok("set_metadata", { uuid: live.uuid, title: "Held snapshot" });
+    expect(await author.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+    const latest = (await author.ok("name_revision", { uuid: live.uuid, name: "Held" })).revision;
+    await waitUntil("the real hub's background snapshot reply to be held", () => held);
+    await author.ok("archive_doc", { uuid: live.uuid });
+    await author.ok("delete_doc", { uuid: live.uuid });
+    await waitUntil("deletion to purge history and release the room's admission", () =>
+      reader.instance.replicas.isDeleted(live.uuid) && sync.historyAccount(room) === null &&
+      ready(cache.readCatalog(token, live.uuid)) === null);
+    release();
+
+    const later = await author.ok("create_doc", { title: "Mirrored after deletion", description: "Background history still progresses on the same connection.",
+      blocks: [{ type: "paragraph", text: "Later content" }] });
+    expect(await author.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+    const laterRevision = (await author.ok("name_revision", { uuid: later.uuid, name: "Later" })).revision;
+    await waitUntil("a later page's snapshot to arrive without reconnecting", () => ready(cache.readSnapshot(token, later.uuid, laterRevision.id)) !== null);
+    expect(sync.state().status).toBe("connected");
+    expect(connectionStates.every(state => state === "connected")).toBe(true);
+    expect(ready(cache.readCatalog(token, live.uuid))).toBeNull();
+    expect(ready(cache.readSnapshot(token, live.uuid, earlier.id))).toBeNull();
+    expect(ready(cache.readSnapshot(token, live.uuid, latest.id))).toBeNull();
+  } finally { release(); unsubscribe(); }
+});
+
 it("yields the former account's admitted role after login changes so a new account session can mirror", async () => {
   const { hub, credentials, principals, memberships, principal, issued, endpoint, config } = await historyWorkspace();
   const author = await startServer(config());
