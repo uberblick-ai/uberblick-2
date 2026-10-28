@@ -71,8 +71,8 @@ describe("comment attribution through MCP", () => {
     ].map(comment => ({ ...comment, createdAt: expect.any(String), ...(agent === undefined ? {} : { agent }) }));
     const stored = getAnnotation(client.instance.replicas.replica(doc.uuid).doc, opened.annotation.id)!;
     expect(stored.comments).toEqual(expected.map(comment => ({ ...comment, kind: "agent" })));
-    expect(moved.annotation.comments).toEqual(expected);
-    expect((await client.ok("get_doc", { uuid: doc.uuid })).annotations[0].comments).toEqual(expected);
+    expect(moved.annotation.comments).toEqual(expected.map(comment => ({ ...comment, id: expect.any(String) })));
+    expect((await client.ok("get_doc", { uuid: doc.uuid })).annotations[0].comments).toEqual(moved.annotation.comments);
   });
 
   it("reads the current sign-in on each offline write and omits identity after sign-out", async () => {
@@ -95,7 +95,7 @@ describe("comment attribution through MCP", () => {
     expect(comments[0]).toMatchObject({ kind: "agent", agent: "claude", account: login.identity.githubUsername, principalId: login.identity.id });
     expect(comments[1]).toMatchObject({ kind: "agent", agent: "claude", account: "another-person", principalId: replacement.identity.id });
     expect(comments[2]).toEqual({ author: "Claude Code", text: "Signed out", createdAt: expect.any(String), kind: "agent", agent: "claude" });
-    expect(moved.annotation.comments).toEqual(comments.map(({ kind: _kind, principalId: _principalId, ...comment }) => comment));
+    expect(moved.annotation.comments).toEqual(comments.map(({ kind: _kind, principalId: _principalId, ...comment }) => ({ ...comment, id: expect.any(String) })));
   });
 
   it("ignores a stored hub sign-in for a local workspace", async () => {
@@ -131,7 +131,7 @@ describe("comment attribution through MCP", () => {
       { author: "Cursor", text: "Other MCP reply", createdAt: expect.any(String), kind: "agent", account: login.identity.githubUsername, principalId: login.identity.id },
     ]);
     const read = await cursor.ok("get_doc", { uuid: doc.uuid });
-    expect(read.annotations[0].comments).toEqual(comments.map(({ kind: _kind, principalId: _principalId, ...comment }) => comment));
+    expect(read.annotations[0].comments).toEqual(comments.map(({ kind: _kind, principalId: _principalId, ...comment }) => ({ ...comment, id: expect.any(String) })));
   });
 
   it("uses the runtime's fixed agent name instead of a session's reported product", async () => {

@@ -28,6 +28,7 @@ import {
   COMMENT_MARK,
   createAnnotation,
   deleteBlock,
+  deleteComment,
   editBlock,
   editComment,
   getAnnotation,
@@ -49,6 +50,8 @@ import {
   observeThreads,
   threadIdFromTarget,
   threadsFromDoc,
+  flashThreadHighlight,
+  selectedHighlightCss,
 } from "../src/ui/comments/threads.js";
 import type { ThreadFocus, ThreadView } from "../src/ui/comments/threads.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
@@ -220,6 +223,33 @@ describe("a thread over a marked range becomes a card", () => {
     } finally {
       editor.destroy();
     }
+  });
+
+  it("leaves a returned mark for a deleted conversation as ordinary text that accepts a new comment", async () => {
+    const { ydoc, blocks } = annotatedDoc();
+    const thread = createAnnotation(ydoc, blocks[1]!, 4, 15, "Reader", "Remove me", undefined, { account: "reader", kind: "person" });
+    const { editor, element } = mountEditor(ydoc);
+    try {
+      const commentId = getAnnotationCommentId(ydoc, thread.id, 0)!;
+      await act(async () => deleteComment(ydoc, thread.id, commentId, "reader"));
+      const block = getBlocksFragment(ydoc).get(1) as Y.XmlElement;
+      const text = block.firstChild as Y.XmlText;
+      await act(async () => text.format(4, 11, { [COMMENT_MARK]: { threadId: thread.id } }));
+      const stale = element.querySelector<HTMLElement>(`[data-comment-thread="${thread.id}"]`)!;
+      expect(stale).not.toBeNull();
+      expect(stale.classList.contains("ub-comment")).toBe(false);
+      expect(stale.hasAttribute("tabindex")).toBe(false);
+      expect(stale.hasAttribute("role")).toBe(false);
+      expect(threadIdFromTarget(stale)).toBeNull();
+      flashThreadHighlight(thread.id);
+      expect(stale.classList.contains("ub-comment-flash")).toBe(false);
+      const selectedSelector = selectedHighlightCss(thread.id).split("{")[0]!;
+      expect(stale.matches(selectedSelector)).toBe(false);
+      expect(threadsFromDoc(ydoc)).toEqual([]);
+      let replacement = "";
+      await act(async () => { replacement = createAnnotation(ydoc, blocks[1]!, 4, 15, "Reader", "New conversation").id; });
+      expect(element.querySelector(`.ub-comment[data-comment-thread="${replacement}"]`)).not.toBeNull();
+    } finally { editor.destroy(); ydoc.destroy(); }
   });
 
   it("lists threads in reading order, not thread-id order", () => {

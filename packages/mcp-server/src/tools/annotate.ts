@@ -1,4 +1,5 @@
-import { addComment, createAnnotation, getAnnotation, getBlock, moveAnnotation, setAnnotationResolved } from "@uberblick/schema";
+import { addComment, createAnnotation, deleteComment, getAnnotation, getBlock, moveAnnotation, setAnnotationResolved } from "@uberblick/schema";
+import type { CommentDeleteRefusal } from "@uberblick/schema";
 import { z } from "zod";
 import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
@@ -7,38 +8,46 @@ import { uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
 
 /**
- * Existing threads either receive a reply or move to a range with a reply.
- * Only a reply without a range may change resolution.
+ * Deletion is exclusive of the existing open, reply and move shapes.
  */
 const ANNOTATE_MODES: readonly ToolMode[] = [
   {
+    title: "Deleting a comment (`action: delete`)",
+    when: { field: "action", is: "delete" },
+    requires: ["thread_id", "comment_id"],
+    forbids: ["text", "author", "block_id", "start", "end", "row", "column", "resolved"],
+  },
+  {
     title: "A reply (`thread_id`)",
-    when: { all: [{ field: "thread_id", present: true }, { field: "block_id", present: false }] },
-    forbids: ["block_id", "start", "end", "row", "column"],
+    when: { all: [{ field: "action", present: false }, { field: "thread_id", present: true }, { field: "block_id", present: false }] },
+    requires: ["text"],
+    forbids: ["comment_id", "block_id", "start", "end", "row", "column"],
   },
   {
     title: "Moving a thread's anchor",
-    when: { all: [{ field: "thread_id", present: true }, { field: "block_id", present: true }] },
-    requires: ["start", "end"],
-    forbids: ["resolved"],
+    when: { all: [{ field: "action", present: false }, { field: "thread_id", present: true }, { field: "block_id", present: true }] },
+    requires: ["text", "start", "end"],
+    forbids: ["comment_id", "resolved"],
   },
   {
     title: "Opening a thread over a range",
-    when: { field: "thread_id", present: false },
-    requires: ["block_id", "start", "end"],
-    forbids: ["resolved"],
+    when: { all: [{ field: "action", present: false }, { field: "thread_id", present: false }] },
+    requires: ["text", "block_id", "start", "end"],
+    forbids: ["comment_id", "resolved"],
   },
 ];
 
 export const inputSchema = strictInput(
   {
     uuid: uuidArg,
-    text: z.string().min(1).describe("The comment body."),
+    text: z.string().min(1).optional().describe("The comment body; required except when action is delete."),
+    action: z.literal("delete").optional().describe("Permanent delete; requires thread_id/comment_id and forbids other mode fields."),
+    comment_id: z.string().min(1).optional().describe("Delete only: stable id from get_doc or annotate."),
     thread_id: z
       .string()
       .min(1)
       .optional()
-      .describe("Reply to or move this existing thread."),
+      .describe("Reply to, move or delete a comment in this existing thread."),
     block_id: z.string().min(1).optional().describe("Target block for opening or moving an anchor."),
     start: z.number().int().min(0).optional().describe("Anchor range start, in characters."),
     end: z.number().int().min(0).optional().describe("Anchor range end, exclusive."),
@@ -53,11 +62,38 @@ export const inputSchema = strictInput(
   ANNOTATE_MODES,
 );
 
-export const annotateOperation = documentOperation({ content: false, contentDurability: false }, inputSchema, (context, { uuid, text, thread_id, block_id, start, end, row, column, resolved, author }, _request, replica) => {
+const DELETE_RECOVERY: Record<Exclude<CommentDeleteRefusal, "thread_not_found" | "comment_not_found">, string> = {
+  account_required: "Sign in to this workspace's hub account before deleting comments; this MCP session has no signed-in account. Nothing was written.",
+  comment_account_missing: "Choose a comment with a stored account; comments without an account cannot be deleted. Nothing was written.",
+  comment_not_owned: "Choose a comment whose stored account matches this session's signed-in GitHub account; someone else's comment cannot be deleted. Nothing was written.",
+  reply_account_missing: "Delete only a reply you own; the opening comment cannot be deleted while a reply has no stored account. Nothing was written.",
+  reply_not_owned: "Delete only a reply you own; the opening comment cannot be deleted while another account has replied. Nothing was written.",
+  thread_resolved: "Choose a comment in an unresolved conversation; comments in a resolved conversation cannot be deleted. Nothing was written.",
+};
+
+export const annotateOperation = documentOperation({ content: false, contentDurability: false }, inputSchema, (context, { uuid, text, action, comment_id, thread_id, block_id, start, end, row, column, resolved, author }, _request, replica) => {
   const { replicas, annotationJson } = context;
 
   const who = author ?? replicas.name;
   const attribution = replicas.commentAttribution();
+
+  if (action === "delete") {
+    // The delete mode requires both ids before this handler can run.
+    const result = deleteComment(replica.doc, thread_id as string, comment_id as string, attribution.account);
+    if (!result.ok) {
+      const detail = { uuid, threadId: thread_id, commentId: comment_id };
+      if (result.reason === "thread_not_found" || result.reason === "comment_not_found") {
+        throw new ToolError(result.reason, "The requested comment or conversation no longer exists.", detail);
+      }
+      const recovery = DELETE_RECOVERY[result.reason];
+      throw new ToolError("comment_delete_refused", "This comment cannot be deleted.", { ...detail, reason: result.reason, recovery });
+    }
+    return {
+      uuid,
+      removed: result.removed,
+      ...(result.removed === "comment" ? { annotation: annotationJson(replica, result.annotation) } : {}),
+    };
+  }
 
   if (thread_id !== undefined && getAnnotation(replica.doc, thread_id) === null) {
     throw new ToolError("thread_not_found", `No annotation thread ${thread_id} in document ${uuid}`, { uuid, threadId: thread_id });
@@ -66,7 +102,7 @@ export const annotateOperation = documentOperation({ content: false, contentDura
   if (thread_id !== undefined && block_id === undefined) {
     // Combine nested reply/resolution transactions into one durable append.
     const updated = replica.doc.transact(() => {
-      const added = addComment(replica.doc, thread_id, who, text, attribution);
+      const added = addComment(replica.doc, thread_id, who, text as string, attribution);
       return added !== null && resolved !== undefined
         ? setAnnotationResolved(replica.doc, thread_id, resolved)
         : added;
@@ -96,8 +132,8 @@ export const annotateOperation = documentOperation({ content: false, contentDura
   }
   const target = row === undefined || column === undefined ? undefined : { row, column };
   const updated = thread_id === undefined
-    ? createAnnotation(replica.doc, block_id as string, start as number, end as number, who, text, target, attribution)
-    : moveAnnotation(replica.doc, thread_id, block_id as string, start as number, end as number, who, text, target, attribution);
+    ? createAnnotation(replica.doc, block_id as string, start as number, end as number, who, text as string, target, attribution)
+    : moveAnnotation(replica.doc, thread_id, block_id as string, start as number, end as number, who, text as string, target, attribution);
   if (updated === null) throw new ToolError("thread_not_found", `No annotation thread ${thread_id} in document ${uuid}`, { uuid, threadId: thread_id });
   return {
     uuid,

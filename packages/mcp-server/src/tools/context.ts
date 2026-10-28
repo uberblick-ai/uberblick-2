@@ -7,6 +7,7 @@ import {
   decisionTopicArchived,
   decisionTopicTitle,
   getBlocksWithInline,
+  getAnnotationCommentIds,
   getDirectoryEntry,
   getMeta,
   getMetaMap,
@@ -512,9 +513,11 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
     anchors: ReadonlyMap<string, AnnotationAnchor> = resolveAnnotationAnchors(replica.doc),
   ): Record<string, unknown> => {
     const anchor = anchors.get(annotation.id);
+    const commentIds = getAnnotationCommentIds(replica.doc, annotation.id);
     return {
       ...annotation,
-      comments: annotation.comments.map(({ author, text, createdAt, account, agent }) => ({
+      comments: annotation.comments.map(({ author, text, createdAt, account, agent }, index) => ({
+        id: commentIds[index],
         author,
         text,
         createdAt,

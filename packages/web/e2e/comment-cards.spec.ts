@@ -7,7 +7,7 @@ import * as Y from "yjs";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import { wrapToken } from "@uberblick/schema/protocol";
 import {
-  addComment, appendBlock, createAnnotation, initDoc,
+  addComment, appendBlock, createAnnotation, deleteComment, getAnnotationCommentId, initDoc,
   roomForDoc, upsertDirectoryEntry, directoryRoom,
 } from "@uberblick/schema";
 import { setupHarness } from "./app-helpers.js";
@@ -18,7 +18,7 @@ const EXTERNAL = "https://example.invalid/spec";
 const GITHUB = "https://github.com/Example/SomeRepo/issues/12";
 const MARKDOWN = `**must** and *maybe* ~~old~~ \`ub update\`\n[spec](${EXTERNAL})\n${GITHUB}`;
 
-async function fixture(openingText = "Opening conversation"): Promise<{ uuid: string; first: string; second: string; close: () => void }> {
+async function fixture(openingText = "Opening conversation", ownReplies = false): Promise<{ uuid: string; first: string; second: string; removeFirst: () => void; close: () => void }> {
   const uuid = randomUUID();
   const secret = await importRootSecret(harness().authSecret);
   const peers: Array<{ doc: Y.Doc; provider: HocuspocusProvider }> = [];
@@ -42,11 +42,18 @@ async function fixture(openingText = "Opening conversation"): Promise<{ uuid: st
   appendBlock(doc, { type: "paragraph", text: "Outside every comment." });
   const first = createAnnotation(doc, firstBlock, 0, 5, "Claude Client", openingText, undefined,
     { kind: "agent", account: "avatar-success", agent: "claude" });
-  addComment(doc, first.id, "Codex Client", "A considered reply", { kind: "agent", account: "avatar-failure", agent: "codex" });
-  const second = createAnnotation(doc, secondBlock, 0, 6, "Neutral Person", "Another opening comment");
+  addComment(doc, first.id, "Codex Client", "A considered reply", { kind: "agent", account: ownReplies ? "avatar-success" : "avatar-failure", agent: "codex" });
+  if (ownReplies) addComment(doc, first.id, "Reader", "A second own reply", { account: "avatar-success", kind: "person" });
+  const second = createAnnotation(doc, secondBlock, 0, 6, "Neutral Person", "Another opening comment", undefined, ownReplies ? { account: "avatar-success", kind: "person" } : undefined);
   const directory = await room(directoryRoom(harness().workspaceUuid));
   upsertDirectoryEntry(directory, { uuid, title: "A calm conversation" });
-  return { uuid, first: first.id, second: second.id, close: () => {
+  return { uuid, first: first.id, second: second.id,
+    removeFirst: () => {
+      const commentId = getAnnotationCommentId(doc, first.id, 0);
+      if (commentId === null) throw new Error("The fixture needs its opening comment to delete it");
+      deleteComment(doc, first.id, commentId, "avatar-success");
+    },
+    close: () => {
     for (const peer of peers) { peer.provider.destroy(); peer.doc.destroy(); }
   } };
 }
@@ -181,6 +188,109 @@ test("comment Markdown links stay native and pills remain readable on resting, h
       expect(selected?.width).toBe(resting?.width);
       expect(selected?.height).toBe(resting?.height);
     }
+  } finally { data.close(); }
+});
+
+test("keyboard deletes an own reply immediately and confirms an opening comment's reply count", async ({ browser }) => {
+  const data = await fixture("Opening conversation", true);
+  try {
+    const page = await openApp(browser, `/${harness().workspace}/${data.uuid}`, {
+      contextOptions: { viewport: { width: 1600, height: 1000 }, hasTouch: false, isMobile: false, reducedMotion: "reduce" },
+      beforeNavigate: ownAccount,
+    });
+    const card = page.locator(`#ub-thread-${data.first} .ub-thread`);
+    const opening = card.locator(".ub-thread-comment").first();
+    const remove = opening.getByRole("button", { name: "Delete", exact: true });
+    const mark = page.locator(`.ub-comment[data-comment-thread="${data.first}"]`);
+    await card.locator(".ub-thread-select").focus();
+    await expect(card.locator(".ub-thread-select")).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(card).toHaveAttribute("aria-current", "true");
+    await page.mouse.move(0, 0);
+    await expect(remove).toHaveCSS("opacity", "1");
+    await page.keyboard.press("Tab");
+    await expect(opening.getByRole("button", { name: "Edit", exact: true })).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(remove).toBeFocused();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("alertdialog", { name: "Delete this conversation?" });
+    await expect(dialog).toContainText("opening comment and 2 replies");
+    const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+    await expect(cancel).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(dialog).toHaveCount(0);
+    await expect(card.locator(".ub-thread-comment")).toHaveCount(3);
+    const reply = card.locator(".ub-thread-comment").last();
+    await reply.getByRole("button", { name: "Edit", exact: true }).focus();
+    await page.keyboard.press("Tab");
+    await expect(reply.getByRole("button", { name: "Delete", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(card.locator(".ub-thread-comment")).toHaveCount(2);
+    await expect(dialog).toHaveCount(0);
+    await remove.focus();
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      const paint = await renderedText(page, `#ub-thread-${data.first} .ub-comment-delete`);
+      expect(paint.length).toBeGreaterThan(0);
+      for (const reading of paint) expect(reading.ratio, `${colorScheme}: ${reading.where}`).toBeGreaterThanOrEqual(4.5);
+    }
+    await page.keyboard.press("Enter");
+    await expect(dialog).toContainText("opening comment and 1 reply");
+    await expect(cancel).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByRole("button", { name: "Delete", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(card).toHaveCount(0);
+    await expect(mark).toHaveCount(0);
+    await expect(page.locator(".ub-editor .tiptap")).toBeFocused();
+  } finally { data.close(); }
+});
+
+test("iPad touch deletes replies and confirms permanent conversation deletion with shared targets", { tag: "@webkit-touch" }, async ({ browser }) => {
+  const data = await fixture("Opening conversation", true);
+  try {
+    const page = await openApp(browser, `/${harness().workspace}/${data.uuid}`, {
+      contextOptions: { ...devices["iPad (gen 7)"], reducedMotion: "reduce" }, beforeNavigate: ownAccount,
+    });
+    await page.locator(".ub-threads-toggle").tap();
+    const sheet = page.getByRole("dialog", { name: "Comments", exact: true });
+    const card = sheet.locator(`#ub-thread-${data.first} .ub-thread`);
+    await card.locator(".ub-thread-text").first().tap();
+    const replyRemove = card.locator(".ub-thread-comment").last().getByRole("button", { name: "Delete", exact: true });
+    const target = await replyRemove.boundingBox();
+    expect(target?.width).toBeGreaterThanOrEqual(44);
+    expect(target?.height).toBeGreaterThanOrEqual(44);
+    await replyRemove.tap();
+    await expect(card.locator(".ub-thread-comment")).toHaveCount(2);
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    const openingRemove = card.locator(".ub-thread-comment").first().getByRole("button", { name: "Delete", exact: true });
+    await openingRemove.tap();
+    const dialog = page.getByRole("alertdialog", { name: "Delete this conversation?" });
+    await expect(dialog).toContainText("opening comment and 1 reply");
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).tap();
+    await expect(card).toBeVisible();
+    await openingRemove.tap();
+    await dialog.getByRole("button", { name: "Delete", exact: true }).tap();
+    await expect(card).toHaveCount(0);
+    await expect(sheet).toHaveCount(0);
+    await expect(page.locator(".ub-threads-toggle")).toHaveText("Comments 1");
+    await expect(page.locator(`.ub-comment[data-comment-thread="${data.first}"]`)).toHaveCount(0);
+  } finally { data.close(); }
+});
+
+test("a remote conversation deletion removes its card and keeps the unsent text recoverable", async ({ browser }) => {
+  const data = await fixture("Opening conversation", true);
+  try {
+    const page = await openApp(browser, `/${harness().workspace}/${data.uuid}`, {
+      contextOptions: { viewport: { width: 1600, height: 1000 }, reducedMotion: "reduce" }, beforeNavigate: ownAccount,
+    });
+    const card = page.locator(`#ub-thread-${data.first} .ub-thread`);
+    await card.locator(".ub-thread-text").first().click();
+    await card.getByPlaceholder("Reply…").fill("Recover this reply after remote deletion");
+    data.removeFirst();
+    await expect(card).toHaveCount(0);
+    await expect(page.locator(".ub-thread-unsent")).toContainText("Recover this reply after remote deletion");
+    await expect(page.locator(`.ub-comment[data-comment-thread="${data.first}"]`)).toHaveCount(0);
   } finally { data.close(); }
 });
 

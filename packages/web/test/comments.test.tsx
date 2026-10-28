@@ -1573,7 +1573,7 @@ describe("the comments column writes back", () => {
     expect(selectedHighlightCss(hostile)).toBe("");
     expect(selectedHighlightCss("b3d1f0e2-4c5a-11ee-be56-0242ac120002"))
       .toBe(
-        '[data-comment-thread="b3d1f0e2-4c5a-11ee-be56-0242ac120002"]:not([data-comment-resolved]){background:var(--brand-subtle);}',
+        '.ub-comment[data-comment-thread="b3d1f0e2-4c5a-11ee-be56-0242ac120002"]{background:var(--brand-subtle);}',
       );
     // Harmless characters, hostile size: a uuid is 36 characters, and an id
     // that goes on for a megabyte is a megabyte of selector on every render.

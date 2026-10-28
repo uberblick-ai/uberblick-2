@@ -213,6 +213,14 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Call get_doc for the threads this document holds, or omit `thread_id` to open a new one over a range.",
   },
+  comment_not_found: {
+    recoveryClass: "reread",
+    guidance: "Call get_doc for the conversation's current comment ids; the requested comment no longer exists. Nothing was written.",
+  },
+  comment_delete_refused: {
+    recoveryClass: "manual",
+    guidance: "Choose an owned comment in an unresolved conversation; deleting an opening comment also requires every reply to be yours. Nothing was written.",
+  },
   inline_link_range: {
     recoveryClass: "reread",
     guidance:

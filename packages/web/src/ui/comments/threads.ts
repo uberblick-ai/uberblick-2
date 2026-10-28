@@ -250,8 +250,7 @@ export function threadCardId(threadId: string): string {
  */
 export function threadIdFromTarget(target: EventTarget | null): string | null {
   if (!(target instanceof Element)) return null;
-  const anchor = target.closest("[data-comment-thread]");
-  if (anchor?.hasAttribute("data-comment-resolved")) return null;
+  const anchor = target.closest(".ub-comment[data-comment-thread]");
   const threadId = anchor?.getAttribute("data-comment-thread") ?? "";
   return threadId === "" ? null : threadId;
 }
@@ -276,7 +275,7 @@ const flashTimers = new WeakMap<Element, ReturnType<typeof setTimeout>>();
  * the class and forcing layout before reapplying it.
  */
 export function flashThreadHighlight(threadId: string): void {
-  const selector = `[data-comment-thread="${CSS.escape(threadId)}"]:not([data-comment-resolved])`;
+  const selector = `.ub-comment[data-comment-thread="${CSS.escape(threadId)}"]`;
   const target = document.querySelector<HTMLElement>(selector);
   if (target !== null) revealFoldedTarget(target);
   const spans = document.querySelectorAll<HTMLElement>(
@@ -304,7 +303,7 @@ export function flashThreadHighlight(threadId: string): void {
 /** Selected highlights are the only amber comment ranges in the document. */
 export function selectedHighlightCss(threadId: string | null): string {
   if (threadId === null || !SAFE_THREAD_ID.test(threadId)) return "";
-  return `[data-comment-thread="${threadId}"]:not([data-comment-resolved]){background:var(--brand-subtle);}`;
+  return `.ub-comment[data-comment-thread="${threadId}"]{background:var(--brand-subtle);}`;
 }
 
 /** Scroll a thread's card into view inside the rail. */
@@ -325,7 +324,7 @@ export function focusThreadCard(threadId: string): void {
 /** Escape from a card returns to its live highlight, or the document text. */
 export function returnFocusToComment(threadId: string): void {
   const highlight = document.querySelector<HTMLElement>(
-    `[data-comment-thread="${CSS.escape(threadId)}"]:not([data-comment-resolved])`,
+    `.ub-comment[data-comment-thread="${CSS.escape(threadId)}"]`,
   );
   if (highlight !== null) {
     highlight.focus();

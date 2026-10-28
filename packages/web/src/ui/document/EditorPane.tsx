@@ -726,7 +726,6 @@ const BoundEditor = memo(function BoundEditor({
     };
     const activate = (event: MouseEvent): void => {
       const threadId = threadIdFromTarget(event.target);
-      if (threadId === null) onSelectThread(null);
       if (handleDocLinkClick(event, docLinks)) return;
       const anchor = linkAnchorFromTarget(event.target);
       if (anchor !== null) {
@@ -744,6 +743,7 @@ const BoundEditor = memo(function BoundEditor({
         }
         return;
       }
+      if (threadId === null) onSelectThread(null);
       if (threadId !== null) selectThread(threadId);
     };
     // Enter/Space activates only a focused button-role highlight. Capture and
