@@ -13,6 +13,7 @@ export const BLOCK_TYPES = [
   "chart",
   "card",
   "figma",
+  "divider",
 ] as const;
 
 export type BlockType = (typeof BLOCK_TYPES)[number];
@@ -26,6 +27,7 @@ export function isBlockType(value: string): value is BlockType {
 /**
  * Prose admits inline marks and Markdown syntax; source blocks admit only comment.
  * Tables, cards and Figma captions admit marks per cell or part, with no block-level offsets.
+ * Dividers have no text or marks.
  */
 export const PROSE_BLOCK_TYPES = [
   "paragraph",
@@ -106,6 +108,7 @@ export interface Block {
   /**
    * Prose is plain text, marks excluded. Tables, cards and Figma blocks are
    * canonical Markdown projections from cell or part text and inline marks.
+   * Dividers always project empty text, including after writes by older clients.
    */
   text: string;
   /**
@@ -129,6 +132,7 @@ export interface Block {
 /** The shape accepted when creating a block. */
 export interface BlockInput {
   type: BlockType;
+  /** Dividers accept only empty text and empty inline runs. */
   text?: string;
   /** Headings only. Defaults to 1. Ignored for other types. */
   level?: HeadingLevel;

@@ -25,6 +25,7 @@ import {
   InvalidCalloutError,
   InvalidTableMappingError,
   OldTextMismatchError,
+  SchemaError,
   StaleBlockError,
 } from "./errors.js";
 import {
@@ -82,7 +83,7 @@ function elementType(element: Y.XmlElement): BlockType {
 }
 
 /**
- * Flat blocks use one Y.XmlText child for source, inline marks and thread marks.
+ * Text-bearing flat blocks use one Y.XmlText child for source and marks.
  * A foreign element with no text child reads as empty until it gains one.
  */
 function textOf(element: Y.XmlElement): Y.XmlText | null {
@@ -154,7 +155,7 @@ export function findBlockElement(
 
 /**
  * @internal — shared with the annotations module. Flat blocks only: callers
- * branch on table, card and Figma first, or this would insert a text child.
+ * branch on table, card, Figma and divider first, or this inserts a text child.
  */
 export function requireBlockText(
   ydoc: Y.Doc,
@@ -193,7 +194,7 @@ export function toBlock(element: Y.XmlElement): Block {
   // Prose rev excludes marks; structured prose projections include inline formatting.
   const type = elementType(element);
   const id = element.getAttribute("id") ?? "";
-  const text = type === "card" ? cardText(element)
+  const text = type === "divider" ? "" : type === "card" ? cardText(element)
     : type === "figma" ? figmaText(element)
     : type === "table" && element.toArray().some((node) => node instanceof Y.XmlElement && node.nodeName === "tableRow")
       ? tableText(element) : plainXmlText(textOf(element));
@@ -298,7 +299,7 @@ export function getBlockRev(ydoc: Y.Doc, blockId: string): string {
  */
 export function getBlockInline(ydoc: Y.Doc, blockId: string): InlineRun[] {
   const element = findBlockElement(ydoc, blockId);
-  return element === null ? [] : readInlineRuns(textOf(element));
+  return element === null || element.nodeName === "divider" ? [] : readInlineRuns(textOf(element));
 }
 
 /**
@@ -319,7 +320,7 @@ export function getBlocksWithInline(
     }
     return {
       block: toBlock(element),
-      inline: readInlineRuns(textOf(element)),
+      inline: element.nodeName === "divider" ? [] : readInlineRuns(textOf(element)),
       ...(element.nodeName === "table" ? { table } : {}),
       ...(element.nodeName === "card" ? { card, cardButtons: cardButtons(element) } : {}),
       ...(element.nodeName === "figma" ? { figma } : {}),
@@ -337,6 +338,14 @@ function inlineOf(input: BlockInput): readonly InlineRun[] | null {
 
 function buildElement(id: string, input: BlockInput): Y.XmlElement {
   // Validate before insertion: Yjs transactions cannot roll back stray blocks.
+  if (input.type === "divider") {
+    if ((input.text ?? "") !== "" || (input.inline?.length ?? 0) > 0) {
+      throw new SchemaError("invalid_divider", "A divider block cannot contain text or inline runs");
+    }
+    const element = new Y.XmlElement("divider");
+    element.setAttribute("id", id);
+    return element;
+  }
   if (input.type === "callout") validateCalloutAttributes(input);
   const runs = inlineOf(input);
   if (runs !== null) assertInlineWritable(runs);
@@ -663,6 +672,9 @@ export function editBlock(
     if (element === null) throw new BlockNotFoundError(blockId);
 
     const current = toBlock(element);
+    if (current.type === "divider") {
+      throw new SchemaError("divider_not_editable", "A divider block cannot be edited; move or delete it instead");
+    }
     if (options.rev !== undefined && options.rev !== current.rev) {
       throw new StaleBlockError({
         blockId,

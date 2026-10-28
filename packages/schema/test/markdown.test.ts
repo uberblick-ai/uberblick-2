@@ -832,10 +832,10 @@ describe("lists and quotes", () => {
    */
   it("does not count an escaped pipe as table structure", () => {
     expect(parseGfmTable("a \\| b\n---")).toBeNull();
-    // Prose, and prose keeps its backslash: `\|` is not one of the escapes the
+    // The heading keeps its backslash: `\|` is not one of the escapes the
     // inline reader resolves, so the text is the line.
     expect(importMarkdown("a \\| b\n---").blocks).toEqual([
-      { type: "paragraph", text: "a \\| b\n---" },
+      { type: "heading", text: "a \\| b", level: 2 },
     ]);
 
     // The same line with a real pipe in it is a table, one column wide.

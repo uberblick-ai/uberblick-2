@@ -114,6 +114,7 @@ function snapshotBlock(element: Y.XmlElement): RevisionBlock {
   const block = toBlock(element);
   const base = { id: block.id, type: block.type, text: block.text };
   const fields: Record<string, unknown> = {};
+  if (block.type === "divider") return { ...base, fields, key: contentKey({ type: block.type }) };
   if (block.type === "card") {
     for (const part of CARD_PARTS) fields[part] = normalizedRuns(cardPartTexts(element, part));
     fields.buttons = cardButtons(element);

@@ -82,6 +82,17 @@ it("includes callouts in edit_doc essentials and teaches their syntax and restra
   ]) expect(callouts, rule).toContain(rule);
 });
 
+it("documents dividers and their distinction from setext headings", async () => {
+  const rig = await local();
+  for (const topic of ["markdown", "edit_doc"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    expect(text).toContain('Write `---` with a blank line above it for a divider');
+    expect(text).toContain('`type: "divider"` with empty text over MCP');
+    expect(text).toContain('Text directly above `---` becomes a level-2 heading.');
+    if (topic === "markdown") expect(text).toContain('setext headings underlined with `===` (level 1) or `---` (level 2)');
+  }
+});
+
 it("writes the markdown help's GitHub reference example as an ordinary external link", async () => {
   const rig = await local();
   const { text } = await rig.ok("get_help", { topic: "markdown" });

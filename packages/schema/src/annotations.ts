@@ -6,7 +6,7 @@
 
 import * as Y from "yjs";
 import { getAnnotationsMap, getBlocksFragment } from "./doc.js";
-import { AnnotationCellError, AnnotationRangeError, BlockNotFoundError, CardAnnotationError, FigmaAnnotationError, InvalidCardError, InvalidFigmaError, InvalidTableError } from "./errors.js";
+import { AnnotationCellError, AnnotationRangeError, BlockNotFoundError, CardAnnotationError, FigmaAnnotationError, InvalidCardError, InvalidFigmaError, InvalidTableError, SchemaError } from "./errors.js";
 import { findBlockElement } from "./blocks.js";
 import { tableCellTexts, tableRows } from "./table.js";
 import { CARD_PARTS, cardPartTexts } from "./card.js";
@@ -104,6 +104,7 @@ function annotationTexts(element: Y.XmlElement): Array<{
   column?: number;
   part?: CardPart | "caption";
 }> {
+  if (element.nodeName === "divider") return [];
   if (element.nodeName === "table" || element.nodeName === "card" || element.nodeName === "figma") {
     return structuredInlineParts(element).map((part) => part.kind === "table"
       ? { texts: part.texts, row: part.row, column: part.column }
@@ -255,6 +256,9 @@ function annotationRange(
 ): { texts: Y.XmlText[]; lo: number; hi: number } {
   const element = findBlockElement(ydoc, blockId);
   if (element === null) throw new BlockNotFoundError(blockId);
+  if (element.nodeName === "divider") {
+    throw new SchemaError("divider_annotation", "A divider block has no text to anchor a comment to");
+  }
   let texts: Y.XmlText[];
   if (element.nodeName === "table") {
     if (target === undefined || !("row" in target)) throw new AnnotationCellError("missing", blockId);

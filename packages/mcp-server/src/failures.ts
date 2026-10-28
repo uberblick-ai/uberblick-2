@@ -99,6 +99,18 @@ const RECOVERIES: Record<string, Recovery> = {
     recoveryClass: "manual",
     guidance: "Supply card content without its :::card and ::: delimiter lines: label, title and footer at most once, a nonempty title, any number of button lines, then a blank line and optional prose body. Each button contains exactly one [Text](destination) link, with nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, optionally followed by ?query. After its link, allow at most one style (outline or filled) and one color (neutral, blue, green or violet), in either order; defaults are outline neutral. Remove other trailing text, unknown keys and non-key header lines. Nothing was written.",
   },
+  invalid_divider: {
+    recoveryClass: "manual",
+    guidance: "Supply type: \"divider\" with no text or inline content. Nothing was written.",
+  },
+  divider_not_editable: {
+    recoveryClass: "manual",
+    guidance: "A divider has no text to edit. Use move_block to reposition it or delete_block to remove it. Nothing was written.",
+  },
+  divider_annotation: {
+    recoveryClass: "manual",
+    guidance: "A divider has no text to anchor a comment to. Select text in another block for annotate. Nothing was written.",
+  },
   annotation_card: {
     recoveryClass: "manual",
     guidance: "Open a card comment on selected text in the web editor, then use annotate with its thread_id to reply, resolve or reopen it. Nothing was written.",
@@ -198,7 +210,7 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Call get_doc for the block's current text, its type and its `doc_links`, then link a range that fits — " +
       "`reason` says which of the three is in the way: `empty` (the range covers no characters), `not-prose` " +
-      "(code, terminal and chart hold source text; table, card and Figma links belong to their parts and have no block-level ranges) or `overlap` (the range " +
+      "(dividers have no text; code, terminal and chart hold source text; table, card and Figma links belong to their parts and have no block-level ranges) or `overlap` (the range " +
       "is already an external link, and one range cannot be both).",
   },
   // Repeating a lookup cannot deliver a missing directory entry; hub sync may.

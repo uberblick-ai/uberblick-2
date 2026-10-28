@@ -44,7 +44,7 @@ function hex8(value: number): string {
  * prevent ambiguous concatenation before hashing.
  */
 export function blockRev(input: RevInput): string {
-  const fields: unknown[] = [
+  const fields: unknown[] = input.type === "divider" ? ["divider"] : [
     input.type,
     input.level ?? null,
     input.language ?? null,

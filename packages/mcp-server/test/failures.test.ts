@@ -124,6 +124,9 @@ const EXPECTED: Record<
   invalid_tag_identity: { recoveryClass: "reread", detail: ["id"] },
   invalid_card: { recoveryClass: "manual", detail: [] },
   invalid_callout: { recoveryClass: "manual", detail: [] },
+  invalid_divider: { recoveryClass: "manual", detail: [] },
+  divider_not_editable: { recoveryClass: "manual", detail: [] },
+  divider_annotation: { recoveryClass: "manual", detail: [] },
   annotation_card: { recoveryClass: "manual", detail: ["blockId"] },
   invalid_figma: { recoveryClass: "manual", detail: [] },
   annotation_figma: { recoveryClass: "manual", detail: ["blockId"] },
@@ -304,6 +307,16 @@ describe("the failure contract", () => {
     record((await rig.call("insert_block", {
       uuid: doc.uuid,
       blocks: [{ type: "callout", variant: "invalid", text: "Invalid variant" }],
+    })).payload);
+    record((await rig.call("insert_block", {
+      uuid: doc.uuid, blocks: [{ type: "divider", text: "Invalid text" }],
+    })).payload);
+    const divider = await rig.ok("insert_block", { uuid: doc.uuid, after_block_id: doc.blockId, blocks: [{ type: "divider" }] });
+    record((await rig.call("edit_block", {
+      uuid: doc.uuid, block_id: divider.blocks[0].id, old_text: "", new_text: "Invalid edit",
+    })).payload);
+    record((await rig.call("annotate", {
+      uuid: doc.uuid, block_id: divider.blocks[0].id, start: 0, end: 1, text: "No divider anchor",
     })).payload);
     const card = await rig.ok("insert_block", {
       uuid: doc.uuid, after_block_id: doc.blockId,

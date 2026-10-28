@@ -81,6 +81,10 @@ function foreignInsideBlock(
   return null;
 }
 
+function isEditorBlockType(name: string): boolean {
+  return isBlockType(name) && uberblickSchema.nodes[name] !== undefined;
+}
+
 /**
  * Return one offender per top-level block. Stray text/hooks are foreign because
  * the doc schema accepts block+ only; an empty result permits binding.
@@ -101,7 +105,7 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
       continue;
     }
     const id = child.getAttribute("id") ?? null;
-    if (!isBlockType(child.nodeName)) {
+    if (!isEditorBlockType(child.nodeName)) {
       foreign.push({ index, nodeName: child.nodeName, id, preview: previewOf(child) });
       continue;
     }
