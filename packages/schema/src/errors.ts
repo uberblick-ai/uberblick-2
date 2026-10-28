@@ -50,6 +50,14 @@ export class InvalidCalloutError extends SchemaError {
   }
 }
 
+/** Column widths are invalid or supplied for a block that cannot be sized. */
+export class InvalidColumnWidthsError extends SchemaError {
+  constructor(reason: string) {
+    super("invalid_column_widths", `Invalid column widths: ${reason}`);
+    this.name = "InvalidColumnWidthsError";
+  }
+}
+
 /** A table write did not contain exactly one supported GFM table. */
 export class InvalidTableError extends SchemaError {
   constructor() {

@@ -50,7 +50,7 @@ import { HelpCatalog } from "../help.js";
 import { activeTagCatalog } from "../tag-catalog.js";
 import { isoTimestamp } from "../timestamps.js";
 import { TLDR_AFTER_CONTENT_CHANGE } from "./descriptions.js";
-import type { DecisionAnswer, blockInputSchema, inlineArg } from "./schemas.js";
+import type { DecisionAnswer, insertedBlockInputSchema, inlineArg } from "./schemas.js";
 
 /** The one-line prompt a mutating tool carries when a document has none. */
 const DESCRIPTION_NUDGE =
@@ -88,7 +88,7 @@ function inlineMarks(
  * Inline runs must already be resolved; target refusals must precede all writes.
  */
 function toBlockInput(
-  input: z.infer<typeof blockInputSchema>,
+  input: z.infer<typeof insertedBlockInputSchema>,
   inline?: InlineRun[],
 ): BlockInput {
   return {
@@ -102,6 +102,7 @@ function toBlockInput(
     ...(input.indent === undefined ? {} : { indent: input.indent as ListIndent }),
     ...(input.variant === undefined ? {} : { variant: input.variant as CalloutVariant }),
     ...(input.icon === undefined ? {} : { icon: input.icon }),
+    ...(input.column_widths === undefined ? {} : { columnWidths: input.column_widths as (number | null)[] }),
     ...(inline === undefined ? {} : { inline }),
   };
 }
@@ -386,7 +387,7 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
    * their cell marks from GFM. Validate all seeds before create_doc opens a room.
    */
   const blockInputFor = (
-    block: z.infer<typeof blockInputSchema>,
+    block: z.infer<typeof insertedBlockInputSchema>,
   ): BlockInput => {
     // A bad later seed must not leave earlier blocks or metadata behind.
     if (block.type === "divider" && ((block.text ?? "") !== "" || (block.inline?.length ?? 0) > 0)) {
@@ -413,11 +414,12 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
    * shows where marks landed; plain prose keeps the answer to its text.
    */
   const blocksJson = (replica: Pick<Replica, "doc">): Record<string, unknown>[] =>
-    getBlocksWithInline(replica.doc).map(({ block, inline }) => {
+    getBlocksWithInline(replica.doc).map(({ block: { columnWidths, ...block }, inline }) => {
       const links = docLinkRanges(block, inline);
       const formatted = isProseBlockType(block.type) && inline.some(run => Object.keys(run.marks).length > 0);
       return {
         ...block,
+        ...(columnWidths === undefined ? {} : { column_widths: columnWidths }),
         ...(links.length === 0 ? {} : { doc_links: links }),
         ...(formatted ? { inline: inline.map(({ text, marks }) => ({ text, marks: { ...marks } })) } : {}),
       };

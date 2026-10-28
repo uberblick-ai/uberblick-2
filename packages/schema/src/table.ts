@@ -1,5 +1,5 @@
 import * as Y from "yjs";
-import { InvalidTableError, InvalidTableMappingError, TableMappingRequiredError } from "./errors.js";
+import { InvalidColumnWidthsError, InvalidTableError, InvalidTableMappingError, TableMappingRequiredError } from "./errors.js";
 import { applyInlineRuns, assertInlineWritable, inlinePlainText, readInlineRuns } from "./marks.js";
 import { spliceInlineText } from "./inline-edit.js";
 import { buildInlinePart, ensureInlinePartText, inlinePartTexts, isSupportedInlinePart, plainXmlText, seedNewInlinePartsOfKind, tableRows } from "./inline-parts.js";
@@ -132,6 +132,35 @@ export function isSupportedColumnWidth(value: unknown): boolean {
     (Array.isArray(value) && value.length === 1 && typeof value[0] === "number" && Number.isFinite(value[0]) && value[0] > 0);
 }
 
+/** The editor renders widths from the header, including virtual unsized cells. */
+export function tableColumnWidths(element: Y.XmlElement, columnCount: number): Array<number | null> {
+  const header = tableRows(element)[0] ?? [];
+  return Array.from({ length: columnCount }, (_, column) => {
+    const width: unknown = header[column]?.getAttribute("colwidth");
+    return Array.isArray(width) && isSupportedColumnWidth(width) ? Math.round(width[0] as number) : null;
+  });
+}
+
+export function validateColumnWidths(widths: unknown, columnCount: number): asserts widths is Array<number | null> {
+  if (!Array.isArray(widths) || widths.length !== columnCount) {
+    throw new InvalidColumnWidthsError("column_widths must have one entry per requested column");
+  }
+  if (Array.from(widths).some((width) => width !== null && (typeof width !== "number" || !Number.isInteger(width) || width <= 0))) {
+    throw new InvalidColumnWidthsError("each width must be a positive whole number or null");
+  }
+}
+
+/** A resize writes every cell, including body rows the renderer does not read. */
+export function writeTableColumnWidths(element: Y.XmlElement, widths: Array<number | null>): void {
+  for (const row of tableRows(element)) {
+    for (const [column, cell] of row.entries()) {
+      const width = widths[column];
+      if (width === null) cell.removeAttribute("colwidth");
+      else (cell as unknown as { setAttribute(name: string, value: unknown): void }).setAttribute("colwidth", [width]);
+    }
+  }
+}
+
 /** Bindable cell grammar. Rectangularity is deliberately not a read invariant. */
 export function isSupportedTable(element: Y.XmlElement): boolean {
   if (element.nodeName !== "table" || element.length === 0) return false;
@@ -246,8 +275,15 @@ function tableMapping(oldValues: string[][], newValues: string[][], supplied: Ta
  * Compare parsed cells so unchanged whitespace and marks survive.
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Validation must precede the first write because Yjs transactions do not roll back; checks and writes share one row and column mapping.
-export function editTable(element: Y.XmlElement, oldTable: GfmTable, newTable: GfmTable, mapping?: TableMapping): void {
+export function editTable(element: Y.XmlElement, oldTable: GfmTable, newTable: GfmTable, mapping?: TableMapping, columnWidths?: Array<number | null>): void {
   if (!isSupportedTable(element)) throw new InvalidTableError();
+  if (columnWidths !== undefined) {
+    validateColumnWidths(columnWidths, newTable.header.length);
+    const storedWidths = tableRows(element).map((row) => row.length);
+    if (storedWidths.some((width) => width !== storedWidths[0])) {
+      throw new InvalidColumnWidthsError("column_widths requires a table whose stored rows have equal lengths");
+    }
+  }
   const oldValues = [oldTable.header, ...oldTable.rows];
   const newValues = [newTable.header, ...newTable.rows];
   const { rows: rowMap, columns: columnMap } = tableMapping(oldValues, newValues, mapping);
@@ -317,6 +353,7 @@ export function editTable(element: Y.XmlElement, oldTable: GfmTable, newTable: G
     // leave the remaining padding virtual.
     if (actualColumn === 0) rowElement.insert(0, [buildTableCell("", row === 0)]);
   }
+  if (columnWidths !== undefined) writeTableColumnWidths(element, columnWidths);
 }
 
 function alignOf(delimiter: string): ColumnAlign {

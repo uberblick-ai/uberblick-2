@@ -125,6 +125,8 @@ export interface Block {
   variant?: CalloutVariant;
   /** Callouts only: a valid stored override of the variant's default icon. */
   icon?: string;
+  /** Tables only: whole CSS pixels from the header row, or null when unsized. */
+  columnWidths?: Array<number | null>;
   /** Figma blocks only: read-only view identity derived from the stored link. */
   figma?: FigmaFields;
 }
@@ -146,6 +148,8 @@ export interface BlockInput {
   variant?: CalloutVariant;
   /** Callouts only: one emoji or a curated :name: icon. Ignored for other types. */
   icon?: string;
+  /** Tables only: one positive whole CSS-pixel width or null per column. */
+  columnWidths?: Array<number | null>;
   /**
    * Overrides text for prose only; callers setting both must keep them consistent.
    * Source blocks ignore it. Tables, cards and Figma blocks use Markdown from text instead.

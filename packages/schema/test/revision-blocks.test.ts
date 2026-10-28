@@ -182,7 +182,8 @@ describe("revision table comparison", () => {
     });
     expect(compareTables(before, first(doc)).fields).toEqual([]);
     const withRow = first(doc);
-    width(tableRows(element)[0]![0]!, 250);
+    const text = getBlock(doc, id)!.text;
+    editBlock(doc, id, text, text, { columnWidths: [250, null] });
     const resized = first(doc);
     expect(resized.key).not.toBe(withRow.key);
     expect(compareTables(withRow, resized).fields).toEqual(["columnWidths"]);
@@ -195,9 +196,8 @@ describe("revision table comparison", () => {
     width(tableRows(element)[0]![0]!, 200);
     const before = first(doc);
     editBlock(doc, id, getBlock(doc, id)!.text, writeGfmTable(CELLS.map((row) => [row[0]!, "extra", row[1]!])), {
-      tableMapping: { rows: [0, 1, 2], columns: [0, null, 1] },
+      tableMapping: { rows: [0, 1, 2], columns: [0, null, 1] }, columnWidths: [250, null, null],
     });
-    width(tableRows(element)[0]![0]!, 250);
     expect(compareTables(before, first(doc))).toEqual({ fields: ["columns", "columnWidths"], rows: [] });
     doc.destroy();
   });

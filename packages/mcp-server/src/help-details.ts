@@ -150,7 +150,7 @@ export const toolHelpDetails = {
     "## What comes back\n" +
     "\n" +
     "- Metadata: `title`, `description` and `tldr` (null when unwritten), `tags`, `links` and, when known, `createdAt`: the creation time as an ISO 8601 UTC string on the creating replica's clock, such as `2026-10-21T18:36:13.213Z`. It is omitted when unknown or outside the supported date range. A regular page whose TL;DR a person removed on purpose returns `tldrOptOut: true`; set_metadata explains opting back in.\n" +
-    "- Blocks with `id`, `type`, `text` and `rev`. Prose `text` is plain. A formatted paragraph, heading, list item, quote or callout also carries `inline`: equally marked runs, each with `text` and `marks`, covering the whole text in order. Marks are `bold`, `italic`, `strike`, `inlineCode`, `link` and `docLink`; unmarked runs carry `marks: {}`. The runs use insert_block's input shape and can be passed back unchanged, subject to its normal validation of document-link targets. Plain prose and non-prose blocks omit `inline`. get_revision returns the same formatting runs for historical prose, without block edit revs. Tables return GFM, and cards and embeds return their container content; see markdown. Prose that links other documents still carries `doc_links` ranges.\n" +
+    "- Blocks with `id`, `type`, `text` and `rev`. Prose `text` is plain. A formatted paragraph, heading, list item, quote or callout also carries `inline`: equally marked runs, each with `text` and `marks`, covering the whole text in order. Marks are `bold`, `italic`, `strike`, `inlineCode`, `link` and `docLink`; unmarked runs carry `marks: {}`. The runs use insert_block's input shape and can be passed back unchanged, subject to its normal validation of document-link targets. Plain prose and non-prose blocks omit `inline`. get_revision returns the same formatting runs for historical prose, without block edit revs. Tables return GFM and `column_widths`: one entry per column rounded to whole CSS pixels, or null for an unsized column. Widths stay outside block and page `rev`; historical reads omit them. Cards and embeds return their container content; see markdown. Prose that links other documents still carries `doc_links` ranges.\n" +
     "- Comment threads with their anchors, for annotate to reply to, resolve or move. Thread comments returned by get_doc and annotate may include `account`, the writing client's GitHub username, and `agent`, either `claude` or `codex`. These optional fields are display hints, not verified authorship. Stored principal identity and person/agent kind are not returned.\n" +
     "- `code_check` on regular pages: the latest comparison per repository, or [] when never checked.\n" +
     "- Decision context: a regular page lists the topics it owns (related) and the topics that link to it (linked), one list_docs topic row each that names the topic's records by UUID in `inForce`, `pending` and `conflicts`. A decision record returns its status, related pages in `related` (omitted when it has none), discussion, predecessors, successors and `resolution`: its topic's `inForce`, `pending` and `conflicts` as record UUIDs, plus `archived`. Predecessor and successor entries carry `createdAt` and `updatedAt`, topic rows `updatedAt`, when known, as ISO 8601 UTC strings; timestamps outside the supported date range are omitted. It is context, not permission to act; see decisions.\n" +
@@ -412,7 +412,13 @@ export const toolHelpDetails = {
     "`10s timeout` keeps `s timeout` anchored. The check also covers table cells, rows/columns removed by " +
     "`table_mapping`, card parts and Figma captions. It sees this replica's state, so concurrent peer edits " +
     "can still remove a remaining anchor.\n\n" +
-    "`old_text` and `new_text` are the block text get_doc returns. For a table this is GFM: each must be " +
+    "`old_text` and `new_text` are the block text get_doc returns. For a table this is GFM. " +
+    "Optional `column_widths` sets one positive whole CSS pixel value or null per column of `new_text`; " +
+    "null clears that width and omission keeps retained columns' widths, with new columns unsized. " +
+    "Repeat `old_text` as `new_text` to change only widths, keeping cell text, formatting, comments and block/page rev. " +
+    "Widths can accompany a cell or `table_mapping` edit in the same write. Invalid widths, unequal stored row lengths " +
+    "or widths on another block type refuse with `invalid_column_widths` before writing. See markdown for sizing guidance. " +
+    "Each GFM text must be " +
     "exactly one table, or `invalid_table` refuses the write. Alignment markers are accepted but not stored; " +
     "inline markdown writes cell formatting and escaped punctuation stays literal. Newly added cell document " +
     "targets must be known to this replica's directory or `doclink_target_not_known_locally` refuses before " +
@@ -488,7 +494,7 @@ export const toolHelpDetails = {
     "reported or reapplied.",
   insert_block:
     "Insert the ordered, nonempty `blocks` array consecutively after `after_block_id`, or at the top " +
-    "when it is omitted. Each entry has the same shape as a `create_doc` seed; a single block uses a " +
+    "when it is omitted. Each entry has the shape of a `create_doc` seed plus optional table `column_widths`; a single block uses a " +
     "one-entry array. The answer's `blocks` lists the inserted blocks in order, each with id and rev. " +
     "Each chart entry also has a `chart` summary of the web's projection of this replica's current data: " +
     "status, counts and warnings, plus first and last x for ready line mappings. Bound scatter mappings report " +
@@ -509,8 +515,11 @@ export const toolHelpDetails = {
     "`bullet`), and `indent` is an integer 0–3 (default 0); both apply only to list-item blocks. " +
     "For example, `list: \"ordered\", indent: 2` creates a nested numbered item. Invalid values refuse " +
     "before writing. Depth need not follow the preceding item's depth. " +
-    "A table's `text` must be exactly one GFM table, or `invalid_table` refuses the write; its rows and cells " +
-    "are stored structurally. Alignment markers are accepted but not stored. Inline markdown stores cell " +
+    "A table's `text` must be exactly one GFM table, or `invalid_table` refuses the write. " +
+    "Size it immediately with `column_widths`: one positive whole CSS pixel value or null per column. " +
+    "Null means unsized; omission creates all columns unsized. Invalid widths or widths on a non-table entry refuse " +
+    "with `invalid_column_widths` and `entry_index`, writing nothing. See markdown for sizing guidance. " +
+    "Rows and cells are stored structurally. Alignment markers are accepted but not stored. Inline markdown stores cell " +
     "formatting and escaped punctuation stays literal. Document-link targets must be known to this replica's " +
     "directory, otherwise `doclink_target_not_known_locally` refuses before any write. A card's text is the " +
     "content between lines exactly :::card and :::. Header keys are lowercase label, title, footer and button " +

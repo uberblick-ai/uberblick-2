@@ -119,6 +119,7 @@ const EXPECTED: Record<
     detail: ["collection", "recordId", "limit", "value", "attempted"],
   },
   invalid_table: { recoveryClass: "manual", detail: [] },
+  invalid_column_widths: { recoveryClass: "manual", detail: [] },
   invalid_tag_name: { recoveryClass: "manual", detail: [] },
   invalid_tag_description: { recoveryClass: "manual", detail: [] },
   invalid_tag_identity: { recoveryClass: "reread", detail: ["id"] },
@@ -291,6 +292,9 @@ describe("the failure contract", () => {
 
     record((await rig.call("edit_block", {
       uuid: doc.uuid, block_id: doc.blockId, old_text: "one", new_text: "two", list: "ordered",
+    })).payload);
+    record((await rig.call("edit_block", {
+      uuid: doc.uuid, block_id: doc.blockId, old_text: "one", new_text: "two", column_widths: [120],
     })).payload);
 
     record((await rig.call("get_doc", { uuid: randomUUID() })).payload);

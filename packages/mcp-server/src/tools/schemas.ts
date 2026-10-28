@@ -88,15 +88,12 @@ export const documentStatusArg = z
   .describe("The recorded lifecycle state. Its kind owns the legal values.");
 
 const INLINE_RUNS =
-  "Formatted content for a PROSE block (paragraph, heading, list-item, quote, callout), as runs of equally-marked text: " +
-  "`[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) " +
-  "and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the " +
-  "run texts joined together are the block's text. Code, terminal and chart hold source text and ignore it; " +
-  "tables, cards and figma also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card/:::figma and :::.\n\n" +
-  "A `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", " +
-  "marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this " +
-  "replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes " +
-  "nothing; an archived target is fine.";
+  "Prose (paragraph, heading, list-item, quote, callout) runs `[{text, marks}]`: marks are bold, italic, strike, " +
+  "inlineCode, link (external http(s) URL) or docLink (document UUID). Replaces `text` with joined run texts. " +
+  "Code, terminal and chart ignore it and use literal `text`; tables, cards and figma ignore it and parse inline " +
+  "Markdown from `text` (one GFM table or content inside :::card/:::figma). Empty docLink text takes the target's " +
+  "current title. A target unknown to this replica's directory refuses with doclink_target_not_known_locally " +
+  "before writing; archived targets are accepted.";
 
 /**
  * Canonicalize through the model before lookups and writes: case-sensitive
@@ -145,14 +142,18 @@ export const inlineArg = z
 export const listStyleArg = z.enum(LIST_STYLES);
 export const listIndentArg = z.number().int().min(0).max(MAX_LIST_INDENT);
 
+// Preserve malformed values for the shared validator and its named refusal.
+export const columnWidthsArg = z.unknown().meta({
+  type: "array",
+  items: { anyOf: [{ type: "integer", exclusiveMinimum: 0 }, { type: "null" }] },
+}).optional().describe("Tables only: one positive whole CSS-pixel width or null per new column. Null clears; omission keeps widths. Sizing guidance: markdown help.");
+
 export const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
   text: z.string().optional().describe(
-    "Block text. Prose blocks take plain text; use `inline` for formatting. Code, terminal and chart take " +
-      "literal source. A table takes exactly one GFM table with inline Markdown in its cells. A card or figma " +
-      "block takes the content between its opening `:::card` or `:::figma` line and the closing `:::`; " +
-      "markdown help gives their keys, buttons and accepted links, and invalid content refuses with " +
-      "invalid_card or invalid_figma before writing.",
+    "Plain prose (`inline` supplies formatting), literal code/terminal/chart source, exactly one GFM table, " +
+      "or card/figma content without ::: delimiters. See markdown help for cell formatting, container keys, " +
+      "buttons and links. Invalid content refuses with invalid_table, invalid_card or invalid_figma before writing.",
   ),
   level: z
     .number()
@@ -172,5 +173,6 @@ export const blockShape = {
   inline: inlineArg,
 };
 
-// Document seeds and inserted entries share the same strict shape.
+// Seed blocks deliberately omit column widths; size them with edit_block later.
 export const blockInputSchema = z.object(blockShape).strict();
+export const insertedBlockInputSchema = z.object({ ...blockShape, column_widths: columnWidthsArg }).strict();

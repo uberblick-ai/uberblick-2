@@ -390,7 +390,7 @@ describe("historical reads through the MCP boundary", () => {
     const captured = snapshotRevision(document);
     const snapshot = captured.state;
     const checksum = createHash("sha256").update(captured.checksum).digest("hex");
-    const expectedBlocks = earlier.blocks.map(({ rev: _rev, ...block }: Record<string, unknown>) => block);
+    const expectedBlocks = earlier.blocks.map(({ rev: _rev, column_widths: _widths, ...block }: Record<string, unknown>) => block);
     await rig.ok("set_metadata", { uuid, title: "Live title" });
     await rig.ok("edit_block", { uuid, block_id: earlier.blocks[0].id, old_text: earlier.blocks[0].text,
       new_text: "Live content", rev: earlier.blocks[0].rev });

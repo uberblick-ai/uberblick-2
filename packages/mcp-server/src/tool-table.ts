@@ -201,7 +201,7 @@ export const tools: readonly Tool[] = [
     name: "get_doc",
     title: "Read a document",
     description:
-      "Read live metadata, blocks with edit-assertion rev hashes, comment threads and decision context. " +
+      "Read live metadata, blocks with edit-assertion rev hashes, table column_widths, comment threads and decision context. " +
       "Creation time createdAt and decision entries' createdAt/updatedAt are ISO 8601 UTC strings when known and representable. " +
       "Data lists collections/counts; use get_data for records. Use get_revision for a historical state.",
     input: getDocInput,
@@ -400,7 +400,7 @@ export const tools: readonly Tool[] = [
       "formatting mark's edge can re-anchor the mark, so check formatted text with export_markdown " +
       "afterwards. An edit that would remove an open thread's last anchor refuses with " +
       "open_thread_anchored; resolve the thread or move its anchor with annotate first. Tables take GFM and " +
-      "need `table_mapping` for structural or multi-cell edits. Card and Figma blocks take their `:::` " +
+      "need `table_mapping` for structural or multi-cell edits; `column_widths` sizes columns (see markdown help). Card and Figma blocks take their `:::` " +
       "content and cannot be converted to or from other types. New document-link targets must be known to " +
       "this replica.",
     input: editBlockInput,
@@ -430,7 +430,7 @@ export const tools: readonly Tool[] = [
       "and moves the cursor once, to the end of the last inserted block's stored text. Lists use " +
       "adjacent list-item entries with list/indent (default bullet/0). Container syntax lives in " +
       "each entry's text field. Document-link targets must be known locally; chart source stays literal. " +
-      "For links and GitHub references, see markdown.",
+      "Tables accept column_widths for immediate sizing. For column sizing, links and GitHub references, see markdown.",
     input: insertBlockInput,
     operation: insertBlockOperation,
     // Adds blocks; repeating adds another batch.

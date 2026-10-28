@@ -95,6 +95,10 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Supply exactly one GFM table, with a header and matching delimiter row, then call again. Alignment markers are accepted but not stored; inline markdown writes cell formatting and escaped punctuation stays literal.",
   },
+  invalid_column_widths: {
+    recoveryClass: "manual",
+    guidance: "Supply column_widths only on an ordinary table with equal stored row lengths: one positive whole CSS pixel value or null per column of new_text. Null clears a width; omit the list to retain widths. See markdown help for sizing guidance. Nothing was written.",
+  },
   invalid_card: {
     recoveryClass: "manual",
     guidance: "Supply card content without its :::card and ::: delimiter lines: label, title and footer at most once, a nonempty title, any number of button lines, then a blank line and optional prose body. Each button contains exactly one [Text](destination) link, with nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, optionally followed by ?query. After its link, allow at most one style (outline or filled) and one color (neutral, blue, green or violet), in either order; defaults are outline neutral. Remove other trailing text, unknown keys and non-key header lines. Nothing was written.",

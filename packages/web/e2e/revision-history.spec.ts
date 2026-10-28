@@ -3,7 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
-import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, initDoc, insertBlock, setKind, setStatus, setTitle, snapshotRevision, tableRows } from "@uberblick/schema";
+import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, initDoc, insertBlock, setKind, setStatus, setTitle, snapshotRevision } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import { activateControl, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
@@ -199,15 +199,9 @@ function tableWidthHistory(uuid: string, title: string): Record<string, string> 
     const mixed = appendBlock(document, { type: "table", text: "| Stage | Duration |\n| --- | --- |\n| Build | 10 |" });
     appendBlock(document, { type: "paragraph", text: "The closing context stays." });
     const widths = (id: string, values: number[]): void => {
-      const table = getBlocksFragment(document).toArray().find(node => node instanceof Y.XmlElement && node.getAttribute("id") === id);
-      if (!(table instanceof Y.XmlElement)) throw new Error("The width comparison fixture table is missing");
-      for (const row of tableRows(table)) {
-        for (const [column, width] of values.entries()) {
-          const cell = row[column];
-          if (cell === undefined) throw new Error("The width comparison fixture cell is missing");
-          (cell as unknown as { setAttribute(name: string, value: unknown): void }).setAttribute("colwidth", [width]);
-        }
-      }
+      const source = getBlock(document, id)?.text;
+      if (source === undefined) throw new Error("The width comparison fixture table is missing");
+      editBlock(document, id, source, source, { columnWidths: values });
     };
     widths(only, [160, 180]);
     widths(mixed, [160, 180]);
