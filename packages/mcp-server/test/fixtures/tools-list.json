@@ -213,7 +213,8 @@
                   "terminal",
                   "chart",
                   "card",
-                  "figma"
+                  "figma",
+                  "divider"
                 ]
               },
               "text": {
@@ -974,7 +975,8 @@
                   "terminal",
                   "chart",
                   "card",
-                  "figma"
+                  "figma",
+                  "divider"
                 ]
               },
               "text": {

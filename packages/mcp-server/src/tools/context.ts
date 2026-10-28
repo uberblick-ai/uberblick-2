@@ -389,6 +389,9 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
     block: z.infer<typeof blockInputSchema>,
   ): BlockInput => {
     // A bad later seed must not leave earlier blocks or metadata behind.
+    if (block.type === "divider" && ((block.text ?? "") !== "" || (block.inline?.length ?? 0) > 0)) {
+      throw new ToolError("invalid_divider", "A divider has no text or inline content.");
+    }
     if (block.type === "callout") {
       if (block.variant !== undefined && !isCalloutVariant(block.variant)) {
         throw new InvalidCalloutError("variant must be note, tip, important, warning or caution");

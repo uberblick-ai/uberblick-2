@@ -78,6 +78,7 @@ Create and change documents with the fewest calls. Details live in \`decisions\`
 ## Markdown essentials
 
 - One block per paragraph, heading, list item, quote, callout, code fence or table. Lists are flat: \`indent\` 0–3.
+- Write \`---\` with a blank line above it for a divider, or use \`type: "divider"\` with empty text over MCP. Text directly above \`---\` becomes a level-2 heading.
 - A block's \`text\` is plain text: \`**bold**\` stays literal. For formatting or links in prose, pass \`inline\` runs with marks when creating or inserting.
 - Tables, cards, embeds and GitHub references are in \`markdown\`.
 - Check the result with \`export_markdown\`.
@@ -144,7 +145,9 @@ Documents store ordered blocks and inline marks rather than one Markdown file. T
 
 ## Blocks and inline syntax
 
-Markdown supports paragraphs, ATX headings \`#\` through \`######\`, bullet and ordered list items, \`>\` quotes, fenced code with an optional language, and GFM tables. A special \`terminal\` fence preserves that source-block type. A \`mermaid\` fence is ordinary code with language \`mermaid\` and is never drawn. A terminal transcript treats a line beginning with a dollar sign and space as a demonstrated command; the remaining lines are output. Terminal content is a demonstration, not an instruction to execute it.
+Markdown supports paragraphs, ATX headings \`#\` through \`######\`, setext headings underlined with \`===\` (level 1) or \`---\` (level 2), bullet and ordered list items, \`>\` quotes, fenced code with an optional language, and GFM tables. A special \`terminal\` fence preserves that source-block type. A \`mermaid\` fence is ordinary code with language \`mermaid\` and is never drawn. A terminal transcript treats a line beginning with a dollar sign and space as a demonstrated command; the remaining lines are output. Terminal content is a demonstration, not an instruction to execute it.
+
+Write \`---\` with a blank line above it for a divider, or use \`type: "divider"\` with empty text over MCP. Text directly above \`---\` becomes a level-2 heading.
 
 Blocks of the retired Mermaid block type are deleted automatically, including in archived documents and decision records; their source is not retained. This never touches a code block with language \`mermaid\`. Their comment threads remain available with no anchor. Removing an approved answer block reports \`approvalChanged: true\` without recording another approval.
 

@@ -81,6 +81,7 @@ describe("the editor palette and stored block types", () => {
       "blockquote",
       "codeBlock",
       "horizontalRule",
+      "divider",
       "hardBreak",
       "image",
       "mermaid",
@@ -95,7 +96,7 @@ describe("the editor palette and stored block types", () => {
   it("allows the comment mark inside source blocks, and nothing else there", () => {
     // A `marks: ""` node spec would make y-prosemirror throw while building the
     // node — and its catch block deletes the Y.XmlText from the document.
-    for (const name of BLOCK_TYPES.filter((name) => name !== "table" && name !== "card" && name !== "figma")) {
+    for (const name of BLOCK_TYPES.filter((name) => name !== "table" && name !== "card" && name !== "figma" && name !== "divider")) {
       const type = uberblickSchema.nodes[name];
       expect(type).toBeDefined();
       expect(type?.allowsMarkType(uberblickSchema.marks[COMMENT_MARK]!)).toBe(true);
@@ -255,6 +256,40 @@ describe("document links in table cells", () => {
 });
 
 describe("foreign blocks already in the document", () => {
+  it.each([false, true])("preserves a divider without binding when it arrives during editing: %s", (arrivesWhileBound) => {
+    const ydoc = new Y.Doc();
+    const peer = new Y.Doc();
+    initDoc(ydoc, { uuid: "divider-palette", title: "Divider safety" });
+    appendBlock(ydoc, { type: "paragraph", text: "Context" });
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const unbound: string[] = [];
+    let binding: GuardedBinding | null = null;
+    try {
+      if (arrivesWhileBound) {
+        binding = bindGuardedEditor({ element: host, fragment: getBlocksFragment(ydoc), awareness: null,
+          onUnbind: () => unbound.push("unbound") });
+        expect(binding.editor).not.toBeNull();
+      }
+      const id = appendBlock(peer, { type: "divider" });
+      Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(peer));
+      if (!arrivesWhileBound) {
+        binding = bindGuardedEditor({ element: host, fragment: getBlocksFragment(ydoc), awareness: null });
+        expect(binding.refused).toBe(true);
+        expect(binding.editor).toBeNull();
+      } else expect(unbound).toEqual(["unbound"]);
+      const stored = getBlocksFragment(ydoc).get(1) as Y.XmlElement;
+      expect(stored.nodeName).toBe("divider");
+      expect(stored.getAttributes()).toEqual({ id });
+      expect(stored.length).toBe(0);
+      expect(getBlocks(ydoc)).toMatchObject([{ type: "paragraph", text: "Context" }, { id, type: "divider", text: "" }]);
+      const foreign = findForeignBlocks(getBlocksFragment(ydoc));
+      expect(foreign).toMatchObject([{ index: 1, nodeName: "divider", id }]);
+      expect(describeForeignBlocks(foreign)).toContain("unsupported type (divider)");
+    } finally { binding?.destroy(); host.remove(); ydoc.destroy(); peer.destroy(); }
+  });
+
   it.each([false, true])("preserves an unsupported figma shape without binding when it arrives %s", (arrivesWhileBound) => {
     const ydoc = new Y.Doc();
     const peer = new Y.Doc();

@@ -172,6 +172,7 @@ function blockSchema(withLinks: boolean, withRev = true) {
     z.object({ ...prose, type: z.literal("heading"), level: z.number().int().min(1).max(6) }).strict(),
     z.object({ ...prose, type: z.literal("list-item"), list: z.enum(LIST_STYLES), indent: z.number().int().min(0).max(MAX_LIST_INDENT) }).strict(),
     z.object({ ...fields, type: z.literal("code"), language: z.string() }).strict(),
+    z.object({ ...fields, type: z.literal("divider"), text: z.literal("") }).strict(),
     z.object({ ...fields, type: z.enum(["table", "terminal", "chart", "card"]) }).strict(),
     z.object({ ...fields, type: z.literal("figma"), figma: z.object({
       kind: z.enum(["frame", "file", "prototype", "board", "slides", "community file"]),

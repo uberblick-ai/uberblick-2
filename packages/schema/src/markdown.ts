@@ -503,6 +503,19 @@ export function renderInline(source: readonly InlineRun[], table = false): strin
  */
 const LIST_INDENT_UNIT = "    ";
 
+const THEMATIC_BREAK_LINE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+const SETEXT_LINE = /^ {0,3}(=+|-+)[ \t]*$/;
+
+/** Escape only syntax introduced by block-level parsing; inline marks stay intact. */
+function escapeParagraphLines(text: string): string {
+  const lines = text.split("\n");
+  return lines.map((line, index) => {
+    const thematic = THEMATIC_BREAK_LINE.test(line);
+    const setext = index > 0 && lines[index - 1]?.trim() !== "" && SETEXT_LINE.test(line);
+    return thematic || setext ? line.replace(/[-=]/, (char) => `\\${char}`) : line;
+  }).join("\n");
+}
+
 /**
  * Use listNumbers so export and editor display agree on ordered markers.
  */
@@ -541,7 +554,7 @@ function renderBlock(
     case "list-item": {
       // Flat items cannot represent continuation blocks; fold to one line.
       const text = renderInline(inline).replace(/\s*\n\s*/g, " ").trim();
-      return `${marker}${text}`.trimEnd();
+      return `${marker}${THEMATIC_BREAK_LINE.test(`${marker}${text}`) ? `\\${text}` : text}`.trimEnd();
     }
     case "quote":
       // Every line marked, so a multi-line quote comes back as one block.
@@ -563,8 +576,10 @@ function renderBlock(
       return `:::card\n${block.text}\n:::`;
     case "figma":
       return `:::figma\n${block.text}\n:::`;
+    case "divider":
+      return "---";
     case "paragraph":
-      return escapeContainerLines(renderInline(inline));
+      return escapeParagraphLines(escapeContainerLines(renderInline(inline)));
   }
 }
 
@@ -608,9 +623,9 @@ export function exportMarkdown(
   const annotationMode = options.annotations ?? "drop";
 
   // Annotation sections inside items must also keep the list's tight spacing.
-  const sections: Array<{ text: string; listItem: boolean }> = [];
-  const push = (text: string, listItem = false): void => {
-    sections.push({ text, listItem });
+  const sections: Array<{ text: string; listItem: boolean; divider: boolean }> = [];
+  const push = (text: string, listItem = false, divider = false): void => {
+    sections.push({ text, listItem, divider });
   };
 
   if (withFrontmatter) {
@@ -685,6 +700,7 @@ export function exportMarkdown(
         marker,
       ),
       listItem,
+      block.type === "divider",
     );
     const comments = annotationsByBlock.get(block.id);
     if (comments === undefined) continue;
@@ -713,7 +729,7 @@ export function exportMarkdown(
   }
 
   if (sections.length === 0) return "";
-  let out = "";
+  let out = sections[0]?.divider === true ? "\n" : "";
   for (let i = 0; i < sections.length; i += 1) {
     const section = sections[i];
     if (section === undefined) continue;
@@ -722,7 +738,7 @@ export function exportMarkdown(
     }
     out += section.text;
   }
-  return `${out}\n`;
+  return `${out}${sections.at(-1)?.divider === true ? "\n\n" : "\n"}`;
 }
 
 export interface ImportedBlock {
@@ -826,6 +842,8 @@ function parseListValue(
   return { list: scalar === "" ? [] : [scalar], last: index };
 }
 
+const FRONTMATTER_KEY_LINE = /^([A-Za-z_][\w-]*)\s*:\s*(.*)$/;
+
 function parseFrontmatter(lines: string[]): Frontmatter {
   if (lines[0]?.trim() !== "---") return { bodyStart: 0 };
   let end = -1;
@@ -835,12 +853,20 @@ function parseFrontmatter(lines: string[]): Frontmatter {
       break;
     }
   }
-  if (end === -1) return { bodyStart: 0 };
+  if (
+    end === -1 ||
+    !FRONTMATTER_KEY_LINE.test(lines[1] ?? "") ||
+    lines.slice(1, end).some((line) =>
+      line.trim() !== "" &&
+      !FRONTMATTER_KEY_LINE.test(line) &&
+      !/^[ \t]*-[ \t]+/.test(line)
+    )
+  ) return { bodyStart: 0 };
 
   const result: Frontmatter = { bodyStart: end + 1 };
   for (let i = 1; i < end; i += 1) {
     const line = lines[i] ?? "";
-    const match = /^([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(line);
+    const match = FRONTMATTER_KEY_LINE.exec(line);
     if (match === null) continue;
     const key = match[1];
     const value = match[2] ?? "";
@@ -1077,7 +1103,7 @@ function tokenizeInline(source: string, marks: InlineMarkSet, table = false): To
 
     if (char === "\\") {
       const next = source[i + 1];
-      if (next !== undefined && ("\\`*_~[]:<".includes(next) || (table && ">&!".includes(next)))) {
+      if (next !== undefined && ("\\`*_~[]:<-=".includes(next) || (table && ">&!".includes(next)))) {
         plain += next;
         i += 2;
         continue;
@@ -1384,6 +1410,7 @@ function startsBlock(line: string): boolean {
   const trimmed = line.trim();
   return (
     QUOTE_LINE.test(line) ||
+    THEMATIC_BREAK_LINE.test(line) ||
     LIST_LINE.test(line) ||
     HEADING_LINE.test(trimmed) ||
     FENCE_LINE.test(trimmed) ||
@@ -1510,6 +1537,26 @@ export function importMarkdown(markdown: string): ImportedDoc {
       }
       i = j - 1;
       blocks.push({ type: "table", text: table.join("\n") });
+      continue;
+    }
+
+    const setext = SETEXT_LINE.exec(line);
+    if (paragraph.length > 0 && setext !== null) {
+      const source = paragraph.map((part) => part.trim()).join(" ");
+      paragraph = [];
+      flush();
+      blocks.push({
+        ...proseBlock("heading", source),
+        level: setext[1]?.startsWith("=") === true ? 1 : 2,
+      });
+      openItems = [];
+      continue;
+    }
+
+    if (THEMATIC_BREAK_LINE.test(line)) {
+      flush();
+      openItems = [];
+      blocks.push({ type: "divider", text: "" });
       continue;
     }
 

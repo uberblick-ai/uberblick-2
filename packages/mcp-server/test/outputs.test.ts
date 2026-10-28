@@ -58,6 +58,33 @@ afterEach(async () => {
 afterAll(removeTempDirs);
 
 describe("successful MCP output contracts", () => {
+  it("delivers empty dividers in current and historical reads through the schema-aware client", async () => {
+    const rig = await startServer();
+    close.push(() => rig.close());
+    const created = await rig.ok("create_doc", { title: "Separated page", description: "Read a divider.",
+      blocks: [{ type: "divider" }] });
+    const document = rig.instance.replicas.replica(created.uuid).doc;
+    vi.spyOn(revisionClient, "readDocumentRevision").mockImplementation(async () => {
+      const snapshot = new Y.Doc();
+      Y.applyUpdate(snapshot, Y.encodeStateAsUpdate(document));
+      return { doc: snapshot, history };
+    });
+    for (const name of ["get_doc", "get_revision"]) {
+      const result = await rig.client.callTool({ name, arguments: { uuid: created.uuid,
+        ...(name === "get_revision" ? { revision: "divider-revision" } : {}) } }) as CallToolResult;
+      expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+      const payload = textPayload(result);
+      expect(result.structuredContent).toEqual(payload);
+      expect(payload.blocks).toEqual([{ id: created.blocks[0].id, type: "divider", text: "",
+        ...(name === "get_doc" ? { rev: created.blocks[0].rev } : {}) }]);
+    }
+    const exported = await rig.client.callTool({ name: "export_markdown",
+      arguments: { uuid: created.uuid, frontmatter: false } }) as CallToolResult;
+    expect(exported.isError, JSON.stringify(exported.content)).not.toBe(true);
+    expect(exported.structuredContent).toEqual(textPayload(exported));
+    expect(textPayload(exported).markdown).toBe("\n---\n\n");
+  });
+
   it("delivers chart seed, batch and edit summaries through the schema-aware SDK client", async () => {
     const rig = await startServer();
     close.push(() => rig.close());

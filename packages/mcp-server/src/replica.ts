@@ -762,7 +762,7 @@ export class Replicas {
               });
             })
             : [],
-        body: blocks.map(({ block }) => block.text).join("\n"),
+        body: blocks.filter(({ block }) => block.type !== "divider").map(({ block }) => block.text).join("\n"),
       },
       replica.indexedThroughSeq,
       this.settings().indexedThroughSeq,
