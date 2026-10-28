@@ -1256,14 +1256,14 @@ test.describe("document history through ub open", () => {
     await expect(restore).toBeDisabled();
     await expect(restore).toHaveAccessibleDescription("This is the current version.");
     const drawer = await showHistoryList(page);
-    const count = await historyList(page).getByRole("listitem").count();
+    const revisionCaption = await historyList(page).getByText(/ · \d+ revisions?$/).innerText();
     await activateControl(historyList(page).getByRole("button", { name: /Baseline to restore/ }));
     await closeHistoryList(page, drawer);
     await expect(restore).toBeEnabled();
     await activateControl(restore);
     await expect(page.getByText("The document already has this version. Nothing changed.", { exact: true })).toBeVisible();
     const noOpDrawer = await showHistoryList(page);
-    await expect(historyList(page).getByRole("listitem")).toHaveCount(count);
+    await expect(historyList(page).getByText(/ · \d+ revisions?$/)).toHaveText(revisionCaption);
     await closeHistoryList(page, noOpDrawer);
     // This shared comparison still names its original After, even after the restore added a newer revision.
     await page.goto(new URL(fixedComparison, harness().appUrl).href);
