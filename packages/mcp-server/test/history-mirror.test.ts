@@ -160,6 +160,37 @@ it("coalesces notices and revalidates an unchanged catalog with one conditional 
   expect(test.cache.putVerifiedSnapshot).toHaveBeenCalledTimes(1);
 });
 
+it("evicts only the triggered page while edits and notices arrive, including while live sync is busy", async () => {
+  const test = fixture([page("live"), page("other")]);
+  test.cache.seed("archived", [revision("closed")]);
+  test.cache.seed("orphan", [revision("closed")]);
+  test.start();
+  await flush();
+  test.cache.listPages.mockClear();
+  test.cache.evict.mockClear();
+  test.calls.length = 0;
+  test.state.ready = false;
+  test.state.pages = [{ ...page("live"), sequence: 2 }, page("other")];
+  test.mirror.refresh();
+  test.mirror.notice("workspace/live");
+  await flush();
+  expect(test.calls).toEqual([]);
+  expect(test.cache.listPages).not.toHaveBeenCalled();
+  expect(test.cache.evict).not.toHaveBeenCalled();
+  test.state.ready = true;
+  test.mirror.refresh();
+  await flush();
+  for (let count = 0; count < 3; count++) {
+    test.state.pages = [{ ...page("live"), sequence: 3 + count }, test.state.pages[1]!];
+    test.mirror.refresh();
+    test.mirror.notice("workspace/live");
+    await flush();
+  }
+  expect(operations(test.calls)).toEqual(Array(4).fill("workspace/live:list"));
+  expect(test.cache.listPages).not.toHaveBeenCalled();
+  expect(test.cache.evict.mock.calls.map(call => call[0])).toEqual(Array(4).fill("live"));
+});
+
 it("waits behind live sync and permits only one request or download at a time", async () => {
   const test = fixture([page("a"), page("b")]);
   const firstDownload = deferredReply();
@@ -246,18 +277,103 @@ it("does not repeatedly poll a deadline that the hub still reports open", async 
   expect(vi.getTimerCount()).toBe(0);
 });
 
-it("revalidates and retries a checksum mismatch once, then stops a persistent mismatch", async () => {
+it("retries a persistent checksum mismatch once across edits, notices and deadlines while filling other snapshots", async () => {
   const test = fixture();
+  const deadline = Date.now() + 100;
+  test.state.reply = async (_room, operation) => operation.operation === "list"
+    ? listed([revision("head", { final: false, endedAt: null, deadlineAt: deadline }), revision("closed"), revision("other")])
+    : downloaded(operation.revisionId ?? "");
   test.cache.verification.push(false, false);
   test.start();
   await flush();
   expect(operations(test.calls)).toEqual([
     "workspace/live:list", "workspace/live:get:closed", "workspace/live:list", "workspace/live:get:closed",
+    "workspace/live:get:other",
   ]);
   expect(test.cache.catalogs.get("live")).toMatchObject({ complete: true, failed: true });
-  expect(test.cache.snapshots.get("live")).toBeUndefined();
+  expect([...test.cache.snapshots.get("live")?.keys() ?? []]).toEqual(["other"]);
+  for (let count = 0; count < 6; count++) {
+    test.state.pages = [{ ...page("live"), sequence: 2 + count }];
+    test.mirror.refresh();
+    test.mirror.notice("workspace/live");
+    await flush();
+  }
   await vi.advanceTimersByTimeAsync(60_000);
-  expect(test.calls).toHaveLength(4);
+  expect(test.calls.filter(call => call.operation.operation === "list")).toHaveLength(9);
+  expect(test.calls.filter(call => call.operation.operation === "get")).toHaveLength(3);
+  expect(test.cache.catalogs.get("live")).toMatchObject({ complete: true, failed: true });
+  test.mirror.connectionChanged(false);
+  test.mirror.connectionChanged(true);
+  await flush();
+  expect(test.calls.filter(call => call.operation.operation === "get")).toHaveLength(4);
+  expect(test.cache.snapshots.get("live")?.has("closed")).toBe(true);
+  expect(test.cache.catalogs.get("live")?.failed).toBe(false);
+});
+
+it("gives a changed checksum its own revalidation and retry, even when the change arrives during recovery", async () => {
+  const test = fixture();
+  const checksums = [CHECKSUM, "b".repeat(64), "c".repeat(64)];
+  let checksum = checksums[0]!;
+  let lists = 0;
+  test.state.reply = async (_room, operation) => {
+    if (operation.operation === "list") {
+      if (++lists === 2) checksum = checksums[1]!;
+      return listed([revision("closed", { checksum })], checksum);
+    }
+    return { ...downloaded("closed"), checksum };
+  };
+  test.cache.putVerifiedSnapshot.mockResolvedValue(result(false));
+  test.start();
+  await flush();
+  expect(test.calls.filter(call => call.operation.operation === "get")).toHaveLength(3);
+  expect(test.cache.putVerifiedSnapshot.mock.calls.map(call => call[2])).toEqual([
+    checksums[0], checksums[1], checksums[1],
+  ]);
+  test.mirror.notice("workspace/live");
+  await flush();
+  expect(test.calls.filter(call => call.operation.operation === "get")).toHaveLength(3);
+  checksum = checksums[2]!;
+  test.mirror.notice("workspace/live");
+  await flush();
+  expect(test.cache.putVerifiedSnapshot.mock.calls.map(call => call[2])).toEqual([
+    checksums[0], checksums[1], checksums[1], checksums[2], checksums[2],
+  ]);
+  expect(test.cache.catalogs.get("live")?.failed).toBe(true);
+});
+
+it("does not carry failed checksums into another account's cache stamp", async () => {
+  const test = fixture();
+  test.cache.verification.push(false, false);
+  test.start();
+  await flush();
+  expect(test.calls.filter(call => call.operation.operation === "get")).toHaveLength(2);
+  test.state.stamp = { ...STAMP, account: "456" };
+  test.state.pages = [{ ...page("live"), sequence: 2 }];
+  test.mirror.refresh();
+  await flush();
+  expect(test.cache.open).toHaveBeenLastCalledWith(test.state.stamp);
+  expect(test.calls.filter(call => call.operation.operation === "get")).toHaveLength(3);
+  expect(test.cache.snapshots.get("live")?.has("closed")).toBe(true);
+});
+
+it("discards a failed verification superseded by reconnect before granting the new connection its retry", async () => {
+  const test = fixture();
+  let finishVerification: (value: HistoryCacheResult<boolean>) => void = () => {};
+  const verification = new Promise<HistoryCacheResult<boolean>>(resolve => { finishVerification = resolve; });
+  releaseReplies.push(() => finishVerification(result(false)));
+  test.cache.putVerifiedSnapshot.mockImplementationOnce(() => verification).mockResolvedValue(result(false));
+  test.start();
+  await flush();
+  expect(test.calls.filter(call => call.operation.operation === "get")).toHaveLength(1);
+  test.mirror.connectionChanged(false);
+  test.mirror.connectionChanged(true);
+  finishVerification(result(false));
+  await flush();
+  expect(test.calls.filter(call => call.operation.operation === "get")).toHaveLength(3);
+  test.mirror.notice("workspace/live");
+  await flush();
+  expect(test.calls.filter(call => call.operation.operation === "get")).toHaveLength(3);
+  expect(test.cache.catalogs.get("live")?.failed).toBe(true);
 });
 
 it("replaces reverted or backup-restored catalogs and evicts removed ids without redownloading closed snapshots", async () => {

@@ -85,6 +85,7 @@ export class HistoryMirror {
   private readonly pending = new Map<string, Work>();
   private readonly deadlines = new Map<string, NodeJS.Timeout>();
   private readonly elapsedDeadlines = new Map<string, string>();
+  private readonly mismatches = new Map<string, Map<string, "retry" | "failed">>();
   private retention: HistoryRetention;
   private evictPending = true;
   private stampKey: string | null = null;
@@ -106,6 +107,7 @@ export class HistoryMirror {
     this.epoch += 1;
     this.clearDeadlines();
     this.elapsedDeadlines.clear();
+    this.mismatches.clear();
     if (connected) {
       this.refused = false;
       for (const uuid of this.pages.keys()) this.enqueue(uuid);
@@ -134,6 +136,7 @@ export class HistoryMirror {
       this.pending.delete(uuid);
       this.clearDeadline(uuid);
       this.elapsedDeadlines.delete(uuid);
+      this.mismatches.delete(uuid);
     }
     this.checkRetention();
     this.wake();
@@ -157,7 +160,6 @@ export class HistoryMirror {
   private enqueue(uuid: string, recovery = false): void {
     const previous = this.pending.get(uuid);
     this.pending.set(uuid, { recovery: recovery || previous?.recovery === true });
-    this.evictPending = true;
   }
 
   private wake(): void {
@@ -194,6 +196,7 @@ export class HistoryMirror {
     if (stamp !== null && this.stampKey !== JSON.stringify(stamp)) {
       ready(await this.cache.open(stamp));
       this.stampKey = JSON.stringify(stamp);
+      this.mismatches.clear();
       this.evictPending = true;
       for (const uuid of this.pages.keys()) this.enqueue(uuid);
     }
@@ -239,18 +242,30 @@ export class HistoryMirror {
         throw new RevisionClientError("unsupported");
       }
       this.setDeadline(page, catalog);
+      const mismatches = this.mismatches.get(uuid) ?? new Map<string, "retry" | "failed">();
+      this.mismatches.set(uuid, mismatches);
+      const current = new Set(catalog.revisions.map(revision => JSON.stringify([revision.id, revision.checksum])));
+      for (const key of mismatches.keys()) if (!current.has(key)) mismatches.delete(key);
       const keep = selectHistorySnapshots({ revisions: catalog.revisions, downloaded: new Set() },
         this.retention, this.source.now());
+      let failed = false;
       for (const revision of catalog.revisions) {
         if (!keep.has(revision.id) || revision.final !== true) continue;
+        const key = JSON.stringify([revision.id, revision.checksum]);
+        if (mismatches.get(key) === "failed") { failed = true; continue; }
         this.check(epoch, stampKey);
         const downloaded = await downloadHistorySnapshot(this.cache, uuid, revision, request);
         this.check(epoch, stampKey);
-        if (downloaded) continue;
-        await this.cache.markRefreshFailed(uuid);
-        if (!work.recovery) this.enqueue(uuid, true);
-        break;
+        if (downloaded) { mismatches.delete(key); continue; }
+        failed = true;
+        if (!mismatches.has(key)) {
+          mismatches.set(key, "retry");
+          this.enqueue(uuid, true);
+          break;
+        }
+        mismatches.set(key, "failed");
       }
+      if (failed) await this.cache.markRefreshFailed(uuid);
     } catch (error) {
       if (error instanceof Paused) {
         if (this.pages.has(uuid)) this.enqueue(uuid, work.recovery);
