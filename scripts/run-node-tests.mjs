@@ -51,6 +51,7 @@ export async function runNodeTests(files, {
 	const lastResult = new Map();
 	let success = true;
 	function fileRecord(file) {
+		file = resolve(file);
 		if (!fileRecords.has(file)) fileRecords.set(file, { file, ends: [], stdout: "", totalMs: 0 });
 		return fileRecords.get(file);
 	}
