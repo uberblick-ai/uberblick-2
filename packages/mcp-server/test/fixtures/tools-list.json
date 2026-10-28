@@ -915,7 +915,7 @@
           "additionalProperties": false
         },
         "column_widths": {
-          "description": "Tables only: one positive whole CSS-pixel width or null per new column. Null clears; omission keeps widths. Sizing guidance: markdown help.",
+          "description": "Tables only: one positive whole CSS-pixel width or null per table column. Null clears; omission keeps widths. Sizing guidance: markdown help.",
           "type": "array",
           "items": {
             "anyOf": [
@@ -1075,7 +1075,7 @@
                 }
               },
               "column_widths": {
-                "description": "Tables only: one positive whole CSS-pixel width or null per new column. Null clears; omission keeps widths. Sizing guidance: markdown help.",
+                "description": "Tables only: one positive whole CSS-pixel width or null per table column. Null clears; omission keeps widths. Sizing guidance: markdown help.",
                 "type": "array",
                 "items": {
                   "anyOf": [

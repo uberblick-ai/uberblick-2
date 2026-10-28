@@ -97,7 +97,7 @@ const RECOVERIES: Record<string, Recovery> = {
   },
   invalid_column_widths: {
     recoveryClass: "manual",
-    guidance: "Supply column_widths only on an ordinary table with equal stored row lengths: one positive whole CSS pixel value or null per column of new_text. Null clears a width; omit the list to retain widths. See markdown help for sizing guidance. Nothing was written.",
+    guidance: "Supply column_widths only on an ordinary table with equal stored row lengths: one positive whole CSS pixel value or null per column of the requested table text. Null clears a width; omit the list to retain widths. See markdown help for sizing guidance. Nothing was written.",
   },
   invalid_card: {
     recoveryClass: "manual",

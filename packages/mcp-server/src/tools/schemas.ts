@@ -146,7 +146,7 @@ export const listIndentArg = z.number().int().min(0).max(MAX_LIST_INDENT);
 export const columnWidthsArg = z.unknown().meta({
   type: "array",
   items: { anyOf: [{ type: "integer", exclusiveMinimum: 0 }, { type: "null" }] },
-}).optional().describe("Tables only: one positive whole CSS-pixel width or null per new column. Null clears; omission keeps widths. Sizing guidance: markdown help.");
+}).optional().describe("Tables only: one positive whole CSS-pixel width or null per table column. Null clears; omission keeps widths. Sizing guidance: markdown help.");
 
 export const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
