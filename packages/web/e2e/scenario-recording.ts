@@ -36,6 +36,7 @@ export async function recordScenario(page: Page, info: TestInfo) {
       size: page.viewportSize() ?? { width: 1280, height: 720 },
       onFrame: frame => { firstFrame ??= frame.timestamp; },
     });
+    await page.screencast.showActions({ cursor: "pointer", duration: 700, position: "bottom-left", fontSize: 16 });
   }
   return {
     async moment(title: string) {
@@ -48,6 +49,7 @@ export async function recordScenario(page: Page, info: TestInfo) {
     async stop() {
       complete = true;
       if (output === undefined || stopped) return;
+      await page.screencast.hideActions();
       await page.screencast.stop();
       stopped = true;
     },
@@ -55,7 +57,10 @@ export async function recordScenario(page: Page, info: TestInfo) {
       if (output === undefined) return;
       let media = "complete";
       try {
-        if (!stopped) await page.screencast.stop();
+        if (!stopped) {
+          await page.screencast.hideActions();
+          await page.screencast.stop();
+        }
       } catch (error) {
         media = `incomplete: ${String(error)}`;
       }
