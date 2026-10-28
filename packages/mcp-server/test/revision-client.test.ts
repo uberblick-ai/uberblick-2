@@ -3,14 +3,14 @@ import { afterEach, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import {
-  appendBlock, compareRevisions, deleteDirectoryEntry, encodeRevisionResponseFrames, getMeta, getMetaMap, initDoc,
+  appendBlock, compareRevisions, deleteDirectoryEntry, encodeRevisionCatalogChanged, encodeRevisionResponseFrames, getMeta, getMetaMap, initDoc,
   readRevisionRequest, roomForDoc, setTitle, tombstoneDirectoryEntry, upsertDirectoryEntry, type RevisionRequest, type RevisionResponse,
 } from "@uberblick/schema";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import { documentRevisionChecksum, getDocumentRevision, listDocumentRevisions, mutateDocumentRevision, restoreDocumentRevision } from "../src/revision-client.js";
 import { HubSync } from "../src/sync.js";
 import { openWorkspaceReplicas, type WorkspaceReplicaSet } from "../src/workspace-replicas.js";
-import { cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, startHub, tempDir, testConfig, TEST_SECRET } from "./helpers.js";
+import { cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, startHub, tempDir, testConfig, TEST_SECRET, waitUntil } from "./helpers.js";
 
 const clients: Array<() => unknown> = [];
 const hubs: Array<() => unknown> = [];
@@ -83,6 +83,48 @@ it("returns an empty list only when the hub confirms there are no revisions", as
   const fixture = await admitted();
   fixture.reply((request, send) => send({ requestId: request.requestId, ok: true, revisions: [] }));
   await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid)).resolves.toEqual([]);
+});
+
+it("delivers revision name notices with their attached room until unsubscribed", async () => {
+  const fixture = await admitted();
+  const room = roomForDoc(fixture.opened.replicas.config.workspaceId, fixture.uuid);
+  const connection = fixture.hub.hocuspocus.documents.get(room)?.getConnections()[0];
+  if (connection === undefined) throw new Error("The document did not retain its admitted connection.");
+  const notices: string[] = [];
+  const unsubscribe = fixture.opened.replicas.sync.onRevisionCatalogChanged(changedRoom => notices.push(changedRoom));
+  connection.sendStateless("unrelated-payload");
+  connection.sendStateless(encodeRevisionCatalogChanged());
+  await waitUntil("the attached room's revision notice", () => notices.length === 1);
+  expect(notices).toEqual([room]);
+
+  unsubscribe();
+  connection.sendStateless(encodeRevisionCatalogChanged());
+  fixture.reply((request, send) => send({ requestId: request.requestId, ok: true, revisions: [] }));
+  await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid)).resolves.toEqual([]);
+  expect(notices).toEqual([room]);
+});
+
+it("rechecks background priority at send time while foreground history remains available", async () => {
+  const fixture = await admitted();
+  const sync = fixture.opened.replicas.sync;
+  let quiet = true;
+  vi.spyOn(sync, "isQuiet").mockImplementation(() => quiet);
+  const requests: RevisionRequest[] = [];
+  fixture.reply((request, send) => {
+    requests.push(request);
+    send({ requestId: request.requestId, ok: true, revisions: [] });
+  });
+  const room = roomForDoc(fixture.opened.replicas.config.workspaceId, fixture.uuid);
+  const background = sync.requestRevisions(room, { operation: "list" }, 5_000, { background: true });
+  quiet = false;
+
+  await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid)).resolves.toEqual([]);
+  expect(requests).toHaveLength(1);
+
+  quiet = true;
+  setTitle(fixture.replica.doc, "Wake deferred background work");
+  await expect(background).resolves.toMatchObject({ ok: true, revisions: [] });
+  expect(requests).toHaveLength(2);
 });
 
 it.each(["directory", "document"] as const)("refuses decision history known through the %s before sending any client request", async source => {
