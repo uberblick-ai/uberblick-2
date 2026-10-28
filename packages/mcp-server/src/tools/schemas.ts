@@ -152,7 +152,7 @@ export const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
   text: z.string().optional().describe(
     "Plain prose (`inline` supplies formatting), literal code/terminal/chart source, exactly one GFM table, " +
-      "or card/figma content without ::: delimiters. See markdown help for cell formatting, container keys, " +
+      "or :::card/:::figma content without delimiters. See markdown help for cell formatting, container keys, " +
       "buttons and links. Invalid content refuses with invalid_table, invalid_card or invalid_figma before writing.",
   ),
   level: z
