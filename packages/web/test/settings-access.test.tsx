@@ -10,7 +10,7 @@ import { useSettingsAccess } from "../src/ui/settings/settings-access.js";
 import { SERVING_STATUS_POLL_MS, SERVING_STATUS_TIMEOUT_MS } from "../src/ui/status/serving-status.js";
 
 const WORKSPACE = "53f04353-622b-4b14-8d71-366193d43c74";
-const SERVING: LocalServing = { workspace: WORKSPACE, remoteHubUrl: "ws://bound.example", rebound: false };
+const SERVING: LocalServing = { workspace: WORKSPACE, remoteHubUrl: "ws://bound.example", localOnly: false, rebound: false };
 const api = vi.fn<(action: AccessAction, signal: AbortSignal) => Promise<AccessAnswer>>();
 const login = vi.fn<(signal: AbortSignal) => Promise<AccountIdentity>>().mockResolvedValue({ state: "signed-in", handle: "my-login", accountId: "1234" });
 vi.mock("../src/shell/workspace-access.js", () => ({ createWorkspaceAccessClient: () => api }));
@@ -143,7 +143,7 @@ describe("independent settings permissions", () => {
     expect(member(view)).toBe(false);
   });
 
-  it.each([null, { ...SERVING, remoteHubUrl: null }])("grants a known local workspace without a role %j", async (serving) => {
+  it.each([null, { ...SERVING, remoteHubUrl: null, localOnly: true }])("grants a known local workspace without a role %j", async (serving) => {
     const view = render(<Reading serving={serving} fallback />);
     await flush();
     expect(value(view)).toEqual({ admin: true, pending: false, devices: false });

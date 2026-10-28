@@ -45,7 +45,7 @@ export function useShellEnvironment(path: string) {
         ? null
         : serving === null
           ? endpoint
-          : { url: serving.remoteHubUrl === null ? "local" : endpointLabel(serving.remoteHubUrl), source: "document" },
+          : { url: serving.localOnly || serving.remoteHubUrl === null ? "local" : endpointLabel(serving.remoteHubUrl), source: "document" },
     [endpoint, hubReady, serving],
   );
   // The URL selects its workspace independently of the configured menu.

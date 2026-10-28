@@ -8,7 +8,7 @@ import type { AccessAction, AccessAnswer } from "../src/shell/workspace-access.j
 import { SERVING_STATUS_POLL_MS, SERVING_STATUS_TIMEOUT_MS } from "../src/ui/status/serving-status.js";
 
 const WORKSPACE = "53f04353-622b-4b14-8d71-366193d43c74";
-const SERVING: LocalServing = { workspace: WORKSPACE, remoteHubUrl: "ws://bound.example", rebound: false };
+const SERVING: LocalServing = { workspace: WORKSPACE, remoteHubUrl: "ws://bound.example", localOnly: false, rebound: false };
 const api = vi.fn<(action: AccessAction, signal: AbortSignal) => Promise<AccessAnswer>>();
 vi.mock("../src/shell/workspace-access.js", () => ({ createWorkspaceAccessClient: () => api }));
 
@@ -90,7 +90,7 @@ describe("bound hub authority", () => {
     expect(onRender).toHaveBeenCalledTimes(2);
   });
 
-  it.each([null, { ...SERVING, remoteHubUrl: null }, { ...SERVING, rebound: true },
+  it.each([null, { ...SERVING, remoteHubUrl: null, localOnly: true }, { ...SERVING, rebound: true },
     { ...SERVING, workspace: "872b46d9-5b18-4fb1-84d5-de245c337e86" }, { ...SERVING, workspace: "not-a-workspace" }])("never picks another login for an unavailable binding %j", async (serving) => {
     const view = render(<Reading serving={serving} />);
     await flush();

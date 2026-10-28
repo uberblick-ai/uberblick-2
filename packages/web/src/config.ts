@@ -5,13 +5,15 @@
  *     {"hubUrl": "wss://host/ws", "workspaces": ["uberblick-<uuid>", "<uuid>"],
  *      "hubAuthToken": "<token-signing key>", "rebound": true,
  *      "defaultPresenceName": "Ana Lopez",
- *      "servedWorkspaces": {"<uuid>": {"remoteHubUrl": "wss://team-host/ws"}}}
+ *      "servedWorkspaces": {"<uuid>": {"remoteHubUrl": "wss://team-host/ws", "localOnly": false}}}
  *
  * ub open supplies its loopback hubUrl, servedWorkspaces and the rebound flag;
  * rebound means the startup binding (the first workspace) changed and the
  * serving process needs a restart. servedWorkspaces uses bare UUIDs and carries
  * no key: its pages ask ub open for room tokens with their session
- * (collab/local-session.ts). A null upstream means local-only. Other keys,
+ * (collab/local-session.ts). localOnly describes the workspace's binding even
+ * when its browser transport uses a loopback hub. Older documents use a null
+ * upstream for explicit local-only secondaries. Other keys,
  * such as ub open's top-level remoteHubUrl, are ignored.
  * Unbound serving supplies no workspace or key. Only ub open supplies the
  * default presence name, from git user.name or the OS username; other routes
@@ -80,6 +82,7 @@ export interface ServedWorkspace extends LocalServing {
 export interface LocalServing {
   workspace: string | null;
   remoteHubUrl: string | null;
+  localOnly: boolean;
   rebound: boolean;
 }
 
@@ -254,6 +257,7 @@ function usableServedWorkspaces(
     map[uuid] = {
       workspace: offered.get(uuid) ?? uuid,
       remoteHubUrl: remote?.url ?? null,
+      localOnly: typeof entry.localOnly === "boolean" ? entry.localOnly : remote === null,
       rebound: rebound && uuid === startupUuid,
       name: usableWorkspaceName(entry.name),
     };

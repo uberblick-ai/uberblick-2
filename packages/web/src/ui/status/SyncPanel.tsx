@@ -88,6 +88,7 @@ export function SyncPanel({
 
   return (
     <div>
+      {localWorkspace ? <p className="m-0 mb-5 text-center ub-type-caption text-(--muted-foreground)">Local-only workspace</p> : <>
       <h2 className="m-0 mb-[0.4rem] ub-type-caption tracking-[0.06em] uppercase text-muted-foreground">Sync</h2>
       <dl className="ub-sync-facts m-0 mb-5">
         <Fact label="Hub" value={namedEndpoint?.url ?? UNKNOWN} mono />
@@ -130,6 +131,7 @@ export function SyncPanel({
           />
         )}
       </dl>
+      </>}
       {codeChecks.length > 0 && (
         <section className="mb-5">
           <h2 className="m-0 mb-[0.4rem] ub-type-caption tracking-[0.06em] uppercase text-muted-foreground">Code</h2>

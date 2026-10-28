@@ -520,11 +520,17 @@ describe("the sync panel renders the state this client holds", () => {
     }
   });
 
-  it("names a local workspace and omits an upstream state it cannot claim", () => {
+  it("shows only local identity and code facts even with a retained upstream failure", () => {
     vi.useFakeTimers();
-    const { host } = mount(fixture(), { url: "local", source: "document" }, true);
-    expect(facts(host)).toMatchObject({ Hub: "local", State: "saved here" });
-    expect(facts(host)["Hub state"]).toBeUndefined();
+    const fix = fixture();
+    setCodeCheck(fix.ydoc, { repository: "owner/project", commit: "a".repeat(40), result: "matches", rev: docRev(fix.ydoc) });
+    const { host } = mount(fix, { url: "local", source: "document" }, false, Date.now(), "no-hub-credentials");
+    expect(host.firstElementChild?.firstElementChild?.textContent).toBe("Local-only workspace");
+    expect(within(host).queryByRole("heading", { name: "Sync" })).toBeNull();
+    expect(within(host).getByRole("heading", { name: "Code" })).toBeTruthy();
+    expect(Object.keys(facts(host))).toEqual(["Repository", "Compared", "Result", "Page edited since"]);
+    expect(facts(host)).toMatchObject({ Repository: "owner/project", Result: "Matches the code", "Page edited since": "No" });
+    expect(host.textContent).not.toMatch(/hub|127\.0\.0\.1/i);
   });
 
   it("suppresses the upstream fact when the local room is not writable", () => {

@@ -486,9 +486,9 @@ export function servingDocumentOf(
     remoteHubUrl,
     ...(rebound ? { rebound: true } : {}),
     servedWorkspaces: {
-      [workspace]: { name: null, remoteHubUrl },
+      [workspace]: { name: null, localOnly: false, remoteHubUrl },
       ...Object.fromEntries(Object.entries(otherWorkspaces).map(([id, entry]) => [id, {
-        name: null, remoteHubUrl: entry.remoteHubUrl,
+        name: null, localOnly: entry.remoteHubUrl === null, remoteHubUrl: entry.remoteHubUrl,
       }])),
     },
     defaultPresenceName: userInfo().username,
