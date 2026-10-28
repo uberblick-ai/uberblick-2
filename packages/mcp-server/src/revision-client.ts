@@ -78,7 +78,11 @@ function historyReader(replicas: Replicas): HistoryReader {
       const stamp = workspaceHistoryStamp(replicas);
       if (stamp === null) throw new RevisionClientError("sign-in-required");
       const attached = room(replicas, uuid);
-      await clock.ensure();
+      try { await clock.ensure(); }
+      catch (error) {
+        clock.reset();
+        throw error;
+      }
       const admitted = sync.historyAccount(attached);
       if (JSON.stringify(workspaceHistoryStamp(replicas)) !== JSON.stringify(stamp) ||
         (admitted !== null && admitted !== stamp.account)) throw new RevisionClientError("sign-in-required");

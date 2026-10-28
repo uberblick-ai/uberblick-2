@@ -135,6 +135,28 @@ it("refuses snapshot reads from a hub catalog without checksums instead of readi
   expect(requests.map(request => request.operation)).toEqual(["list"]);
 });
 
+it("retries the hub clock after a failed refresh without restarting the client", async () => {
+  const fixture = await admitted();
+  const entries = [{ id: "revision-1", author: null, startedAt: 100, endedAt: 200,
+    checksum: documentRevisionChecksum(fixture.replica.doc) }];
+  const requests: RevisionRequest[] = [];
+  fixture.reply((request, send) => {
+    requests.push(request);
+    send({ requestId: request.requestId, ok: true, revisions: entries });
+  });
+  const http = vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("The hub clock is temporarily unreachable."));
+
+  await expect(readDocumentHistory(fixture.opened.replicas, fixture.uuid, { refresh: true }))
+    .rejects.toMatchObject({ code: "unreachable" });
+  expect(requests).toEqual([]);
+  expect(fixture.opened.replicas.sync.state().status).toBe("connected");
+  await expect(readDocumentHistory(fixture.opened.replicas, fixture.uuid, { refresh: true }))
+    .resolves.toMatchObject({ revisions: entries, history: { complete: true, refreshFailed: false, offline: false } });
+  expect(requests.map(request => request.operation)).toEqual(["list"]);
+  expect(http).toHaveBeenCalledTimes(2);
+  expect(http.mock.calls.every(([url]) => String(url).endsWith("/auth/claim-state"))).toBe(true);
+});
+
 it("updates an already cached catalog before a successful naming call returns", async () => {
   const fixture = await admitted();
   const entry = { id: "named-revision", author: null, startedAt: 100, endedAt: 200,

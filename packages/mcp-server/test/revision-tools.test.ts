@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { writeHubLogin } from "../src/auth-store.js";
 import { RevisionClientError } from "../src/revision-client.js";
+import { HistoryCache } from "../src/history-cache.js";
 import { acquireInitLock } from "../src/init-lock.js";
 import { tryAcquireHistoryRefresherRole } from "../src/history-refresher-role.js";
 import { MirrorStore } from "../src/store.js";
@@ -451,6 +452,40 @@ describe("historical reads through the MCP boundary", () => {
     expect(await fixture.rig.ok("list_revisions", { uuid: fixture.uuid })).toMatchObject({ uuid: fixture.uuid, revisions: [],
       history: { complete: true, lastRefresh: expect.any(String), refreshFailed: false } });
     expect(requests).toBe(1);
+  });
+
+  it("reports an old hub's late failure on the next forced refresh before retrying the download", async () => {
+    const { rig, uuid, configured } = await admitted();
+    let fail!: () => void;
+    const pending = new Promise<RevisionResponse>((_resolve, reject) => {
+      fail = () => reject(new RevisionClientError("unsupported"));
+    });
+    const requests = vi.spyOn(rig.instance.replicas.sync, "requestRevisions")
+      .mockImplementationOnce(() => pending);
+
+    refusal(await rig.call("list_revisions", { uuid }), "revisions_downloading");
+    expect(requests).toHaveBeenCalledTimes(1);
+    fail();
+
+    const cache = new HistoryCache(configured.databasePath, WORKSPACE, configured.deviceLogin.env);
+    clients.push(() => cache.close());
+    const resumed = cache.resume();
+    if (resumed.status !== "ready" || resumed.value === null) throw new Error("The timed-out read did not open its history cache.");
+    const token = resumed.value;
+    await waitUntil("the timed-out catalog download's failed publication", () => {
+      const catalog = cache.readCatalog(token, uuid);
+      return catalog.status === "ready" && catalog.value?.failed === true;
+    });
+    await new Promise<void>(resolve => setImmediate(resolve));
+
+    const failed = await rig.call("list_revisions", { uuid, refresh: true });
+    refusal(failed, "revisions_unsupported");
+    expect(failed.payload).toMatchObject({ recoveryClass: "manual", recovery: expect.stringContaining("update the hub") });
+    expect(requests).toHaveBeenCalledTimes(1);
+    expect(await rig.ok("list_revisions", { uuid })).toMatchObject({
+      history: { complete: true, refreshFailed: false, offline: false },
+    });
+    expect(requests).toHaveBeenCalledTimes(2);
   });
 
   it("projects both revision tools' declared fields and ISO times while preserving nulls", async () => {

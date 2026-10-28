@@ -215,6 +215,70 @@ it("keeps a timed-out snapshot download for a later cache read", async () => {
   expect(test.request).toHaveBeenCalledTimes(1);
 });
 
+it.each(["unsupported", "unreachable"] as const)("reports a completed catalog download's %s failure once before retrying", async code => {
+  const test = await fixture();
+  let fail!: () => void;
+  const response = new Promise<RevisionResponse>((_resolve, reject) => { fail = () => reject(new RevisionClientError(code)); });
+  settleReplies.push(fail);
+  test.state.reply = async () => response;
+
+  await expect(test.reader.list(PAGE, { timeoutMs: 20 })).rejects.toMatchObject({ code: "downloading" });
+  await waitUntil("the catalog request to start", () => test.request.mock.calls.length === 1);
+  fail();
+  await waitUntil("the failed background catalog download", () => ready(test.cache.readCatalog(test.token, PAGE))?.failed === true);
+  await expect(test.reader.list(PAGE, { refresh: true })).rejects.toMatchObject({ code });
+  expect(test.request).toHaveBeenCalledTimes(1);
+
+  test.state.reply = async () => listed([]);
+  expect(await test.reader.list(PAGE, { refresh: true })).toMatchObject({ revisions: [], history: { complete: true, refreshFailed: false } });
+  expect(test.request).toHaveBeenCalledTimes(2);
+});
+
+it("reports a completed snapshot download's failure once and allows a later download", async () => {
+  const test = await fixture();
+  const value = snapshot("failed-download");
+  test.seed([value.revision]);
+  let fail!: () => void;
+  const response = new Promise<RevisionResponse>((_resolve, reject) => { fail = () => reject(new RevisionClientError("unsupported")); });
+  settleReplies.push(fail);
+  test.state.reply = async () => response;
+
+  await expect(test.reader.get(PAGE, value.revision.id, { timeoutMs: 20 })).rejects.toMatchObject({ code: "downloading" });
+  await waitUntil("the snapshot request to start", () => test.request.mock.calls.length === 1);
+  fail();
+  await waitUntil("the failed background snapshot download", () => ready(test.cache.readCatalog(test.token, PAGE))?.failed === true);
+  expect(await test.reader.list(PAGE)).toMatchObject({ revisions: [value.revision], history: { refreshFailed: true } });
+  await expect(test.reader.get(PAGE, value.revision.id)).rejects.toMatchObject({ code: "unsupported" });
+  expect(test.request).toHaveBeenCalledTimes(1);
+
+  test.state.reply = async () => downloaded(value);
+  const read = await test.reader.get(PAGE, value.revision.id);
+  try { expect(getMeta(read.doc).title).toBe(value.revision.id); }
+  finally { read.doc.destroy(); }
+  expect(test.request).toHaveBeenCalledTimes(2);
+});
+
+it("serves a snapshot published by another reader ahead of an unreported download failure", async () => {
+  const test = await fixture();
+  const value = snapshot("downloaded-elsewhere");
+  test.seed([value.revision]);
+  let fail!: () => void;
+  const response = new Promise<RevisionResponse>((_resolve, reject) => { fail = () => reject(new RevisionClientError("forbidden")); });
+  settleReplies.push(fail);
+  test.state.reply = async () => response;
+
+  await expect(test.reader.get(PAGE, value.revision.id, { timeoutMs: 20 })).rejects.toMatchObject({ code: "downloading" });
+  await waitUntil("the snapshot request to start", () => test.request.mock.calls.length === 1);
+  fail();
+  await waitUntil("the refused background snapshot download", () => ready(test.cache.readCatalog(test.token, PAGE))?.failed === true);
+  test.putSnapshot(value);
+  test.state.connected = false;
+  const read = await test.reader.get(PAGE, value.revision.id);
+  try { expect(getMeta(read.doc).title).toBe(value.revision.id); }
+  finally { read.doc.destroy(); }
+  expect(test.request).toHaveBeenCalledTimes(1);
+});
+
 it("revalidates an unknown revision online before confirming absence, and never confirms it offline", async () => {
   const test = await fixture();
   test.seed([]);
@@ -300,4 +364,19 @@ it("writes a hub-applied name through to the catalog without claiming an uncache
   await test.reader.writeThrough(PAGE, value.revision);
   expect(ready(test.cache.readCatalog(test.token, PAGE))).toMatchObject({ revisions: [value.revision], complete: true, refreshedAt: 1_000 });
   expect(test.request).not.toHaveBeenCalled();
+});
+
+it("revalidates an incomplete naming catalog when connected while keeping its downloaded entry readable offline", async () => {
+  const test = await fixture();
+  const named = snapshot("named", "Named state", { name: { text: "Reviewed", namedAt: 1_500, namer: null, canManage: true } });
+  const older = snapshot("older");
+  await test.reader.writeThrough(PAGE, named.revision);
+  test.state.connected = false;
+  expect(await test.reader.list(PAGE)).toMatchObject({ revisions: [named.revision], history: { complete: false, offline: true } });
+  expect(test.request).not.toHaveBeenCalled();
+
+  test.state.connected = true;
+  test.state.reply = async () => listed([named.revision, older.revision]);
+  expect(await test.reader.list(PAGE)).toMatchObject({ revisions: [named.revision, older.revision], history: { complete: true, offline: false } });
+  expect(test.request).toHaveBeenCalledTimes(1);
 });

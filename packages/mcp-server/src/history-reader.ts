@@ -36,6 +36,7 @@ export class HistoryReader {
   private readonly jobs = new Set<Promise<unknown>>();
   private readonly refreshes = new Map<string, Promise<CachedHistoryCatalog>>();
   private readonly downloads = new Map<string, Promise<boolean>>();
+  private readonly failures = new Map<string, unknown>();
   private closed = false;
 
   constructor(private readonly source: HistoryReaderSource, private readonly cache: HistoryMirrorCache) {}
@@ -78,15 +79,28 @@ export class HistoryReader {
         if (expired) discard?.(value); else resolve(value);
       }, error => {
         clearTimeout(timer);
-        if (!expired) reject(error);
+        if (!expired) { this.reported(error); reject(error); }
       });
     });
+  }
+
+  private reported(error: unknown): void {
+    for (const [key, failure] of this.failures) if (failure === error) this.failures.delete(key);
+  }
+
+  // Preserve a download failure past the caller's wait until a read can report it.
+  private async attempt<T>(key: string, work: () => Promise<T>): Promise<T> {
+    if (this.failures.has(key)) {
+      throw this.failures.get(key);
+    }
+    try { return await work(); }
+    catch (error) { this.failures.set(key, error); throw error; }
   }
 
   private refresh(uuid: string): Promise<CachedHistoryCatalog> {
     const existing = this.refreshes.get(uuid);
     if (existing !== undefined) return existing;
-    const job = (async () => {
+    const job = this.attempt(JSON.stringify([this.source.stamp(), uuid, "list"]), async () => {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         const catalog = await revalidateHistoryCatalog(this.cache, uuid, operation => {
           this.check(uuid);
@@ -95,7 +109,7 @@ export class HistoryReader {
         if (catalog.complete) return catalog;
       }
       throw new RevisionClientError("unreachable", { uuid, reason: "cache-superseded" });
-    })();
+    });
     this.refreshes.set(uuid, job);
     void job.finally(() => this.refreshes.delete(uuid)).catch(() => {});
     return job;
@@ -103,7 +117,7 @@ export class HistoryReader {
 
   private async catalog(uuid: string, refresh = false): Promise<CachedHistoryCatalog> {
     const cached = ready(await this.cache.readCatalog(uuid));
-    if (!refresh && cached !== null && (cached.complete || cached.revisions.length > 0)) return cached;
+    if (!refresh && cached !== null && (cached.complete || (!this.source.connected() && cached.revisions.length > 0))) return cached;
     if (!this.source.connected() && !refresh) {
       throw new RevisionClientError("not-downloaded", { uuid, history: cached === null ? {
         complete: false, lastRefresh: null, refreshFailed: false, offline: true, newestDownloadedRevision: null,
@@ -137,7 +151,8 @@ export class HistoryReader {
     const key = JSON.stringify([uuid, revision.id, revision.checksum]);
     let download = this.downloads.get(key);
     if (download === undefined) {
-      download = downloadHistorySnapshot(this.cache, uuid, revision, operation => this.source.request(uuid, operation));
+      download = this.attempt(JSON.stringify([this.source.stamp(), key]),
+        () => downloadHistorySnapshot(this.cache, uuid, revision, operation => this.source.request(uuid, operation)));
       this.downloads.set(key, download);
       void download.finally(() => this.downloads.delete(key)).catch(() => {});
     }
@@ -146,7 +161,10 @@ export class HistoryReader {
       return ready(await this.cache.readSnapshot(uuid, revision.id));
     } catch (error) {
       await this.cache.markRefreshFailed(uuid);
-      if (retryMissing && error instanceof RevisionClientError && error.code === "revision-not-found") return null;
+      if (retryMissing && error instanceof RevisionClientError && error.code === "revision-not-found") {
+        this.reported(error);
+        return null;
+      }
       throw error;
     }
   }
@@ -224,5 +242,6 @@ export class HistoryReader {
     this.closed = true;
     await this.cache.close();
     await Promise.allSettled([...this.jobs]);
+    this.failures.clear();
   }
 }
