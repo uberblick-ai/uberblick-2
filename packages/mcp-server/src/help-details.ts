@@ -158,22 +158,31 @@ export const toolHelpDetails = {
     "\n" +
     "Archived and decided documents stay readable. A permanently deleted UUID refuses with doc_deleted. A missing or unavailable document refuses with recovery guidance, never an empty document.",
   list_revisions:
-    "List a known document's automatic revisions from the hub, newest first, including an archived document. " +
-    "The whole list is returned without paging. An empty list means the hub confirmed there are no revisions; " +
-    "unavailable history is a failure, never an empty list.\n\n" +
+    "List a known document's automatic revisions from this computer's history cache, newest first, including an archived document. " +
+    "A cached read sends no hub request. When connected, a missing catalog downloads into the cache before answering, within a bounded wait. " +
+    "If the wait expires, revisions_downloading says the download continues; retry later to read what it stored. " +
+    "The whole cached list is returned without paging. An empty list means a complete downloaded catalog records no revisions. " +
+    "A first download that failed is not an empty history: revisions_not_downloaded says Connect once to download history.\n\n" +
+    "The result includes `history`: `complete` says the hub's full list was downloaded, independent of snapshot coverage; " +
+    "`lastRefresh` is its last successful refresh as an ISO 8601 UTC string, or null; `refreshFailed` says the last refresh failed; " +
+    "`offline` says this reader cannot currently reach the hub; and `newestDownloadedRevision` names the newest checksum-matching " +
+    "cached snapshot, or null. It identifies the newest downloaded state, without claiming it is the hub's current state. " +
+    "Downloaded history stays readable offline, while signed out or after access is refused. " +
+    "Pass `refresh: true` to require an online catalog revalidation through the cache, particularly after an unknown naming or restore outcome; " +
+    "wait for a successful refresh before deciding whether to retry the mutation.\n\n" +
     "Each entry has `id`, `author`, `startedAt`, `endedAt` and `name`. A name is null or " +
     "`{text, namer, namedAt, canManage}`; its namer has the same account/surface shape as author and identifies who set its current text. " +
-    "`canManage` is true when this account has write access and the document is not archived, whoever named it. " +
+    "Cached `canManage` reflects this account's write access and the document's archive state at the last refresh, whoever named it; it is not current authorization. " +
     "A rename records the renaming account, surface and hub time as `namer` and `namedAt`. The author is " +
     "`{githubUsername, surface: {kind, name}}`, using the author's current GitHub username, or null when unknown. " +
     "`startedAt`, `endedAt` and `name.namedAt` are ISO 8601 UTC strings, such as `2026-10-21T18:36:13.213Z`: " +
     "null `startedAt` means an unknown start for content from before history began, " +
-    "and null `endedAt` means the revision is still open.\n\n" +
+    "and null `endedAt` means the revision was open at the last catalog refresh.\n\n" +
     "Pass an entry's `id` as `revision` to get_revision or get_data. It is a hub revision ID, distinct from " +
     "get_doc's page and block `rev` content hashes. restore_revision accepts the same revision IDs. " +
     "A UUID unknown to this workspace refuses with doc_not_found before contacting the hub; a permanently " +
     "deleted document refuses with doc_deleted. Decision records, including archived records, refuse with " +
-    "decision_no_history before any hub request; read the topic's records instead. See tool-contracts for hub history failures and recovery.",
+    "decision_no_history before cache or hub access; read the topic's records instead. See tool-contracts for history failures and recovery.",
   name_revision:
     "Call only when a person asks to name the current document state. Supply `uuid` and a `name` of " +
     "1 to 100 characters on one line. The hub verifies that this client's displayed title, visible blocks " +
@@ -183,9 +192,11 @@ export const toolHelpDetails = {
     "and records the naming account, MCP client surface and hub time. An already named state refuses " +
     "with revision_already_named and existingName. Anyone with write access can rename or remove the name in the web while the document is not archived.\n\n" +
     "Success returns the named `revision`, `applied: true` and `synced: true`: the hub applied and " +
-    "acknowledged its naming transaction. This hub-only metadata writes no local document log. A known " +
+    "acknowledged its naming transaction. Its result writes through to the cached catalog before returning; if that cache update fails, " +
+    "the acknowledged result still reports applied: true and synced: true, and the hub's name notice refreshes the cache later. " +
+    "This hub-only metadata writes no local document log and cannot be queued offline. A known " +
     "refusal reports applied: false. If a sent request loses its reply, revision_naming_outcome_unknown " +
-    "reports applied: null, partial: false and synced: false. Read list_revisions before retrying; " +
+    "reports applied: null, partial: false and synced: false. Call list_revisions with refresh: true and wait for a successful refresh before retrying; " +
     "reason unsupported means an admitted hub stayed silent, while unreachable means transport failed. " +
     "Decision records in every state, including archived records, refuse with decision_no_history before any hub request; read the topic's records instead.",
   restore_revision:
@@ -194,7 +205,8 @@ export const toolHelpDetails = {
     "authored by the restoring GitHub account and MCP client. Later edits start another revision. All history " +
     "stays readable; restoring the revision before the restore undoes it. An already identical state writes " +
     "nothing and returns applied: false with the current revision. Success otherwise returns the new revision " +
-    "in list_revisions form, applied: true, synced: true and hub. Content reaches clients through normal sync.\n\n" +
+    "in list_revisions form, applied: true, synced: true and hub. Content reaches clients through normal sync, followed by a background history refresh. " +
+    "The restore does not write through to the cache, so a cached list_revisions can omit its new entry until that refresh.\n\n" +
     "Requires write access, a non-archived document and a copy matching the hub with nothing pending; otherwise " +
     "revisions_forbidden, doc_archived or revision_stale_state refuses without writing. Review current content " +
     "and synchronize before retrying stale state. restore_doc instead makes an archived document live.\n\n" +
@@ -203,23 +215,25 @@ export const toolHelpDetails = {
     "again does not reattach them. Edits another replica makes inside replaced or removed blocks before " +
     "receiving the restore are dropped, including offline edits; edits elsewhere land on top.\n\n" +
     "A sent request whose reply is lost reports revision_restore_outcome_unknown with applied: null, " +
-    "partial: false and synced: false. Read list_revisions and get_doc before retrying: the restore may have " +
+    "partial: false and synced: false. Call list_revisions with refresh: true, wait for a successful refresh, and read get_doc before retrying: the restore may have " +
     "committed. reason unsupported means an admitted hub stayed silent; unreachable means transport failed. " +
     "Decision records in every state, including archived records, refuse with decision_no_history before any hub request; read the topic's records instead.",
   get_revision:
     "Read a known document as it was at the hub revision ID from list_revisions, including an archived document. " +
-    "The result returns `uuid`, `revision`, `title`, visible `blocks` and `data`. Blocks use get_doc's shape " +
+    "The result returns `uuid`, `revision`, `title`, visible `blocks`, `data` and `history`, the cache status described by list_revisions. Blocks use get_doc's shape " +
     "and canonical table, card and Figma text, but carry no block `rev`. The result has no page `rev`, comment " +
     "threads, tags, description, TL;DR, code checks or decision context.\n\n" +
     "`data` is get_data's area summary, or null when absent: collection names, record counts, validity and " +
     "invalid-record counts, canonical UTF-8 bytes, area validity and area error count. It has no schemas or " +
     "record values; read those deliberately with get_data using the same `uuid` and `revision`.\n\n" +
-    "This read fetches the snapshot from the hub and never reads an earlier state from the local replica or " +
-    "changes the live document. Revision IDs are distinct from get_doc's page and block `rev` content hashes. " +
-    "An unknown revision, including one belonging to another document, refuses with revision_not_found. " +
+    "This read answers from a checksum-verified cached snapshot without changing the live document. A cached read sends no hub request. " +
+    "When connected, a missing catalog or snapshot downloads into the cache within a bounded wait; revisions_downloading means it continues after the wait. " +
+    "Offline, an uncached revision refuses with revisions_not_downloaded and connecting fetches it; downloaded snapshots remain readable while signed out or refused. " +
+    "A snapshot outside this computer's retention limit is kept only while the read holds it. Revision IDs are distinct from get_doc's page and block `rev` content hashes. " +
+    "A revision absent from the cached catalog is revalidated online before revision_not_found; offline its absence means not downloaded. " +
     "Unknown document UUIDs refuse with doc_not_found before contacting the hub, and permanently deleted " +
     "documents refuse with doc_deleted. Decision records, including archived records, refuse with " +
-    "decision_no_history before any hub request; read the topic's records instead. See tool-contracts for other hub history failures and recovery.",
+    "decision_no_history before cache or hub access; read the topic's records instead. A hub without snapshot checksums refuses with revisions_unsupported; update the hub. See tool-contracts for history failures and recovery.",
   get_data:
     "Read structured data deliberately. Without `collection`, return `data: null` for none, or an area " +
     "summary of collection names, record counts, validity and invalid-record counts, canonical UTF-8 bytes, " +
@@ -238,13 +252,16 @@ export const toolHelpDetails = {
     "returns `missing_ids` for requested ids absent from the collection. Live cursors are not snapshots: " +
     "following them visits each record exactly once only while the data stays unchanged.\n\n" +
     "Optional `revision` selects the hub revision ID returned by list_revisions, distinct from get_doc's " +
-    "page and block `rev` content hashes. It reads the revision's data from the hub with the same summary " +
+    "page and block `rev` content hashes. It reads the revision's data from this computer's checksum-verified history cache with the same summary " +
     "and bounded collection paging, including for archived documents. Pass the same revision on every page " +
-    "to keep reading that revision; an open revision can still change between calls. For example, `get_data({uuid, revision, collection: \"observations\", " +
+    "to keep reading that revision; an open revision can still change between calls. Historical results include `history`, the cache status described by list_revisions. " +
+    "A missing catalog or snapshot downloads when connected within a bounded wait; revisions_downloading means the download continues after that wait. " +
+    "Offline, an uncached or evicted snapshot refuses with revisions_not_downloaded; a paging cursor does not keep a snapshot downloaded. " +
+    "For example, `get_data({uuid, revision, collection: \"observations\", " +
     "limit: 100})` pages that revision's observations. An unknown revision, including one from another " +
-    "document, refuses with revision_not_found; it never falls back to live data. See tool-contracts for " +
-    "hub history failures and recovery. Decision records in every state, including archived records, refuse " +
-    "historical reads with decision_no_history before any hub request; read the topic's records instead.\n\n" +
+    "document, refuses with revision_not_found after online catalog revalidation; offline it reports not downloaded. It never falls back to live data. See tool-contracts for " +
+    "history failures and recovery. Decision records in every state, including archived records, refuse " +
+    "historical reads with decision_no_history before cache or hub access; read the topic's records instead.\n\n" +
     "Merged invalidity is observed through the shared reader without dropping, repairing or writing values.",
   list_docs:
     "Documents in the workspace, from the synced directory document — never from locally observed creations. " +

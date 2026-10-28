@@ -84,12 +84,18 @@ it("verifies source-worker downloads, enforces retention and preserves permanent
   const content = snapshot();
   ready(await test.worker.putCatalog(PAGE, catalog(content.checksum)));
   expect(ready(await test.worker.listPages())).toEqual([PAGE]);
+  expect(ready(await test.worker.newestDownloadedRevision(PAGE, catalog(content.checksum).revisions))).toBeNull();
   expect(ready(await test.worker.putVerifiedSnapshot(PAGE, "revision-one", "a".repeat(64), content.state))).toBe(false);
   expect(ready(await test.worker.hasSnapshot(PAGE, "revision-one", content.checksum))).toBe(false);
   expect(ready(await test.worker.putVerifiedSnapshot(PAGE, "revision-one", content.checksum, content.state))).toBe(true);
   expect(ready(await test.worker.putVerifiedSnapshot(PAGE, "revision-two", content.checksum, content.state))).toBe(true);
   expect(ready(await test.worker.putVerifiedSnapshot(PAGE, "revision-three", content.checksum, content.state))).toBe(true);
   expect(ready(await test.worker.hasSnapshot(PAGE, "revision-one", content.checksum))).toBe(true);
+  expect(ready(await test.worker.readSnapshot(PAGE, "revision-one"))).toEqual(content);
+  expect(ready(await test.worker.newestDownloadedRevision(PAGE, catalog(content.checksum).revisions))).toBe("revision-one");
+  const updated = catalog(content.checksum).revisions.map(revision => revision.id === "revision-one"
+    ? { ...revision, checksum: "b".repeat(64) } : revision);
+  expect(ready(await test.worker.newestDownloadedRevision(PAGE, updated))).toBe("revision-two");
   expect(ready(test.cache.readSnapshot(test.token, PAGE, "revision-one"))?.state).toEqual(Buffer.from(content.state));
   ready(await test.worker.markRefreshFailed(PAGE));
   expect(ready(await test.worker.readCatalog(PAGE))?.failed).toBe(true);
@@ -99,10 +105,38 @@ it("verifies source-worker downloads, enforces retention and preserves permanent
   expect(ready(await test.worker.hasSnapshot(PAGE, "revision-three", content.checksum))).toBe(false);
   ready(test.cache.purgeDoc(PAGE));
   expect(ready(await test.worker.listPages())).toEqual([]);
+  expect(ready(await test.worker.readSnapshot(PAGE, "revision-one"))).toBeNull();
+  expect(ready(await test.worker.newestDownloadedRevision(PAGE, catalog(content.checksum).revisions))).toBeNull();
   expect(await test.worker.putCatalog(PAGE, catalog(content.checksum))).toEqual({ status: "superseded" });
   expect(await test.worker.putVerifiedSnapshot(PAGE, "revision-one", content.checksum, content.state)).toEqual({ status: "superseded" });
   await test.worker.close();
   expect(await test.worker.readCatalog(PAGE)).toEqual({ status: "unavailable" });
+});
+
+it("holds snapshots across worker reads and releases independent handles and closed workers for retention", async () => {
+  const test = await fixture();
+  const content = snapshot();
+  ready(await test.worker.putCatalog(PAGE, catalog(content.checksum)));
+  expect(ready(await test.worker.putVerifiedSnapshot(PAGE, "revision-one", content.checksum, content.state))).toBe(true);
+  const first = ready(await test.worker.hold(PAGE, "revision-three"));
+  const second = ready(await test.worker.hold(PAGE, "revision-three"));
+  expect(ready(await test.worker.putVerifiedSnapshot(PAGE, "revision-three", content.checksum, content.state))).toBe(true);
+  ready(await test.worker.evict(PAGE, { mode: "named" }, Date.now()));
+  expect(ready(await test.worker.readSnapshot(PAGE, "revision-three"))).toEqual(content);
+  await first.release();
+  await first.release();
+  ready(await test.worker.evict(PAGE, { mode: "named" }, Date.now()));
+  expect(ready(await test.worker.readSnapshot(PAGE, "revision-three"))).toEqual(content);
+  await second.release();
+  ready(await test.worker.evict(PAGE, { mode: "named" }, Date.now()));
+  expect(ready(await test.worker.readSnapshot(PAGE, "revision-three"))).toBeNull();
+
+  const heldAtClose = ready(await test.worker.hold(PAGE, "revision-three"));
+  expect(ready(await test.worker.putVerifiedSnapshot(PAGE, "revision-three", content.checksum, content.state))).toBe(true);
+  await test.worker.close();
+  await heldAtClose.release();
+  ready(test.cache.evict(test.token, PAGE, { mode: "named" }, Date.now()));
+  expect(ready(test.cache.readSnapshot(test.token, PAGE, "revision-three"))).toBeNull();
 });
 
 it("allows the live event loop to release a writer while cache publication waits for SQLite", async () => {

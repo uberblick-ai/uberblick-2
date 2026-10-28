@@ -1,7 +1,7 @@
 import type { RevisionEntry, RevisionRequest, RevisionResponse } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
 import type { CachedHistoryCatalog, HistoryCacheResult, HistoryCacheStamp, HistoryCacheToken } from "../src/history-cache.js";
-import { HistoryMirror, type HistoryMirrorPage, type HistoryMirrorSource, type MirrorCache } from "../src/history-mirror.js";
+import { downloadHistorySnapshot, HistoryMirror, revalidateHistoryCatalog, type HistoryMirrorPage, type HistoryMirrorSource, type MirrorCache } from "../src/history-mirror.js";
 import { selectHistorySnapshots } from "../src/history-retention.js";
 import type { HistoryRetention } from "../src/local-settings.js";
 
@@ -129,6 +129,28 @@ async function flush(): Promise<void> { await vi.advanceTimersByTimeAsync(10); }
 function operations(calls: Call[]): string[] {
   return calls.map(call => `${call.room}:${call.operation.operation}${call.operation.revisionId === undefined ? "" : `:${call.operation.revisionId}`}`);
 }
+
+it("rereads competing catalog and snapshot publications instead of refusing a successful download", async () => {
+  const test = fixture();
+  test.cache.putCatalog.mockImplementationOnce(async () => {
+    test.cache.seed("live", [revision("winner")]);
+    return { status: "superseded" };
+  });
+  const catalog = await revalidateHistoryCatalog(test.cache, "live", async () => listed([revision("loser")]), () => Date.now());
+  expect(catalog.revisions.map(entry => entry.id)).toEqual(["winner"]);
+  expect(test.cache.markRefreshFailed).not.toHaveBeenCalled();
+
+  test.cache.snapshots.delete("live");
+  test.cache.putVerifiedSnapshot.mockImplementationOnce(async () => {
+    test.cache.snapshots.set("live", new Map([["winner", CHECKSUM]]));
+    return { status: "superseded" };
+  });
+  expect(await downloadHistorySnapshot(test.cache, "live", revision("winner"), async () => downloaded("winner"))).toBe(true);
+
+  test.cache.snapshots.delete("live");
+  test.cache.putVerifiedSnapshot.mockResolvedValueOnce({ status: "superseded" });
+  expect(await downloadHistorySnapshot(test.cache, "live", revision("winner"), async () => downloaded("winner"))).toBe(false);
+});
 
 it("bootstraps every held live regular page and skips pages first encountered archived", async () => {
   const test = fixture([page("unopened-a"), page("unopened-b"), page("archived", true)]);

@@ -454,6 +454,16 @@ export class HistoryCache {
       .get(token.generation, uuid, revision, checksum, token.generation, uuid) !== undefined));
   }
 
+  newestDownloadedRevision(token: HistoryCacheToken, uuid: string, revisions: readonly RevisionEntry[]): HistoryCacheResult<string | null> {
+    return this.result(() => this.read(token, db => {
+      const snapshots = db.prepare("SELECT revision, checksum FROM history_v1_snapshots WHERE generation = ? AND uuid = ? " +
+        "AND NOT EXISTS (SELECT 1 FROM history_v1_deleted WHERE generation = ? AND uuid = ?)")
+        .all(token.generation, uuid, token.generation, uuid);
+      const downloaded = new Map(snapshots.map(snapshot => [String(snapshot.revision), String(snapshot.checksum)]));
+      return revisions.find(revision => revision.checksum !== undefined && downloaded.get(revision.id) === revision.checksum)?.id ?? null;
+    }));
+  }
+
   evict(token: HistoryCacheToken, uuid: string, retention: HistoryRetention, now: number): HistoryCacheResult<void> {
     return this.result(() => {
       const catalog = this.readCatalog(token, uuid);

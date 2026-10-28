@@ -386,6 +386,11 @@
           "type": "string",
           "format": "uuid",
           "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "refresh": {
+          "description": "Revalidate the catalog through the hub before answering; use after an unknown naming or restore outcome. Requires a connection.",
+          "type": "boolean",
+          "const": true
         }
       },
       "required": [
@@ -394,7 +399,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "List hub revisions newest first, including archived documents, with names, namers and times or null. IDs work with get_revision/get_data/restore_revision. Empty means hub-confirmed no history. Listing a decision record refuses with decision_no_history.\n\nHelp: list_revisions, workspaces, tool-contracts.",
+    "description": "List this computer's cached revision catalog newest first, including archived documents, with cache freshness. Missing history downloads when connected; cached reads work offline. Use refresh: true to check an unknown mutation outcome. IDs work with get_revision/get_data/restore_revision. Empty means a complete downloaded catalog has no history. Listing a decision record refuses with decision_no_history.\n\nHelp: list_revisions, workspaces, tool-contracts.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -484,7 +489,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 256,
-          "description": "Hub revision ID from list_revisions for this document; distinct from get_doc's page and block rev hashes."
+          "description": "Hub revision ID from this document's cached list_revisions catalog; distinct from get_doc's page and block rev hashes. Historical reads use downloaded snapshots, fetching missing snapshots when connected."
         }
       },
       "required": [
@@ -494,7 +499,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Read a hub revision from list_revisions: title, visible blocks without rev, and data summary. Archived documents work. Page records with get_data and the same revision. Reading a decision record's revision refuses with decision_no_history.\n\nHelp: get_revision, workspaces, tool-contracts, data.",
+    "description": "Read a cached revision from list_revisions: title, visible blocks without rev, data summary and cache freshness. Missing snapshots download when connected; downloaded history works offline. Archived documents work. Page records with get_data and the same revision. Reading a decision record's revision refuses with decision_no_history.\n\nHelp: get_revision, workspaces, tool-contracts, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -518,7 +523,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 256,
-          "description": "Hub revision ID from list_revisions for this document; distinct from get_doc's page and block rev hashes."
+          "description": "Hub revision ID from this document's cached list_revisions catalog; distinct from get_doc's page and block rev hashes. Historical reads use downloaded snapshots, fetching missing snapshots when connected."
         },
         "collection": {
           "description": "Collection name; omit for the area summary.",
@@ -555,7 +560,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Read a data summary, or name collection for bounded records and diagnostics. limit: 0 reads schema; follow next_after until complete. Optional revision uses a hub ID from list_revisions, including archived documents; omission reads live data. Live data and open revisions can change between calls. Historical decision data refuses with decision_no_history.\n\nHelp: get_data, workspaces, tool-contracts, data.",
+    "description": "Read a data summary, or name collection for bounded records and diagnostics. limit: 0 reads schema; follow next_after until complete. Optional revision reads this computer's cached snapshot using an ID from list_revisions, fetching it when connected if missing, including archived documents; omission reads live data. Live data and open revisions can change between calls. Historical decision data refuses with decision_no_history.\n\nHelp: get_data, workspaces, tool-contracts, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -1278,8 +1283,6 @@
       "required": [
         "uuid"
       ],
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
       "dependencies": {
         "tldr_opt_in": {
           "required": [
@@ -1292,7 +1295,9 @@
             }
           }
         }
-      }
+      },
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false
     },
     "description": "Change one or more of a document's title, description, TL;DR, tags, curated links and code check, or an open decision's discussion RFC. Name at least one field; omitted fields keep their values. The call is all or nothing: a refusal writes none of the named fields and names the failing `field`. Tags and links replace the whole set, and `[]` clears it. Title and description cannot be cleared; `tldr: null` clears the TL;DR. Decision records take no TL;DR or code check, and decided records also refuse discussion. Archived documents refuse every field; lifecycle status belongs to set_status.\n\nHelp: set_metadata, workspaces, tool-contracts, decisions.",
     "annotations": {

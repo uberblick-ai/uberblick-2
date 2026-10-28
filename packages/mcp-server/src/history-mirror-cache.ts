@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 import * as Y from "yjs";
-import { snapshotRevision } from "@uberblick/schema";
+import { snapshotRevision, type RevisionEntry } from "@uberblick/schema";
 import {
   HistoryCache,
   type CachedHistoryCatalog,
@@ -18,9 +18,12 @@ type Command =
   | { operation: "open"; stamp: HistoryCacheStamp }
   | { operation: "listPages" | "resume" }
   | { operation: "readCatalog" | "markRefreshFailed"; uuid: string }
+  | { operation: "readSnapshot" | "hold"; uuid: string; revision: string }
+  | { operation: "releaseHold"; hold: number }
   | { operation: "putCatalog"; uuid: string; input: CatalogInput }
   | { operation: "evict"; uuid: string; retention: HistoryRetention; now: number }
   | { operation: "hasSnapshot"; uuid: string; revision: string; checksum: string }
+  | { operation: "newestDownloadedRevision"; uuid: string; revisions: readonly RevisionEntry[] }
   | { operation: "putVerifiedSnapshot"; uuid: string; revision: string; checksum: string; state: Uint8Array };
 type Request = Command & { id: number };
 type Reply = { id: number; result: HistoryCacheResult<unknown> } | { ready: true };
@@ -58,7 +61,14 @@ async function serveCacheWorker(data: CacheWorkerData): Promise<void> {
   if (port === null) throw new Error("History cache worker requires a parent port.");
   const cache = new HistoryCache(data.path, data.workspace, data.env, data.identity);
   let token: HistoryCacheToken | null = null;
+  let nextHold = 0;
+  const holds = new Map<number, { release(): void }>();
   const execute = (command: Command): HistoryCacheResult<unknown> => {
+    if (command.operation === "releaseHold") {
+      holds.get(command.hold)?.release();
+      holds.delete(command.hold);
+      return { status: "ready", value: undefined };
+    }
     if (command.operation === "open") {
       const opened = cache.open(command.stamp);
       token = opened.status === "ready" ? opened.value : null;
@@ -72,11 +82,20 @@ async function serveCacheWorker(data: CacheWorkerData): Promise<void> {
     if (token === null) return { status: "unavailable" };
     switch (command.operation) {
       case "readCatalog": return cache.readCatalog(token, command.uuid);
+      case "readSnapshot": return cache.readSnapshot(token, command.uuid, command.revision);
+      case "hold": {
+        const held = cache.hold(token, command.uuid, command.revision);
+        if (held.status !== "ready") return held;
+        const id = nextHold++;
+        holds.set(id, held.value);
+        return { status: "ready", value: id };
+      }
       case "listPages": return cache.listPages(token);
       case "markRefreshFailed": return cache.markRefreshFailed(token, command.uuid);
       case "putCatalog": return cache.putCatalog(token, command.uuid, command.input);
       case "evict": return cache.evict(token, command.uuid, command.retention, command.now);
       case "hasSnapshot": return cache.hasSnapshot(token, command.uuid, command.revision, command.checksum);
+      case "newestDownloadedRevision": return cache.newestDownloadedRevision(token, command.uuid, command.revisions);
       case "putVerifiedSnapshot": return verifiedSnapshot(cache, token, command);
     }
   };
@@ -92,6 +111,8 @@ async function serveCacheWorker(data: CacheWorkerData): Promise<void> {
       port.postMessage({ ready: true } satisfies Reply);
     });
   } finally {
+    for (const hold of holds.values()) hold.release();
+    holds.clear();
     cache.close();
     port.close();
   }
@@ -201,6 +222,21 @@ export class HistoryMirrorCache {
     return this.request({ operation: "readCatalog", uuid });
   }
 
+  readSnapshot(uuid: string, revision: string): Promise<HistoryCacheResult<{ state: Uint8Array; checksum: string } | null>> {
+    return this.request({ operation: "readSnapshot", uuid, revision });
+  }
+
+  async hold(uuid: string, revision: string): Promise<HistoryCacheResult<{ release(): Promise<void> }>> {
+    const held = await this.request<number>({ operation: "hold", uuid, revision });
+    if (held.status !== "ready") return held;
+    let released = false;
+    return { status: "ready", value: { release: async () => {
+      if (released) return;
+      released = true;
+      await this.request({ operation: "releaseHold", hold: held.value });
+    } } };
+  }
+
   listPages(): Promise<HistoryCacheResult<string[]>> {
     return this.request({ operation: "listPages" });
   }
@@ -219,6 +255,10 @@ export class HistoryMirrorCache {
 
   hasSnapshot(uuid: string, revision: string, checksum: string): Promise<HistoryCacheResult<boolean>> {
     return this.request({ operation: "hasSnapshot", uuid, revision, checksum });
+  }
+
+  newestDownloadedRevision(uuid: string, revisions: readonly RevisionEntry[]): Promise<HistoryCacheResult<string | null>> {
+    return this.request({ operation: "newestDownloadedRevision", uuid, revisions });
   }
 
   putVerifiedSnapshot(uuid: string, revision: string, checksum: string, state: Uint8Array): Promise<HistoryCacheResult<boolean>> {

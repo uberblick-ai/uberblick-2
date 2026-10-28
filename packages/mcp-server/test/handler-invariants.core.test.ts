@@ -139,7 +139,7 @@ it("every registered tool is guarded and only hub revision requests wait after o
       expect(waits[0]!.expression.getText(operation.source)).toMatch(
         name === "name_revision" ? /^mutateDocumentRevision\(/
           : name === "restore_revision" ? /^restoreDocumentRevision\(/
-          : name === "list_revisions" ? /^listDocumentRevisions\(/ : /^getDocumentRevision\(/,
+          : name === "list_revisions" ? /^readDocumentHistory\(/ : /^readDocumentRevision\(/,
       );
     } else {
       expectSynchronousBody(operation.handler);

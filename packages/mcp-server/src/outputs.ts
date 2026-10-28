@@ -235,6 +235,13 @@ const dataSummary = z.object({
   errorCount: count,
 }).strict();
 const revisionId = z.string().describe("Hub revision ID from list_revisions, distinct from page and block rev hashes.");
+const historyReadStatus = z.object({
+  complete: z.boolean().describe("Whether the cached catalog contains the hub's full revision list as of lastRefresh; independent of downloaded snapshot coverage."),
+  lastRefresh: z.string().nullable().describe("Last successful catalog refresh as an ISO 8601 UTC string, or null when never downloaded."),
+  refreshFailed: z.boolean().describe("Whether the last catalog refresh failed; cached history stays readable."),
+  offline: z.boolean().describe("Whether the hub is currently unavailable to this reader; downloaded history stays readable while signed out or refused."),
+  newestDownloadedRevision: revisionId.nullable().describe("Newest cached snapshot matching its catalog checksum, or null. This is the newest downloaded state, not a claim about the hub's current state."),
+}).strict().describe("This computer's history cache freshness and availability.");
 
 /**
  * The SDK requires a root object; strictInput validates each mode through this
@@ -243,6 +250,7 @@ const revisionId = z.string().describe("Hub revision ID from list_revisions, dis
 const getData = strictInput({
   uuid,
   revision: revisionId.optional().describe("Present when reading this hub revision's data instead of the live document."),
+  history: historyReadStatus.optional().describe("History-cache status; present exactly when revision is supplied."),
   data: dataSummary.nullable().optional(),
   collection: z.string().optional(),
   schema: z.unknown().optional().describe("Raw caller-stored schema, including missing or unsupported schemas; never normalized."),
@@ -273,7 +281,11 @@ const getData = strictInput({
     requires: ["schema", "valid", "errors", "recordCount", "invalidRecordCount", "records", "bytes", "complete", "next_after"],
     forbids: ["data"],
   },
-]);
+]).superRefine((value, context) => {
+  if ((value.revision === undefined) === (value.history === undefined)) return;
+  context.addIssue({ code: "custom", path: ["history"],
+    message: "Historical reads require history; live reads omit it." });
+});
 
 const groupIdentity = z.object({ id: z.string(), name: z.string() }).strict();
 const helpTopic = z.object({
@@ -312,13 +324,13 @@ const revisionName = z.object({
   text: z.string(),
   namer: revisionAuthor.describe("Account and surface that set the name's current text; separate from the revision's author."),
   namedAt: z.string().describe("Hub time when the name's current text was set, as an ISO 8601 UTC string; updated on rename."),
-  canManage: z.boolean().describe("Whether this account may rename or remove this name."),
+  canManage: z.boolean().describe("Whether this account may rename or remove this name. Cached reads reflect the catalog's last refresh, not current authorization."),
 }).strict().nullable();
 const revisionEntry = z.object({
   id: revisionId,
   author: revisionAuthor.describe("Verified GitHub account and surface, or null when unknown."),
   startedAt: z.string().nullable().describe("Start as an ISO 8601 UTC string; null only for content predating history."),
-  endedAt: z.string().nullable().describe("End as an ISO 8601 UTC string; null means this revision is still open."),
+  endedAt: z.string().nullable().describe("End as an ISO 8601 UTC string; null means open. Cached reads reflect the catalog's last refresh."),
   name: revisionName.describe("The revision's name, namer and time, or null when unnamed."),
 }).strict();
 
@@ -327,7 +339,8 @@ export const outputSchemas = {
   get_help: getHelp,
   list_revisions: z.object({
     uuid,
-    revisions: z.array(revisionEntry).describe("Hub-confirmed revisions, newest first; empty only when the hub confirms no history."),
+    revisions: z.array(revisionEntry).describe("Cached catalog entries, newest first; empty only when a complete downloaded catalog records no revisions."),
+    history: historyReadStatus,
   }).strict(),
   name_revision: z.object({
     uuid,
@@ -346,6 +359,7 @@ export const outputSchemas = {
   get_revision: z.object({
     uuid,
     revision: revisionId,
+    history: historyReadStatus,
     title: z.string(),
     blocks: z.array(blockSchema(true, false)).describe("Historical visible blocks in stored order, without edit-assertion rev hashes."),
     data: dataSummary.nullable(),

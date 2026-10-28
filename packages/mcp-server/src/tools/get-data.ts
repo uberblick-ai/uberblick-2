@@ -2,7 +2,7 @@ import { canonicalJson, compareCodePoints, readDocData } from "@uberblick/schema
 import { z } from "zod";
 import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
-import { getDocumentRevision } from "../revision-client.js";
+import { readDocumentRevision } from "../revision-client.js";
 import { revisionArg, uuidArg } from "./schemas.js";
 import { READ, operation } from "./operation.js";
 
@@ -34,10 +34,11 @@ export function dataSummary(data: ReturnType<typeof readDocData>) {
 export const getDataOperation = operation(READ, inputSchema, async (context, args) => {
   const { uuid, revision } = args;
   if (revision !== undefined) context.requireKnownDoc(uuid);
-  const doc = revision === undefined ? context.requireDoc(uuid).doc
-    : await getDocumentRevision(context.replicas, uuid, revision);
+  const historical = revision === undefined ? undefined
+    : await readDocumentRevision(context.replicas, uuid, revision);
+  const doc = historical?.doc ?? context.requireDoc(uuid).doc;
   try {
-    return { ...readData(doc, args), ...(revision === undefined ? {} : { revision }) };
+    return { ...readData(doc, args), ...(historical === undefined ? {} : { revision, history: historical.history }) };
   } finally {
     if (revision !== undefined) doc.destroy();
   }

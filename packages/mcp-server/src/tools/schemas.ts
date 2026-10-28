@@ -22,7 +22,7 @@ export const uuidArg = z.uuid().transform((value, ctx) => {
 }).describe("Document UUID.");
 
 export const revisionArg = z.string().min(1).max(256)
-  .describe("Hub revision ID from list_revisions for this document; distinct from get_doc's page and block rev hashes.");
+  .describe("Hub revision ID from this document's cached list_revisions catalog; distinct from get_doc's page and block rev hashes. Historical reads use downloaded snapshots, fetching missing snapshots when connected.");
 
 /**
  * Trim before measuring and storing; whitespace must not satisfy the minimum

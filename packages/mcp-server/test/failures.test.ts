@@ -43,6 +43,8 @@ const stores: MirrorStore[] = [];
 const REVISION_FAILURES = [
   ["local-only", "revisions_local_only", "manual", "team hub"],
   ["unreachable", "revisions_unreachable", "retry", "once the hub is reachable"],
+  ["downloading", "revisions_downloading", "retry", "download continues"],
+  ["not-downloaded", "revisions_not_downloaded", "manual", "Connect once to download history."],
   ["sign-in-required", "revisions_sign_in_required", "manual", "ub auth login"],
   ["forbidden", "revisions_forbidden", "manual", "grant read access"],
   ["deleted", "doc_deleted", "manual", "permanently deleted"],
@@ -172,6 +174,8 @@ const EXPECTED: Record<
   decision_no_history: { recoveryClass: "manual", detail: [] },
   revisions_local_only: { recoveryClass: "manual", detail: [] },
   revisions_unreachable: { recoveryClass: "retry", detail: [] },
+  revisions_downloading: { recoveryClass: "retry", detail: [] },
+  revisions_not_downloaded: { recoveryClass: "manual", detail: [] },
   revisions_sign_in_required: { recoveryClass: "manual", detail: [] },
   revisions_forbidden: { recoveryClass: "manual", detail: [] },
   revisions_unsupported: { recoveryClass: "manual", detail: [] },
@@ -691,6 +695,15 @@ describe("the failure contract", () => {
         recovery: expect.stringContaining(recovery),
       },
     });
+  });
+
+  it.each(["naming-outcome-unknown", "restore-outcome-unknown"] as const)("requires an online catalog refresh to settle %s", (code) => {
+    const tool = code === "naming-outcome-unknown" ? "name_revision" : "restore_revision";
+    const result = toFailure(toolNamed(tool), new RevisionClientError(code, { applied: null, reason: "unreachable" }));
+    expect(result.payload).toMatchObject({ applied: null, synced: false, recoveryClass: "reread",
+      recovery: expect.stringContaining("refresh: true") });
+    expect(result.payload.recovery).toContain("successful refresh");
+    if (code === "restore-outcome-unknown") expect(result.payload.recovery).toContain("get_doc");
   });
 
   it("says a failed write changed nothing, and invents nothing for a read", async () => {
