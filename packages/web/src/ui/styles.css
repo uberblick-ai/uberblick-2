@@ -1758,6 +1758,13 @@ h6.ub-heading {
 .ub-chart-editing > .ub-chart-panel,
 .ub-chart[data-annotated="true"] > .ub-chart-panel { display: none; }
 .ub-chart-probe { position: absolute; visibility: hidden; font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans); color: var(--muted-foreground); border-color: var(--border); }
+.ub-scatter-details { margin-top: 0.75rem; font: var(--type-small-size)/var(--type-small-leading) var(--font-sans); }
+.ub-scatter-details[hidden] { display: none; }
+.ub-scatter-details [data-slot="native-select-wrapper"] { max-width: 100%; }
+.ub-scatter-details dl { display: grid; grid-template-columns: minmax(6rem, 1fr) minmax(0, 3fr); gap: 0.35rem 0.75rem; margin: 0.75rem 0 0; }
+.ub-scatter-detail { display: contents; }
+.ub-scatter-details dt { color: var(--muted-foreground); }
+.ub-scatter-details dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .ub-chart[data-view="table"] > .ub-block-caption { display: none; }
 .ub-chart[data-view="table"] > .ub-chart-source {

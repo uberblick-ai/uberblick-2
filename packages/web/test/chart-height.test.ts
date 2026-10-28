@@ -18,6 +18,12 @@ function change(source: string, height: number | undefined): string {
 }
 
 describe("chart height source edits", () => {
+  it("changes only scatter height and preserves authored details and bound mappings", () => {
+    const scatter = '{ "version":1,"type":"scatter","collection":"points","x":{"field":"x","lower":"low"},"y":{"field":"y"},"label":"name","details":[{"field":"url","format":"link"}] }';
+    const resized = change(scatter, 320);
+    expect(resized).toBe(`${scatter.slice(0, -2)},"height":320 }`);
+    expect(change(resized, undefined)).toBe(scatter);
+  });
   it("inserts a member using the existing compact, multiline and CRLF separators", () => {
     expect(change(mapping, 160)).toBe(`{${members},"height":160}`);
     const source = JSON.stringify(JSON.parse(mapping), null, "\t").replaceAll("\n", "\r\n");

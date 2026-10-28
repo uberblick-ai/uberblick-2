@@ -42,6 +42,16 @@ afterEach(() => {
 });
 
 describe("chart block content", () => {
+  it("keeps scatter mappings and stored bounds as ordinary source across Markdown round trips", () => {
+    const source = JSON.stringify({
+      version: 1, type: "scatter", collection: "observations", label: "name",
+      x: { field: "cost", lower: "minimum", upper: "maximum" }, y: { field: "quality" },
+    });
+    const doc = document();
+    appendBlock(doc, { type: "chart", text: source });
+    expect(importMarkdown(exportMarkdown(doc, { frontmatter: false })).blocks).toEqual([{ type: "chart", text: source }]);
+  });
+
   it("exports and imports mapping source without exposing document records", () => {
     const doc = document();
     const id = appendBlock(doc, { type: "chart", text: mapping });

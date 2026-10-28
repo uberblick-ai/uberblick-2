@@ -21,6 +21,23 @@ Views whose assertions read series or reference colours run in both:
 | Score line in front of response bars, document width | ![Light mixed chart](mixed-desktop-light.png) | ![Dark mixed chart](mixed-desktop-dark.png) |
 | Survey scale and references, overlay | ![Light survey overlay](survey-overlay-light.png) | ![Dark survey overlay](survey-overlay-dark.png) |
 | Survey scale and references, panels | ![Light survey panels](survey-panels-light.png) | ![Dark survey panels](survey-panels-dark.png) |
+| Scatter points and stored bounds, desktop | ![Light desktop scatter](scatter-desktop-light.png) | ![Dark desktop scatter](scatter-desktop-dark.png) |
+| Scatter points and selected details, iPad portrait | ![Light iPad scatter](scatter-ipad-light.png) | ![Dark iPad scatter](scatter-ipad-dark.png) |
+
+`scatter.spec.ts` uses synthetic observations with three named groups and an
+ungrouped record sharing another record's coordinates. Native canvas strokes
+establish that stored bounds widen the declared ranges and remain visible;
+text paint establishes that colliding labels are hidden and legend text stays
+neutral in both appearances. Pointer and touch input cycle through the two
+overlapping records. A separate paint case checks eight group colours, then
+the neutral fallback and field-naming diagnostic for nine groups.
+The native selector reaches every record from the keyboard and lets Tab leave
+the control. Selection follows a record update, clears on removal, and resets
+on mapping edits and reload. A later upstream metadata barrier precedes checks
+that selection did not change the mapping or stored data. Desktop resize and
+the iPad source-mode Height field both save the same chart height. Detail links
+open a separate browser page. Point selection and source inspection also work
+in locked documents.
 
 The browser suite covers source insertion and keyboard/pointer access, canvas
 names/descriptions and appearance changes. The combined chart/table journey in
@@ -107,6 +124,14 @@ Regenerate the chart screenshots, with shared-frame table regression coverage:
 
 ```sh
 mise run e2e -- chart.spec.ts data-table.spec.ts --project=chromium
+```
+
+Regenerate scatter evidence in desktop Chromium and iPad WebKit, including both
+appearances:
+
+```sh
+mise run e2e -- scatter.spec.ts
+python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path("packages/web/test-results"); target = Path("packages/web/e2e/evidence/chart"); names = ["scatter-desktop-light", "scatter-desktop-dark", "scatter-ipad-light", "scatter-ipad-dark"]; matches = {name: list(source.rglob("chart-" + name + ".png")) for name in names}; assert all(len(paths) == 1 for paths in matches.values()), matches; [copyfile(matches[name][0], target / (name + ".png")) for name in names]'
 ```
 
 The Chromium run attaches cropped blocks named `chart-light.png` and

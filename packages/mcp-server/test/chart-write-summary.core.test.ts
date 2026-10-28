@@ -13,6 +13,11 @@ const table = {
   version: 1, type: "table", collection: "observations",
   columns: [{ field: "count", format: "number" }],
 };
+const scatter = {
+  version: 1, type: "scatter", collection: "observations",
+  x: { field: "cost" }, y: { field: "quality", unit: "%", lower: "low", upper: "high" },
+  label: "name", group: "tier", details: [{ field: "source", format: "link" }],
+};
 
 async function local(): Promise<Rig> {
   const rig = await startServer();
@@ -200,7 +205,51 @@ describe("chart source write summaries", () => {
     });
   });
 
-  it("reports bound empty line and table collections with counts", async () => {
+  it("summarizes scatter seeds, inserted points and edited groups from the shared projection without record values", async () => {
+    const rig = await local();
+    const source = JSON.stringify(scatter);
+    const created = await rig.ok("create_doc", {
+      title: "Scatter feedback", description: "Stored bounds remain private to the document.",
+      blocks: [{ type: "chart", text: source }],
+    });
+    expect(created.blocks[0].chart).toEqual({
+      status: "collection-absent", message: "Chart collection “observations” is absent.",
+      collections: [], warnings: [expect.any(String)],
+    });
+    await rig.ok("update_data", { uuid: created.uuid, operations: [{
+      collection: "observations", schema: { version: 1, schema: { type: "object" } },
+      upsert: [
+        { id: "private-a", value: { cost: 42424242, quality: 82, low: 76, high: 87,
+          name: "PRIVATE_POINT_LABEL", tier: "PRIVATE_GROUP", source: "https://private.example/source" } },
+        { id: "private-b", value: { cost: 42424242, quality: 82, low: "PRIVATE_BAD_BOUND", high: 70,
+          name: "PRIVATE_DUPLICATE_POINT", tier: "PRIVATE_GROUP" } },
+        { id: "private-invalid-x", value: { cost: "PRIVATE_WRONG_TYPE", quality: 82 } },
+        { id: "private-missing-y", value: { cost: 42424242 } },
+      ],
+    }] });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const before = JSON.stringify(doc.getMap(DATA_KEY).toJSON());
+    const result = await rig.ok("insert_block", { uuid: created.uuid, blocks: [{ type: "chart", text: source }] });
+    expect(result.blocks[0].chart).toEqual({ status: "ready", recordCount: 4, plottedCount: 2, warnings: [] });
+    expect(JSON.stringify(result)).not.toMatch(/42424242|PRIVATE_|private-/);
+    expect(JSON.stringify(doc.getMap(DATA_KEY).toJSON())).toBe(before);
+
+    await rig.ok("update_data", { uuid: created.uuid, operations: [{
+      collection: "observations",
+      upsert: Array.from({ length: 9 }, (_, index) => ({ id: `group-${index}`,
+        value: { cost: index, quality: index, tier: `PRIVATE_GROUP_${index}` } })),
+    }] });
+    const edited = await rig.ok("edit_block", {
+      uuid: created.uuid, block_id: result.blocks[0].id, rev: result.blocks[0].rev,
+      old_text: source, new_text: JSON.stringify({ ...scatter, title: "Changed scatter title" }),
+    });
+    expect(edited.block.chart).toEqual({
+      status: "ready", recordCount: 13, plottedCount: 11, warnings: [expect.stringContaining("tier")],
+    });
+    expect(JSON.stringify(edited)).not.toMatch(/PRIVATE_|private-/);
+  });
+
+  it("reports bound empty line, scatter and table collections with counts", async () => {
     const rig = await local();
     const { uuid } = await create(rig);
     await rig.ok("update_data", { uuid, operations: [{
@@ -214,6 +263,10 @@ describe("chart source write summaries", () => {
     expect(await insert(rig, uuid, table)).toEqual({
       status: "no-records", message: "No records to show in this table collection.",
       recordCount: 0, rowCount: 0, invalidRecordCount: 0, warnings: [expect.any(String)],
+    });
+    expect(await insert(rig, uuid, scatter)).toEqual({
+      status: "no-records", message: "No plottable records in this scatter collection.",
+      recordCount: 0, plottedCount: 0, warnings: [expect.any(String)],
     });
   });
 

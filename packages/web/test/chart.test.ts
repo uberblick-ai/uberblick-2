@@ -45,9 +45,10 @@ vi.mock("chart.js", () => {
       charts.instances.push(this);
     }
     update() { this.updates += 1; }
+    draw() {}
     destroy() { this.destroyed = true; }
   }
-  return { Chart, LineController: {}, LineElement: {}, PointElement: {}, BarController: {}, BarElement: {}, LinearScale: {}, Legend: {}, Tooltip: {} };
+  return { Chart, ScatterController: {}, LineController: {}, LineElement: {}, PointElement: {}, BarController: {}, BarElement: {}, LinearScale: {}, Legend: {}, Tooltip: {} };
 });
 
 const mapping = JSON.stringify({ version: 1, type: "line", collection: "trend", x: { field: "day", type: "number" }, y: [{ field: "value", label: "Delivery", unit: "issues" }] });
@@ -80,6 +81,29 @@ function panelFixture() {
     { id: "last", value: { day: 6, value: null, secondary: -20, third: 9_000 } },
   ] }]);
   return { ...result, source };
+}
+const scatterMapping = JSON.stringify({ version: 1, type: "scatter", collection: "trend",
+  x: { field: "day", label: "Weekly cost", unit: "€" },
+  y: { field: "value", label: "Quality", unit: "%", lower: "lower", upper: "upper" },
+  label: "name", group: "tier", title: "Options", details: [
+    { field: "sample", label: "Sample size", format: "number", decimals: 0, unit: "people" },
+    { field: "absent", label: "Absent value", format: "number" },
+    { field: "null", label: "Null value", format: "number" },
+    { field: "wrong", label: "Wrong value", format: "number" },
+    { field: "url", label: "Source", format: "link" },
+    { field: "unsafe", label: "Unsafe source", format: "link" },
+    { field: "metadata", label: "Metadata" },
+  ],
+});
+function scatterFixture() {
+  const result = fixture();
+  editBlock(result.doc, result.id, mapping, scatterMapping);
+  applyDocData(result.doc, result.directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } }, replaceRecords: [
+    { id: "a", value: { day: 12, value: 82, lower: 76, upper: 87, name: "Duplicate", tier: "Core", sample: 1234,
+      null: null, wrong: "not numeric", url: "https://example.com/source", unsafe: "javascript:alert(1)", metadata: { nested: true } } },
+    { id: "b", value: { day: 12, value: 82, lower: 76, upper: 87, name: "Duplicate", tier: null, metadata: { nested: false } } },
+  ] }]);
+  return result;
 }
 function panelOptions(chart: RecordedChart): PanelOptions { return chart.options as PanelOptions; }
 function panelData(chart: RecordedChart): PanelData { return chart.data as PanelData; }
@@ -248,6 +272,158 @@ describe("chart height controls", () => {
     await act(async () => { fireEvent.submit(input.form!); flush(); });
     expect(getBlocks(doc).find(block => block.id === id)?.text).toBe(source.replace('"height":200', '"height":300'));
     expect(listAnnotationRanges(doc, id)).toEqual(ranges);
+    await act(async () => editor.destroy());
+    doc.destroy(); directory.destroy();
+  });
+});
+
+describe("the scatter chart's composed presentation and lifecycle", () => {
+  it("selects equal-valued records separately and presents bounds, table markers and safe links without writes", async () => {
+    const { doc, directory } = scatterFixture();
+    let mounted!: ReturnType<typeof mountEditor>;
+    await act(async () => { mounted = mountEditor(doc); flush(); });
+    const { editor } = mounted;
+    const root = editor.view.dom.querySelector<HTMLElement>(".ub-chart")!;
+    const details = root.querySelector<HTMLElement>(".ub-scatter-details")!;
+    const selector = within(details).getByRole<HTMLSelectElement>("combobox", { name: "Select point" });
+    expect([...selector.options].map(option => [option.value, option.text])).toEqual([
+      ["", "Select a point"], ["a", "Duplicate · a"], ["b", "Duplicate · b"],
+    ]);
+    expect(details.querySelector("dl")).toBeNull();
+    const before = Y.encodeStateAsUpdate(doc);
+    await act(async () => fireEvent.change(selector, { target: { value: "a" } }));
+    expect(selector.value).toBe("a");
+    const rows = [...details.querySelectorAll("dt")].map(term => [term.textContent, term.nextElementSibling?.textContent]);
+    expect(rows).toEqual([
+      ["Label", "Duplicate"], ["Record", "a"], ["Group", "Core"],
+      ["Weekly cost", "12 €"], ["Quality", "82 % (76–87 %)"],
+      ["Sample size", "1,234 people"], ["Absent value", "Absent"], ["Null value", "Null"],
+      ["Wrong value", "Invalid: not numeric"], ["Source", "https://example.com/source"],
+      ["Unsafe source", "Invalid: javascript:alert(1)"], ["Metadata", '{"nested":true}'],
+    ]);
+    expect([...details.querySelectorAll("[data-state]")].map(cell => cell.getAttribute("data-state"))).toEqual([
+      "valid", "valid", "valid", "absent", "null", "invalid", "valid", "invalid", "valid",
+    ]);
+    const link = within(details).getByRole<HTMLAnchorElement>("link", { name: "https://example.com/source" });
+    expect(link.href).toBe("https://example.com/source");
+    expect(link.target).toBe("_blank");
+    expect(link.rel).toBe("noopener noreferrer");
+    expect(within(details).getAllByRole("link")).toHaveLength(1);
+    await act(async () => fireEvent.change(selector, { target: { value: "b" } }));
+    expect(selector.value).toBe("b");
+    expect(details.querySelector("dl")?.textContent).toContain('RecordbGroupNull');
+    expect(details.querySelector("dl")?.textContent).toContain('{"nested":false}');
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    await act(async () => editor.destroy());
+    doc.destroy(); directory.destroy();
+  });
+
+  it("follows selection by record through data updates and clears it after omission, source edits and remount", async () => {
+    const { doc, directory, id } = scatterFixture();
+    let mounted!: ReturnType<typeof mountEditor>;
+    await act(async () => { mounted = mountEditor(doc); flush(); });
+    const { editor } = mounted;
+    const details = editor.view.dom.querySelector<HTMLElement>(".ub-scatter-details")!;
+    const selector = () => within(details).getByRole<HTMLSelectElement>("combobox", { name: "Select point" });
+    await act(async () => fireEvent.change(selector(), { target: { value: "a" } }));
+    await act(async () => {
+      applyDocData(doc, directory, [{ collection: "trend", upsert: [{ id: "a", value: { day: 15, value: 90, name: "Updated", tier: "Core" } }] }]);
+      flush();
+    });
+    expect(selector().value).toBe("a");
+    expect(details.querySelector("dl")?.textContent).toContain("Updated");
+    expect(details.querySelector("dl")?.textContent).toContain("90 % (Absent–Absent)");
+    await act(async () => {
+      applyDocData(doc, directory, [{ collection: "trend", upsert: [{ id: "a", value: { day: null, value: 90, name: "No longer plotted" } }] }]);
+      flush();
+    });
+    expect(selector().value).toBe("");
+    expect(details.querySelector("dl")).toBeNull();
+    expect([...selector().options].map(option => option.value)).toEqual(["", "b"]);
+    await act(async () => fireEvent.change(selector(), { target: { value: "b" } }));
+    const changed = scatterMapping.replace('"Options"', '"Revised options"');
+    await act(async () => { editBlock(doc, id, scatterMapping, changed); flush(); });
+    expect(selector().value).toBe("");
+    expect(details.querySelector("dl")).toBeNull();
+    await act(async () => fireEvent.change(selector(), { target: { value: "b" } }));
+    const oldCharts = [...charts.instances];
+    await act(async () => editor.destroy());
+    expect(oldCharts.every(chart => chart.destroyed)).toBe(true);
+    await act(async () => { mounted = mountEditor(doc); flush(); });
+    const remounted = mounted.editor.view.dom.querySelector<HTMLElement>(".ub-scatter-details")!;
+    expect(within(remounted).getByRole<HTMLSelectElement>("combobox", { name: "Select point" }).value).toBe("");
+    expect(remounted.querySelector("dl")).toBeNull();
+    await act(async () => mounted.editor.destroy());
+    doc.destroy(); directory.destroy();
+  });
+
+  it("releases scatter state when switching through line and table views and destroys the last chart", async () => {
+    const { doc, directory, id } = scatterFixture();
+    let mounted!: ReturnType<typeof mountEditor>;
+    await act(async () => { mounted = mountEditor(doc); flush(); });
+    const { editor } = mounted;
+    const root = editor.view.dom.querySelector<HTMLElement>(".ub-chart")!;
+    const selector = within(root).getByRole<HTMLSelectElement>("combobox", { name: "Select point" });
+    await act(async () => fireEvent.change(selector, { target: { value: "a" } }));
+    const scatterChart = charts.instances[0]!;
+    await act(async () => { editBlock(doc, id, scatterMapping, mapping); flush(); });
+    expect(scatterChart.destroyed).toBe(true);
+    expect(root.getAttribute("data-view")).toBe("line");
+    expect(root.querySelector<HTMLElement>(".ub-scatter-details")?.hidden).toBe(true);
+    expect(root.querySelector(".ub-scatter-details select")).toBeNull();
+    expect(charts.instances.filter(chart => !chart.destroyed)).toHaveLength(1);
+    const lineChart = charts.instances[1]!;
+    await act(async () => { editBlock(doc, id, mapping, tableMapping); flush(); });
+    expect(lineChart.destroyed).toBe(true);
+    expect(root.getAttribute("data-view")).toBe("table");
+    expect(root.querySelector<HTMLElement>(".ub-table-view")?.hidden).toBe(false);
+    expect(root.querySelector(".ub-chart-open")?.getAttribute("aria-label")).toBe("Open table source");
+    expect(charts.instances.filter(chart => !chart.destroyed)).toHaveLength(0);
+    await act(async () => { editBlock(doc, id, tableMapping, scatterMapping); flush(); });
+    expect(root.getAttribute("data-view")).toBe("scatter");
+    expect(root.querySelector<HTMLElement>(".ub-table-view")?.hidden).toBe(true);
+    expect(root.querySelector(".ub-chart-open")?.getAttribute("aria-label")).toBe("Open chart source");
+    expect(within(root).getByRole<HTMLSelectElement>("combobox", { name: "Select point" }).value).toBe("");
+    expect(root.querySelector(".ub-scatter-details dl")).toBeNull();
+    expect(charts.instances.filter(chart => !chart.destroyed)).toHaveLength(1);
+    await act(async () => editor.destroy());
+    expect(charts.instances.every(chart => chart.destroyed)).toBe(true);
+    expect(frames.size).toBe(0);
+    doc.destroy(); directory.destroy();
+  });
+
+  it("reports unusable coordinates, omitted bounds and group overflow and recovers from invalid source", async () => {
+    const { doc, directory, id } = scatterFixture();
+    applyDocData(doc, directory, [{ collection: "trend", replaceRecords: [
+      ...Array.from({ length: 9 }, (_, index) => ({ id: `point-${index}`, value: {
+        day: index, value: 50, name: `Point ${index}`, tier: index, lower: 60, upper: "wrong",
+      } })),
+      { id: "absent", value: { value: 50 } }, { id: "null", value: { day: null, value: 50 } },
+      { id: "wrong-x", value: { day: "1", value: 50 } }, { id: "wrong-y", value: { day: 1, value: "50" } },
+    ] }]);
+    let mounted!: ReturnType<typeof mountEditor>;
+    await act(async () => { mounted = mountEditor(doc); flush(); });
+    const { editor } = mounted;
+    const root = editor.view.dom.querySelector<HTMLElement>(".ub-chart")!;
+    const diagnostics = root.querySelector(".ub-chart-diagnostics")!;
+    expect(diagnostics.textContent).toContain("4 records not plotted (1 absent x; 1 null x; 1 wrong-type x; 1 wrong-type y)");
+    expect(diagnostics.textContent).toContain("y lower: 9 on the wrong side");
+    expect(diagnostics.textContent).toContain("y upper: 9 wrong-type");
+    expect(diagnostics.textContent).toContain("group field “tier” has more than 8 values");
+    const invalid = scatterMapping.replace('"type":"scatter"', '"type":"scatter","limit":1');
+    await act(async () => { editBlock(doc, id, scatterMapping, invalid); flush(); });
+    expect(root.querySelector(".ub-chart-panel")?.getAttribute("data-state")).toBe("invalid-configuration");
+    expect(root.querySelector(".ub-chart-message")?.textContent).toContain("Invalid scatter configuration");
+    expect(root.querySelector<HTMLElement>(".ub-scatter-details")?.hidden).toBe(true);
+    expect(charts.instances.every(chart => chart.destroyed)).toBe(true);
+    await act(async () => { editBlock(doc, id, invalid, scatterMapping); flush(); });
+    expect(root.querySelector(".ub-chart-panel")?.getAttribute("data-state")).toBe("ready");
+    expect(within(root).getByRole<HTMLSelectElement>("combobox", { name: "Select point" }).value).toBe("");
+    await act(async () => { applyDocData(doc, directory, [{ collection: "trend", replaceRecords: [] }]); flush(); });
+    expect(root.querySelector(".ub-chart-panel")?.getAttribute("data-state")).toBe("no-records");
+    expect(root.querySelector(".ub-chart-message")?.textContent).toContain("No plottable records");
+    expect(root.querySelector<HTMLElement>(".ub-scatter-details")?.hidden).toBe(true);
+    expect(charts.instances.every(chart => chart.destroyed)).toBe(true);
     await act(async () => editor.destroy());
     doc.destroy(); directory.destroy();
   });
