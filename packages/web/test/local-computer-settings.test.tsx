@@ -21,7 +21,7 @@ const WORKSPACE: Workspace = {
   uuid: "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4",
   segment: "uberblick-6f4c8a51-2b7d-4e39-9a06-c81d3f572be4",
 };
-const SERVING: LocalServing = { workspace: WORKSPACE.uuid, remoteHubUrl: "wss://hub.example.test/ws", rebound: false };
+const SERVING: LocalServing = { workspace: WORKSPACE.uuid, remoteHubUrl: "wss://hub.example.test/ws", localOnly: false, rebound: false };
 const DEFAULT: HistoryRetention = { mode: "recent", days: 30, keepNamed: true };
 const SIZE: WorkspaceSize = { bytes: 1_200_000_000, usedFraction: 0.75 };
 const READ_ONLY: RoomStatus = {
@@ -160,7 +160,7 @@ it.each([null, { ...SERVING, rebound: true }, { ...SERVING, workspace: "53f04353
 
 it("shows only Size for a local workspace, without history wording or retention requests", async () => {
   fetchImpl.mockImplementation(async () => Response.json({ size: SIZE }));
-  const { container: host } = await renderSettled(page({ local: true, serving: { ...SERVING, remoteHubUrl: null } }));
+  const { container: host } = await renderSettled(page({ local: true, serving: { ...SERVING, remoteHubUrl: null, localOnly: true } }));
   expect(size(host)).toBe("1.2 GB · 75% used");
   expect(host.textContent).not.toMatch(/history|revision/i);
   expect(within(host).queryByRole("combobox")).toBeNull();

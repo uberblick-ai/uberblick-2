@@ -72,6 +72,7 @@ it("shows the restart state only for a rebound local-serving document", async ()
   const serving = {
     workspace: WORKSPACE,
     remoteHubUrl: "wss://remote.example/ws",
+    localOnly: false,
     rebound: false,
   };
 

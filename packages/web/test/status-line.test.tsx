@@ -43,7 +43,7 @@ function fixture(patch: Partial<RoomStatus> = {}) {
   } };
 }
 
-beforeEach(() => { vi.useFakeTimers(); copy.mockClear(); vi.mocked(toast.success).mockClear(); vi.mocked(toast.error).mockClear(); });
+beforeEach(() => { vi.useFakeTimers(); copy.mockClear(); vi.mocked(toast.success).mockClear(); vi.mocked(toast.error).mockClear(); vi.mocked(toast.warning).mockClear(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 function settle() { act(() => void vi.advanceTimersByTime(5_000)); }
 
@@ -247,7 +247,7 @@ describe("hub status", () => {
     const view = mount(true, {}, null, "local");
     expect(view.container.querySelector(".ub-sync-dot")).toBeNull();
     expect(within(view.container).queryByRole("button")).toBeNull();
-    expect(view.container.textContent).toBe("Edited just now");
+    expect(view.container.textContent).toBe("Local-only · Edited just now");
   });
 
   it("uses neutral details for unknown acknowledgement and never calls it offline", () => {
@@ -293,5 +293,70 @@ describe("hub status", () => {
     expect(view.container.querySelector(".ub-not-saved")?.textContent).toBe("not saved");
     expect(view.container.querySelector(".ub-status-offline")).toBeNull();
     expect(view.container.textContent).not.toContain("Changes are saved on this device.");
+  });
+});
+
+describe("local-only status", () => {
+  const day = 24 * 60 * 60 * 1_000;
+  const check = (days: number, result: CodeCheck["result"] = "matches"): CodeCheck => ({
+    repository: "owner/project", commit: "a".repeat(40), result,
+    checked_at: new Date(Date.now() - days * day).toISOString(),
+  });
+
+  it("keeps the local reading without an edit time and exposes checks only on regular pages", () => {
+    const current = fixture();
+    const tree = (codeChecks: CodeCheck[], lastUpdated?: number) => <Popover><StatusLine
+      connection={current.connection} presence={[]} lastUpdated={lastUpdated} revision="abc12345"
+      codeChecks={codeChecks} syncReading={{ endpoint: { url: "local", source: "document" }, syncDetails: true }} /></Popover>;
+    const view = render(tree([]));
+    expect(view.container.querySelector(".ub-status-left")?.textContent).toBe("Local-only");
+    expect(within(view.container).queryByRole("button", { name: "Code check" })).toBeNull();
+    view.rerender(tree([check(2, "drift")], Date.now()));
+    expect(view.container.querySelector(".ub-status-left")?.textContent).toBe("Local-only · Edited just now</> · Differs from code");
+    const button = within(view.container).getByRole("button", { name: "Code check" });
+    expect(button.getAttribute("title")).toBe("Code check");
+    expect(view.container.querySelector(".ub-sync-dot")).toBeNull();
+    expect(within(view.container).getByRole("button", { name: "Copy revision abc12345" })).toBeTruthy();
+    initDoc(current.connection.ydoc, { uuid: "9f3c1a2b-0000-4000-8000-0123456789ab", title: "Decision" });
+    act(() => { setKind(current.connection.ydoc, "decision"); });
+    view.rerender(tree([check(2)], Date.now()));
+    expect(view.container.querySelector(".ub-status-code-check")).toBeNull();
+  });
+
+  it("adds the oldest whole-day age only after fourteen days and refreshes it with the clock", () => {
+    const checks = [check(14)];
+    const current = fixture();
+    const tree = () => <Popover><StatusLine connection={current.connection} presence={[]} codeChecks={checks}
+      syncReading={{ endpoint: { url: "local", source: "document" }, hubAcked: false, syncDetails: true }} /></Popover>;
+    const view = render(tree());
+    const button = () => within(view.container).getByRole("button");
+    expect(button().getAttribute("aria-label")).toBe("Code check");
+    act(() => { vi.advanceTimersByTime(60_000); });
+    expect(button().getAttribute("aria-label")).toBe("Code check · code check 14 days old");
+    checks.push({ ...check(20.9), repository: "owner/oldest" });
+    view.rerender(tree());
+    expect(button().getAttribute("aria-label")).toBe("Code check · code check 20 days old");
+    expect(button().getAttribute("title")).toBe(button().getAttribute("aria-label"));
+    expect(document.querySelector(".ub-sync-announcement")).toBeNull();
+  });
+
+  it("never names a hub or announces offline during upstream and local transport failures", () => {
+    const current = fixture();
+    const tree = (hubAcked: boolean | null) => <Popover><StatusLine connection={current.connection} presence={[]}
+      syncReading={{ endpoint: { url: "local", source: "document" }, hubAcked,
+        notSharedReason: "no-hub-credentials", syncDetails: true }} /></Popover>;
+    const view = render(tree(null));
+    for (const ack of [false, true, null]) {
+      view.rerender(tree(ack));
+      settle();
+      expect(view.container.textContent).toBe("Local-only");
+      expect(view.container.querySelector(".ub-status-offline")).toBeNull();
+      expect(toast.warning).not.toHaveBeenCalled();
+    }
+    current.change({ tokenMissing: true, writable: false });
+    settle();
+    expect(view.container.textContent).toBe("Local-onlynot saved");
+    expect(toast.error).toHaveBeenLastCalledWith("Changes are not saved.", expect.anything());
+    expect(document.querySelector(".ub-sync-announcement")).toBeNull();
   });
 });

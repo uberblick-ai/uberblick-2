@@ -347,6 +347,41 @@ describe("the served configuration", () => {
 });
 
 describe("the local-serving diagnostic", () => {
+  it("keeps the workspace binding separate from its loopback browser transport", async () => {
+    for (const binding of [
+      { remoteHubUrl: "ws://127.0.0.1:1234/ws", localOnly: true },
+      { remoteHubUrl: null, localOnly: true },
+      { remoteHubUrl: "ws://127.0.0.1:1234/ws", localOnly: false },
+      { remoteHubUrl: "wss://remote.example/ws", localOnly: false },
+    ]) {
+      const config = await readClientConfig(serving({ body: JSON.stringify({
+        hubUrl: "ws://127.0.0.1:4321",
+        workspaces: [FIRST],
+        rebound: true,
+        servedWorkspaces: { [FIRST_UUID]: binding },
+      }) }).fetch);
+      expect(config.servedWorkspaces?.[FIRST_UUID]).toMatchObject({
+        ...binding, workspace: FIRST, rebound: true,
+      });
+      expect(config.rejected).toBeUndefined();
+    }
+  });
+
+  it("keeps older explicit local-only secondaries and ignores non-boolean binding claims", async () => {
+    for (const localOnly of [undefined, "true", 1, null]) {
+      const config = await readClientConfig(serving({ body: JSON.stringify({
+        hubUrl: "ws://127.0.0.1:4321",
+        workspaces: [FIRST, SECOND],
+        servedWorkspaces: {
+          [FIRST_UUID]: { remoteHubUrl: "ws://127.0.0.1:1234/ws", localOnly },
+          [SECOND]: { remoteHubUrl: null, localOnly },
+        },
+      }) }).fetch);
+      expect(config.servedWorkspaces?.[FIRST_UUID]?.localOnly).toBe(false);
+      expect(config.servedWorkspaces?.[SECOND]?.localOnly).toBe(true);
+    }
+  });
+
   it("keeps development and ub open on their local admission path without a key", async () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -378,6 +413,7 @@ describe("the local-serving diagnostic", () => {
     expect(rebound.servedWorkspaces?.[FIRST_UUID]).toEqual({
       workspace: FIRST,
       remoteHubUrl: "wss://remote.example/ws",
+      localOnly: false,
       rebound: true,
       name: null,
     });
