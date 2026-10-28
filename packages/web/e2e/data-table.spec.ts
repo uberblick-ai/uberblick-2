@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
 import { writeFileSync } from "node:fs";
+import { performance } from "node:perf_hooks";
 import { activateControl, createDoc, editor, setupHarness } from "./app-helpers.js";
 import { placeCaretIn } from "./harness.js";
 import { renderedText } from "./contrast-helpers.js";
@@ -960,6 +961,10 @@ interface Timings {
   bytes: number; records: number; tables: number; charts: number; cpuThrottle: number;
 }
 
+interface WorkloadPhases {
+  setup: number; initialReadiness: number; liveUpdates: number; cleanup: number; total: number;
+}
+
 async function workload(session: McpSession, mixed: boolean): Promise<{ uuid: string; bytes: number }> {
   const table = {
     version: 1, type: "table", collection: "observations", pageSize: 25,
@@ -1012,7 +1017,7 @@ async function workload(session: McpSession, mixed: boolean): Promise<{ uuid: st
   return { uuid: result.uuid, bytes };
 }
 
-async function timingEvidence(page: Page, session: McpSession, uuid: string, mixed: boolean, bytes: number): Promise<Timings> {
+async function timingEvidence(page: Page, session: McpSession, uuid: string, mixed: boolean, bytes: number, initialReadinessStarted: number): Promise<{ timings: Timings; initialReadiness: number; liveUpdates: number }> {
   const readinessTimeout = mixed ? 180_000 : 20_000;
   await waitForDocumentDraw(page, session, uuid, { index: "all", timeout: readinessTimeout });
   // Ten continuous tables contain over 400,000 cells. Repeated Playwright
@@ -1039,6 +1044,7 @@ async function timingEvidence(page: Page, session: McpSession, uuid: string, mix
     return scroll !== null && scroll.scrollWidth > scroll.clientWidth;
   })).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const liveUpdatesStarted = performance.now();
   for (let iteration = 0; iteration < 10; iteration += 1) {
     const value = 900 + iteration;
     const previous = await page.evaluate(() => (window as unknown as { tableProbe: { durations: number[] } }).tableProbe.durations.length);
@@ -1059,31 +1065,41 @@ async function timingEvidence(page: Page, session: McpSession, uuid: string, mix
   // The arrival proof adds one deliberate metadata update, without rendering writes.
   expect(probe.localUpdates).toBe(1);
   expect(probe.readsPerUpdate).toEqual(Array.from({ length: 10 }, () => 1));
-  return { first: initial.first, updates: probe.durations, readsPerUpdate: probe.readsPerUpdate, availableEntries: initial.availableEntries,
-    bytes, records: 4400, tables: mixed ? 10 : 1, charts: mixed ? 10 : 0, cpuThrottle: 2 };
+  return {
+    timings: { first: initial.first, updates: probe.durations, readsPerUpdate: probe.readsPerUpdate, availableEntries: initial.availableEntries,
+      bytes, records: 4400, tables: mixed ? 10 : 1, charts: mixed ? 10 : 0, cpuThrottle: 2 },
+    initialReadiness: liveUpdatesStarted - initialReadinessStarted,
+    liveUpdates: performance.now() - liveUpdatesStarted,
+  };
 }
 
-async function publishTimings(info: TestInfo, result: Timings, label: string): Promise<void> {
+async function publishTimings(info: TestInfo, result: Timings, label: string, phases: WorkloadPhases): Promise<void> {
   const ordered = [...result.updates].sort((a, b) => a - b);
   const median = ((ordered[4] ?? Infinity) + (ordered[5] ?? Infinity)) / 2;
-  const record = { ...result, median, min: ordered[0], max: ordered.at(-1) };
+  const record = { ...result, median, min: ordered[0], max: ordered.at(-1), phases };
   console.log(`data table timing ${label}: ${JSON.stringify(record)}`);
   const evidence = info.outputPath(`data-table-timing-${label}.json`);
   writeFileSync(evidence, `${JSON.stringify(record, null, 2)}\n`);
   await info.attach(`data-table-timing-${label}`, { path: evidence, contentType: "application/json" });
   if (process.env.UB_CHART_TIMING_BUDGETS !== "1") return;
-  // The measured full 4,035-row table still fits the existing first-render budget.
   if (label === "single") expect(result.first).toBeLessThanOrEqual(500);
   expect(median).toBeLessThanOrEqual(label === "single" ? 250 : 500);
 }
 
-test("one table and twenty shared views record bounded Chromium live-update timings", { tag: "@workload" }, async ({ browser }, info) => {
-  // Initial layout of 400,000 cells takes over a minute on GitHub's runner.
-  // Readiness is separate from the first-render/update measurements below.
-  test.setTimeout(360_000);
-  const session = writer();
-  for (const mixed of [false, true]) {
+// Native layout/scrolling at 4,035 rows × ten columns per table, with real
+// Chart.js drawing in the mixed view. Deterministic shared-read, one-read-per-
+// update and no-write invariants belong to test/chart.test.ts (Chart.js mocked).
+for (const mixed of [false, true]) {
+  test(`${mixed ? "ten tables and ten charts" : "one continuous table"} render and update at scale in Chromium`, { tag: "@workload" }, async ({ browser }, info) => {
+    if (mixed) {
+      // Required native layout of 403,500 cells plus ten real charts exceeds
+      // 60 s on CI; retain its existing allowance pending maintainer assessment.
+      test.setTimeout(360_000);
+    }
+    const setupStarted = performance.now();
+    const session = writer();
     const { uuid, bytes } = await workload(session, mixed);
+    const initialReadinessStarted = performance.now();
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
       beforeNavigate: async (loading) => {
         const cdp = await loading.context().newCDPSession(loading);
@@ -1092,7 +1108,16 @@ test("one table and twenty shared views record bounded Chromium live-update timi
       },
       contextOptions: { viewport: { width: 1366, height: 768 }, locale: "en-US" },
     });
-    await publishTimings(info, await timingEvidence(page, session, uuid, mixed, bytes), mixed ? "mixed" : "single");
+    const result = await timingEvidence(page, session, uuid, mixed, bytes, initialReadinessStarted);
+    const cleanupStarted = performance.now();
     await page.context().close();
-  }
-});
+    const finished = performance.now();
+    await publishTimings(info, result.timings, mixed ? "mixed" : "single", {
+      setup: initialReadinessStarted - setupStarted,
+      initialReadiness: result.initialReadiness,
+      liveUpdates: result.liveUpdates,
+      cleanup: finished - cleanupStarted,
+      total: finished - setupStarted,
+    });
+  });
+}

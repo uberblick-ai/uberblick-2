@@ -7,6 +7,7 @@ import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
 import { writeFileSync } from "node:fs";
+import { performance } from "node:perf_hooks";
 import { composite, contrast, pageGrounds, srgb } from "../test/colour.js";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { setNativeSelection } from "./native-selection.js";
@@ -1765,6 +1766,10 @@ interface Timings {
   bytes: number; records: number; series: number; cpuThrottle: number;
 }
 
+interface WorkloadPhases {
+  setup: number; initialReadiness: number; liveUpdates: number; cleanup: number; total: number;
+}
+
 async function workload(session: McpSession, bounded: boolean, layout: "overlay" | "panels" = "overlay", bars = false): Promise<{ uuid: string; bytes: number }> {
   const series = bounded ? 8 : 3;
   const collection = "summaries";
@@ -1816,7 +1821,7 @@ async function workload(session: McpSession, bounded: boolean, layout: "overlay"
   return { uuid, bytes };
 }
 
-async function timingEvidence(page: Page, session: McpSession, uuid: string, bounded: boolean, bytes: number): Promise<Timings> {
+async function timingEvidence(page: Page, session: McpSession, uuid: string, bounded: boolean, bytes: number, readinessStarted: number): Promise<{ timings: Timings; initialReadiness: number; liveUpdates: number }> {
   await waitForDocumentDraw(page, session, uuid);
   const title = bounded ? "Bound chart" : "API health year";
   const canvas = page.getByRole("img", { name: title, exact: true });
@@ -1828,6 +1833,7 @@ async function timingEvidence(page: Page, session: McpSession, uuid: string, bou
   // One key per record and schema: first draw sees the full area, including
   // the representative workload's observations outside the plotted collection.
   expect(availableEntries).toBe(bounded ? 5002 : 4402);
+  const updatesStarted = performance.now();
   const series = bounded ? 8 : 3;
   const latest = bounded ? 5000 : 364;
   const day = new Date(Date.UTC(2012, 0, 1 + latest)).toISOString().slice(0, 10);
@@ -1850,13 +1856,17 @@ async function timingEvidence(page: Page, session: McpSession, uuid: string, bou
   }
   await proveMcpArrival(page, session, uuid, { path: "upstream" });
   expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(1);
-  return { first: first ?? Infinity, redraws, availableEntries, bytes, records: bounded ? 5000 : 365, series, cpuThrottle: 2 };
+  return {
+    timings: { first: first ?? Infinity, redraws, availableEntries, bytes, records: bounded ? 5000 : 365, series, cpuThrottle: 2 },
+    initialReadiness: updatesStarted - readinessStarted,
+    liveUpdates: performance.now() - updatesStarted,
+  };
 }
 
-async function publishTimings(info: TestInfo, result: Timings, label: string): Promise<void> {
+async function publishTimings(info: TestInfo, result: Timings, label: string, phases: WorkloadPhases): Promise<void> {
   const ordered = [...result.redraws].sort((a, b) => a - b);
   const median = ((ordered[4] ?? Infinity) + (ordered[5] ?? Infinity)) / 2;
-  const record = { ...result, median, min: ordered[0], max: ordered.at(-1) };
+  const record = { ...result, median, min: ordered[0], max: ordered.at(-1), phases };
   console.log(`chart timing ${label}: ${JSON.stringify(record)}`);
   const evidence = info.outputPath(`chart-timing-${label}.json`);
   writeFileSync(evidence, `${JSON.stringify(record, null, 2)}\n`);
@@ -1869,16 +1879,19 @@ async function publishTimings(info: TestInfo, result: Timings, label: string): P
   if (label.startsWith("bound")) expect.soft(Math.max(...result.redraws)).toBeLessThanOrEqual(1000);
 }
 
-test("whole-area validation and Chart.js record representative and bounded Chromium redraw timings", { tag: "@workload" }, async ({ browser }, info) => {
-  test.setTimeout(120_000);
-  const session = writer();
-  for (const { bounded, layout, bars } of [
-    { bounded: false, layout: "overlay", bars: false },
-    { bounded: true, layout: "overlay", bars: false },
-    { bounded: true, layout: "panels", bars: false },
-    { bounded: true, layout: "overlay", bars: true },
-  ] as const) {
+// Real Chart.js drawing at scale complements chart.test.ts's mocked shared-read,
+// frame-coalescing and no-renderer-write coverage.
+for (const { name, label, bounded, layout, bars } of [
+  { name: "representative three-series overlay", label: "representative", bounded: false, layout: "overlay", bars: false },
+  { name: "5,000-record eight-series overlay", label: "bound", bounded: true, layout: "overlay", bars: false },
+  { name: "5,000-record eight-series panels", label: "bound-panels", bounded: true, layout: "panels", bars: false },
+  { name: "5,000-record eight-series all-bar overlay", label: "bound-bars", bounded: true, layout: "overlay", bars: true },
+] as const) {
+  test(`Chart.js draws and live-updates the ${name} Chromium workload`, { tag: "@workload" }, async ({ browser }, info) => {
+    const started = performance.now();
+    const session = writer();
     const { uuid, bytes } = await workload(session, bounded, layout, bars);
+    const readinessStarted = performance.now();
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
       beforeNavigate: async (loading) => {
         // A conservative CPU allowance on shared CI hardware, with the actual
@@ -1889,8 +1902,16 @@ test("whole-area validation and Chart.js record representative and bounded Chrom
       },
       contextOptions: { viewport: { width: 1366, height: 768 }, locale: "en-US" },
     });
-    const result = await timingEvidence(page, session, uuid, bounded, bytes);
-    await publishTimings(info, result, bars ? "bound-bars" : bounded ? layout === "panels" ? "bound-panels" : "bound" : "representative");
+    const result = await timingEvidence(page, session, uuid, bounded, bytes, readinessStarted);
+    const cleanupStarted = performance.now();
     await page.context().close();
-  }
-});
+    const finished = performance.now();
+    await publishTimings(info, result.timings, label, {
+      setup: readinessStarted - started,
+      initialReadiness: result.initialReadiness,
+      liveUpdates: result.liveUpdates,
+      cleanup: finished - cleanupStarted,
+      total: finished - started,
+    });
+  });
+}
