@@ -18,7 +18,7 @@ const EXTERNAL = "https://example.invalid/spec";
 const GITHUB = "https://github.com/Example/SomeRepo/issues/12";
 const MARKDOWN = `**must** and *maybe* ~~old~~ \`ub update\`\n[spec](${EXTERNAL})\n${GITHUB}`;
 
-async function fixture(openingText = "Opening conversation", ownReplies = false): Promise<{ uuid: string; first: string; second: string; removeFirst: () => void; close: () => void }> {
+async function fixture(openingText = "Opening conversation", ownReplies = false, genericReply = false): Promise<{ uuid: string; first: string; second: string; removeFirst: () => void; close: () => void }> {
   const uuid = randomUUID();
   const secret = await importRootSecret(harness().authSecret);
   const peers: Array<{ doc: Y.Doc; provider: HocuspocusProvider }> = [];
@@ -43,6 +43,7 @@ async function fixture(openingText = "Opening conversation", ownReplies = false)
   const first = createAnnotation(doc, firstBlock, 0, 5, "Claude Client", openingText, undefined,
     { kind: "agent", account: "avatar-success", agent: "claude" });
   addComment(doc, first.id, "Codex Client", "A considered reply", { kind: "agent", account: ownReplies ? "avatar-success" : "avatar-failure", agent: "codex" });
+  if (genericReply) addComment(doc, first.id, "Cursor Client", "A generic reply", { kind: "agent", clientName: "Cursor" });
   if (ownReplies) addComment(doc, first.id, "Reader", "A second own reply", { account: "avatar-success", kind: "person" });
   const second = createAnnotation(doc, secondBlock, 0, 6, "Neutral Person", "Another opening comment", undefined, ownReplies ? { account: "avatar-success", kind: "person" } : undefined);
   const directory = await room(directoryRoom(harness().workspaceUuid));
@@ -132,6 +133,40 @@ async function readablePill(page: Page, selector: string, state: string): Promis
   const paint = await renderedText(page, selector);
   expect(paint.length, state).toBeGreaterThanOrEqual(2);
   for (const reading of paint) expect(reading.ratio, `${state}: ${reading.where}`).toBeGreaterThanOrEqual(4.5);
+}
+
+async function agentMarks(card: Locator): Promise<void> {
+  for (const name of ["via Claude", "via Codex", "via Cursor"]) {
+    await expect(card.getByRole("img", { name, exact: true })).toBeVisible();
+  }
+  await expect(card.locator(".ub-comment-agent [data-icon=claude] svg")).toBeVisible();
+  await expect(card.locator(".ub-comment-agent [data-icon=codex] svg")).toBeVisible();
+  const generic = card.getByRole("img", { name: "via Cursor", exact: true });
+  await expect(generic).toHaveText("");
+  await expect(generic.locator("svg")).toBeVisible();
+}
+
+async function neutralAgentPaint(page: Page, card: Locator): Promise<void> {
+  await page.evaluate(async () => { await document.fonts.ready; });
+  const paint = await card.locator(".ub-comment-agent").evaluateAll((marks) => marks.map((mark) => {
+    const svg = mark.querySelector("svg");
+    const byline = mark.closest(".ub-thread-byline");
+    const author = mark.previousElementSibling;
+    if (svg === null || byline === null || author === null) throw new Error("e2e: agent mark needs its SVG, byline and author");
+    const box = svg.getBoundingClientRect();
+    return { ink: getComputedStyle(svg).color, textInk: getComputedStyle(byline).color,
+      width: box.width, height: box.height, afterAuthor: box.x >= author.getBoundingClientRect().right };
+  }));
+  expect(paint).toHaveLength(3);
+  const generic = paint[2];
+  if (generic === undefined) throw new Error("e2e: attribution fixture needs its generic mark");
+  expect(generic.ink).toBe(generic.textInk);
+  expect(generic.width).toBeGreaterThan(0);
+  for (const mark of paint) {
+    expect(mark.width).toBeCloseTo(generic.width, 1);
+    expect(mark.height).toBeCloseTo(generic.height, 1);
+    expect(mark.afterAuthor).toBe(true);
+  }
 }
 
 test("comment Markdown links stay native and pills remain readable on resting, hovered and selected cards", async ({ browser }) => {
@@ -295,7 +330,7 @@ test("a remote conversation deletion removes its card and keeps the unsent text 
 });
 
 test("iPad comment drawer renders inline Markdown and follows links without selecting or toggling the card", { tag: "@webkit-touch" }, async ({ browser }) => {
-  const data = await fixture(MARKDOWN);
+  const data = await fixture(MARKDOWN, false, true);
   try {
     const page = await openApp(browser, `/${harness().workspace}/${data.uuid}`, {
       contextOptions: { ...devices["iPad (gen 7)"], reducedMotion: "reduce" },
@@ -313,6 +348,8 @@ test("iPad comment drawer renders inline Markdown and follows links without sele
     await expect(card).not.toHaveAttribute("aria-current", "true");
     await card.locator(".ub-thread-select").tap();
     await expect(card).toHaveAttribute("aria-current", "true");
+    await agentMarks(card);
+    await expect(sheet.locator(`#ub-thread-${data.second} .ub-comment-agent`)).toHaveCount(0);
     await external.focus();
     await externalPopup(page, EXTERNAL, () => page.keyboard.press("Enter"));
     await expect(card).toHaveAttribute("aria-current", "true");
@@ -323,12 +360,13 @@ test("iPad comment drawer renders inline Markdown and follows links without sele
     for (const colorScheme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme });
       await readablePill(page, `#ub-thread-${data.first} .ub-github-pill`, `${colorScheme} drawer selected`);
+      await neutralAgentPaint(page, card);
     }
   } finally { data.close(); }
 });
 
 test("comment cards reveal quiet controls through hover, keyboard and selection while drafts stay with each card", async ({ browser }) => {
-  const data = await fixture();
+  const data = await fixture(undefined, false, true);
   try {
     const page = await openApp(browser, `/${harness().workspace}/${data.uuid}`, {
       contextOptions: { viewport: { width: 1600, height: 1000 }, hasTouch: false, isMobile: false, reducedMotion: "reduce" },
@@ -338,7 +376,7 @@ test("comment cards reveal quiet controls through hover, keyboard and selection 
     const second = page.locator(`#ub-thread-${data.second} .ub-thread`);
     const outside = page.locator(".ub-editor .ub-paragraph").filter({ hasText: "Outside every comment." });
     const mark = page.locator(`[data-comment-thread="${data.first}"]`);
-    await expect(first).toContainText("1 reply");
+    await expect(first).toContainText("2 replies");
     await expect(first).not.toContainText("A considered reply");
     await expect(first.locator(".ub-thread-ref, .ub-thread-excerpt, .ub-chip")).toHaveCount(0);
     await page.mouse.move(0, 0);
@@ -367,16 +405,22 @@ test("comment cards reveal quiet controls through hover, keyboard and selection 
     await expect(first).toContainText("A considered reply");
     await page.mouse.move(0, 0);
     await revealed(first, "1");
-    await expect(first.getByRole("img", { name: "via Claude" })).toBeVisible();
-    await expect(first.getByRole("img", { name: "via Codex" })).toBeVisible();
-    await expect(first.locator(".ub-comment-agent [data-icon=claude] svg")).toBeVisible();
-    await expect(first.locator(".ub-comment-agent [data-icon=codex] svg")).toBeVisible();
+    await agentMarks(first);
+    await expect(second.locator(".ub-comment-agent")).toHaveCount(0);
+    const generic = first.getByRole("img", { name: "via Cursor", exact: true });
+    await generic.hover();
+    await expect(page.getByRole("tooltip")).toHaveText("via Cursor");
+    // Radix tracks movement beyond the hover corridor after leaving the trigger.
+    await page.mouse.move(0, 0, { steps: 5 });
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
     await expect(first.locator(".ub-comment-avatar img")).toHaveCount(1);
+    await expect(first.locator(".ub-comment-avatar").nth(1)).toHaveText("CC");
     await expect(first.locator(".ub-comment-avatar").last()).toHaveText("CC");
     await expect(second.locator(".ub-comment-avatar")).toHaveText("NP");
     await expect(first.locator(".ub-comment-avatar img")).toHaveJSProperty("naturalWidth", 32);
     for (const colorScheme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme });
+      await neutralAgentPaint(page, first);
       const backgrounds = await page.locator(".ub-comment").evaluateAll((marks) => marks.map((node) => getComputedStyle(node).backgroundColor));
       const tokens = await page.evaluate(() => {
         const probe = document.createElement("span");
@@ -393,7 +437,7 @@ test("comment cards reveal quiet controls through hover, keyboard and selection 
     await second.locator(".ub-thread-text").first().click();
     await second.getByPlaceholder("Reply…").fill("Keep the second draft");
     await expect(page.locator('.ub-thread[aria-current="true"]')).toHaveCount(1);
-    await expect(first).toContainText("1 reply");
+    await expect(first).toContainText("2 replies");
     await outside.click();
     await expect(page.locator('.ub-thread[aria-current="true"]')).toHaveCount(0);
     await first.locator(".ub-thread-text").first().click();
@@ -407,6 +451,7 @@ test("comment cards reveal quiet controls through hover, keyboard and selection 
     await expect(second.getByPlaceholder("Reply…")).toHaveValue("Keep the second draft");
     await second.getByPlaceholder("Reply…").press("Enter");
     await expect(second.locator(".ub-thread-text")).toHaveText(["Another opening comment", "Keep the second draft"]);
+    await expect(second.locator(".ub-comment-agent")).toHaveCount(0);
     await second.locator(".ub-thread-select").focus();
     await page.keyboard.press("Tab");
     await expect(second.getByRole("button", { name: "Resolve", exact: true })).toBeFocused();
