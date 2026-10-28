@@ -2,6 +2,7 @@ import { prepareChartView, readDocData } from "@uberblick/schema";
 import type { Block, DocData } from "@uberblick/schema";
 import type * as Y from "yjs";
 import type { ChartWriteSummary } from "../outputs.js";
+import { checkDrawing, drawingLanguage } from "./drawing-check.js";
 
 function xEndpoint(value: number, type: "number" | "date"): number | string {
   if (type === "number") return value;
@@ -49,7 +50,7 @@ function unavailable(): ChartWriteSummary {
   return { status: "collection-unusable", message, warnings: [message] };
 }
 
-/** Read one snapshot for the written charts, without changing their source. */
+/** Read one snapshot for the written charts and check written drawings, without changing their source. */
 export function summarizeWrittenBlocks(doc: Y.Doc, blocks: readonly Block[]) {
   let data: DocData | null = null;
   let readFailed = false;
@@ -59,6 +60,8 @@ export function summarizeWrittenBlocks(doc: Y.Doc, blocks: readonly Block[]) {
   }
   return blocks.map(block => {
     const written = { id: block.id, rev: block.rev };
+    const drawing = drawingLanguage(block);
+    if (drawing !== null) return { ...written, drawing: checkDrawing(drawing, block.text) };
     if (block.type !== "chart") return written;
     try { return { ...written, chart: readFailed ? unavailable() : summarize(block.text, data) }; }
     catch { return { ...written, chart: unavailable() }; }

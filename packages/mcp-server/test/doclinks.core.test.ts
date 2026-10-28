@@ -75,6 +75,11 @@ describe("inline document references", () => {
     expect(after.blocks[0]).toEqual({
       ...prose,
       doc_links: [{ start: 4, end: 11, docId: target.uuid }],
+      inline: [
+        { text: "See ", marks: {} },
+        { text: "the hub", marks: { docLink: target.uuid } },
+        { text: " docs", marks: {} },
+      ],
     });
     expect(after.blocks[1]).toEqual(code);
     expect(

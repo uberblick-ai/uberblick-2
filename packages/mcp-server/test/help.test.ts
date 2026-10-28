@@ -139,14 +139,14 @@ it.each(["delete_doc", "archive_doc", "unpin_doc"])("explains explicit topic del
   }
 });
 
-it("points Markdown authors to Ablauf help and requires checking edits in the web editor", () => {
+it("points Markdown authors to Ablauf help and to the diagnostics every drawing write returns", () => {
   const help = new HelpCatalog();
   const markdown = help.read("markdown").text;
   expect(markdown).toContain("[Ablauf diagrams](uberblick://help/ablauf)");
   expect(markdown).not.toContain("github.com/uberblick-ai/ablauf");
   const ablauf = help.read("ablauf").text.replace(/\s+/g, " ");
-  expect(ablauf).toContain("After every edit, check the drawing in the web editor.");
-  expect(ablauf).toContain("MCP does not return the renderer's diagnostics");
+  expect(ablauf).toContain("answers with a `drawing` summary for it");
+  expect(ablauf).toContain("The check never refuses the write.");
 });
 
 it("teaches the installed wireframe format, with every example parsing cleanly", () => {
@@ -160,7 +160,7 @@ it("teaches the installed wireframe format, with every example parsing cleanly",
   const examples = [...wireframe.matchAll(/```wireframe\n([\s\S]*?)\n```/g)].map((match) => match[1]!);
   expect(examples.length).toBeGreaterThanOrEqual(3);
   for (const source of examples) expect(parseWireframe(source).diagnostics, source).toEqual([]);
-  expect(wireframe.replace(/\s+/g, " ")).toContain("MCP stores the source without checking it.");
+  expect(wireframe.replace(/\s+/g, " ")).toContain("answers with a `drawing` summary for it");
 });
 
 it("documents move preservation, refusal recovery and the full concurrent-edit limit", async () => {

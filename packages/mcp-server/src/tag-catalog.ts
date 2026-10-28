@@ -57,18 +57,24 @@ export function tagCatalogComplete(replicas: Replicas): boolean {
   return replicas.roomComplete(replicas.settings().room);
 }
 
+/** A read filter writes nothing, so its recovery does not talk about stored assignments. */
+const UNKNOWN_FILTER_RECOVERY =
+  "Call list_tags for the complete existing catalog, then filter by an existing id or name (case ignored). " +
+  "An unknown tag is refused rather than answered with an empty list, which would read as a tag with no documents.";
+
 /**
  * An incomplete catalog may explain an unknown value, so recovery waits for it.
  */
 function refuseTagValues(
   replicas: Replicas,
   unknown: string[],
+  use: "assignment" | "filter" = "assignment",
 ): never {
   const { message } = new InvalidTagAssignmentError(unknown);
   throw new ToolError("invalid_tag_assignment", message, {
     unknown,
     ...(tagCatalogComplete(replicas)
-      ? {}
+      ? use === "filter" ? { recovery: UNKNOWN_FILTER_RECOVERY } : {}
       : incompleteCatalogRecovery(replicas.hubState().status)),
   });
 }
@@ -89,7 +95,7 @@ export function resolveTagFilter(
     (entry) => entry.name === name,
   );
   if (byName !== undefined) return byName.id;
-  return refuseTagValues(replicas, [selector]);
+  return refuseTagValues(replicas, [selector], "filter");
 }
 
 /**

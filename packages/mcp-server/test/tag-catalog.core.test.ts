@@ -47,6 +47,18 @@ describe("the workspace tag catalog", () => {
     expect(exported.markdown).not.toContain(AUTH.id);
   });
 
+  it("refuses an unknown filter with a read's recovery, not an assignment's", async () => {
+    const rig = await local();
+    for (const [name, args] of [["list_docs", { tag: "no-such-tag" }], ["search", { query: "anything", tag: "no-such-tag" }]] as const) {
+      const refused = await rig.call(name, args);
+      expect(refused).toMatchObject({ isError: true, payload: { error: "invalid_tag_assignment", unknown: ["no-such-tag"] } });
+      expect(refused.payload.recovery).toContain("filter by an existing id or name");
+      expect(refused.payload.recovery).not.toMatch(/stay stored|assigned/);
+    }
+    const assignment = await rig.call("create_doc", { title: "Untagged", description: "An unknown tag.", tags: ["no-such-tag"] });
+    expect(assignment.payload.recovery).toContain("stay stored automatically");
+  });
+
   it("reindexes converged aliases without rewriting the document", async () => {
     const rig = await local();
     const mine = "ffffffff-0000-4000-8000-000000000001";

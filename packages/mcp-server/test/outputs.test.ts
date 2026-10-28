@@ -114,11 +114,10 @@ describe("successful MCP output contracts", () => {
     const document = rig.instance.replicas.replica(created.uuid).doc;
     const expected = CALLOUT_VARIANTS.map((variant, index) => {
       const icon = [undefined, "🚀", "⏱️", ":codex:", ":claude:"][index];
-      const id = appendBlock(document, { type: "callout", variant, ...(icon === undefined ? {} : { icon }), inline: [
-        { text: "Read ", marks: {} }, { text: "the page", marks: { docLink: docId } },
-      ] });
+      const inline = [{ text: "Read ", marks: {} }, { text: "the page", marks: { docLink: docId } }];
+      const id = appendBlock(document, { type: "callout", variant, ...(icon === undefined ? {} : { icon }), inline });
       return { id, type: "callout", text: "Read the page", variant, ...(icon === undefined ? {} : { icon }),
-        doc_links: [{ start: 5, end: 13, docId }] };
+        doc_links: [{ start: 5, end: 13, docId }], inline };
     });
     vi.spyOn(revisionClient, "readDocumentRevision").mockImplementation(async () => {
       const snapshot = new Y.Doc();

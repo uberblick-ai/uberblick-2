@@ -148,8 +148,20 @@ const blockFields = {
   text: z.string().describe("Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."),
   rev: z.string().describe("Content hash to assert on a later block edit."),
 };
+const readRuns = z.array(z.object({
+  text: z.string(),
+  marks: z.object({
+    bold: z.boolean().optional(),
+    italic: z.boolean().optional(),
+    strike: z.boolean().optional(),
+    inlineCode: z.boolean().optional(),
+    link: z.string().optional(),
+    docLink: z.string().optional(),
+  }).strict(),
+}).strict());
 const linkRanges = {
   doc_links: z.array(docLink).optional().describe("Prose character ranges that reference documents; absent when there are none."),
+  inline: readRuns.optional().describe("A formatted prose block's equally-marked runs, in insert_block's `inline` shape; their texts join to `text`. Absent when the block has no inline formatting."),
 };
 function blockSchema(withLinks: boolean, withRev = true) {
   const fields = { id: blockFields.id, text: blockFields.text, ...(withRev ? { rev: blockFields.rev } : {}) };
@@ -198,8 +210,23 @@ const chartWriteSummary = z.union([
     message: z.string(), warnings: chartWarnings }).strict(),
 ]);
 export type ChartWriteSummary = z.infer<typeof chartWriteSummary>;
+const drawingDiagnostics = z.array(z.object({
+  line: count.describe("1-based line in the drawing source."),
+  severity: z.enum(["error", "warning"]).describe("An error keeps the web from drawing the source; a warning still draws."),
+  message: z.string(),
+}).strict()).describe("The diagnostics the web editor lists below the drawing, in line order; at most 20.");
+const drawingWriteSummary = z.union([
+  z.object({
+    status: z.enum(["clean", "warnings", "errors"]),
+    diagnostics: drawingDiagnostics,
+    diagnosticCount: count.optional().describe("Total diagnostics when more exist than are listed."),
+  }).strict(),
+  z.object({ status: z.literal("unchecked"), message: z.string() }).strict(),
+]);
+export type DrawingWriteSummary = z.infer<typeof drawingWriteSummary>;
 const authoredBlock = writtenBlock.extend({
   chart: chartWriteSummary.optional().describe("Chart-block projection of this replica's data at write time, shared with the web. Other block types omit it. Contains no record values beyond plotted x endpoints; summary failures leave the applied write and durability unchanged."),
+  drawing: drawingWriteSummary.optional().describe("The web editor's parse of a code block in language ablauf or wireframe; other blocks omit it. Advisory: diagnostics never refuse or roll back the write."),
 }).strict();
 const readBlocks = z.array(blockSchema(true)).describe("Visible document blocks in stored order.");
 const annotation = z.object({

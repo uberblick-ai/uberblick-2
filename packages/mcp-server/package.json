@@ -29,15 +29,16 @@
   "dependencies": {
     "@hocuspocus/provider": "4.7.1",
     "@modelcontextprotocol/sdk": "1.32.1",
+    "@uberblick/ablauf": "^0.2.0",
     "@uberblick/hub": "workspace:*",
     "@uberblick/schema": "workspace:*",
+    "@uberblick/wireframe": "^0.3.2",
     "y-protocols": "catalog:",
     "yjs": "catalog:",
     "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
-    "@uberblick/wireframe": "^0.3.2",
     "esbuild": "0.28.2",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
