@@ -319,7 +319,6 @@ export class HistoryMirror {
     this.closed = true;
     this.clearDeadlines();
     if (this.immediate !== null) clearImmediate(this.immediate);
-    await this.running;
-    await this.cache.close();
+    await Promise.all([this.running, this.cache.close()]);
   }
 }

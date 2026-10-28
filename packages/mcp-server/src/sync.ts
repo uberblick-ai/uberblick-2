@@ -1369,6 +1369,13 @@ export class HubSync {
     return this.isRoomQuiet(room) && this.providers.get(room)?.authorizedScope === "read-write";
   }
 
+  /** Bind downloaded history to the account offered on this room's current admission. */
+  historyAccount(room: string): string | null {
+    return this.providers.get(room)?.hasCurrentSync() === true
+      ? this.offeredLogins.get(room)?.identity.githubAccountId ?? null
+      : null;
+  }
+
   private revisionAdmissionFailure(room: string): ConstructorParameters<typeof RevisionClientError>[0] | null {
     if (this.deletedRooms.has(room)) return "deleted";
     const state = this.state();

@@ -201,6 +201,7 @@ export async function removeWorkspaceCommand({ positionals, values }: CommandArg
       try {
         for (const suffix of ["", "-wal", "-shm"]) rmSync(`${databasePath}${suffix}`, { force: true });
         rmSync(`${databasePath}.history-holds`, { recursive: true, force: true });
+        rmSync(`${databasePath}.history-refresher-lock`, { force: true });
         forgetWorkspace(id);
         // Keep the role held through every unlink; a live serving lock is never removed.
         rmSync(`${databasePath}.serving-lock`, { force: true });

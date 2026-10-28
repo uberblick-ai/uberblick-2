@@ -8,7 +8,7 @@ export default async function setup(): Promise<void> {
     join(PACKAGE_ROOT, "src/main.ts"),
     join(HUB_ROOT, "src/main.ts"),
     ...hubCheckoutInvocation().sources,
-    ...["serving-engine", "store-open", "device-login", "store-upgrade", "shutdown-timeout", "history-holds", "history-cache"]
+    ...["serving-engine", "store-open", "device-login", "store-upgrade", "shutdown-timeout", "history-holds", "history-cache", "history-refresher-role", "history-refresher"]
       .map((name) => join(PACKAGE_ROOT, "test", `${name}-worker.ts`)),
   ]);
   await Promise.all([...sources].map((source) => build({

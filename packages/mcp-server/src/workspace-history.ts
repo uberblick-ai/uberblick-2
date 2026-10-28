@@ -5,10 +5,20 @@ import { HistoryMirror } from "./history-mirror.js";
 import { HistoryMirrorCache } from "./history-mirror-cache.js";
 import type { Replicas } from "./replica.js";
 import { authenticationOrigin } from "./remote-url.js";
-import { requireDocumentHistory } from "./revision-client.js";
+import { requireDocumentHistory, RevisionClientError } from "./revision-client.js";
 
-/** The caller must already hold the workspace's browser-serving role. */
-export function startWorkspaceHistory(replicas: Replicas): {
+export function workspaceHistoryStamp(replicas: Replicas) {
+  const { config } = replicas;
+  const env = config.deviceLogin?.env ?? config.authEnv ?? process.env;
+  const logins = readHubLogins(env);
+  const origin = authenticationOrigin(config.hubUrl);
+  if (logins.state !== "usable" || logins.unreadableHubs.includes(origin)) return null;
+  const account = logins.logins[origin]?.identity.githubAccountId;
+  return account === undefined ? null : { hub: config.hubUrl, workspace: config.workspaceId, account };
+}
+
+/** The caller holds the history role until close has stopped its worker. */
+export function startWorkspaceHistory(replicas: Replicas, isCurrent: () => boolean): {
   refresh(): void;
   checkRetention(): void;
   close(): Promise<void>;
@@ -17,6 +27,16 @@ export function startWorkspaceHistory(replicas: Replicas): {
   const env = config.deviceLogin?.env ?? config.authEnv ?? process.env;
   const clock = new HubHistoryClock(config.hubUrl);
   const cache = new HistoryMirrorCache(store.databasePath, config.workspaceId, env);
+  const stamp = () => workspaceHistoryStamp(replicas);
+  const requireAccount = (room: string): void => {
+    const current = stamp();
+    const admitted = sync.historyAccount(room);
+    if (current === null || (admitted !== null && admitted !== current.account)) {
+      throw new RevisionClientError("sign-in-required");
+    }
+    // Deletion or a connection interruption can remove just this room's admission.
+    if (admitted === null) throw new RevisionClientError("unreachable");
+  };
   const mirror = new HistoryMirror({
     pages: () => {
       const directory = replicas.directory().doc;
@@ -30,19 +50,16 @@ export function startWorkspaceHistory(replicas: Replicas): {
       });
     },
     retention: () => store.readHistoryRetention(),
-    stamp: () => {
-      const logins = readHubLogins(env);
-      const origin = authenticationOrigin(config.hubUrl);
-      if (logins.state !== "usable" || logins.unreadableHubs.includes(origin)) return null;
-      const account = logins.logins[origin]?.identity.githubAccountId;
-      return account === undefined ? null : { hub: config.hubUrl, workspace: config.workspaceId, account };
-    },
-    ready: () => sync.isQuiet() && store.pendingRooms().length === 0 &&
+    stamp,
+    ready: () => isCurrent() && sync.isQuiet() && store.pendingRooms().length === 0 &&
       replicas.persistenceError() === null && !store.isRemoved(),
     request: async (room, operation) => {
       await clock.ensure();
+      requireAccount(room);
       requireDocumentHistory(replicas, room.slice(config.workspaceId.length + 1));
-      return sync.requestRevisions(room, operation, 5_000, { background: true });
+      const response = await sync.requestRevisions(room, operation, 5_000, { background: true });
+      requireAccount(room);
+      return response;
     },
     now: () => clock.now(),
     deadlineDelay: deadlineAt => clock.delay(deadlineAt),

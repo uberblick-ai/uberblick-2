@@ -536,7 +536,7 @@ it("applies a retention reduction queued during network work even if the connect
   expect(test.calls).toHaveLength(2);
 });
 
-it("cancels deadline work at shutdown and waits for the current network operation before closing the cache", async () => {
+it("cancels deadline work and closes the cache while waiting for the current network operation", async () => {
   const test = fixture([page("head"), page("downloading")]);
   const pendingDownload = deferredReply();
   test.state.reply = async (room, operation) => {
@@ -552,7 +552,7 @@ it("cancels deadline work at shutdown and waits for the current network operatio
   const closing = test.mirror.close().then(() => { closed = true; });
   await flush();
   expect(closed).toBe(false);
-  expect(test.cache.close).not.toHaveBeenCalled();
+  expect(test.cache.close).toHaveBeenCalledTimes(1);
   expect(vi.getTimerCount()).toBe(0);
   pendingDownload.resolve(downloaded("closed"));
   await closing;
