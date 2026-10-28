@@ -12,6 +12,7 @@ import { useDocumentHistory, type DocumentHistory } from "../src/ui/document/doc
 import type { DocumentRevisionsClient } from "../src/shell/document-revisions.js";
 import { revisionAuthor, revisionAuthors, revisionGroups, revisionSpan } from "../src/ui/document/revision-list.js";
 import { HistorySidebar } from "../src/ui/sidebar/HistorySidebar.js";
+import { formatExactTimestamp } from "../src/ui/timestamps.js";
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -97,7 +98,12 @@ describe("revision list model", () => {
     const span = revisionSpan(revisions, NOW);
     expect(span.label).toContain("now");
     expect(span.title).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).formatRange(new Date(NOW - 4 * HOUR), new Date(NOW)));
-    expect(revisionSpan([{ ...entries[0]!, startedAt: NOW + HOUR }], NOW).label).toContain("now");
+    const futureSpan = revisionSpan([{ ...entries[0]!, startedAt: NOW + HOUR }], NOW);
+    expect(futureSpan.label).toContain("now");
+    expect(futureSpan.title).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(NOW + HOUR)));
+    const unknownStart = revisionSpan([entries[1]!, { ...entries[3]!, startedAt: null }], NOW);
+    const closedSpan = `Unknown start – ${formatExactTimestamp(NOW - 2 * HOUR)?.label}`;
+    expect(unknownStart).toEqual({ label: closedSpan, title: closedSpan });
   });
 
   it("says who and where when known, and never invents an author", () => {

@@ -50,8 +50,9 @@ const SPAN = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle
 export function revisionSpan(entries: readonly RevisionEntry[], now: number): { label: string; title: string } {
   const newest = entries[0];
   const start = entries.at(-1)?.startedAt;
+  const endTime = newest?.endedAt ?? now;
   // An open revision's hub start can be ahead of this browser's clock.
-  const end = Math.max(start ?? now, newest?.endedAt ?? now);
+  const end = Math.max(start ?? endTime, endTime);
   const endLabel = formatExactTimestamp(end)?.label ?? "Unknown time";
   const title = start == null ? `Unknown start – ${endLabel}` : SPAN.formatRange(new Date(start), new Date(end));
   const label = newest?.endedAt == null ? `${start == null ? "Unknown start" : formatExactTimestamp(start)?.label} – now` : title;
