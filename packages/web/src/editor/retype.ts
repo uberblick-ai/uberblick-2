@@ -55,7 +55,8 @@ export function retypeBlockInTransaction(
   const node = tr.doc.nodeAt(pos);
   if (node === null) return false;
   const currentType = node.type.name;
-  if (currentType === "card" || type === "card" || currentType === "figma" || type === "figma") return false;
+  if (currentType === "card" || type === "card" || currentType === "figma" || type === "figma" ||
+    currentType === "divider" || type === "divider") return false;
   if (!(BLOCK_TYPES as readonly string[]).includes(currentType)) return false;
 
   const nodeType = tr.doc.type.schema.nodes[type];

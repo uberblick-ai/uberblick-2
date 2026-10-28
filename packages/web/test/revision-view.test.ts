@@ -7,7 +7,7 @@ import {
 import { parseWireframe } from "@uberblick/wireframe";
 import { AllSelection } from "@tiptap/pm/state";
 import { createRevisionEditor, createRevisionInline, revisionViewModel } from "../src/editor/revision-view.js";
-import { revisionSplitModel } from "../src/editor/revision-split.js";
+import { createRevisionSplit, revisionSplitModel } from "../src/editor/revision-split.js";
 import { findForeignBlocks } from "../src/editor/palette.js";
 import { createUberblickEditor, uberblickSchema } from "../src/editor/create-editor.js";
 
@@ -38,6 +38,45 @@ function mount(before: Y.Doc | null, after: Y.Doc) {
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("the detached revision view", () => {
+  it("labels added and removed dividers in both views and counts an unchanged divider in folded blocks", () => {
+    const before = new Y.Doc();
+    const removed = appendBlock(before, { type: "divider" });
+    appendBlock(before, { type: "paragraph", text: "Opening context" });
+    appendBlock(before, { type: "divider" });
+    for (const text of ["Middle context", "Closing context", "Last context"]) appendBlock(before, { type: "paragraph", text });
+    const after = clone(before);
+    deleteBlock(after, removed);
+    appendBlock(after, { type: "divider" });
+    const oldState = Y.encodeStateAsUpdate(before);
+    const newState = Y.encodeStateAsUpdate(after);
+    const inlineElement = document.body.appendChild(document.createElement("div"));
+    const left = document.body.appendChild(document.createElement("div"));
+    const right = document.body.appendChild(document.createElement("div"));
+    const folding = { collapse: true, expanded: new Set<number>() };
+    const inline = createRevisionInline({ element: inlineElement, before, after, folding });
+    const split = createRevisionSplit({ beforeElement: left, afterElement: right, before, after, folding });
+    try {
+      for (const element of [inlineElement, left, right]) {
+        expect(element.querySelector(".ub-revision-fold-button")?.textContent).toBe("3 unchanged blocks");
+      }
+      expect([...inlineElement.querySelectorAll(".ub-revision-fields")].map(label => label.textContent)).toEqual(["Removed block", "Added block"]);
+      expect(left.querySelector(".ub-revision-fields")?.textContent).toBe("Removed block");
+      expect(right.querySelector(".ub-revision-fields")?.textContent).toBe("Added block");
+      expect(inlineElement.querySelectorAll("hr")).toHaveLength(2);
+      expect(left.querySelectorAll("hr")).toHaveLength(1);
+      expect(right.querySelectorAll("hr")).toHaveLength(1);
+      inline.setCollapse(false);
+      split.setCollapse(false);
+      expect(inlineElement.querySelectorAll("hr")).toHaveLength(3);
+      expect(left.querySelectorAll("hr")).toHaveLength(2);
+      expect(right.querySelectorAll("hr")).toHaveLength(2);
+      expect(Y.encodeStateAsUpdate(before)).toEqual(oldState);
+      expect(Y.encodeStateAsUpdate(after)).toEqual(newState);
+    } finally {
+      inline.destroy(); split.destroy(); inlineElement.remove(); left.remove(); right.remove(); before.destroy(); after.destroy();
+    }
+  });
+
   it("folds the same unchanged runs as Split and retains paired drawings through in-place expansion", async () => {
     const before = new Y.Doc();
     for (let index = 0; index < 5; index += 1) appendBlock(before, { type: index === 0 ? "heading" : "paragraph", text: `Opening ${index}` });

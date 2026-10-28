@@ -96,6 +96,22 @@ export const Paragraph = Node.create({
   },
 });
 
+export const Divider = Node.create({
+  name: "divider",
+  group: "block",
+  marks: "",
+  addAttributes() {
+    return { id: idAttribute };
+  },
+  parseHTML() {
+    return [{ tag: "div[data-block-type=divider]" }, { tag: "hr" }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ["div", mergeAttributes({ class: "ub-divider", "data-block-type": "divider" }, HTMLAttributes), ["hr"]];
+  },
+  renderText() { return "---"; },
+});
+
 export const Heading = Node.create({
   name: "heading",
   group: "block",
@@ -354,6 +370,7 @@ export const paletteExtensions = [
   Doc,
   Text,
   Paragraph,
+  Divider,
   Heading,
   CodeBlock,
   ListItem,

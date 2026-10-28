@@ -590,6 +590,54 @@ function visualHistory(uuid: string, title: string): Record<string, string> {
 test.describe("document history through ub open", () => {
   const { harness, openApp } = setupHarness({ accessRole: "admin" });
 
+  test("divider revisions draw and label added and removed lines in Split and Inline and fold unchanged dividers", { tag: "@webkit" }, async ({ browser }) => {
+    const uuid = randomUUID();
+    const title = docTitle("Divider history");
+    const source = new Y.Doc();
+    const states: Record<string, string> = {};
+    try {
+      initDoc(source, { uuid, title });
+      const removed = appendBlock(source, { type: "divider" });
+      appendBlock(source, { type: "paragraph", text: "Opening context" });
+      appendBlock(source, { type: "divider" });
+      for (const text of ["Middle context", "Closing context", "Last context"]) appendBlock(source, { type: "paragraph", text });
+      states.earlier = Buffer.from(snapshotRevision(source).state).toString("base64");
+      deleteBlock(source, removed);
+      appendBlock(source, { type: "divider" });
+      states.latest = Buffer.from(snapshotRevision(source).state).toString("base64");
+      await harness().seedDocument(source);
+    } finally { source.destroy(); }
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      contextOptions: { viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" },
+      beforeNavigate: async target => { await serveHistory(target, [
+        { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+        { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+      ], states); },
+    });
+    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    await expect(editor(page).getByRole("separator")).toHaveCount(2);
+    await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeEnabled();
+    await previous(page);
+    for (const view of ["Split", "Inline"] as const) {
+      await comparisonView(page, view);
+      const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true });
+      await collapse.setChecked(true);
+      const revision = page.locator(".ub-revision-pane");
+      await expect(revision.locator(".ub-revision-fold-button").first()).toHaveText("3 unchanged blocks");
+      for (const label of ["Removed block", "Added block"]) await expect(revision.locator(".ub-revision-fields").filter({ hasText: label })).toBeVisible();
+      await expect(revision.getByRole("separator")).toHaveCount(2);
+      await collapse.setChecked(false);
+      await expect(revision.getByRole("separator")).toHaveCount(view === "Split" ? 4 : 3);
+      for (const scheme of ["light", "dark"] as const) {
+        await page.emulateMedia({ colorScheme: scheme });
+        await expect(revision.getByRole("separator").first()).toBeVisible();
+      }
+    }
+    await previous(page);
+    await expect(historicalEditor(page).getByRole("separator")).toHaveCount(2);
+    await expect(historicalEditor(page).locator(".ub-revision-fields")).toHaveCount(0);
+  });
+
   test("the earliest revision keeps the live document's block spacing", { tag: "@webkit" }, async ({ browser }) => {
     const uuid = randomUUID();
     const title = docTitle("Earliest revision spacing");

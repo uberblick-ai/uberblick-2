@@ -63,7 +63,7 @@ describe("typing a markdown prefix", () => {
         typeText(editor, entry.trigger ?? "");
 
         const blocks = getBlocks(ydoc);
-        expect(blocks).toHaveLength(1);
+        expect(blocks).toHaveLength(entry.type === "divider" ? 2 : 1);
         expect(blocks[0]).toMatchObject({
           id: ids[0],
           type: entry.type,
@@ -73,7 +73,7 @@ describe("typing a markdown prefix", () => {
           ...(entry.attrs.variant === undefined ? {} : { variant: entry.attrs.variant }),
         });
         // And the caret is in the block that was just made, ready to be typed in.
-        expect(editor.state.selection.$head.parent.type.name).toBe(entry.type);
+        expect(editor.state.selection.$head.parent.type.name).toBe(entry.type === "divider" ? "paragraph" : entry.type);
       } finally {
         editor.destroy();
       }
@@ -181,6 +181,114 @@ describe("typing a markdown prefix", () => {
     } finally {
       editor.destroy();
     }
+  });
+});
+
+describe("typed dividers", () => {
+  it("inserts a paragraph directly after the divider and restores the prefix, then the empty paragraph, on undo", () => {
+    const { ydoc, ids } = docWith(["", "Below"]);
+    const { editor } = mountEditor(ydoc);
+    try {
+      caret(editor, 0, 0);
+      typeText(editor, "---");
+      expect(getBlocks(ydoc)).toMatchObject([
+        { id: ids[0], type: "divider", text: "" },
+        { type: "paragraph", text: "" },
+        { id: ids[1], type: "paragraph", text: "Below" },
+      ]);
+      const after = getBlocks(ydoc)[1];
+      expect(after?.id).not.toBe(ids[0]);
+      expect(editor.state.selection.$head.parent.attrs.id).toBe(after?.id);
+      expect(editor.commands.keyboardShortcut("Mod-z")).toBe(true);
+      expect(getBlocks(ydoc)).toMatchObject([
+        { id: ids[0], type: "paragraph", text: "---" },
+        { id: ids[1], type: "paragraph", text: "Below" },
+      ]);
+      expect(editor.commands.keyboardShortcut("Mod-z")).toBe(true);
+      expect(getBlocks(ydoc)).toMatchObject([
+        { id: ids[0], type: "paragraph", text: "" },
+        { id: ids[1], type: "paragraph", text: "Below" },
+      ]);
+    } finally { editor.destroy(); }
+  });
+
+  it.each(["list-item", "quote", "callout", "code"] as const)("keeps --- as text in %s", (type) => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "divider-source", title: "Divider source" });
+    appendBlock(ydoc, { type, text: "" });
+    const { editor } = mountEditor(ydoc);
+    try {
+      caret(editor, 0, 0);
+      typeText(editor, "---");
+      expect(getBlocks(ydoc)).toMatchObject([{ type, text: "---" }]);
+    } finally { editor.destroy(); }
+  });
+
+  it("keeps a --- commit over selected text as prose", () => {
+    const { ydoc } = docWith(["replace me"]);
+    const { editor } = mountEditor(ydoc);
+    try {
+      editor.commands.setTextSelection({ from: 1, to: 11 });
+      typeText(editor, "---");
+      expect(getBlocks(ydoc)).toMatchObject([{ type: "paragraph", text: "---" }]);
+    } finally { editor.destroy(); }
+  });
+
+  it.each([
+    { type: "table", text: "| |\n| --- |\n| |" },
+    { type: "card", text: "title: Title\n\n" },
+    { type: "figma", text: "url: https://www.figma.com/design/key/Checkout\n\n" },
+  ] as const)("keeps --- as text in every nested paragraph of $type", ({ type, text }) => {
+    const ydoc = new Y.Doc();
+    initDoc(ydoc, { uuid: "divider-nesting", title: "Divider nesting" });
+    appendBlock(ydoc, { type, text });
+    const { editor } = mountEditor(ydoc);
+    try {
+      const positions: number[] = [];
+      editor.state.doc.descendants((node, pos) => {
+        if (node.isTextblock) positions.push(pos + 1);
+      });
+      expect(positions.length).toBeGreaterThan(0);
+      for (const pos of positions.reverse()) {
+        const length = editor.state.doc.resolve(pos).parent.content.size;
+        editor.commands.setTextSelection({ from: pos, to: pos + length });
+        editor.commands.deleteSelection();
+        typeText(editor, "---");
+        expect(editor.state.selection.$head.parent.textContent).toBe("---");
+      }
+      expect(getBlocks(ydoc).map((block) => block.type)).toEqual([type]);
+    } finally { editor.destroy(); }
+  });
+
+  it("does not convert stored or programmatically replaced prefixes", () => {
+    const { ydoc, ids } = docWith(["--", ""]);
+    const { editor } = mountEditor(ydoc);
+    try {
+      caret(editor, 0, 2);
+      typeText(editor, "-");
+      expect(getBlocks(ydoc)[0]).toMatchObject({ type: "paragraph", text: "---" });
+      caret(editor, 1, 0);
+      typeText(editor, "--");
+      editBlock(ydoc, ids[1] ?? "", "--", "-");
+      caret(editor, 1, 1);
+      typeText(editor, "--");
+      expect(getBlocks(ydoc)[1]).toMatchObject({ type: "paragraph", text: "---" });
+    } finally { editor.destroy(); }
+  });
+
+  it("offers no divider and leaves --- as text in a decision answer draft", () => {
+    expect(DECISION_ANSWER_MENU_ENTRIES.some((entry) => entry.type === "divider")).toBe(false);
+    const { ydoc } = docWith([""]);
+    const element = document.createElement("div");
+    document.body.appendChild(element);
+    const editor = createUberblickEditor({
+      element, fragment: getBlocksFragment(ydoc), blockMenuEntries: DECISION_ANSWER_MENU_ENTRIES,
+    });
+    try {
+      caret(editor, 0, 0);
+      typeText(editor, "---");
+      expect(getBlocks(ydoc)).toMatchObject([{ type: "paragraph", text: "---" }]);
+    } finally { editor.destroy(); element.remove(); }
   });
 });
 

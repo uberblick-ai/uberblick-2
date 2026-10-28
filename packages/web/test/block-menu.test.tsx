@@ -10,8 +10,8 @@
  * 2. **Converting keeps the block.** The block id survives the re-type (it is
  *    the same block, so every reference to it stays valid), the typed `/query`
  *    never reaches the saved text, and the whole gesture is one undo step.
- * 3. **Inserting makes exactly one new block**, below the one that was hovered,
- *    with an id of its own and the caret inside it.
+ * 3. **Inserting makes new blocks below the hovered block**, with their own
+ *    ids and the caret in the new editable content.
  * 4. **Neither operation acts on a block that has moved or gone.** Both name
  *    their block by id and re-resolve it against live state; a concurrent delete
  *    makes the menu refuse, never edit whichever block took its place.
@@ -190,6 +190,7 @@ describe("the registry", () => {
       "Heading 2",
       "Heading 3",
       "Quote",
+      "Divider",
       "Card",
       "Figma",
       "Note",
@@ -255,6 +256,9 @@ describe("the registry", () => {
     expect(labels("hint")).toEqual(["Tip"]);
     expect(labels("attention")).toEqual(["Warning"]);
     expect(labels("danger")).toEqual(["Caution"]);
+    for (const alias of ["horizontal rule", "hr", "line", "separator"]) {
+      expect(labels(alias)).toContain("Divider");
+    }
   });
 });
 
@@ -302,6 +306,29 @@ describe("the slash trigger", () => {
 });
 
 describe("the slash menu", () => {
+  it("replaces the slash paragraph with a divider and a fresh paragraph in one undo step", () => {
+    const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }, { type: "paragraph", text: "Below" }]);
+    const mounted = mountMenu(ydoc);
+    try {
+      caret(mounted.editor, 0, 0);
+      type(mounted.editor, "/divider");
+      mounted.press("Enter");
+      const blocks = getBlocks(ydoc);
+      expect(blocks).toMatchObject([
+        { id: ids[0], type: "divider", text: "" },
+        { type: "paragraph", text: "" },
+        { id: ids[1], type: "paragraph", text: "Below" },
+      ]);
+      soundIds(ydoc);
+      expect(mounted.editor.state.selection.$head.parent.attrs.id).toBe(blocks[1]?.id);
+      act(() => { expect(mounted.editor.commands.keyboardShortcut("Mod-z")).toBe(true); });
+      expect(getBlocks(ydoc)).toMatchObject([
+        { id: ids[0], type: "paragraph", text: "/divider" },
+        { id: ids[1], type: "paragraph", text: "Below" },
+      ]);
+    } finally { mounted.unmount(); }
+  });
+
   it.each(BLOCK_MENU_ENTRIES.filter((entry) => entry.type === "callout"))("creates $label from slash and gutter entries with valid attributes and one undo", (entry) => {
     const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }]);
     const mounted = mountMenu(ydoc);
@@ -737,6 +764,26 @@ describe("the gutter menu", () => {
     const entry = within(mounted.frame.ownerDocument.body).getByRole("option", { name: label });
     act(() => entry.click());
   }
+
+  it("inserts a divider and a fresh paragraph directly below the gutter anchor in one undo step", () => {
+    const { ydoc, ids } = docWith([{ type: "heading", text: "Above" }, { type: "paragraph", text: "Below" }]);
+    const mounted = mountMenu(ydoc);
+    try {
+      openGutterMenu(mounted, 0);
+      pick(mounted, "Divider");
+      const blocks = getBlocks(ydoc);
+      expect(blocks).toMatchObject([
+        { id: ids[0], type: "heading", text: "Above" },
+        { type: "divider", text: "" },
+        { type: "paragraph", text: "" },
+        { id: ids[1], type: "paragraph", text: "Below" },
+      ]);
+      soundIds(ydoc);
+      expect(mounted.editor.state.selection.$head.parent.attrs.id).toBe(blocks[2]?.id);
+      act(() => { expect(mounted.editor.commands.keyboardShortcut("Mod-z")).toBe(true); });
+      expect(getBlocks(ydoc).map((block) => block.id)).toEqual(ids);
+    } finally { mounted.unmount(); }
+  });
 
   /** Pointer identity comes from the event, including on a mixed-input iPad. */
   function touchCaret(mounted: Mounted, index: number): void {

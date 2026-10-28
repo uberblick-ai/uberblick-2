@@ -92,6 +92,15 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
     attrs: {},
   },
   {
+    id: "divider",
+    label: "Divider",
+    group: "Text",
+    trigger: "---",
+    keywords: ["horizontal rule", "hr", "line", "separator"],
+    type: "divider",
+    attrs: {},
+  },
+  {
     id: "card",
     label: "Card",
     group: "Text",
@@ -316,6 +325,18 @@ function attrsForNewBlock(entry: BlockMenuEntry): Record<string, unknown> {
   return attrs;
 }
 
+/** Replace an emptied paragraph with its divider and the paragraph to type in. */
+export function replaceParagraphWithDivider(tr: Transaction, pos: number): boolean {
+  const previous = tr.doc.nodeAt(pos);
+  const { divider, paragraph } = tr.doc.type.schema.nodes;
+  if (previous?.type.name !== "paragraph" || previous.content.size !== 0 ||
+    divider === undefined || paragraph === undefined) return false;
+  const line = divider.create({ id: previous.attrs.id });
+  tr.replaceWith(pos, pos + previous.nodeSize, [line, paragraph.create({ id: null })]);
+  tr.setSelection(TextSelection.near(tr.doc.resolve(pos + line.nodeSize + 1)));
+  return true;
+}
+
 /**
  * Re-derive and compare the live block id and query before consuming the slash
  * and retyping in one transaction. A stale session changes nothing; choosing
@@ -338,7 +359,9 @@ export function convertBlockAtTrigger(
   const tr = editor.state.tr;
   const contentStart = found.pos + 1;
   tr.delete(contentStart, contentStart + found.node.content.size);
-  if (entry.type === "table") {
+  if (entry.type === "divider") {
+    if (!replaceParagraphWithDivider(tr, found.pos)) return false;
+  } else if (entry.type === "table") {
     const emptied = tr.doc.nodeAt(found.pos);
     if (emptied === null) return false;
     tr.replaceWith(found.pos, found.pos + emptied.nodeSize,
@@ -353,7 +376,8 @@ export function convertBlockAtTrigger(
   }
   const converted = tr.doc.nodeAt(found.pos);
   if (converted === null) return false;
-  const caret = entry.type === "card" ? found.pos + cardTitleOffset(converted) : contentStart;
+  const caret = entry.type === "divider" ? found.pos + converted.nodeSize + 1
+    : entry.type === "card" ? found.pos + cardTitleOffset(converted) : contentStart;
   tr.setSelection(TextSelection.near(tr.doc.resolve(caret)));
 
   editor.view.dispatch(tr);
@@ -378,6 +402,8 @@ export function insertBlockBelow(
 
   const nodeType = state.schema.nodes[entry.type];
   if (nodeType === undefined) return false;
+  const following = entry.type === "divider" ? state.schema.nodes.paragraph?.create({ id: null }) : null;
+  if (entry.type === "divider" && following == null) return false;
   const fresh = entry.type === "table"
     ? tableFromRows(state.schema, [["", "", ""], ["", "", ""], ["", "", ""]], null)
     : entry.type === "card" ? emptyCard(state.schema, null)
@@ -387,8 +413,10 @@ export function insertBlockBelow(
 
   endUndoCapture(state);
   const at = blockPos + block.nodeSize;
-  const tr = state.tr.insert(at, fresh);
-  tr.setSelection(TextSelection.near(tr.doc.resolve(at + (entry.type === "card" ? cardTitleOffset(fresh) : 1))));
+  const tr = state.tr.insert(at, following == null ? fresh : [fresh, following]);
+  const caretOffset = entry.type === "divider" ? fresh.nodeSize + 1
+    : entry.type === "card" ? cardTitleOffset(fresh) : 1;
+  tr.setSelection(TextSelection.near(tr.doc.resolve(at + caretOffset)));
 
   editor.view.dispatch(tr);
   editor.view.focus();

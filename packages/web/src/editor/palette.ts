@@ -85,6 +85,17 @@ function isEditorBlockType(name: string): boolean {
   return isBlockType(name) && uberblickSchema.nodes[name] !== undefined;
 }
 
+/** Undefined denotes prose; null denotes a supported non-prose shape. */
+function shapeProblem(child: Y.XmlElement): string | null | undefined {
+  switch (child.nodeName) {
+    case "divider": return child.length === 0 ? null : "#divider-shape";
+    case "figma": return isSupportedFigma(child) ? null : "#figma-shape";
+    case "table": return isSupportedTable(child) ? null : "#table-shape";
+    case "card": return isSupportedCard(child) ? null : "#card-shape";
+    default: return undefined;
+  }
+}
+
 /**
  * Return one offender per top-level block. Stray text/hooks are foreign because
  * the doc schema accepts block+ only; an empty result permits binding.
@@ -109,23 +120,10 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
       foreign.push({ index, nodeName: child.nodeName, id, preview: previewOf(child) });
       continue;
     }
-    if (child.nodeName === "figma") {
-      if (!isSupportedFigma(child)) foreign.push({ index, nodeName: "#figma-shape", id, preview: previewOf(child) });
-      else if (hasStructuredLinkConflicts(child)) {
-        foreign.push({ index, nodeName: LINK_CONFLICT, id, preview: previewOf(child) });
-      }
-      continue;
-    }
-    if (child.nodeName === "table") {
-      if (!isSupportedTable(child)) foreign.push({ index, nodeName: "#table-shape", id, preview: previewOf(child) });
-      else if (hasStructuredLinkConflicts(child)) foreign.push({ index, nodeName: LINK_CONFLICT, id, preview: previewOf(child) });
-      continue;
-    }
-    if (child.nodeName === "card") {
-      if (!isSupportedCard(child)) foreign.push({ index, nodeName: "#card-shape", id, preview: previewOf(child) });
-      else if (hasStructuredLinkConflicts(child)) {
-        foreign.push({ index, nodeName: LINK_CONFLICT, id, preview: previewOf(child) });
-      }
+    const shape = shapeProblem(child);
+    if (shape !== undefined) {
+      const nodeName = shape ?? (hasStructuredLinkConflicts(child) ? LINK_CONFLICT : null);
+      if (nodeName !== null) foreign.push({ index, nodeName, id, preview: previewOf(child) });
       continue;
     }
     for (const inner of child.toArray()) {
