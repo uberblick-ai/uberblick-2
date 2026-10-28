@@ -226,8 +226,10 @@ describe("ub open automatic revisions", () => {
     try {
       await waitUntil("the offline history writer to synchronize", () => browser.isSynced);
       initDoc(document, { uuid, title: "Keep this downloaded history" });
-      await waitUntil("the offline history content to reach the hub", () =>
-        getMeta(hub.hocuspocus.documents.get(roomForDoc(WORKSPACE, uuid))!).title === "Keep this downloaded history");
+      await waitUntil("the offline history content to reach the hub", () => {
+        const current = hub.hocuspocus.documents.get(roomForDoc(WORKSPACE, uuid));
+        return current !== undefined && getMeta(current).title === "Keep this downloaded history";
+      });
       const listed = await fetch(`${path}&refresh=true`, { headers });
       const { revisions } = await listed.json() as { revisions: RevisionEntry[] };
       expect(revisions).toHaveLength(1);
