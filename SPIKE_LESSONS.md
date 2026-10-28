@@ -6,6 +6,10 @@ This is a disposable, local experiment, grounded on `344a07495e2079986b5688ce738
 
 One person opens an existing document with R1 → R2 → R3, visits R2 then R1, returns to R2 and restores it as R4. The existing browser restore test remains in the ordinary regression selection. Synthetic data only; local files and local playback; no shared corpus publication. The two-actor milestone pilot remains untested by this narrower experiment.
 
+## Deferred after the learning round
+
+On 28 October 2026, Ben asked not to build this now, to leave all issues unlabeled, and to update them with useful learnings. All ten issues (#2408–#2417) were already unlabeled. Their descriptions and the [milestone summary](https://github.com/uberblick-ai/uberblick-2/milestone/36) now carry the applicable findings and an explicit deferral. A readback verified all ten remain open and unlabeled. No follow-on implementation or queue entry was started; a maintainer must explicitly restart that work.
+
 ## Reader feedback — 28 October 2026
 
 Ben inspected the local prototype and gave the following feedback in this Codex conversation. This supplies the previously missing reader reaction. It confirms a useful direction, especially clickable moments, and exposes problems with comprehension and presentation. It does not establish measured PM time savings, a two-actor review or a complete PM-authored bug request.
@@ -91,9 +95,9 @@ This is an agent-observed adjustment, not a PM validation result or a newly file
 Same-machine reference while the preview is running:
 `http://127.0.0.1:4178/?scenario=history-restore&recording=2026-10-27T14-26-24.968Z-5af61b24&actor=member&t=9.65`
 
-## Recommended changes to the milestone intakes
+## Refinements carried into the deferred milestone intakes
 
-These are recommended issue changes, incorporating Ben's feedback above. The issue bodies have not been edited. Distinguish his expressed choices from implementation suggestions and the unresolved retention question.
+These refinements, incorporating Ben's feedback above, have been applied to the issue descriptions and aligned with the milestone summary at his request. They remain deferred review intakes, not prepared implementation contracts. Distinguish his expressed choices from implementation suggestions and the unresolved retention question.
 
 | Issue | Smallest useful adjustment |
 | --- | --- |
