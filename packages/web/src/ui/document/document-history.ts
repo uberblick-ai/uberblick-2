@@ -213,12 +213,20 @@ async function reloadSelection(owner: Session, operation: number, update: Update
   }
 }
 
+/** Per-browser reading preferences survive document and history sessions. */
+function useHistoryPreferences() {
+  const [collapseUnchanged, setCollapseUnchanged] = useStoredFlag("uberblick.history.collapse-unchanged", true);
+  const [inlineComparison, setInlineComparison] = useStoredFlag("uberblick.history.inline", false);
+  const comparisonView: "split" | "inline" = inlineComparison ? "inline" : "split";
+  const setComparisonView = (next: "split" | "inline"): void => setInlineComparison(next === "inline");
+  return { collapseUnchanged, setCollapseUnchanged, comparisonView, setComparisonView };
+}
+
 export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid: string | null, key: string, liveDocument: Y.Doc | null = null, route?: HistoryRoute) {
   const current = useRef<Session | null>(null);
   const routing = useRef(route);
   routing.current = route;
-  // A per-browser reading preference, shared by the sidebar switch and the comparison.
-  const [collapseUnchanged, setCollapseUnchanged] = useStoredFlag("uberblick.history.collapse-unchanged", true);
+  const preferences = useHistoryPreferences();
   const [view, setView] = useState<{ session: Session; state: HistoryState } | null>(null);
   const update = useCallback((session: Session, changes: Partial<HistoryState>): void => {
     if (current.current !== session || session.signal.aborted) return;
@@ -361,8 +369,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
     canBack,
     canForward,
     available: client !== null && uuid !== null,
-    collapseUnchanged,
-    setCollapseUnchanged,
+    ...preferences,
     entry: displayed.selection === null ? null : displayed.entries?.[displayed.selection.index] ?? null,
     back: () => { if (selection === null || canBack) void select({ step: 1, named: filter === "named" }); },
     forward: () => {

@@ -8,6 +8,7 @@ import type * as Y from "yjs";
 import {
   CARD_PARTS,
   getAnnotationsMap,
+  getAnnotationCommentIds,
   getBlocks,
   getBlocksFragment,
   listAnnotations,
@@ -65,10 +66,7 @@ export function blockRefLabel(type: BlockType, index: number, source = ""): stri
   return `${label} ${index + 1}`;
 }
 
-/**
- * Stored comments have no ID; derive React keys from their converged thread
- * order.
- */
+/** Stable row identity remains the same when text is edited. */
 export interface ThreadComment extends AnnotationComment {
   key: string;
 }
@@ -168,6 +166,7 @@ export function threadsFromDoc(ydoc: Y.Doc): ThreadView[] {
 
   const views: ThreadView[] = listAnnotations(ydoc).map((annotation) => {
     const anchor = anchors.get(annotation.id) ?? null;
+    const commentIds = getAnnotationCommentIds(ydoc, annotation.id);
     return {
       id: annotation.id,
       blockId: annotation.blockId,
@@ -178,7 +177,7 @@ export function threadsFromDoc(ydoc: Y.Doc): ThreadView[] {
       resolved: annotation.resolved === true,
       comments: annotation.comments.map((comment, index) => ({
         ...comment,
-        key: `${annotation.id}:${index}`,
+        key: commentIds[index] ?? `${annotation.id}:${index}`,
       })),
       replyCount: Math.max(0, annotation.comments.length - 1),
     };

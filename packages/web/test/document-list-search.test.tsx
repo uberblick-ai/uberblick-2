@@ -202,15 +202,17 @@ it("merges documents and current decision topics in shared relevance order while
   ]);
 });
 
-it("combines type, state, query and OR tags; a chip replaces tags and clears no other filter", async () => {
+it("combines type, state, query and OR tags; chips and Clear tags preserve the other filters", async () => {
   const onSelect = vi.fn();
+  const untagged = "00000000-0000-4000-8000-000000000005";
   const records = [
     entry(ONE, "Release note", { tags: [RELEASE_ALIAS, CLI] }),
     entry(TWO, "CLI note", { tags: [CLI] }),
     entry(THREE, "Release decision", { kind: "decision", status: "open", tags: [RELEASE] }),
     entry(FOUR, "CLI decision", { kind: "decision", status: "decided", tags: [CLI] }),
+    entry(untagged, "Untagged decision", { kind: "decision", status: "open" }),
   ];
-  const { container } = await renderSettled(list({ entries: records, onSelect, searchClient: { search: async () => [TWO, ONE, FOUR, THREE] } }));
+  const { container } = await renderSettled(list({ entries: records, onSelect, searchClient: { search: async () => [TWO, ONE, FOUR, THREE, untagged] } }));
   await search(container, "sync");
   await click(container, "Filter by tags");
   await act(async () => {
@@ -230,6 +232,30 @@ it("combines type, state, query and OR tags; a chip replaces tags and clears no 
   expect(within(container).getByRole<HTMLSelectElement>("combobox", { name: "Decision state" }).value).toBe("not-yet-decided");
   expect(within(container).getByRole("button", { name: "Filter by tags" }).textContent).toContain("release");
   expect(within(container).getByRole("button", { name: "Filter by tags" }).textContent).not.toContain("cli");
+
+  await act(async () => fireEvent.keyDown(within(container).getByRole("tab", { name: /^Documents/ }), { key: "Enter" }));
+  expect(titles(container)).toEqual(["Release note"]);
+  expect(within(container).getByRole<HTMLInputElement>("searchbox", { name: "Search" }).value).toBe("sync");
+  expect(within(container).getByRole("button", { name: "Filter by tags" }).textContent).toContain("release");
+  await act(async () => fireEvent.keyDown(within(container).getByRole("tab", { name: /^Decisions/ }), { key: "Enter" }));
+  expect(within(container).getByRole<HTMLSelectElement>("combobox", { name: "Decision state" }).value).toBe("not-yet-decided");
+  expect(titles(container)).toEqual(["Release decision"]);
+
+  await click(container, "Title");
+  await click(container, "Filter by tags");
+  const clearTags = within(document.body).getByRole<HTMLButtonElement>("button", { name: "Clear tags" });
+  expect(clearTags.disabled).toBe(false);
+  await act(async () => clearTags.click());
+  expect(clearTags.disabled).toBe(true);
+  const picker = within(document.body).getByRole("listbox", { name: "Tags" });
+  expect(within(picker).getAllByRole("option").map((option) => option.getAttribute("aria-selected"))).toEqual(["false", "false"]);
+  await act(async () => fireEvent.keyDown(document.body, { key: "Escape" }));
+  expect(within(container).getByRole("button", { name: "Filter by tags" }).textContent).toContain("Any");
+  expect(within(container).getByRole<HTMLInputElement>("searchbox", { name: "Search" }).value).toBe("sync");
+  expect(within(container).getByRole("tab", { name: /^Decisions/ }).getAttribute("aria-selected")).toBe("true");
+  expect(within(container).getByRole<HTMLSelectElement>("combobox", { name: "Decision state" }).value).toBe("not-yet-decided");
+  expect(container.querySelector("[aria-sort]")?.getAttribute("aria-sort")).toBe("ascending");
+  expect(titles(container)).toEqual(["Release decision", "Untagged decision"]);
 });
 
 it("names all filters in a partial-sync empty answer and clears them together", async () => {

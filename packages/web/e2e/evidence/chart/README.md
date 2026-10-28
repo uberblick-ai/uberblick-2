@@ -75,6 +75,25 @@ the host class. Unit suites defend value semantics, non-destructive invalid
 merges, zero renderer writes, frame coalescing, observer release and old-client
 preservation.
 
+The four independent `@workload` scenarios use the normal 60-second test budget.
+Each exercises actual Chart.js canvas drawing, which the mocked Chart.js in
+`packages/web/test/chart.test.ts` cannot cover:
+
+| Scenario | Real-browser scale |
+| --- | --- |
+| Representative | 365 records, three series, with the complete 4,400-record data area |
+| 5,000-record overlay | Latest 5,000 of 5,001 stored records, eight line series |
+| 5,000-record panels | The same records and eight separate Chart.js canvases |
+| 5,000-record all-bar overlay | The same records and eight bar series |
+
+All retain ten successive live redraws at 2× CPU throttling and 1366×768.
+The component tests own the deterministic invariants also retained here:
+“shares one full read and observer across mixed views, with no reads for source,
+caret, prose or annotation” owns shared reads and one read per update frame;
+“mounts, redraws a burst once per frame, follows remote mapping/data and adds
+no local update” and “coalesces data, mapping, theme, appearance and font redraws
+through one binding without writes” own frame coalescing and no renderer writes.
+
 The committed [representative timing capture](timing-representative.json) and
 [5,000-record timing capture](timing-bound.json) were recorded on macOS Apple
 Silicon with the suite's twofold Chromium CPU throttling. They are observations
@@ -122,11 +141,12 @@ recorded budgets on a benchmark host, run
 `env UB_CHART_TIMING_BUDGETS=1 mise run e2e -- chart.spec.ts --project=chromium-workload --no-deps --workers=1`.
 That opt-in requires representative first draw within 500 ms and median redraw
 within 250 ms, plus bounded first draw, median and every redraw within 1,000 ms.
-The panels variant enforces the same bounded budget for the complete block,
-including all eight Chart.js instances.
+Only under `UB_CHART_TIMING_BUDGETS=1`, the panels variant enforces the same
+bounded budget for the complete block, including all eight Chart.js instances.
 
-The all-bar overlay variant uses the same 5,000-record/eight-series fixture and
-enforces that bound for its first draw and every live redraw. Native canvas
+The all-bar overlay variant uses the same 5,000-record/eight-series fixture;
+only under `UB_CHART_TIMING_BUDGETS=1` does it enforce that bound for its first
+draw and every live redraw. Native canvas
 rectangle observations separately check grouped bars, zero-based negative bars,
 missing values, endpoint and lone-x containment, bars behind lines, filled legend
 swatches and mapping-order shared tooltips. The mixed fixture runs in Chromium

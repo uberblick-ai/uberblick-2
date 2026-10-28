@@ -1,5 +1,14 @@
 import { alignRevisionSides } from "../../editor/revision-split.js";
-import type { RevisionSplit } from "../../editor/revision-split.js";
+import type { Editor } from "@tiptap/core";
+import type { RevisionRow } from "../../editor/revision-split.js";
+
+export interface RevisionComparisonView {
+  readonly model: { rows: readonly RevisionRow[] };
+  before?: Editor;
+  after: Editor;
+  expand: (run: number) => void;
+  setCollapse: (collapse: boolean) => void;
+}
 
 export interface RevisionRowHold {
   /** Correct the settled layout before row motion is applied. */
@@ -17,8 +26,8 @@ export const REVISION_READING_INSET = 8;
  * Holds the row crossing the header through one switch transaction. Individual
  * fold bars and all scrolling after the transition keep native anchoring.
  */
-export function holdRevisionRow(pane: HTMLElement, header: HTMLElement, split: RevisionSplit): RevisionRowHold | null {
-  const side = split.after.view.dom;
+export function holdRevisionRow(pane: HTMLElement, header: HTMLElement, comparison: RevisionComparisonView): RevisionRowHold | null {
+  const side = comparison.after.view.dom;
   const starts = [...side.querySelectorAll<HTMLElement>(":scope > .ub-revision-row-start[data-key]")]
     .filter((element) => element.getClientRects().length > 0);
   const line = header.getBoundingClientRect().bottom;
@@ -27,7 +36,7 @@ export function holdRevisionRow(pane: HTMLElement, header: HTMLElement, split: R
     // Native scroll offsets can round by a pixel on WebKit.
     return end !== null && end.getBoundingClientRect().bottom > line + REVISION_READING_INSET + 1;
   }) ?? starts.at(-1);
-  const row = reader === undefined ? undefined : split.model.rows[Number(reader.dataset.row)];
+  const row = reader === undefined ? undefined : comparison.model.rows[Number(reader.dataset.row)];
   if (reader === undefined || row === undefined) return null;
   const originalTop = reader.getBoundingClientRect().top;
   const originalFold = row.fold !== undefined;
@@ -63,7 +72,7 @@ export function holdRevisionRow(pane: HTMLElement, header: HTMLElement, split: R
   const align = (): { key: string; top: number } | null => {
     if (stopped) return null;
     if (!pane.isConnected || !side.isConnected) { stop(); return null; }
-    const replacement = split.model.rows.find((current) => current.at === row.at
+    const replacement = comparison.model.rows.find((current) => current.at === row.at
       || (current.fold !== undefined && current.fold.run <= row.at && row.at < current.fold.run + current.fold.count));
     if (replacement === undefined) { stop(); return null; }
     const key = `${replacement.fold === undefined ? "row" : "fold"}-${replacement.at}`;
@@ -71,11 +80,12 @@ export function holdRevisionRow(pane: HTMLElement, header: HTMLElement, split: R
     if (target === null) { stop(); return null; }
     // A bar replacing a partly hidden row must be reachable below the header.
     const top = replacement.fold !== undefined && !originalFold ? Math.max(originalTop, line) : originalTop;
-    alignRevisionSides(split.before.view, split.after.view);
+    if (comparison.before !== undefined) alignRevisionSides(comparison.before.view, comparison.after.view);
     pane.scrollTop += target.getBoundingClientRect().top - top;
     return { key, top };
   };
-  const pendingDrawings = (): boolean => document.fonts?.status === "loading" || [split.before.view.dom, side].some((element) =>
+  const sides = comparison.before === undefined ? [side] : [comparison.before.view.dom, side];
+  const pendingDrawings = (): boolean => document.fonts?.status === "loading" || sides.some((element) =>
     [...element.querySelectorAll<HTMLElement>(".ub-wireframe, .ub-ablauf, .ub-chart")].some((drawing) => {
       if (drawing.getClientRects().length === 0) return false;
       const state = drawing.dataset.drawState;

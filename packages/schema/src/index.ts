@@ -26,6 +26,17 @@ export {
 export type { DataCollection, DataCollectionChange, DataOperation, DataRecord, DocData } from "./data.js";
 export { DataError, canonicalJson, compareCodePoints, validateCollectionSchema } from "./data-schema.js";
 export type { CollectionSchema, DataSchema, JSONObject, JSONValue } from "./data-schema.js";
+export {
+  CHART_RECORD_LIMIT, CHART_MIN_HEIGHT, CHART_MAX_HEIGHT, chartDate,
+  parseChartConfig, prepareChart,
+} from "./chart-data.js";
+export type {
+  ChartConfig, ChartNoRecords, ChartProjection, ChartReady, ChartSeries, ChartSeriesMapping,
+} from "./chart-data.js";
+export { parseTableConfig, prepareTable, sortTableRows } from "./table-data.js";
+export type { TableColumnMapping, TableConfig, TableNoRecords, TableProjection, TableReady } from "./table-data.js";
+export { chartViewType, prepareChartView } from "./chart-view.js";
+export type { ChartView } from "./chart-view.js";
 export { decisionCurrentRecord, decisionRelations, decisionTopicState, decisionTopicTitle, readDecisions, relatedDecisionTopics, resolveDecisionTopics } from "./decisions.js";
 export type { DecisionTopicState } from "./decisions.js";
 export {
@@ -85,7 +96,10 @@ export {
   addComment,
   annotationAnchors,
   createAnnotation,
+  editComment,
   getAnnotation,
+  getAnnotationCommentId,
+  getAnnotationCommentIds,
   listAnnotationRanges,
   listAnnotations,
   moveAnnotation,

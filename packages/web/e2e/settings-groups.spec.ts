@@ -27,10 +27,10 @@ async function openPersonal(page: Page, title: "Preferences" | "Devices"): Promi
   await expect(page.getByRole("heading", { level: 1, name: title, exact: true })).toBeVisible();
 }
 
-async function showSidebar(page: Page): Promise<void> {
+async function showSidebar(page: Page, settings = true): Promise<void> {
   if ((page.viewportSize()?.width ?? 1280) >= 1280) return;
   const sidebar = page.getByRole("dialog", { name: "Sidebar", exact: true });
-  if (!await sidebar.isVisible()) await activateControl(page.getByRole("button", { name: "Show sidebar", exact: true }));
+  if (!await sidebar.isVisible()) await activateControl(page.getByRole("button", { name: settings ? "Show sidebar" : "Show document list", exact: true }));
   await expect(sidebar).toBeVisible();
 }
 
@@ -132,7 +132,7 @@ test.describe("a current workspace and hub admin", () => {
     });
   }
 
-  test("a changed workspace role removes controls and returns an open page to Preferences", async ({ browser }) => {
+  test("a changed workspace role leaves only local General settings and denies admin pages", async ({ browser }) => {
     let role = "admin";
     const page = await openApp(browser, `/${harness().workspace}/settings`, {
       beforeNavigate: async (opening) => {
@@ -146,12 +146,15 @@ test.describe("a current workspace and hub admin", () => {
     await expect(page.getByRole("textbox", { name: "Name", exact: true })).toBeEnabled();
     await expect(page.getByRole("textbox", { name: "Main repository", exact: true })).toBeEnabled();
     role = "member";
-    await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
+    await expect(workspaceNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["General", "Admins", "Workspaces"]);
+    await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "On this computer", exact: true })).toBeVisible();
     await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
-    await expect(personalNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["Preferences", "Devices"]);
-    await page.goto(new URL(`/${harness().workspace}/settings/tags`, harness().appUrl).href);
-    await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
-    await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
+    for (const suffix of ["/tags", "/members"]) {
+      await page.goto(new URL(`/${harness().workspace}/settings${suffix}`, harness().appUrl).href);
+      await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
+      await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
+    }
   });
 
   test("signing this computer out removes Workspace, Devices and Hub while the page stays open", async ({ browser }) => {
@@ -264,7 +267,7 @@ test.describe("a current workspace and hub admin", () => {
 for (const role of ["member", "none"] as const) {
   test.describe(`a hub administrator with workspace role ${role}`, () => {
     const { harness, openApp } = setupHarness({ accessRole: role, hubAdmin: true });
-    test("confirms hub authority independently, defaults to Admins and keeps personal pages separate", async ({ browser }) => {
+    test("confirms hub authority independently and keeps personal pages separate", async ({ browser }) => {
       let hold = true;
       const pending: Route[] = [];
       const page = await openApp(browser, `/${harness().workspace}`, {
@@ -279,18 +282,25 @@ for (const role of ["member", "none"] as const) {
       try {
         const entry = page.getByRole("button", { name: "Workspace settings", exact: true });
         await expect.poll(() => pending.length).toBeGreaterThan(0);
-        await expect(entry).toHaveCount(0);
+        if (role === "member") await expect(entry).toBeVisible();
+        else await expect(entry).toHaveCount(0);
         await openPersonal(page, "Preferences");
         await expect(personalNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["Preferences", "Devices"]);
-        await expect(entry).toHaveCount(0);
+        if (role === "member") await expect(entry).toBeVisible();
+        else await expect(entry).toHaveCount(0);
         hold = false;
         for (const route of pending.splice(0)) await route.continue().catch(() => {});
         await expect(entry).toBeVisible();
         await entry.click();
-        await expect(page).toHaveURL(new URL(`/${harness().workspace}/settings/hub-admins`, harness().appUrl).href);
+        const landing = role === "member" ? "" : "/hub-admins";
+        await expect(page).toHaveURL(new URL(`/${harness().workspace}/settings${landing}`, harness().appUrl).href);
+        await expect(workspaceNavigation(page).locator(".ub-settings-nav > p")).toHaveText(role === "member" ? ["Workspace", "Hub"] : ["Hub"]);
+        await expect(workspaceNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(role === "member" ? ["General", "Admins", "Workspaces"] : ["Admins", "Workspaces"]);
+        if (role === "member") {
+          await expect(page.getByRole("heading", { name: "On this computer", exact: true })).toBeVisible();
+          await workspaceNavigation(page).getByRole("button", { name: "Admins", exact: true }).click();
+        }
         await expect(page.getByRole("table", { name: "Hub admins", exact: true })).toBeVisible();
-        await expect(workspaceNavigation(page).locator(".ub-settings-nav > p")).toHaveText(["Hub"]);
-        await expect(workspaceNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["Admins", "Workspaces"]);
         await expect(entry).toHaveCount(0);
         await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
         await openPersonal(page, "Devices");
@@ -305,11 +315,111 @@ for (const role of ["member", "none"] as const) {
 
   test.describe(`a signed-in account with ${role === "none" ? "no workspace membership" : "a member role"} and no hub role`, () => {
     const { harness, openApp } = setupHarness({ accessRole: role });
-    test("hides Workspace settings, opens personal pages from the user menu and keeps own Devices", async ({ browser }) => {
+    if (role === "member") {
+      test("a member saves this computer's retention with desktop keyboard and iPad touch", { tag: "@webkit" }, async ({ browser }, info) => {
+        const touch = info.project.use.hasTouch === true;
+        let retention = { mode: "recent", days: 30, keepNamed: true };
+        let hold = true;
+        const pending: Route[] = [];
+        const page = await openApp(browser, `/${harness().workspace}`, {
+          contextOptions: {
+            ...(touch ? devices["iPad Pro 11"] : { viewport: { width: 1440, height: 900 }, hasTouch: false, isMobile: false }),
+            colorScheme: "light", reducedMotion: "reduce",
+          },
+          beforeNavigate: async (opening) => {
+            await opening.route("**/api/local-settings", (route) => {
+              if (route.request().method() === "POST") {
+                retention = (route.request().postDataJSON() as { retention: typeof retention }).retention;
+              } else if (hold) {
+                pending.push(route);
+                return;
+              }
+              return route.fulfill({ json: { retention, size: { bytes: 1_200_000_000, usedFraction: 0.75 } } });
+            });
+          },
+        });
+        await showSidebar(page, false);
+        const entry = page.getByRole("button", { name: "Workspace settings", exact: true });
+        if (touch) await entry.tap();
+        else await entry.press("Enter");
+        await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+        const local = page.getByRole("region", { name: "On this computer", exact: true });
+        const size = local.locator("div").filter({ has: page.getByText("Size", { exact: true }) }).last();
+        await expect(size).toContainText("—");
+        await expect.poll(() => pending.length).toBeGreaterThan(0);
+        hold = false;
+        for (const route of pending.splice(0)) {
+          await route.fulfill({ json: { retention, size: { bytes: 1_200_000_000, usedFraction: 0.75 } } });
+        }
+        await expect(size).toContainText("1.2 GB · 75% used");
+        const mode = local.getByRole("combobox", { name: "History retention", exact: true });
+        const period = local.getByRole("combobox", { name: "Recent history period", exact: true });
+        const named = local.getByRole("checkbox", { name: "Keep named revisions", exact: true });
+        const save = local.getByRole("button", { name: "Save history retention", exact: true });
+        await expect(mode).toHaveValue("recent");
+        await expect(mode.locator("option")).toHaveText(["Named revisions only", "Recent history", "Everything"]);
+        await expect(period).toHaveValue("30");
+        await expect(period.locator("option")).toHaveText(["7 days", "30 days", "90 days"]);
+        await expect(named).toBeChecked();
+        const backgrounds: string[] = [];
+        for (const colorScheme of ["light", "dark"] as const) {
+          await page.emulateMedia({ colorScheme });
+          for (const control of [mode, period, named, save]) await expect(control).toBeVisible();
+          await expect(save).toBeDisabled();
+          await expect(save).toHaveCSS("border-top-width", "1px");
+          await expect(save).toHaveCSS("border-top-style", "solid");
+          await expect(save).toHaveCSS("opacity", "0.5");
+          await period.selectOption("7");
+          await expect(save).toBeEnabled();
+          await expect(save).toHaveCSS("opacity", "1");
+          await period.selectOption("30");
+          await expect(save).toBeDisabled();
+          if (colorScheme === "dark") {
+            await expect.poll(() => mode.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(backgrounds[0]);
+          }
+          backgrounds.push(await mode.evaluate((element) => getComputedStyle(element).backgroundColor));
+          expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+          const bounds = await local.boundingBox();
+          expect(bounds?.width).toBeGreaterThan(0);
+          expect((bounds?.x ?? 0) + (bounds?.width ?? 0)).toBeLessThanOrEqual(page.viewportSize()?.width ?? 1440);
+        }
+        expect(backgrounds[0]).not.toBe(backgrounds[1]);
+        if (touch) {
+          await period.selectOption("90");
+          await named.tap();
+          await save.tap();
+        } else {
+          await period.focus();
+          await page.keyboard.press("ArrowDown");
+          await page.keyboard.press("Tab");
+          await expect(named).toBeFocused();
+          await page.keyboard.press("Space");
+          await page.keyboard.press("Tab");
+          await expect(save).toBeFocused();
+          await page.keyboard.press("Enter");
+        }
+        await expect.poll(() => retention).toEqual({ mode: "recent", days: 90, keepNamed: false });
+        await expect(save).toBeDisabled();
+        await page.reload();
+        await expect(page.getByRole("combobox", { name: "Recent history period", exact: true })).toHaveValue("90");
+        await expect(page.getByRole("checkbox", { name: "Keep named revisions", exact: true })).not.toBeChecked();
+        await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
+      });
+    }
+    test("opens the allowed settings and keeps own Devices separate", async ({ browser }) => {
       const page = await openApp(browser, `/${harness().workspace}`);
       const account = page.getByTestId("account-menu");
       await expect(account).toContainText(role === "member" ? "@browser-person" : "Account unavailable");
-      await expect(page.getByRole("button", { name: "Workspace settings", exact: true })).toHaveCount(0);
+      const workspaceEntry = page.getByRole("button", { name: "Workspace settings", exact: true });
+      if (role === "member") {
+        await expect(workspaceEntry).toBeVisible();
+        await workspaceEntry.click();
+        await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+        await expect(workspaceNavigation(page).locator(".ub-settings-nav > p")).toHaveText(["Workspace"]);
+        await expect(workspaceNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["General"]);
+        await expect(page.getByRole("heading", { level: 2 })).toHaveText(["On this computer"]);
+        await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
+      } else await expect(workspaceEntry).toHaveCount(0);
       await openPersonal(page, "Preferences");
       await expect(personalNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["Preferences", "Devices"]);
       await expect(page.getByRole("navigation", { name: "Settings", exact: true })).toHaveCount(0);
@@ -319,8 +429,16 @@ for (const role of ["member", "none"] as const) {
       await openPersonal(page, "Devices");
       for (const suffix of ["", "/tags", "/members"]) {
         await page.goto(new URL(`/${harness().workspace}/settings${suffix}`, harness().appUrl).href);
-        await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
-        await expect(page).toHaveURL(new URL(`/${harness().workspace}/settings/preferences`, harness().appUrl).href);
+        if (role === "member" && suffix === "") {
+          await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+          await expect(page.getByRole("heading", { level: 2 })).toHaveText(["On this computer"]);
+          await page.reload();
+          await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+          await expect(page.getByRole("heading", { level: 2 })).toHaveText(["On this computer"]);
+        } else {
+          await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
+          await expect(page).toHaveURL(new URL(`/${harness().workspace}/settings/preferences`, harness().appUrl).href);
+        }
         await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
       }
       await personalNavigation(page).getByRole("button", { name: "Devices", exact: true }).click();
@@ -340,8 +458,14 @@ for (const role of ["member", "none"] as const) {
 test.describe("a local workspace without roles", () => {
   const { harness, openApp } = setupHarness({ accessRole: "admin", hubAdmin: true, localWorkspace: true });
   test("always offers Workspace and Preferences while stored hub login grants no Devices or Hub group", async ({ browser }) => {
-    const page = await openApp(browser, `/${harness().workspace}/settings`);
+    const page = await openApp(browser, `/${harness().workspace}/settings`, {
+      beforeNavigate: async (opening) => {
+        await opening.route("**/api/local-settings", (route) => route.fulfill({ json: { size: { bytes: 24_000_000, usedFraction: 0.5 } } }));
+      },
+    });
     await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "On this computer", exact: true })).toContainText("24 MB · 50% used");
+    await expect(page.locator("[data-settings-page]")).not.toContainText(/history/i);
     await expect(workspaceNavigation(page).locator(".ub-settings-nav > p")).toHaveText(["Workspace"]);
     await expect(workspaceNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["General", "Tags", "Members"]);
     await page.getByTestId("account-menu").click();

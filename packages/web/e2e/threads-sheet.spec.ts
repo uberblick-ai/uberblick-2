@@ -56,6 +56,63 @@ test("a document keeps its threads column before and after the first comment", a
   expect(await prose.boundingBox()).toEqual(proseBefore);
 });
 
+test("Escape cancels only the edit in the drawer and closing preserves an unsent edit", { tag: "@webkit" }, async ({ browser }) => {
+  const context = await browser.newContext({
+    hasTouch: false, isMobile: false, viewport: { width: 1400, height: 800 }, reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  try {
+    await page.route("**/api/account", (route) => route.fulfill({
+      json: { state: "signed-in", handle: "browser-person" },
+    }));
+    await openDocument(page);
+    await page.keyboard.insertText("own comment anchor");
+    await selectParagraph(page.locator(".ub-editor .ub-paragraph").first());
+    await page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")).click();
+    await page.getByPlaceholder(/Comment as/).fill("My original comment");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".ub-thread")).toHaveCount(1);
+    await expect(editor(page)).toBeFocused();
+    await page.setViewportSize({ width: 820, height: 1180 });
+    const sheet = page.getByRole("dialog", { name: "Comments", exact: true });
+    await expect(sheet).toBeVisible();
+    const card = sheet.locator(".ub-thread");
+    const edit = card.getByRole("button", { name: "Edit", exact: true });
+    await card.locator(".ub-thread-select").focus();
+    await page.keyboard.press("Tab");
+    await expect(edit).toBeFocused();
+    await page.keyboard.press("Enter");
+    const field = card.getByPlaceholder("Edit comment…");
+    await expect(field).toBeFocused();
+    await field.fill("Cancel without closing the drawer");
+    await field.press("Escape");
+    await expect(field).toHaveCount(0);
+    await expect(sheet).toBeVisible();
+    await expect(card).toHaveAttribute("aria-current", "true");
+    await expect(card.locator(".ub-thread-text")).toHaveText("My original comment");
+    await edit.focus();
+    await page.keyboard.press("Enter");
+    await field.fill("Keep this unsent edit");
+    const close = sheet.getByRole("button", { name: "Close comments", exact: true });
+    await close.click();
+    await expect(sheet).toBeHidden();
+    const toggle = page.locator(".ub-threads-toggle");
+    await expect(toggle).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(sheet).toBeVisible();
+    await expect(field).toHaveValue("Keep this unsent edit");
+    await field.press("Escape");
+    await expect(sheet).toBeVisible();
+    await expect(field).toHaveCount(0);
+    await expect(card.locator(".ub-thread-text")).toHaveText("My original comment");
+    await close.focus();
+    await page.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
+  } finally {
+    await context.close();
+  }
+});
+
 test.describe("fractional layout", () => {
   // Let the native window supply its device scale instead of fixture emulation.
   test.use({ deviceScaleFactor: async ({ browserName: _browserName }, use) => { await use(undefined); } });

@@ -36,9 +36,13 @@ export function useSettingsAccess(workspace: string | null, serving: LocalServin
   const offlineAdmin = role.authority?.status === "hub-down" && !refusedLogin && lastAdmin;
   const local = ready && ((serving === null && localFallback) || (bound && serving !== null &&
     (serving.remoteHubUrl === null || role.authority?.status === "local-only")));
+  const workspaceAdmin = ready && (local || (bound && (role.admin || (accountId !== null && offlineAdmin))));
+  const workspaceMember = workspaceAdmin || (ready && bound && !refusedLogin &&
+    role.authority?.status === "ok" && role.authority.role === "member");
   return {
     local,
-    workspaceAdmin: ready && (local || (bound && (role.admin || (accountId !== null && offlineAdmin)))),
+    workspaceAdmin,
+    workspaceMember,
     workspacePending: !ready || (bound && !local && (role.authority === null ||
       (role.authority.status === "hub-down" && login.state === "unavailable"))),
     devicesAvailable: ready && bound && !local && !refusedLogin && login.state === "signed-in",

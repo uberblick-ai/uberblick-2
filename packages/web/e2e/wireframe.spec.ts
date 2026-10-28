@@ -469,13 +469,18 @@ test("desktop and iPad wireframes fit inside their column and follow both appear
   await editSource(session, uuid, SOURCE);
 });
 
-test("tabs and switches stay inert, text backgrounds follow both appearances, and keyboard focus leaves overflowing tabs", { tag: "@webkit" }, async ({ browser }, info) => {
+test("navigation and comparison sketches stay inert in both appearances, and keyboard focus leaves overflowing tabs", { tag: "@webkit" }, async ({ browser }, info) => {
   const session = writer();
   const sketch = [
     "page.window width=480 Settings", "  tabs", "    option.current General",
     ...Array.from({ length: 12 }, (_, index) => `    option Section ${index + 1}`),
     "  switch.on Sync automatically", "  switch Show archived",
     "  text.bg-red Danger", "  text.bg-amber Warning", "  text.bg-blue Information", "  text.bg-green Success",
+    "  item.current Reviewed", "    icon check", "    text.small.muted 2 hours ago",
+    "  item Draft", "    image.round width=24 Author", "    text.small.muted Yesterday",
+    "  row.stretch", "    card", "      text Before", "      fold 4 unchanged blocks",
+    "    card", "      text After", "      row", "        button.primary.disabled Restore",
+    "    ruler", "      mark.red at=0", "      mark at=50", "      mark.green at=100",
   ].join("\n");
   const uuid = await wireframeDoc(session, "Wireframe tabs and text backgrounds", sketch);
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
@@ -485,6 +490,9 @@ test("tabs and switches stay inert, text backgrounds follow both appearances, an
   const tabs = preview(page).locator(".wf-tabs");
   await expect(tabs.locator(".wf-current")).toHaveText("General");
   await expect(preview(page).locator(".wf-switch")).toHaveCount(2);
+  await expect(preview(page).locator(".wf-item.wf-current")).toContainText("Reviewed, current");
+  await expect(preview(page).locator(".wf-button.wf-disabled")).toContainText("Restore, unavailable");
+  await expect(preview(page).locator(".wf-ruler")).toHaveAttribute("aria-hidden", "true");
   await expect.poll(() => tabs.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
   for (const appearance of ["light", "dark"]) {
     await page.evaluate((theme) => document.documentElement.setAttribute("data-theme", theme), appearance);
@@ -504,6 +512,19 @@ test("tabs and switches stay inert, text backgrounds follow both appearances, an
       expect(colours.actual).toBe(colours.expected);
     }
     await expectContained(page);
+    await expect(preview(page).locator(".wf-fold")).toHaveCSS("border-top-style", "dashed");
+    const ruler = preview(page).locator(".wf-ruler");
+    const track = await ruler.boundingBox();
+    const row = await ruler.locator("..").boundingBox();
+    if (track === null || row === null) throw new Error("e2e: comparison ruler is missing");
+    expect(track.height).toBeGreaterThan(0);
+    expect(Math.abs(track.height - row.height)).toBeLessThanOrEqual(1);
+    for (const mark of await ruler.locator(".wf-mark").all()) {
+      const bounds = await mark.boundingBox();
+      if (bounds === null) throw new Error("e2e: comparison mark is missing");
+      expect(bounds.y).toBeGreaterThanOrEqual(track.y - 1);
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(track.y + track.height + 1);
+    }
     await evidence(page, info, `wireframe-tabs-backgrounds-${appearance}`);
   }
   if (info.project.use.hasTouch !== true) {
@@ -563,8 +584,11 @@ function median(values: number[]): number {
   return ordered[Math.floor(ordered.length / 2)] ?? Infinity;
 }
 
-test("100 wireframes do no rendering work during prose typing and record comparable ordinary-code typing costs", { tag: "@workload" }, async ({ browser }, info) => {
-  test.setTimeout(120_000);
+// Native keyboard prose input and resulting layout beside 100 mounted previews
+// need a real browser. packages/web/test/wireframe.test.ts owns the deterministic
+// no-parse/render invariant in "does no parse or render work for prose typing and
+// selection changes with 100 previews", using programmatic typing and spies.
+test("native prose typing beside 100 wireframes records ordinary-code comparison timings", { tag: "@workload" }, async ({ browser }, info) => {
   const session = writer();
   const pages: Page[] = [];
   let wireframeUuid: string | null = null;

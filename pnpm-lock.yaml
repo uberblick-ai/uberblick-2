@@ -138,8 +138,8 @@ importers:
         specifier: ^26.2.0
         version: 26.2.0
       '@uberblick/wireframe':
-        specifier: ^0.3.1
-        version: 0.3.1
+        specifier: ^0.3.2
+        version: 0.3.2
       esbuild:
         specifier: 0.28.2
         version: 0.28.2
@@ -238,8 +238,8 @@ importers:
         specifier: workspace:*
         version: link:../schema
       '@uberblick/wireframe':
-        specifier: ^0.3.1
-        version: 0.3.1
+        specifier: ^0.3.2
+        version: 0.3.2
       chart.js:
         specifier: 4.5.1
         version: 4.5.1
@@ -1561,8 +1561,8 @@ packages:
     resolution: {integrity: sha512-cO3bcnKF8kyJVcHjyiGO1AD+tlTJs5pzKRa1+/EUD7Xo/amLgOYzecpaLkupAZF3st9t4QssxujVt8ked2AauQ==}
     engines: {node: '>=22.18'}
 
-  '@uberblick/wireframe@0.3.1':
-    resolution: {integrity: sha512-/aCCmXE4NWuXbuSq9vMB38cRPcOr0oGF01h2twyEh8laxtneeBFRUpMjP30+xGAYAo8ibJJydIqrNgINDa4nwQ==}
+  '@uberblick/wireframe@0.3.2':
+    resolution: {integrity: sha512-oCOO09SokmLgXuAWEYYJLoZvhyHjR5H1QGXPCEWxXtU5vgipUAUMaV6npZY5Wv4kkIvlpab2cUW+32FsxM8yIg==}
 
   '@vitejs/plugin-react@6.1.0':
     resolution: {integrity: sha512-qd2BzUBehkov86WFhg0JkEFEYyCLG9uPCe6qWTY/kRlss9OvJrOF2UbIWT7p+8IzZHkEu0DNGHc4HSv+JdDLsw==}
@@ -3710,7 +3710,7 @@ snapshots:
 
   '@uberblick/ablauf@0.2.0': {}
 
-  '@uberblick/wireframe@0.3.1': {}
+  '@uberblick/wireframe@0.3.2': {}
 
   '@vitejs/plugin-react@6.1.0(vite@8.2.4(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))':
     dependencies:

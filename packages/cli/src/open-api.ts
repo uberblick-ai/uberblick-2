@@ -7,8 +7,10 @@ import * as Y from "yjs";
 import { readAccessAction, requestAccess, type AccessBinding } from "./open-access.js";
 import { requestAccount, requestDeviceLogin } from "./open-account.js";
 import { serveRevisionMutation } from "./open-revisions.js";
+import { serveLocalSettingsRequest } from "./open-local-settings.js";
 import { serveBundleRequest } from "./open-bundle.js";
 import { respond } from "./open-response.js";
+import type { AvailableUpdate } from "./open-update.js";
 import { hasSession, serveSessionRequest, type BrowserAccess } from "./open-session.js";
 import { BrowserReplicaUnavailable, type BrowserReplicas, type ServedWorkspace } from "./open-workspaces.js";
 
@@ -16,9 +18,11 @@ const API_PREFIX = "/api/";
 const SEARCH_PATH = "/api/search";
 const REVISIONS_PATH = "/api/revisions";
 const STATUS_PATH = "/api/status";
+const LOCAL_SETTINGS_PATH = "/api/local-settings";
 const ACCESS_PATH = "/api/access";
 const ACCOUNT_PATH = "/api/account";
 const DEVICE_LOGIN_PATH = "/api/device-login";
+const UPDATE_PATH = "/api/update";
 const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
 
 type ApiAuthenticator = (authMessage: string) => Promise<string | null>;
@@ -100,6 +104,7 @@ interface ApiRequestContext {
   authenticate: ApiAuthenticator;
   replicas: BrowserReplicas;
   statusForWorkspace: (workspace: string) => ServingSyncStatus;
+  availableUpdate: () => AvailableUpdate | null;
   env: NodeJS.ProcessEnv;
   expectedOrigin: string;
   document: () => string;
@@ -141,9 +146,37 @@ async function serveRevisions(
   }
 }
 
+function serveSearch(
+  engine: UberblickMcpEngine,
+  target: URL,
+  reply: (status: number, body: object) => void,
+): void {
+  const query = target.searchParams.get("q");
+  if (query === null) {
+    reply(400, { error: "query_required" });
+    return;
+  }
+  if (
+    engine.health.status === "quarantined" ||
+    engine.refreshStatus.status === "failed"
+  ) {
+    reply(503, { error: "replica_unavailable" });
+    return;
+  }
+
+  try {
+    reply(200, {
+      hits: engine.store.searchUuids(query).map((uuid) => ({ uuid })),
+      capped: false,
+    });
+  } catch {
+    reply(500, { error: "search_failed" });
+  }
+}
+
 async function serveApiRequest(context: ApiRequestContext): Promise<void> {
   const { request, response, target, authenticate, replicas, statusForWorkspace,
-    env, expectedOrigin, document, access } = context;
+    availableUpdate, env, expectedOrigin, document, access } = context;
   const reply = (status: number, body: object, headers?: Record<string, string>) =>
     apiResponse(request, response, status, body, headers);
   if (await serveSessionRequest(access, request, target.pathname, expectedOrigin, reply)) return;
@@ -178,6 +211,14 @@ async function serveApiRequest(context: ApiRequestContext): Promise<void> {
     const rebound = replicas.workspaces.keys().next().value === workspaceId &&
       JSON.parse(document()).rebound === true;
     apiResponse(request, response, 200, requestDeviceLogin({ workspaceId, hubUrl: workspace.binding.hubUrl, env }, rebound));
+    return;
+  }
+  if (target.pathname === UPDATE_PATH) {
+    if (request.method !== "GET") {
+      apiResponse(request, response, 405, { error: "method_not_allowed" }, { allow: "GET" });
+      return;
+    }
+    apiResponse(request, response, 200, { update: availableUpdate() });
     return;
   }
   let engine: UberblickMcpEngine;
@@ -230,6 +271,11 @@ async function serveApiRequest(context: ApiRequestContext): Promise<void> {
     return;
   }
 
+  if (target.pathname === LOCAL_SETTINGS_PATH) {
+    await serveLocalSettingsRequest(engine, request, expectedOrigin, workspace.binding.hubUrl !== null, reply);
+    return;
+  }
+
   if (request.method !== "GET") {
     apiResponse(
       request,
@@ -266,27 +312,7 @@ async function serveApiRequest(context: ApiRequestContext): Promise<void> {
     return;
   }
 
-  const query = target.searchParams.get("q");
-  if (query === null) {
-    apiResponse(request, response, 400, { error: "query_required" });
-    return;
-  }
-  if (
-    engine.health.status === "quarantined" ||
-    engine.refreshStatus.status === "failed"
-  ) {
-    apiResponse(request, response, 503, { error: "replica_unavailable" });
-    return;
-  }
-
-  try {
-    apiResponse(request, response, 200, {
-      hits: engine.store.searchUuids(query).map((uuid) => ({ uuid })),
-      capped: false,
-    });
-  } catch {
-    apiResponse(request, response, 500, { error: "search_failed" });
-  }
+  serveSearch(engine, target, reply);
 }
 
 export function serveBoundRequest(context: BoundRequestContext): void {

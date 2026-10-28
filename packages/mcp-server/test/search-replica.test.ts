@@ -89,19 +89,28 @@ describe("replica search derivation", () => {
       title: "Upgrade fixture",
       description: "A live page indexed before the upgrade.",
       tags: ["auth"],
-      blocks: [{ type: "paragraph", text: "Launching the new search." }],
+      blocks: [
+        { type: "paragraph", text: "Launching the new search." },
+        { type: "code", language: "wireframe", text: "page" },
+      ],
     });
     const decision = await first.ok("create_doc", {
       title: "Can we keep launching?",
       description: "A retained decision record.",
       kind: "decision",
-      blocks: [{ type: "paragraph", text: "Keep the live corpus searchable." }],
+      blocks: [
+        { type: "paragraph", text: "Keep the live corpus searchable." },
+        { type: "code", language: "ablauf", text: "flow v0" },
+      ],
     });
     const archived = await first.ok("create_doc", {
       title: "Archived upgrade fixture",
       description: "An archived page stays out.",
       tags: ["auth"],
-      blocks: [{ type: "paragraph", text: "Launching an archived fixture." }],
+      blocks: [
+        { type: "paragraph", text: "Launching an archived fixture." },
+        { type: "code", language: "ts", text: "const answer = 42" },
+      ],
     });
     await first.ok("archive_doc", { uuid: archived.uuid });
     const replica = first.instance.replicas.replica(live.uuid);
@@ -129,6 +138,10 @@ describe("replica search derivation", () => {
     const store = new MirrorStore(databasePath, WORKSPACE);
     expect(store.search("launch", 100).map(hit => hit.uuid).sort()).toEqual([live.uuid, decision.uuid].sort());
     const reopened = await local(databasePath, store);
+    expect((await reopened.ok("search", { query: "wireframe" })).hits).toMatchObject([{ uuid: live.uuid }]);
+    expect((await reopened.ok("search", { query: "ablauf", kind: "decision" })).hits).toMatchObject([{ uuid: decision.uuid }]);
+    expect((await reopened.ok("search", { query: "ts" })).hits).toEqual([]);
+    expect(reopened.instance.store.searchUuids("wire")).toEqual([live.uuid]);
     expect((await reopened.ok("search", { query: "auth" })).hits).toMatchObject([
       { uuid: live.uuid, kind: "regular" },
     ]);
@@ -140,11 +153,13 @@ describe("replica search derivation", () => {
 
     await close(reopened);
     const secondOpen = await local(databasePath);
+    expect((await secondOpen.ok("search", { query: "wireframe" })).hits).toMatchObject([{ uuid: live.uuid }]);
     expect((await secondOpen.ok("search", { query: "auth" })).hits).toMatchObject([
       { uuid: live.uuid, kind: "regular" },
     ]);
     expect(sourceRows(databasePath)).toEqual(before);
     await secondOpen.ok("restore_doc", { uuid: archived.uuid });
+    expect(secondOpen.instance.store.searchUuids("ts")).toEqual([archived.uuid]);
     expect((await secondOpen.ok("search", { query: "auth" })).hits.map((hit: { uuid: string }) => hit.uuid).sort()).toEqual([live.uuid, archived.uuid].sort());
   });
 });

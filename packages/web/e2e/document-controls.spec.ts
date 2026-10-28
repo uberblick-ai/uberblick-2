@@ -5,7 +5,7 @@ import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberbl
 import { wrapToken } from "@uberblick/schema/protocol";
 import { createTagCatalogEntry, seedTagCatalog, settingsRoom } from "@uberblick/schema";
 import { devices, expect, test } from "@playwright/test";
-import type { Browser, Locator, Page, TestInfo } from "@playwright/test";
+import type { Browser, Locator, Page } from "@playwright/test";
 import * as Y from "yjs";
 import { createDoc, setupHarness } from "./app-helpers.js";
 
@@ -68,7 +68,7 @@ async function syncDetails(page: Page, touch: boolean): Promise<void> {
   await expect(trigger).toBeFocused();
 }
 
-async function exerciseDocumentControls(browser: Browser, touch: boolean, info: TestInfo): Promise<void> {
+async function exerciseDocumentControls(browser: Browser, touch: boolean): Promise<void> {
   const floor = touch ? 44 : 24;
   const page = await openApp(browser, `/${harness().workspace}/${randomUUID()}`, {
     contextOptions: touch ? devices["iPad Pro 11"] : {
@@ -85,9 +85,7 @@ async function exerciseDocumentControls(browser: Browser, touch: boolean, info: 
   await page.goto(harness().appUrl);
   await showSidebar(page, touch);
   const prefix = touch ? "Target iPad" : "Target desktop";
-  const first = { title: `${prefix} A`, uuid: await createDoc(page, `${prefix} A`) };
-  await showSidebar(page, touch);
-  const second = { title: `${prefix} Z`, uuid: await createDoc(page, `${prefix} Z`) };
+  await createDoc(page, `${prefix} Z`);
   await syncDetails(page, touch);
 
   const picker = page.getByRole("button", { name: "Edit tags", exact: true });
@@ -120,50 +118,13 @@ async function exerciseDocumentControls(browser: Browser, touch: boolean, info: 
   await expect(picker).toBeFocused();
   await expect(picker).toContainText("floor-0");
   expect(await page.locator(".ub-title").boundingBox()).toEqual(titleBefore);
-
-  await showSidebar(page, touch);
-  await activate(page.getByRole("button", { name: "All documents", exact: true }), touch);
-  await page.getByRole("searchbox", { name: "Search", exact: true }).fill(touch ? "ipad" : "desktop");
-  await expect(page.locator(".ub-docs-title")).toHaveCount(2);
-  const rowHeights = await page.locator(".ub-docs-row").evaluateAll((rows) =>
-    rows.map((row) => row.getBoundingClientRect().height));
-  if (!touch) {
-    // Body leading plus the existing padding keeps each row on one line.
-    for (const height of rowHeights) expect(height, "compact desktop document row").toBeLessThanOrEqual(41);
-  }
-  for (const [name, initial] of [["Title", "ascending"], ["Changed", "descending"]] as const) {
-    const heading = page.getByRole("columnheader", { name: new RegExp(`^${name}`) });
-    const sort = heading.getByRole("button", { name, exact: true });
-    await expectFloor(sort, floor);
-    await activate(sort, touch);
-    await expect(heading).toHaveAttribute("aria-sort", initial);
-    if (name === "Title") await expect(page.locator(".ub-docs-title")).toHaveText([first.title, second.title]);
-    // Space is a separate desktop activation path; touch toggles via a second tap.
-    if (touch) await sort.tap();
-    else await sort.press("Space");
-    await expect(heading).toHaveAttribute("aria-sort", initial === "ascending" ? "descending" : "ascending");
-    if (name === "Title") await expect(page.locator(".ub-docs-title")).toHaveText([second.title, first.title]);
-  }
-  for (const open of await page.locator(".ub-docs-open").all()) await expectFloor(open, floor);
-  await info.attach("document-target-geometry", {
-    body: JSON.stringify({ touch, ...chrome, rowHeights }, null, 2),
-    contentType: "application/json",
-  });
-  for (const document of [first, second]) {
-    const open = page.locator(".ub-docs-row").filter({ hasText: document.title }).locator(".ub-docs-open");
-    await activate(open, touch);
-    await expect(page).toHaveURL(new URL(`/${harness().workspace}/${document.uuid}`, harness().appUrl).href);
-    await expect(page.locator(".ub-title")).toHaveValue(document.title);
-    await showSidebar(page, touch);
-    await activate(page.getByRole("button", { name: "All documents", exact: true }), touch);
-  }
 }
 
 test("document controls retain desktop target floors and keyboard behavior", { tag: "@webkit" }, async ({ browser }, info) => {
   test.skip(info.project.name === "webkit-ipad", "The paired explicit iPad context owns touch coverage.");
-  await exerciseDocumentControls(browser, false, info);
+  await exerciseDocumentControls(browser, false);
 });
 
-test("document controls retain iPad target floors and tap behavior", { tag: "@webkit-touch" }, async ({ browser }, info) => {
-  await exerciseDocumentControls(browser, true, info);
+test("document controls retain iPad target floors and tap behavior", { tag: "@webkit-touch" }, async ({ browser }) => {
+  await exerciseDocumentControls(browser, true);
 });

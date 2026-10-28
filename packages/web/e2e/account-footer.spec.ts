@@ -36,7 +36,7 @@ for (const scheme of ["light", "dark"] as const) {
         const footer = page.locator('[data-slot="sidebar-footer"]');
         await expect(account(page)).toContainText(`@${handle}`);
         await expect(account(page)).toBeInViewport({ ratio: 1 });
-        await expect(footer.getByRole("button", { name: "Workspace settings", exact: true })).toHaveCount(0);
+        await expect(footer.getByRole("button", { name: "Workspace settings", exact: true })).toBeVisible();
         await expect(footer.getByText("Account settings", { exact: true })).toHaveCount(0);
         await account(page).click();
         const menu = page.getByRole("menu");

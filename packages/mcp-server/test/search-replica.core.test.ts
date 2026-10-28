@@ -2,7 +2,7 @@
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { createTagCatalogEntry, deleteTagCatalogEntry, getMeta, getMetaMap, getTagCatalogIdentities, insertBlock, setTags } from "@uberblick/schema";
+import { createTagCatalogEntry, deleteTagCatalogEntry, findBlockElement, getMeta, getMetaMap, getTagCatalogIdentities, insertBlock, setTags } from "@uberblick/schema";
 import type { MirrorStore } from "../src/store.js";
 import { removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
@@ -23,6 +23,73 @@ afterEach(async () => {
 afterAll(removeTempDirs);
 
 describe("replica search derivation", () => {
+  it("finds languages without prose mentions, including fence names and decision answers", async () => {
+    const rig = await local();
+    const created = await rig.ok("create_doc", {
+      title: "Source samples", description: "A page of examples.", tags: ["auth"],
+      blocks: [
+        { type: "code", language: "wireframe", text: "page" },
+        { type: "code", language: "ts", text: "const answer = 42" },
+        { type: "code", language: "Écoles", text: "sample" },
+        { type: "code", language: "launching", text: "sample" },
+        { type: "code", language: "customlang", text: "sample" },
+        { type: "chart", text: "{}" },
+        { type: "terminal", text: "echo example" },
+      ],
+    });
+    const decision = await rig.ok("create_doc", {
+      title: "Which approach?", description: "A proposed answer.", kind: "decision",
+      blocks: [{ type: "code", language: "ablauf", text: "flow v0" }],
+    });
+
+    for (const query of ["wireframe", "ts", "ecole", "launch", "customlang", "chart", "terminal", "wire*", "unmatched wireframe"]) {
+      expect((await rig.ok("search", { query })).hits, query).toMatchObject([{ uuid: created.uuid }]);
+    }
+    expect((await rig.ok("search", { query: "typescript code" })).hits).toEqual([]);
+    expect((await rig.ok("search", { query: "wireframe", tag: "auth", kind: "regular" })).hits).toMatchObject([{ uuid: created.uuid }]);
+    expect((await rig.ok("search", { query: "wireframe", kind: "decision" })).hits).toEqual([]);
+    expect((await rig.ok("search", { query: "ablauf", kind: "decision" })).hits).toMatchObject([{ uuid: decision.uuid }]);
+    expect(rig.instance.store.searchUuids("wire")).toEqual([created.uuid]);
+    expect(rig.instance.store.searchUuids("ts")).toEqual([created.uuid]);
+
+    await rig.ok("update_data", { uuid: created.uuid, operations: [{
+      collection: "samples", schema: { version: 1, schema: { type: "object" } },
+      upsert: [{ id: "one", value: { text: "quartzrecordvalue" } }],
+    }] });
+    expect((await rig.ok("search", { query: "quartzrecordvalue" })).hits).toEqual([]);
+  });
+
+  it("tracks language-only edits, remaining blocks and archive visibility", async () => {
+    const rig = await local();
+    const created = await rig.ok("create_doc", {
+      title: "Source sample", description: "A page of examples.",
+      blocks: [
+        { type: "code", language: "wireframe", text: "unchanged source" },
+        { type: "code", language: "wireframe", text: "other source" },
+      ],
+    });
+    const document = rig.instance.replicas.replica(created.uuid).doc;
+    findBlockElement(document, created.blocks[0].id)!.setAttribute("language", "ablauf");
+    expect((await rig.ok("search", { query: "wireframe" })).hits).toMatchObject([{ uuid: created.uuid }]);
+    expect((await rig.ok("search", { query: "ablauf" })).hits).toMatchObject([{ uuid: created.uuid }]);
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks[0]).toMatchObject({ text: "unchanged source", language: "ablauf" });
+
+    await rig.ok("delete_block", { uuid: created.uuid, block_id: created.blocks[1].id });
+    expect((await rig.ok("search", { query: "wireframe" })).hits).toEqual([]);
+    expect(rig.instance.store.searchUuids("wire")).toEqual([]);
+    expect(rig.instance.store.searchUuids("ablauf")).toEqual([created.uuid]);
+
+    await rig.ok("archive_doc", { uuid: created.uuid });
+    expect((await rig.ok("search", { query: "ablauf" })).hits).toEqual([]);
+    expect(rig.instance.store.searchUuids("ablauf")).toEqual([]);
+    await rig.ok("restore_doc", { uuid: created.uuid });
+    expect((await rig.ok("search", { query: "ablauf" })).hits).toMatchObject([{ uuid: created.uuid }]);
+    findBlockElement(document, created.blocks[0].id)!.setAttribute("language", "");
+    expect((await rig.ok("search", { query: "ablauf" })).hits).toEqual([]);
+    expect(rig.instance.store.searchUuids("ablauf")).toEqual([]);
+    expect((await rig.ok("search", { query: "unchanged" })).hits).toMatchObject([{ uuid: created.uuid }]);
+  });
+
   it("indexes callout prose without its variant or icon", async () => {
     const rig = await local();
     const created = await rig.ok("create_doc", { title: "Passage", description: "A prose fixture." });

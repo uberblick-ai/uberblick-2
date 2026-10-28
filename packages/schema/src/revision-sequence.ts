@@ -5,6 +5,7 @@ export type TextSpan = {
 };
 
 type SequenceItem = { id?: string; key: string };
+type WorkBudget = { remaining: number };
 type Range = {
   beforeStart: number;
   beforeEnd: number;
@@ -19,7 +20,30 @@ type Search = {
   beforeLength: number;
   afterLength: number;
   offset: number;
+  budget: WorkBudget | undefined;
 };
+
+function spendWork(budget: WorkBudget | undefined): boolean {
+  if (!budget) return true;
+  if (budget.remaining === 0) return false;
+  budget.remaining--;
+  return true;
+}
+
+function snake(search: Search, start: number, diagonal: number, reverse: boolean): number | undefined {
+  const { before, after, range, beforeLength, afterLength, budget } = search;
+  let x = start;
+  let y = x - diagonal;
+  while (x < beforeLength && y < afterLength) {
+    const oldIndex = reverse ? range.beforeEnd - x - 1 : range.beforeStart + x;
+    const newIndex = reverse ? range.afterEnd - y - 1 : range.afterStart + y;
+    if (before[oldIndex] !== after[newIndex]) break;
+    if (!spendWork(budget)) return undefined;
+    x++;
+    y++;
+  }
+  return x;
+}
 
 function advance(
   search: Search,
@@ -29,21 +53,17 @@ function advance(
   distance: number,
   reverse: boolean,
 ): SequencePair | undefined {
-  const { before, after, range, beforeLength, afterLength, offset } = search;
+  const { range, beforeLength, afterLength, offset, budget } = search;
   const delta = beforeLength - afterLength;
   for (let diagonal = -distance + limit.start; diagonal <= distance - limit.end; diagonal += 2) {
+    if (!spendWork(budget)) return undefined;
     const index = offset + diagonal;
     const prior = path[index - 1] ?? -1;
     const next = path[index + 1] ?? -1;
-    let x = diagonal === -distance || (diagonal !== distance && prior < next) ? next : prior + 1;
-    let y = x - diagonal;
-    while (x < beforeLength && y < afterLength) {
-      const oldIndex = reverse ? range.beforeEnd - x - 1 : range.beforeStart + x;
-      const newIndex = reverse ? range.afterEnd - y - 1 : range.afterStart + y;
-      if (before[oldIndex] !== after[newIndex]) break;
-      x++;
-      y++;
-    }
+    const start = diagonal === -distance || (diagonal !== distance && prior < next) ? next : prior + 1;
+    const x = snake(search, start, diagonal, reverse);
+    if (x === undefined) return undefined;
+    const y = x - diagonal;
     path[index] = x;
     if (x > beforeLength) limit.end += 2;
     else if (y > afterLength) limit.start += 2;
@@ -65,6 +85,7 @@ function bisect(
   before: readonly string[],
   after: readonly string[],
   range: Range,
+  budget?: WorkBudget,
 ): SequencePair | undefined {
   const beforeLength = range.beforeEnd - range.beforeStart;
   const afterLength = range.afterEnd - range.afterStart;
@@ -76,18 +97,20 @@ function bisect(
   backward[offset + 1] = 0;
   const forwardLimit = { start: 0, end: 0 };
   const backwardLimit = { start: 0, end: 0 };
-  const search = { before, after, range, beforeLength, afterLength, offset };
+  const search = { before, after, range, beforeLength, afterLength, offset, budget };
   for (let distance = 0; distance <= maxDistance; distance++) {
     const front = advance(search, forward, backward, forwardLimit, distance, false);
     if (front) return front;
+    if (budget?.remaining === 0) return undefined;
     const back = advance(search, backward, forward, backwardLimit, distance, true);
     if (back) return back;
+    if (budget?.remaining === 0) return undefined;
   }
   return undefined;
 }
 
-/** Exact LCS in O((N + M)D) time and linear working space. */
-function commonSequence(before: readonly string[], after: readonly string[]): SequencePair[] {
+/** Myers LCS; an exhausted budget leaves only the unresolved range's shared ends. */
+function commonSequence(before: readonly string[], after: readonly string[], budget?: WorkBudget): SequencePair[] {
   const pairs: SequencePair[] = [];
   const pending: Range[] = [{
     beforeStart: 0, beforeEnd: before.length,
@@ -113,6 +136,7 @@ function commonSequence(before: readonly string[], after: readonly string[]): Se
       });
     }
     if (beforeStart === beforeEnd || afterStart === afterEnd) continue;
+    if (budget?.remaining === 0) continue;
     if (beforeEnd - beforeStart === 1) {
       const found = after.indexOf(before[beforeStart] as string, afterStart);
       if (found !== -1 && found < afterEnd) pairs.push({ before: beforeStart, after: found });
@@ -123,7 +147,7 @@ function commonSequence(before: readonly string[], after: readonly string[]): Se
       if (found !== -1 && found < beforeEnd) pairs.push({ before: found, after: afterStart });
       continue;
     }
-    const split = bisect(before, after, { beforeStart, beforeEnd, afterStart, afterEnd });
+    const split = bisect(before, after, { beforeStart, beforeEnd, afterStart, afterEnd }, budget);
     if (!split) continue;
     pending.push({
       beforeStart: split.before, beforeEnd,
@@ -191,6 +215,9 @@ export function matchSequence(
 }
 
 const words = new Intl.Segmenter("en", { granularity: "word" });
+const MAX_WORD_DIFF_WORK = 5_000_000;
+// Structural JSON uses word marks within this combined character bound; keep them exact.
+const EXACT_WORD_DIFF_LENGTH = 4096;
 
 export function diffWords(before: string, after: string): TextSpan[] {
   if (before === after) return before ? [{ kind: "unchanged", text: before }] : [];
@@ -205,7 +232,9 @@ export function diffWords(before: string, after: string): TextSpan[] {
   };
   let oldIndex = 0;
   let newIndex = 0;
-  for (const pair of commonSequence(oldWords, newWords)) {
+  const budget = before.length + after.length <= EXACT_WORD_DIFF_LENGTH
+    ? undefined : { remaining: MAX_WORD_DIFF_WORK };
+  for (const pair of commonSequence(oldWords, newWords, budget)) {
     append("removed", oldWords.slice(oldIndex, pair.before).join(""));
     append("added", newWords.slice(newIndex, pair.after).join(""));
     append("unchanged", oldWords[pair.before] as string);

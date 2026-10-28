@@ -40,6 +40,7 @@ import { formatTimestamp, useTimestampClock } from "../timestamps.js";
 import { workspaceLocationLabel } from "../workspace-location.js";
 import { useWorkspaceSetting } from "../workspace-setting.js";
 import { AccessSettings } from "./AccessSettings.js";
+import { LocalComputerSettings } from "./LocalComputerSettings.js";
 import { CELL, ROW_ACTION, ROW_HEADER, SettingsPage, TableHead } from "./settings-kit.js";
 
 /** What a SyncPanel-style fact reads as before this client knows it. */
@@ -73,6 +74,10 @@ function GeneralSettings({
   connection,
   catalogConnection,
   agentSessions,
+  admin,
+  local,
+  serving,
+  subject,
 }: {
   workspace: Workspace;
   workspaceLocation: string | null;
@@ -80,6 +85,10 @@ function GeneralSettings({
   connection: RoomConnection | null;
   catalogConnection: RoomConnection | null;
   agentSessions: number;
+  admin: boolean;
+  local: boolean;
+  serving: LocalServing | null;
+  subject: string;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const catalogStatus = useRoomStatus(catalogConnection);
@@ -110,6 +119,7 @@ function GeneralSettings({
 
   return (
     <SettingsPage title="General">
+      {admin && <>
       <SharedSettingField key={workspace.uuid} setting={NAME} workspace={workspace} connection={catalogConnection} />
       <SharedSettingField key={`repository-${workspace.uuid}`} setting={MAIN_REPOSITORY} workspace={workspace} connection={catalogConnection} />
       <section className="mt-8" aria-labelledby="ub-workspace-location-title">
@@ -159,6 +169,8 @@ function GeneralSettings({
           </dl>
         </CollapsibleContent>
       </Collapsible>
+      </>}
+      <LocalComputerSettings key={workspace.uuid} workspace={workspace.uuid} serving={serving} subject={subject} local={local} />
     </SettingsPage>
   );
 }
@@ -512,6 +524,7 @@ function TagSettings({
 
 export function WorkspaceSettings({
   admin,
+  member = admin,
   local = false,
   page = "general",
   workspace,
@@ -525,6 +538,7 @@ export function WorkspaceSettings({
   verifiedHandle = null,
 }: {
   admin: boolean;
+  member?: boolean;
   local?: boolean;
   page?: SettingsRoutePage;
   workspace: Workspace;
@@ -537,7 +551,7 @@ export function WorkspaceSettings({
   subject?: string;
   verifiedHandle?: string | null;
 }): ReactElement {
-  if (!admin) return <SettingsPage><p role="status">Reading workspace permissions…</p></SettingsPage>;
+  if (!admin && (page !== "general" || !member)) return <SettingsPage><p role="status">Reading workspace permissions…</p></SettingsPage>;
   return page === "members" ? (
     <AccessSettings key={workspace.uuid} workspace={workspace} serving={serving} subject={subject} verifiedHandle={verifiedHandle} />
   ) : page === "tags" ? (
@@ -550,6 +564,10 @@ export function WorkspaceSettings({
       connection={connection}
       catalogConnection={catalogConnection}
       agentSessions={agentSessions}
+      admin={admin}
+      local={local}
+      serving={serving}
+      subject={subject}
     />
   );
 }

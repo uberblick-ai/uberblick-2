@@ -11,6 +11,8 @@ import type {
   StatementResultingChanges,
 } from "node:sqlite";
 import { log } from "./log.js";
+import { HistoryCache } from "./history-cache.js";
+import { parseHistoryRetention, type HistoryRetention, type WorkspaceSize } from "./local-settings.js";
 
 const BUSY_TIMEOUT_MS = 5_000;
 const WAL_RETRY_MS = 10;
@@ -79,6 +81,8 @@ export interface IndexedDoc {
   tags: string[];
   /** Current display names of assigned tags, omitting unresolved identities. */
   tagNames?: readonly string[];
+  /** Code block languages and the fence names of chart and terminal blocks. */
+  blockLanguages?: readonly string[];
   kind?: "regular" | "decision";
   /** The document's description, or the empty string when it has none. */
   description: string;
@@ -169,11 +173,12 @@ CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5 (
   body,
   description,
   tag_names,
+  block_languages,
   tokenize = 'porter unicode61'
 );
 `;
 
-const SEARCH_RELEVANCE = "bm25(docs_fts, 0, 2, 1, 1, 1)";
+const SEARCH_RELEVANCE = "bm25(docs_fts, 0, 2, 1, 1, 1, 1)";
 
 const FRAGMENT_FTS_SCHEMA = `
 CREATE VIRTUAL TABLE docs_fragment_fts USING fts5 (
@@ -184,6 +189,7 @@ CREATE VIRTUAL TABLE docs_fragment_fts USING fts5 (
   tag_names,
   indexed_through_seq UNINDEXED,
   catalog_through_seq UNINDEXED,
+  block_languages,
   tokenize = 'trigram remove_diacritics 1'
 );
 `;
@@ -305,9 +311,10 @@ interface Prepared<P extends SQLInputValue[]> {
 }
 
 /**
- * Deferred reads pin a snapshot without blocking writers; writes enter the
- * queue on their first statement. Immediate migrations lock before checking.
- * Do not nest wrappers: BEGIN fails before try and leaves the outer transaction
+ * Deferred reads pin a snapshot without blocking writers. Every write is
+ * immediate: SQLite skips the busy handler when a read transaction upgrades
+ * to a write, so a deferred body that reads first fails at once with
+ * "database is locked" while another process commits. Do not nest wrappers: BEGIN fails before try and leaves the outer transaction
  * intact to roll back. A successful body commits; a thrown body rolls back.
  */
 function transactional<A extends unknown[], R>(
@@ -476,6 +483,7 @@ export function inspectExistingStore(databasePath: string, workspaceId: string):
 }
 
 export class MirrorStore {
+  readonly history: HistoryCache;
   readonly databasePath: string;
 
   private readonly db: DatabaseSync;
@@ -523,9 +531,9 @@ export class MirrorStore {
     dropGithubRefs: Prepared<[string]>;
     putGithubRef: Prepared<[string, string]>;
     dropFts: Prepared<[string]>;
-    putFts: Prepared<[string, string, string, string, string]>;
+    putFts: Prepared<[string, string, string, string, string, string]>;
     dropFragmentFts: Prepared<[string]>;
-    putFragmentFts: Prepared<[number | bigint, string, string, string, string, string, number, number]>;
+    putFragmentFts: Prepared<[number | bigint, string, string, string, string, string, number, number, string]>;
     markSearch: Prepared<[number | bigint, string]>;
     search: Prepared<[string, string, string | null, string | null, number]>;
     searchUuids: Prepared<[string]>;
@@ -567,6 +575,7 @@ export class MirrorStore {
   // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
   constructor(databasePath: string, private readonly workspaceId: string) {
     this.databasePath = databasePath;
+    this.history = new HistoryCache(databasePath, workspaceId);
     // Owner-only: this tree holds the corpus and may later receive credentials.
     const durable = databasePath !== ":memory:";
     const fresh = durable && !existsSync(databasePath);
@@ -685,12 +694,13 @@ export class MirrorStore {
           "OR doc_index_seq.github_refs_indexed = 0 " +
           // An older peer can replace the row using only the original columns.
           "OR NOT EXISTS (SELECT 1 FROM docs_fts f WHERE f.rowid = doc_index_seq.search_rowid " +
-          "AND f.uuid = excluded.uuid AND f.description IS NOT NULL AND f.tag_names IS NOT NULL) " +
+          "AND f.uuid = excluded.uuid AND f.description IS NOT NULL AND f.tag_names IS NOT NULL " +
+          "AND f.block_languages IS NOT NULL) " +
           // A peer can fill the Porter row completely and reuse its rowid;
           // the fragment row must also represent both current source cuts.
           "OR NOT EXISTS (SELECT 1 FROM docs_fragment_fts f WHERE f.rowid = doc_index_seq.search_rowid " +
           "AND f.uuid = excluded.uuid AND f.indexed_through_seq = excluded.indexed_through_seq " +
-          "AND f.catalog_through_seq = excluded.catalog_through_seq))",
+          "AND f.catalog_through_seq = excluded.catalog_through_seq AND f.block_languages IS NOT NULL))",
       ),
       staleIndex: prepare(
         "SELECT 1 FROM doc_index_seq WHERE uuid = ? AND " +
@@ -718,13 +728,13 @@ export class MirrorStore {
       ),
       dropFts: prepare("DELETE FROM docs_fts WHERE uuid = ?"),
       putFts: prepare(
-        "INSERT INTO docs_fts (uuid, title, body, description, tag_names) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO docs_fts (uuid, title, body, description, tag_names, block_languages) VALUES (?, ?, ?, ?, ?, ?)",
       ),
       dropFragmentFts: prepare("DELETE FROM docs_fragment_fts WHERE uuid = ?"),
       putFragmentFts: prepare(
         "INSERT OR REPLACE INTO docs_fragment_fts " +
-          "(rowid, uuid, title, body, description, tag_names, indexed_through_seq, catalog_through_seq) " +
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          "(rowid, uuid, title, body, description, tag_names, indexed_through_seq, catalog_through_seq, block_languages) " +
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       ),
       markSearch: prepare("UPDATE doc_index_seq SET search_rowid = ? WHERE uuid = ?"),
       // Pack unambiguous JSON IDs into each hit to keep search to one query.
@@ -743,12 +753,12 @@ export class MirrorStore {
           "f.uuid LIMIT ?",
       ),
       searchUuids: prepare(
-        "SELECT f.uuid AS uuid, bm25(docs_fragment_fts, 0, 2, 1, 1, 1) AS relevance " +
+        "SELECT f.uuid AS uuid, bm25(docs_fragment_fts, 0, 2, 1, 1, 1, 0, 0, 1) AS relevance " +
           "FROM docs_fragment_fts f JOIN doc_index d ON d.uuid = f.uuid " +
           "WHERE docs_fragment_fts MATCH ?",
       ),
       shortSearchRows: prepare(
-        "SELECT f.uuid AS uuid, f.title AS title, f.tag_names AS tag_names " +
+        "SELECT f.uuid AS uuid, f.title AS title, f.tag_names AS tag_names, f.block_languages AS block_languages " +
           "FROM docs_fragment_fts f JOIN doc_index d ON d.uuid = f.uuid",
       ),
       backlinks: prepare(
@@ -789,6 +799,7 @@ export class MirrorStore {
         }
         return seq;
       },
+      "immediate",
     );
 
     // Atomically snapshot then prune: a crash must not drop uncovered updates.
@@ -806,6 +817,7 @@ export class MirrorStore {
         this.statements.pruneUpdates.run(room, throughSeq);
         return written;
       },
+      "immediate",
     );
 
     // Pin snapshot and tail together so concurrent compaction cannot prune an
@@ -901,15 +913,17 @@ export class MirrorStore {
         doc.body,
         doc.description,
         (doc.tagNames ?? []).join("\n"),
+        (doc.blockLanguages ?? []).join("\n"),
       );
       this.statements.dropFragmentFts.run(doc.uuid);
       this.statements.putFragmentFts.run(
         indexed.lastInsertRowid, doc.uuid, doc.title, doc.body, doc.description,
         (doc.tagNames ?? []).join("\n"), throughSeq, catalogThroughSeq,
+        (doc.blockLanguages ?? []).join("\n"),
       );
       this.statements.markSearch.run(indexed.lastInsertRowid, doc.uuid);
       return true;
-    });
+    }, "immediate");
 
     this.unindexTx = transactional(this.db, (uuid: string) => {
       this.statements.dropFts.run(uuid);
@@ -919,7 +933,7 @@ export class MirrorStore {
       this.statements.dropGithubRefs.run(uuid);
       this.statements.dropDoc.run(uuid);
       this.statements.dropIndexSeq.run(uuid);
-    });
+    }, "immediate");
   }
 
   /**
@@ -953,6 +967,37 @@ export class MirrorStore {
     return row === undefined ? null : JSON.parse(String(row.value)) as SettingsReset;
   }
 
+  /** Machine-local policy stays outside collaborative rooms and disposable history. */
+  readHistoryRetention(): HistoryRetention {
+    const row = this.db.prepare("SELECT value FROM meta WHERE key = 'history_retention'").get();
+    if (row === undefined) return { mode: "recent", days: 30, keepNamed: true };
+    const retention = parseHistoryRetention(JSON.parse(String(row.value)));
+    if (retention === null) throw new Error("Invalid stored history retention");
+    return retention;
+  }
+
+  setHistoryRetention(value: HistoryRetention): void {
+    this.assertWorkspacePresent();
+    const retention = parseHistoryRetention(value);
+    if (retention === null) throw new Error("Invalid history retention");
+    this.db.prepare("INSERT INTO meta (key, value) VALUES ('history_retention', ?) " +
+      "ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(JSON.stringify(retention));
+  }
+
+  workspaceSize(): WorkspaceSize | null {
+    if (this.databasePath === ":memory:") return null;
+    this.assertWorkspacePresent();
+    const pages = this.db.prepare(
+      "SELECT page_count, freelist_count FROM pragma_page_count(), pragma_freelist_count()",
+    ).get() as { page_count: number; freelist_count: number };
+    const bytes = statSync(this.databasePath).size +
+      (statSync(`${this.databasePath}-wal`, { throwIfNoEntry: false })?.size ?? 0);
+    return {
+      bytes,
+      usedFraction: pages.page_count === 0 ? 0 : (pages.page_count - pages.freelist_count) / pages.page_count,
+    };
+  }
+
   /** Claim a refusal notice once across local processes without clearing its generation. */
   takeSettingsResetNotice(expectedSeq: number): string | null {
     this.assertWorkspacePresent();
@@ -982,7 +1027,7 @@ export class MirrorStore {
       this.statements.putSnapshot.run(room, state, seq, Date.now());
       this.db.prepare("INSERT INTO meta (key, value) VALUES ('settings_reset', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
         .run(JSON.stringify({ seq, notice }));
-    })();
+    }, "immediate")();
     for (const listener of [...this.appendListeners]) {
       try { listener(); }
       catch (error) { log.warn("an update-log append observer failed", error); }
@@ -1171,6 +1216,7 @@ export class MirrorStore {
   /** Only a deletion mark or authenticated room refusal authorizes removing authoritative rows. */
   purgeDoc(room: string, uuid: string): void {
     this.assertWorkspacePresent();
+    this.history.purgeDoc(uuid);
     this.pruneOrphanFragments();
     const tables = [
       ["updates", "room", room], ["snapshots", "room", room],
@@ -1197,7 +1243,7 @@ export class MirrorStore {
       this.db.prepare("DELETE FROM sync_acknowledgements WHERE room = ?").run(room);
       this.db.prepare("DELETE FROM snapshots WHERE room = ?").run(room);
       this.db.prepare("DELETE FROM pending_rooms WHERE room = ?").run(room);
-    })();
+    }, "immediate")();
   }
 
   private pruneOrphanFragments(): void {
@@ -1225,7 +1271,7 @@ export class MirrorStore {
           "DELETE FROM doc_links; DELETE FROM decision_github_refs; DELETE FROM docs_fts; " +
           "DELETE FROM docs_fragment_fts;",
       );
-    })();
+    }, "immediate")();
   }
 
   search(
@@ -1279,8 +1325,10 @@ export class MirrorStore {
         for (const row of this.statements.shortSearchRows.all()) {
           const title = foldFragment(String(row.title));
           const tags = foldFragment(String(row.tag_names ?? ""));
+          const languages = foldFragment(String(row.block_languages ?? ""));
           const weight = short.reduce((sum, word) => sum +
-            (title.includes(word) ? 2 : 0) + (tags.includes(word) ? 1 : 0), 0);
+            (title.includes(word) ? 2 : 0) + (tags.includes(word) ? 1 : 0) +
+            (languages.includes(word) ? 1 : 0), 0);
           if (weight === 0) continue;
           const uuid = String(row.uuid);
           // FTS5 floors common-term IDF at 1e-6; use that scale for short
@@ -1405,7 +1453,7 @@ export class MirrorStore {
     const current = (): boolean =>
       hasColumn("doc_index", "kind") &&
       hasColumn("doc_index_seq", "search_rowid") &&
-      hasColumn("docs_fts", "tag_names");
+      hasColumn("docs_fts", "block_languages");
     if (current()) return;
 
     transactional(this.db, () => {
@@ -1417,12 +1465,15 @@ export class MirrorStore {
       if (!hasColumn("doc_index_seq", "search_rowid")) {
         this.db.exec("ALTER TABLE doc_index_seq ADD COLUMN search_rowid INTEGER");
       }
-      if (!hasColumn("docs_fts", "tag_names")) {
+      if (!hasColumn("docs_fts", "block_languages")) {
         // Preserve searchable content while replicas hydrate and enrich rows.
+        const description = hasColumn("docs_fts", "description") ? "description" : "NULL AS description";
+        const tagNames = hasColumn("docs_fts", "tag_names") ? "tag_names" : "NULL AS tag_names";
         this.db.exec(
-          "CREATE TEMP TABLE search_upgrade AS SELECT uuid, title, body FROM docs_fts; " +
+          `CREATE TEMP TABLE search_upgrade AS SELECT rowid, uuid, title, body, ${description}, ${tagNames} FROM docs_fts; ` +
             "DROP TABLE docs_fts; " + FTS_SCHEMA +
-            "INSERT INTO docs_fts (uuid, title, body) SELECT uuid, title, body FROM search_upgrade; " +
+            "INSERT INTO docs_fts (rowid, uuid, title, body, description, tag_names) " +
+            "SELECT rowid, uuid, title, body, description, tag_names FROM search_upgrade; " +
             "DROP TABLE search_upgrade;",
         );
       }
@@ -1431,21 +1482,26 @@ export class MirrorStore {
 
   /** Create and backfill together so another opener cannot see a partial index. */
   private migrateFragmentSearchIndex(): void {
-    const current = (): boolean => this.db.prepare(
+    const exists = (): boolean => this.db.prepare(
       "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'docs_fragment_fts'",
+    ).get() !== undefined;
+    const current = (): boolean => this.db.prepare(
+      "SELECT 1 FROM pragma_table_info('docs_fragment_fts') WHERE name = 'block_languages'",
     ).get() !== undefined;
     if (current()) return;
     transactional(this.db, () => {
       if (current()) return;
+      if (exists()) this.db.exec("DROP TABLE docs_fragment_fts");
       this.db.exec(FRAGMENT_FTS_SCHEMA);
       this.db.exec(
         "INSERT INTO docs_fragment_fts " +
-          "(rowid, uuid, title, body, description, tag_names, indexed_through_seq, catalog_through_seq) " +
+          "(rowid, uuid, title, body, description, tag_names, indexed_through_seq, catalog_through_seq, block_languages) " +
           "SELECT f.rowid, f.uuid, f.title, f.body, f.description, f.tag_names, " +
           // Unknown fields must remain repairable even if a peer enriches the
           // Porter row at the same cuts and reuses its rowid before we derive it.
-          "CASE WHEN f.description IS NULL OR f.tag_names IS NULL THEN NULL ELSE COALESCE(s.indexed_through_seq, 0) END, " +
-          "CASE WHEN f.description IS NULL OR f.tag_names IS NULL THEN NULL ELSE COALESCE(s.catalog_through_seq, 0) END " +
+          "CASE WHEN f.description IS NULL OR f.tag_names IS NULL OR f.block_languages IS NULL THEN NULL ELSE COALESCE(s.indexed_through_seq, 0) END, " +
+          "CASE WHEN f.description IS NULL OR f.tag_names IS NULL OR f.block_languages IS NULL THEN NULL ELSE COALESCE(s.catalog_through_seq, 0) END, " +
+          "f.block_languages " +
           "FROM docs_fts f LEFT JOIN doc_index_seq s ON s.uuid = f.uuid",
       );
     }, "immediate")();
@@ -1468,6 +1524,7 @@ export class MirrorStore {
   /** Both server shutdown and the supplying owner may close; keep it idempotent. */
   close(): void {
     this.appendListeners.clear();
+    this.history.close();
     try {
       if (this.db.isOpen) this.db.close();
     } finally {

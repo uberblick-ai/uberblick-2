@@ -38,6 +38,8 @@ import type { AccessBinding } from "./open-access.js";
 import { createBrowserAccess } from "./open-session.js";
 import { monitorOpenHub, waitForOpenHubState } from "./open-hub-output.js";
 import { openBanner } from "./open-output.js";
+import { startUpdateCheck, type UpdateCheck } from "./open-update.js";
+import { cliVersion, isInstallPayload } from "./version.js";
 import { requestRecentDevices } from "./recent-devices.js";
 import { BrowserReplicas, browserWorkspaces, type ServedWorkspace } from "./open-workspaces.js";
 import { assertWorkspaceBinding, rememberWorkspaceBindings } from "@uberblick/mcp-server/workspace-registry";
@@ -277,6 +279,7 @@ interface Owned {
   engineMonitor: EngineMonitor | null;
   replicas: BrowserReplicas | null;
   hubMonitor: { stop(): void } | null;
+  updateCheck: UpdateCheck | null;
 }
 
 interface EngineMonitor {
@@ -382,6 +385,7 @@ function takeForeground(owned: Owned, io: Io): Foreground {
 
     owned.engineMonitor?.stop();
     owned.hubMonitor?.stop();
+    owned.updateCheck?.stop();
     let result = code;
 
     if (owned.localServer !== null) {
@@ -464,6 +468,9 @@ async function startBrowserServer(startup: BrowserStartup) {
   let localServer: LocalBrowserServer | null = null;
   const replicas = new BrowserReplicas(workspaces, engine, workspaceId => localServer?.refresh(workspaceId));
   owned.replicas = replicas;
+  // Only an installed copy can follow the banner's advice to run ub update.
+  const updateCheck = isInstallPayload() ? startUpdateCheck(cliVersion()) : null;
+  owned.updateCheck = updateCheck;
   const status = (workspaceId: string): ServingSyncStatus => {
     if (localServer !== null) {
       const current = new Set<string>();
@@ -521,6 +528,7 @@ async function startBrowserServer(startup: BrowserStartup) {
         authenticate: authenticateApi,
         replicas,
         statusForWorkspace: status,
+        availableUpdate: () => updateCheck?.available() ?? null,
         env: startupEnv,
         expectedOrigin: servedUrl.origin,
         access,
@@ -563,6 +571,7 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
     engineMonitor: null,
     replicas: null,
     hubMonitor: null,
+    updateCheck: null,
   };
   const foreground = takeForeground(owned, io);
   let hubNote = "";

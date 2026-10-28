@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import {
   AnnotationRangeError,
@@ -8,10 +8,12 @@ import {
   annotationAnchors,
   appendBlock,
   createAnnotation,
+  editComment,
   deleteBlock,
   editBlock,
   exportMarkdown,
   getAnnotation,
+  getAnnotationCommentId,
   getAnnotationsMap,
   getBlock,
   getBlocksFragment,
@@ -28,6 +30,8 @@ import {
   tableCellTexts,
   tableRows,
   setAnnotationResolved,
+  setKind,
+  documentDirectoryFields,
 } from "../src/index.js";
 import { replicaPair, syncDocs } from "./helpers.js";
 
@@ -65,6 +69,21 @@ function threadedPair(): { a: Y.Doc; b: Y.Doc; threadId: string } {
   return { a, b, threadId };
 }
 
+function editablePair(): { a: Y.Doc; b: Y.Doc; threadId: string } {
+  let threadId = "";
+  const [a, b] = replicaPair((doc) => {
+    initDoc(doc, { uuid: UUID, title: "Editable comments" });
+    const blockId = appendBlock(doc, { type: "paragraph", text: SENTENCE });
+    threadId = createAnnotation(doc, blockId, 6, 11, "Display name", "Original", undefined,
+      { kind: "agent", account: "Octocat", agent: "codex", principalId: UUID }).id;
+  });
+  return { a, b, threadId };
+}
+
+function storedComments(doc: Y.Doc, threadId: string): Y.Array<unknown> {
+  return (getAnnotationsMap(doc).get(threadId) as Y.Map<unknown>).get("comments") as Y.Array<unknown>;
+}
+
 /** The raw formatting attributes Yjs holds, to prove the anchor is a mark. */
 function deltaOf(doc: Y.Doc, blockId: string): Array<[string, unknown]> {
   const element = getBlocksFragment(doc).toArray().find((child) => {
@@ -77,6 +96,228 @@ function deltaOf(doc: Y.Doc, blockId: string): Array<[string, unknown]> {
 }
 
 describe("annotations", () => {
+  it("edits an account's agent comment in place, preserving attribution and identity", () => {
+    const { a, b, threadId } = editablePair();
+    addComment(a, threadId, "Someone else", "Later reply", { kind: "person", account: "someone" });
+    const original = getAnnotation(a, threadId)!.comments[0]!;
+    const id = getAnnotationCommentId(a, threadId, 0)!;
+    const transaction = vi.fn();
+    a.on("update", transaction);
+
+    expect(editComment(a, threadId, id, "octocat", "Corrected")?.comments).toEqual([
+      { ...original, text: "Corrected", editedAt: expect.any(String) },
+      expect.objectContaining({ text: "Later reply" }),
+    ]);
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(getAnnotationCommentId(a, threadId, 0)).toBe(id);
+    syncDocs(a, b);
+    expect(getAnnotation(b, threadId)).toEqual(getAnnotation(a, threadId));
+    expect(getAnnotationCommentId(b, threadId, 0)).toBe(id);
+    a.destroy();
+    b.destroy();
+  });
+
+  it.each(["other account", "legacy", "empty", "missing thread", "missing comment", "resolved"])(
+    "refuses %s edits without changing the document", (reason) => {
+      const { a, b, threadId } = editablePair();
+      let id = getAnnotationCommentId(a, threadId, 0)!;
+      if (reason === "legacy") {
+        addComment(a, threadId, "Legacy", "No account");
+        id = getAnnotationCommentId(a, threadId, 1)!;
+      }
+      if (reason === "missing thread") getAnnotationsMap(a).delete(threadId);
+      if (reason === "missing comment") storedComments(a, threadId).delete(0, 1);
+      if (reason === "resolved") setAnnotationResolved(a, threadId, true);
+      const before = Y.encodeStateAsUpdate(a);
+
+      expect(editComment(a, threadId, id, reason === "other account" ? "someone" : "octocat",
+        reason === "empty" ? " \n\t " : "Correction")).toBeNull();
+      expect(Y.encodeStateAsUpdate(a)).toEqual(before);
+      a.destroy();
+      b.destroy();
+    },
+  );
+
+  it.each([0, 1])("keeps an edit at comment %s while concurrent replies retain converged order", (index) => {
+    const { a, b, threadId } = editablePair();
+    addComment(a, threadId, "Display name", "Second", { kind: "person", account: "octocat" });
+    syncDocs(a, b);
+    const id = getAnnotationCommentId(a, threadId, index)!;
+    editComment(a, threadId, id, "octocat", "Corrected");
+    addComment(b, threadId, "Other", "First concurrent reply");
+    addComment(b, threadId, "Other", "Second concurrent reply");
+    syncDocs(a, b);
+
+    const expected = ["Original", "Second", "First concurrent reply", "Second concurrent reply"];
+    expected[index] = "Corrected";
+    expect(getAnnotation(a, threadId)!.comments.map((comment) => comment.text)).toEqual(expected);
+    expect(getAnnotation(a, threadId)).toEqual(getAnnotation(b, threadId));
+    expect(getAnnotationCommentId(a, threadId, index)).toBe(id);
+    a.destroy();
+    b.destroy();
+  });
+
+  it.each([false, true])("collapses concurrent edits deterministically (same edit time: %s) in every shared reader", (sameTime) => {
+    const { a, b, threadId } = editablePair();
+    setKind(a, "decision");
+    syncDocs(a, b);
+    const id = getAnnotationCommentId(a, threadId, 0)!;
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-27T10:00:00.000Z"));
+      editComment(a, threadId, id, "octocat", "Edit from A");
+      vi.setSystemTime(new Date(sameTime ? "2026-10-27T10:00:00.000Z" : "2026-10-27T10:00:01.000Z"));
+      editComment(b, threadId, id, "OCTOCAT", "Edit from B");
+      syncDocs(a, b);
+      const winningText = !sameTime || b.clientID > a.clientID ? "Edit from B" : "Edit from A";
+
+      expect(storedComments(a, threadId)).toHaveLength(2);
+      expect(getAnnotation(a, threadId)!.comments).toHaveLength(1);
+      expect(getAnnotation(a, threadId)!.comments[0]!.text).toBe(winningText);
+      expect(getAnnotation(a, threadId)).toEqual(getAnnotation(b, threadId));
+      expect(listAnnotations(a)[0]!.comments).toHaveLength(1);
+      expect(documentDirectoryFields(a).openThreadCount).toBe(1);
+      expect(documentDirectoryFields(a).commentCount).toBe(1);
+      expect(documentDirectoryFields(b).commentCount).toBe(1);
+      const markdown = exportMarkdown(a, { annotations: "html-comments" });
+      expect(markdown.split(winningText)).toHaveLength(2);
+      expect(markdown).not.toContain("editedAt");
+      expect(markdown).not.toContain("(edited)");
+
+      // A subsequent edit deletes every known replacement, even with clock skew.
+      vi.setSystemTime(new Date("2026-10-27T09:00:00.000Z"));
+      expect(editComment(a, threadId, id, "octocat", "Final edit")?.comments).toHaveLength(1);
+      expect(storedComments(a, threadId)).toHaveLength(1);
+      syncDocs(a, b);
+      expect(getAnnotation(b, threadId)!.comments.map((comment) => comment.text)).toEqual(["Final edit"]);
+      expect(getAnnotationCommentId(b, threadId, 0)).toBe(id);
+    } finally {
+      vi.useRealTimers();
+      a.destroy();
+      b.destroy();
+    }
+  });
+
+  it("keeps distinct comments with identical metadata separate, including after collapsed rows", () => {
+    const { a, b, threadId } = editablePair();
+    const rows = storedComments(a, threadId);
+    rows.push([{ ...rows.get(0) as object }]);
+    const firstId = getAnnotationCommentId(a, threadId, 0)!;
+    const secondId = getAnnotationCommentId(a, threadId, 1)!;
+    expect(secondId).not.toBe(firstId);
+    syncDocs(a, b);
+    editComment(a, threadId, firstId, "octocat", "First A");
+    editComment(b, threadId, firstId, "octocat", "First B");
+    syncDocs(a, b);
+    expect(storedComments(a, threadId)).toHaveLength(3);
+    expect(getAnnotation(a, threadId)!.comments).toHaveLength(2);
+    expect(getAnnotationCommentId(a, threadId, 1)).toBe(secondId);
+    editComment(a, threadId, secondId, "octocat", "Second only");
+    syncDocs(a, b);
+    expect(getAnnotation(a, threadId)!.comments.map((comment) => comment.text)).toEqual([
+      expect.stringMatching(/^First [AB]$/), "Second only",
+    ]);
+    expect(getAnnotation(a, threadId)).toEqual(getAnnotation(b, threadId));
+    a.destroy();
+    b.destroy();
+  });
+
+  it("collapses a late edit from a third stale replica after known duplicates were cleaned", () => {
+    const { a, b, threadId } = editablePair();
+    const c = new Y.Doc();
+    syncDocs(a, c);
+    const id = getAnnotationCommentId(a, threadId, 0)!;
+    editComment(a, threadId, id, "octocat", "A");
+    editComment(b, threadId, id, "octocat", "B");
+    syncDocs(a, b);
+    editComment(a, threadId, id, "octocat", "Cleanup");
+    editComment(c, threadId, id, "octocat", "Late edit");
+    syncDocs(a, c);
+    syncDocs(a, b);
+    expect(getAnnotation(a, threadId)!.comments).toHaveLength(1);
+    expect(getAnnotation(a, threadId)).toEqual(getAnnotation(b, threadId));
+    expect(getAnnotation(a, threadId)).toEqual(getAnnotation(c, threadId));
+    a.destroy();
+    b.destroy();
+    c.destroy();
+  });
+
+  it.each([42, null, "yesterday", "2026-02-30T10:00:00.000Z", "2026-10-27", "2026-10-27T25:00:00Z"])(
+    "omits malformed editedAt %s without losing a comment, attribution or siblings", (editedAt) => {
+      const { a, b, threadId } = editablePair();
+      const rows = storedComments(a, threadId);
+      const comment = rows.get(0) as object;
+      rows.delete(0, 1);
+      rows.push([{ ...comment, editedAt }, null, { author: "Malformed" }]);
+      addComment(a, threadId, "Legacy", "Sibling");
+      const comments = getAnnotation(a, threadId)!.comments;
+      expect(comments).toHaveLength(2);
+      expect(comments[0]).toEqual(comment);
+      expect(comments[0]).not.toHaveProperty("editedAt");
+      expect(comments[1]).toMatchObject({ text: "Sibling" });
+      expect(getAnnotationCommentId(a, threadId, 1)).not.toBeNull();
+      a.destroy();
+      b.destroy();
+    },
+  );
+
+  it.each(["2026-10-27T10:00:00.000Z", "2026-10-27T10:00:00Z", "2026-10-27T12:00:00+02:00"])(
+    "reads valid ISO editedAt %s", (editedAt) => {
+      const { a, b, threadId } = editablePair();
+      const rows = storedComments(a, threadId);
+      const comment = rows.get(0) as object;
+      rows.delete(0, 1);
+      rows.push([{ ...comment, editedAt }]);
+      expect(getAnnotation(a, threadId)!.comments[0]).toHaveProperty("editedAt", editedAt);
+      a.destroy();
+      b.destroy();
+    },
+  );
+
+  it("keeps the hub-v0.4.10 isComment/readThread shape and replying compatible with edited rows", () => {
+    const { a, b, threadId } = editablePair();
+    const original = getAnnotation(a, threadId)!;
+    editComment(a, threadId, getAnnotationCommentId(a, threadId, 0)!, "octocat", "New text");
+    syncDocs(a, b);
+    const rows = storedComments(b, threadId);
+    const releasedIsComment = (value: unknown): value is { author: string; text: string; createdAt: string } => {
+      if (typeof value !== "object" || value === null) return false;
+      const candidate = value as Record<string, unknown>;
+      return typeof candidate.author === "string" && typeof candidate.text === "string" && typeof candidate.createdAt === "string";
+    };
+    const releasedReadThread = (thread: Y.Map<unknown>) => {
+      const comments: Array<{ author: string; text: string; createdAt: string }> = [];
+      for (const value of (thread.get("comments") as Y.Array<unknown>).toArray()) {
+        if (!releasedIsComment(value)) continue;
+        const { author, text, createdAt } = value;
+        comments.push({ author, text, createdAt });
+      }
+      const resolved = thread.get("resolved");
+      return {
+        id: thread.get("id") as string,
+        blockId: thread.get("blockId") as string,
+        ...(typeof resolved === "boolean" ? { resolved } : {}),
+        comments,
+      };
+    };
+    const oldRead = () => releasedReadThread(getAnnotationsMap(b).get(threadId) as Y.Map<unknown>);
+    expect(oldRead()).toEqual({
+      id: threadId,
+      blockId: original.blockId,
+      comments: [{ author: "Display name", text: "New text", createdAt: original.comments[0]!.createdAt }],
+    });
+    expect(oldRead().comments[0]).not.toHaveProperty("editedAt");
+    rows.push([{ author: "Old release", text: "Reply", createdAt: "2026-10-27T10:00:00.000Z" }]);
+    syncDocs(a, b);
+    expect(getAnnotation(a, threadId)!.comments.map((comment) => comment.text)).toEqual(["New text", "Reply"]);
+    expect(oldRead().comments).toHaveLength(2);
+    setAnnotationResolved(a, threadId, true);
+    syncDocs(a, b);
+    expect(oldRead()).toMatchObject({ resolved: true });
+    a.destroy();
+    b.destroy();
+  });
+
   it("keeps browser, MCP and legacy attribution on each stored comment through a document round trip", () => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: UUID, title: "Comment attribution" });

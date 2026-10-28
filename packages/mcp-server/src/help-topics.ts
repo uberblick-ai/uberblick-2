@@ -121,7 +121,7 @@ A topic is the question; it keeps its identity while its answer changes. The fir
 
 ## Changing a decided answer
 
-A decided record's answer is read-only: content writes refuse with \`decision_read_only\`. Title, description, tags, links and comments stay editable, and a rename keeps the approval. To change the answer, create a successor with \`create_doc\`, \`kind: "decision"\` and \`supersedes\` naming the record it replaces. It joins the same topic, and the current answer stays in force while the successor is open. State the changed outcome and why. An answer edit that still arrives, for example from an offline editor, shows \`approvalChanged: true\` until a person's answer is recorded again.
+A decided record's answer is read-only: content writes refuse with \`decision_read_only\`. Title, description, tags, links and comments stay editable, and a rename keeps the approval. To change the answer, create a successor with \`create_doc\`, \`kind: "decision"\` and \`supersedes\` naming the record it replaces. It joins the same topic, and the current answer stays in force while the successor is open. State only the changed decision in the successor's answer; put the reasoning in the successor's own linked RFC. An answer edit that still arrives, for example from an offline editor, shows \`approvalChanged: true\` until a person's answer is recorded again.
 
 ## Discussion and related pages
 
@@ -222,7 +222,7 @@ An embed is visual content the web draws from data stored in the document: a flo
 | Chart or data table | \`chart\` fence | JSON mapping to the document's structured data; see [Structured data](uberblick://help/data) |
 | Figma | \`:::figma\` container | link, title, height and caption |
 
-Markdown and MCP keep an embed's data as text: ablauf and wireframe are code blocks with that language, a chart is its own \`chart\` block, and MCP reads and writes the source as the block's \`text\`. Only the web draws it, so check a changed embed in the web editor.
+Markdown and MCP keep an embed's data as text: ablauf and wireframe are code blocks with that language, a chart is its own \`chart\` block, and MCP reads and writes the source as the block's \`text\`. The web draws embeds. Chart-source writes also report what the mapping can draw from the document's current data; inspect appearance in the web editor.
 
 ### Figma
 
@@ -419,7 +419,7 @@ destinations right-aligned, no arrows).
 
 const wireframe = `# Wireframes
 
-A wireframe is a static UI sketch that the web editor draws from a fenced code block whose info string is exactly \`wireframe\`. This topic follows Format v0.1 of \`@uberblick/wireframe\` 0.3.1. Import, export and MCP keep the source as a code block with language \`wireframe\`. Nothing else goes on the fence line.
+A wireframe is a static UI sketch that the web editor draws from a fenced code block whose info string is exactly \`wireframe\`. This topic follows Format v0.1 of \`@uberblick/wireframe\` 0.3.2. Import, export and MCP keep the source as a code block with language \`wireframe\`. Nothing else goes on the fence line.
 
 \`\`\`wireframe
 dialog Delete “Q3 launch draft”?
@@ -446,12 +446,16 @@ Roots stand at the top level: \`dialog\`, whose label is its title; \`banner\` w
 
 | Kind | Directly inside | Variants | Label |
 | --- | --- | --- | --- |
-| \`text\` | root, dock, card, row | \`.muted\`, \`.strong\`, \`.title\`, \`.small\`, \`.red\`, \`.amber\`, \`.green\`, \`.blue\`; backgrounds \`.bg-red\`, \`.bg-amber\`, \`.bg-green\`, \`.bg-blue\` | the text |
+| \`text\` | root, dock, card, row, item | \`.muted\`, \`.strong\`, \`.title\`, \`.small\`, \`.red\`, \`.amber\`, \`.green\`, \`.blue\`; backgrounds \`.bg-red\`, \`.bg-amber\`, \`.bg-green\`, \`.bg-blue\` | the text |
 | \`row\` | root, dock, card, non-table row, table | one of \`.end\`, \`.between\`, \`.scroll\`, plus \`.stretch\`, only in roots, docks and cards; \`.head\` only in a table | none |
-| \`card\` | top level, root, dock, non-table row | none; optional \`width=\` and \`padding=\` | none: it holds text, images, rows, switches and tabs |
-| \`image\` | root, dock, card, row | \`.square\`, \`.round\`; optional \`width=\` | what it shows |
-| \`button\` | row, cell, frame | \`.primary\`, \`.danger\`, \`.link\`, \`.focus\` | the caption, or none when it holds an icon |
-| \`icon\` | root, dock, cell, button, option | \`.filled\` and the four colours | an exact kebab-case Tabler name, such as \`pin\` or \`dots-vertical\` |
+| \`card\` | top level, root, dock, non-table row | none; optional \`width=\` and \`padding=\` | none: it holds text, images, folds, items, rows, switches and tabs |
+| \`image\` | root, dock, card, row, item | \`.square\`, \`.round\`; optional \`width=\`; only \`.round\` as an item's first child | what it shows |
+| \`fold\` | root, dock, card | none | collapsed content's label, or none for an empty bar |
+| \`item\` | root, card | \`.current\` | main line; child text lines and one optional leading icon or round image |
+| \`ruler\` | last in a non-table row | none | none: holds marks |
+| \`mark\` | ruler | \`.red\`, \`.green\`; warning by default; required \`at=0\` through \`at=100\` | none |
+| \`button\` | row, cell, frame | \`.primary\`, \`.danger\`, \`.link\`, \`.focus\`, \`.disabled\` | the caption, or none when it holds an icon |
+| \`icon\` | root, dock, cell, button, option, item | \`.filled\` and the four colours; only as an item's first child | an exact kebab-case Tabler name, such as \`pin\` or \`dots-vertical\` |
 | \`input\`, \`select\` | root, dock, row | none; optional \`label=\` | the placeholder, or the chosen value |
 | \`toggle\` | root, dock, row | none | none: its choices are \`option\` lines, \`.current\` for the chosen one |
 | \`switch\` | root, dock, card, non-table row | \`.on\`; off by default | the caption, or none for a bare switch |
@@ -468,6 +472,29 @@ Write \`icon.filled pin\`, not \`pin-filled\`. Use one text or icon colour per n
 Plain rows nested in non-table rows group their children side by side as one content-width item. Row variants do not apply to these inner groups. \`row.stretch\` gives direct cards equal heights and aligns other children to the top; it combines with \`.end\` or \`.between\`, but competes with \`.scroll\` (first written wins). Fractional card widths use \`N/M\` with \`1 <= N <= M <= 9999\`, sharing the space left after gaps and fixed-width children. Their row must be directly inside a dialog, page, frame, phone, dock or card and must not scroll; banner rows and nested groups do not accept them. Unsized cards share what remains.
 
 Switches show an inert on/off state; captions wrap beside the track. Tabs underline the first \`option.current\`; later current options warn. They do not change content. An overflowing tab strip scrolls inside the drawing and becomes one native keyboard stop with a visible focus ring; fitting strips and individual tabs add none. Text backgrounds use the existing danger, warning, success and info tints, respectively. Choose one background and one text colour independently; the background alone keeps ink text.
+
+Folds are static dashed bars, not expand controls. Items stack their main line and child text; only the first direct \`item.current\` in each root or card is selected. An item's one optional icon or round image must come first. Disabled buttons combine with other button variants, mute the whole action and announce “unavailable”; they remain inert, without a role or focus target. Rulers and their marks are decorative and never scroll or accept input. A mark needs an integer \`at=\` from 0 to 100; an invalid or missing position warns and draws no mark. Folds and marks take no children.
+
+\`\`\`wireframe
+page.window width=720 Revision history
+  row.stretch
+    card width=1/3
+      item.current Reviewed
+        icon check
+        text.small.muted 2 hours ago
+      item Draft
+        text.small.muted Yesterday
+    card width=2/3
+      text.title Goals
+      fold 4 unchanged blocks · Steps, Checklist
+      text.bg-green Added text
+      row.end
+        button.disabled Restore
+    ruler
+      mark.red at=0
+      mark at=50
+      mark.green at=100
+\`\`\`
 
 \`\`\`wireframe
 page.browser app.example/documents
@@ -530,7 +557,7 @@ banner.warning
 
 Errors stop the drawing: tabs or odd indentation, a jump of more than one level, an indented first line, an unterminated quote, text after a closing quote, or an exceeded limit. Warnings still draw, but the block no longer says what you meant: an unknown kind, variant, attribute or icon, a label on a kind that takes none, or a node in the wrong place. The usual misplacements are a \`button\` outside a \`row\`, \`cell\` or \`frame\`, anything but a \`cell\` in a table's row, and a root inside another node. Fix both.
 
-MCP stores the source without checking it. The web editor lists each diagnostic with its line number. When nobody can open the editor, keep to the kinds and places above and report the wireframe as unchecked. The [full authoring primer](https://github.com/uberblick-ai/wireframe-md/blob/v0.3.1/AUTHORING.md), with every kind's drawing, phones, docks and each mistake with its diagnostic, ships as \`AUTHORING.md\` in \`@uberblick/wireframe\` 0.3.1.`;
+MCP stores the source without checking it. The web editor lists each diagnostic with its line number. When nobody can open the editor, keep to the kinds and places above and report the wireframe as unchecked. The [full authoring primer](https://github.com/uberblick-ai/wireframe-md/blob/v0.3.2/AUTHORING.md), with every kind's drawing, phones, docks and each mistake with its diagnostic, ships as \`AUTHORING.md\` in \`@uberblick/wireframe\` 0.3.2.`;
 
 const data = `# Structured data and views
 
@@ -583,6 +610,8 @@ A \`chart\` block holds editable JSON source, configured with ordinary \`create_
 
 Mapping fields are version 1, type line, collection, x with field and type number or date (optional label), and one to eight numeric y series with field (optional label and unit). Optional y series type is line or bar, default line. Bars-only charts keep top-level type line and draw grouped bars from zero. In overlay, a mixed chart draws its bars behind its lines on a separate right-hand value axis. Optional title and missing gap or connect control presentation; gap is the default. Optional layout is overlay or panels, default overlay. panels draws one compact line or bar chart per y series in mapping order, in a responsive grid; each panel shows its label and latest plotted value. Panels share the x range and share y ranges within each unit group. Optional height is a whole number from 100 to 600 pixels. In overlay it sizes the drawing, including axes and legend, excluding the caption row and notices; in panels it sizes each plot below its label and latest value. Without height, overlay stays at 2:1 between 200 and 300 pixels, and each panel plot stays at 150 pixels. layout and height are invalid for table mappings. Each y series optionally accepts range [min, max], exactly two finite numbers with min lower than max, and reference, one finite number. In overlay, both apply to the series' left or right value axis. In panels, range applies to the series' unit group and reference draws only on that series' own panel. A range is a minimum span: the axis covers every declared range, and plotted or reference values outside it widen the axis. A declared range replaces the zero-baseline rule for line-only axes and panel unit groups. Axes and panel unit groups containing bars always include zero. A reference draws a horizontal line across the plot; each distinct reference value appears once per axis or panel. A panel's reference value also widens its unit group's shared range. range and reference are invalid on x and in table mappings. Optional limit is an integer of 1 or more and selects the latest N records with a valid x in x-then-record-id order, still at most 5,000. A numeric x is finite; a date x is an ISO date-only string or an RFC 3339 date-time string with an explicit timezone. Date-only values are UTC days. Charts sort by x then record id, never coerce or aggregate values, omit schema-invalid records and report omissions. Missing/null y values break a line series under gap and bridge under connect; wrong types remain gaps. Missing, null or wrong-type bar values draw no bar. At most the latest 5,000 eligible x records are plotted.
 
+Each chart block written by \`create_doc\`, \`insert_block\` or \`edit_block\` adds a \`chart\` summary beside its id and rev. It uses the web's projection of this replica's current data: \`status\` is ready, invalid-configuration, collection-absent, collection-unusable, mapping-incompatible or no-records. A non-ready status carries the problem message and a warning; invalid JSON carries the parser's message. A missing collection also returns the document's collection names in \`collections\`. Once a line mapping binds its collection (ready or no-records), it reports total \`recordCount\`, \`plottedCount\` and \`series\` entries with each \`field\` and numeric \`pointCount\`; a series with no points adds a warning naming its field. Ready lines also report \`firstX\` and \`lastX\` as numbers for numeric x, or ISO date/date-time strings for date x. Plotted and per-series counts follow the mapping's selected window. Summaries contain no record values or points, apart from these x endpoints. Warnings never refuse, repair or roll back a write, and an unavailable summary leaves the write's application and durability result intact. A new document has no data yet, so a valid seeded mapping reports collection-absent.
+
 ### Data tables
 
 People insert Data table from the block menu, then edit its JSON source. Agents use the same \`chart\` block type:
@@ -593,11 +622,13 @@ People insert Data table from the block menu, then edit its JSON source. Agents 
 
 A table mapping has version 1, type table, collection and 1–30 ordered columns. Each column has field, optional label and optional format: text (default), number, date or link. Only number accepts unit as a suffix and decimals as an integer from 0–10 setting exact fraction digits; without decimals it uses the line chart's number formatting. Optional title supplies only the table's accessible name; otherwise it is \`Data table of <collection>\`. Optional sort names one column field and direction asc or desc. Optional limit is an integer of 1 or more and shows only the first N valid rows in sort order (record-id order without sort). Existing pageSize values remain accepted as integers from 1–100 for compatibility and never affect display; omit pageSize from new mappings. Unknown keys or options are invalid, including percent, currency, duration and textField.
 
+A bound table mapping's write summary reports \`recordCount\`, \`rowCount\` after limit and \`invalidRecordCount\` for schema-invalid records omitted, with no series or x endpoints. The same status, message and warning rules apply. Other block types carry no chart summary. These summaries describe data held at the time of the source write; \`get_doc\`, \`get_revision\`, \`move_block\` and \`update_data\` do not return them.
+
 Text shows strings verbatim and other values as compact JSON. Number shows JSON numbers in the reader's locale. Date accepts the line chart's ISO dates and RFC 3339 date-times. Link shows only external http(s) URLs as links, opening without an opener or referrer. Absent, null and invalid values have distinct visible markers; invalid markers include the stored value as text. Values never become markup. Sort uses numbers, date instants or Unicode code points for text and links; absent, null and invalid values follow valid ones in either direction. Ties and unsorted rows follow record id. Schema-invalid records are omitted and counted. Without limit, every valid record appears in one continuous native table styled like an ordinary document table, with Generated from document data · read-only below it. Limited rows remain one continuous table, with no pager or page state. When limit hides rows, the footnote includes shown and total valid-record counts. Open table source and copy appear on hover or keyboard focus without moving the table; source stays reachable on devices without hover.
 
 For both views, limit has no upper bound of its own. Records hidden by the author limit are not omissions. When it hides chart records, a muted note shows the latest shown and total valid-x counts; when it hides nothing, no count appears. The chart's 5,000 cap retains its existing notice and diagnostics when N exceeds 5,000.
 
-\`update_data\` refreshes open charts and tables and recomputes a limited window without changing their source. All mounted views in one document share one validated data snapshot. Views are read-only; invalid mappings, missing collections, unsupported schemas and incompatible fields show problems without repairing stored content. Tables also report an empty collection. Charts and tables remain readable in locked documents; their source follows existing content locks. Search indexes titles, descriptions and block text, not record values; Markdown exports mappings while omitting datasets.
+\`update_data\` refreshes open charts and tables and recomputes a limited window without changing their source. All mounted views in one document share one validated data snapshot. Views are read-only; invalid mappings, missing collections, unsupported schemas and incompatible fields show problems without repairing stored content. Tables also report an empty collection. Charts and tables remain readable in locked documents; their source follows existing content locks. Search indexes titles, descriptions, block text, assigned tag names and code block languages, not record values; Markdown exports mappings while omitting datasets.
 
 ## Related
 

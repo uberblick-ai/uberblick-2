@@ -5,6 +5,7 @@ import { ToolError, toFailure } from "../failures.js";
 import { strictInput } from "../inputs.js";
 import { blockInputSchema, uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
+import { summarizeWrittenBlocks } from "./chart-summary.js";
 
 export const inputSchema = strictInput({
   uuid: uuidArg,
@@ -59,7 +60,7 @@ export const insertBlockOperation = documentOperation({ content: true, contentDu
     if (last === undefined) throw new Error("Validated insert batch is empty");
     // Use stored text length: inline runs can replace the supplied text.
     replicas.publishCursor(replica, last.id, last.text.length);
-    return { uuid, blocks: inserted.map(({ id, rev }) => ({ id, rev })) };
+    return { uuid, blocks: summarizeWrittenBlocks(replica.doc, inserted) };
   } finally {
     draft.destroy();
   }

@@ -72,7 +72,7 @@ const OPEN_ATTEMPTS = 5;
 const OPEN_READY_MS = 30_000;
 const OPEN_STOP_MS = 5_000;
 
-function freePort(): Promise<number> {
+export function freePort(): Promise<number> {
   return new Promise((resolvePort, reject) => {
     const server = createNetServer();
     server.once("error", reject);
@@ -92,7 +92,7 @@ function exited(child: ChildProcessWithoutNullStreams): Promise<number | null> {
   return new Promise((resolveExit) => child.once("exit", resolveExit));
 }
 
-async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
+export async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   const exit = exited(child);
   child.kill("SIGTERM");
@@ -177,14 +177,15 @@ async function tradeLaunch(appUrl: string, launch: string): Promise<string> {
   return session;
 }
 
-async function startOpen(
+export async function startOpen(
   runDir: string,
   bundleDir: string,
   fixedPort?: number,
   projectDir = runDir,
+  choosePort = freePort,
 ): Promise<{ child: ChildProcessWithoutNullStreams; appUrl: string; printed: string }> {
   for (let attempt = 1; attempt <= OPEN_ATTEMPTS; attempt += 1) {
-    const port = fixedPort ?? await freePort();
+    const port = fixedPort ?? await choosePort();
     const child = spawn(process.execPath, [UB, "open", "--no-browser", "--port", String(port)], {
       cwd: projectDir,
       env: openEnvironment(runDir, bundleDir),
@@ -221,12 +222,14 @@ async function startOpen(
       const printed = new RegExp(`^web {8}(http://127\\.0\\.0\\.1:${port}/#launch=[A-Za-z0-9_-]{43})$`, "m").exec(stdout)?.[1];
       if (printed === undefined) {
         await stopChild(child);
-        throw new Error(`e2e: ub open printed no launch address\nstdout:\n${stdout}`);
+        throw new Error(`e2e: ub open printed no launch address\nstdout:\n${stdout}\nstderr:\n${stderr}`);
       }
       return { child, appUrl: `http://127.0.0.1:${port}/`, printed };
     }
     await stopChild(child);
-    if (fixedPort === undefined && outcome === "exit" && stderr.includes(`port ${port} is in use`) && attempt < OPEN_ATTEMPTS) {
+    const portTaken = stderr.includes(`port ${port} is in use`) ||
+      stderr.includes(`port ${port} is already serving Uberblick, from another ub open`);
+    if (fixedPort === undefined && outcome === "exit" && portTaken && attempt < OPEN_ATTEMPTS) {
       continue;
     }
     throw new Error(

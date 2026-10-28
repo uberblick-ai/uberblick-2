@@ -733,6 +733,11 @@ export class Replicas {
         kind: meta.kind === "decision" ? "decision" : "regular",
         tags: tags.map((entry) => entry.id),
         tagNames: tags.flatMap((entry) => entry.name === null ? [] : [entry.name]),
+        blockLanguages: [...new Set(blocks.flatMap(({ block }) =>
+          block.type === "code"
+            ? block.language ? [block.language] : []
+            : block.type === "chart" || block.type === "terminal" ? [block.type] : [],
+        ))],
         description: meta.description ?? "",
         links: [
           ...meta.links,

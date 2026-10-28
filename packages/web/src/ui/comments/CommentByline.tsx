@@ -7,6 +7,16 @@ import { initialOf } from "../status/PeerAvatar.js";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../shadcn/tooltip.js";
 import { commentTimestamp } from "./threads.js";
 
+export function CommentEdited({ editedAt, now }: { editedAt: string; now: number }): ReactElement {
+  const { dateTime, title } = commentTimestamp(editedAt, now);
+  return <TooltipProvider><Tooltip>
+    <TooltipTrigger asChild>
+      <time className="ub-comment-edited ub-type-caption text-(--muted-foreground)" dateTime={dateTime} title={title}>(edited)</time>
+    </TooltipTrigger>
+    <TooltipContent>{title}</TooltipContent>
+  </Tooltip></TooltipProvider>;
+}
+
 function CommentAvatar({ author, account, opening }: {
   author: string;
   account?: string | undefined;

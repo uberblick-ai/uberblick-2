@@ -43,6 +43,10 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
+import { ShellThreads } from "../src/ui/shell/ShellThreads.js";
+import type { AppShell } from "../src/ui/shell/use-app-shell.js";
+import { focusThread, threadsFromDoc } from "../src/ui/comments/threads.js";
+import type { AccountIdentity } from "../src/shell/account.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 /** The annotated paragraph. "quick brown" — [4, 15) — is the marked range. */
@@ -204,6 +208,57 @@ function press(target: HTMLElement, key: string, init: KeyboardEventInit = {}): 
     );
   });
 }
+
+describe("comment edit eligibility in the shell", () => {
+  const noop = (): void => {};
+  function shellFor(connection: RoomConnection, threadId: string): AppShell {
+    return {
+      rooms: { doc: connection, docStatus: OFFLINE, topic: null, catalog: null, directory: null, deleted: false },
+      readings: { archived: false, meta: getMeta(connection.ydoc) },
+      environment: { identity: { name: "Reader" }, account: { state: "signed-in", handle: "BK-ONE" } },
+      layout: { narrowLayout: false }, history: { active: false }, navigation: { docLinks: null },
+      threads: { threads: threadsFromDoc(connection.ydoc), focusedThread: focusThread(null, threadId), threadsOpen: false,
+        onFocusThread: noop, setThreadsOpen: noop, setHasReplyDrafts: noop, restoreThreadsFocus: noop },
+    } as unknown as AppShell;
+  }
+
+  it("offers focused own person and agent comments independently of their author names", async () => {
+    const connection = room(roomForDoc(WORKSPACE, UUID));
+    initDoc(connection.ydoc, { uuid: UUID, title: "Ownership" });
+    const block = appendBlock(connection.ydoc, { type: "paragraph", text: "Prose" });
+    const thread = createAnnotation(connection.ydoc, block, 0, 5, "Different display name", "Mine", undefined, { kind: "person", account: "bk-one" });
+    addComment(connection.ydoc, thread.id, "Agent", "Agent wrote this", { account: "bk-one", kind: "agent", agent: "codex" });
+    addComment(connection.ydoc, thread.id, "Reader", "Someone else's", { kind: "person", account: "peer" });
+    addComment(connection.ydoc, thread.id, "Reader", "Legacy comment");
+    const shell = shellFor(connection, thread.id);
+    const { container, rerender } = await renderSettled(<ShellThreads shell={shell} />);
+    expect(within(container).getAllByRole("button", { name: "Edit" })).toHaveLength(2);
+    expect(container.querySelector(".ub-thread-select .ub-comment-edit")).toBeNull();
+    shell.threads.focusedThread = null;
+    rerender(<ShellThreads shell={shell} />);
+    expect(within(container).queryByRole("button", { name: "Edit" })).toBeNull();
+  });
+
+  it.each(["signed-out", "unavailable", "archived", "unwritable", "decision-without-first-record", "resolved"] as const)("hides Edit in %s state", async (state) => {
+    const connection = room(roomForDoc(WORKSPACE, UUID));
+    initDoc(connection.ydoc, { uuid: UUID, title: "Edit access" });
+    const block = appendBlock(connection.ydoc, { type: "paragraph", text: "Prose" });
+    const thread = createAnnotation(connection.ydoc, block, 0, 5, "Reader", "Own comment", undefined, { kind: "person", account: "bk-one" });
+    const shell = shellFor(connection, thread.id);
+    if (state === "signed-out" || state === "unavailable") shell.environment.account = { state } as AccountIdentity;
+    else if (state === "archived") shell.readings.archived = true;
+    else if (state === "unwritable") shell.rooms.docStatus = { ...OFFLINE, writable: false };
+    else if (state === "decision-without-first-record") shell.readings.meta = { ...getMeta(connection.ydoc), kind: "decision" };
+    else {
+      setAnnotationResolved(connection.ydoc, thread.id, true);
+      shell.threads.threads = threadsFromDoc(connection.ydoc);
+    }
+    const { container } = await renderSettled(<ShellThreads shell={shell} />);
+    expect(within(container).getByText("Own comment")).toBeDefined();
+    expect(within(container).queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(within(container).queryByPlaceholderText("Edit comment…")).toBeNull();
+  });
+});
 
 describe("thread writes require a writable, unarchived document", () => {
   function findButton(host: HTMLElement, label: string): HTMLButtonElement | null {

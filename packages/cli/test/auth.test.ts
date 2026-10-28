@@ -54,6 +54,7 @@ describe("ub auth local selection and command surface", () => {
       expect(help.stderr).toBe("");
       if (args[1] === "login") {
         expect(help.stdout).toContain("Login never changes the project binding.");
+        expect(help.stdout).toContain("the code also appears in large letters");
         expect(help.stdout).toContain("Signing in grants no workspace membership");
         expect(help.stdout).toMatch(/revok.*replac|replac.*revok/i);
         expect(help.stdout.replace(/\s+/g, " ")).toMatch(/approve only a code you just started/i);
