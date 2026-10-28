@@ -358,7 +358,7 @@ describe.each(["remove", "rm"])("ub workspace %s", command => {
   }
 
   function replicaFiles(box: Sandbox, uuid = OTHER): string[] {
-    return ["", "-wal", "-shm", ".serving-lock"].map(suffix => `${databasePath(box, uuid)}${suffix}`);
+    return ["", "-wal", "-shm", ".serving-lock", ".history-refresher-lock"].map(suffix => `${databasePath(box, uuid)}${suffix}`);
   }
 
   function terminal(box: Sandbox, operand: string, answer: string): ReturnType<typeof runUbAsync> {
@@ -412,7 +412,7 @@ syncBuiltinESMExports();
     expect(run.status, run.output).toBe(0);
     expect(run.stdout).toBe(`removed ${OTHER} from this computer\n`);
     expect(run.stderr).toBe("");
-    expect(replicaFiles(box).map(path => existsSync(path))).toEqual([false, false, false, false]);
+    expect(replicaFiles(box).map(path => existsSync(path))).toEqual([false, false, false, false, false]);
     expect(existsSync(historyHolds)).toBe(false);
     expect(readWorkspaceHub(OTHER, box.env)).toBeUndefined();
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(HUB);

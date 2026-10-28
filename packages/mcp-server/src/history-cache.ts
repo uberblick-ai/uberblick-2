@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS history_v1_deleted (
 );`;
 
 export interface HistoryCacheStamp { hub: string; workspace: string; account: string }
+export interface HistoryCacheFileIdentity { dev: number; ino: number }
 export interface HistoryCacheToken extends HistoryCacheStamp { generation: string }
 export type HistoryCacheResult<T> = { status: "ready"; value: T }
   | { status: "unavailable" | "update-required" | "superseded" };
@@ -84,15 +85,17 @@ function chunks(bytes: Uint8Array): Uint8Array[] {
 export class HistoryCache {
   private db: DatabaseSync | undefined;
   private session: HistoryHoldSession | undefined;
-  private identity: { dev: number; ino: number } | undefined;
+  private identity: HistoryCacheFileIdentity | null | undefined;
   private closed = false;
   private readonly localHolds = new Map<string, number>();
 
   constructor(private readonly path: string, private readonly workspace: string,
-    private readonly env: NodeJS.ProcessEnv = process.env) {}
+    private readonly env: NodeJS.ProcessEnv = process.env, identity?: HistoryCacheFileIdentity | null) {
+    this.identity = identity;
+  }
 
   private connection(): DatabaseSync {
-    if (this.closed || this.path === ":memory:") throw new CacheRefusal("unavailable");
+    if (this.closed || this.path === ":memory:" || this.identity === null) throw new CacheRefusal("unavailable");
     const identity = statSync(this.path);
     if (this.identity !== undefined && (identity.dev !== this.identity.dev || identity.ino !== this.identity.ino)) {
       throw new CacheRefusal("unavailable");

@@ -1,5 +1,5 @@
 import { generateKeyPairSync, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -124,6 +124,49 @@ it("allows the live event loop to release a writer while cache publication waits
     if (database.isTransaction) database.exec("ROLLBACK");
     database.close();
   }
+});
+
+it("cancels queued cache work and ends its worker before returning from close", async () => {
+  const test = await fixture();
+  const database = new DatabaseSync(test.path);
+  let deadline: NodeJS.Timeout | undefined;
+  try {
+    database.exec("BEGIN IMMEDIATE");
+    const publication = test.worker.putCatalog(PAGE, catalog(snapshot().checksum));
+    // Queue the publication before shutdown starts.
+    await Promise.resolve();
+    await Promise.race([
+      test.worker.close(),
+      new Promise<never>((_resolve, reject) => {
+        deadline = setTimeout(() => reject(new Error("Cache shutdown waited for queued work.")), 1_000);
+      }),
+    ]);
+    expect(await publication).toEqual({ status: "unavailable" });
+    database.exec("COMMIT");
+    expect(ready(test.cache.readCatalog(test.token, PAGE))).toBeNull();
+    expect(await test.worker.putCatalog(PAGE, catalog(snapshot().checksum))).toEqual({ status: "unavailable" });
+  } finally {
+    clearTimeout(deadline);
+    if (database.isTransaction) database.exec("ROLLBACK");
+    database.close();
+  }
+});
+
+it("refuses a replacement workspace even before the worker's first cache request", async () => {
+  const test = await fixture();
+  await test.worker.close();
+  const stale = new HistoryMirrorCache(test.path, WORKSPACE, test.env);
+  workers.push(stale);
+  test.store.close();
+  renameSync(test.path, `${test.path}.removed`);
+  const replacementStore = new MirrorStore(test.path, WORKSPACE);
+  stores.push(replacementStore);
+  const replacementCache = new HistoryCache(test.path, WORKSPACE, test.env);
+  caches.push(replacementCache);
+  const replacementToken = ready(replacementCache.open(test.stamp));
+  expect(await stale.open(test.stamp)).toEqual({ status: "unavailable" });
+  expect(await stale.putCatalog(PAGE, catalog(snapshot().checksum))).toEqual({ status: "unavailable" });
+  expect(ready(replacementCache.listPages(replacementToken))).toEqual([]);
 });
 
 it("resumes persisted history for retention after logout and fences that token when another account signs in", async () => {

@@ -9,7 +9,7 @@ import type { Replicas } from "./replica.js";
 import type { MirrorStore } from "./store.js";
 import { seedTagCatalogOnce } from "./tag-catalog.js";
 import { openWorkspaceReplicas } from "./workspace-replicas.js";
-import { startWorkspaceHistory } from "./workspace-history.js";
+import { startHistoryRefresher } from "./history-refresher.js";
 
 const DEFAULT_REFRESH_INTERVAL_MS = 25;
 
@@ -85,8 +85,7 @@ export async function createMcpEngine(
   }
 
   const listeners = new Set<() => void>();
-  const history = options.serving === true && config.localWorkspace !== true
-    ? startWorkspaceHistory(replicas) : null;
+  const history = options.serving === true ? startHistoryRefresher(replicas) : null;
   let dirty = false;
   let lastDataVersion = store.dataVersion();
   let refreshStatus: EngineRefreshStatus = { status: "running" };
@@ -119,7 +118,6 @@ export async function createMcpEngine(
       }
 
       const dataVersion = store.dataVersion();
-      history?.checkRetention();
       const pendingCanAdvance =
         replicas.sync.state().status === "connected" &&
         store.pendingRooms().length > 0;
@@ -135,7 +133,6 @@ export async function createMcpEngine(
       dirty = false;
       lastDataVersion = dataVersion;
       replicas.refresh();
-      history?.refresh();
     } catch (error) {
       if (engineHealth(replicas).status === "quarantined") {
         stopLoop();

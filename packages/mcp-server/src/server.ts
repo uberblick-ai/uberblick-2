@@ -18,6 +18,7 @@ import { startupInstructions } from "./startup-instructions.js";
 import { registerTools } from "./tools.js";
 import { mcpVersion } from "./version.js";
 import { openWorkspaceReplicas } from "./workspace-replicas.js";
+import { startHistoryRefresher } from "./history-refresher.js";
 
 /**
  * Prefer the initialized session's human-readable title, then its client name.
@@ -90,6 +91,7 @@ function openRuntime(
   replicas.setWriteSurface({ kind: "mcp", name: options.agentName === undefined
     ? "unknown MCP client"
     : agentDisplayName({ name: options.agentName }) });
+  const history = startHistoryRefresher(replicas);
   const sessions = new Set<UberblickMcpSession>();
   let seeding: Promise<void> | null = null;
   let closed = false;
@@ -116,6 +118,7 @@ function openRuntime(
     close(deadline = performance.now() + SHUTDOWN_TIMEOUT_MS) {
       if (closing !== null) return closing;
       closed = true;
+      const historyClosed = history.close();
       // Every session stops admission synchronously, before any transport closes.
       const draining = [...sessions].map((session) => session.close());
       closing = Promise.resolve().then(async () => {
@@ -124,6 +127,7 @@ function openRuntime(
         if (!store.isRemoved() && replicas.sync.enabled && replicas.config.localWorkspace !== true && pending > 0) {
           log.warn(`${pending} changes are still only local; they sync the next time Uberblick on this machine reaches the hub.`);
         }
+        await historyClosed;
         await workspace.close();
       });
       return closing;

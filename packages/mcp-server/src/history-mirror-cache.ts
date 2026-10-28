@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { statSync } from "node:fs";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 import * as Y from "yjs";
 import { snapshotRevision } from "@uberblick/schema";
@@ -6,6 +7,7 @@ import {
   HistoryCache,
   type CachedHistoryCatalog,
   type HistoryCacheResult,
+  type HistoryCacheFileIdentity,
   type HistoryCacheStamp,
   type HistoryCacheToken,
 } from "./history-cache.js";
@@ -14,7 +16,7 @@ import type { HistoryRetention } from "./local-settings.js";
 type CatalogInput = Omit<CachedHistoryCatalog, "catalog">;
 type Command =
   | { operation: "open"; stamp: HistoryCacheStamp }
-  | { operation: "listPages" | "close" | "resume" }
+  | { operation: "listPages" | "resume" }
   | { operation: "readCatalog" | "markRefreshFailed"; uuid: string }
   | { operation: "putCatalog"; uuid: string; input: CatalogInput }
   | { operation: "evict"; uuid: string; retention: HistoryRetention; now: number }
@@ -29,6 +31,7 @@ interface CacheWorkerData {
   path: string;
   workspace: string;
   env: NodeJS.ProcessEnv;
+  identity: HistoryCacheFileIdentity | null;
 }
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -53,7 +56,7 @@ function verifiedSnapshot(cache: HistoryCache, token: HistoryCacheToken,
 async function serveCacheWorker(data: CacheWorkerData): Promise<void> {
   const port = parentPort;
   if (port === null) throw new Error("History cache worker requires a parent port.");
-  const cache = new HistoryCache(data.path, data.workspace, data.env);
+  const cache = new HistoryCache(data.path, data.workspace, data.env, data.identity);
   let token: HistoryCacheToken | null = null;
   const execute = (command: Command): HistoryCacheResult<unknown> => {
     if (command.operation === "open") {
@@ -66,7 +69,6 @@ async function serveCacheWorker(data: CacheWorkerData): Promise<void> {
       token = resumed.status === "ready" ? resumed.value : null;
       return resumed;
     }
-    if (command.operation === "close") return { status: "ready", value: undefined };
     if (token === null) return { status: "unavailable" };
     switch (command.operation) {
       case "readCatalog": return cache.readCatalog(token, command.uuid);
@@ -85,7 +87,6 @@ async function serveCacheWorker(data: CacheWorkerData): Promise<void> {
         try { result = execute(command); }
         catch { result = { status: "unavailable" }; }
         port.postMessage({ id: command.id, result } satisfies Reply);
-        if (command.operation === "close") resolve();
       });
       port.once("close", resolve);
       port.postMessage({ ready: true } satisfies Reply);
@@ -116,11 +117,18 @@ export class HistoryMirrorCache {
   private termination: Promise<number> | null = null;
 
   constructor(path: string, workspace: string, env: NodeJS.ProcessEnv = process.env) {
+    let identity: HistoryCacheFileIdentity | null = null;
+    try {
+      const current = statSync(path);
+      identity = { dev: current.dev, ino: current.ino };
+    } catch {
+      // Storage missing at construction must not bind a later workspace copy.
+    }
     const data: CacheWorkerData = {
       uberblickHistoryCache: true,
       moduleUrl: import.meta.url,
       sourceLoader: import.meta.url.endsWith(".ts") ? import.meta.resolve("tsx/esm/api") : null,
-      path, workspace, env,
+      path, workspace, env, identity,
     };
     this.worker = new Worker(`(async () => {
       const { workerData } = await import("node:worker_threads");
@@ -168,7 +176,7 @@ export class HistoryMirrorCache {
   }
 
   private async request<T>(command: Command): Promise<HistoryCacheResult<T>> {
-    if (this.closing !== null && command.operation !== "close") return { status: "unavailable" };
+    if (this.closing !== null) return { status: "unavailable" };
     if (this.stopped || !(await this.started)) return { status: "unavailable" };
     if (this.stopped) return { status: "unavailable" };
     return new Promise<HistoryCacheResult<T>>(resolve => {
@@ -219,7 +227,6 @@ export class HistoryMirrorCache {
 
   close(): Promise<void> {
     this.closing ??= (async () => {
-      await this.request({ operation: "close" });
       this.stop();
       await this.termination;
     })();
