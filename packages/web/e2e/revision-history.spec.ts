@@ -64,6 +64,15 @@ async function previous(page: Page): Promise<void> {
   await activateControl(history(page).getByRole("button", { name: "Previous revision", exact: true }));
 }
 
+async function waitForHistoryCatalog(page: Page, accepts: (entries: RevisionEntry[]) => boolean): Promise<void> {
+  await page.waitForResponse(async response => {
+    const url = new URL(response.url());
+    if (response.request().method() !== "GET" || url.pathname !== "/api/revisions" || url.searchParams.has("revision") || !response.ok()) return false;
+    const body = await response.json();
+    return Array.isArray(body.revisions) && accepts(body.revisions);
+  });
+}
+
 async function backToNow(page: Page): Promise<void> {
   // The sidebar holds it on desktop; the revision's status row keeps it when the sidebar is a drawer.
   await activateControl(page.getByRole("button", { name: "Back to now", exact: true }).first());
@@ -606,7 +615,8 @@ test.describe("document history through ub open", () => {
     await activateControl(editor(page));
     await page.keyboard.type("Downloaded original.");
     await waitForAcknowledged(page, { path: "upstream" });
-    await harness().nameRevisionAsOther(uuid, "Downloaded baseline");
+    const baseline = await harness().nameRevisionAsOther(uuid, "Downloaded baseline");
+    await waitForHistoryCatalog(page, entries => entries.some(entry => entry.id === baseline.id && entry.name?.text === "Downloaded baseline"));
     await previous(page);
     await expect(historicalEditor(page)).toContainText("Downloaded original.");
     const address = page.url();
@@ -1138,6 +1148,8 @@ test.describe("document history through ub open", () => {
       await page.keyboard.type(after);
     }
     await expect.poll(() => harness().hubText(room)).toContain("The latest paragraph.");
+    await waitForHistoryCatalog(page, entries => entries[0]?.name?.text !== "Reviewed after auth rewrite" &&
+      entries.some(entry => entry.name?.text === "Reviewed after auth rewrite"));
     await previous(page);
     await expect(historicalEditor(page)).toBeVisible();
     const drawer = await showHistoryList(page);
@@ -1188,6 +1200,7 @@ test.describe("document history through ub open", () => {
     await expect.poll(() => harness().hubText(`${harness().workspaceUuid}/${uuid}`)).toBe("A state reviewed by another teammate.");
     const named = await harness().nameRevisionAsOther(uuid, "Reviewed by teammate");
     expect(named.name?.namer).toMatchObject({ githubUsername: "other-admin", surface: { kind: "mcp", name: "Review client" } });
+    await waitForHistoryCatalog(page, entries => entries.some(entry => entry.id === named.id && entry.name?.text === "Reviewed by teammate"));
     await previous(page);
     await expect(history(page)).toContainText("“Reviewed by teammate”, named by other-admin via Review client at ");
     const trigger = history(page).getByRole("button", { name: "Rename revision", exact: true });
@@ -1545,12 +1558,6 @@ test.describe("document history through ub open", () => {
     await expect.poll(() => harness().hubText(room)).toContain("A surviving paragraph.");
 
     // Archiving closes the actual hub's authored stretch without a fake clock.
-    const catalogReady = page.waitForResponse(async response => {
-      const url = new URL(response.url());
-      return response.request().method() === "GET" && url.pathname === "/api/revisions" &&
-        url.searchParams.get("uuid") === uuid && !url.searchParams.has("revision") && response.ok() &&
-        (await response.json()).revisions?.length === 2;
-    });
     await archiveAndRestore(page, title);
     await selectPositions(live, 5, 10);
     await page.keyboard.type("blue");
@@ -1563,7 +1570,7 @@ test.describe("document history through ub open", () => {
     await page.keyboard.press("Backspace");
     await expect(live.locator(":scope > p")).toHaveText(["The blue fox stays.", "A surviving paragraph."]);
     await expect.poll(() => harness().hubText(room)).not.toContain("A removed paragraph.");
-    await catalogReady;
+    await waitForHistoryCatalog(page, entries => entries.length === 2);
 
     const path = new URL(page.url()).pathname;
     const peer = await openApp(browser, path, { readySelector: ".ub-editor .ProseMirror" });
