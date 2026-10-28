@@ -4,6 +4,7 @@ import type { Editor } from "@tiptap/core";
 import { activateControl, docTitle, editor, setupHarness } from "./app-helpers.js";
 import { placeCaretIn } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
+import { setNativeSelection } from "./native-selection.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
@@ -182,11 +183,25 @@ test("native clipboard keeps a selection that includes a divider", { tag: "@webk
     { type: "paragraph", text: "Above" }, { type: "divider" }, { type: "paragraph", text: "Below" },
   ]);
   await placeCaretIn(blocks(page).first());
-  await page.keyboard.press("ControlOrMeta+a");
-  await page.keyboard.press("ControlOrMeta+c");
+  const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+  await setNativeSelection(editor(page), () => editor(page).evaluate(element => {
+    const { view, state } = (element as HTMLElement & { editor: Editor }).editor;
+    const anchor = 1;
+    const head = state.doc.content.size - 1;
+    const start = view.domAtPos(anchor);
+    const end = view.domAtPos(head);
+    const range = document.createRange();
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return { anchor, head };
+  }));
+  await page.keyboard.press(`${modifier}+c`);
   await page.keyboard.press("Backspace");
   await expect(dividers(page)).toHaveCount(0);
-  await page.keyboard.press("ControlOrMeta+v");
+  await page.keyboard.press(`${modifier}+v`);
   await expect.poll(() => blockTypes(page)).toEqual(["paragraph", "divider", "paragraph"]);
   await expect(blocks(page)).toHaveText(["Above", "", "Below"]);
 });
