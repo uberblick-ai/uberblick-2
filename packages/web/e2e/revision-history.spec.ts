@@ -1566,8 +1566,7 @@ test.describe("document history through ub open", () => {
     await expect(editor(page).locator("[data-revision-change]")).toHaveCount(0);
   });
 
-  // Comparison text can satisfy this journey's wait before the selected revision settles.
-  test.fixme("keyboard history navigation retains control focus and moves to an available control at either boundary", { tag: "@webkit" }, async ({ browser }) => {
+  test("keyboard history navigation retains control focus and moves to an available control at either boundary", { tag: "@webkit" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
     const title = docTitle("Keyboard revision navigation");
     const uuid = await newDocument(page, title);
@@ -1588,6 +1587,8 @@ test.describe("document history through ub open", () => {
     const back = history(page).getByRole("button", { name: "Previous revision", exact: true });
     const forward = history(page).getByRole("button", { name: "Next revision", exact: true });
     const position = history(page).locator(".ub-history-position");
+    // The live Previous control stays enabled during the initial history list read.
+    await expect(history(page).getByRole("button", { name: "Name current revision", exact: true })).toBeEnabled();
     await expect(back).toBeEnabled();
     await back.focus();
     await expect(back).toBeFocused();
