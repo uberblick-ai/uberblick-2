@@ -17,6 +17,7 @@ import {
 } from "./workspace.js";
 import { createWorkspaceCommand, WORKSPACE_CREATE_HELP } from "./workspace-create.js";
 import { forkWorkspaceCommand, WORKSPACE_FORK_HELP } from "./workspace-fork.js";
+import { detachWorkspaceCommand, WORKSPACE_DETACH_HELP } from "./workspace-detach.js";
 import { promoteWorkspaceCommand, WORKSPACE_PROMOTE_HELP } from "./workspace-promote.js";
 import {
   workspaceMemberCommand, WORKSPACE_MEMBER_HELP, WORKSPACE_MEMBER_SUBCOMMAND_HELP,
@@ -83,6 +84,8 @@ export const COMMAND_TREE: CommandGroup = {
         run: (_args, io) => forkWorkspaceCommand(io) }),
       command({ path: ["workspace", "promote"], help: WORKSPACE_PROMOTE_HELP, options: {},
         positionals: { min: 1, max: 1, error: "expected exactly one hub" }, run: promoteWorkspaceCommand }),
+      command({ path: ["workspace", "detach"], help: WORKSPACE_DETACH_HELP, options: {},
+        positionals: { min: 1, max: 1, error: "expected exactly one workspace id or prefix" }, run: detachWorkspaceCommand }),
       { path: ["workspace", "member"], help: WORKSPACE_MEMBER_HELP, children: [
         command({ path: ["workspace", "member", "add"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.add, options: WORKSPACE_MEMBER_ADD_OPTIONS,
           positionals: { min: 1, max: 1, error: "expected 1 argument" }, run: (args, io) => workspaceMemberCommand("add", args, io) }),

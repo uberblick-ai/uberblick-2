@@ -12,6 +12,7 @@ import {
   type HistoryCacheToken,
 } from "./history-cache.js";
 import type { HistoryRetention } from "./local-settings.js";
+import { captureWorkspaceDetachGeneration } from "./workspace-generation.js";
 
 type CatalogInput = Omit<CachedHistoryCatalog, "catalog">;
 type Command =
@@ -35,6 +36,7 @@ interface CacheWorkerData {
   workspace: string;
   env: NodeJS.ProcessEnv;
   identity: HistoryCacheFileIdentity | null;
+  detachGeneration: string | null;
 }
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -59,7 +61,7 @@ function verifiedSnapshot(cache: HistoryCache, token: HistoryCacheToken,
 async function serveCacheWorker(data: CacheWorkerData): Promise<void> {
   const port = parentPort;
   if (port === null) throw new Error("History cache worker requires a parent port.");
-  const cache = new HistoryCache(data.path, data.workspace, data.env, data.identity);
+  const cache = new HistoryCache(data.path, data.workspace, data.env, data.identity, data.detachGeneration);
   let token: HistoryCacheToken | null = null;
   let nextHold = 0;
   const holds = new Map<number, { release(): void }>();
@@ -149,7 +151,7 @@ export class HistoryMirrorCache {
       uberblickHistoryCache: true,
       moduleUrl: import.meta.url,
       sourceLoader: import.meta.url.endsWith(".ts") ? import.meta.resolve("tsx/esm/api") : null,
-      path, workspace, env, identity,
+      path, workspace, env, identity, detachGeneration: captureWorkspaceDetachGeneration(path),
     };
     this.worker = new Worker(`(async () => {
       const { workerData } = await import("node:worker_threads");

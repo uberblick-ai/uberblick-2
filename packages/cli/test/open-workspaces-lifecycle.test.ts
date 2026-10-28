@@ -1,7 +1,12 @@
 /** Lazy replica starts must remain owned when shutdown overtakes admission. */
 import { createMcpEngine, type McpConfig, type UberblickMcpEngine } from "@uberblick/mcp-server";
-import { describe, expect, it, vi } from "vitest";
+import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserReplicas, type ServedWorkspace } from "../src/open-workspaces.js";
+import { removeTempDirs, sandbox } from "./helpers.js";
+
+afterAll(removeTempDirs);
+afterEach(() => vi.mocked(createMcpEngine).mockReset());
 
 vi.mock("@uberblick/mcp-server", async importOriginal => ({
   ...await importOriginal<typeof import("@uberblick/mcp-server")>(),
@@ -29,13 +34,15 @@ function config(workspaceId: string): McpConfig {
   };
 }
 
-function destination(workspaceId: string): ServedWorkspace {
+function destination(workspaceId: string, env: NodeJS.ProcessEnv): ServedWorkspace {
   return {
     workspace: workspaceId,
     browserKey: "unused-browser-key",
     name: null,
     binding: { workspaceId, hubUrl: null },
     config: config(workspaceId),
+    env,
+    detachGeneration: null,
   };
 }
 
@@ -56,19 +63,39 @@ function engine(workspaceId: string) {
 }
 
 describe("browser replica lifecycle", () => {
+  it("does not start a replica when shutdown overtakes its init-lock wait", async () => {
+    const box = sandbox();
+    const startup = engine(FIRST);
+    const replicas = new BrowserReplicas(new Map([
+      [FIRST, destination(FIRST, box.env)],
+      [SECOND, destination(SECOND, box.env)],
+    ]), startup.value, vi.fn());
+    const lock = await acquireInitLock(box.env);
+    const preparing = replicas.prepare(SECOND);
+    const denied = expect(preparing).rejects.toMatchObject({ reason: "replica-failed" });
+    const closing = replicas.close();
+    lock.release();
+    await Promise.all([denied, closing]);
+
+    expect(createMcpEngine).not.toHaveBeenCalled();
+    expect(startup.close).toHaveBeenCalledOnce();
+  });
+
   it("refuses an in-flight admission after shutdown starts and closes its late engine", async () => {
     const startup = engine(FIRST);
     const secondary = engine(SECOND);
     let complete!: (engine: UberblickMcpEngine) => void;
     const started = new Promise<UberblickMcpEngine>(resolve => { complete = resolve; });
     vi.mocked(createMcpEngine).mockReturnValueOnce(started);
+    const box = sandbox();
     const replicas = new BrowserReplicas(new Map([
-      [FIRST, destination(FIRST)],
-      [SECOND, destination(SECOND)],
+      [FIRST, destination(FIRST, box.env)],
+      [SECOND, destination(SECOND, box.env)],
     ]), startup.value, vi.fn());
 
     const preparing = replicas.prepare(SECOND);
     const denied = expect(preparing).rejects.toMatchObject({ reason: "replica-failed" });
+    await vi.waitFor(() => expect(createMcpEngine).toHaveBeenCalledOnce());
     const closing = replicas.close();
     complete(secondary.value);
     await Promise.all([denied, closing]);

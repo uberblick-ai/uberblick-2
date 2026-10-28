@@ -25,6 +25,7 @@ commands:
   create <name>               create and select a separate local-only workspace
   fork                        copy this workspace independently and select the local copy
   promote <hub>               upload, verify and connect this local workspace
+  detach <id|prefix>          make this computer's hub workspace copy local
   member <command>            grant workspace access and manage members
   list [--json]               workspaces this machine has a database for
   use <link|id>               fetch a shared workspace or select a local replica

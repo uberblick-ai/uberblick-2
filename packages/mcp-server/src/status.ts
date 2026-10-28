@@ -147,7 +147,7 @@ export async function collectSyncStatus(
     database: replicas.store.databasePath,
     hub: replicas.hubState(),
     caughtUp: local
-      ? !replicas.store.isRemoved() && replicas.persistenceError() === null
+      ? !replicas.store.isRemoved() && !replicas.store.isDetached() && replicas.persistenceError() === null
       : collectReplicaSyncState(replicas).caughtUp,
     unsyncedChanges: pending.length,
     pendingRooms: pending,

@@ -18,6 +18,7 @@ import {
   DEFAULT_HUB_URL,
   ServingReplicaHeldError,
   collectServingSyncStatus,
+  captureWorkspaceDetachGeneration,
   createMcpEngine,
   readWorkspaceName,
   usesDeviceLogin,
@@ -209,6 +210,7 @@ function startupRefusal(error: unknown): string {
 async function initialConfig(env: NodeJS.ProcessEnv, ensureSecret = false): Promise<{
   resolved: ReturnType<typeof resolveConfig>;
   secretCreated: string | null;
+  detachGeneration: string | null;
 }> {
   const lock = await acquireInitLock(env, { command: "ub open" });
   try {
@@ -241,7 +243,8 @@ async function initialConfig(env: NodeJS.ProcessEnv, ensureSecret = false): Prom
         }
       }
     }
-    return { resolved, secretCreated };
+    const databasePath = resolveMcpConfig(resolved.env).databasePath;
+    return { resolved, secretCreated, detachGeneration: captureWorkspaceDetachGeneration(databasePath) };
   } finally {
     lock.release();
   }
@@ -438,6 +441,7 @@ interface BrowserStartup {
   startupEnv: NodeJS.ProcessEnv;
   projectBinding: ReturnType<typeof requireBinding>;
   resolved: ReturnType<typeof resolveConfig>;
+  detachGeneration: string | null;
   presenceName: string;
   root: string;
   servedUrl: URL;
@@ -445,10 +449,21 @@ interface BrowserStartup {
 }
 
 async function startBrowserServer(startup: BrowserStartup) {
-  const { options, io, env, startupEnv, projectBinding, resolved,
+  const { options, io, env, startupEnv, projectBinding, resolved, detachGeneration,
     presenceName, root, servedUrl, owned } = startup;
   const mcpConfig = resolveMcpConfig(env);
-  const engine = await createMcpEngine(mcpConfig, { serving: true });
+  const lock = await acquireInitLock(startupEnv, { command: "ub open" });
+  let starting: Promise<UberblickMcpEngine>;
+  try {
+    if (captureWorkspaceDetachGeneration(mcpConfig.databasePath) !== detachGeneration) {
+      throw new Error("The workspace was detached while ub open was starting. Restart ub open to use its current selection.");
+    }
+    assertWorkspaceBinding(projectBinding, startupEnv, resolved.paths.projectConfig ?? "environment");
+    // The engine takes its serving role synchronously before its first await,
+    // preventing detach from passing after this final selection check.
+    starting = createMcpEngine(mcpConfig, { serving: true });
+  } finally { lock.release(); }
+  const engine = await starting;
   owned.engine = engine;
   const engineMonitor = monitorEngine(engine);
   owned.engineMonitor = engineMonitor;
@@ -617,6 +632,7 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
   try {
     serving = await startBrowserServer({
       options, io, env, startupEnv, projectBinding, resolved: initial.resolved,
+      detachGeneration: initial.detachGeneration,
       presenceName, root: plan.dir, servedUrl, owned,
     });
   } catch (error) {

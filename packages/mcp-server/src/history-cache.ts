@@ -9,6 +9,7 @@ import { tryAcquireInitLock } from "./init-lock.js";
 import type { HistoryRetention } from "./local-settings.js";
 import { authenticationOrigin, hubIdentity } from "./remote-url.js";
 import { readWorkspaceHub } from "./workspace-registry.js";
+import { captureWorkspaceDetachGeneration, workspaceDetachGeneration } from "./workspace-generation.js";
 
 export const HISTORY_CACHE_FORMAT = 1;
 const CHUNK_BYTES = 64 * 1024;
@@ -50,6 +51,17 @@ CREATE TABLE IF NOT EXISTS history_v1_deleted (
   generation TEXT NOT NULL, uuid TEXT NOT NULL, PRIMARY KEY (generation, uuid)
 );`;
 
+/** The caller owns the workspace write transaction and configuration lock. */
+export function discardDownloadedHistory(db: DatabaseSync): void {
+  const tables = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all();
+  for (const { name } of tables) {
+    if (name === "history_cache" || (typeof name === "string" &&
+      /^history_v[0-9]+_(?:catalog_chunks|snapshot_chunks|snapshots|pages|holds|deleted)$/.test(name))) {
+      db.exec(`DELETE FROM ${name}`);
+    }
+  }
+}
+
 export interface HistoryCacheStamp { hub: string; workspace: string; account: string }
 export interface HistoryCacheFileIdentity { dev: number; ino: number }
 export interface HistoryCacheToken extends HistoryCacheStamp { generation: string }
@@ -88,10 +100,13 @@ export class HistoryCache {
   private identity: HistoryCacheFileIdentity | null | undefined;
   private closed = false;
   private readonly localHolds = new Map<string, number>();
+  private readonly detachGeneration: string | null;
 
   constructor(private readonly path: string, private readonly workspace: string,
-    private readonly env: NodeJS.ProcessEnv = process.env, identity?: HistoryCacheFileIdentity | null) {
+    private readonly env: NodeJS.ProcessEnv = process.env, identity?: HistoryCacheFileIdentity | null,
+    detachGeneration = captureWorkspaceDetachGeneration(path)) {
     this.identity = identity;
+    this.detachGeneration = detachGeneration;
   }
 
   private connection(): DatabaseSync {
@@ -111,6 +126,7 @@ export class HistoryCache {
         this.db = db;
       } catch (error) { db.close(); throw error; }
     }
+    if (workspaceDetachGeneration(this.db) !== this.detachGeneration) throw new CacheRefusal("superseded");
     return this.db;
   }
 
@@ -176,6 +192,7 @@ export class HistoryCache {
         }
         db.exec("BEGIN IMMEDIATE");
         try {
+          if (workspaceDetachGeneration(db) !== this.detachGeneration) throw new CacheRefusal("superseded");
           this.header();
           if (token !== null) this.check(token);
           const value = action(db);

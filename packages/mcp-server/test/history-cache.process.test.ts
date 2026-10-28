@@ -1,9 +1,10 @@
-import { fork, type ChildProcess } from "node:child_process";
+import { execFile, fork, type ChildProcess } from "node:child_process";
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
+import { promisify } from "node:util";
 import { roomForDoc, type RevisionEntry } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
@@ -22,6 +23,7 @@ const CHECKSUM = "a".repeat(64);
 const children: ChildProcess[] = [];
 const caches: HistoryCache[] = [];
 const stores: MirrorStore[] = [];
+const execFileAsync = promisify(execFile);
 type Message = { type: string; name?: string; started?: number; ended?: number; error?: string };
 
 afterEach(async () => {
@@ -92,6 +94,37 @@ function worker(mode: string, path: string, directory: string) {
 }
 
 describe("history cache between processes", () => {
+  it("discards downloaded history and fences old writers even after the original hub and account return", async () => {
+    const test = await fixture();
+    ready(test.cache.putCatalog(test.token, PAGE, { revisions: [{ id: "revision-0", author: null, startedAt: 1,
+      endedAt: 2, final: true, checksum: CHECKSUM }], version: "before", refreshedAt: 1, complete: true, failed: false }));
+    ready(test.cache.putSnapshot(test.token, PAGE, "revision-0", CHECKSUM, new Uint8Array([9])));
+    test.store.setHistoryRetention({ mode: "named" });
+    test.store.appendUpdate(roomForDoc(WORKSPACE, SAVE_PAGE), new Uint8Array([0, 0]), "local");
+    expect(() => test.store.detachWorkspace(() => { throw new Error("binding write failed"); })).toThrow("binding write failed");
+    expect(ready(test.cache.readSnapshot(test.token, PAGE, "revision-0"))?.state).toEqual(Buffer.from([9]));
+    await execFileAsync(process.execPath, [builtWorker("workspace-detach"), test.path, WORKSPACE]);
+
+    // The registry deliberately still names the same hub, modelling a later reconnect.
+    expect(test.cache.open({ hub: HUB, workspace: WORKSPACE, account: "123" }).status).toBe("superseded");
+    expect(test.cache.putSnapshot(test.token, PAGE, "after", CHECKSUM, new Uint8Array([8])).status).toBe("superseded");
+    const restartedStore = new MirrorStore(test.path, WORKSPACE);
+    stores.push(restartedStore);
+    expect(restartedStore.readHistoryRetention()).toEqual({ mode: "named" });
+    expect(restartedStore.pendingRooms().some(room => room.room === roomForDoc(WORKSPACE, SAVE_PAGE))).toBe(true);
+    const restartedCache = new HistoryCache(test.path, WORKSPACE, test.env);
+    caches.push(restartedCache);
+    const reconnected = ready(restartedCache.open({ hub: HUB, workspace: WORKSPACE, account: "123" }));
+    expect(reconnected.generation).not.toBe(test.token.generation);
+    expect(ready(restartedCache.readCatalog(reconnected, PAGE))).toBeNull();
+    expect(ready(restartedCache.readSnapshot(reconnected, PAGE, "revision-0"))).toBeNull();
+    const inspector = new DatabaseSync(test.path);
+    try {
+      expect(inspector.prepare("SELECT COUNT(*) AS n FROM history_v1_catalog_chunks").get()?.n).toBe(0);
+      expect(inspector.prepare("SELECT COUNT(*) AS n FROM history_v1_snapshot_chunks").get()?.n).toBe(0);
+    } finally { inspector.close(); }
+  });
+
   it("leaves configuration and cache writes available after a downloader is killed inside a chunk transaction", async () => {
     const test = await fixture();
     const downloader = worker("crash-write", test.path, test.directory);

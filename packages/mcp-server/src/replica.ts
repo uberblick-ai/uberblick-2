@@ -54,7 +54,7 @@ import { closeDocumentHistory } from "./revision-client.js";
 import { log } from "./log.js";
 import { collectReplicaSyncState } from "./status.js";
 import type { MirrorStore, UpdateOrigin } from "./store.js";
-import { SettingsResetError, WorkspaceRemovedError } from "./store.js";
+import { SettingsResetError, WorkspaceDetachedError, WorkspaceRemovedError } from "./store.js";
 import { HubSync, LOCAL_HUB_REASON, type HubState, type SyncWaitResult } from "./sync.js";
 import { createLocalCredentialProvider, type CredentialProvider } from "./credential-provider.js";
 
@@ -253,6 +253,7 @@ export class Replicas {
       this.refusedDeletedDocs.add(uuid);
       this.purgeDeletedDocs();
     }, onSettingsReset: (state, refused) => this.acceptSettingsReset(state, refused),
+    canSync: () => !this.store.isRemoved() && !this.store.isDetached(),
     readLog: (room, seq) => this.store.readForSync(room, seq),
     acknowledgeLog: (room, seq) => this.store.acknowledgeSync(room, seq) });
 
@@ -296,6 +297,10 @@ export class Replicas {
 
   /** Refuse workspace reads and writes from state the log cannot restore. */
   assertHealthy(): void {
+    if (this.store.isDetached()) {
+      this.sync.quarantine();
+      throw new WorkspaceDetachedError();
+    }
     if (this.store.isRemoved()) {
       this.persistenceFailure ??= {
         room: directoryRoom(this.config.workspaceId),
@@ -942,7 +947,7 @@ export class Replicas {
    */
   async settle(options: { requireHealthy?: boolean } = {}): Promise<void> {
     const requireHealthy = options.requireHealthy !== false;
-    if (!requireHealthy && this.store.isRemoved()) {
+    if (!requireHealthy && (this.store.isRemoved() || this.store.isDetached())) {
       this.sync.quarantine();
       return;
     }
@@ -1052,7 +1057,7 @@ export class Replicas {
 
   /** Await only durable local changes, leaving unrelated hydration out of shutdown. */
   async waitForPendingChanges(deadline: number): Promise<number> {
-    if (this.store.isRemoved()) {
+    if (this.store.isRemoved() || this.store.isDetached()) {
       this.sync.quarantine();
       return 0;
     }

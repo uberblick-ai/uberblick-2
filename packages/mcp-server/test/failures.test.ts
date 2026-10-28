@@ -25,7 +25,7 @@ import {
 } from "../src/failures.js";
 import { RevisionClientError } from "../src/revision-client.js";
 import { ServerShuttingDownError } from "../src/server-work.js";
-import { MirrorStore, WorkspaceRemovedError } from "../src/store.js";
+import { MirrorStore, WorkspaceDetachedError, WorkspaceRemovedError } from "../src/store.js";
 import type { SearchHit } from "../src/store.js";
 import {
   FailingStore,
@@ -138,6 +138,7 @@ const EXPECTED: Record<
   unknown_help_topic: { recoveryClass: "manual", detail: ["topics"] },
   persistence_failed: { recoveryClass: "manual", detail: ["room"] },
   workspace_removed: { recoveryClass: "manual", detail: [] },
+  workspace_detached: { recoveryClass: "manual", detail: [] },
   stale_block: {
     recoveryClass: "reread",
     detail: ["blockId", "currentText", "currentRev", "retry"],
@@ -637,6 +638,7 @@ describe("the failure contract", () => {
     // Admission refusals use the same failure floor as every other tool error.
     record(toFailure(toolNamed("set_metadata"), new ServerShuttingDownError()).payload);
     record(toFailure(toolNamed("create_doc"), new WorkspaceRemovedError()).payload);
+    record(toFailure(toolNamed("create_doc"), new WorkspaceDetachedError()).payload);
 
     // Valid MCP inputs cannot cross decision kinds; retain the defensive
     // mapper for shared-model lifecycle errors from an internal caller.

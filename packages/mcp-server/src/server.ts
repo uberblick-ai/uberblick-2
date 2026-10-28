@@ -124,7 +124,7 @@ function openRuntime(
       closing = Promise.resolve().then(async () => {
         await Promise.all(draining);
         const pending = await replicas.waitForPendingChanges(deadline - SHUTDOWN_CLOSE_RESERVE_MS);
-        if (!store.isRemoved() && replicas.sync.enabled && replicas.config.localWorkspace !== true && pending > 0) {
+        if (!store.isRemoved() && !store.isDetached() && replicas.sync.enabled && replicas.config.localWorkspace !== true && pending > 0) {
           log.warn(`${pending} changes are still only local; they sync the next time Uberblick on this machine reaches the hub.`);
         }
         await historyClosed;

@@ -32,6 +32,7 @@ const osSensitive = [
   "workspace-fork",
   "workspace-history",
   "workspace-removal",
+  "workspace-detach",
 ];
 
 const osOnly = process.env.UB_TEST_SCOPE === "os";

@@ -2,6 +2,7 @@ import { statSync } from "node:fs";
 import { parseWorkspaceId } from "@uberblick/schema";
 import {
   createMcpEngine,
+  captureWorkspaceDetachGeneration,
   ServingReplicaHeldError,
   type McpConfig,
   type UberblickMcpEngine,
@@ -10,7 +11,8 @@ import { resolveConfig } from "@uberblick/mcp-server/project-config";
 import { resolveMcpConfig } from "./budget.js";
 import { localBrowserKey } from "./browser-key.js";
 import type { ProjectBinding } from "@uberblick/mcp-server/project-binding";
-import { readWorkspaceHub } from "@uberblick/mcp-server/workspace-registry";
+import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
+import { assertWorkspaceBinding, readWorkspaceHub } from "@uberblick/mcp-server/workspace-registry";
 import { listWorkspaces } from "./workspace.js";
 
 export interface ServedWorkspace {
@@ -19,6 +21,8 @@ export interface ServedWorkspace {
   browserKey: string;
   binding: ProjectBinding;
   config: McpConfig;
+  env: NodeJS.ProcessEnv;
+  detachGeneration: string | null;
 }
 
 function isFile(path: string): boolean {
@@ -41,14 +45,20 @@ export function browserWorkspaces(
     browserKey: localBrowserKey(id, env),
     binding: startup,
     config: startupConfig,
+    env: { ...env },
+    detachGeneration: captureWorkspaceDetachGeneration(startupConfig.databasePath),
   }]]);
   for (const entry of entries) {
     if (entry.uuid === id || !isFile(entry.databasePath)) continue;
     const hubUrl = readWorkspaceHub(entry.uuid, env) ?? null;
     let browserKey: string;
-    try { browserKey = localBrowserKey(entry.uuid, env); }
+    let detachGeneration: string | null;
+    try {
+      browserKey = localBrowserKey(entry.uuid, env);
+      detachGeneration = captureWorkspaceDetachGeneration(entry.databasePath);
+    }
     catch (error) {
-      // A secondary's refused key must not stop a healthy startup workspace.
+      // A secondary's refused key or unreadable state must not stop startup.
       // The refusal names the repair but never the key's stored contents.
       warn(`workspace ${entry.uuid} is unavailable: ${error instanceof Error ? error.message : String(error)}`);
       continue;
@@ -69,6 +79,8 @@ export function browserWorkspaces(
       binding: { workspaceId: entry.uuid, hubUrl },
       // Local-only is explicit, never an invitation to dial the default hub.
       config: hubUrl === null ? { ...localConfig, authSecret: null } : config,
+      env: { ...env },
+      detachGeneration,
     });
   }
   return result;
@@ -118,7 +130,7 @@ export class BrowserReplicas {
     if (workspace === undefined) throw new BrowserReplicaUnavailable("replica-failed");
     let started = this.starts.get(id);
     if (started === undefined) {
-      started = createMcpEngine(workspace.config, { serving: true }).then(engine => {
+      started = this.start(workspace).then(engine => {
         this.engines.set(id, engine);
         if (!this.closing) this.unsubscribes.push(engine.onRefresh(() => this.refresh(id)));
         requireHealthy(engine);
@@ -131,6 +143,21 @@ export class BrowserReplicas {
     }
     await started;
     return this.read(id);
+  }
+
+  private async start(workspace: ServedWorkspace): Promise<UberblickMcpEngine> {
+    const lock = await acquireInitLock(workspace.env);
+    let starting: Promise<UberblickMcpEngine>;
+    try {
+      if (this.closing || captureWorkspaceDetachGeneration(workspace.config.databasePath) !== workspace.detachGeneration) {
+        throw new BrowserReplicaUnavailable("replica-failed");
+      }
+      assertWorkspaceBinding(workspace.binding, workspace.env, "running ub open");
+      // Engine creation takes the serving role synchronously before its first
+      // await, so detach cannot interleave after this binding check.
+      starting = createMcpEngine(workspace.config, { serving: true });
+    } finally { lock.release(); }
+    return starting;
   }
 
   async close(): Promise<void> {

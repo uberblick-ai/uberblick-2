@@ -201,8 +201,8 @@ describe("the versioned install payload", () => {
     expect(failed.stderr).toContain("Error: EISDIR: illegal operation on a directory, open");
     for (const [path, statement] of [
       ["packages/mcp-server/src/store.ts", "this.identityFd = openSync(databasePath, \"a+\", 0o600)"],
-      ["packages/mcp-server/src/workspace-replicas.ts", "options.store ?? new MirrorStore(config.databasePath, config.workspaceId);"],
-      ["packages/mcp-server/src/main.ts", "const instance = createMcpServer(config)"],
+      ["packages/mcp-server/src/main.ts", "const store = new MirrorStore(config.databasePath, config.workspaceId)"],
+      ["packages/mcp-server/src/main.ts", "const instance = openStdioServer(config)"],
       ["packages/mcp-server/src/main.ts", "main().catch("],
     ] as const) {
       expect(failed.stderr).toContain(`${path}:${sourceLine(path, statement)}:`);

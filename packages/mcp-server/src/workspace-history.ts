@@ -29,6 +29,7 @@ export function startWorkspaceHistory(replicas: Replicas, isCurrent: () => boole
   const cache = new HistoryMirrorCache(store.databasePath, config.workspaceId, env);
   const stamp = () => workspaceHistoryStamp(replicas);
   const requireAccount = (room: string): void => {
+    replicas.assertHealthy();
     const current = stamp();
     const admitted = sync.historyAccount(room);
     if (current === null || (admitted !== null && admitted !== current.account)) {
@@ -52,8 +53,9 @@ export function startWorkspaceHistory(replicas: Replicas, isCurrent: () => boole
     retention: () => store.readHistoryRetention(),
     stamp,
     ready: () => isCurrent() && sync.isQuiet() && store.pendingRooms().length === 0 &&
-      replicas.persistenceError() === null && !store.isRemoved(),
+      replicas.persistenceError() === null && !store.isRemoved() && !store.isDetached(),
     request: async (room, operation) => {
+      requireAccount(room);
       await clock.ensure();
       requireAccount(room);
       requireDocumentHistory(replicas, room.slice(config.workspaceId.length + 1));
