@@ -44,6 +44,8 @@ import { createTeamHub as createHub } from "@uberblick/hub/team";
 import type { TeamHub as Hub } from "@uberblick/hub/team";
 import type { TeamHubConfig as HubConfig } from "@uberblick/hub/team-config";
 import { issueCredential } from "@uberblick/hub/test-device-credentials";
+import { AgentGrantRegistry } from "../../hub/src/agent-grants.js";
+import { HubDatabase } from "../../hub/src/persistence.js";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
 import { createRevisionResponseReader, directoryRoom, encodeRevisionRequest, getBlocks, getMeta, getWorkspaceMainRepository, getWorkspaceName, listTagCatalog, repairDirectoryStub, roomForDoc, seedTagCatalog, settingsRoom, snapshotRevision } from "@uberblick/schema";
 import type { RevisionEntry, RevisionResponse } from "@uberblick/schema";
@@ -250,6 +252,8 @@ export interface Harness {
   createMcpAgent(statePrefix: string): McpAgent;
   /** Public fixture identities for access-control browser proofs. */
   readonly access?: { principalId: string; otherDeviceId: string; legacyDeviceId: string; foreignDeviceId: string; deviceName: string };
+  /** Create consent state without issuing its credential, on this fixture's private hub. */
+  createAgentGrant(clientName: string, scope: "read-only" | "read-write"): string;
   /** Remove the browser account's hub role while its devices and memberships stay. */
   removeCurrentHubAdmin(): void;
   changeCurrentWorkspaceRole(role: "member" | "admin"): void;
@@ -674,6 +678,15 @@ export async function startHarness(options: {
       createMcpAgent(statePrefix) {
         return new McpAgent({ workspace, hubUrl, authSecret: SECRET, statePrefix,
           ...(accessRole === undefined ? {} : { configHome: join(runDir, "config") }) });
+      },
+      createAgentGrant(clientName, scope) {
+        if (access === undefined || hub === null) throw new Error("Agent grant fixture needs a signed-in account");
+        const database = new HubDatabase(hub.databasePath, error => { throw error; });
+        database.open();
+        try {
+          return new AgentGrantRegistry(database).create({ clientId: "browser-hosted-client", clientName,
+            principalId: access.principalId, workspaceId: workspaceUuid, scope }).deviceId;
+        } finally { database.close(); }
       },
       workspace,
       workspaceUuid,

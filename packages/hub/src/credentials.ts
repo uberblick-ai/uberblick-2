@@ -2,10 +2,12 @@
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { HubDatabase } from "./persistence.js";
-import { MembershipRegistry } from "./memberships.js";
+import type { MembershipRegistry } from "./memberships.js";
 import { AgentGrantRegistry } from "./agent-grants.js";
 import { HubAdminRegistry } from "./hub-admins.js";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
+import { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
+import { WorkspaceNameReader } from "./workspace-names.js";
 import {
   type ClampFailure,
   type RequestAction,
@@ -58,6 +60,10 @@ export interface DeviceRecord {
   deviceName?: string;
   signedInAt: number;
   workspaces: string[];
+  hosted?: true;
+  workspaceId?: string;
+  workspaceName?: string;
+  scope?: TokenScope;
 }
 
 export type CredentialRenewal =
@@ -120,7 +126,6 @@ function recordFromRow(row: CredentialRow): CredentialRecord {
 export class CredentialRegistry {
   private readonly db: DatabaseSync;
   private readonly grants: AgentGrantRegistry;
-  private readonly memberships: MembershipRegistry;
   private readonly insert: StatementSync;
   private readonly select: StatementSync;
   private readonly selectKey: StatementSync;
@@ -135,13 +140,13 @@ export class CredentialRegistry {
   private readonly revokeListeners = new Set<(credentialId: string) => void>();
 
   constructor(database: HubDatabase, private readonly hubAdmins = new HubAdminRegistry(database),
-    private readonly log: HubLogger = stderrLogger, private readonly now: () => number = () => Date.now()) {
+    private readonly log: HubLogger = stderrLogger, private readonly now: () => number = () => Date.now(),
+    private readonly workspaceNames = new WorkspaceNameReader(database)) {
     // Database opening upgrades existing rows before any registry prepares queries.
     const db = database.connection;
     this.db = db;
     db.exec(CREDENTIAL_SCHEMA);
-    this.grants = new AgentGrantRegistry(database);
-    this.memberships = new MembershipRegistry(database);
+    this.grants = new AgentGrantRegistry(database, this.now);
     db.exec(`CREATE TABLE IF NOT EXISTS hub_used_request_proofs (
       proof TEXT PRIMARY KEY NOT NULL,
       expires_at INTEGER NOT NULL
@@ -185,6 +190,7 @@ export class CredentialRegistry {
           ORDER BY history.rowid LIMIT 1) AS signed_in_at
       FROM hub_credentials AS current
       WHERE current.principal_id = $principalId
+        AND current.ceiling IS NULL
         AND current.revoked_at IS NULL AND current.replaced_at IS NULL
         AND current.issued_at > $oldestIssuedAt
       ORDER BY current.device_id
@@ -210,8 +216,7 @@ export class CredentialRegistry {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const grant = this.grants.get(grantId);
-      if (grant === null || grant.revokedAt !== null ||
-        this.memberships.roleFor(grant.workspaceId, grant.principalId) === null) {
+      if (grant === null || !this.grants.isLive(grantId)) {
         this.db.exec("ROLLBACK");
         return null;
       }
@@ -231,6 +236,10 @@ export class CredentialRegistry {
     } catch (error) {
       this.revoke(issued.record.id);
       throw error;
+    }
+    if (!this.grants.isLive(grantId)) {
+      this.revoke(issued.record.id);
+      return null;
     }
     return "failure" in this.usable(this.get(issued.record.id)) ? null : issued;
   }
@@ -294,12 +303,16 @@ export class CredentialRegistry {
     if (record === null) return { failure: "unknown-credential" };
     if (record.revokedAt !== null) return { failure: "revoked-credential" };
     if (record.replacedAt !== null) return { failure: "replaced-credential" };
+    if (record.ceiling !== undefined) {
+      const grant = this.grants.get(record.ceiling.grantId);
+      if (grant === null || grant.revokedAt !== null) return { failure: "revoked-credential" };
+    }
     return this.isExpired(record) ? { failure: "expired-credential" } : { record };
   }
 
-  /** Principal-level management; only devices with a current credential exist here. */
+  /** Consent grants stay visible independently of their credentials and membership. */
   listDevices(principalId: string): DeviceRecord[] {
-    return this.selectDevices.all({ principalId, oldestIssuedAt: this.now() - DEVICE_CREDENTIAL_LIFETIME_MS }).map((row) => {
+    const laptops = this.selectDevices.all({ principalId, oldestIssuedAt: this.now() - DEVICE_CREDENTIAL_LIFETIME_MS }).map((row) => {
       const deviceName = sanitizeDeviceName(row.device_name);
       return {
         deviceId: row.device_id as string,
@@ -308,6 +321,18 @@ export class CredentialRegistry {
         workspaces: JSON.parse(row.workspaces as string) as string[],
       };
     });
+    const grants = this.grants.listForPrincipal(principalId).map(grant => {
+      const deviceName = sanitizeDeviceName(grant.clientName);
+      const workspaceName = sanitizeWorkspaceNames({ [grant.workspaceId]: this.workspaceNames.read(grant.workspaceId) },
+        [grant.workspaceId])?.[grant.workspaceId];
+      return {
+        deviceId: grant.deviceId, signedInAt: grant.createdAt, workspaces: [grant.workspaceId],
+        hosted: true as const, workspaceId: grant.workspaceId, scope: grant.scope,
+        ...(deviceName === undefined ? {} : { deviceName }),
+        ...(workspaceName === undefined ? {} : { workspaceName }),
+      };
+    });
+    return [...laptops, ...grants].sort((a, b) => a.deviceId.localeCompare(b.deviceId));
   }
 
   /**
@@ -394,10 +419,14 @@ export class CredentialRegistry {
       if (reused) {
         const ids = this.selectDeviceCredentials.all({ principalId: current.principalId, deviceId: current.deviceId })
           .map((credential) => credential.id as string);
-        this.markDeviceRevoked.run({ principalId: current.principalId, deviceId: current.deviceId, revokedAt: this.now() });
+        this.endDevice(current.principalId, current.deviceId);
         this.db.exec("COMMIT");
         exchanged = { reused: current, ids };
       } else {
+        if (current.ceiling !== undefined && !this.grants.isLive(current.ceiling.grantId)) {
+          this.db.exec("ROLLBACK");
+          return refusal;
+        }
         const eligible = memberships.workspacesFor(current.principalId)
           .filter(workspace => current.ceiling === undefined || workspace === current.ceiling.workspaceId);
         const workspaces = this.hubAdmins.availableWorkspaces(eligible).sort();
@@ -443,7 +472,8 @@ export class CredentialRegistry {
     // Closure callbacks are synchronous but can themselves revoke access.
     // Such a revocation still landed during the exchange and must win.
     if (this.get(proof.kid)?.revokedAt !== null ||
-      this.get(issued.record.id)?.revokedAt !== null) {
+      "failure" in this.usable(this.get(issued.record.id)) ||
+      (issued.record.ceiling !== undefined && !this.grants.isLive(issued.record.ceiling.grantId))) {
       this.revoke(issued.record.id);
       return refusal;
     }
@@ -476,11 +506,12 @@ export class CredentialRegistry {
     try {
       ids = this.selectDeviceCredentials.all({ principalId, deviceId })
         .map((row) => row.id as string);
-      if (ids.length === 0) {
+      const grant = this.grants.getForDevice(principalId, deviceId);
+      if (ids.length === 0 && grant === null) {
         this.db.exec("ROLLBACK");
         return false;
       }
-      this.markDeviceRevoked.run({ principalId, deviceId, revokedAt: this.now() });
+      this.endDevice(principalId, deviceId);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -488,6 +519,13 @@ export class CredentialRegistry {
     }
     this.closeCredentials(ids);
     return true;
+  }
+
+  /** Called inside the revocation transaction, never by credential replacement or expiry. */
+  private endDevice(principalId: string, deviceId: string): void {
+    this.markDeviceRevoked.run({ principalId, deviceId, revokedAt: this.now() });
+    const grant = this.grants.getForDevice(principalId, deviceId);
+    if (grant !== null) this.grants.revoke(grant.id);
   }
 
   private closeCredential(id: string): void {

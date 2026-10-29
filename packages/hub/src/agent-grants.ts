@@ -1,6 +1,7 @@
 import type { StatementSync } from "node:sqlite";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { isTokenScope, type TokenScope } from "@uberblick/schema/token";
+import { MembershipRegistry } from "./memberships.js";
 import type { HubDatabase } from "./persistence.js";
 
 export interface AgentGrantRecord {
@@ -11,6 +12,7 @@ export interface AgentGrantRecord {
   workspaceId: string;
   scope: TokenScope;
   deviceId: string;
+  createdAt: number;
   revokedAt: number | null;
 }
 
@@ -31,6 +33,7 @@ function fromRow(row: Record<string, unknown>): AgentGrantRecord {
     workspaceId: row.workspace_id as string,
     scope: row.scope as TokenScope,
     deviceId: row.device_id as string,
+    createdAt: row.created_at as number,
     revokedAt: row.revoked_at as number | null,
   };
 }
@@ -39,7 +42,10 @@ function fromRow(row: Record<string, unknown>): AgentGrantRecord {
 export class AgentGrantRegistry {
   private readonly insert: StatementSync;
   private readonly select: StatementSync;
+  private readonly selectDevice: StatementSync;
+  private readonly selectPrincipal: StatementSync;
   private readonly markRevoked: StatementSync;
+  private readonly memberships: MembershipRegistry;
 
   constructor(database: HubDatabase, private readonly now: () => number = Date.now) {
     const db = database.connection;
@@ -51,13 +57,24 @@ export class AgentGrantRegistry {
       workspace_id TEXT NOT NULL,
       scope TEXT NOT NULL CHECK(scope IN ('read-only', 'read-write')),
       device_id TEXT UNIQUE NOT NULL,
+      created_at INTEGER NOT NULL,
       revoked_at INTEGER
     )`);
+    const columns = db.prepare("PRAGMA table_info(hub_agent_grants)").all();
+    if (!columns.some(column => column.name === "created_at")) {
+      // Older grants did not record consent time; zero retains that unknown date.
+      db.exec("ALTER TABLE hub_agent_grants ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0");
+    }
+    this.memberships = new MembershipRegistry(database);
     this.insert = db.prepare(`INSERT INTO hub_agent_grants
-      (id, client_id, client_name, principal_id, workspace_id, scope, device_id)
-      VALUES ($id, $clientId, $clientName, $principalId, $workspaceId, $scope, $deviceId)
+      (id, client_id, client_name, principal_id, workspace_id, scope, device_id, created_at)
+      VALUES ($id, $clientId, $clientName, $principalId, $workspaceId, $scope, $deviceId, $createdAt)
       RETURNING *`);
     this.select = db.prepare("SELECT * FROM hub_agent_grants WHERE id = $id");
+    this.selectDevice = db.prepare(`SELECT * FROM hub_agent_grants
+      WHERE principal_id = $principalId AND device_id = $deviceId`);
+    this.selectPrincipal = db.prepare(`SELECT * FROM hub_agent_grants
+      WHERE principal_id = $principalId AND revoked_at IS NULL ORDER BY device_id`);
     this.markRevoked = db.prepare(`UPDATE hub_agent_grants SET revoked_at = $revokedAt
       WHERE id = $id AND revoked_at IS NULL`);
   }
@@ -79,7 +96,7 @@ export class AgentGrantRegistry {
     }
     const row = this.insert.get({ id: crypto.randomUUID(), clientId: request.clientId, clientName: request.clientName,
       principalId: request.principalId, workspaceId: request.workspaceId, scope: request.scope,
-      deviceId: crypto.randomUUID() });
+      deviceId: crypto.randomUUID(), createdAt: this.now() });
     if (row === undefined) throw new Error("AgentGrantRegistry.create: grant was not persisted");
     return fromRow(row);
   }
@@ -89,6 +106,23 @@ export class AgentGrantRegistry {
     return row === undefined ? null : fromRow(row);
   }
 
+  getForDevice(principalId: string, deviceId: string): AgentGrantRecord | null {
+    const row = this.selectDevice.get({ principalId, deviceId });
+    return row === undefined ? null : fromRow(row);
+  }
+
+  /** Own-device management remains available after workspace membership ends. */
+  listForPrincipal(principalId: string): AgentGrantRecord[] {
+    return this.selectPrincipal.all({ principalId }).map(fromRow);
+  }
+
+  isLive(id: string): boolean {
+    const grant = this.get(id);
+    return grant !== null && grant.revokedAt === null &&
+      this.memberships.roleFor(grant.workspaceId, grant.principalId) !== null;
+  }
+
+  /** Storage mutation; end access through CredentialRegistry.revokeDevice to include credentials and rooms. */
   revoke(id: string): boolean {
     return this.markRevoked.run({ id, revokedAt: this.now() }).changes > 0;
   }

@@ -229,7 +229,7 @@ test.describe("a current workspace and hub admin", () => {
         await expect(page.getByRole("menuitem")).toHaveText(["Preferences", "Devices"]);
         await page.getByRole("menuitem", { name: "Devices", exact: true }).click();
         await expect(page.getByRole("heading", { name: "Devices", exact: true })).toBeVisible();
-        await expect(page.getByText(`Computers signed in to ${new URL(harness().hubUrl).host} as @browser-person. Revoking one stops its sync; its downloaded documents stay.`, { exact: true })).toBeVisible();
+        await expect(page.getByText(`Computers and hosted agents signed in to ${new URL(harness().hubUrl).host} as @browser-person. Revoking one stops its access; downloaded documents stay.`, { exact: true })).toBeVisible();
         if (offline === "waiting") {
           await expect(page.getByText("Reading devices from the hub…", { exact: true })).toBeVisible();
         }
@@ -444,7 +444,7 @@ for (const role of ["member", "none"] as const) {
       await personalNavigation(page).getByRole("button", { name: "Devices", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Devices", exact: true })).toBeVisible();
       const host = new URL(harness().hubUrl).host;
-      await expect(page.getByText(`Computers signed in to ${host} as @browser-person. Revoking one stops its sync; its downloaded documents stay.`, { exact: true })).toBeVisible();
+      await expect(page.getByText(`Computers and hosted agents signed in to ${host} as @browser-person. Revoking one stops its access; downloaded documents stay.`, { exact: true })).toBeVisible();
       await expect(page.getByRole("table", { name: "Devices", exact: true })).toBeVisible();
       await expect(account).toContainText(role === "member" ? "@browser-person" : "Account unavailable");
       if (role === "none") {

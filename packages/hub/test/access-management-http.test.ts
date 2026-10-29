@@ -12,6 +12,7 @@ import type { HubLogRecord } from "../src/log.js";
 import type { MembershipRole } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
+import { setWorkspaceName, settingsRoom } from "@uberblick/schema";
 import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
 import { DEVICE_CREDENTIAL_LIFETIME_MS, importCredentialKey, importRootSecret, mintToken, type RequestAction } from "@uberblick/schema/token";
 import { createClient, OTHER_WORKSPACE, removeTempDatabases, tempDatabasePath, TEST_SECRET, testRoom,
@@ -497,6 +498,120 @@ describe("authenticated hub access management", () => {
       .toEqual({ code: 200, result: { status: "ok" } });
     expect(await manage(hub, second, { operation: "list-devices" }))
       .toEqual({ code: 401, result: { status: "sign-in-required" } });
+  });
+
+  it.each(["read-only", "read-write"] as const)("lists an unused %s grant at consent and revokes it only for its person", async scope => {
+    const { hub } = await rig();
+    const owner = person(hub, "1234", "owner", [[WORKSPACE, "member"]]);
+    const foreign = person(hub, "5678", "foreign", [[WORKSPACE, "admin"]]);
+    const database = new HubDatabase(hub.databasePath, error => { throw error; });
+    database.open();
+    const settings = new Y.Doc();
+    try {
+      setWorkspaceName(settings, "Agent workspace");
+      database.connection.prepare("INSERT INTO documents (name, data) VALUES (?, ?)")
+        .run(settingsRoom(WORKSPACE), Y.encodeStateAsUpdate(settings));
+      const grants = new AgentGrantRegistry(database);
+      const grant = grants.create({ clientId: "hosted-agent", clientName: "Consent-time agent",
+        principalId: owner.principal.id, workspaceId: WORKSPACE, scope });
+      const listed = await manage(hub, owner.issued, { operation: "list-devices" });
+      expect(listed).toEqual({ code: 200, result: { status: "ok", devices: expect.arrayContaining([
+        { deviceId: grant.deviceId, deviceName: "Consent-time agent", signedInAt: grant.createdAt,
+          workspaces: [WORKSPACE], current: false, hosted: true, workspaceId: WORKSPACE,
+          workspaceName: "Agent workspace", scope },
+      ]) } });
+      expect(listed.result.devices).toHaveLength(2);
+      expect(database.connection.prepare("SELECT COUNT(*) AS count FROM hub_credentials WHERE device_id = ?")
+        .get(grant.deviceId)?.count).toBe(0);
+      expect(await manage(hub, foreign.issued, { operation: "revoke-device", deviceId: grant.deviceId }))
+        .toEqual({ code: 404, result: { status: "device-not-found" } });
+      expect(grants.isLive(grant.id)).toBe(true);
+      expect((await manage(hub, foreign.issued, { operation: "list-devices" })).result.devices)
+        .not.toContainEqual(expect.objectContaining({ deviceId: grant.deviceId }));
+      expect(await manage(hub, owner.issued, { operation: "revoke-device", deviceId: grant.deviceId }))
+        .toEqual({ code: 200, result: { status: "ok" } });
+      expect(grants.get(grant.id)?.revokedAt).toBeTypeOf("number");
+      expect(grants.isLive(grant.id)).toBe(false);
+      expect(hub.credentials!.issueForGrant(grant.id, generateTestCredentialKeyPair().publicKey)).toBeNull();
+      expect((await manage(hub, owner.issued, { operation: "list-devices" })).result.devices)
+        .not.toContainEqual(expect.objectContaining({ deviceId: grant.deviceId }));
+    } finally {
+      settings.destroy();
+      database.close();
+    }
+  });
+
+  it("revoking a used grant through its device row revokes its credential history and closes its rooms", async () => {
+    const { hub } = await rig();
+    const owner = person(hub, "1234", "owner", [[WORKSPACE, "member"]]);
+    const database = new HubDatabase(hub.databasePath, error => { throw error; });
+    database.open();
+    try {
+      const grants = new AgentGrantRegistry(database);
+      const grant = grants.create({ clientId: "hosted-agent", clientName: "Hosted Agent",
+        principalId: owner.principal.id, workspaceId: WORKSPACE, scope: "read-write" });
+      const old = hub.credentials!.issueForGrant(grant.id, generateTestCredentialKeyPair().publicKey)!;
+      const pair = generateTestCredentialKeyPair();
+      const issued = { ...hub.credentials!.issueForGrant(grant.id, pair.publicKey)!, keyBytes: pair.keyBytes };
+      const room = testRoom();
+      const hosted = connect(hub, room, await roomToken(issued));
+      const laptop = connect(hub, room, await roomToken(owner.issued));
+      await Promise.all([hosted.synced, laptop.synced]);
+      expect(hub.hocuspocus.documents.get(room)!.getConnections()).toHaveLength(2);
+      expect(await manage(hub, owner.issued, { operation: "revoke-device", deviceId: grant.deviceId }))
+        .toEqual({ code: 200, result: { status: "ok" } });
+      await waitUntil("revoked grant's room closes", () => hub.hocuspocus.documents.get(room)!.getConnections().length === 1);
+      expect(grants.get(grant.id)?.revokedAt).toBeTypeOf("number");
+      expect(hub.credentials!.get(old.record.id)?.revokedAt).toBeTypeOf("number");
+      expect(hub.credentials!.get(issued.record.id)?.revokedAt).toBeTypeOf("number");
+      expect(hub.credentials!.get(owner.issued.record.id)?.revokedAt).toBeNull();
+      await expect(connect(hub, room, await roomToken(issued)).denied).resolves.toBe("device-credential-refused");
+      const renewal = await mintRequestProof(await importCredentialKey(issued.keyBytes), {
+        kid: issued.record.id, operation: "renew-credential", lifetimeSeconds: 60,
+      });
+      expect(await renewCredential(hub.credentials!, renewal, hub.memberships!)).toEqual({ status: "sign-in-required" });
+      expect(hub.credentials!.issueForGrant(grant.id, generateTestCredentialKeyPair().publicKey)).toBeNull();
+      expect((await manage(hub, owner.issued, { operation: "list-devices" })).result.devices)
+        .not.toContainEqual(expect.objectContaining({ deviceId: grant.deviceId }));
+    } finally {
+      database.close();
+    }
+  });
+
+  it("membership removal closes grant rooms without ending its grant or hiding its device row, and rejoining restores access", async () => {
+    const { hub } = await rig();
+    const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
+    const member = person(hub, "5678", "member", [[WORKSPACE, "member"]]);
+    const database = new HubDatabase(hub.databasePath, error => { throw error; });
+    database.open();
+    try {
+      const grants = new AgentGrantRegistry(database);
+      const grant = grants.create({ clientId: "hosted-agent", clientName: "Hosted Agent",
+        principalId: member.principal.id, workspaceId: WORKSPACE, scope: "read-write" });
+      const pair = generateTestCredentialKeyPair();
+      const issued = { ...hub.credentials!.issueForGrant(grant.id, pair.publicKey)!, keyBytes: pair.keyBytes };
+      const room = testRoom();
+      const hosted = connect(hub, room, await roomToken(issued));
+      const observer = connect(hub, room, await roomToken(admin.issued));
+      await Promise.all([hosted.synced, observer.synced]);
+      expect(await manage(hub, admin.issued, { operation: "remove-member", workspaceId: WORKSPACE,
+        principalId: member.principal.id })).toEqual({ code: 200, result: { status: "ok" } });
+      await waitUntil("removed member's grant room closes", () => hub.hocuspocus.documents.get(room)!.getConnections().length === 1);
+      expect(grants.isLive(grant.id)).toBe(false);
+      expect(grants.get(grant.id)?.revokedAt).toBeNull();
+      expect(hub.credentials!.get(issued.record.id)?.revokedAt).toBeNull();
+      expect(hub.credentials!.issueForGrant(grant.id, generateTestCredentialKeyPair().publicKey)).toBeNull();
+      await expect(connect(hub, room, await roomToken(issued)).denied).resolves.toBe("device-credential-refused");
+      expect((await manage(hub, member.issued, { operation: "list-devices" })).result.devices)
+        .toContainEqual(expect.objectContaining({ deviceId: grant.deviceId, signedInAt: grant.createdAt, hosted: true }));
+      hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: member.principal.id, role: "member" });
+      expect(grants.isLive(grant.id)).toBe(true);
+      await connect(hub, room, await roomToken(issued)).synced;
+      expect(hub.credentials!.issueForGrant(grant.id, generateTestCredentialKeyPair().publicKey)).not.toBeNull();
+      expect(grants.get(grant.id)?.revokedAt).toBeNull();
+    } finally {
+      database.close();
+    }
   });
 
   it("authenticates only current hub-issued device proofs and binds every authority-bearing request field", async () => {

@@ -3,7 +3,8 @@ import { mintHubAuthMessage } from "../collab/rooms.js";
 import { localSessionHeaders } from "../collab/local-session.js";
 import type { RequestAction } from "@uberblick/schema/token";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
-import { validateWorkspaceName } from "@uberblick/schema";
+import { isUuid, validateWorkspaceName } from "@uberblick/schema";
+import { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
 import { isGithubUsername } from "@uberblick/schema/github-identity";
 
 export type AccessAction = Exclude<RequestAction, { operation: "renew-credential" | "promote-workspace" }>;
@@ -14,12 +15,18 @@ export interface AccessMember {
   githubUsername: string;
   role: AccessRole;
 }
-export interface AccessDevice {
+interface AccessDeviceFields {
   deviceId: string;
   deviceName?: string;
   signedInAt: number;
   current: boolean;
 }
+export type AccessDevice = AccessDeviceFields & ({ hosted?: never } | {
+  hosted: true;
+  workspaceId: string;
+  workspaceName?: string;
+  scope: "read-only" | "read-write";
+});
 export interface HubAdmin {
   principalId: string;
   githubAccountId: string;
@@ -167,8 +174,15 @@ function answer(value: unknown, action: AccessAction): AccessAnswer {
           typeof device.signedInAt !== "number" || !Number.isFinite(new Date(device.signedInAt).getTime()) ||
           typeof device.current !== "boolean") throw new Error("Invalid access answer");
         const deviceName = sanitizeDeviceName(device.deviceName);
-        return { deviceId: device.deviceId, ...(deviceName === undefined ? {} : { deviceName }),
+        const common = { deviceId: device.deviceId, ...(deviceName === undefined ? {} : { deviceName }),
           signedInAt: device.signedInAt, current: device.current };
+        if (device.hosted !== true) return common;
+        if (!isUuid(device.workspaceId) || (device.scope !== "read-only" && device.scope !== "read-write") || device.current) {
+          throw new Error("Invalid access answer");
+        }
+        const workspaceName = sanitizeWorkspaceNames({ [device.workspaceId]: device.workspaceName }, [device.workspaceId])?.[device.workspaceId];
+        return { ...common, hosted: true, workspaceId: device.workspaceId, scope: device.scope,
+          ...(workspaceName === undefined ? {} : { workspaceName }) };
       });
       break;
   }

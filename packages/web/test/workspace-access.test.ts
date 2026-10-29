@@ -64,6 +64,28 @@ describe("the browser's hub management answers", () => {
       .resolves.toEqual({ status: "ok", role: "member", hub: null });
   });
 
+  it.each(["read-only", "read-write"])("preserves hosted grant display fields and %s scope without private extras", async scope => {
+    const grant = { deviceId: "device", deviceName: "Hosted client", signedInAt: 1_790_000_000_000,
+      current: false, hosted: true, workspaceId: WORKSPACE.workspaceId, workspaceName: "Project", scope };
+    await expect(reply({ status: "ok", handle: "person", devices: [{ ...grant, key: "private", grantId: "private" }] })
+      .request({ operation: "list-devices" })).resolves.toEqual({ status: "ok", hub: null, handle: "person", devices: [grant] });
+  });
+
+  it.each([undefined, "", "bad\nname", 12])("preserves a hosted row when workspace display data needs the unnamed fallback", async workspaceName => {
+    const grant = { deviceId: "device", signedInAt: 1_790_000_000_000, current: false,
+      hosted: true, workspaceId: WORKSPACE.workspaceId, scope: "read-only" };
+    await expect(reply({ status: "ok", handle: "person", devices: [{ ...grant, workspaceName }] })
+      .request({ operation: "list-devices" })).resolves.toEqual({ status: "ok", hub: null, handle: "person", devices: [grant] });
+  });
+
+  it.each([{ workspaceId: undefined }, { workspaceId: "invalid" }, { scope: undefined }, { scope: "admin" }, { current: true }])(
+    "refuses malformed hosted row authority %j", async invalid => {
+      await expect(reply({ status: "ok", handle: "person", devices: [{ deviceId: "device", signedInAt: 1_790_000_000_000,
+        current: false, hosted: true, workspaceId: WORKSPACE.workspaceId, scope: "read-only", ...invalid }] })
+        .request({ operation: "list-devices" })).rejects.toThrow("Invalid access answer");
+    },
+  );
+
   it.each([undefined, "", "a".repeat(40), "bad/handle", "-person", 12])("refuses a device list with an invalid login handle %j", async (handle) => {
     await expect(reply({ status: "ok", handle, devices: [] }).request({ operation: "list-devices" }))
       .rejects.toThrow("Invalid access answer");

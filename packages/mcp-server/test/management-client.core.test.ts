@@ -152,6 +152,34 @@ describe("management replies exposed to a browser", () => {
       .toEqual({ status: 200, body: { status: "ok", devices: [named] } });
   });
 
+  it.each(["read-only", "read-write"])("projects the public hosted grant fields with %s access", scope => {
+    const grant = { deviceId: "7593802f-77dd-4699-b370-e714f67a19a8", deviceName: "Hosted client",
+      signedInAt: 1_790_000_000_000, current: false, hosted: true, workspaceId: WORKSPACE,
+      workspaceName: "Research", scope };
+    expect(sanitizeManagementReply({ operation: "list-devices" }, { status: 200, body: {
+      status: "ok", devices: [device, { ...grant, key: login.credential.key, grantId: "private-grant" }],
+    } }, login)).toEqual({ status: 200, body: { status: "ok", devices: [device, grant] } });
+  });
+
+  it.each([undefined, "", "bad\nname", login.credential.key, `Workspace ${login.credential.key}`])(
+    "keeps unnamed hosted grants revocable when workspace display data is unsafe", workspaceName => {
+      const grant = { deviceId: "7593802f-77dd-4699-b370-e714f67a19a8", current: false,
+        signedInAt: 1_790_000_000_000, hosted: true, workspaceId: WORKSPACE, scope: "read-only" };
+      expect(sanitizeManagementReply({ operation: "list-devices" }, { status: 200, body: {
+        status: "ok", devices: [device, { ...grant, workspaceName }],
+      } }, login)).toEqual({ status: 200, body: { status: "ok", devices: [device, grant] } });
+    },
+  );
+
+  it.each([{ workspaceId: undefined }, { workspaceId: "private-workspace" }, { scope: undefined },
+    { scope: "admin" }, { current: true }])("refuses incomplete or contradictory hosted grant claims %j", invalid => {
+    const grant = { deviceId: "7593802f-77dd-4699-b370-e714f67a19a8", current: false,
+      signedInAt: 1_790_000_000_000, hosted: true, workspaceId: WORKSPACE, scope: "read-only", ...invalid };
+    expect(() => sanitizeManagementReply({ operation: "list-devices" }, { status: 200, body: {
+      status: "ok", devices: [device, grant],
+    } }, login)).toThrow(ManagementResponseError);
+  });
+
   it.each([undefined, null, 42, {}, "", " ", "x".repeat(254), "host\nname", "host\u202ename",
     "host\u2028name", login.credential.key, `host-${login.credential.key}`])(
     "omits unsafe name metadata without dropping the device", deviceName => {
