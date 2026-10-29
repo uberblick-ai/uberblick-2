@@ -17,7 +17,8 @@ Uberblick is that context, shared: like your local Claude Code session's
 memory, but visible to the whole team and kept current. Plans, rules, decisions
 and numbers sit in one workspace: people review them in the browser, agents
 read and edit them over MCP. The agent reads the pages its change needs before
-it builds and brings them up to date after. Delivery stays on GitHub.
+it builds and brings them up to date after. Delivery stays on GitHub, where
+[ub-agents](https://agents.uberblick.ai) can run it for you.
 
 Free and MIT licensed. Local-first, no account to start, synced by a hub you
 run when the team needs one. Built by a small team in Berlin that ships its own
@@ -67,12 +68,23 @@ agents alike.
 - **Files you own.** One SQLite file per workspace on your computer. It works
   offline, has no telemetry, and exports any page to Markdown.
 
+## Works best with ub-agents
+
+[ub-agents](https://agents.uberblick.ai) is the loop that runs delivery on
+GitHub: roles in a few lines of YAML, driven by labels, on Actions, with any
+agent and no server. Issues get prepared, implemented, reviewed and merged by
+agents, and a person steps in where a label asks for one.
+
+Every issue starts from the Uberblick pages it names, and every pull request
+brings them up to date. Retrospectives propose changes to the pages and to the
+loop's own rules; a person decides each one. It is how Uberblick itself is
+built.
+
 ## What it isn't
 
 Uberblick does not track tasks. There are no boards, sprints or burndown
 charts. Issues, pull requests, labels and Actions stay on GitHub, and Uberblick
-holds the pages those issues point at. If you also want agents to run the
-delivery loop on GitHub, that is [ub-agents](https://agents.uberblick.ai).
+holds the pages those issues point at.
 
 It is not a hosted service either. To share a workspace you run a small hub
 yourself; see [Remote hubs](REMOTE.md).
