@@ -9,7 +9,7 @@
 
 Your coding agent has some context: a `CLAUDE.md`, memory files, the plan it
 drafted with you last week. But that context is gathered on each developer's
-machine. It is not synced, nobody reviews it, and it goes out of date. The
+machine. It is not synced, rarely reviewed, and goes out of date. The
 agent on your laptop and the one on your colleague's work from different
 pictures, and a question settled in one session gets reopened in the next.
 
@@ -35,16 +35,17 @@ chat log on somebody's laptop, so nobody mentions it.
 **With Uberblick**, the agent asks the workspace first:
 
 ```text
-▸ find_decisions  my-org/my-product#142    1 record in force
+▸ find_decisions  my-org/my-product#142    1 record: Retry limit on sync
+▸ get_doc         Retry limit on sync      decided 14 May
 ▸ get_doc         Sync: retry and backoff
 
 No. "Retry limit on sync" was decided on 14 May: two retries, then report
-the failure. The page still says "until the timeout", so I'll change the
-code and that paragraph in the same pull request.
+the failure. The page still says "until the timeout", so I'll fix the code
+and propose the matching page update in the pull request.
 ```
 
-Two small reads instead of the whole docs folder, and the settled question
-stays settled.
+A few focused reads instead of the whole docs folder, and the settled
+question stays settled.
 
 ## What's inside
 
@@ -57,14 +58,15 @@ agents alike.
   write them in a few lines; people see them rendered next to the reasoning.
 - **Decision records.** A question, a proposed answer, and the answer in force
   with who decided and when, linked to issues and pages. `find_decisions`
-  returns it in one call.
-- **Guidance for agents.** Pinned pages and guidance tags tell an agent that
-  has never seen the project where to start, so it reads three pages instead
-  of fifty.
+  finds the records linked to an issue; `get_doc` reads their answers.
+- **Guidance for agents.** Pinned pages give an agent that has never seen the
+  project a starting point, and pages tagged `guidance` are named to it when
+  it connects, so it reads a few pages instead of fifty.
 - **Comments where the text is.** People and agents in the same thread, with
   @mentions for people and documents.
-- **History.** On a hub, every revision is kept and compared side by side,
-  with named states ("Reviewed by legal") and restore.
+- **History.** On a hub, every revision of a page is kept and compared side by
+  side, with named states ("Reviewed by legal") and restore. Decision records
+  keep their sequence of records instead.
 - **Files you own.** One SQLite file per workspace on your computer. It works
   offline, has no telemetry, and exports any page to Markdown.
 
@@ -102,13 +104,13 @@ both sides can use.
 `ub open` serves the editor from your computer, and `ub mcp serve` gives your
 agent the same workspace over a local MCP server. Both work on a local replica,
 so reading a dozen pages costs a dozen local calls, not a dozen round trips.
-Edits merge as CRDTs, so a person and an agent can change the same page at once
-and nothing is lost.
+Edits merge as CRDTs, so a person and an agent can change the same page at
+once; only competing edits to the very same value overwrite one another.
 
 The MCP server is opinionated about context. When an agent connects, it names
-the few guidance pages. The decisions linked to an issue come with one call,
-and search finds the rest. The agent gets what its change needs and nothing
-more.
+the few pages tagged `guidance`. The decisions linked to an issue come with one
+call, and search finds the rest. Your `AGENTS.md` or `CLAUDE.md` tells the
+agent what to read before it builds and when to update the pages.
 
 A `.uberblick.json` in your repository binds the checkout to its workspace, so
 an agent started there always finds the right one. A hub syncs that workspace
@@ -122,8 +124,8 @@ On Apple Silicon macOS or Linux x86_64, with [Homebrew](https://brew.sh):
 brew install uberblick-ai/tap/uberblick
 ```
 
-That installs the `ub` CLI and the web editor. Then connect your agent in your
-project's directory, once it has a workspace (step 1 below):
+That installs the `ub` CLI and the web editor. Create a workspace in your
+project (step 1 below), then connect your agent from that directory:
 
 **Claude Code**
 
@@ -190,9 +192,9 @@ section from [Agents over MCP](https://uberblick.ai/docs/agents#instructions)
 to your `AGENTS.md` or `CLAUDE.md`.
 
 **4. Ask, change the page, ask again.** Ask the agent a question your rule page
-answers and have it name the page it read. You will see `get_sidebar`, then
-`get_doc`. Change a sentence in the browser and ask again: the answer follows
-the page, with no restart.
+answers, and ask it to read the pinned page and cite it. You should see
+`get_sidebar`, then `get_doc`. Change a sentence in the browser and ask again:
+the answer follows the page, with no restart.
 
 **5. Record a decision.** Ask the agent to record an open question as a
 decision with a proposed answer, linked to an issue, and not to decide it.
@@ -211,7 +213,8 @@ force, who decided and when.
 | `ub status` | Show the bound workspace, local storage and sync state |
 | `ub workspace use <link\|id>` | Bind this directory to an existing or shared workspace |
 | `ub auth login` | Sign in to the workspace's hub |
-| `ub data get` / `ub data update` | Read or write the records behind a chart |
+| `ub data get <doc> [<collection>]` | Print a document's data, or one collection as JSON |
+| `ub data update <doc> --file <path\|->` | Apply data updates from a file or stdin |
 | `ub update` | Update the Homebrew installation |
 
 `ub <command> --help` lists every option. The [user guide](USER_GUIDE.md) has
@@ -222,18 +225,19 @@ the full reference.
 **What does it cost?** Nothing. Client and hub are MIT licensed. Running a hub
 costs you a small machine.
 
-**What leaves my machine?** With a local-only workspace, nothing. With a hub,
-your documents go to that hub and to the other members' computers, encrypted
-in transit. Sign-in uses GitHub's device flow, and Uberblick has no telemetry.
+**What leaves my machine?** A local-only workspace syncs no documents anywhere.
+With a hub, your documents go to that hub and to the other members' computers,
+encrypted in transit. Sign-in uses GitHub's device flow. `ub open` checks
+GitHub for a newer release, and a Figma block contacts Figma when it is
+opened. Uberblick has no telemetry.
 
 **Do I need a hub?** Not to start. A local-only workspace is complete on its
 own. Add a hub when a second computer or a second person needs the workspace;
 see [Remote hubs](REMOTE.md).
 
-**Can I use it without agents?** Yes, as a document editor with offline sync.
-But it is designed around agents writing most of the text and people reviewing
-it, and guidance pages, decision records and chart data only pay off with
-agents.
+**Can I use it without agents?** Yes. You can write, review and comment on
+pages in the browser without an agent. But it is designed around agents writing
+most of the text and people reviewing it, and it shows its strengths with them.
 
 **Does it run on Windows?** Not natively. The Linux build may run under WSL,
 but we have not tested it.
