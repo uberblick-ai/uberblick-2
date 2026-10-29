@@ -114,7 +114,7 @@ async function browserPreview(running: TeamHub, secure = false, enforcePolicy = 
       ...(secure ? { https: previewTls() } : {}),
       ...(enforcePolicy ? { headers: { "Content-Security-Policy": WEB_CONTENT_SECURITY_POLICY } } : {}),
       // Preserve the page's Host and Origin, including its port, through the
-      // same-origin auth and consent routes used by the released hub's reverse proxy.
+      // preview's same-origin auth and consent routes.
       proxy: {
         "/auth/": { target: `http://127.0.0.1:${running.port}`, changeOrigin: false },
         "/oauth/": { target: `http://127.0.0.1:${running.port}`, changeOrigin: false },
