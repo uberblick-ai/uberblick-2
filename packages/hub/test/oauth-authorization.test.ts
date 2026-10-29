@@ -3,11 +3,12 @@ import { request } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import { settingsRoom, setWorkspaceName } from "@uberblick/schema";
 import { workspaceResourceUrl } from "@uberblick/schema/oauth";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { silentLogger } from "../src/log.js";
 import { createHub, type Hub } from "../src/server.js";
 import { createTeamHub } from "../src/team.js";
+import * as metadataFetch from "../src/oauth-metadata-fetch.js";
 import { removeTempDatabases, tempDatabasePath, TEST_SECRET, WORKSPACE, OTHER_WORKSPACE } from "./helpers.js";
 
 const ISSUER = "https://hub.example.com";
@@ -22,6 +23,7 @@ const hubs: Hub[] = [];
 afterEach(async () => {
   for (const hub of hubs.splice(0)) await hub.stop();
   removeTempDatabases();
+  vi.restoreAllMocks();
 });
 
 function inspect<T>(path: string, read: (db: DatabaseSync) => T): T {
@@ -41,13 +43,13 @@ function authorityRows(path: string) {
   };
 }
 
-async function rig() {
+async function rig(productionClients = false) {
   const path = tempDatabasePath();
   const clock = { time: 1000 };
   const hub = await createTeamHub({ databasePath: path, address: "127.0.0.1", port: 0,
     authSecret: TEST_SECRET, publicUrl: ISSUER, log: silentLogger,
     github: { clientId: "Iv1.0123456789abcdef", now: () => clock.time,
-      fetch: async () => { throw new Error("consent must reuse the browser identity"); } } }, {
+      fetch: async () => { throw new Error("consent must reuse the browser identity"); } } }, productionClients ? {} : {
     oauthClients: async clientId => {
       if (clientId === "refused") throw new Error("client source refused");
       return clientId === CLIENT_ID ? { name: CLIENT_NAME, redirectUriAllowed: uri => uri === REDIRECT } : null;
@@ -201,6 +203,70 @@ describe("OAuth authorize validation", () => {
     const response = await http(hub, `/oauth/authorize?${parameters()}`);
     expect(response.code).toBe(400);
     expect(response.headers.location).toBeUndefined();
+  });
+});
+
+describe("production metadata client lookup", () => {
+  const clientId = "https://agent.example/client.json";
+  const redirectUri = "http://127.0.0.1:56789/callback";
+  function metadata() {
+    return { client_id: clientId, client_name: "Document Agent", redirect_uris: ["http://127.0.0.1/callback"],
+      token_endpoint_auth_method: "none" };
+  }
+  function params() {
+    const params = parameters();
+    params.set("client_id", clientId);
+    params.set("redirect_uri", redirectUri);
+    return params;
+  }
+
+  it("creates only pending consent with the document name and requested callback port", async () => {
+    const fetch = vi.spyOn(metadataFetch, "fetchMetadataDocument").mockResolvedValue(metadata());
+    const r = await rig(true);
+    const response = await authorize(r, params());
+    expect(response.code).toBe(302);
+    const location = new URL(response.headers.location!);
+    expect(location.origin + location.pathname).toBe(`${ISSUER}/connect`);
+    const requestId = location.searchParams.get("request")!;
+    expect(rows(r.path, "hub_oauth_pending_authorizations")).toMatchObject([
+      { client_id: clientId, client_name: "Document Agent", redirect_uri: redirectUri },
+    ]);
+    expect(await consent(r, "read", { requestId })).toMatchObject({ code: 200,
+      result: { status: "pending", clientName: "Document Agent", redirectHost: "127.0.0.1:56789" } });
+    expect(authorityRows(r.path)).toEqual({ grants: [], codes: [], credentials: [] });
+    await authorize(r, params());
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["omitted", "private_key_jwt"])('shows fixed unsupported-authentication wording for %s without state or redirect', async method => {
+    const value: Record<string, unknown> = metadata();
+    if (method === "omitted") delete value.token_endpoint_auth_method;
+    else value.token_endpoint_auth_method = method;
+    vi.spyOn(metadataFetch, "fetchMetadataDocument").mockResolvedValue(value);
+    const r = await rig(true);
+    const response = await authorize(r, params());
+    expect(response.code).toBe(400);
+    expect(response.headers.location).toBeUndefined();
+    expect(response.text).toContain("The hub does not support this client's authentication method.");
+    expect(response.text).not.toContain(method);
+    expect(response.text).not.toContain(clientId);
+    expect(response.text).not.toContain("Document Agent");
+    expect(rows(r.path, "hub_oauth_pending_authorizations")).toEqual([]);
+    expect(authorityRows(r.path)).toEqual({ grants: [], codes: [], credentials: [] });
+  });
+
+  it.each(["fetch refused", "id mismatch", "unregistered redirect"])("keeps the generic page for %s without storing or redirecting", async failure => {
+    const fetch = vi.spyOn(metadataFetch, "fetchMetadataDocument");
+    if (failure === "fetch refused") fetch.mockRejectedValue(new Error("untrusted error text"));
+    else fetch.mockResolvedValue({ ...metadata(), ...(failure === "id mismatch" ? { client_id: "other" } : { redirect_uris: [REDIRECT] }) });
+    const r = await rig(true);
+    const response = await authorize(r, params());
+    expect(response.code).toBe(400);
+    expect(response.headers.location).toBeUndefined();
+    expect(response.text).toContain("Start again from your agent.");
+    expect(response.text).not.toContain("untrusted error text");
+    expect(rows(r.path, "hub_oauth_pending_authorizations")).toEqual([]);
+    expect(authorityRows(r.path)).toEqual({ grants: [], codes: [], credentials: [] });
   });
 });
 

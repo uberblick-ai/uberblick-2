@@ -15,18 +15,21 @@ export interface OAuthClient {
 /** Client metadata and registration sources own redirect matching and refusal. */
 export type OAuthClientLookup = (clientId: string) => Promise<OAuthClient | null>;
 
+export class UnsupportedOAuthClientAuthentication extends Error {}
+
 function redirect(response: ServerResponse, location: string): void {
   response.writeHead(302, { Location: location, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
   response.end();
 }
 
-function errorPage(response: ServerResponse): void {
+function errorPage(response: ServerResponse, unsupportedAuthentication = false): void {
   response.writeHead(400, {
     "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store",
     "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
     "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer",
   });
-  response.end('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Authorization request refused</title><h1>Authorization request refused</h1><p>Start again from your agent.</p></html>');
+  const message = unsupportedAuthentication ? "The hub does not support this client's authentication method." : "Start again from your agent.";
+  response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Authorization request refused</title><h1>Authorization request refused</h1><p>${message}</p></html>`);
 }
 
 function resourceWorkspace(resource: string | null, issuer: string, hubAdmins: HubAdminRegistry): string | null {
@@ -81,7 +84,7 @@ async function authorize(issuer: string, clients: OAuthClientLookup, authorizati
       if (requestId === null) { refuse("temporarily_unavailable"); return; }
       redirect(response, `${issuer}/connect?request=${requestId}`);
     } catch { refuse("server_error"); }
-  } catch { errorPage(response); }
+  } catch (error) { errorPage(response, error instanceof UnsupportedOAuthClientAuthentication); }
 }
 
 function submission(body: Record<string, unknown>): ConsentSubmission | null {

@@ -22,6 +22,7 @@ import { handleAuthorizationServerMetadata } from "./oauth-discovery.js";
 import { handleOAuthAuthorization, type OAuthClientLookup } from "./oauth-authorization.js";
 import { OAuthAuthorizations } from "./oauth-authorizations.js";
 import { handleOAuthToken } from "./oauth-token.js";
+import { OAuthMetadataClients } from "./oauth-client-metadata.js";
 
 export interface TeamHub extends Hub {
   /** Hub-internal authorities; never exposed through a public route. */
@@ -55,6 +56,8 @@ function createTeamExtension(
   let promotions: WorkspacePromotions | undefined;
   let hubAdmins: HubAdminRegistry | undefined;
   let authorizations: OAuthAuthorizations | undefined;
+  const metadataClients = new OAuthMetadataClients();
+  const oauthClients = options.oauthClients ?? metadataClients.lookup;
   const workspaceNames = new WorkspaceNameReader(database, room => server().hocuspocus.documents.get(room));
   const hasLiveDocuments = (workspaceId: string) =>
     [...server().hocuspocus.documents.keys()].some(name => name.startsWith(`${workspaceId}/`));
@@ -93,7 +96,7 @@ function createTeamExtension(
     async handleRequest(request, response) {
       if (handleAuthorizationServerMetadata(config.publicUrl, signIn !== undefined, request, response)) return true;
       if (await handleOAuthAuthorization(config.publicUrl, signIn, authorizations, hubAdmins,
-        options.oauthClients ?? (async () => null), request, response)) return true;
+        oauthClients, request, response)) return true;
       if (await handleOAuthToken(config.publicUrl, signIn !== undefined, authorizations, request, response)) return true;
       if (handleHubClaimState(claims, signIn !== undefined, request, response)) return true;
       if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response, workspaceNames)) return true;
@@ -116,6 +119,7 @@ function createTeamExtension(
       signIn?.stop();
       accounts?.stop();
       authorizations?.stop();
+      metadataClients.stop();
       await adminSetup?.stop();
     },
   };
