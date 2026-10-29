@@ -221,6 +221,10 @@ const RECOVERIES: Record<string, Recovery> = {
     recoveryClass: "manual",
     guidance: "Choose an owned comment in an unresolved conversation; deleting an opening comment also requires every reply to be yours. Nothing was written.",
   },
+  comment_edit_refused: {
+    recoveryClass: "manual",
+    guidance: "Choose an owned comment in an unresolved conversation and supply nonblank text. Nothing was written.",
+  },
   inline_link_range: {
     recoveryClass: "reread",
     guidance:

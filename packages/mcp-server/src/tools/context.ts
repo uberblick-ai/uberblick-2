@@ -516,11 +516,12 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
     const commentIds = getAnnotationCommentIds(replica.doc, annotation.id);
     return {
       ...annotation,
-      comments: annotation.comments.map(({ author, text, createdAt, account, agent }, index) => ({
+      comments: annotation.comments.map(({ author, text, createdAt, editedAt, account, agent }, index) => ({
         id: commentIds[index],
         author,
         text,
         createdAt,
+        ...(editedAt === undefined ? {} : { editedAt }),
         ...(account === undefined ? {} : { account }),
         ...(agent === undefined ? {} : { agent }),
       })),

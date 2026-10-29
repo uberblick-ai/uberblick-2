@@ -159,6 +159,7 @@ const EXPECTED: Record<
   thread_not_found: { recoveryClass: "reread", detail: ["uuid", "threadId"] },
   comment_not_found: { recoveryClass: "reread", detail: ["uuid", "threadId", "commentId"] },
   comment_delete_refused: { recoveryClass: "manual", detail: ["uuid", "threadId", "commentId", "reason"] },
+  comment_edit_refused: { recoveryClass: "manual", detail: ["uuid", "threadId", "commentId", "reason"] },
   inline_link_range: { recoveryClass: "reread", detail: ["reason"] },
   // Never `retry`: the directory arrives over the hub, not by calling again.
   doclink_target_not_known_locally: {
@@ -289,6 +290,7 @@ describe("the failure contract", () => {
     const comments = await rig.ok("annotate", { uuid: deletionDoc.uuid, block_id: deletionDoc.blockId, start: 0, end: 1, text: "Deletion failure cases" });
     record((await rig.call("annotate", { uuid: deletionDoc.uuid, action: "delete", thread_id: comments.annotation.id, comment_id: "missing" })).payload);
     record((await rig.call("annotate", { uuid: deletionDoc.uuid, action: "delete", thread_id: comments.annotation.id, comment_id: comments.annotation.comments[0].id })).payload);
+    record((await rig.call("annotate", { uuid: deletionDoc.uuid, action: "edit", thread_id: comments.annotation.id, comment_id: comments.annotation.comments[0].id, text: "Correction" })).payload);
 
     record((await rig.call("move_block", {
       uuid: doc.uuid, block_ids: [doc.blockId, doc.blockId],

@@ -151,7 +151,7 @@ export const toolHelpDetails = {
     "\n" +
     "- Metadata: `title`, `description` and `tldr` (null when unwritten), `tags`, `links` and, when known, `createdAt`: the creation time as an ISO 8601 UTC string on the creating replica's clock, such as `2026-10-21T18:36:13.213Z`. It is omitted when unknown or outside the supported date range. A regular page whose TL;DR a person removed on purpose returns `tldrOptOut: true`; set_metadata explains opting back in.\n" +
     "- Blocks with `id`, `type`, `text` and `rev`. Prose `text` is plain. A formatted paragraph, heading, list item, quote or callout also carries `inline`: equally marked runs, each with `text` and `marks`, covering the whole text in order. Marks are `bold`, `italic`, `strike`, `inlineCode`, `link` and `docLink`; unmarked runs carry `marks: {}`. The runs use insert_block's input shape and can be passed back unchanged, subject to its normal validation of document-link targets. Plain prose and non-prose blocks omit `inline`. get_revision returns the same formatting runs for historical prose, without block edit revs. Tables return GFM and `column_widths`: one entry per column rounded to whole CSS pixels, or null for an unsized column. Widths stay outside block and page `rev`; historical reads omit them. Cards and embeds return their container content; see markdown. Prose that links other documents still carries `doc_links` ranges.\n" +
-    "- Comment threads with their anchors, for annotate to reply to, resolve, move or delete. Every comment returned by get_doc and annotate has a stable `id`, used as `comment_id` when deleting. Comments may include `account`, the writing client's GitHub username, and `agent`, either `claude` or `codex`. These optional fields are display hints, not verified authorship. Stored principal identity and person/agent kind are not returned.\n" +
+    "- Comment threads with their anchors, for annotate to reply to, resolve, move, edit or delete. Every comment returned by get_doc and annotate has a stable `id`, used as `comment_id` when editing or deleting. Edited comments also return `editedAt`, the last edit time as an ISO 8601 UTC string that the web's `(edited)` marker reads; unedited comments omit it. Comments may include `account`, the writing client's GitHub username, and `agent`, either `claude` or `codex`. These optional fields are display hints, not verified authorship. Stored principal identity and person/agent kind are not returned.\n" +
     "- `code_check` on regular pages: the latest comparison per repository, or [] when never checked.\n" +
     "- Decision context: a regular page lists the topics it owns (related) and the topics that link to it (linked), one list_docs topic row each that names the topic's records by UUID in `inForce`, `pending` and `conflicts`. A decision record returns its status, related pages in `related` (omitted when it has none), discussion, predecessors, successors and `resolution`: its topic's `inForce`, `pending` and `conflicts` as record UUIDs, plus `archived`. Predecessor and successor entries carry `createdAt` and `updatedAt`, topic rows `updatedAt`, when known, as ISO 8601 UTC strings; timestamps outside the supported date range are omitted. It is context, not permission to act; see decisions.\n" +
     "- `data`, when the document has structured data: collection names and record counts. Read records with get_data.\n" +
@@ -763,12 +763,29 @@ export const toolHelpDetails = {
     "Existing card ranges name label, title, body or footer in part. Opening or moving into a Figma caption " +
     "refuses with annotation_figma. Existing Figma ranges name part caption and measure caption characters. " +
     "Card and Figma threads can receive replies, resolution and reopening, or move to prose or a table cell.\n\n" +
-    "Four shapes, and a call is exactly one: open with `block_id`, `start` and `end`; reply with `thread_id` " +
+    "Five shapes, and a call is exactly one: open with `block_id`, `start` and `end`; reply with `thread_id` " +
     "and no range fields; or move with `thread_id`, `block_id`, `start` and `end`. Range targets require all " +
     "three range fields, plus `row` and `column` for a table cell. Incomplete ranges refuse at the input " +
     "boundary before writing. These three modes require `text` and accept optional `author`. Only a reply may " +
     "carry `resolved`: true resolves and false reopens in the same update as the reply. Opening and moving " +
     "forbid `resolved`; a move keeps the thread's existing resolution.\n\n" +
+    "Edit with `{uuid, action: \"edit\", thread_id, comment_id, text}`; no author, range fields or resolved " +
+    "is accepted. Use the stable comment id from get_doc or annotate, never a reader index. Your own " +
+    "comments have a stored account matching this MCP session's workspace sign-in GitHub username, " +
+    "ignoring case. That includes comments an agent wrote and comments the person wrote by hand on " +
+    "that account. An edit replaces the text in place at any time, even after replies, and no earlier " +
+    "version is kept. It preserves id, position, author, account, agent, kind and createdAt; editing a " +
+    "hand-written comment adds no agent mark. The last edit time is recorded in editedAt, returned only " +
+    "on edited comments by annotate and get_doc, and read by the web's (edited) marker. Replies made " +
+    "concurrently survive in their converged order. Concurrent edits keep the latest edit.\n\n" +
+    "Editing refuses without writing for a signed-out or local session (account_required), a comment " +
+    "without an account (comment_account_missing), someone else's comment (comment_not_owned), text " +
+    "empty after trimming (empty_text), or a resolved thread (thread_resolved). Each returns " +
+    "comment_edit_refused, recoveryClass manual, reason and a recovery sentence naming it. Unknown " +
+    "thread or comment ids use thread_not_found or comment_not_found with reread recovery. Archived " +
+    "documents keep doc_archived. Success returns the updated annotation, applied, synced and hub. " +
+    "Decided decision records remain commentable. An offline edit can reach a thread resolved meanwhile, " +
+    "and a GitHub handle rename leaves comments under the old handle uneditable.\n\n" +
     "Delete permanently with `{uuid, action: \"delete\", thread_id, comment_id}`; no text, author, range " +
     "fields or resolved is accepted. Every comment in get_doc and annotate carries the stable `id` to use " +
     "as comment_id. Your own comments have a stored account matching this MCP session's workspace sign-in's " +

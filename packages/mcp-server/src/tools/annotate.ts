@@ -1,5 +1,5 @@
-import { addComment, createAnnotation, deleteComment, getAnnotation, getBlock, moveAnnotation, setAnnotationResolved } from "@uberblick/schema";
-import type { CommentDeleteRefusal } from "@uberblick/schema";
+import { addComment, createAnnotation, deleteComment, editComment, getAnnotation, getBlock, moveAnnotation, setAnnotationResolved } from "@uberblick/schema";
+import type { CommentDeleteRefusal, CommentEditRefusal } from "@uberblick/schema";
 import { z } from "zod";
 import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
@@ -8,9 +8,15 @@ import { uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
 
 /**
- * Deletion is exclusive of the existing open, reply and move shapes.
+ * Editing and deletion are exclusive of the open, reply and move shapes.
  */
 const ANNOTATE_MODES: readonly ToolMode[] = [
+  {
+    title: "Editing a comment (`action: edit`)",
+    when: { field: "action", is: "edit" },
+    requires: ["thread_id", "comment_id", "text"],
+    forbids: ["author", "block_id", "start", "end", "row", "column", "resolved"],
+  },
   {
     title: "Deleting a comment (`action: delete`)",
     when: { field: "action", is: "delete" },
@@ -40,14 +46,14 @@ const ANNOTATE_MODES: readonly ToolMode[] = [
 export const inputSchema = strictInput(
   {
     uuid: uuidArg,
-    text: z.string().min(1).optional().describe("The comment body; required except when action is delete."),
-    action: z.literal("delete").optional().describe("Permanent delete; requires thread_id/comment_id and forbids other mode fields."),
-    comment_id: z.string().min(1).optional().describe("Delete only: stable id from get_doc or annotate."),
+    text: z.string().optional().describe("Comment body; required except for delete. Edit replaces it and refuses blank text."),
+    action: z.enum(["delete", "edit"]).optional().describe("Edit or permanently delete; requires thread_id/comment_id. Edit also requires text; other mode fields are forbidden."),
+    comment_id: z.string().min(1).optional().describe("Edit/delete only: stable id from get_doc or annotate."),
     thread_id: z
       .string()
       .min(1)
       .optional()
-      .describe("Reply to, move or delete a comment in this existing thread."),
+      .describe("Reply to, move, edit or delete a comment in this existing thread."),
     block_id: z.string().min(1).optional().describe("Target block for opening or moving an anchor."),
     start: z.number().int().min(0).optional().describe("Anchor range start, in characters."),
     end: z.number().int().min(0).optional().describe("Anchor range end, exclusive."),
@@ -60,7 +66,20 @@ export const inputSchema = strictInput(
     author: z.string().min(1).optional(),
   },
   ANNOTATE_MODES,
-);
+).superRefine(({ action, text }, ctx) => {
+  // Edit's shared writer reports blank text; other shapes retain their input refusal.
+  if (action !== "edit" && text === "") {
+    ctx.addIssue({ code: "too_small", origin: "string", minimum: 1, inclusive: true, path: ["text"] });
+  }
+});
+
+const EDIT_RECOVERY: Record<Exclude<CommentEditRefusal, "thread_not_found" | "comment_not_found">, string> = {
+  account_required: "Sign in to this workspace's hub account before editing comments; this MCP session has no signed-in account. Nothing was written.",
+  comment_account_missing: "Choose a comment with a stored account; comments without an account cannot be edited. Nothing was written.",
+  comment_not_owned: "Choose a comment whose stored account matches this session's signed-in GitHub account; someone else's comment cannot be edited. Nothing was written.",
+  thread_resolved: "Choose a comment in an unresolved conversation; comments in a resolved conversation cannot be edited. Nothing was written.",
+  empty_text: "Supply text that is not empty after trimming; blank comment text cannot be saved. Nothing was written.",
+};
 
 const DELETE_RECOVERY: Record<Exclude<CommentDeleteRefusal, "thread_not_found" | "comment_not_found">, string> = {
   account_required: "Sign in to this workspace's hub account before deleting comments; this MCP session has no signed-in account. Nothing was written.",
@@ -76,6 +95,20 @@ export const annotateOperation = documentOperation({ content: false, contentDura
 
   const who = author ?? replicas.name;
   const attribution = replicas.commentAttribution();
+
+  if (action === "edit") {
+    const result = editComment(replica.doc, thread_id as string, comment_id as string, attribution.account, text as string, { reportRefusal: true });
+    if (!result.ok) {
+      const detail = { uuid, threadId: thread_id, commentId: comment_id };
+      if (result.reason === "thread_not_found" || result.reason === "comment_not_found") {
+        throw new ToolError(result.reason, "The requested comment or conversation no longer exists.", detail);
+      }
+      throw new ToolError("comment_edit_refused", "This comment cannot be edited.", {
+        ...detail, reason: result.reason, recovery: EDIT_RECOVERY[result.reason],
+      });
+    }
+    return { uuid, annotation: annotationJson(replica, result.annotation) };
+  }
 
   if (action === "delete") {
     // The delete mode requires both ids before this handler can run.
