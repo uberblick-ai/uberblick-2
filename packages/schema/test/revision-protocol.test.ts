@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { createRevisionResponseReader, encodeRevisionCatalogChanged, encodeRevisionRequest, encodeRevisionResponseFrames,
+import { createRevisionResponseReader, encodeRevisionCatalogChanged, encodeRevisionRequest, encodeRevisionResponse, encodeRevisionResponseFrames,
   readOriginAck, readRevisionCatalogChanged, readRevisionRequest, readRevisionResponse, validRevisionName,
   type RevisionResponse } from "../src/index.js";
 
@@ -157,27 +157,32 @@ it("preserves snapshot identity and checksum while accepting legacy snapshots", 
   }
 });
 
-// The large fixture intermittently exceeds its CI time budget.
-it.skip("reassembles large snapshots and lists without exceeding the WebSocket frame ceiling", () => {
-  const state = Uint8Array.from({ length: 17 * 1024 * 1024 }, (_, index) => index % 251);
+it("reassembles large snapshots and lists without exceeding the WebSocket frame ceiling", () => {
+  const ceiling = 16 * 1024 * 1024;
+  const state = new Uint8Array(1.5 * 1024 * 1024);
+  for (let index = 0; index < state.length; index++) state[index] = index % 251;
+  // Text exercises the message ceiling without paying for a ceiling-sized base64 snapshot.
+  const title = "🦊é".repeat(256 * 1024);
   const responses: RevisionResponse[] = [
     { requestId: "one", ok: true, state, revisionId: "revision", checksum: "c".repeat(64) },
-    { requestId: "one", ok: true, version: "catalog-version", revisions: Array.from({ length: 5000 }, (_, index) => ({
+    { requestId: "one", ok: true, version: "catalog-version", revisions: Array.from({ length: 12 }, (_, index) => ({
       id: `revision-${index}`, author: { githubUsername: "person", surface: { kind: "mcp", name: "Claude Code" } },
-      startedAt: index, endedAt: index + 1, checksum: "d".repeat(64), final: true,
+      startedAt: index, endedAt: index + 1, checksum: "d".repeat(64), final: index % 2 === 0, title,
     })) },
   ];
   for (const response of responses) {
+    if ("revisions" in response) expect(Buffer.byteLength(encodeRevisionResponse(response), "utf8")).toBeGreaterThan(ceiling);
     const frames = encodeRevisionResponseFrames(response);
     expect(frames.length).toBeGreaterThan(1);
-    expect(frames.every(frame => new TextEncoder().encode(frame).length < 16 * 1024 * 1024)).toBe(true);
+    expect(frames.every(frame => Buffer.byteLength(frame, "utf8") < ceiling)).toBe(true);
     const read = createRevisionResponseReader("one");
     const other = createRevisionResponseReader("other");
     let result: RevisionResponse | null = null;
-    for (const frame of frames.toReversed()) {
+    for (const [index, frame] of frames.toReversed().entries()) {
       expect(other(frame)).toBeNull();
       expect(read(encodeRevisionCatalogChanged())).toBeNull();
       result = read(frame);
+      if (index < frames.length - 1) expect(result).toBeNull();
     }
     if ("state" in response) {
       expect(result !== null && "state" in result && Buffer.from(result.state).equals(response.state)).toBe(true);
@@ -186,4 +191,4 @@ it.skip("reassembles large snapshots and lists without exceeding the WebSocket f
       expect(result).toEqual(response);
     }
   }
-}, 15000);
+});
