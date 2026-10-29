@@ -583,18 +583,18 @@ export const tools: readonly Tool[] = [
     title: "Comment, reply, resolve, move, edit or delete your comment",
     description:
       "Open with block_id/start/end, reply with thread_id, or move with both; text required, author optional. " +
-      "Only replies accept resolved. Moves replace all marks, keeping id, replies and resolution, even when orphaned. " +
-      "Edit with action: edit, thread_id, comment_id and text; no author, range or resolved fields. " +
-      "Text is replaced; no earlier version is kept. Delete permanently with action: delete and both ids, " +
-      "without other mode fields. Yours means stored account matches this session's workspace sign-in GitHub " +
-      "account, ignoring case, including agent and hand-written comments. No account (signed out/local) " +
-      "means no edit/delete. Resolved threads refuse both. Deleting the opener removes the thread only if " +
-      "every reply is yours. Tables need zero-based row/column (header 0); offsets count displayed characters " +
-      "and stored edge whitespace. Cards/Figma refuse opening/moving in; existing threads permit replies, " +
-      "resolution and moves to prose/tables. See help for ranges, offsets and refusal codes.",
+      "Only replies accept resolved: true; resolving is final, false is refused. Resolved threads refuse replies/moves. " +
+      "New threads may cover resolved text, removing every old anchor while retaining the resolved comments. " +
+      "Open-thread overlap refuses without writing; moves refuse other threads and replace all their own marks. " +
+      "Edit with action: edit, thread_id, comment_id and text; delete permanently with action: delete and both ids. " +
+      "Edit/delete require an open thread " +
+      "and a stored account matching this session's workspace sign-in GitHub account, ignoring case, including " +
+      "agent comments. Deleting the opener requires every reply to be yours. Tables need zero-based row/column " +
+      "(header 0); offsets count displayed characters and edge whitespace. Cards/Figma refuse opening/moving in; " +
+      "open threads permit replies, resolution and moves to prose/tables.",
     input: annotateInput,
     operation: annotateOperation,
-    // Replies can overwrite thread resolution; repeating adds another comment.
+    // Resolving changes thread state; repeating a reply adds another comment.
     hints: { destructive: true, idempotent: false },
     example: {
       uuid,

@@ -114,7 +114,7 @@ describe("directory stamps from the web", () => {
         expect(getDirectoryEntry(peer, UUID)?.openThreadCount).toBe(1);
         setAnnotationResolved(remote, open.id, false);
         expect(getDirectoryEntry(peer, UUID)).toMatchObject({
-          openThreadCount: 2, createdAt: T0, updatedAt: T0,
+          openThreadCount: 1, createdAt: T0, updatedAt: T0,
         });
       } finally {
         stop();

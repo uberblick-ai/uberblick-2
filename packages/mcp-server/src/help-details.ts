@@ -298,7 +298,8 @@ export const toolHelpDetails = {
     "be zero or unknown. With `include_superseded: true`, the predicate applies to each record instead.\n\n" +
     "To discover topics, call `list_docs({has_open_threads: true})`. To read every matching document's " +
     "threads, call `list_docs({has_open_threads: true, include_superseded: true})`, then `get_doc` on each " +
-    "hit for threads and anchors, then `annotate` with `thread_id` to reply, resolve or reopen. Resolving " +
+    "hit for threads and anchors, then `annotate` with `thread_id` to reply or resolve. Resolving is final. " +
+    "A new thread may cover resolved text, detaching the old conversation. Resolving " +
     "the last open thread sets that document's count to zero and removes its per-record match; the topic " +
     "leaves the topic-row filter when none of its live records matches.\n\n" +
     "Hydrated MCP and web replicas recompute the cache after document changes, including peer updates. " +
@@ -741,12 +742,14 @@ export const toolHelpDetails = {
     "replica's state; a concurrent peer edit can still remove a remaining anchor.",
   annotate:
     "Open an annotation thread over a range of a block's text, or — with `thread_id` — add a comment to an " +
-    "existing thread and optionally resolve or reopen it. The range is anchored by a formatting mark on the " +
+    "open thread and optionally resolve it permanently. To continue after resolution, start a new thread; " +
+    "it may cover resolved text. In that same update, every overlapped resolved thread loses all its marks " +
+    "in the document and keeps its comments and resolved state with range null. The range is anchored by a formatting mark on the " +
     "text itself, so it follows surviving characters through edits, splits and re-types. To move an existing " +
     "thread's anchor, supply `thread_id` together with a complete target range. In one document update, " +
     "the move removes every old comment mark for that thread in every block, marks the new range, changes " +
-    "its recorded blockId and appends `text` as a reply. It preserves the id, earlier replies and resolution, " +
-    "and works on already orphaned threads. In every answer, as in get_doc, `blockId` names the block containing " +
+    "its recorded blockId and appends `text` as a reply. It preserves the id and earlier replies, " +
+    "and works on already orphaned open threads. In every answer, as in get_doc, `blockId` names the block containing " +
     "the resolved range: the recorded block while marked, otherwise the first marked visible block in document " +
     "order. An orphan keeps its recorded blockId and has a null range.\n\n" +
     "For a table, supply `row` and `column`: zero-based GFM projection indices with the header as row 0, the " +
@@ -756,19 +759,22 @@ export const toolHelpDetails = {
     "cell's inline syntax, rather than trimming it. Offsets are clamped to the cell's text. The returned " +
     "range adds `row` and `column`, recomputed as cells move; it is null when orphaned. Coordinates on a " +
     "non-table block, missing coordinates or a cell outside the projection refuse with `annotation_cell` " +
-    "before anything is written. Empty ranges and ranges overlapping another thread refuse with " +
-    "`annotation_range`; moving onto the thread's own current anchor is allowed. Unknown thread ids refuse " +
+    "before anything is written. Empty ranges and ranges overlapping an open thread refuse with " +
+    "`annotation_range`, naming the open thread and leaving resolved anchors intact. A move also refuses " +
+    "overlap with resolved threads; moving onto the thread's own current anchor is allowed. Unknown thread ids refuse " +
     "with `thread_not_found`. Invalid move targets leave the old anchor, replies and thread unchanged. " +
     "Card comments are opened in the web editor; opening or moving into a card refuses with annotation_card. " +
     "Existing card ranges name label, title, body or footer in part. Opening or moving into a Figma caption " +
     "refuses with annotation_figma. Existing Figma ranges name part caption and measure caption characters. " +
-    "Card and Figma threads can receive replies, resolution and reopening, or move to prose or a table cell.\n\n" +
+    "Open card and Figma threads can receive replies and resolution, or move to prose or a table cell.\n\n" +
     "Five shapes, and a call is exactly one: open with `block_id`, `start` and `end`; reply with `thread_id` " +
     "and no range fields; or move with `thread_id`, `block_id`, `start` and `end`. Range targets require all " +
     "three range fields, plus `row` and `column` for a table cell. Incomplete ranges refuse at the input " +
     "boundary before writing. These three modes require `text` and accept optional `author`. Only a reply may " +
-    "carry `resolved`: true resolves and false reopens in the same update as the reply. Opening and moving " +
-    "forbid `resolved`; a move keeps the thread's existing resolution.\n\n" +
+    "carry `resolved: true`, resolving in the same update as the reply. `resolved: false` refuses with " +
+    "`resolution_final`, even on an open thread. Replies and moves on resolved threads refuse with " +
+    "`thread_resolved`: This conversation was resolved. Start a new comment to continue. These refusals " +
+    "have recoveryClass manual and write nothing. Opening and moving forbid `resolved`.\n\n" +
     "Edit with `{uuid, action: \"edit\", thread_id, comment_id, text}`; no author, range fields or resolved " +
     "is accepted. Use the stable comment id from get_doc or annotate, never a reader index. Your own " +
     "comments have a stored account matching this MCP session's workspace sign-in GitHub username, " +

@@ -62,7 +62,7 @@ export const inputSchema = strictInput(
     resolved: z
       .boolean()
       .optional()
-      .describe("Reply only: true resolves the thread; false reopens it."),
+      .describe("Reply only: true resolves the thread permanently; false is refused. Start a new thread to continue; it may cover resolved text."),
     author: z.string().min(1).optional(),
   },
   ANNOTATE_MODES,
@@ -90,8 +90,16 @@ const DELETE_RECOVERY: Record<Exclude<CommentDeleteRefusal, "thread_not_found" |
   thread_resolved: "Choose a comment in an unresolved conversation; comments in a resolved conversation cannot be deleted. Nothing was written.",
 };
 
+const RESOLVED_MESSAGE = "This conversation was resolved. Start a new comment to continue.";
+
 export const annotateOperation = documentOperation({ content: false, contentDurability: false }, inputSchema, (context, { uuid, text, action, comment_id, thread_id, block_id, start, end, row, column, resolved, author }, _request, replica) => {
   const { replicas, annotationJson } = context;
+
+  if (resolved === false) {
+    const message = thread_id !== undefined && getAnnotation(replica.doc, thread_id)?.resolved
+      ? RESOLVED_MESSAGE : "Resolving is final. Start a new comment to continue.";
+    throw new ToolError("resolution_final", message, { uuid, threadId: thread_id });
+  }
 
   const who = author ?? replicas.name;
   const attribution = replicas.commentAttribution();
@@ -128,16 +136,22 @@ export const annotateOperation = documentOperation({ content: false, contentDura
     };
   }
 
-  if (thread_id !== undefined && getAnnotation(replica.doc, thread_id) === null) {
-    throw new ToolError("thread_not_found", `No annotation thread ${thread_id} in document ${uuid}`, { uuid, threadId: thread_id });
+  if (thread_id !== undefined) {
+    const thread = getAnnotation(replica.doc, thread_id);
+    if (thread === null) {
+      throw new ToolError("thread_not_found", `No annotation thread ${thread_id} in document ${uuid}`, { uuid, threadId: thread_id });
+    }
+    if (thread.resolved) {
+      throw new ToolError("thread_resolved", RESOLVED_MESSAGE, { uuid, threadId: thread_id });
+    }
   }
 
   if (thread_id !== undefined && block_id === undefined) {
     // Combine nested reply/resolution transactions into one durable append.
     const updated = replica.doc.transact(() => {
       const added = addComment(replica.doc, thread_id, who, text as string, attribution);
-      return added !== null && resolved !== undefined
-        ? setAnnotationResolved(replica.doc, thread_id, resolved)
+      return added !== null && resolved === true
+        ? setAnnotationResolved(replica.doc, thread_id, true)
         : added;
     });
     if (updated === null) {

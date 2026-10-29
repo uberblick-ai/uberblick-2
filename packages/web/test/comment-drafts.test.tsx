@@ -162,7 +162,7 @@ describe("comment edit drafts", () => {
     } finally { view.close(); }
   });
 
-  it("keeps a refused edit after a remote resolution and resumes it after reopening", async () => {
+  it.each([false, true])("keeps an edit after a remote resolution and lets it be discarded (submit in the same task: %s)", async (submit) => {
     const view = mountComments(1);
     try {
       const item = view.card(view.first.id);
@@ -170,16 +170,22 @@ describe("comment edit drafts", () => {
       const save = within(item).getByRole<HTMLButtonElement>("button", { name: "Save" });
       await act(async () => {
         setAnnotationResolved(view.remote, view.first.id, true);
-        save.click();
+        const before = [...Y.encodeStateAsUpdate(view.ydoc)];
+        if (submit) save.click();
+        expect([...Y.encodeStateAsUpdate(view.ydoc)]).toEqual(before);
       });
       fireEvent.click(within(view.container).getByRole("button", { name: "1 resolved" }));
       const resolved = view.card(view.first.id);
       expect(within(resolved).queryByPlaceholderText("Edit comment…")).toBeNull();
-      expect(within(resolved).getByText("This comment was resolved while you wrote — reopen it to edit.")).toBeDefined();
+      expect(within(resolved).getByText("This conversation was resolved. Start a new comment to continue.")).toBeDefined();
       expect(within(resolved).getByText("Recover the resolved edit")).toBeDefined();
       expect(getAnnotation(view.ydoc, view.first.id)?.comments[0]?.text).toBe("First question");
-      await act(async () => setAnnotationResolved(view.remote, view.first.id, false));
-      expect(within(view.card(view.first.id)).getByPlaceholderText<HTMLTextAreaElement>("Edit comment…").value).toBe("Recover the resolved edit");
+      expect(within(resolved).queryByRole("button", { name: "Reopen" })).toBeNull();
+      const before = [...Y.encodeStateAsUpdate(view.ydoc)];
+      fireEvent.click(within(resolved).getByRole("button", { name: "Discard edit" }));
+      expect(within(resolved).queryByText("Recover the resolved edit")).toBeNull();
+      expect(within(view.container).getByLabelText("Reply draft state").textContent).toBe("No drafts");
+      expect([...Y.encodeStateAsUpdate(view.ydoc)]).toEqual(before);
     } finally { view.close(); }
   });
 

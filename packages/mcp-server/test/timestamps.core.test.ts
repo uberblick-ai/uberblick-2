@@ -278,7 +278,7 @@ describe("directory timestamps", () => {
     await rig.ok("annotate", { uuid: doc.uuid, thread_id: opened.annotation.id, text: "Done", resolved: true });
     expect(stub(rig, doc.uuid)).toMatchObject({ openThreadCount: 0, updatedAt: T0 + 3_000 });
     vi.setSystemTime(T0 + 4_000);
-    await rig.ok("annotate", { uuid: doc.uuid, thread_id: opened.annotation.id, text: "Reconsider", resolved: false });
+    await rig.ok("annotate", { uuid: doc.uuid, block_id: doc.blocks[0].id, start: 0, end: 3, text: "A new question" });
     expect(stub(rig, doc.uuid)).toMatchObject({ openThreadCount: 1, updatedAt: T0 + 4_000 });
   });
 

@@ -126,9 +126,10 @@ describe("structured tables through MCP", () => {
     const refused = await rig.call("annotate", { uuid, block_id: old.id, start: 0, end: 3, text: "New thread" });
     expect(refused.payload).toMatchObject({ error: "annotation_cell", applied: false, blockId: old.id });
     expect(Y.encodeStateVector(replica.doc)).toEqual(state);
-    for (const resolved of [true, false]) {
+    for (const resolved of [undefined, true]) {
       const reply = await rig.ok("annotate", { uuid, thread_id: old.threadId, text: "Reply", resolved });
-      expect(reply.annotation).toMatchObject({ resolved, range: null });
+      expect(reply.annotation).toMatchObject({ range: null });
+      expect(reply.annotation.resolved).toBe(resolved);
     }
     const created = await rig.ok("annotate", { uuid, block_id: old.id, row: 1, column: 0, start: 1, end: 4, text: "New cell thread" });
     expect(created.annotation.range).toEqual({ row: 1, column: 0, start: 1, end: 4, collapsed: false });

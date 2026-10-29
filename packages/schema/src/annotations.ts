@@ -254,10 +254,32 @@ function threadMap(ydoc: Y.Doc, threadId: string): ThreadMap | null {
   return isThreadMap(value) ? value : null;
 }
 
+function replaceableThreadIds(
+  ydoc: Y.Doc,
+  blockId: string,
+  texts: readonly Y.XmlText[],
+  lo: number,
+  hi: number,
+  ownThreadId?: string,
+): Set<string> {
+  const replacedThreadIds = new Set<string>();
+  for (const run of commentRuns(texts)) {
+    if (run.threadId === ownThreadId || run.end <= lo || hi <= run.start) continue;
+    const thread = threadMap(ydoc, run.threadId);
+    if (thread === null) continue;
+    if (ownThreadId === undefined && thread.get("resolved") === true) {
+      replacedThreadIds.add(run.threadId);
+    } else {
+      throw new AnnotationRangeError("overlap", blockId, run.threadId);
+    }
+  }
+  return replacedThreadIds;
+}
+
 /**
  * Clamp and order a half-open range in block text or one projected table cell.
- * Empty ranges and overlaps are refused: Yjs and editor marks allow one thread
- * per character, so another thread's anchor would be overwritten.
+ * New threads can replace resolved anchors; moves cannot replace any anchor.
+ * Validate every overlap before returning the resolved threads to detach.
  */
 function annotationRange(
   ydoc: Y.Doc,
@@ -266,7 +288,7 @@ function annotationRange(
   endIndex: number,
   target?: { row: number; column: number } | { part: CardPart | "caption" },
   ownThreadId?: string,
-): { texts: Y.XmlText[]; lo: number; hi: number } {
+): { texts: Y.XmlText[]; lo: number; hi: number; replacedThreadIds: Set<string> } {
   const element = findBlockElement(ydoc, blockId);
   if (element === null) throw new BlockNotFoundError(blockId);
   if (element.nodeName === "divider") {
@@ -310,12 +332,8 @@ function annotationRange(
   const hi = Math.max(0, Math.min(length, Math.max(startIndex, endIndex)));
   if (lo === hi) throw new AnnotationRangeError("empty", blockId);
 
-  const clash = commentRuns(texts).find((run) => run.threadId !== ownThreadId &&
-    threadMap(ydoc, run.threadId) !== null && run.start < hi && lo < run.end);
-  if (clash !== undefined) {
-    throw new AnnotationRangeError("overlap", blockId, clash.threadId);
-  }
-  return { texts, lo, hi };
+  const replacedThreadIds = replaceableThreadIds(ydoc, blockId, texts, lo, hi, ownThreadId);
+  return { texts, lo, hi, replacedThreadIds };
 }
 
 export function createAnnotation(
@@ -328,7 +346,7 @@ export function createAnnotation(
   target?: { row: number; column: number } | { part: CardPart | "caption" },
   attribution?: CommentAttribution,
 ): Annotation {
-  const { texts, lo, hi } = annotationRange(ydoc, blockId, startIndex, endIndex, target);
+  const { texts, lo, hi, replacedThreadIds } = annotationRange(ydoc, blockId, startIndex, endIndex, target);
 
   const id = crypto.randomUUID();
   const opening: AnnotationComment = {
@@ -342,6 +360,7 @@ export function createAnnotation(
   const thread: ThreadMap = new Y.Map<unknown>();
   const comments = new Y.Array<unknown>();
   ydoc.transact(() => {
+    for (const threadId of replacedThreadIds) clearThreadMarks(ydoc, threadId);
     formatRange(texts, lo, hi, mark);
     annotations.set(id, thread);
     thread.set("id", id);
@@ -365,7 +384,7 @@ export function moveAnnotation(
   attribution?: CommentAttribution,
 ): Annotation | null {
   const thread = threadMap(ydoc, threadId);
-  if (thread === null) return null;
+  if (thread === null || thread.get("resolved") === true) return null;
   const { texts, lo, hi } = annotationRange(ydoc, blockId, startIndex, endIndex, target, threadId);
   ydoc.transact(() => {
     clearThreadMarks(ydoc, threadId);
@@ -491,7 +510,8 @@ export function addComment(
   attribution?: CommentAttribution,
 ): Annotation | null {
   const thread = threadMap(ydoc, threadId);
-  if (thread === null) return null;
+  // known limit: a reply on another replica can race resolution; revisit when writes have a protocol fence.
+  if (thread === null || thread.get("resolved") === true) return null;
   const comment: AnnotationComment = {
     author,
     text,
@@ -649,14 +669,15 @@ export function deleteComment(
 }
 
 /**
- * Write only the resolved flag so concurrent replies survive. Keep the text
- * mark so resolved threads remain anchored in the editor.
+ * Resolution is final. Keep the mark until a new thread replaces its anchor.
  */
 export function setAnnotationResolved(
   ydoc: Y.Doc,
   threadId: string,
   resolved: boolean,
 ): Annotation | null {
+  // known limit: older clients can still write resolved: false; revisit when the hub enforces annotation writes.
+  if (resolved !== true) return null;
   const thread = threadMap(ydoc, threadId);
   if (thread === null) return null;
   ydoc.transact(() => {

@@ -8,7 +8,7 @@ import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberbl
 import { wrapToken } from "@uberblick/schema/protocol";
 import {
   addComment, appendBlock, createAnnotation, deleteComment, getAnnotationCommentId, initDoc,
-  roomForDoc, upsertDirectoryEntry, directoryRoom,
+  roomForDoc, setAnnotationResolved, upsertDirectoryEntry, directoryRoom,
 } from "@uberblick/schema";
 import { setupHarness } from "./app-helpers.js";
 import { renderedText } from "./contrast-helpers.js";
@@ -18,7 +18,7 @@ const EXTERNAL = "https://example.invalid/spec";
 const GITHUB = "https://github.com/Example/SomeRepo/issues/12";
 const MARKDOWN = `**must** and *maybe* ~~old~~ \`ub update\`\n[spec](${EXTERNAL})\n${GITHUB}`;
 
-async function fixture(openingText = "Opening conversation", ownReplies = false, genericReply = false): Promise<{ uuid: string; first: string; second: string; removeFirst: () => void; close: () => void }> {
+async function fixture(openingText = "Opening conversation", ownReplies = false, genericReply = false): Promise<{ uuid: string; first: string; second: string; removeFirst: () => void; resolveFirst: () => void; close: () => void }> {
   const uuid = randomUUID();
   const secret = await importRootSecret(harness().authSecret);
   const peers: Array<{ doc: Y.Doc; provider: HocuspocusProvider }> = [];
@@ -49,6 +49,7 @@ async function fixture(openingText = "Opening conversation", ownReplies = false,
   const directory = await room(directoryRoom(harness().workspaceUuid));
   upsertDirectoryEntry(directory, { uuid, title: "A calm conversation" });
   return { uuid, first: first.id, second: second.id,
+    resolveFirst: () => { setAnnotationResolved(doc, first.id, true); },
     removeFirst: () => {
       const commentId = getAnnotationCommentId(doc, first.id, 0);
       if (commentId === null) throw new Error("The fixture needs its opening comment to delete it");
@@ -463,11 +464,9 @@ test("comment cards reveal quiet controls through hover, keyboard and selection 
     await page.keyboard.press("Tab");
     await expect(second.locator(".ub-thread-select")).toBeFocused();
     await page.keyboard.press("Enter");
-    await page.keyboard.press("Tab");
-    await expect(second.getByRole("button", { name: "Reopen", exact: true })).toBeFocused();
-    await page.keyboard.press("Enter");
-    await expect(second).toHaveAttribute("aria-current", "true");
-    await expect(page.locator(`[data-comment-thread="${data.second}"]`)).toHaveAttribute("tabindex", "0");
+    await expect(second.getByRole("button", { name: "Reopen", exact: true })).toHaveCount(0);
+    await expect(second.getByPlaceholder("Reply…")).toHaveCount(0);
+    await expect(page.locator(`[data-comment-thread="${data.second}"]`)).not.toHaveAttribute("tabindex");
   } finally { data.close(); }
 });
 
@@ -592,7 +591,7 @@ test("iPad touch can start, cancel and save an own comment edit with shared targ
   } finally { data.close(); }
 });
 
-test("iPad taps select, reply, resolve and reopen without reviving a resolved anchor", { tag: "@webkit-touch" }, async ({ browser }) => {
+test("iPad taps select, reply and resolve without reviving a resolved anchor", { tag: "@webkit-touch" }, async ({ browser }) => {
   const data = await fixture();
   try {
     const page = await openApp(browser, `/${harness().workspace}/${data.uuid}`, {
@@ -645,28 +644,74 @@ test("iPad taps select, reply, resolve and reopen without reviving a resolved an
     await expect(card).toHaveCount(0);
     await resolved.tap();
     await card.locator(".ub-thread-text").first().tap();
-    const reopen = card.getByRole("button", { name: "Reopen", exact: true });
-    const reopenTarget = await reopen.boundingBox();
-    expect(reopenTarget?.height).toBeGreaterThanOrEqual(44);
-    await reopen.tap();
-    await sheet.getByRole("button", { name: "Close comments" }).tap();
-    await expect(mark).toHaveAccessibleName("Comment");
-    await expect(mark).toHaveAttribute("tabindex", "0");
-    await expect(mark).toHaveClass(/(?:^| )ub-comment(?: |$)/);
-    await mark.tap();
-    await expect(sheet).toBeVisible();
+    await expect(card.getByRole("button", { name: "Reopen", exact: true })).toHaveCount(0);
+    await expect(card.getByRole("button", { name: "Resolve", exact: true })).toHaveCount(0);
     await expect(card).toContainText("Touch reply");
-    await sheet.getByRole("button", { name: "Close comments" }).tap();
-    await mark.focus();
-    await mark.press("Enter");
-    await expect(card.locator(".ub-thread-select")).toBeFocused();
-    await page.keyboard.press("Tab");
-    await expect(card.getByRole("button", { name: "Resolve", exact: true })).toBeFocused();
-    await page.keyboard.press("Enter");
-    await expect(sheet.getByRole("button", { name: "1 resolved", exact: true })).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveCount(0);
     await expect(toggle).toBeFocused();
     await expect(mark).not.toHaveAttribute("tabindex");
+  } finally { data.close(); }
+});
+
+test("a remote resolve keeps unsent replies and edits selectable, copyable and discardable", async ({ browser }) => {
+  const data = await fixture();
+  try {
+    const page = await openApp(browser, `/${harness().workspace}/${data.uuid}`, {
+      contextOptions: { viewport: { width: 1600, height: 1000 }, reducedMotion: "reduce", permissions: ["clipboard-read", "clipboard-write"] },
+      beforeNavigate: ownAccount,
+    });
+    const card = page.locator(`#ub-thread-${data.first} .ub-thread`);
+    await card.locator(".ub-thread-text").first().click();
+    await card.getByPlaceholder("Reply…").fill("Keep this reply");
+    await card.getByRole("button", { name: "Edit", exact: true }).click();
+    await card.getByPlaceholder("Edit comment…").fill("Keep this edit");
+    data.resolveFirst();
+    await page.getByRole("button", { name: "1 resolved", exact: true }).click();
+    await expect(card.getByPlaceholder("Reply…")).toHaveCount(0);
+    await expect(card.getByPlaceholder("Edit comment…")).toHaveCount(0);
+    await expect(card.getByRole("button", { name: "Reopen", exact: true })).toHaveCount(0);
+    await expect(card.locator(".ub-thread-unsent")).toHaveCount(2);
+    for (const [text, discard] of [["Keep this edit", "Discard edit"], ["Keep this reply", "Discard reply"]] as const) {
+      const retained = card.getByText(text, { exact: true });
+      await expect(retained).toHaveCSS("user-select", "text");
+      await retained.click({ clickCount: 3 });
+      expect((await page.evaluate(() => window.getSelection()?.toString() ?? "")).trim()).toBe(text);
+      await page.keyboard.press("ControlOrMeta+c");
+      await expect.poll(async () => (await page.evaluate(() => navigator.clipboard.readText())).trim()).toBe(text);
+      await card.getByRole("button", { name: discard, exact: true }).click();
+      await expect(retained).toHaveCount(0);
+    }
+    await expect(card.locator(".ub-thread-text").first()).toHaveText("Opening conversation");
+    await expect(card.locator(".ub-thread-text").last()).toHaveText("A considered reply");
+  } finally { data.close(); }
+});
+
+test("a new comment takes resolved text while the retained conversation loses its anchor", async ({ browser }) => {
+  const data = await fixture();
+  try {
+    const page = await openApp(browser, `/${harness().workspace}/${data.uuid}`, {
+      contextOptions: { viewport: { width: 1600, height: 1000 }, reducedMotion: "reduce" },
+      beforeNavigate: avatarStubs,
+    });
+    const card = page.locator(`#ub-thread-${data.first} .ub-thread`);
+    await card.locator(".ub-thread-text").first().click();
+    await card.getByRole("button", { name: "Resolve", exact: true }).click();
+    const mark = page.locator(`[data-comment-thread="${data.first}"]`);
+    await mark.dblclick();
+    expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("First");
+    const composer = page.locator('[data-slot="selection-composer"]');
+    await composer.getByRole("button", { name: "Comment", exact: true }).click();
+    await composer.getByPlaceholder(/Comment as/).fill("Continue on the same text");
+    await composer.getByRole("button", { name: "Comment", exact: true }).click();
+    await expect(page.locator(".ub-thread:not(.ub-thread-resolved)")).toHaveCount(2);
+    await expect(page.locator(".ub-thread:not(.ub-thread-resolved)").filter({ hasText: "Continue on the same text" })).toBeVisible();
+    await expect(mark).toHaveCount(0);
+    await page.getByRole("button", { name: "1 resolved", exact: true }).click();
+    await expect(card).toHaveClass(/ub-thread-resolved/);
+    await expect(card.locator(".ub-thread-gone")).toHaveText("on ‘…’ (text removed)");
+    await card.locator(".ub-thread-select").click();
+    await expect(card.locator(".ub-thread-text")).toHaveText(["Opening conversation", "A considered reply"]);
+    await expect(card.getByRole("button", { name: "Reopen", exact: true })).toHaveCount(0);
   } finally { data.close(); }
 });

@@ -781,10 +781,10 @@ describe("directory unresolved thread cache", () => {
     setAnnotationResolved(doc, open.id, true);
     expect(documentDirectoryFields(doc).openThreadCount).toBe(0);
     expect(directoryStubDiffers(getDirectoryEntry(directory, ALPHA), getMeta(doc), documentDirectoryFields(doc))).toBe(true);
-    setAnnotationResolved(doc, resolved.id, false);
-    expect(documentDirectoryFields(doc).openThreadCount).toBe(1);
+    expect(setAnnotationResolved(doc, resolved.id, false)).toBeNull();
+    expect(documentDirectoryFields(doc).openThreadCount).toBe(0);
     (getAnnotationsMap(doc).get(open.id) as Y.Map<unknown>).set("resolved", "true");
-    expect(documentDirectoryFields(doc).openThreadCount).toBe(2);
+    expect(documentDirectoryFields(doc).openThreadCount).toBe(1);
   });
 
   it.each([undefined, "decision"] as const)("preserves known counts for %s stubs through omitted writes, archive and restore", (kind) => {

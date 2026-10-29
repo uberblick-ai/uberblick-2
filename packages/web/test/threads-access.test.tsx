@@ -319,13 +319,12 @@ describe("thread writes require a writable, unarchived document", () => {
     const open = threadCard(host);
     await act(async () => within(host).getByRole("button", { name: "1 resolved" }).click());
     const resolved = threadCard(host, "jumps");
-    // A collapsed resolved card has no actions even when writable. Expand
-    // first so removing the read-only gate cannot pass this test vacuously.
+    // Expanded resolved cards stay read-only even when the room is writable.
     await act(async () => threadButton(resolved).click());
     expect(threadButton(resolved).getAttribute("aria-expanded")).toBe("true");
     expect(button(open, "Reply")).toBeDefined();
     expect(button(open, "Resolve")).toBeDefined();
-    expect(button(resolved, "Reopen")).toBeDefined();
+    expect(findButton(resolved, "Reopen")).toBeNull();
     const before = [...Y.encodeStateAsUpdate(ydoc)];
 
     await act(async () => emitStatus(roomForDoc(WORKSPACE, UUID), { writable: false }));
@@ -350,7 +349,7 @@ describe("thread writes require a writable, unarchived document", () => {
     await act(async () => emitStatus(roomForDoc(WORKSPACE, UUID), { writable: true }));
     expect(button(open, "Reply")).toBeDefined();
     expect(button(open, "Resolve")).toBeDefined();
-    expect(button(resolved, "Reopen")).toBeDefined();
+    expect(findButton(resolved, "Reopen")).toBeNull();
     expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
     });
 
@@ -434,7 +433,7 @@ describe("a keyboard reaches a thread from its range in the prose", () => {
     expect(document.activeElement).toBe(card);
   });
 
-  it("makes resolved anchors ordinary text after live updates and redraws, and restores a reopened control", async () => {
+  it("keeps resolved anchors ordinary text after live updates and redraws", async () => {
     const { host, ydoc, threadId } = await openAnnotatedDoc();
     let span = highlight(host, threadId);
     expect(span.getAttribute("aria-label")).toBe("Comment");
@@ -459,13 +458,9 @@ describe("a keyboard reaches a thread from its range in the prose", () => {
     const card = threadCard(host);
     await act(async () => card.click());
     expect(within(card).queryByPlaceholderText("Reply…")).toBeNull();
-    await act(async () => within(card).getByRole("button", { name: "Reopen" }).click());
-    span = highlight(host, threadId);
-    expect(span.getAttribute("role")).toBe("button");
-    expect(span.tabIndex).toBe(0);
-    expect(span.getAttribute("aria-label")).toBe("Comment");
-    expect(span.classList.contains("ub-comment")).toBe(true);
-    expect(getAnnotation(ydoc, threadId)?.resolved).toBe(false);
+    expect(within(card).queryByRole("button", { name: "Reopen" })).toBeNull();
+    ordinary(highlight(host, threadId));
+    expect(getAnnotation(ydoc, threadId)?.resolved).toBe(true);
   });
 
   /**

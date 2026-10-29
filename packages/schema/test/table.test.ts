@@ -900,7 +900,7 @@ describe("structured table contract", () => {
     });
     expect(addComment(doc, thread.id, "writer", "Reply")?.comments).toHaveLength(2);
     expect(setAnnotationResolved(doc, thread.id, true)?.resolved).toBe(true);
-    expect(setAnnotationResolved(doc, thread.id, false)?.resolved).toBe(false);
+    expect(setAnnotationResolved(doc, thread.id, false)).toBeNull();
 
     const invalid = legacy(doc, "Unparseable source");
     const invalidThread = createAnnotation(doc, paragraphId, 8, 12, "reader", "Other");

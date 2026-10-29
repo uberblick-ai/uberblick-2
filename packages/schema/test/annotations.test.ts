@@ -490,7 +490,6 @@ describe("annotations", () => {
   it("moves all copies of an anchor with one reply while preserving the thread's metadata", () => {
     const { doc, blockId, threadId } = annotated();
     addComment(doc, threadId, "owner", "Earlier reply");
-    setAnnotationResolved(doc, threadId, true);
     const previous = getAnnotation(doc, threadId)!;
     const target = appendBlock(doc, { type: "paragraph", text: "New anchor" });
     const table = appendBlock(doc, { type: "table", text: "| H |\n| --- |\n| Cell |" });
@@ -514,7 +513,7 @@ describe("annotations", () => {
     const moved = moveAnnotation(doc, threadId, target, 0, 3, "agent", "Moved context");
 
     expect(updates).toBe(1);
-    expect(moved).toMatchObject({ id: threadId, blockId: target, resolved: true });
+    expect(moved).toMatchObject({ id: threadId, blockId: target });
     expect(moved?.comments.slice(0, -1)).toEqual(previous.comments);
     expect(moved?.comments.at(-1)).toMatchObject({ author: "agent", text: "Moved context" });
     expect(resolveAnnotationRange(doc, threadId)).toEqual({ start: 0, end: 3, collapsed: false });
@@ -785,6 +784,121 @@ describe("annotations", () => {
     expect(annotatedText(doc, blockId, threadId)).toBe("brave");
     expect(addComment(doc, "unknown", "a", "b")).toBeNull();
     expect(setAnnotationResolved(doc, "unknown", true)).toBeNull();
+  });
+
+  it.each(["open", "resolved", "legacy resolved"])("refuses reopening a %s thread without writing", (state) => {
+    const { doc, threadId } = annotated();
+    if (state === "resolved") setAnnotationResolved(doc, threadId, true);
+    if (state === "legacy resolved") (getAnnotationsMap(doc).get(threadId) as Y.Map<unknown>).set("resolved", true);
+    const before = Y.encodeStateAsUpdate(doc);
+    const thread = getAnnotation(doc, threadId);
+    const update = vi.fn();
+    doc.on("update", update);
+
+    expect(setAnnotationResolved(doc, threadId, false)).toBeNull();
+
+    expect(getAnnotation(doc, threadId)).toEqual(thread);
+    if (state !== "open") expect(getAnnotation(doc, threadId)?.resolved).toBe(true);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(update).not.toHaveBeenCalled();
+    doc.destroy();
+  });
+
+  it("refuses replies and moves on resolved threads without writing", () => {
+    const { doc, blockId, threadId } = annotated();
+    setAnnotationResolved(doc, threadId, true);
+    const before = Y.encodeStateAsUpdate(doc);
+    const update = vi.fn();
+    doc.on("update", update);
+
+    expect(addComment(doc, threadId, "author", "Too late")).toBeNull();
+    expect(moveAnnotation(doc, threadId, blockId, 0, 5, "author", "Moved")).toBeNull();
+
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(update).not.toHaveBeenCalled();
+    doc.destroy();
+  });
+
+  it.each([[0, 5], [1, 4]])("replaces resolved text at [%s, %s) and clears every old anchor in one update", (start, end) => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Resolved anchor" });
+    const blockId = appendBlock(doc, { type: "paragraph", text: "brave" });
+    const old = createAnnotation(doc, blockId, 0, 5, "reviewer", "Previous conversation");
+    addComment(doc, old.id, "author", "Agreed");
+    setAnnotationResolved(doc, old.id, true);
+    const previous = getAnnotation(doc, old.id);
+    const otherBlock = appendBlock(doc, { type: "paragraph", text: "another copy" });
+    (findBlockElement(doc, otherBlock)!.firstChild as Y.XmlText).format(0, 7, { [COMMENT_MARK]: { threadId: old.id } });
+    const shadow = findBlockElement(doc, blockId)!.clone();
+    getBlocksFragment(doc).insert(getBlocksFragment(doc).length, [shadow]);
+    const update = vi.fn();
+    doc.on("update", update);
+
+    const next = createAnnotation(doc, blockId, start!, end!, "author", "New conversation");
+
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(getAnnotation(doc, old.id)).toEqual(previous);
+    expect(resolveAnnotationRange(doc, old.id)).toBeNull();
+    expect(resolveAnnotationRange(doc, next.id)).toEqual({ start, end, collapsed: false });
+    expect(listAnnotations(doc)).toHaveLength(2);
+    expect(listAnnotationRanges(doc, otherBlock)).toEqual([]);
+    expect((shadow.firstChild as Y.XmlText).toDelta()).toEqual([{ insert: "brave" }]);
+    expect(listAnnotationRanges(doc, blockId)).toEqual([{ threadId: next.id, start, end }]);
+    doc.destroy();
+  });
+
+  it("replaces every overlapping resolved thread while retaining all conversations", () => {
+    const { doc, blockId, threadId } = annotated();
+    const other = createAnnotation(doc, blockId, 12, 17, "other", "World");
+    setAnnotationResolved(doc, threadId, true);
+    setAnnotationResolved(doc, other.id, true);
+    const update = vi.fn();
+    doc.on("update", update);
+
+    const next = createAnnotation(doc, blockId, 0, 17, "author", "Continue");
+
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(listAnnotationRanges(doc, blockId)).toEqual([{ threadId: next.id, start: 0, end: 17 }]);
+    expect(resolveAnnotationRange(doc, threadId)).toBeNull();
+    expect(resolveAnnotationRange(doc, other.id)).toBeNull();
+    expect(getAnnotation(doc, threadId)).toMatchObject({ resolved: true, comments: [{ text: "Too much?" }] });
+    expect(getAnnotation(doc, other.id)).toMatchObject({ resolved: true, comments: [{ text: "World" }] });
+    doc.destroy();
+  });
+
+  it("refuses mixed resolved and open overlap before detaching any anchor", () => {
+    const { doc, blockId, threadId } = annotated();
+    const open = createAnnotation(doc, blockId, 12, 17, "other", "Still open");
+    setAnnotationResolved(doc, threadId, true);
+    const before = Y.encodeStateAsUpdate(doc);
+    const update = vi.fn();
+    doc.on("update", update);
+
+    expect(() => createAnnotation(doc, blockId, 0, 17, "author", "Overlap")).toThrow(
+      new AnnotationRangeError("overlap", blockId, open.id),
+    );
+
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(update).not.toHaveBeenCalled();
+    expect(resolveAnnotationRange(doc, threadId)).toEqual({ start: 6, end: 11, collapsed: false });
+    doc.destroy();
+  });
+
+  it("refuses moving an open thread onto resolved text without changing either anchor", () => {
+    const { doc, blockId, threadId } = annotated();
+    const resolved = createAnnotation(doc, blockId, 12, 17, "other", "Done");
+    setAnnotationResolved(doc, resolved.id, true);
+    const before = Y.encodeStateAsUpdate(doc);
+    const update = vi.fn();
+    doc.on("update", update);
+
+    expect(() => moveAnnotation(doc, threadId, blockId, 12, 17, "author", "Move")).toThrow(
+      new AnnotationRangeError("overlap", blockId, resolved.id),
+    );
+
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(update).not.toHaveBeenCalled();
+    doc.destroy();
   });
 
   it("tracks the range through a concurrent edit from another replica", () => {

@@ -1380,7 +1380,7 @@ describe("the comments column writes back", () => {
   /**
    * A reply form open on a thread another client then resolves. The reply
    * belongs to a resolved conversation, so the field goes and the draft stays
-   * recoverable. Reopening restores the same text without taking focus.
+   * recoverable for a new conversation.
    */
   it("takes back an open reply form when another client resolves the thread", async () => {
     const { ydoc, blocks } = annotatedDoc();
@@ -1404,11 +1404,12 @@ describe("the comments column writes back", () => {
       expect(within(view.cards()[0]!).queryByPlaceholderText("Reply…")).toBeNull();
       expect(within(view.cards()[0]!).getByText("a retained reply")).toBeDefined();
 
-      // Reopened by the same client: the draft returns without taking focus.
-      await settle(() => setAnnotationResolved(remote, thread.id, false));
-      const field = within(view.cards()[0]!).getByPlaceholderText<HTMLTextAreaElement>("Reply…");
-      expect(field.value).toBe("a retained reply");
-      expect(document.activeElement).not.toBe(field);
+      expect(within(view.cards()[0]!).getByText("This conversation was resolved. Start a new comment to continue.")).toBeDefined();
+      expect(within(view.cards()[0]!).queryByRole("button", { name: "Reopen" })).toBeNull();
+      const before = [...Y.encodeStateAsUpdate(ydoc)];
+      await settle(() => action(view.cards()[0]!, "Discard reply").click());
+      expect(within(view.cards()[0]!).queryByText("a retained reply")).toBeNull();
+      expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
     } finally {
       view.unmount();
     }
@@ -1437,7 +1438,9 @@ describe("the comments column writes back", () => {
       // handled against the render that still shows an open thread.
       await settle(() => {
         setAnnotationResolved(remote, thread.id, true);
+        const before = [...Y.encodeStateAsUpdate(ydoc)];
         submitReply(view.card(thread.id));
+        expect([...Y.encodeStateAsUpdate(ydoc)]).toEqual(before);
       });
 
       // Nothing was appended, on either replica…
@@ -1446,20 +1449,14 @@ describe("the comments column writes back", () => {
       await settle(() => screen.getByRole<HTMLButtonElement>("button", { name: "1 resolved" }).click());
       // …and the card says why, on the card rather than in a form that is gone.
       expect(
-        within(view.card(thread.id)).queryByText("This comment was resolved while you wrote — reopen it to reply.")?.textContent,
-      ).toBe("This comment was resolved while you wrote — reopen it to reply.");
+        within(view.card(thread.id)).queryByText("This conversation was resolved. Start a new comment to continue.")?.textContent,
+      ).toBe("This conversation was resolved. Start a new comment to continue.");
       expect(within(view.card(thread.id)).queryByPlaceholderText("Reply…")).toBeNull();
       expect(within(view.card(thread.id)).getByText("because it is a pangram")).toBeDefined();
 
-      // The message is about a thread that reads as resolved, and whoever
-      // settled it can reopen it from anywhere. Nobody clicks anything here:
-      // the reopen arrives from the other replica and the message goes with the
-      // state that justified it.
-      await settle(() => setAnnotationResolved(remote, thread.id, false));
-      expect(within(view.card(thread.id)).queryByText("This comment was resolved while you wrote — reopen it to reply.")).toBeNull();
-      expect(within(view.card(thread.id)).getByPlaceholderText<HTMLTextAreaElement>("Reply…").value).toBe("because it is a pangram");
-      await settle(() => submitReply(view.card(thread.id)));
-      expect(getAnnotation(remote, thread.id)?.comments).toHaveLength(2);
+      await settle(() => action(view.card(thread.id), "Discard reply").click());
+      expect(within(view.card(thread.id)).queryByText("because it is a pangram")).toBeNull();
+      expect(getAnnotation(remote, thread.id)?.comments).toHaveLength(1);
     } finally {
       view.unmount();
     }
@@ -1508,14 +1505,9 @@ describe("the comments column writes back", () => {
       expect(anchor?.hasAttribute("tabindex")).toBe(false);
       expect(anchor?.hasAttribute("role")).toBe(false);
 
-      // …and reopening puts it back in the count.
-      await settle(() => action(view.card(thread.id), "Reopen").click());
-      expect(getAnnotation(remote, thread.id)?.resolved).toBe(false);
-      expect(view.count()).toBe("2");
-      const reopened = element.querySelector<HTMLElement>(`[data-comment-thread="${thread.id}"]`);
-      expect(reopened?.classList.contains("ub-comment")).toBe(true);
-      expect(reopened?.tabIndex).toBe(0);
-      expect(reopened?.getAttribute("aria-label")).toBe("Comment");
+      expect(within(view.card(thread.id)).queryByRole("button", { name: "Reopen" })).toBeNull();
+      expect(within(view.card(thread.id)).queryByRole("button", { name: "Resolve" })).toBeNull();
+      expect(within(view.card(thread.id)).queryByPlaceholderText("Reply…")).toBeNull();
     } finally {
       view.unmount();
       editor.destroy();
