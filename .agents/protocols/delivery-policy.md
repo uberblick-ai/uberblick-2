@@ -206,7 +206,10 @@ neither does an answer that covers the shape without naming the version.
 ### Library and custom-mechanism choices
 
 Choose the simplest defensible mechanism, comparing existing primitives and
-libraries with custom code, including parsers and file-format handling. Consider
+libraries with custom code, including parsers and file-format handling. Take
+the first that holds, in this order: what the repository already has (a
+helper, component or pattern, used the way the surrounding code uses it), the
+platform or standard library, an installed dependency, then custom code. Consider
 the supported inputs, correctness burden and maintenance. If that choice needs
 a protected runtime dependency, seek a maintainer's answer early; bespoke code
 must not be an approval workaround. Evidence supports a recommendation, not a

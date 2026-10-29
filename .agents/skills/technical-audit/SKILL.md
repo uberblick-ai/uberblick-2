@@ -183,7 +183,11 @@ even when it also found defects.
 
 For each suspected finding, establish exact evidence, reachability inside the
 supported usage model, concrete consequence, confidence (`proven`, `strong`, or
-`hypothesis`), and the smallest correction with its appropriate owner. Use the
+`hypothesis`), and the smallest correction with its appropriate owner. A
+`known limit:` comment that names its trigger is a recorded decision, not a
+finding, unless supported usage now crosses it. List the markers in the sampled
+code (`git grep -n "known limit:"`) and put any without a trigger under `Watch`,
+since nothing would ever bring them back. Use the
 `P1`, `P2`, and `P3` definitions in
 `.agents/protocols/review-protocol.md`. A hypothesis belongs in `Watch`,
 not `Findings`. Record important suspicions rejected and recommend at most three
@@ -222,8 +226,8 @@ Corpus ↔ code
 - <unsynced write and page, including acknowledgement confirmed before run end> | None.
 
 Findings
-- <P1|P2|P3> <confidence> — <finding, evidence, consequence, correction, owner>
-  | None.
+1. <P1|P2|P3> <confidence> — <finding, evidence, consequence, correction, owner>
+   | None.
 
 Watch
 - <hypothesis and evidence needed to resolve it> | None.
@@ -235,7 +239,7 @@ Rejected suspicions
 - <concern and counterevidence> | None.
 
 Candidate actions
-- <at most three, ordered by risk reduction per unit of change> | None.
+1. <at most three, ordered by risk reduction per unit of change> | None.
 
 Cursor
 - Code: <origin/main SHA>
@@ -248,6 +252,7 @@ Audit self-assessment
   next audit cheaper or clearer, if applicable>
 ```
 
+Number findings and candidate actions so a maintainer can answer by number.
 Link durable evidence instead of pasting long logs. A clean audit reports the
 sample and its limits without manufacturing findings. `Coverage: incomplete`
 requires `Verdict: incomplete`; findings may still be listed. Post no other

@@ -50,7 +50,13 @@ library or exception evidence in the PR; unresolved maintainer choices use the r
 or escalation rule below.
 
 The least code that defends the issue's contract, inside its declared `Touches`
-footprint, with contract and invariant tests rather than tests of trivia. Run
+footprint, with contract and invariant tests rather than tests of trivia.
+Before editing, list every place the change must reach: callers of each
+function you change, tests, fixtures, config and exports. A bug fix corrects
+the root cause once, in the shared code, not in the one caller that showed it.
+A known limit accepted under the
+[review protocol](../protocols/review-protocol.md#findings) gets its
+`known limit:` comment where it lives. Run
 focused checks while editing. Before handoff, wait for the pull request's
 required checks at the final head (`gh pr checks <n> --required --watch`) and
 treat each failure as the [integrator's CI gate](../protocols/integration.md#gate-mechanics)
@@ -257,6 +263,7 @@ Rewrites: None — <why no documented claim changes> | <title> (<uuid>), block <
 ## Self-review
 KISS: <why this is the least defensible change>
 Tests: <why coverage protects contracts without testing trivia>
+Not checked: None | <what was not run or verified, and the risk it leaves>
 Corpus: not used — <why no product choice needed it> | <title> (<uuid>) — <one line on usefulness>
 ```
 
