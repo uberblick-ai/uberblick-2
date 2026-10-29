@@ -89,7 +89,7 @@ test("confirm a GitHub account, manage membership, and revoke only your devices"
   await page.getByRole("menuitem", { name: "Devices", exact: true }).click();
   const devices = page.getByRole("table", { name: "Devices", exact: true });
   await expect(page.getByRole("heading", { name: "Devices", exact: true })).toBeVisible();
-  await expect(page.getByText(`Computers signed in to ${new URL(harness().hubUrl).host} as @browser-person. Revoking one stops its sync; its downloaded documents stay.`, { exact: true })).toBeVisible();
+  await expect(page.getByText(`Computers and hosted agents signed in to ${new URL(harness().hubUrl).host} as @browser-person. Revoking one stops its access; downloaded documents stay.`, { exact: true })).toBeVisible();
   await expect(devices.getByRole("columnheader")).toHaveText(["Device", "Signed in", "Revoke"]);
   await expect(devices.getByText("This computer", { exact: true })).toBeVisible();
   await expect(devices.getByRole("rowheader").filter({ hasText: access.deviceName })).toHaveCount(2);

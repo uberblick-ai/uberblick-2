@@ -121,7 +121,7 @@ describe("OAuth consent persistence", () => {
     expect(JSON.stringify(stored)).not.toContain(code);
     const grant = new AgentGrantRegistry(r.database).get(stored.codes[0]!.grant_id as string);
     expect(grant).toEqual({ id: stored.grants[0]!.id, clientId: request.clientId, clientName: request.clientName,
-      principalId: PRINCIPAL, workspaceId: WORKSPACE, scope: "read-write", deviceId: expect.any(String), revokedAt: null });
+      principalId: PRINCIPAL, workspaceId: WORKSPACE, scope: "read-write", deviceId: expect.any(String), createdAt: approvedAt, revokedAt: null });
     r.database.close();
     const reopened = rig(path, r.clock);
     expect(snapshot(reopened.database)).toEqual(stored);

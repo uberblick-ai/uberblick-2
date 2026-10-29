@@ -205,8 +205,18 @@ export function sanitizeManagementReply(
           const name = sanitizeDeviceName(value.deviceName);
           const deviceName = name !== undefined && login !== undefined && name.includes(login.credential.key)
             ? undefined : name;
+          let hosted: Record<string, unknown> = {};
+          if (value.hosted === true) {
+            if (!isUuid(value.workspaceId) || (value.scope !== "read-only" && value.scope !== "read-write") || value.current) {
+              throw new ManagementResponseError();
+            }
+            const workspaceName = sanitizeWorkspaceNames({ [value.workspaceId]: value.workspaceName }, [value.workspaceId],
+              login?.credential.key)?.[value.workspaceId];
+            hosted = { hosted: true, workspaceId: value.workspaceId, scope: value.scope,
+              ...(workspaceName === undefined ? {} : { workspaceName }) };
+          }
           return { deviceId: value.deviceId, signedInAt: value.signedInAt, current: value.current,
-            ...(deviceName === undefined ? {} : { deviceName }) };
+            ...(deviceName === undefined ? {} : { deviceName }), ...hosted };
         });
         if (new Set(devices.map(row => row.deviceId)).size !== devices.length ||
             devices.filter(row => row.current).length !== 1) throw new ManagementResponseError();

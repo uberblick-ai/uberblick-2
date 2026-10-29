@@ -19,17 +19,24 @@ function failure(status: string, hub: string | null): string {
 function DeviceRow({ device, now, hub, busy, revoke }: {
   device: AccessDevice; now: number; hub: string | null; busy: boolean; revoke: (device: AccessDevice) => void;
 }): ReactElement {
-  const signedIn = formatTimestamp(device.signedInAt, now, true);
+  const signedIn = device.hosted && device.signedInAt === 0 ? null : formatTimestamp(device.signedInAt, now, true);
   const name = device.deviceName ?? `Unnamed device (${device.deviceId.slice(0, 8)})`;
   return <tr>
     <th className={`${ROW_HEADER} max-w-56`} scope="row">
       {device.deviceName ?? <><span className="ub-muted">Unnamed device</span>{" "}<span className="ub-muted mt-1 block font-(family-name:--font-mono) ub-type-caption" title={device.deviceId}>{device.deviceId.slice(0, 8)}</span></>}
       {device.current && <>{" "}<span className="ub-muted mt-1 block">This computer</span></>}
+      {device.hosted && <>
+        {" "}<span className="ub-muted mt-1 block">Hosted</span>
+        {" "}<span className="mt-1 block">{device.workspaceName ?? <><span className="ub-muted">Unnamed workspace</span>{" "}<span className="ub-muted mt-1 block font-(family-name:--font-mono) ub-type-caption" title={device.workspaceId}>{device.workspaceId.slice(0, 8)}</span></>}</span>
+        {" "}<span className="ub-muted mt-1 block">{device.scope === "read-only" ? "Read only" : "Read and write"}</span>
+      </>}
     </th>
-    <td className={CELL}>{signedIn !== null && <time dateTime={signedIn.dateTime} title={signedIn.title}>{signedIn.label}</time>}</td>
+    <td className={CELL}>{signedIn === null ? "—" : <time dateTime={signedIn.dateTime} title={signedIn.title}>{signedIn.label}</time>}</td>
     <td className={CELL}><ConfirmAction trigger="Revoke" label={`Revoke ${device.deviceName ?? "Unnamed device"} (${device.deviceId})`}
       title={device.current ? "Revoke this computer?" : `Revoke ${name}?`}
-      description={`This one device of yours loses access to this hub. Documents already downloaded stay where they are.${device.current ? ` This computer's sync with the hub stops until ub auth login ${hub ?? "<hub>"} is run again.` : ""}`}
+      description={device.hosted
+        ? "This hosted agent loses access to its workspace. It will need your consent to connect again. Documents already downloaded stay where they are."
+        : `This one device of yours loses access to this hub. Documents already downloaded stay where they are.${device.current ? ` This computer's sync with the hub stops until ub auth login ${hub ?? "<hub>"} is run again.` : ""}`}
       disabled={busy} onConfirm={() => revoke(device)} /></td>
   </tr>;
 }
@@ -57,6 +64,7 @@ export function DevicesSettings({ request, initial, login }: {
       if (signal.aborted) return;
       const done = acknowledged(result, device.current
         ? `This computer was revoked. Its sync with the hub stops until ub auth login ${identity?.hub ?? "<hub>"} is run again. Documents already downloaded stay where they are.`
+        : device.hosted ? "Hosted access revoked. Documents already downloaded stay where they are."
         : "Device revoked. Documents already downloaded stay where they are.");
       // Keep the hub's acknowledgment when revoking this computer makes the
       // following read require a new sign-in.
@@ -69,7 +77,7 @@ export function DevicesSettings({ request, initial, login }: {
   };
 
   return <SettingsPage title="Devices" gap="gap-4" note={noteIdentity?.handle !== undefined
-    ? `Computers signed in to ${hubHost(noteIdentity.hub)} as @${noteIdentity.handle}. Revoking one stops its sync; its downloaded documents stay.` : null}>
+    ? `Computers and hosted agents signed in to ${hubHost(noteIdentity.hub)} as @${noteIdentity.handle}. Revoking one stops its access; downloaded documents stay.` : null}>
     <FeedbackLine feedback={feedback} />
     {list === null ? <p className="m-0 ub-type-ui" role="status">Reading devices from the hub…</p> :
       list.status !== "ok" ? <p className="m-0 ub-type-ui" role="alert">{failure(list.status, list.hub)}</p> :

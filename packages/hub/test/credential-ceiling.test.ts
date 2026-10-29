@@ -2,7 +2,7 @@ import { copyFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken, type TokenScope } from "@uberblick/schema/token";
+import { DEVICE_CREDENTIAL_LIFETIME_MS, importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken, type TokenScope } from "@uberblick/schema/token";
 import { AgentGrantRegistry } from "../src/agent-grants.js";
 import { CredentialRegistry } from "../src/credentials.js";
 import { HubAdminRegistry } from "../src/hub-admins.js";
@@ -121,15 +121,15 @@ describe("hosted grant credential ceilings", () => {
       .toEqual({ status: "already-replaced" });
     expect(await restarted.store.verify(await roomToken(replacement))).toEqual({ failure: "revoked-credential" });
     expect(restarted.store.get(original.record.id)?.revokedAt).toBeTypeOf("number");
-    expect(restarted.grants.get(grant.id)?.revokedAt).toBeNull();
+    expect(restarted.grants.get(grant.id)?.revokedAt).toBeTypeOf("number");
+    expect(restarted.grants.isLive(grant.id)).toBe(false);
+    expect(restarted.store.issueForGrant(grant.id, generateTestCredentialKeyPair().publicKey)).toBeNull();
     expect(await restarted.store.verify(await roomToken(other))).toHaveProperty("record", other.record);
     expect(await restarted.store.verify(await roomToken(laptop))).toHaveProperty("record", laptop.record);
 
-    const recovered = issueForGrant(restarted.store, grant.id);
-    expect(recovered.record.deviceId).toBe(grant.deviceId);
-    expect(restarted.store.revokeDevice(PRINCIPAL, recovered.record.deviceId)).toBe(true);
-    expect(await restarted.store.verify(await roomToken(recovered))).toEqual({ failure: "revoked-credential" });
-    expect(await restarted.store.verify(await roomToken(other))).toHaveProperty("record", other.record);
+    expect(restarted.store.revokeDevice(PRINCIPAL, other.record.deviceId)).toBe(true);
+    expect(restarted.grants.get(otherGrant.id)?.revokedAt).toBeTypeOf("number");
+    expect(await restarted.store.verify(await roomToken(other))).toEqual({ failure: "revoked-credential" });
     expect(await restarted.store.verify(await roomToken(laptop))).toHaveProperty("record", laptop.record);
   });
 
@@ -144,6 +144,97 @@ describe("hosted grant credential ceilings", () => {
     expect(context.db.connection.prepare("SELECT * FROM hub_credentials").all()).toEqual(before);
     expect(await context.store.verify(await roomToken(original))).toHaveProperty("record", original.record);
     expect(context.grants.get(grant.id)?.revokedAt).toBeNull();
+  });
+
+  it("lists one consent row through issuance, renewal, re-issuance and expiry", async () => {
+    const context = registry();
+    const grant = createGrant(context);
+    const row = { deviceId: grant.deviceId, deviceName: "Hosted Client", signedInAt: grant.createdAt,
+      hosted: true, workspaceId: WORKSPACE, scope: "read-only", workspaces: [WORKSPACE] };
+    expect(context.store.listDevices(PRINCIPAL)).toEqual([row]);
+    const original = issueForGrant(context.store, grant.id);
+    const renewed = replacementCredential(await renewCredential(context.store, await renewalProof(original), context.memberships));
+    expect(context.store.get(original.record.id)?.replacedAt).toBeTypeOf("number");
+    expect(context.store.listDevices(PRINCIPAL)).toEqual([row]);
+    const reissued = issueForGrant(context.store, grant.id);
+    expect(context.store.get(renewed.record.id)?.replacedAt).toBeTypeOf("number");
+    context.db.connection.prepare("UPDATE hub_credentials SET issued_at = ? WHERE id = ?")
+      .run(Date.now() - DEVICE_CREDENTIAL_LIFETIME_MS, reissued.record.id);
+    expect(context.store.usable(context.store.get(reissued.record.id))).toEqual({ failure: "expired-credential" });
+    expect(context.grants.isLive(grant.id)).toBe(true);
+    expect(context.store.listDevices(PRINCIPAL)).toEqual([row]);
+    expect(issueForGrant(context.store, grant.id).record.deviceId).toBe(grant.deviceId);
+    expect(context.store.listDevices(PRINCIPAL)).toEqual([row]);
+  });
+
+  it.each(["issuance", "renewal"] as const)("refuses a replacement revoked during %s closure", async operation => {
+    const context = registry();
+    const grant = createGrant(context);
+    const original = issueForGrant(context.store, grant.id);
+    let revoked = false;
+    context.store.onRevoke(id => {
+      if (id === original.record.id && !revoked) {
+        revoked = true;
+        context.store.revokeDevice(PRINCIPAL, grant.deviceId);
+      }
+    });
+    if (operation === "issuance") {
+      expect(context.store.issueForGrant(grant.id, generateTestCredentialKeyPair().publicKey)).toBeNull();
+    } else {
+      expect(await renewCredential(context.store, await renewalProof(original), context.memberships))
+        .toEqual({ status: "sign-in-required" });
+    }
+    expect(context.grants.isLive(grant.id)).toBe(false);
+    expect(context.store.listDevices(PRINCIPAL)).toEqual([]);
+    const rows = context.db.connection.prepare("SELECT revoked_at FROM hub_credentials").all();
+    expect(rows).toHaveLength(2);
+    expect(rows.every(row => typeof row.revoked_at === "number")).toBe(true);
+  });
+
+  it("refuses renewal when revocation lands during signature verification", async () => {
+    const context = registry();
+    const grant = createGrant(context);
+    const original = issueForGrant(context.store, grant.id);
+    const proof = await renewalProof(original);
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const reached = new Promise<void>(resolve => { entered = resolve; });
+    const verify = crypto.subtle.verify.bind(crypto.subtle);
+    vi.spyOn(crypto.subtle, "verify").mockImplementation(async (...args) => {
+      entered();
+      await held;
+      return verify(...args);
+    });
+    const renewing = renewCredential(context.store, proof, context.memberships);
+    await reached;
+    context.store.revokeDevice(PRINCIPAL, grant.deviceId);
+    release();
+    expect(await renewing).toEqual({ status: "sign-in-required" });
+    expect(context.db.connection.prepare("SELECT COUNT(*) AS count FROM hub_credentials").get()?.count).toBe(1);
+    expect(context.grants.isLive(grant.id)).toBe(false);
+  });
+
+  it("rolls back grant and credential revocation together and retries closure after commit", () => {
+    const context = registry();
+    const grant = createGrant(context);
+    const original = issueForGrant(context.store, grant.id);
+    context.db.connection.exec(`CREATE TRIGGER reject_grant_revoke BEFORE UPDATE OF revoked_at ON hub_agent_grants
+      BEGIN SELECT RAISE(ABORT, 'grant storage failed'); END`);
+    expect(() => context.store.revokeDevice(PRINCIPAL, grant.deviceId)).toThrow("grant storage failed");
+    expect(context.store.get(original.record.id)?.revokedAt).toBeNull();
+    expect(context.grants.isLive(grant.id)).toBe(true);
+    context.db.connection.exec("DROP TRIGGER reject_grant_revoke");
+    const close = vi.fn().mockImplementationOnce(() => { throw new Error("closure failed"); });
+    context.store.onRevoke(close);
+    expect(() => context.store.revokeDevice(PRINCIPAL, grant.deviceId)).toThrow("closure failed");
+    const revokedAt = context.grants.get(grant.id)?.revokedAt;
+    expect(revokedAt).toBeTypeOf("number");
+    expect(context.store.get(original.record.id)?.revokedAt).toBeTypeOf("number");
+    expect(context.store.revokeDevice(PRINCIPAL, grant.deviceId)).toBe(true);
+    expect(close).toHaveBeenCalledTimes(2);
+    expect(context.grants.get(grant.id)?.revokedAt).toBe(revokedAt);
+    expect(context.store.issueForGrant(grant.id, generateTestCredentialKeyPair().publicKey)).toBeNull();
   });
 
   it("leaves no usable replacement when an admitted connection cannot be closed", () => {
