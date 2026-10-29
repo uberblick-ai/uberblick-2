@@ -150,8 +150,8 @@ export const toolHelpDetails = {
     "## What comes back\n" +
     "\n" +
     "- Metadata: `title`, `description` and `tldr` (null when unwritten), `tags`, `links` and, when known, `createdAt`: the creation time as an ISO 8601 UTC string on the creating replica's clock, such as `2026-10-21T18:36:13.213Z`. It is omitted when unknown or outside the supported date range. A regular page whose TL;DR a person removed on purpose returns `tldrOptOut: true`; set_metadata explains opting back in.\n" +
-    "- Blocks with `id`, `type`, `text` and `rev`. Prose `text` is plain. A formatted paragraph, heading, list item, quote or callout also carries `inline`: equally marked runs, each with `text` and `marks`, covering the whole text in order. Marks are `bold`, `italic`, `strike`, `inlineCode`, `link` and `docLink`; unmarked runs carry `marks: {}`. The runs use insert_block's input shape and can be passed back unchanged, subject to its normal validation of document-link targets. Plain prose and non-prose blocks omit `inline`. get_revision returns the same formatting runs for historical prose, without block edit revs. Tables return GFM, and cards and embeds return their container content; see markdown. Prose that links other documents still carries `doc_links` ranges.\n" +
-    "- Comment threads with their anchors, for annotate to reply to, resolve or move. Thread comments returned by get_doc and annotate may include `account`, the writing client's GitHub username, and `agent`, either `claude` or `codex`. These optional fields are display hints, not verified authorship. Stored principal identity and person/agent kind are not returned.\n" +
+    "- Blocks with `id`, `type`, `text` and `rev`. Prose `text` is plain. A formatted paragraph, heading, list item, quote or callout also carries `inline`: equally marked runs, each with `text` and `marks`, covering the whole text in order. Marks are `bold`, `italic`, `strike`, `inlineCode`, `link` and `docLink`; unmarked runs carry `marks: {}`. The runs use insert_block's input shape and can be passed back unchanged, subject to its normal validation of document-link targets. Plain prose and non-prose blocks omit `inline`. get_revision returns the same formatting runs for historical prose, without block edit revs. Tables return GFM and `column_widths`: one entry per column rounded to whole CSS pixels, or null for an unsized column. Widths stay outside block and page `rev`; historical reads omit them. Cards and embeds return their container content; see markdown. Prose that links other documents still carries `doc_links` ranges.\n" +
+    "- Comment threads with their anchors, for annotate to reply to, resolve, move, edit or delete. Every comment returned by get_doc and annotate has a stable `id`, used as `comment_id` when editing or deleting. Edited comments also return `editedAt`, the last edit time as an ISO 8601 UTC string that the web's `(edited)` marker reads; unedited comments omit it. Comments may include `account`, the writing client's GitHub username, and `agent`, either `claude` or `codex`. These optional fields are display hints, not verified authorship. Stored principal identity and person/agent kind are not returned.\n" +
     "- `code_check` on regular pages: the latest comparison per repository, or [] when never checked.\n" +
     "- Decision context: a regular page lists the topics it owns (related) and the topics that link to it (linked), one list_docs topic row each that names the topic's records by UUID in `inForce`, `pending` and `conflicts`. A decision record returns its status, related pages in `related` (omitted when it has none), discussion, predecessors, successors and `resolution`: its topic's `inForce`, `pending` and `conflicts` as record UUIDs, plus `archived`. Predecessor and successor entries carry `createdAt` and `updatedAt`, topic rows `updatedAt`, when known, as ISO 8601 UTC strings; timestamps outside the supported date range are omitted. It is context, not permission to act; see decisions.\n" +
     "- `data`, when the document has structured data: collection names and record counts. Read records with get_data.\n" +
@@ -412,7 +412,13 @@ export const toolHelpDetails = {
     "`10s timeout` keeps `s timeout` anchored. The check also covers table cells, rows/columns removed by " +
     "`table_mapping`, card parts and Figma captions. It sees this replica's state, so concurrent peer edits " +
     "can still remove a remaining anchor.\n\n" +
-    "`old_text` and `new_text` are the block text get_doc returns. For a table this is GFM: each must be " +
+    "`old_text` and `new_text` are the block text get_doc returns. For a table this is GFM. " +
+    "Optional `column_widths` sets one positive whole CSS pixel value or null per column of `new_text`; " +
+    "null clears that width and omission keeps retained columns' widths, with new columns unsized. " +
+    "Repeat `old_text` as `new_text` to change only widths, keeping cell text, formatting, comments and block/page rev. " +
+    "Widths can accompany a cell or `table_mapping` edit in the same write. Invalid widths, unequal stored row lengths " +
+    "or widths on another block type refuse with `invalid_column_widths` before writing. See markdown for sizing guidance. " +
+    "Each GFM text must be " +
     "exactly one table, or `invalid_table` refuses the write. Alignment markers are accepted but not stored; " +
     "inline markdown writes cell formatting and escaped punctuation stays literal. Newly added cell document " +
     "targets must be known to this replica's directory or `doclink_target_not_known_locally` refuses before " +
@@ -488,7 +494,7 @@ export const toolHelpDetails = {
     "reported or reapplied.",
   insert_block:
     "Insert the ordered, nonempty `blocks` array consecutively after `after_block_id`, or at the top " +
-    "when it is omitted. Each entry has the same shape as a `create_doc` seed; a single block uses a " +
+    "when it is omitted. Each entry has the shape of a `create_doc` seed plus optional table `column_widths`; a single block uses a " +
     "one-entry array. The answer's `blocks` lists the inserted blocks in order, each with id and rev. " +
     "Each chart entry also has a `chart` summary of the web's projection of this replica's current data: " +
     "status, counts and warnings, plus first and last x for ready line mappings. Bound scatter mappings report " +
@@ -509,8 +515,11 @@ export const toolHelpDetails = {
     "`bullet`), and `indent` is an integer 0–3 (default 0); both apply only to list-item blocks. " +
     "For example, `list: \"ordered\", indent: 2` creates a nested numbered item. Invalid values refuse " +
     "before writing. Depth need not follow the preceding item's depth. " +
-    "A table's `text` must be exactly one GFM table, or `invalid_table` refuses the write; its rows and cells " +
-    "are stored structurally. Alignment markers are accepted but not stored. Inline markdown stores cell " +
+    "A table's `text` must be exactly one GFM table, or `invalid_table` refuses the write. " +
+    "Size it immediately with `column_widths`: one positive whole CSS pixel value or null per column. " +
+    "Null means unsized; omission creates all columns unsized. Invalid widths or widths on a non-table entry refuse " +
+    "with `invalid_column_widths` and `entry_index`, writing nothing. See markdown for sizing guidance. " +
+    "Rows and cells are stored structurally. Alignment markers are accepted but not stored. Inline markdown stores cell " +
     "formatting and escaped punctuation stays literal. Document-link targets must be known to this replica's " +
     "directory, otherwise `doclink_target_not_known_locally` refuses before any write. A card's text is the " +
     "content between lines exactly :::card and :::. Header keys are lowercase label, title, footer and button " +
@@ -754,12 +763,44 @@ export const toolHelpDetails = {
     "Existing card ranges name label, title, body or footer in part. Opening or moving into a Figma caption " +
     "refuses with annotation_figma. Existing Figma ranges name part caption and measure caption characters. " +
     "Card and Figma threads can receive replies, resolution and reopening, or move to prose or a table cell.\n\n" +
-    "Three shapes, and a call is exactly one: open with `block_id`, `start` and `end`; reply with `thread_id` " +
+    "Five shapes, and a call is exactly one: open with `block_id`, `start` and `end`; reply with `thread_id` " +
     "and no range fields; or move with `thread_id`, `block_id`, `start` and `end`. Range targets require all " +
     "three range fields, plus `row` and `column` for a table cell. Incomplete ranges refuse at the input " +
-    "boundary before writing. Every mode requires `text` and accepts optional `author`. Only a reply may " +
+    "boundary before writing. These three modes require `text` and accept optional `author`. Only a reply may " +
     "carry `resolved`: true resolves and false reopens in the same update as the reply. Opening and moving " +
-    "forbid `resolved`; a move keeps the thread's existing resolution.",
+    "forbid `resolved`; a move keeps the thread's existing resolution.\n\n" +
+    "Edit with `{uuid, action: \"edit\", thread_id, comment_id, text}`; no author, range fields or resolved " +
+    "is accepted. Use the stable comment id from get_doc or annotate, never a reader index. Your own " +
+    "comments have a stored account matching this MCP session's workspace sign-in GitHub username, " +
+    "ignoring case. That includes comments an agent wrote and comments the person wrote by hand on " +
+    "that account. An edit replaces the text in place at any time, even after replies, and no earlier " +
+    "version is kept. It preserves id, position, author, account, agent, kind and createdAt; editing a " +
+    "hand-written comment adds no agent mark. The last edit time is recorded in editedAt, returned only " +
+    "on edited comments by annotate and get_doc, and read by the web's (edited) marker. Replies made " +
+    "concurrently survive in their converged order. Concurrent edits keep the latest edit.\n\n" +
+    "Editing refuses without writing for a signed-out or local session (account_required), a comment " +
+    "without an account (comment_account_missing), someone else's comment (comment_not_owned), text " +
+    "empty after trimming (empty_text), or a resolved thread (thread_resolved). Each returns " +
+    "comment_edit_refused, recoveryClass manual, reason and a recovery sentence naming it. Unknown " +
+    "thread or comment ids use thread_not_found or comment_not_found with reread recovery. Archived " +
+    "documents keep doc_archived. Success returns the updated annotation, applied, synced and hub. " +
+    "Decided decision records remain commentable. An offline edit can reach a thread resolved meanwhile, " +
+    "and a GitHub handle rename leaves comments under the old handle uneditable.\n\n" +
+    "Delete permanently with `{uuid, action: \"delete\", thread_id, comment_id}`; no text, author, range " +
+    "fields or resolved is accepted. Every comment in get_doc and annotate carries the stable `id` to use " +
+    "as comment_id. Your own comments have a stored account matching this MCP session's workspace sign-in's " +
+    "GitHub username, ignoring case, including comments an agent wrote on that account. Comments without " +
+    "an account cannot be deleted. A reply delete removes only that reply. Deleting the opening comment " +
+    "removes the whole thread and all its marks, only while every reply is yours. There is no undo. " +
+    "A concurrent reply, resolution or move is dropped when the whole thread is removed; a concurrent " +
+    "edit of the same deleted reply can survive and be deleted again.\n\n" +
+    "Deletion refuses without writing for a signed-out or local session, someone else's comment, a " +
+    "comment without an account, a resolved thread, or an opening comment with another account's reply " +
+    "or a reply without an account. These refusals return comment_delete_refused, recoveryClass manual " +
+    "and a recovery sentence naming the reason. Unknown thread or comment ids use thread_not_found or " +
+    "comment_not_found with reread recovery. Archived documents keep doc_archived. Success returns " +
+    "applied, synced and hub, with removed: comment or thread; a reply delete also returns the remaining " +
+    "annotation. No notification is sent.",
   link_range:
     "Turn a range of a block's text into an inline reference to another document. The range's own characters " +
     "are the label — this tool writes a mark and never a character, so the block's `text` and `rev` come back " +

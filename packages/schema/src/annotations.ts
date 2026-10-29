@@ -113,6 +113,18 @@ function annotationTexts(element: Y.XmlElement): Array<{
   return element.firstChild instanceof Y.XmlText ? [{ texts: [element.firstChild] }] : [];
 }
 
+function clearThreadMarks(ydoc: Y.Doc, threadId: string): void {
+  // Include shadowed copies so a later repair cannot restore an old anchor.
+  for (const child of getBlocksFragment(ydoc).toArray()) {
+    if (!(child instanceof Y.XmlElement)) continue;
+    for (const { texts } of annotationTexts(child)) {
+      for (const run of commentRuns(texts)) {
+        if (run.threadId === threadId) formatRange(texts, run.start, run.end, null);
+      }
+    }
+  }
+}
+
 /**
  * Nested Y.Array replies merge independently of last-write-wins thread fields.
  * Keep converged array order: createdAt sorting can invert replies under skew.
@@ -215,13 +227,14 @@ export function getAnnotationCommentIds(ydoc: Y.Doc, threadId: string): string[]
 function readThread(thread: ThreadMap): Annotation {
   const comments: AnnotationComment[] = [];
   for (const { value } of readCommentRows(commentRows(thread))) {
-    const { author, text, createdAt, account, agent, principalId, kind, editedAt } = value;
+    const { author, text, createdAt, account, agent, clientName, principalId, kind, editedAt } = value;
     comments.push({
       author,
       text,
       createdAt,
       ...(isGithubUsername(account) ? { account } : {}),
       ...(agent === "claude" || agent === "codex" ? { agent } : {}),
+      ...(typeof clientName === "string" ? { clientName } : {}),
       ...(isUuid(principalId) ? { principalId } : {}),
       ...(kind === "person" || kind === "agent" ? { kind } : {}),
       ...(isEditTime(editedAt) ? { editedAt } : {}),
@@ -297,7 +310,8 @@ function annotationRange(
   const hi = Math.max(0, Math.min(length, Math.max(startIndex, endIndex)));
   if (lo === hi) throw new AnnotationRangeError("empty", blockId);
 
-  const clash = commentRuns(texts).find((run) => run.threadId !== ownThreadId && run.start < hi && lo < run.end);
+  const clash = commentRuns(texts).find((run) => run.threadId !== ownThreadId &&
+    threadMap(ydoc, run.threadId) !== null && run.start < hi && lo < run.end);
   if (clash !== undefined) {
     throw new AnnotationRangeError("overlap", blockId, clash.threadId);
   }
@@ -354,15 +368,7 @@ export function moveAnnotation(
   if (thread === null) return null;
   const { texts, lo, hi } = annotationRange(ydoc, blockId, startIndex, endIndex, target, threadId);
   ydoc.transact(() => {
-    // Clear shadowed copies too so a later repair cannot restore an old anchor.
-    for (const child of getBlocksFragment(ydoc).toArray()) {
-      if (!(child instanceof Y.XmlElement)) continue;
-      for (const { texts: oldTexts } of annotationTexts(child)) {
-        for (const run of commentRuns(oldTexts)) {
-          if (run.threadId === threadId) formatRange(oldTexts, run.start, run.end, null);
-        }
-      }
-    }
+    clearThreadMarks(ydoc, threadId);
     formatRange(texts, lo, hi, { threadId });
     thread.set("blockId", blockId);
     commentRows(thread).push([{ author, text, createdAt: new Date().toISOString(), ...attribution }]);
@@ -498,6 +504,18 @@ export function addComment(
   return readThread(thread);
 }
 
+export type CommentEditRefusal =
+  | "thread_not_found"
+  | "comment_not_found"
+  | "thread_resolved"
+  | "account_required"
+  | "comment_account_missing"
+  | "comment_not_owned"
+  | "empty_text";
+
+export type EditCommentResult = { ok: false; reason: CommentEditRefusal }
+  | { ok: true; annotation: Annotation };
+
 /** Replace only this account's comment, retaining attribution and array position. */
 export function editComment(
   ydoc: Y.Doc,
@@ -505,19 +523,129 @@ export function editComment(
   commentId: string,
   account: string,
   text: string,
-): Annotation | null {
+): Annotation | null;
+export function editComment(
+  ydoc: Y.Doc,
+  threadId: string,
+  commentId: string,
+  account: string | undefined,
+  text: string,
+  options: { reportRefusal: true },
+): EditCommentResult;
+export function editComment(
+  ydoc: Y.Doc,
+  threadId: string,
+  commentId: string,
+  account: string | undefined,
+  text: string,
+  options?: { reportRefusal: true },
+): Annotation | null | EditCommentResult {
+  const refuse = (reason: CommentEditRefusal): EditCommentResult | null =>
+    options?.reportRefusal === true ? { ok: false, reason } : null;
   const thread = threadMap(ydoc, threadId);
-  if (thread === null || thread.get("resolved") === true || !isGithubUsername(account) || text.trim() === "") return null;
+  if (thread === null) return refuse("thread_not_found");
   const rows = commentRows(thread);
   const comment = readCommentRows(rows).find((entry) => entry.id === commentId);
-  if (comment === undefined || !isGithubUsername(comment.value.account) ||
-      comment.value.account.toLowerCase() !== account.toLowerCase()) return null;
+  if (comment === undefined) return refuse("comment_not_found");
+  if (thread.get("resolved") === true) return refuse("thread_resolved");
+  if (!isGithubUsername(account)) return refuse("account_required");
+  if (!isGithubUsername(comment.value.account)) return refuse("comment_account_missing");
+  if (comment.value.account.toLowerCase() !== account.toLowerCase()) return refuse("comment_not_owned");
+  if (text.trim() === "") return refuse("empty_text");
   const replacement = { ...comment.value, text, commentId, editedAt: new Date().toISOString() };
   ydoc.transact(() => {
     for (const index of [...comment.indices].reverse()) rows.delete(index, 1);
     rows.insert(comment.indices[0], [replacement]);
   });
-  return readThread(thread);
+  const annotation = readThread(thread);
+  return options?.reportRefusal === true ? { ok: true, annotation } : annotation;
+}
+
+export type CommentDeleteRefusal =
+  | "thread_not_found"
+  | "comment_not_found"
+  | "thread_resolved"
+  | "account_required"
+  | "comment_account_missing"
+  | "comment_not_owned"
+  | "reply_account_missing"
+  | "reply_not_owned";
+
+type CommentDeleteFailure = { ok: false; reason: CommentDeleteRefusal };
+export type CommentDeleteEligibility = CommentDeleteFailure | {
+  ok: true;
+  removed: "comment" | "thread";
+  replyCount: number;
+};
+export type DeleteCommentResult = CommentDeleteFailure
+  | { ok: true; removed: "thread"; replyCount: number }
+  | { ok: true; removed: "comment"; replyCount: number; annotation: Annotation };
+
+function commentDeleteTarget(
+  ydoc: Y.Doc,
+  threadId: string,
+  commentId: string,
+  account?: string,
+): CommentDeleteFailure | {
+  ok: true;
+  removed: "comment" | "thread";
+  replyCount: number;
+  thread: ThreadMap;
+  comment: CommentRow;
+} {
+  const thread = threadMap(ydoc, threadId);
+  if (thread === null) return { ok: false, reason: "thread_not_found" };
+  const comments = readCommentRows(commentRows(thread));
+  const index = comments.findIndex((entry) => entry.id === commentId);
+  const comment = comments[index];
+  if (comment === undefined) return { ok: false, reason: "comment_not_found" };
+  if (thread.get("resolved") === true) return { ok: false, reason: "thread_resolved" };
+  if (!isGithubUsername(account)) return { ok: false, reason: "account_required" };
+  if (!isGithubUsername(comment.value.account)) return { ok: false, reason: "comment_account_missing" };
+  if (comment.value.account.toLowerCase() !== account.toLowerCase()) return { ok: false, reason: "comment_not_owned" };
+  if (index === 0) {
+    for (const reply of comments.slice(1)) {
+      if (!isGithubUsername(reply.value.account)) return { ok: false, reason: "reply_account_missing" };
+      if (reply.value.account.toLowerCase() !== account.toLowerCase()) return { ok: false, reason: "reply_not_owned" };
+    }
+  }
+  return { ok: true, removed: index === 0 ? "thread" : "comment", replyCount: comments.length - 1, thread, comment };
+}
+
+/** Inspect the writer's current ownership and lifecycle rules without writing. */
+export function getCommentDeleteEligibility(
+  ydoc: Y.Doc,
+  threadId: string,
+  commentId: string,
+  account?: string,
+): CommentDeleteEligibility {
+  const target = commentDeleteTarget(ydoc, threadId, commentId, account);
+  return target.ok ? { ok: true, removed: target.removed, replyCount: target.replyCount } : target;
+}
+
+/** Permanently remove the addressed comment, or its whole conversation. */
+export function deleteComment(
+  ydoc: Y.Doc,
+  threadId: string,
+  commentId: string,
+  account?: string,
+): DeleteCommentResult {
+  const target = commentDeleteTarget(ydoc, threadId, commentId, account);
+  if (!target.ok) return target;
+  const { thread, comment, removed, replyCount } = target;
+  ydoc.transact(() => {
+    if (removed === "thread") {
+      clearThreadMarks(ydoc, threadId);
+      // Deleting the parent map key also drops concurrent nested writes.
+      getAnnotationsMap(ydoc).delete(threadId);
+    } else {
+      const rows = commentRows(thread);
+      for (const index of [...comment.indices].reverse()) rows.delete(index, 1);
+    }
+  });
+  return removed === "thread"
+    ? { ok: true, removed, replyCount }
+    : { ok: true, removed, replyCount, annotation: readThread(thread) };
 }
 
 /**

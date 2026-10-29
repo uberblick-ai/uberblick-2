@@ -119,6 +119,7 @@ const EXPECTED: Record<
     detail: ["collection", "recordId", "limit", "value", "attempted"],
   },
   invalid_table: { recoveryClass: "manual", detail: [] },
+  invalid_column_widths: { recoveryClass: "manual", detail: [] },
   invalid_tag_name: { recoveryClass: "manual", detail: [] },
   invalid_tag_description: { recoveryClass: "manual", detail: [] },
   invalid_tag_identity: { recoveryClass: "reread", detail: ["id"] },
@@ -156,6 +157,9 @@ const EXPECTED: Record<
     detail: ["reason", "blockId", "conflictingThreadId"],
   },
   thread_not_found: { recoveryClass: "reread", detail: ["uuid", "threadId"] },
+  comment_not_found: { recoveryClass: "reread", detail: ["uuid", "threadId", "commentId"] },
+  comment_delete_refused: { recoveryClass: "manual", detail: ["uuid", "threadId", "commentId", "reason"] },
+  comment_edit_refused: { recoveryClass: "manual", detail: ["uuid", "threadId", "commentId", "reason"] },
   inline_link_range: { recoveryClass: "reread", detail: ["reason"] },
   // Never `retry`: the directory arrives over the hub, not by calling again.
   doclink_target_not_known_locally: {
@@ -282,6 +286,12 @@ describe("the failure contract", () => {
       failures.set(payload.error, payload);
     };
 
+    const deletionDoc = await seeded(rig);
+    const comments = await rig.ok("annotate", { uuid: deletionDoc.uuid, block_id: deletionDoc.blockId, start: 0, end: 1, text: "Deletion failure cases" });
+    record((await rig.call("annotate", { uuid: deletionDoc.uuid, action: "delete", thread_id: comments.annotation.id, comment_id: "missing" })).payload);
+    record((await rig.call("annotate", { uuid: deletionDoc.uuid, action: "delete", thread_id: comments.annotation.id, comment_id: comments.annotation.comments[0].id })).payload);
+    record((await rig.call("annotate", { uuid: deletionDoc.uuid, action: "edit", thread_id: comments.annotation.id, comment_id: comments.annotation.comments[0].id, text: "Correction" })).payload);
+
     record((await rig.call("move_block", {
       uuid: doc.uuid, block_ids: [doc.blockId, doc.blockId],
     })).payload);
@@ -291,6 +301,9 @@ describe("the failure contract", () => {
 
     record((await rig.call("edit_block", {
       uuid: doc.uuid, block_id: doc.blockId, old_text: "one", new_text: "two", list: "ordered",
+    })).payload);
+    record((await rig.call("edit_block", {
+      uuid: doc.uuid, block_id: doc.blockId, old_text: "one", new_text: "two", column_widths: [120],
     })).payload);
 
     record((await rig.call("get_doc", { uuid: randomUUID() })).payload);

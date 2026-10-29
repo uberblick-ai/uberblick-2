@@ -108,6 +108,20 @@ test("Escape cancels only the edit in the drawer and closing preserves an unsent
     await close.focus();
     await page.keyboard.press("Escape");
     await expect(sheet).toBeHidden();
+    await expect(toggle).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(sheet).toBeVisible();
+    await card.locator(".ub-thread-select").focus();
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Tab");
+    await expect(edit).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(card.getByRole("button", { name: "Delete", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    await expect(card).toHaveCount(0);
+    await expect(sheet).toBeHidden();
+    await expect(editor(page)).toBeFocused();
   } finally {
     await context.close();
   }

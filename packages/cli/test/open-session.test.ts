@@ -43,7 +43,7 @@ describe("ub open browser sessions", () => {
       const document = await (await get(`${app.url}uberblick-config.json`)).text();
       expect(document).not.toContain(key);
       expect(JSON.parse(document)).toMatchObject({ hubAuthToken: "", workspaces: [WORKSPACE] });
-      expect(Object.keys(JSON.parse(document).servedWorkspaces[WORKSPACE]).sort()).toEqual(["name", "remoteHubUrl"]);
+      expect(Object.keys(JSON.parse(document).servedWorkspaces[WORKSPACE]).sort()).toEqual(["localOnly", "name", "remoteHubUrl"]);
 
       const local = client(app.url);
       // Even a room token signed by the on-disk key needs the page's session.

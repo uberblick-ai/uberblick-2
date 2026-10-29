@@ -201,7 +201,7 @@ describe("the document tag picker", () => {
     fix.catalog.ydoc.getMap<string>("tag-identities").set(TAGS.legacy, "legacy");
     fix.catalog.ydoc.getMap<number>("tag-retired").set("legacy#old-client", 1);
     fix.catalog.status.writable = writable;
-    vi.spyOn(config, "localServing").mockReturnValue({ workspace: WORKSPACE, remoteHubUrl: "wss://hub.example.test/ws", rebound: false });
+    vi.spyOn(config, "localServing").mockReturnValue({ workspace: WORKSPACE, remoteHubUrl: "wss://hub.example.test/ws", localOnly: false, rebound: false });
     const before = Y.encodeStateAsUpdate(fix.catalog.ydoc);
     const host = await openApp();
     expect(host.textContent).not.toContain("legacy (retired)");

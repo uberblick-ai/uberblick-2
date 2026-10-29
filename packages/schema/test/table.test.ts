@@ -1,8 +1,8 @@
 import * as Y from "yjs";
 import { describe, expect, it, vi } from "vitest";
 import {
-  AnnotationCellError, InvalidTableError, InvalidTableMappingError, OldTextMismatchError, StaleBlockError, TableMappingRequiredError,
-  addComment, appendBlock, createAnnotation, editBlock,
+  AnnotationCellError, InvalidColumnWidthsError, InvalidTableError, InvalidTableMappingError, OldTextMismatchError, StaleBlockError, TableMappingRequiredError,
+  addComment, appendBlock, createAnnotation, docRev, editBlock,
   exportMarkdown, findBlockElement, getBlock, getBlocks, getBlocksFragment,
   initDoc, insertBlock, isSupportedTable, listAnnotationRanges, listAnnotations,
   normalizeLegacyTables, parseGfmTable, parseTableCell, repairDuplicateBlocks,
@@ -130,6 +130,104 @@ describe("structured table contract", () => {
     expect(beta.toDelta()).toEqual([{ insert: "Beta", attributes: { bold: {}, link: { href: "https://example.test" }, comment: { threadId: UUID } } }]);
     expect(getBlock(doc, id)!.text).toBe(expanded);
     expect(isSupportedTable(table)).toBe(true);
+    doc.destroy();
+  });
+
+  it("projects rounded header widths, padded to the widest stored row, only on tables", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "table", text: GFM });
+    const table = element(doc, id);
+    const cells = tableRows(table);
+    expect(getBlock(doc, id)!.columnWidths).toEqual([null, null]);
+    setCellWidth(cells[0]![0]!, [225.5]);
+    setCellWidth(cells[1]![1]!, [400]);
+    expect(getBlock(doc, id)!.columnWidths).toEqual([226, null]);
+    table.insert(3, [buildTableRow(["Long", "row", "visible"], false)]);
+    expect(getBlock(doc, id)!.columnWidths).toEqual([226, null, null]);
+    const prose = appendBlock(doc, { type: "paragraph", text: "Prose" });
+    expect(getBlock(doc, prose)).not.toHaveProperty("columnWidths");
+    const old = legacy(doc, GFM);
+    expect(getBlock(doc, old)!.columnWidths).toEqual([null, null]);
+    doc.destroy();
+  });
+
+  it("sets and clears every cell's width while preserving text, marks, comments, identities and revs", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "table", text: GFM, columnWidths: [120, 200] });
+    const cells = tableRows(element(doc, id));
+    const alpha = tableCellText(cells[1]![0]!)!;
+    alpha.format(0, alpha.length, { bold: {}, link: { href: "https://example.test" } });
+    createAnnotation(doc, id, 0, alpha.length, "reader", "Question", { row: 1, column: 0 });
+    const before = getBlock(doc, id)!;
+    const pageRev = docRev(doc);
+    const delta = alpha.toDelta();
+    const annotations = listAnnotationRanges(doc, id);
+    editBlock(doc, id, before.text, before.text, { rev: before.rev, columnWidths: [240, null] });
+    expect(getBlock(doc, id)).toEqual({ ...before, columnWidths: [240, null] });
+    expect(docRev(doc)).toBe(pageRev);
+    expect(tableRows(element(doc, id))).toEqual(cells);
+    expect(tableCellText(cells[1]![0]!)).toBe(alpha);
+    expect(alpha.toDelta()).toEqual(delta);
+    expect(listAnnotationRanges(doc, id)).toEqual(annotations);
+    expect(cells.map((row) => row.map((cell) => cell.getAttributes().colwidth))).toEqual([
+      [[240], undefined], [[240], undefined], [[240], undefined],
+    ]);
+    doc.destroy();
+  });
+
+  it("applies explicit widths alongside cell and mapped edits using the new column count", () => {
+    const doc = seeded();
+    const id = insertBlock(doc, null, { type: "table", text: GFM, columnWidths: [120, null] });
+    expect(getBlock(doc, id)!.columnWidths).toEqual([120, null]);
+    editBlock(doc, id, GFM, GFM.replace("Alpha", "Alpine"), { columnWidths: [160, 240] });
+    expect(getBlock(doc, id)!.columnWidths).toEqual([160, 240]);
+    const expanded = writeGfmTable([
+      ["Name", "New", "Count"], ["Alpine", "x", "1"], ["Inserted", "y", "3"], ["Beta", "z", "2"],
+    ]);
+    editBlock(doc, id, getBlock(doc, id)!.text, expanded, {
+      tableMapping: { rows: [0, 1, null, 2], columns: [0, null, 1] }, columnWidths: [200, null, 280],
+    });
+    expect(getBlock(doc, id)!.text).toBe(expanded);
+    expect(getBlock(doc, id)!.columnWidths).toEqual([200, null, 280]);
+    expect(tableRows(element(doc, id)).map((row) => row.map((cell) => cell.getAttributes().colwidth))).toEqual(
+      Array.from({ length: 4 }, () => [[200], undefined, [280]]),
+    );
+    editBlock(doc, id, expanded, expanded, { columnWidths: [1e100, null, 280] });
+    expect(getBlock(doc, id)!.columnWidths).toEqual([1e100, null, 280]);
+    doc.destroy();
+  });
+
+  it("refuses malformed widths and widths on other block types before any update", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "table", text: GFM });
+    const prose = appendBlock(doc, { type: "paragraph", text: "Prose" });
+    const initial = Y.encodeStateAsUpdate(doc);
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    for (const invalid of [null, "120", 120, {}, [], [120], [120, null, 200], [120, 0], [-1, null], [1.5, null], ["120", null], [undefined, null], [Infinity, null], [NaN, null], [true, null]]) {
+      const columnWidths = invalid as Array<number | null>;
+      expect(() => insertBlock(doc, id, { type: "table", text: GFM, columnWidths })).toThrow(InvalidColumnWidthsError);
+      expect(() => editBlock(doc, id, GFM, GFM.replace("Alpha", "Alpine"), { columnWidths })).toThrow(InvalidColumnWidthsError);
+    }
+    expect(() => insertBlock(doc, id, { type: "paragraph", text: "Text", columnWidths: [120] })).toThrow(InvalidColumnWidthsError);
+    expect(() => editBlock(doc, prose, "Prose", "Changed", { columnWidths: [120] })).toThrow(InvalidColumnWidthsError);
+    expect(() => editBlock(doc, prose, "Prose", "Changed", { rev: "stale", columnWidths: [120] })).toThrow(StaleBlockError);
+    expect(() => editBlock(doc, prose, "Wrong", "Changed", { rev: getBlock(doc, prose)!.rev, columnWidths: [120] })).toThrow(OldTextMismatchError);
+    expect(updates).toBe(0);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(initial);
+    doc.destroy();
+  });
+
+  it("refuses widths on ragged stored tables without partially editing their text", () => {
+    const doc = seeded();
+    const id = appendBlock(doc, { type: "table", text: GFM });
+    element(doc, id).insert(3, [buildTableRow(["Long", "row", "visible"], false)]);
+    const before = getBlock(doc, id)!;
+    const initial = Y.encodeStateAsUpdate(doc);
+    expect(before.columnWidths).toEqual([null, null, null]);
+    expect(() => editBlock(doc, id, before.text, before.text.replace("Alpha", "Alpine"), { columnWidths: [120, null, 200] })).toThrow(InvalidColumnWidthsError);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(initial);
+    expect(getBlock(doc, id)).toEqual(before);
     doc.destroy();
   });
 

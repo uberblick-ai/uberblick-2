@@ -3,7 +3,7 @@ import * as Y from "yjs";
 import { z } from "zod";
 import { ToolError, toFailure } from "../failures.js";
 import { strictInput } from "../inputs.js";
-import { blockInputSchema, uuidArg } from "./schemas.js";
+import { insertedBlockInputSchema, uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
 import { summarizeWrittenBlocks } from "./chart-summary.js";
 
@@ -14,7 +14,7 @@ export const inputSchema = strictInput({
     .min(1)
     .nullish()
     .describe("Insert after this block. Omit or null to insert first."),
-  blocks: z.array(blockInputSchema).min(1).describe("Blocks to insert consecutively, in order. A single block is a one-entry array."),
+  blocks: z.array(insertedBlockInputSchema).min(1).describe("Blocks to insert consecutively, in order. A single block is a one-entry array."),
 });
 
 export const insertBlockOperation = documentOperation({ content: true, contentDurability: true }, inputSchema, (context, { uuid, after_block_id, blocks }, _request, replica) => {

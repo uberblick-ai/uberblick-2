@@ -156,7 +156,7 @@ it.each(["general", "tags", "members"] as const)("offers no %s controls or write
   vi.stubGlobal("fetch", fetchImpl);
   mounted = await renderSettled(<WorkspaceSettings admin={false} page={page} workspace={WORKSPACE}
     endpoint={ENDPOINT} connection={directory.connection} catalogConnection={catalog.connection} agentSessions={2}
-    serving={{ workspace: WORKSPACE.uuid, remoteHubUrl: "wss://hub.example.test/ws", rebound: false }} />);
+    serving={{ workspace: WORKSPACE.uuid, remoteHubUrl: "wss://hub.example.test/ws", localOnly: false, rebound: false }} />);
   const pageControls = within(mounted.container);
   expect(pageControls.queryAllByRole("textbox")).toEqual([]);
   expect(pageControls.queryAllByRole("button")).toEqual([]);
@@ -920,7 +920,7 @@ function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?
 
 async function mountAccess(local = true, catalogConnection: RoomConnection | null = null, servingWorkspace = WORKSPACE.uuid, verifiedHandle: string | null = null): Promise<HTMLElement> {
   mounted = await renderSettled(<WorkspaceSettings admin={true} page="members" workspace={WORKSPACE}
-    serving={local ? { workspace: servingWorkspace, remoteHubUrl: "ws://127.0.0.1:1234", rebound: false } : null}
+    serving={local ? { workspace: servingWorkspace, remoteHubUrl: "ws://127.0.0.1:1234", localOnly: false, rebound: false } : null}
     subject="browser-person" verifiedHandle={verifiedHandle} endpoint={ENDPOINT} connection={null} catalogConnection={catalogConnection} agentSessions={2} />);
   return mounted.container;
 }

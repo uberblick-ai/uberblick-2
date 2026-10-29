@@ -173,7 +173,11 @@ function blockSchema(withLinks: boolean, withRev = true) {
     z.object({ ...prose, type: z.literal("list-item"), list: z.enum(LIST_STYLES), indent: z.number().int().min(0).max(MAX_LIST_INDENT) }).strict(),
     z.object({ ...fields, type: z.literal("code"), language: z.string() }).strict(),
     z.object({ ...fields, type: z.literal("divider"), text: z.literal("") }).strict(),
-    z.object({ ...fields, type: z.enum(["table", "terminal", "chart", "card"]) }).strict(),
+    z.object({ ...fields, type: z.literal("table"), ...(withRev ? {
+      column_widths: z.array(z.number().nonnegative().refine(Number.isInteger).meta({ type: "integer" }).nullable())
+        .describe("Header-row column widths rounded to whole CSS pixels, one per projected column; null means unsized. Widths do not affect text rev hashes."),
+    } : {}) }).strict(),
+    z.object({ ...fields, type: z.enum(["terminal", "chart", "card"]) }).strict(),
     z.object({ ...fields, type: z.literal("figma"), figma: z.object({
       kind: z.enum(["frame", "file", "prototype", "board", "slides", "community file"]),
       file: z.string(),
@@ -240,9 +244,11 @@ const annotation = z.object({
   id: z.string(),
   blockId: z.string().describe("Block containing range; the recorded block id when range is null."),
   comments: z.array(z.object({
+    id: z.string().describe("Stable comment identity used by annotate's edit and delete shapes; survives edits and concurrent reply changes."),
     author: z.string(),
     text: z.string(),
     createdAt: z.string(),
+    editedAt: z.string().optional().describe("Last edit time as an ISO 8601 UTC string; present only on edited comments, matching the web's (edited) marker."),
     account: z.string().optional().describe("The writing client's signed-in GitHub username, when known; display data, not verified authorship."),
     agent: z.enum(["claude", "codex"]).optional().describe("Recognized MCP client product; display data, not verified authorship."),
   }).strict()),
@@ -534,7 +540,16 @@ export const outputSchemas = {
     deleted: z.literal(true).describe("The archived document or decision topic was permanently deleted; its record UUIDs cannot be restored or reused."),
     ...multipleRoomDurability,
   }).strict(),
-  annotate: z.object({ uuid, annotation, ...documentDurability }).strict(),
+  annotate: z.object({
+    uuid,
+    annotation: annotation.optional().describe("The current thread; omitted only after deleting its opening comment and whole thread."),
+    removed: z.enum(["comment", "thread"]).optional().describe("Delete only: whether one reply or the whole thread was permanently removed."),
+    ...documentDurability,
+  }).strict().superRefine((result, context) => {
+    if ((result.annotation === undefined) !== (result.removed === "thread")) {
+      context.addIssue({ code: "custom", path: ["annotation"], message: "Return annotation except when the whole thread was removed." });
+    }
+  }),
   link_range: z.object({ uuid, blockId: z.string(), docId: z.string(), title: z.string(), rev: z.string(), ...documentDurability }).strict(),
   export_markdown: z.object({ uuid, markdown: z.string() }).strict(),
   sync_status: z.object({

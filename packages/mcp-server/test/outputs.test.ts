@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { appendBlock, CALLOUT_VARIANTS } from "@uberblick/schema";
+import { appendBlock, CALLOUT_VARIANTS, findBlockElement, tableRows } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import * as Y from "yjs";
@@ -58,6 +58,43 @@ afterEach(async () => {
 afterAll(removeTempDirs);
 
 describe("successful MCP output contracts", () => {
+  it("advertises current table widths while preserving historical and write result shapes", async () => {
+    const rig = await startServer();
+    close.push(() => rig.close());
+    const source = "| Name | Value |\n| --- | --- |\n| Alpha | Beta |";
+    const created = await rig.ok("create_doc", { title: "Sized table reads", description: "Widths belong only to current reads.",
+      blocks: [{ type: "table", text: source }, { type: "paragraph", text: "Prose" }] });
+    const id = created.blocks[0].id;
+    const document = rig.instance.replicas.replica(created.uuid).doc;
+    const header = tableRows(findBlockElement(document, id)!)[0]!;
+    (header[0] as unknown as { setAttribute(name: string, value: unknown): void }).setAttribute("colwidth", [225.5]);
+    vi.spyOn(revisionClient, "readDocumentRevision").mockImplementation(async () => {
+      const snapshot = new Y.Doc();
+      Y.applyUpdate(snapshot, Y.encodeStateAsUpdate(document));
+      return { doc: snapshot, history };
+    });
+    for (const name of ["get_doc", "get_revision"]) {
+      const result = await rig.client.callTool({ name, arguments: { uuid: created.uuid,
+        ...(name === "get_revision" ? { revision: "sized-table-revision" } : {}) } }) as CallToolResult;
+      expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
+      const payload = textPayload(result);
+      expect(result.structuredContent).toEqual(payload);
+      expect(payload.blocks).toEqual([
+        { id, type: "table", text: source,
+          ...(name === "get_doc" ? { rev: created.blocks[0].rev, column_widths: [226, null] } : {}) },
+        { id: created.blocks[1].id, type: "paragraph", text: "Prose",
+          ...(name === "get_doc" ? { rev: created.blocks[1].rev } : {}) },
+      ]);
+    }
+    const inserted = await rig.ok("insert_block", { uuid: created.uuid,
+      blocks: [{ type: "table", text: source, column_widths: [1, 1e100] }] });
+    expect(inserted.blocks).toEqual([{ id: expect.any(String), rev: expect.any(String) }]);
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks[0].column_widths).toEqual([1, 1e100]);
+    const edited = await rig.ok("edit_block", { uuid: created.uuid, block_id: id,
+      old_text: source, new_text: source, rev: created.blocks[0].rev, column_widths: [120, null] });
+    expect(edited.block).toEqual({ id, rev: created.blocks[0].rev });
+  });
+
   it("delivers empty dividers in current and historical reads through the schema-aware client", async () => {
     const rig = await startServer();
     close.push(() => rig.close());

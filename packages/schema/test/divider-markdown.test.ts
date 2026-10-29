@@ -138,7 +138,7 @@ describe("divider Markdown export", () => {
       for (const block of blocks) appendBlock(doc, block);
       const exported = exportMarkdown(doc, { frontmatter });
       const reimported = importMarkdown(exported);
-      expect(reimported.blocks, exported).toEqual(getBlocks(doc).map(({ id: _id, rev: _rev, ...block }) => block));
+      expect(reimported.blocks, exported).toEqual(getBlocks(doc).map(({ id: _id, rev: _rev, columnWidths: _widths, ...block }) => block));
       doc.destroy();
     }
   });

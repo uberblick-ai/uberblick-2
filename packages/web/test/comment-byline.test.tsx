@@ -60,10 +60,25 @@ describe("comment attribution", () => {
     expect(container.querySelector("time")?.textContent).toBe("1 hour ago");
   });
 
-  it("gives legacy and generic agent comments no product mark", () => {
-    const { container, rerender } = render(<CommentByline comment={comment} now={now} />);
-    expect(container.querySelector(".ub-comment-agent")).toBeNull();
-    rerender(<CommentByline comment={{ ...comment, kind: "agent" }} now={now} />);
+  it.each([
+    { clientName: "Cursor", label: "via Cursor" },
+    { clientName: "Other <client>", label: "via Other <client>" },
+    { label: "via unknown MCP client" },
+  ])("labels a generic agent mark $label without visible attribution text", ({ clientName, label }) => {
+    const { container } = render(<CommentByline comment={{ ...comment, kind: "agent", ...(clientName === undefined ? {} : { clientName }) }} now={now} />);
+    const mark = within(container).getByRole("img", { name: label });
+    expect(mark.textContent).toBe("");
+    expect(mark.querySelector("svg")).not.toBeNull();
+    expect(mark.querySelector("[data-icon]")).toBeNull();
+    expect(mark.style.color).toBe("");
+    expect(container.querySelector(".ub-thread-author")?.textContent).toBe("Ben Kubota");
+  });
+
+  it.each([
+    comment,
+    { ...comment, kind: "person" as const },
+  ])("gives browser and legacy comments no agent mark", (value) => {
+    const { container } = render(<CommentByline comment={value} now={now} />);
     expect(container.querySelector(".ub-comment-agent")).toBeNull();
   });
 });

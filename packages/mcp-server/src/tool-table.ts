@@ -201,7 +201,7 @@ export const tools: readonly Tool[] = [
     name: "get_doc",
     title: "Read a document",
     description:
-      "Read live metadata, blocks with edit-assertion rev hashes, comment threads and decision context. " +
+      "Read live metadata, blocks with edit-assertion rev hashes, table column_widths, comment threads and decision context. " +
       "Creation time createdAt and decision entries' createdAt/updatedAt are ISO 8601 UTC strings when known and representable. " +
       "Data lists collections/counts; use get_data for records. Use get_revision for a historical state.",
     input: getDocInput,
@@ -400,7 +400,7 @@ export const tools: readonly Tool[] = [
       "formatting mark's edge can re-anchor the mark, so check formatted text with export_markdown " +
       "afterwards. An edit that would remove an open thread's last anchor refuses with " +
       "open_thread_anchored; resolve the thread or move its anchor with annotate first. Tables take GFM and " +
-      "need `table_mapping` for structural or multi-cell edits. Card and Figma blocks take their `:::` " +
+      "need `table_mapping` for structural or multi-cell edits; `column_widths` sizes columns (see markdown help). Card and Figma blocks take their `:::` " +
       "content and cannot be converted to or from other types. New document-link targets must be known to " +
       "this replica.",
     input: editBlockInput,
@@ -430,7 +430,7 @@ export const tools: readonly Tool[] = [
       "and moves the cursor once, to the end of the last inserted block's stored text. Lists use " +
       "adjacent list-item entries with list/indent (default bullet/0). Container syntax lives in " +
       "each entry's text field. Document-link targets must be known locally; chart source stays literal. " +
-      "For links and GitHub references, see markdown.",
+      "Tables accept column_widths for immediate sizing. For column sizing, links and GitHub references, see markdown.",
     input: insertBlockInput,
     operation: insertBlockOperation,
     // Adds blocks; repeating adds another batch.
@@ -580,19 +580,18 @@ export const tools: readonly Tool[] = [
   }),
   tool({
     name: "annotate",
-    title: "Annotate a range, reply, resolve or move a thread's anchor",
+    title: "Comment, reply, resolve, move, edit or delete your comment",
     description:
-      "Open a thread with block_id/start/end; reply with thread_id and no range fields; move an anchor with " +
-      "thread_id plus block_id/start/end. text adds a comment in every mode; author is optional. Only replies " +
-      "accept resolved to resolve or reopen. Moves remove all previous marks in the document and keep the " +
-      "thread's id, earlier replies and resolution, including for orphaned threads. Incomplete ranges refuse. " +
-      "Table targets need zero-based row/column GFM projection indices including header row 0. Offsets count " +
-      "displayed characters, including stored edge whitespace: remove exactly the GFM padding before decoding " +
-      "inline syntax. Coordinates follow moved cells; orphaned ranges are null. Bad or missing cell coordinates " +
-      "refuse with annotation_cell; empty or other-thread overlap ranges with annotation_range. Offsets clamp " +
-      "to text; a move may overlap its own anchor. Opening or moving into cards/Figma refuses with " +
-      "annotation_card/annotation_figma. Existing card/Figma threads accept replies, resolution, reopening " +
-      "or moves to prose/table cells; Figma ranges name caption.",
+      "Open with block_id/start/end, reply with thread_id, or move with both; text required, author optional. " +
+      "Only replies accept resolved. Moves replace all marks, keeping id, replies and resolution, even when orphaned. " +
+      "Edit with action: edit, thread_id, comment_id and text; no author, range or resolved fields. " +
+      "Text is replaced; no earlier version is kept. Delete permanently with action: delete and both ids, " +
+      "without other mode fields. Yours means stored account matches this session's workspace sign-in GitHub " +
+      "account, ignoring case, including agent and hand-written comments. No account (signed out/local) " +
+      "means no edit/delete. Resolved threads refuse both. Deleting the opener removes the thread only if " +
+      "every reply is yours. Tables need zero-based row/column (header 0); offsets count displayed characters " +
+      "and stored edge whitespace. Cards/Figma refuse opening/moving in; existing threads permit replies, " +
+      "resolution and moves to prose/tables. See help for ranges, offsets and refusal codes.",
     input: annotateInput,
     operation: annotateOperation,
     // Replies can overwrite thread resolution; repeating adds another comment.

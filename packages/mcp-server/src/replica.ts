@@ -287,6 +287,7 @@ export class Replicas {
     const login = this.config.localWorkspace === true ? null : this.credentialProvider.read();
     return {
       kind: "agent",
+      clientName: this.writeSurface.name,
       ...(agent === undefined ? {} : { agent }),
       ...(login?.status === "ready" ? {
         account: login.login.identity.githubUsername,

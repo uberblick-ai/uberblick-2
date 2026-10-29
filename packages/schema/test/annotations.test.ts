@@ -75,7 +75,7 @@ function editablePair(): { a: Y.Doc; b: Y.Doc; threadId: string } {
     initDoc(doc, { uuid: UUID, title: "Editable comments" });
     const blockId = appendBlock(doc, { type: "paragraph", text: SENTENCE });
     threadId = createAnnotation(doc, blockId, 6, 11, "Display name", "Original", undefined,
-      { kind: "agent", account: "Octocat", agent: "codex", principalId: UUID }).id;
+      { kind: "agent", account: "Octocat", agent: "codex", clientName: "Codex desktop", principalId: UUID }).id;
   });
   return { a, b, threadId };
 }
@@ -117,22 +117,40 @@ describe("annotations", () => {
     b.destroy();
   });
 
-  it.each(["other account", "legacy", "empty", "missing thread", "missing comment", "resolved"])(
-    "refuses %s edits without changing the document", (reason) => {
+  it.each([
+    ["other account", "comment_not_owned"],
+    ["legacy", "comment_account_missing"],
+    ["whitespace", "empty_text"],
+    ["empty string", "empty_text"],
+    ["missing thread", "thread_not_found"],
+    ["missing comment", "comment_not_found"],
+    ["resolved", "thread_resolved"],
+    ["signed out", "account_required"],
+    ["invalid account", "account_required"],
+  ] as const)(
+    "refuses %s edits with a reason and without changing the document", (scenario, reason) => {
       const { a, b, threadId } = editablePair();
       let id = getAnnotationCommentId(a, threadId, 0)!;
-      if (reason === "legacy") {
+      if (scenario === "legacy") {
         addComment(a, threadId, "Legacy", "No account");
         id = getAnnotationCommentId(a, threadId, 1)!;
       }
-      if (reason === "missing thread") getAnnotationsMap(a).delete(threadId);
-      if (reason === "missing comment") storedComments(a, threadId).delete(0, 1);
-      if (reason === "resolved") setAnnotationResolved(a, threadId, true);
+      if (scenario === "missing thread") getAnnotationsMap(a).delete(threadId);
+      if (scenario === "missing comment") storedComments(a, threadId).delete(0, 1);
+      if (scenario === "resolved") setAnnotationResolved(a, threadId, true);
       const before = Y.encodeStateAsUpdate(a);
+      const update = vi.fn();
+      a.on("update", update);
+      const account = scenario === "signed out" ? undefined
+        : scenario === "invalid account" ? "invalid account"
+        : scenario === "other account" ? "someone" : "octocat";
+      const text = scenario === "whitespace" ? " \n\t "
+        : scenario === "empty string" ? "" : "Correction";
 
-      expect(editComment(a, threadId, id, reason === "other account" ? "someone" : "octocat",
-        reason === "empty" ? " \n\t " : "Correction")).toBeNull();
+      expect(editComment(a, threadId, id, account ?? "", text)).toBeNull();
+      expect(editComment(a, threadId, id, account, text, { reportRefusal: true })).toEqual({ ok: false, reason });
       expect(Y.encodeStateAsUpdate(a)).toEqual(before);
+      expect(update).not.toHaveBeenCalled();
       a.destroy();
       b.destroy();
     },
@@ -143,7 +161,9 @@ describe("annotations", () => {
     addComment(a, threadId, "Display name", "Second", { kind: "person", account: "octocat" });
     syncDocs(a, b);
     const id = getAnnotationCommentId(a, threadId, index)!;
-    editComment(a, threadId, id, "octocat", "Corrected");
+    expect(editComment(a, threadId, id, "octocat", "Corrected", { reportRefusal: true })).toEqual({
+      ok: true, annotation: getAnnotation(a, threadId),
+    });
     addComment(b, threadId, "Other", "First concurrent reply");
     addComment(b, threadId, "Other", "Second concurrent reply");
     syncDocs(a, b);
@@ -323,11 +343,11 @@ describe("annotations", () => {
     initDoc(doc, { uuid: UUID, title: "Comment attribution" });
     const blockId = appendBlock(doc, { type: "paragraph", text: SENTENCE });
     const person = { kind: "person", account: "octo-cat", principalId: UUID } as const;
-    const claude = { kind: "agent", account: "octo-cat", principalId: UUID, agent: "claude" } as const;
+    const claude = { kind: "agent", account: "octo-cat", principalId: UUID, agent: "claude", clientName: "CLAUDE Code" } as const;
     const thread = createAnnotation(doc, blockId, 6, 11, "Presence name", "Browser opener", undefined, person);
     addComment(doc, thread.id, "Presence name", "Unsigned browser reply", { kind: "person" });
     addComment(doc, thread.id, "Explicit agent author", "Claude reply", claude);
-    moveAnnotation(doc, thread.id, blockId, 0, 5, "Other client", "Agent move", undefined, { kind: "agent" });
+    moveAnnotation(doc, thread.id, blockId, 0, 5, "Other client", "Agent move", undefined, { kind: "agent", clientName: "Cursor <client>" });
     addComment(doc, thread.id, "Old release", "Legacy reply");
 
     const stored = getAnnotationsMap(doc).get(thread.id) as Y.Map<unknown>;
@@ -335,7 +355,7 @@ describe("annotations", () => {
       { author: "Presence name", text: "Browser opener", createdAt: expect.any(String), ...person },
       { author: "Presence name", text: "Unsigned browser reply", createdAt: expect.any(String), kind: "person" },
       { author: "Explicit agent author", text: "Claude reply", createdAt: expect.any(String), ...claude },
-      { author: "Other client", text: "Agent move", createdAt: expect.any(String), kind: "agent" },
+      { author: "Other client", text: "Agent move", createdAt: expect.any(String), kind: "agent", clientName: "Cursor <client>" },
       { author: "Old release", text: "Legacy reply", createdAt: expect.any(String) },
     ]);
     const replica = new Y.Doc();
@@ -371,6 +391,10 @@ describe("annotations", () => {
     { field: "account", invalid: 42 },
     { field: "agent", invalid: "other-product" },
     { field: "agent", invalid: 42 },
+    { field: "clientName", invalid: 42 },
+    { field: "clientName", invalid: null },
+    { field: "clientName", invalid: { name: "Cursor" } },
+    { field: "clientName", invalid: ["Cursor"] },
     { field: "principalId", invalid: "octocat" },
     { field: "principalId", invalid: 42 },
     { field: "kind", invalid: "human" },
@@ -379,7 +403,7 @@ describe("annotations", () => {
     const { doc, threadId } = annotated();
     const stored = getAnnotationsMap(doc).get(threadId) as Y.Map<unknown>;
     const rows = stored.get("comments") as Y.Array<unknown>;
-    const attribution = { kind: "agent", account: "octocat", principalId: UUID, agent: "codex" };
+    const attribution = { kind: "agent", account: "octocat", principalId: UUID, agent: "codex", clientName: "Codex desktop" };
     const comment = { author: "Author", text: "Foreign comment", createdAt: "2026-10-26T00:00:00.000Z" };
     rows.push([{ ...comment, ...attribution, [field]: invalid }, null, { author: "Malformed" }]);
     addComment(doc, threadId, "Legacy author", "Sibling");

@@ -99,7 +99,7 @@ function configDocument(
     remoteHubUrl: string;
     rebound: boolean;
     workspaces: readonly string[];
-    servedWorkspaces: Record<string, { remoteHubUrl: string | null; name: string | null }>;
+    servedWorkspaces: Record<string, { remoteHubUrl: string | null; name: string | null; localOnly: boolean }>;
   },
   defaultPresenceName: string,
 ): string {
@@ -165,6 +165,7 @@ function servingConfigSource(
     workspaces: [...workspaces.values()].map(entry => entry.workspace),
     servedWorkspaces: Object.fromEntries([...workspaces].map(([id, entry]) => [id, {
       name: entry.name,
+      localOnly: entry.binding.hubUrl === null,
       // The startup replica retains ensureHub's loopback behavior. Explicit
       // local-only secondaries have no upstream to name or start.
       remoteHubUrl: id === startupId ? binding.hubUrl : entry.binding.hubUrl,

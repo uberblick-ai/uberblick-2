@@ -23,6 +23,7 @@ import {
   InvalidBlockMoveError,
   InvalidListAttributesError,
   InvalidCalloutError,
+  InvalidColumnWidthsError,
   InvalidTableMappingError,
   OldTextMismatchError,
   SchemaError,
@@ -35,7 +36,7 @@ import {
 } from "./marks.js";
 import { blockRev } from "./rev.js";
 import { canonicalDocumentUuid } from "./rooms.js";
-import { buildTableElement, editTable, parseGfmTable, parseTableInput, parseTableCell, tableRows, tableText } from "./table.js";
+import { buildTableElement, editTable, parseGfmTable, parseTableInput, parseTableCell, tableColumnWidths, tableRows, tableText, validateColumnWidths, writeTableColumnWidths } from "./table.js";
 import type { TableMapping } from "./table.js";
 import {
   MAX_LIST_INDENT,
@@ -228,6 +229,9 @@ export function toBlock(element: Y.XmlElement): Block {
       ...(isCalloutIcon(storedIcon) ? { icon: storedIcon } : {}),
     };
   }
+  if (type === "table") {
+    return { id, type, text, rev: blockRev({ type, text }), columnWidths: tableColumnWidths(element, parseGfmTable(text)?.header.length ?? 0) };
+  }
   const figma = type === "figma" ? figmaFields(element) : undefined;
   return { id, type, text, rev: blockRev({ type, text }), ...(figma === undefined ? {} : { figma }) };
 }
@@ -336,8 +340,15 @@ function inlineOf(input: BlockInput): readonly InlineRun[] | null {
   return isProseBlockType(input.type) ? input.inline : null;
 }
 
+function validateColumnWidthsType(type: BlockType, widths: unknown): void {
+  if (widths !== undefined && type !== "table") {
+    throw new InvalidColumnWidthsError("column_widths applies only to table blocks");
+  }
+}
+
 function buildElement(id: string, input: BlockInput): Y.XmlElement {
   // Validate before insertion: Yjs transactions cannot roll back stray blocks.
+  validateColumnWidthsType(input.type, input.columnWidths);
   if (input.type === "divider") {
     if ((input.text ?? "") !== "" || (input.inline?.length ?? 0) > 0) {
       throw new SchemaError("invalid_divider", "A divider block cannot contain text or inline runs");
@@ -364,6 +375,7 @@ function buildElement(id: string, input: BlockInput): Y.XmlElement {
 
   if (input.type === "table") {
     const table = parseTableInput(input.text ?? "");
+    if (input.columnWidths !== undefined) validateColumnWidths(input.columnWidths, table.header.length);
     for (const cell of [table.header, ...table.rows].flat()) assertInlineWritable(parseTableCell(cell));
     return buildTableElement(id, {
       ...table, header: table.header.map(() => ""), rows: table.rows.map((row) => row.map(() => "")),
@@ -414,6 +426,7 @@ function writeInline(element: Y.XmlElement, input: BlockInput): void {
       const text = part.texts[0];
       if (text !== undefined) applyInlineRuns(text, parseTableCell(values[part.row]?.[part.column] ?? ""));
     }
+    if (input.columnWidths !== undefined) writeTableColumnWidths(element, input.columnWidths);
     return;
   }
   const runs = inlineOf(input);
@@ -622,6 +635,8 @@ export interface EditBlockOptions {
   icon?: string;
   /** Surviving old GFM positions, or null for newly created rows and columns. */
   tableMapping?: TableMapping;
+  /** Tables only: one positive whole CSS-pixel width or null per new column. */
+  columnWidths?: Array<number | null>;
 }
 
 function validateListAttributes(type: BlockType, options: EditBlockOptions): void {
@@ -699,10 +714,11 @@ export function editBlock(
     }
     validateListAttributes(current.type, options);
     validateCalloutEdit(current.type, options);
+    validateColumnWidthsType(current.type, options.columnWidths);
     if (current.type === "table") {
       const parsedOld = parseTableInput(oldText);
       const parsedNew = parseTableInput(newText);
-      editTable(element, parsedOld, parsedNew, options.tableMapping);
+      editTable(element, parsedOld, parsedNew, options.tableMapping, options.columnWidths);
       return;
     }
     if (options.tableMapping !== undefined) throw new InvalidTableMappingError("mapping applies only to a table block");

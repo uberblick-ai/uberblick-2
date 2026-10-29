@@ -88,11 +88,12 @@ describe("ub open", () => {
   it.each([
     { source: "project", hubUrl: null },
     { source: "project", hubUrl: FIRST_REMOTE },
+    { source: "project", hubUrl: "ws://localhost:1234" },
     { source: "environment", hubUrl: null },
     { source: "environment", hubUrl: FIRST_REMOTE },
     { source: "id-only", hubUrl: null },
   ])("remembers a first $source binding with hub $hubUrl after serving", async ({ source, hubUrl }) => {
-    if (hubUrl === null) await holdDefaultHub();
+    if (hubUrl === null || hubUrl === "ws://localhost:1234") await holdDefaultHub();
     const box = source === "project"
       ? sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl } })
       : unboundSandbox();
@@ -109,6 +110,12 @@ describe("ub open", () => {
     try {
       expect((await get(app.url)).status).toBe(200);
       expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(hubUrl);
+      expect(await (await get(`${app.url}uberblick-config.json`)).json()).toMatchObject({
+        servedWorkspaces: { [WORKSPACE]: {
+          localOnly: hubUrl === null,
+          remoteHubUrl: hubUrl ?? "ws://localhost:1234",
+        } },
+      });
     } finally { expect((await app.interrupt()).status).toBe(0); }
   });
 

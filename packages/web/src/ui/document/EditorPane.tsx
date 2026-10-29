@@ -62,6 +62,7 @@ import type { RemotePresence } from "../status/doc-chrome.js";
 import { CommentComposer } from "../comments/CommentComposer.js";
 import { PeerCluster } from "../status/PeerCluster.js";
 import { SyncDot } from "../status/SyncDot.js";
+import { CodeCheckTrigger } from "../status/CodeCheckTrigger.js";
 import { useDocumentSyncActivity } from "../status/document-sync-activity.js";
 import { DocMetaLine } from "./DocChrome.js";
 import type { DocumentActionProps } from "./DocChrome.js";
@@ -386,6 +387,11 @@ export interface DocumentSyncReading {
 
 const OFFLINE_NOTE = "Offline. Changes are saved on this device.";
 
+function saveProblemDetail(detail: string | null, writable: boolean, localWorkspace: boolean): string | null {
+  if (localWorkspace) return detail !== null || !writable ? "Changes are not saved." : null;
+  return detail ?? (!writable ? "Changes are not saved." : null);
+}
+
 /** The quiet edit row retains explicit refusals and truthful durability warnings. */
 export function StatusLine({
   connection,
@@ -442,7 +448,7 @@ export function StatusLine({
     <PeerCluster presence={presence} onActivate={onActivatePresence} reserveSpace={documentLayout} />
   );
   const blank = facts.primary === null;
-  const saveProblem = blank ? null : reading.detail ?? (!status.writable ? "Changes are not saved." : null);
+  const saveProblem = blank ? null : saveProblemDetail(reading.detail, status.writable, localWorkspace);
   // A retained serving cause is not a hub claim while its acknowledgement is
   // unknown. Publish only the condition the compact facts actually name.
   const hubProblem = facts.hub === "not shared with hub" ? facts.hubDetail : null;
@@ -468,8 +474,8 @@ export function StatusLine({
   }, [connection]);
   const activity = useDocumentSyncActivity(connection, hubAcked, rawHubAcked, sampledAt);
   const hasHub = endpoint !== null && endpoint.url !== "local";
-  const refusal = reading.detail !== null ? reading.word : hubProblem !== null ? "not shared with hub" : null;
-  const unsaved = !blank && reading.detail === null && !status.writable;
+  const refusal = localWorkspace ? null : reading.detail !== null ? reading.word : hubProblem !== null ? "not shared with hub" : null;
+  const unsaved = !blank && (localWorkspace ? reading.detail !== null || !status.writable : reading.detail === null && !status.writable);
   const offline = hasHub && facts.twoFact && state === "synced" && hubAcked === false && refusal === null;
   const confirmed = hasHub && raw === "synced" && status.writable && refusal === null && notSharedReason === null && activity.confirmed;
   const now = useTimestampClock();
@@ -478,6 +484,7 @@ export function StatusLine({
   const updatedReading =
     formattedUpdatedAt === null ? null : (
       <span className="ub-last-updated">
+        {localWorkspace && "Local-only · "}
         Edited{" "}
         <time
           dateTime={formattedUpdatedAt.dateTime}
@@ -499,7 +506,9 @@ export function StatusLine({
           lastConfirmedAt={activity.lastConfirmedAt} pulse={activity.pulse} syncDetails={syncDetails}
           codeChecks={isDecision(connection) ? [] : codeChecks} />}
         <div className="ub-status-left">
+          {localWorkspace && updatedReading === null && <span className="ub-local-only">Local-only</span>}
           {updatedReading}
+          {localWorkspace && syncDetails && !isDecision(connection) && codeChecks.length > 0 && <CodeCheckTrigger codeChecks={codeChecks} />}
           {codeNote !== null && <>
             {updatedReading !== null && <span className="ub-status-separator" aria-hidden="true"> · </span>}
             <span className="ub-code-check-note text-(--status-warning-ink)">{codeNote}</span>
@@ -507,7 +516,7 @@ export function StatusLine({
           {refusal !== null && <span className="ub-status-word">{refusal}</span>}
           {unsaved && <span className="ub-not-saved">not saved</span>}
           {offline && <span className="ub-status-offline" title={OFFLINE_NOTE}>{OFFLINE_NOTE}</span>}
-          {Boolean(statusLink) && (updatedReading !== null || codeNote !== null || refusal !== null || unsaved || offline) &&
+          {Boolean(statusLink) && (localWorkspace || updatedReading !== null || codeNote !== null || refusal !== null || unsaved || offline) &&
             <span className="ub-status-separator" aria-hidden="true"> · </span>}
           {statusLink}
         </div>
@@ -717,7 +726,6 @@ const BoundEditor = memo(function BoundEditor({
     };
     const activate = (event: MouseEvent): void => {
       const threadId = threadIdFromTarget(event.target);
-      if (threadId === null) onSelectThread(null);
       if (handleDocLinkClick(event, docLinks)) return;
       const anchor = linkAnchorFromTarget(event.target);
       if (anchor !== null) {
@@ -735,6 +743,7 @@ const BoundEditor = memo(function BoundEditor({
         }
         return;
       }
+      if (threadId === null) onSelectThread(null);
       if (threadId !== null) selectThread(threadId);
     };
     // Enter/Space activates only a focused button-role highlight. Capture and

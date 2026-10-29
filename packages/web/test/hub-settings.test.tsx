@@ -6,7 +6,7 @@ import { HubSettings } from "../src/ui/settings/HubSettings.js";
 import { useHubAdministration } from "../src/ui/settings/hub-administration.js";
 
 const WORKSPACE = "53f04353-622b-4b14-8d71-366193d43c74";
-const SERVING = { workspace: WORKSPACE, remoteHubUrl: "ws://bound.example", rebound: false };
+const SERVING = { workspace: WORKSPACE, remoteHubUrl: "ws://bound.example", localOnly: false, rebound: false };
 const HUB = "https://bound.example";
 const api = vi.fn<(action: AccessAction, signal: AbortSignal) => Promise<AccessAnswer>>();
 vi.mock("../src/shell/workspace-access.js", () => ({ createWorkspaceAccessClient: () => api }));

@@ -208,7 +208,7 @@ function filter(host: HTMLElement): HTMLInputElement {
 }
 
 function localSearch(answers: Readonly<Record<string, readonly string[]>>) {
-  const serving = { workspace: WORKSPACE, remoteHubUrl: null, rebound: false };
+  const serving = { workspace: WORKSPACE, remoteHubUrl: null, localOnly: true, rebound: false };
   const client = {
     search: vi.fn(async (query: string) => [...(answers[query] ?? [])]),
     status: async () => ({ caughtUp: true, rooms: {} }),
