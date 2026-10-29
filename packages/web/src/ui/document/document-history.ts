@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type * as Y from "yjs";
-import type { RevisionEntry } from "@uberblick/schema";
+import * as Y from "yjs";
+import { snapshotRevision, type RevisionEntry } from "@uberblick/schema";
 import { documentRevisionChecksum, DocumentHistoryError } from "../../shell/document-revisions.js";
 import type { DocumentHistoryStatus, DocumentRevisionsClient } from "../../shell/document-revisions.js";
 import { useStoredFlag } from "../hooks.js";
 import type { RevisionView } from "../route.js";
 
-interface Selection { index: number; entry: RevisionEntry; entries: RevisionEntry[]; before: Y.Doc | null; after: Y.Doc; comparedWith?: RevisionEntry }
+/** Local comparisons identify the downloaded Before; After has no hub identity. */
+interface Selection { kind?: "local"; index: number; entry: RevisionEntry; entries: RevisionEntry[]; before: Y.Doc | null; after: Y.Doc; comparedWith?: RevisionEntry }
+interface LocalComparison { revision: string; waiting: "sync" | "history" | null; offline: boolean; newer: boolean }
+interface LocalSync { connected: boolean; confirmed: boolean }
 interface HistoryState {
   filter: "all" | "named";
   entries: RevisionEntry[] | null;
@@ -17,6 +20,7 @@ interface HistoryState {
   error: string | null;
   history: DocumentHistoryStatus | null;
   downloading: boolean;
+  localComparison: LocalComparison | null;
   /** Only the opted-in list supplies markers, including when snapshots are cached. */
   titles: Readonly<Record<string, string>>;
 }
@@ -34,9 +38,12 @@ interface Session {
   retryRefresh: boolean;
   startingHash: Promise<string | Error> | null;
   acknowledgedNames: Map<string, RevisionEntry>;
+  localTask: number | null;
+  localGeneration: number;
+  localChecksum: string | null;
   state: HistoryState;
 }
-const initial: HistoryState = { filter: "all", entries: null, selection: null, active: false, busy: true, error: null, history: null, downloading: false, titles: {} };
+const initial: HistoryState = { filter: "all", entries: null, selection: null, active: false, busy: true, error: null, history: null, downloading: false, localComparison: null, titles: {} };
 type Target = { index: number; named?: boolean } | { step: -1 | 1; named?: boolean } | { since: string | null } | { id: string; since?: string };
 interface HistoryRoute { view: RevisionView | null; navigate: (view: RevisionView | null) => void }
 function sameView(left: RevisionView | null, right: RevisionView | null): boolean {
@@ -44,6 +51,7 @@ function sameView(left: RevisionView | null, right: RevisionView | null): boolea
 }
 function displayedState(state: HistoryState, session: Session | undefined, route: HistoryRoute | undefined): HistoryState {
   if (route === undefined) return state;
+  if (state.localComparison !== null && route.view === null) return state;
   const pending = !sameView(route.view, session?.requestedView ?? null);
   const selectedId = state.selection?.entry.id;
   const matches = route.view === null || (selectedId === route.view.revision && state.selection?.comparedWith?.id === route.view.since);
@@ -87,6 +95,24 @@ function replaceEntries(owner: Session, entries: RevisionEntry[]): Pick<HistoryS
   const id = selection?.entry.id;
   const index = entries.findIndex(entry => entry.id === id);
   return { entries, titles: listedTitles(entries), selection: selection === null ? null : index === selection.index ? selection : { ...selection, index } };
+}
+
+function hasNewerContent(previous: readonly RevisionEntry[], entries: readonly RevisionEntry[]): boolean {
+  const known = new Map(previous.map(entry => [entry.id, entry]));
+  return entries.some(entry => !known.has(entry.id) || entry.checksum !== known.get(entry.id)?.checksum || entry.title !== known.get(entry.id)?.title);
+}
+
+function polledEntries(owner: Session, entries: RevisionEntry[], history: DocumentHistoryStatus): Partial<HistoryState> {
+  const local = owner.state.localComparison;
+  if (local?.waiting === "history" && history.offline && !local.offline) {
+    owner.operation++;
+    owner.localTask = null;
+    return { ...replaceEntries(owner, entries), history, localComparison: { ...local, waiting: "sync", offline: true } };
+  }
+  const newer = local !== null && local.waiting === null && owner.state.selection !== null &&
+    hasNewerContent(owner.state.selection.entries, entries);
+  return { ...replaceEntries(owner, entries), history,
+    ...(local === null || !newer ? {} : { localComparison: { ...local, newer: true } }) };
 }
 
 function catalogEntries(owner: Session, result: Awaited<ReturnType<DocumentRevisionsClient["list"]>>, refreshed = false): RevisionEntry[] {
@@ -211,7 +237,7 @@ async function selectTarget(owner: Session | null, target: Target, liveDocument:
   const fresh = "since" in target && refresh ? new Map<string, Y.Doc>() : null;
   let adopted = false;
   owner.retryTarget = target;
-  update(owner, { busy: true, error: null, downloading: false, active: true });
+  update(owner, { busy: true, error: null, downloading: false, active: true, localComparison: null });
   try {
     if (entering && fresh === null) destroyDocuments(owner.documents);
     const entries = await targetEntries(owner, target, refresh, operation, fresh ?? owner.documents, update);
@@ -282,6 +308,12 @@ async function reloadSelection(owner: Session, operation: number, update: Update
   }
 }
 
+async function reloadHistory(owner: Session, operation: number, update: Update): Promise<void> {
+  owner.retryRefresh = true;
+  await reloadSelection(owner, operation, update);
+  if (owner.operation === operation) owner.retryRefresh = false;
+}
+
 /** Per-browser reading preferences survive document and history sessions. */
 function useHistoryPreferences() {
   const [collapseUnchanged, setCollapseUnchanged] = useStoredFlag("uberblick.history.collapse-unchanged", true);
@@ -294,7 +326,7 @@ function useHistoryPreferences() {
 type SelectionRequest = { current: (target: Target, relist?: boolean, fromRoute?: boolean) => Promise<void> };
 async function continueDownload(owner: Session, select: SelectionRequest, refresh: { current: () => void }): Promise<void> {
   if (!owner.state.active || !owner.state.downloading) return;
-  if (owner.retryRefresh) refresh.current();
+  if (owner.retryRefresh || owner.state.localComparison !== null) refresh.current();
   else if (owner.retryTarget !== null) await select.current(owner.retryTarget, false, true);
 }
 
@@ -307,13 +339,13 @@ function useHistoryPolling(owner: Session | undefined, select: SelectionRequest,
     const poll = async (): Promise<void> => {
       const operation = owner.operation;
       try {
-        if (owner.state.busy || owner.signal.aborted) return;
+        if (owner.state.busy && owner.state.localComparison === null) return;
         if (owner.state.active && owner.state.downloading && owner.retryRefresh) { refresh.current(); return; }
         const confirmNames = owner.acknowledgedNames.size > 0 && owner.state.history?.offline === false;
         const result = await owner.client.list(owner.uuid, owner.signal, confirmNames ? { refresh: true } : undefined);
         if (stopped || owner.signal.aborted || owner.operation !== operation) return;
         const entries = catalogEntries(owner, result, confirmNames);
-        update(owner, { ...replaceEntries(owner, entries), history: result.history });
+        update(owner, polledEntries(owner, entries, result.history));
         await continueDownload(owner, select, refresh);
       } catch (error) {
         if (!stopped && !owner.signal.aborted && owner.operation === operation) {
@@ -350,7 +382,125 @@ async function mutateName(owner: Session | null, write: (owner: Session) => Prom
   } catch (error) { if (owner.operation === operation) update(owner, { busy: false }); throw error; }
 }
 
-export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid: string | null, key: string, liveDocument: Y.Doc | null = null, route?: HistoryRoute) {
+function failLocalComparison(owner: Session, local: LocalComparison, offline: boolean, error: unknown, update: Update, fail: Fail): void {
+  if (error instanceof DocumentHistoryError && error.history?.offline === true && !offline) {
+    update(owner, { history: error.history, localComparison: { ...local, waiting: "sync", offline: true } });
+    return;
+  }
+  fail(owner, error);
+  const downloading = error instanceof DocumentHistoryError && error.reason === "downloading";
+  update(owner, { localComparison: { ...local, waiting: downloading ? "history" : null, offline } });
+}
+
+async function localEntries(owner: Session, local: LocalComparison, operation: number, offline: boolean, update: Update): Promise<RevisionEntry[] | null> {
+  if (offline) return owner.state.entries ?? [];
+  const result = await owner.client.list(owner.uuid, owner.signal, { refresh: true });
+  if (owner.operation !== operation) return null;
+  update(owner, { history: result.history });
+  if (result.history.offline) {
+    update(owner, { localComparison: { ...local, waiting: "sync", offline: true } });
+    return null;
+  }
+  if (result.history.refreshFailed) throw new DocumentHistoryError("unreachable");
+  const entries = catalogEntries(owner, result, true);
+  update(owner, { entries, titles: listedTitles(entries) });
+  return entries;
+}
+
+async function prepareLocalComparison(owner: Session, local: LocalComparison, liveDocument: Y.Doc, offline: boolean,
+  sync: () => LocalSync | undefined, update: Update, fail: Fail): Promise<void> {
+  const operation = owner.operation;
+  const generation = owner.localGeneration;
+  const fresh = new Map<string, Y.Doc>();
+  owner.localTask = operation;
+  update(owner, { busy: true, localComparison: { ...local, waiting: "history", offline } });
+  let adopted = false;
+  try {
+    const entries = await localEntries(owner, local, operation, offline, update);
+    if (entries === null) return;
+    const index = entries.findIndex(entry => entry.id === local.revision);
+    const entry = entries[index];
+    if (entry === undefined) throw new DocumentHistoryError("revision-not-found");
+    const before = await getRevision(owner, entry.id, operation, fresh, entry);
+    if (owner.operation !== operation) return;
+    if (!offline && (generation !== owner.localGeneration || sync()?.confirmed !== true || sync()?.connected === false)) {
+      update(owner, { localComparison: { ...local, waiting: "sync" } });
+      return;
+    }
+    const after = new Y.Doc();
+    fresh.set("local", after);
+    Y.applyUpdate(after, Y.encodeStateAsUpdate(liveDocument));
+    owner.localChecksum = snapshotRevision(after).checksum;
+    destroyDocuments(owner.documents);
+    owner.documents = fresh;
+    adopted = true;
+    update(owner, { selection: { kind: "local", index, entry, entries, before, after },
+      localComparison: { ...local, waiting: null, offline, newer: false }, busy: false, error: null, downloading: false });
+  } catch (error) {
+    if (owner.operation === operation) failLocalComparison(owner, local, offline, error, update, fail);
+  } finally {
+    if (!adopted) destroyDocuments(fresh);
+    if (owner.localTask === operation) owner.localTask = null;
+  }
+}
+
+function beginLocalComparison(owner: Session | null, revision: string, update: Update, fail: Fail, navigate: () => void): void {
+  if (owner === null || owner.state.busy) return;
+  const operation = ++owner.operation;
+  owner.localTask = operation;
+  owner.retryTarget = null;
+  owner.retryRefresh = false;
+  owner.requestedView = null;
+  navigate();
+  const local: LocalComparison = { revision, waiting: "sync", offline: false, newer: false };
+  update(owner, { active: true, selection: null, busy: true, error: null, downloading: false, localComparison: local });
+  // A cached read supplies the current connection fact even just after reconnect.
+  void owner.client.list(owner.uuid, owner.signal).then(result => {
+    if (owner.operation !== operation) return;
+    owner.localTask = null;
+    const entries = catalogEntries(owner, result);
+    update(owner, { entries, history: result.history, titles: listedTitles(entries) });
+  }, (error: unknown) => {
+    if (owner.operation !== operation) return;
+    owner.localTask = null;
+    failLocalComparison(owner, local, false, error, update, fail);
+  });
+}
+
+function useLocalComparison(owner: Session | undefined, state: HistoryState, liveDocument: Y.Doc | null,
+  sync: LocalSync | undefined, update: Update, fail: Fail): void {
+  const localSync = useRef(sync);
+  localSync.current = sync;
+  useEffect(() => {
+    if (owner === undefined || liveDocument === null) return;
+    const changed = (): void => {
+      owner.localGeneration++;
+      const local = owner.state.localComparison;
+      if (local?.waiting === null && !local.newer && snapshotRevision(liveDocument).checksum !== owner.localChecksum) {
+        update(owner, { localComparison: { ...local, newer: true } });
+      }
+    };
+    liveDocument.on("update", changed);
+    return () => { liveDocument.off("update", changed); };
+  }, [owner, liveDocument, update]);
+  useEffect(() => {
+    const local = state.localComparison;
+    if (owner === undefined || local === null || local.waiting === null || liveDocument === null) return;
+    const offline = sync?.connected === false || state.history?.offline === true;
+    if (local.waiting === "history") {
+      if (offline && !local.offline) {
+        owner.operation++;
+        owner.localTask = null;
+        update(owner, { localComparison: { ...local, waiting: "sync", offline: true } });
+      }
+      return;
+    }
+    if ((!offline && sync?.confirmed !== true) || owner.localTask !== null) return;
+    void prepareLocalComparison(owner, local, liveDocument, offline, () => localSync.current, update, fail);
+  }, [owner, state.localComparison, state.history, liveDocument, sync?.connected, sync?.confirmed, update, fail]);
+}
+
+export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid: string | null, key: string, liveDocument: Y.Doc | null = null, route?: HistoryRoute, sync?: LocalSync) {
   const current = useRef<Session | null>(null);
   const routing = useRef(route);
   routing.current = route;
@@ -373,7 +523,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
     if (client === null || uuid === null) { current.current = null; setView(null); return; }
     const controller = new AbortController();
     const listing = client.list(uuid, controller.signal);
-    const session: Session = { client, uuid, key, requestedView: null, listing, operation: 0, signal: controller.signal, documents: new Map(), documentChecksums: new WeakMap(), retryTarget: null, retryRefresh: false, startingHash: null, acknowledgedNames: new Map(), state: initial };
+    const session: Session = { client, uuid, key, requestedView: null, listing, operation: 0, signal: controller.signal, documents: new Map(), documentChecksums: new WeakMap(), retryTarget: null, retryRefresh: false, startingHash: null, acknowledgedNames: new Map(), localTask: null, localGeneration: 0, localChecksum: null, state: initial };
     current.current = session;
     setView({ session, state: initial });
     void listing.then(
@@ -381,6 +531,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
       (error: unknown) => { session.listing = null; if (session.operation === 0) fail(session, error); },
     );
     return () => {
+      session.operation++;
       controller.abort();
       if (current.current === session) current.current = null;
       destroyDocuments(session.documents);
@@ -388,6 +539,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
   }, [client, uuid, key, update, fail]);
   const session = view?.session;
   const state = view !== null && session?.client === client && session.uuid === uuid && session.key === key && current.current === session ? view.state : initial;
+  useLocalComparison(session, state, liveDocument, sync, update, fail);
   useEffect(() => {
     const owner = current.current;
     if (liveDocument !== null && state.active && owner !== null && owner.startingHash === null) captureStartingPoint(owner, liveDocument);
@@ -395,31 +547,28 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
   const select = (target: Target, relist = false, fromRoute = false): Promise<void> => selectTarget(
     current.current, target, liveDocument, update, fail, view => routing.current?.navigate(view), relist, fromRoute);
   const mutate = (write: (owner: Session) => Promise<RevisionEntry>): Promise<void> => mutateName(current.current, write, update);
-  const reload = async (owner: Session, operation: number): Promise<void> => {
-    owner.retryRefresh = true;
-    await reloadSelection(owner, operation, update);
-    if (owner.operation === operation) owner.retryRefresh = false;
-  };
+  const compareLocal = (revision: string): void => beginLocalComparison(current.current, revision, update, fail, () => routing.current?.navigate(null));
   const refresh = (): void => {
     const owner = current.current;
     if (owner === null || owner.state.busy) return;
+    if (owner.state.localComparison !== null) { compareLocal(owner.state.localComparison.revision); return; }
     const operation = ++owner.operation;
     captureStartingPoint(owner, liveDocument);
     update(owner, { busy: true, error: null, downloading: false });
-    void reload(owner, operation).catch((error: unknown) => { if (owner.operation === operation) fail(owner, error); });
+    void reloadHistory(owner, operation, update).catch((error: unknown) => { if (owner.operation === operation) fail(owner, error); });
   };
   const refreshRefusedRestore = async (owner: Session, operation: number, error: unknown): Promise<void> => {
     if (owner.operation !== operation) return;
     if (error instanceof DocumentHistoryError && ["stale-state", "restore-outcome-unknown", "unreachable"].includes(error.reason ?? "")) {
       captureStartingPoint(owner, liveDocument);
-      try { await reload(owner, operation); }
+      try { await reloadHistory(owner, operation, update); }
       catch (refreshError) { if (owner.operation === operation) fail(owner, refreshError); }
     }
     update(owner, { busy: false });
   };
   const restore = async (revisionId: string): Promise<boolean> => {
     const owner = current.current;
-    if (owner === null || owner.state.busy) throw new Error("Wait for history to load and try again.");
+    if (owner === null || owner.state.busy || owner.state.localComparison !== null) throw new Error("Wait for history to load and try again.");
     const startingHash = owner.startingHash;
     if (startingHash === null) throw new Error("Wait for the live document to load, then reopen history and try again.");
     const operation = ++owner.operation;
@@ -432,7 +581,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
       const result = await owner.client.restore(owner.uuid, revisionId, checksum, owner.signal);
       applied = result.applied;
       captureStartingPoint(owner, liveDocument);
-      await reload(owner, operation);
+      await reloadHistory(owner, operation, update);
       return applied;
     } catch (error) {
       await refreshRefusedRestore(owner, operation, error);
@@ -447,7 +596,8 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
       owner.retryTarget = null;
       owner.retryRefresh = false;
       owner.requestedView = null;
-      update(owner, { selection: null, active: false, error: null, downloading: false, busy: false, filter: "all" });
+      owner.localTask = null;
+      update(owner, { selection: null, localComparison: null, active: false, error: null, downloading: false, busy: false, filter: "all" });
     }
     if (!fromRoute) routing.current?.navigate(null);
   }, [update]);
@@ -471,14 +621,14 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
   // A new address never displays the previous address's comparison or live editor.
   const displayed = displayedState(state, session, route);
   const { selection, entries, filter } = displayed;
-  const canBack = selection !== null && (filter === "named" ? namedStep(entries ?? [], selection.index, 1) >= 0 : selection.index < (entries?.length ?? 0) - 1);
-  const canForward = selection !== null && (filter === "named" ? namedStep(entries ?? [], selection.index, -1) >= 0 : true);
+  const canBack = displayed.localComparison === null && selection !== null && (filter === "named" ? namedStep(entries ?? [], selection.index, 1) >= 0 : selection.index < (entries?.length ?? 0) - 1);
+  const canForward = displayed.localComparison === null && selection !== null && (filter === "named" ? namedStep(entries ?? [], selection.index, -1) >= 0 : true);
   const setFilter = (next: HistoryState["filter"]): void => {
     const owner = current.current;
     if (owner === null || owner.state.filter === next || owner.state.busy) return;
     update(owner, { filter: next });
     const selected = owner.state.selection;
-    if (selected === null || owner.state.entries?.[selected.index]?.name == null) return;
+    if (selected === null || owner.state.localComparison !== null || owner.state.entries?.[selected.index]?.name == null) return;
     if (selected.index === 0 && selected.comparedWith?.name != null) return;
     void select({ index: selected.index, named: next === "named" });
   };
@@ -491,6 +641,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
     connected: displayed.history?.offline === false,
     ...preferences,
     entry: displayed.selection?.entry ?? null,
+    compareLocal,
     back: () => { if (selection === null || canBack) void select({ step: 1, named: filter === "named" }); },
     forward: () => {
       if (!canForward) return;
@@ -513,6 +664,7 @@ export function useDocumentHistory(client: DocumentRevisionsClient | null, uuid:
     retry: () => {
       const owner = current.current;
       if (owner === null) return;
+      if (owner.state.localComparison !== null) { compareLocal(owner.state.localComparison.revision); return; }
       if (owner.retryTarget !== null) void select(owner.retryTarget, true);
       else if (owner.state.selection === null) void select({ index: 0 });
       else refresh();

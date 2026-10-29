@@ -14,6 +14,7 @@ import { useShellNavigation } from "./navigation.js";
 import { useCreateDocument } from "./create-document.js";
 import { useDocumentHistory } from "../document/document-history.js";
 import { rememberRevisionHeader } from "../document/revision-motion.js";
+import { useDocumentSyncActivity } from "../status/document-sync-activity.js";
 
 export function useAppShell() {
   const [path, navigate, documentList, onDocumentListStateChange] = useRoutePath<DocumentListState>();
@@ -27,6 +28,8 @@ export function useAppShell() {
   const historyView = route.kind === "doc" ? route.history ?? null : null;
   const documentKey = `${environment.workspaceUuid}/${route.kind === "doc" ? route.uuid : rooms.selected}`;
   const liveDocument = readings.meta?.uuid === rooms.selected ? rooms.doc?.ydoc ?? null : null;
+  const activity = useDocumentSyncActivity(readings.chromeRoom, readings.servingStatus?.hubAcked,
+    readings.servingStatus?.rawHubAcked, readings.servingStatus?.sampledAt);
   const history = useDocumentHistory(decisionPage ? null : environment.documentRevisions, rooms.selected, documentKey, liveDocument, {
     view: historyView,
     navigate: (view) => {
@@ -34,7 +37,7 @@ export function useAppShell() {
       navigate(view === null ? docPath(route.workspace.segment, route.uuid)
         : revisionPath(route.workspace.segment, route.uuid, view.revision, view.since));
     },
-  });
+  }, { connected: rooms.docStatus.connected, confirmed: activity.confirmed });
   useEffect(() => {
     if (route.kind !== "doc" || route.history === undefined || !environment.hubReady) return;
     const unavailable = environment.hubAdministration.authority?.status === "local-only";
