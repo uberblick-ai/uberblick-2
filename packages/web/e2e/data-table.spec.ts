@@ -101,8 +101,10 @@ async function expectHeaderOrder(table: Locator, label: string, direction: "asce
   await expect(header).toHaveAttribute("aria-sort", direction);
   await expect(header.locator("[aria-hidden='true']")).toHaveText(direction === "ascending" ? "↑" : "↓");
   await expect(header.locator("[aria-hidden='true']")).toBeVisible();
-  const buttonInk = await header.locator("button").evaluate(element => getComputedStyle(element).color);
-  await expect(header.locator("[aria-hidden='true']")).toHaveCSS("color", buttonInk);
+  await expect.poll(() => header.locator("button").evaluate(button => {
+    const arrow = button.querySelector("[aria-hidden='true']");
+    return arrow !== null && getComputedStyle(arrow).color === getComputedStyle(button).color;
+  })).toBe(true);
   await expect(header.locator("[aria-hidden='true']")).toHaveCSS("opacity", "1");
   const readings = await renderedText(table.page(), ".ub-data-table th[aria-sort] button");
   expect(readings.length).toBeGreaterThan(0);
