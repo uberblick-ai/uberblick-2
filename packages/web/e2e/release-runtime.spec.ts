@@ -10,15 +10,22 @@ import { createHub, silentLogger } from "@uberblick/hub";
 import type { Hub } from "@uberblick/hub";
 import { createTeamHub } from "@uberblick/hub/team";
 import type { TeamHub } from "@uberblick/hub/team";
+import { workspaceResourceUrl } from "@uberblick/schema/oauth";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { LOCAL_SESSION_KEY } from "../src/collab/local-session.js";
 import { build, preview } from "vite";
 import type { PreviewServer } from "vite";
+import { renderedText } from "./contrast-helpers.js";
+import { expectOpenPages } from "./settle.js";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WORKSPACE = "00000000-0000-4000-8000-000000000001";
 const SECRET = "synthetic-release-runtime-secret";
+const OAUTH_CLIENT = "release-browser-agent";
+const OAUTH_CLIENT_NAME = "Example MCP Agent";
+const OAUTH_REDIRECT = "http://127.0.0.1:43321/callback";
+const OAUTH_STATE = "original state?&/";
 let scratch: string | undefined;
 let serving: PreviewServer | undefined;
 let hub: Hub | undefined;
@@ -107,8 +114,11 @@ async function browserPreview(running: TeamHub, secure = false, enforcePolicy = 
       ...(secure ? { https: previewTls() } : {}),
       ...(enforcePolicy ? { headers: { "Content-Security-Policy": WEB_CONTENT_SECURITY_POLICY } } : {}),
       // Preserve the page's Host and Origin, including its port, through the
-      // same-origin /auth route used by the released hub's reverse proxy.
-      proxy: { "/auth/": { target: `http://127.0.0.1:${running.port}`, changeOrigin: false } } } });
+      // preview's same-origin auth and consent routes.
+      proxy: {
+        "/auth/": { target: `http://127.0.0.1:${running.port}`, changeOrigin: false },
+        "/oauth/": { target: `http://127.0.0.1:${running.port}`, changeOrigin: false },
+      } } });
   const address = serving.httpServer.address();
   if (address === null || typeof address === "string") {
     await serving.close();
@@ -117,15 +127,22 @@ async function browserPreview(running: TeamHub, secure = false, enforcePolicy = 
   return { serving, appUrl: `${secure ? "https" : "http"}://localhost:${address.port}` };
 }
 
-async function browserHub(secure = false, enforcePolicy = true): Promise<{
+async function browserHub(secure = false, enforcePolicy = true, oauth = false): Promise<{
   hub: TeamHub; github: BrowserGithub; appUrl: string; stop(): Promise<void>;
 }> {
   const github = new BrowserGithub();
-  const running = await createTeamHub({ port: 0, authSecret: SECRET, databasePath: ":memory:", log: silentLogger,
-    github: { clientId: "Iv1.0123456789abcdef", fetch: github.fetch, now: () => github.now } },
-  { initializeDefaultWorkspace: true, deviceCredentials: true });
+  const config = { port: 0, authSecret: SECRET, databasePath: ":memory:", log: silentLogger,
+    ...(oauth ? { publicUrl: "http://localhost" } : {}),
+    github: { clientId: "Iv1.0123456789abcdef", fetch: github.fetch, now: () => github.now } };
+  const running = await createTeamHub(config,
+  { initializeDefaultWorkspace: true, deviceCredentials: true,
+    ...(oauth ? { oauthClients: async (clientId: string) => clientId === OAUTH_CLIENT
+      ? { name: OAUTH_CLIENT_NAME, redirectUriAllowed: (uri: string) => uri === OAUTH_REDIRECT } : null } : {}),
+  });
   try {
     const served = await browserPreview(running, secure, enforcePolicy);
+    // The ephemeral preview address is known only after its listener starts.
+    if (oauth) config.publicUrl = served.appUrl;
     return { hub: running, github, appUrl: served.appUrl, async stop() {
       try { await served.serving.close(); } finally { await running.stop(); }
     } };
@@ -133,6 +150,33 @@ async function browserHub(secure = false, enforcePolicy = true): Promise<{
     await running.stop();
     throw error;
   }
+}
+
+async function consentHub(context: BrowserContext): Promise<Awaited<ReturnType<typeof browserHub>>> {
+  const running = await browserHub(false, true, true);
+  try {
+    const { principals, memberships } = running.hub;
+    if (principals === undefined || memberships === undefined) throw new Error("Consent hub has no account registries");
+    const principal = principals.identify("9007", "browser-person");
+    memberships.grant({ workspaceId: WORKSPACE, principalId: principal.id, role: "member" });
+    await context.route("**/uberblick-config.json", route => route.fulfill({ json: {
+      hubUrl: `ws://localhost:${running.hub.port}/ws`, workspaces: [WORKSPACE],
+    } }));
+    await context.route(`${OAUTH_REDIRECT}**`, route => route.fulfill({
+      contentType: "text/html", body: "<!doctype html><title>Agent callback</title><p>Returned to the agent</p>",
+    }));
+    return running;
+  } catch (error) {
+    await running.stop();
+    throw error;
+  }
+}
+
+function authorizeUrl(origin: string): string {
+  const parameters = new URLSearchParams({ client_id: OAUTH_CLIENT, redirect_uri: OAUTH_REDIRECT,
+    response_type: "code", code_challenge: "a".repeat(43), code_challenge_method: "S256",
+    resource: workspaceResourceUrl(origin, WORKSPACE), scope: "docs:read docs:write", state: OAUTH_STATE });
+  return `${origin}/oauth/authorize?${parameters}`;
 }
 
 async function completeBrowserSignIn(page: Page, github: BrowserGithub): Promise<BrowserSignIn> {
@@ -392,6 +436,109 @@ test("@webkit a released HTTPS page signs in through its own origin and keeps th
   } finally {
     try { await context.close(); } finally { await running.stop(); }
   }
+});
+
+test("@webkit an agent connect request signs in, offers consent and returns its approval in the same tab", async ({ context, page }, testInfo) => {
+  const running = await consentHub(context);
+  try {
+    const sockets: string[] = [];
+    const submissions: unknown[] = [];
+    page.on("websocket", socket => sockets.push(socket.url()));
+    page.on("request", request => {
+      if (new URL(request.url()).pathname === "/oauth/consent/submit") submissions.push(request.postDataJSON());
+    });
+    await expectPolicy(await page.goto(authorizeUrl(running.appUrl)));
+    expect(new URL(page.url()).pathname).toBe("/connect");
+    const requestId = new URL(page.url()).searchParams.get("request");
+    expect(requestId).toBeTruthy();
+    await completeBrowserSignIn(page, running.github);
+    await expect(page.getByText(OAUTH_CLIENT_NAME, { exact: true })).toBeVisible();
+    await expect(page.getByText("127.0.0.1:43321", { exact: true })).toBeVisible();
+    await expect(page.getByText(WORKSPACE, { exact: true })).toBeVisible();
+    await expect(page.getByText(/approve only if you started this from an agent on this computer/i)).toBeVisible();
+    const approve = page.getByRole("button", { name: "Approve", exact: true });
+    const deny = page.getByRole("button", { name: "Deny", exact: true });
+    await expect(approve).toBeEnabled();
+    for (const appearance of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: appearance });
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+        await Promise.all(document.getAnimations().filter(animation => animation instanceof CSSTransition)
+          .map(animation => animation.finished.catch(() => undefined)));
+      });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await approve.scrollIntoViewIfNeeded();
+      await expect(approve).toBeInViewport({ ratio: 1 });
+      await expect(deny).toBeInViewport({ ratio: 1 });
+      const readings = await renderedText(page, "main");
+      expect(readings.length).toBeGreaterThan(0);
+      for (const reading of readings) expect(reading.ratio, `${appearance}: ${reading.where}`).toBeGreaterThanOrEqual(4.5);
+    }
+    await expectNoViolations(page);
+    // Reload proves a stored session opens this same request directly.
+    await expectPolicy(await page.reload());
+    await expect(approve).toBeEnabled();
+    expect(running.github.starts).toBe(1);
+    const access = page.getByRole("combobox", { name: "Access", exact: true });
+    await access.selectOption("read-write");
+    await expect(access).toHaveValue("read-write");
+    if (testInfo.project.name === "webkit-ipad") {
+      await approve.tap();
+    } else {
+      await access.focus();
+      await page.keyboard.press("Tab");
+      await expect(approve).toBeFocused();
+      await page.keyboard.press("Enter");
+    }
+    await expect(page.getByText("Returned to the agent", { exact: true })).toBeVisible();
+    const redirect = new URL(page.url());
+    expect(redirect.origin + redirect.pathname).toBe(OAUTH_REDIRECT);
+    expect(redirect.searchParams.get("state")).toBe(OAUTH_STATE);
+    expect(redirect.searchParams.get("code")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(redirect.searchParams.has("error")).toBe(false);
+    expect(submissions).toEqual([{ requestId, decision: "approve", accessLevel: "read-write" }]);
+    await expectOpenPages(context, 1);
+    expect(sockets).toEqual([]);
+  } finally { await running.stop(); }
+});
+
+test("an agent connect request signs in and returns its denial with state", async ({ context, page }) => {
+  const running = await consentHub(context);
+  try {
+    const submissions: unknown[] = [];
+    page.on("request", request => {
+      if (new URL(request.url()).pathname === "/oauth/consent/submit") submissions.push(request.postDataJSON());
+    });
+    await expectPolicy(await page.goto(authorizeUrl(running.appUrl)));
+    const requestId = new URL(page.url()).searchParams.get("request");
+    await completeBrowserSignIn(page, running.github);
+    await page.getByRole("button", { name: "Deny", exact: true }).click();
+    await expect(page.getByText("Returned to the agent", { exact: true })).toBeVisible();
+    const redirect = new URL(page.url());
+    expect(redirect.origin + redirect.pathname).toBe(OAUTH_REDIRECT);
+    expect(redirect.searchParams.get("state")).toBe(OAUTH_STATE);
+    expect(redirect.searchParams.get("error")).toBe("access_denied");
+    expect(redirect.searchParams.has("code")).toBe(false);
+    expect(submissions).toEqual([{ requestId, decision: "deny" }]);
+    await expectOpenPages(context, 1);
+  } finally { await running.stop(); }
+});
+
+test("an agent connect request that expires while open removes consent and asks to start again", async ({ context, page }) => {
+  const running = await consentHub(context);
+  try {
+    await expectPolicy(await page.goto(authorizeUrl(running.appUrl)));
+    await completeBrowserSignIn(page, running.github);
+    await expect(page.getByText(OAUTH_CLIENT_NAME, { exact: true })).toBeVisible();
+    running.github.now += 5 * 60_000;
+    await page.getByRole("button", { name: "Approve", exact: true }).click();
+    await expect(page.getByText(/start again from the agent/i)).toBeVisible();
+    await expect(page.getByText(OAUTH_CLIENT_NAME, { exact: true })).toHaveCount(0);
+    await expect(page.getByText(WORKSPACE, { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Deny", exact: true })).toHaveCount(0);
+    await expectNoViolations(page);
+  } finally { await running.stop(); }
 });
 
 test("another localhost port cannot start or end hub sign-in or reuse the hub session", async ({ context, page }) => {
