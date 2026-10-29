@@ -37,13 +37,13 @@ function snapshot(title: string): Y.Doc {
 function historyAt(index: number, since = false, busy = false): DocumentHistory {
   const baseline = entries[3]!;
   return {
-    entries, entry: entries[index]!, titles: {}, active: true, available: true, connected: true, history: null, downloading: false, busy, error: null,
+    entries, entry: entries[index]!, titles: {}, active: true, available: true, connected: true, history: null, localComparison: null, downloading: false, busy, error: null,
     filter: "all", setFilter: vi.fn(), comparisonView: "split", setComparisonView: vi.fn(), canBack: index < entries.length - 1, canForward: true,
     selection: { index, entry: entries[index]!, entries, before: snapshot(since ? baseline.id : entries[index + 1]!.id), after: snapshot(entries[index]!.id),
       ...(since ? { comparedWith: baseline } : {}) },
     collapseUnchanged: true, setCollapseUnchanged: vi.fn(), back: vi.fn(), forward: vi.fn(), open: vi.fn(), openSession: vi.fn(),
     sinceLastNamed: vi.fn(), sinceNamed: vi.fn(), name: vi.fn(async () => {}), rename: vi.fn(async () => {}),
-    removeName: vi.fn(async () => {}), restore: vi.fn(async () => true), now: vi.fn(), retry: vi.fn(), refresh: vi.fn(),
+    removeName: vi.fn(async () => {}), restore: vi.fn(async () => true), compareLocal: vi.fn(), now: vi.fn(), retry: vi.fn(), refresh: vi.fn(),
   };
 }
 
@@ -164,6 +164,60 @@ describe("cached history states", () => {
     view.rerender(<RevisionPane history={{ ...history, error: "Connect once to download history.", history: { ...history.history, offline: true } }} docLinks={null} workspaceSettings={null} />);
     expect(screen.getByText("Connect once to download history.")).toBeTruthy();
     expect(screen.getByText("Offline. History is not fully downloaded.")).toBeTruthy();
+  });
+});
+
+describe("local comparison controls", () => {
+  it("offers a local comparison for the downloaded displayed revision", () => {
+    const history = historyAt(1);
+    render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);
+    fireEvent.click(screen.getByRole("button", { name: "Compare with local version" }));
+    expect(history.compareLocal).toHaveBeenCalledWith(entries[1]!.id);
+  });
+
+  it.each(["split", "inline"] as const)("keeps local inputs and labels in %s without revision metadata, naming or restore", comparisonView => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1200, 900));
+    const history = historyAt(1);
+    history.comparisonView = comparisonView;
+    history.localComparison = { revision: entries[1]!.id, waiting: null, offline: true, newer: false };
+    history.selection = { ...history.selection!, kind: "local", before: snapshot("Downloaded title"), after: snapshot("Local title") };
+    const view = render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);
+    expect(screen.getByText("Downloaded hub revision")).toBeTruthy();
+    expect(screen.getByText("This computer")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Local title");
+    expect(screen.getByRole("status").textContent).toBe("Offline. Comparing against the last downloaded hub state.");
+    expect(screen.queryByRole("button", { name: /Restore/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Copy revision/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Name|Rename|Previous revision|Next revision/ })).toBeNull();
+    expect(screen.queryByText(/ben/)).toBeNull();
+    expect(screen.queryByText(/rev selected/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Previous change" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Next change" })).toBeTruthy();
+    const editors = Array.from(view.container.querySelectorAll(".ProseMirror"));
+    expect(editors.map(editor => editor.textContent).join(" ")).toContain("Local title");
+    view.rerender(<RevisionPane history={{ ...history, localComparison: { ...history.localComparison, newer: true } }} docLinks={null} workspaceSettings={null} writable />);
+    expect(screen.getByRole("status").textContent).toContain("Newer content is available. Refresh to compare it.");
+    const preserved = view.container.querySelectorAll(".ProseMirror");
+    expect(preserved.length).toBe(editors.length);
+    expect(editors.every((editor, index) => editor === preserved[index])).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(history.refresh).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Back to now" }));
+    expect(history.now).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["sync", "Waiting for this page's pending edits to reach the hub…"],
+    ["history", "Refreshing this page's history…"],
+  ] as const)("states the %s wait before showing comparison content", (waiting, message) => {
+    const history = { ...historyAt(1), selection: null, entry: null, busy: true,
+      localComparison: { revision: entries[1]!.id, waiting, offline: false, newer: false } };
+    const view = render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);
+    expect(screen.getByRole("status").textContent).toBe(message);
+    expect(view.container.querySelector(".ProseMirror")).toBeNull();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Refresh" }).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Back to now" }));
+    expect(history.now).toHaveBeenCalledOnce();
   });
 });
 

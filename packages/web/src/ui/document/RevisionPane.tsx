@@ -160,6 +160,33 @@ function RevisionStatus({ history, writable, now }: { history: DocumentHistory; 
       onClick={() => { void writeToClipboard(entry.id).then((ok) => toast[ok ? "success" : "error"](ok ? "Revision copied" : "Couldn't copy the revision. Try again in a browser with clipboard access.", { id: "clipboard" })); }}>
       {entry.name != null ? <span>{entry.name.text}</span> : <>rev <span className="ub-doc-id">{entry.id.slice(0, 8)}</span></>}
     </Button>
+    <Button variant="secondary" size="sm" type="button" disabled={busy} onClick={() => { void history.compareLocal(entry.id); }}>Compare with local version</Button>
+    <Button variant="secondary" size="sm" className="ub-history-now" onClick={history.now}>Back to now</Button>
+  </fieldset>;
+}
+
+function localComparisonMessage(history: DocumentHistory): string | null {
+  const local = history.localComparison;
+  if (local == null) return null;
+  if (local.waiting === "sync") return "Waiting for this page's pending edits to reach the hub…";
+  if (local.waiting === "history") return "Refreshing this page's history…";
+  return [local.offline ? "Offline. Comparing against the last downloaded hub state." : null,
+    local.newer ? "Newer content is available. Refresh to compare it." : null, history.error].filter(Boolean).join(" ");
+}
+
+function LocalComparisonStatus({ history }: { history: DocumentHistory }): ReactElement {
+  const refresh = useRef<HTMLButtonElement | null>(null);
+  useLayoutEffect(() => {
+    if (history.busy) return;
+    const button = refresh.current;
+    if (button === null || button.disabled || button.closest("[inert]")) return;
+    const active = button.ownerDocument.activeElement;
+    if (active === null || active === button.ownerDocument.body || active.closest("[inert]") !== null) button.focus({ preventScroll: true });
+  }, [history.busy]);
+  return <fieldset aria-label="Document history" className="ub-history-controls ub-type-small">
+    <span className="ub-history-who"><ClockIcon /><span>Local comparison</span></span>
+    <span role="status" className="ub-history-state">{localComparisonMessage(history)}</span>
+    <Button variant="secondary" size="sm" ref={refresh} type="button" disabled={history.busy} onClick={history.refresh}>Refresh</Button>
     <Button variant="secondary" size="sm" className="ub-history-now" onClick={history.now}>Back to now</Button>
   </fieldset>;
 }
@@ -167,13 +194,15 @@ function RevisionStatus({ history, writable, now }: { history: DocumentHistory; 
 /** Shown while history is open without a revision: loading, unavailable, or empty. */
 function HistoryState({ history }: { history: DocumentHistory }): ReactElement {
   const cacheMessage = historyCacheMessage(history);
-  const message = history.error ?? (history.busy ? "Loading history…" : history.entries?.length === 0 && history.history?.complete !== false ? "No revisions yet" : cacheMessage ?? "Document history");
+  const localMessage = localComparisonMessage(history);
+  const message = history.error ?? localMessage ?? (history.busy ? "Loading history…" : history.entries?.length === 0 && history.history?.complete !== false ? "No revisions yet" : cacheMessage ?? "Document history");
   return <div className="ub-history-empty ub-type-ui">
     <p role="status" className="m-0">{message}</p>
-    {cacheMessage !== null && cacheMessage !== message && <p role="status" className="m-0">{cacheMessage}</p>}
+    {localMessage === null && cacheMessage !== null && cacheMessage !== message && <p role="status" className="m-0">{cacheMessage}</p>}
     <div className="flex gap-2">
       {history.error !== null && <Button variant="secondary" size="sm" onClick={history.retry}>Try again</Button>}
-      {history.history?.refreshFailed === true && <Button variant="secondary" size="sm" onClick={history.refresh}>Refresh history</Button>}
+      {history.localComparison != null ? <Button variant="secondary" size="sm" disabled={history.busy} onClick={history.refresh}>Refresh</Button>
+        : history.history?.refreshFailed === true && <Button variant="secondary" size="sm" onClick={history.refresh}>Refresh history</Button>}
       <Button variant="secondary" size="sm" onClick={history.now}>Back to now</Button>
     </div>
   </div>;
@@ -352,6 +381,28 @@ function RevisionRestoreButton({ label, unavailable, reasonId, restore }: {
   </Button>;
 }
 
+function RevisionSplitLabels({ history, now, restoreButton }: {
+  history: DocumentHistory; now: number; restoreButton: ReactElement | null;
+}): ReactElement | null {
+  const { selection } = history;
+  if (selection === null) return null;
+  const { entry, entries, comparedWith } = selection;
+  const selected = entries.findIndex(item => item.id === entry.id);
+  const predecessor = comparedWith ?? entries[selected + 1];
+  const local = selection.kind === "local";
+  const restoreBefore = comparedWith?.name != null;
+  return <>
+    <div className="ub-revision-side-label">
+      {local ? <span>Downloaded hub revision</span> : <span>Before · {authorName(predecessor, predecessor !== undefined && predecessor.id === entries[entries.length - 1]?.id)}{comparedWith !== undefined && predecessor?.name != null && <> · “{predecessor.name.text}”</>}</span>}
+      {restoreBefore && restoreButton}
+    </div>
+    <div className="ub-revision-side-label">
+      {local ? <span>This computer</span> : <RevisionAfterLabel entry={entry} earliest={selected + 1 >= entries.length} comparison={comparisonAttribution(history, now)} showName={comparedWith !== undefined} />}
+      {!restoreBefore && restoreButton}
+    </div>
+  </>;
+}
+
 export function RevisionPane({ history, docLinks, workspaceSettings, writable = false, archived = false }: {
   history: DocumentHistory; docLinks: DocLinkContext | null; workspaceSettings: Y.Doc | null; writable?: boolean; archived?: boolean;
 }): ReactElement | null {
@@ -480,20 +531,15 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   useLayoutEffect(() => { morph.current?.follow(); });
   if (!history.active) return null;
   // While the first revision loads after a click, the header holds the live title.
-  const arriving = selection === null && live !== null && history.busy && history.error === null;
+  const arriving = selection === null && live !== null && history.busy && history.error === null && history.localComparison == null;
   if (selection === null && !arriving) return <section ref={pane} className="ub-pane ub-page-pane ub-document-pane ub-revision-pane">
     <div className="ub-column"><HistoryState history={history} /></div>
   </section>;
   const entry = selection?.entry;
-  const entries = selection?.entries;
-  const selected = entries?.findIndex(item => item.id === entry?.id) ?? -1;
+  const local = selection?.kind === "local";
   const comparedWith = selection?.comparedWith;
-  const comparedAttribution = comparisonAttribution(history, now);
-  const restoreBefore = comparedWith?.name != null;
-  const restoreTarget = restoreBefore ? comparedWith : entry;
+  const restoreTarget = comparedWith?.name != null ? comparedWith : entry;
   const restoreLabel = comparedWith?.name == null ? "Restore this version" : `Restore “${comparedWith.name.text}”`;
-  const predecessor = selection === null ? undefined : selection.comparedWith ?? entries?.[selected + 1];
-  const total = entries?.length ?? 0;
   const before = editors.find((entry) => entry.side === "before")?.editor;
   const after = editors.find((entry) => entry.side === (split ? "after" : "single"))?.editor;
   const restoreUnavailable = restoreUnavailableReason(history, writable, archived);
@@ -506,7 +552,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       toast.error(error instanceof Error ? error.message : "Couldn't restore this version. Refresh history and try again.");
     }
   };
-  const restoreButton = <RevisionRestoreButton label={restoreLabel} unavailable={restoreUnavailable} reasonId={restoreReason} restore={restore} />;
+  const restoreButton = local ? null : <RevisionRestoreButton label={restoreLabel} unavailable={restoreUnavailable} reasonId={restoreReason} restore={restore} />;
   return <section ref={pane} className={`ub-pane ub-page-pane ub-document-pane ub-revision-pane${selection?.before != null ? " ub-revision-comparison-pane" : ""}${split ? " ub-revision-split-pane" : ""}`}>
     <div className="ub-column">
       {/* Stays in view while the comparison scrolls; revisions keep no tags. */}
@@ -515,9 +561,10 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
           <RevisionTitle title={selection === null ? live?.title?.text ?? "" : title} index={selection?.index ?? -1} />
           {!split && restoreButton}
         </div>
-        {restoreUnavailable !== null && <p id={restoreReason} className={archived || !writable ? "m-0 ub-type-small text-(--muted-foreground)" : "sr-only"}>{restoreUnavailable}</p>}
+        {!local && restoreUnavailable !== null && <p id={restoreReason} className={archived || !writable ? "m-0 ub-type-small text-(--muted-foreground)" : "sr-only"}>{restoreUnavailable}</p>}
         {selection === null ? <p role="status" className="ub-history-controls ub-type-small">Loading history…</p>
-          : <RevisionStatus history={history} writable={writable && !archived} now={now} />}
+          : local ? <LocalComparisonStatus history={history} /> : <RevisionStatus history={history} writable={writable && !archived} now={now} />}
+        {local && !split && <div className="ub-revision-side-label ub-type-small"><span>Downloaded hub revision</span><span aria-hidden="true"> → </span><span>This computer</span></div>}
         {selection?.before != null && after !== undefined && rows.length > 0 && <>
           <ChangeNavigation pane={pane} header={header} before={before} after={after} rows={rows} onNavigate={stopHolding} />
           <RevisionRuler pane={pane} header={header} side={after.view.dom} rows={rows} />
@@ -525,14 +572,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       </header>
       {selection !== null && failed === selection.after && <p role="status">This client cannot display this revision. Update the client and try again.</p>}
       {selection === null ? null : split ? <div ref={body} className="ub-revision-split ub-revision-comparison">
-        <div className="ub-revision-side-label">
-          <span>Before · {authorName(predecessor, predecessor !== undefined && predecessor.id === entries?.[total - 1]?.id)}{comparedWith !== undefined && predecessor?.name != null && <> · “{predecessor.name.text}”</>}</span>
-          {restoreBefore && restoreButton}
-        </div>
-        <div className="ub-revision-side-label">
-          <RevisionAfterLabel entry={entry} earliest={selected + 1 >= total} comparison={comparedAttribution} showName={comparedWith !== undefined} />
-          {!restoreBefore && restoreButton}
-        </div>
+        <RevisionSplitLabels history={history} now={now} restoreButton={restoreButton} />
         <div className="ub-revision-side ub-revision-side-before">
           <div className="ub-editor-frame ub-revision-view"><div className="ub-editor" ref={beforeHost} /></div>
         </div>

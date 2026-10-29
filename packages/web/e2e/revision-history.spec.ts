@@ -60,6 +60,19 @@ async function comparisonView(page: Page, value: "Split" | "Inline"): Promise<vo
   await closeHistoryList(page, drawer);
 }
 
+async function openNamedRevision(page: Page, name: string): Promise<void> {
+  await previous(page);
+  const settled = page.getByRole("button", { name: "Compare with local version", exact: true, includeHidden: true })
+    .or(page.locator(".ub-revision-pane").getByRole("button", { name: "Try again", exact: true, includeHidden: true }));
+  await expect(settled).toBeEnabled();
+  const drawer = await showHistoryList(page);
+  await activateControl(historyList(page).getByRole("button", { name: "Named", exact: true }));
+  await expect(settled).toBeEnabled();
+  await activateControl(historyList(page).locator(".ub-history-entry").filter({ hasText: name }));
+  await closeHistoryList(page, drawer);
+  await expect(history(page)).toContainText(name);
+}
+
 /** The live status line's ‹ opens history; in history it steps to an older revision. */
 async function previous(page: Page): Promise<void> {
   await activateControl(history(page).getByRole("button", { name: "Previous revision", exact: true }));
@@ -601,6 +614,219 @@ function visualHistory(uuid: string, title: string): Record<string, string> {
 
 test.describe("document history through ub open", () => {
   const { harness, openApp } = setupHarness({ accessRole: "admin" });
+
+  test("an offline local comparison keeps downloaded content, local title, data and unsent work through Refresh and Back to now", { tag: "@webkit" }, async ({ browser, browserName }) => {
+    const uuid = randomUUID();
+    const title = docTitle("Local comparison data");
+    const states = dataHistory(uuid, title);
+    const source = new Y.Doc();
+    const directory = new Y.Doc();
+    try {
+      initDoc(source, { uuid, title });
+      Y.applyUpdate(source, Buffer.from(states.earlier ?? "", "base64"));
+      let preceding = insertBlock(source, null, { type: "paragraph", text: "The shared baseline." });
+      for (let index = 1; index <= 4; index += 1) {
+        preceding = insertBlock(source, preceding, { type: "paragraph", text: `Unchanged local comparison context ${index}.` });
+      }
+      await harness().seedDocument(source);
+      const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+        readySelector: ".ub-editor .ProseMirror", contextOptions: {
+          ...(browserName === "webkit" ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 640 } }), reducedMotion: "reduce",
+        },
+      });
+      await waitForAcknowledged(page, { path: "upstream" });
+      const baseline = await harness().nameRevisionAsOther(uuid, "Downloaded data baseline");
+      await waitForHistoryCatalog(page, entries => entries.some(entry => entry.id === baseline.id && entry.name?.text === "Downloaded data baseline"));
+      await openNamedRevision(page, "Downloaded data baseline");
+      await expect(historicalEditor(page).getByRole("table", { name: "Historical measurements", exact: true }).locator("tbody tr"))
+        .toHaveText(["2026-10-2010 ms", "2026-10-2120 ms"]);
+      await backToNow(page);
+      applyDocData(source, directory, [{ collection: "measurements", replaceRecords: [
+        { id: "a", value: { day: "2026-10-20", latency: 90 } },
+        { id: "b", value: { day: "2026-10-21", latency: 100 } },
+      ] }]);
+      await harness().seedDocument(source);
+      await expect(editor(page).getByRole("table", { name: "Historical measurements", exact: true }).locator("tbody tr"))
+        .toHaveText(["2026-10-2090 ms", "2026-10-21100 ms"]);
+      const peer = await openApp(browser, new URL(page.url()).pathname, { readySelector: ".ub-editor .ProseMirror" });
+      await expect(editor(peer)).toContainText("The shared baseline.");
+      await harness().stopHub();
+      try {
+        await expect(page.locator(".ub-status")).toContainText("Offline. Changes are saved on this device.");
+        await page.locator(".ub-title").fill(`${title} offline`);
+        await selectPositions(editor(page), 1);
+        await page.keyboard.type("Unsynced draft: ");
+        await selectPositions(editor(page), 1, 9);
+        await activateControl(page.getByRole("button", { name: "Comment", exact: true }).and(page.locator("[data-selection-tool], .ub-composer button")));
+        const comment = page.getByPlaceholder(/Comment as/);
+        await comment.fill("Unsent local comparison comment.");
+        const refreshRequests: string[] = [];
+        page.on("request", request => {
+          const url = new URL(request.url());
+          if (url.pathname === "/api/revisions" && url.searchParams.has("refresh")) refreshRequests.push(url.searchParams.get("uuid") ?? "");
+        });
+        await openNamedRevision(page, "Downloaded data baseline");
+        await activateControl(history(page).getByRole("button", { name: "Compare with local version", exact: true }));
+        const pane = page.locator(".ub-revision-pane");
+        const before = page.locator(".ub-revision-split .ProseMirror").nth(0);
+        const local = page.locator(".ub-revision-split .ProseMirror").nth(1);
+        await expect(pane).toContainText("Downloaded hub revision");
+        await expect(pane).toContainText("This computer");
+        await expect(pane).toContainText(/last downloaded hub state/i);
+        await expect(pane.locator(".ub-revision-title")).toContainText(`${title} offline`);
+        await expect(before).toContainText("The shared baseline.");
+        await expect(before).not.toContainText("Unsynced draft");
+        await expect(local).toContainText("Unsynced draft: The shared baseline.");
+        await expect(local.getByRole("table", { name: "Historical measurements", exact: true }).locator("tbody tr"))
+          .toHaveText(["2026-10-2090 ms", "2026-10-21100 ms"]);
+        await expect(local.locator(".ub-chart").filter({ has: page.getByRole("img", { name: "Historical latency", exact: true }) })
+          .locator(".ub-chart-description")).toContainText("Latest values: Latency: 100 ms.");
+        await expect(before.getByRole("table", { name: "Historical measurements", exact: true }).locator("tbody tr"))
+          .toHaveText(["2026-10-2010 ms", "2026-10-2120 ms"]);
+        await expect(pane.getByRole("button", { name: /^Restore/ })).toHaveCount(0);
+        await expect(history(page).getByRole("button", { name: /Name revision|Rename revision|Copy revision/ })).toHaveCount(0);
+        expect(new URL(page.url()).search).toBe("");
+        await expect(comment).toBeHidden();
+        await expect(local.locator(".ub-revision-fold-button")).toBeVisible();
+        const drawer = await showHistoryList(page);
+        await historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true }).setChecked(false);
+        await closeHistoryList(page, drawer);
+        await expect(local.locator(".ub-revision-fold-button")).toHaveCount(0);
+        await expect(local).toContainText("Unchanged local comparison context 4.");
+        if (await page.evaluate(() => matchMedia("(any-pointer: fine)").matches)) {
+          await expect(pane.getByTestId("revision-ruler")).toBeVisible();
+          expect(await pane.locator(".ub-revision-ruler-mark").count()).toBeGreaterThan(0);
+        }
+        const nextChange = pane.getByRole("button", { name: "Next change", exact: true });
+        const previousChange = pane.getByRole("button", { name: "Previous change", exact: true });
+        await expect(nextChange).toBeEnabled();
+        await activateControl(nextChange);
+        await expect(previousChange).toBeEnabled();
+        await activateControl(previousChange);
+        if (browserName === "chromium") await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+        const localParagraph = local.locator(":scope > p").filter({ hasText: "Unsynced draft: The shared baseline." });
+        await setPointerSelection(localParagraph, () => localParagraph.click());
+        await page.keyboard.press("ControlOrMeta+a");
+        await page.keyboard.press("ControlOrMeta+c");
+        await page.evaluate(() => {
+          const target = document.createElement("textarea");
+          target.setAttribute("data-local-comparison-copy", "");
+          document.body.append(target);
+        });
+        const copied = page.locator("textarea[data-local-comparison-copy]");
+        await copied.focus();
+        await page.keyboard.press("ControlOrMeta+v");
+        await expect(copied).toHaveValue(/Unsynced draft: The shared baseline\./);
+        expect(await copied.inputValue()).not.toMatch(/Downloaded hub revision|This computer|Back to now/);
+        await copied.evaluate(element => element.remove());
+        for (const colorScheme of ["light", "dark"] as const) {
+          await page.emulateMedia({ colorScheme });
+          await page.evaluate(() => document.fonts.ready);
+          await expect(pane.getByText("Downloaded hub revision", { exact: true })).toBeVisible();
+          await expect(pane.getByText("This computer", { exact: true })).toBeVisible();
+          const controls = await history(page).evaluate(element => {
+            const box = element.getBoundingClientRect();
+            return [...element.querySelectorAll("button")].filter(button => button.getClientRects().length > 0).map(button => {
+              const bounds = button.getBoundingClientRect();
+              return bounds.left >= box.left && bounds.right <= box.right;
+            });
+          });
+          expect(controls.every(Boolean), `${colorScheme}: local comparison controls fit their status row`).toBe(true);
+        }
+        await selectPositions(editor(peer), 1);
+        await peer.keyboard.type("Later local edit: ");
+        await expect(page.locator('.ub-editor .ProseMirror[aria-label="Document content"]')).toContainText("Later local edit:");
+        // This later relay update reached the hidden live document; the detached input remains fixed.
+        await expect(pane).toContainText(/newer|new changes/i);
+        await expect(local).not.toContainText("Later local edit:");
+        await activateControl(history(page).getByRole("button", { name: "Refresh", exact: true }));
+        await expect(local).toContainText("Later local edit:");
+        expect(refreshRequests).toEqual([]);
+        await comparisonView(page, "Inline");
+        await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+        await expect(pane).toContainText("Downloaded hub revision");
+        await expect(pane).toContainText("This computer");
+        await expect(pane.getByRole("table", { name: "Historical measurements", exact: true }).locator("tbody tr"))
+          .toHaveText(["2026-10-2010 ms", "2026-10-2120 ms", "2026-10-2090 ms", "2026-10-21100 ms"]);
+        await backToNow(page);
+        await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+        await expect(editor(page)).toContainText("Unsynced draft:");
+        await expect(editor(page)).toContainText("Later local edit:");
+        await expect(page.locator(".ub-title")).toHaveValue(`${title} offline`);
+        await expect(comment).toBeVisible();
+        await expect(comment).toHaveValue("Unsent local comparison comment.");
+      } finally { await harness().startHub(); }
+    } finally { source.destroy(); directory.destroy(); }
+  });
+
+  test("a connected local comparison waits for this page's real hub acknowledgement and history refresh", { tag: "@webkit" }, async ({ browser, browserName }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+      ...(browserName === "webkit" ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 900 } }), reducedMotion: "reduce",
+    } });
+    const uuid = await newDocument(page, docTitle("Connected local comparison"));
+    const room = `${harness().workspaceUuid}/${uuid}`;
+    await activateControl(editor(page));
+    await page.keyboard.type("The acknowledged baseline.");
+    await waitForAcknowledged(page, { path: "upstream" });
+    const baseline = await harness().nameRevisionAsOther(uuid, "Connected baseline");
+    await waitForHistoryCatalog(page, entries => entries.some(entry => entry.id === baseline.id && entry.name?.text === "Connected baseline"));
+    await openNamedRevision(page, "Connected baseline");
+    await backToNow(page);
+    const unrelatedRoom = `${harness().workspaceUuid}/${randomUUID()}`;
+    let sawUnrelatedPending = false;
+    await page.route("**/api/status", async route => {
+      const response = await route.fetch();
+      const status = await response.json();
+      // Preserve this page's real acknowledgement while supplying an unrelated backlog.
+      status.caughtUp = false;
+      status.rooms[unrelatedRoom] = { hubAcked: false };
+      sawUnrelatedPending = true;
+      await route.fulfill({ response, json: status });
+    });
+    let releaseRefresh = (): void => {};
+    const refreshGate = new Promise<void>(resolve => { releaseRefresh = resolve; });
+    let beganRefresh = (): void => {};
+    const refreshStarted = new Promise<void>(resolve => { beganRefresh = resolve; });
+    const refreshedPages: string[] = [];
+    let contentAtRefresh: string | null = null;
+    await page.route("**/api/revisions?**", async route => {
+      const url = new URL(route.request().url());
+      if (!url.searchParams.has("refresh")) { await route.continue(); return; }
+      refreshedPages.push(url.searchParams.get("uuid") ?? "");
+      contentAtRefresh = harness().hubText(room);
+      const response = await route.fetch();
+      beganRefresh();
+      await refreshGate;
+      await route.fulfill({ response });
+    });
+    try {
+      await activateControl(editor(page));
+      await page.keyboard.press("ControlOrMeta+End");
+      await page.keyboard.type(" Pending browser edit.");
+      await openNamedRevision(page, "Connected baseline");
+      await activateControl(history(page).getByRole("button", { name: "Compare with local version", exact: true }));
+      await refreshStarted;
+      expect(contentAtRefresh).toBe("The acknowledged baseline. Pending browser edit.");
+      expect(refreshedPages).toEqual([uuid]);
+      await expect(page.locator(".ub-revision-pane")).toContainText(/waiting|refreshing/i);
+      await expect(page.locator(".ub-revision-split")).toHaveCount(0);
+      releaseRefresh();
+      const local = page.locator(".ub-revision-split .ProseMirror").nth(1);
+      await expect(local).toContainText("The acknowledged baseline. Pending browser edit.");
+      expect(sawUnrelatedPending).toBe(true);
+      const peer = await openApp(browser, new URL(page.url()).pathname, { readySelector: ".ub-editor .ProseMirror" });
+      await activateControl(editor(peer));
+      await peer.keyboard.press("ControlOrMeta+End");
+      await peer.keyboard.type(" Later remote edit.");
+      await expect.poll(() => harness().hubText(room)).toBe("The acknowledged baseline. Pending browser edit. Later remote edit.");
+      await expect(page.locator('.ub-editor .ProseMirror[aria-label="Document content"]')).toContainText("Later remote edit.");
+      await expect(page.locator(".ub-revision-pane")).toContainText(/newer|new changes/i);
+      await expect(local).not.toContainText("Later remote edit.");
+      await activateControl(history(page).getByRole("button", { name: "Refresh", exact: true }));
+      await expect(local).toContainText("Later remote edit.");
+      expect(refreshedPages).toEqual([uuid, uuid]);
+    } finally { releaseRefresh(); }
+  });
 
   test("downloaded history survives an upstream outage and follows cache publications without changing the shown comparison", { tag: "@webkit" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane" });

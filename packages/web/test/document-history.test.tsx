@@ -2,7 +2,7 @@ import { act, render, type RenderResult } from "./react-render.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import * as Y from "yjs";
-import { getMeta, initDoc, setTitle, type RevisionEntry } from "@uberblick/schema";
+import { appendBlock, applyDocData, editBlock, getBlocks, getMeta, initDoc, readDocData, setTitle, type RevisionEntry } from "@uberblick/schema";
 import * as revisionClient from "../src/shell/document-revisions.js";
 import { DocumentHistoryError, type DocumentHistoryList, type DocumentHistoryStatus, type DocumentRevisionsClient } from "../src/shell/document-revisions.js";
 import { renamedFrom, useDocumentHistory, type DocumentHistory } from "../src/ui/document/document-history.js";
@@ -55,17 +55,21 @@ function mount(api: DocumentRevisionsClient | null, uuid: string | null = UUID, 
     visit: (nextApi, nextUuid, nextPath) => view.rerender(<Probe api={nextApi} uuid={nextUuid} path={nextPath} />) };
 }
 
-function mountRouted(initialApi: DocumentRevisionsClient | null, initialView: RevisionView | null, initialDocument: Y.Doc | null = null) {
+type LocalSync = { connected: boolean; confirmed: boolean };
+
+function mountRouted(initialApi: DocumentRevisionsClient | null, initialView: RevisionView | null, initialDocument: Y.Doc | null = null, initialSync?: LocalSync) {
   let api = initialApi;
   let change!: (next: RevisionView | null, nextApi: DocumentRevisionsClient | null) => void;
   let hydrate!: (next: Y.Doc | null) => void;
+  let sync!: (next: LocalSync) => void;
   const seen: DocumentHistory[] = [];
   const navigate = vi.fn((next: RevisionView | null) => change(next, api));
   function Probe(): null {
-    const [input, setInput] = useState({ api: initialApi, view: initialView, liveDocument: initialDocument });
+    const [input, setInput] = useState({ api: initialApi, view: initialView, liveDocument: initialDocument, sync: initialSync });
     change = (next, nextApi) => setInput(previous => ({ ...previous, api: nextApi, view: next }));
     hydrate = next => setInput(previous => ({ ...previous, liveDocument: next }));
-    seen.push(useDocumentHistory(input.api, UUID, "/document/one", input.liveDocument, { view: input.view, navigate }));
+    sync = next => setInput(previous => ({ ...previous, sync: next }));
+    seen.push(useDocumentHistory(input.api, UUID, "/document/one", input.liveDocument, { view: input.view, navigate }, input.sync));
     return null;
   }
   const view = render(<Probe />);
@@ -75,6 +79,7 @@ function mountRouted(initialApi: DocumentRevisionsClient | null, initialView: Re
       act(() => change(next, nextApi));
     },
     hydrate: (next: Y.Doc | null) => act(() => hydrate(next)),
+    sync: (next: LocalSync) => act(() => sync(next)),
   };
 }
 
@@ -86,6 +91,381 @@ function anchorHistory(): RevisionEntry[] {
     ...(names[id] === undefined ? {} : { name: { text: names[id], namer: null, namedAt: 100 - index * 10, canManage: true } }),
   }));
 }
+
+describe("comparison with this computer", () => {
+  it("waits for the current document to load before making its detached copy", async () => {
+    const api = client();
+    const fix = mountRouted(api, { revision: "middle" }, null, { connected: true, confirmed: true });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("middle"));
+    expect(fix.reading()).toMatchObject({ active: true, busy: true, selection: null });
+    expect(vi.mocked(api.list).mock.calls.filter(call => call[2]?.refresh)).toHaveLength(0);
+    const live = document("Loaded current page");
+    fix.hydrate(live);
+    await act(async () => {});
+    expect(fix.reading().selection?.kind).toBe("local");
+    expect(getMeta(fix.reading().selection!.after).title).toBe("Loaded current page");
+    expect(fix.reading().selection!.after).not.toBe(live);
+  });
+
+  it("copies the offline title, blocks and data without writing to or owning the live document", async () => {
+    const live = document("Unsynced local title");
+    appendBlock(live, { type: "paragraph", text: "Unsynced local paragraph" });
+    const directory = document("Directory");
+    applyDocData(live, directory, [{ collection: "values", schema: { version: 1, schema: { type: "object", properties: { value: { type: "number" } } } }, upsert: [{ id: "one", value: { value: 42 } }] }]);
+    const localState = Y.encodeStateAsUpdate(live);
+    const api = client();
+    vi.mocked(api.list).mockResolvedValue(listed(entries, { ...history, offline: true }));
+    const fix = mountRouted(api, { revision: "middle" }, live, { connected: false, confirmed: false });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("middle"));
+
+    const selected = fix.reading().selection!;
+    expect(selected).toMatchObject({ kind: "local", entry: entries[1] });
+    expect(getMeta(selected.before!).title).toBe("middle");
+    expect(selected.after).not.toBe(live);
+    expect(getMeta(selected.after).title).toBe("Unsynced local title");
+    expect(getBlocks(selected.after)).toEqual(getBlocks(live));
+    expect(readDocData(selected.after)).toEqual(readDocData(live));
+    expect(fix.reading().localComparison).toEqual({ revision: "middle", waiting: null, offline: true, newer: false });
+    expect(fix.navigate).toHaveBeenLastCalledWith(null);
+    expect(vi.mocked(api.list).mock.calls.every(call => call[2]?.refresh !== true)).toBe(true);
+    expect(Y.encodeStateAsUpdate(live)).toEqual(localState);
+
+    act(() => fix.reading().now());
+    expect(fix.reading()).toMatchObject({ active: false, selection: null, localComparison: null });
+    expect(live.isDestroyed).toBe(false);
+    expect(Y.encodeStateAsUpdate(live)).toEqual(localState);
+    fix.view.unmount();
+    expect(selected.after.isDestroyed).toBe(true);
+    expect(selected.before!.isDestroyed).toBe(true);
+    expect(live.isDestroyed).toBe(false);
+  });
+
+  it("waits for this page's confirmation, then its refreshed history, before copying the current document", async () => {
+    vi.useFakeTimers();
+    const live = document("Pending browser edit");
+    const refreshed = deferred<DocumentHistoryList>();
+    const api = client();
+    vi.mocked(api.list).mockImplementation(async (_uuid, _signal, options) => options?.refresh ? refreshed.promise : listed(entries));
+    const fix = mountRouted(api, { revision: "middle" }, live, { connected: true, confirmed: false });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("middle"));
+    expect(fix.reading()).toMatchObject({ active: true, busy: true, selection: null, localComparison: { revision: "middle", waiting: "sync", offline: false } });
+    await act(async () => vi.advanceTimersByTimeAsync(5000));
+    expect(fix.reading()).toMatchObject({ busy: true, selection: null, localComparison: { waiting: "sync" } });
+    expect(vi.mocked(api.list).mock.calls.filter(call => call[2]?.refresh)).toHaveLength(0);
+
+    act(() => setTitle(live, "The page acknowledged by the hub"));
+    fix.sync({ connected: true, confirmed: true });
+    await act(async () => {});
+    expect(api.list).toHaveBeenLastCalledWith(UUID, expect.any(AbortSignal), { refresh: true });
+    expect(fix.reading()).toMatchObject({ busy: true, selection: null, localComparison: { waiting: "history" } });
+    await act(async () => refreshed.resolve(listed(entries)));
+    expect(fix.reading()).toMatchObject({ busy: false, localComparison: { waiting: null, offline: false, newer: false } });
+    expect(getMeta(fix.reading().selection!.after).title).toBe("The page acknowledged by the hub");
+    expect(vi.mocked(api.list).mock.calls.every(call => call[0] === UUID)).toBe(true);
+  });
+
+  it("waits for a new confirmation and refresh when another local edit arrives during preparation", async () => {
+    const firstRefresh = deferred<DocumentHistoryList>();
+    const live = document("First acknowledged state");
+    const api = client();
+    let refreshes = 0;
+    vi.mocked(api.list).mockImplementation(async (_uuid, _signal, options) => {
+      if (!options?.refresh) return listed(entries);
+      refreshes++;
+      return refreshes === 1 ? firstRefresh.promise : listed(entries);
+    });
+    const fix = mountRouted(api, null, live, { connected: true, confirmed: true });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("middle"));
+    expect(fix.reading().localComparison?.waiting).toBe("history");
+    fix.sync({ connected: true, confirmed: false });
+    act(() => setTitle(live, "Another pending edit"));
+    await act(async () => firstRefresh.resolve(listed(entries)));
+    expect(fix.reading()).toMatchObject({ busy: true, selection: null, localComparison: { waiting: "sync" } });
+    expect(refreshes).toBe(1);
+    fix.sync({ connected: true, confirmed: true });
+    await act(async () => {});
+    expect(refreshes).toBe(2);
+    expect(fix.reading().localComparison?.waiting).toBeNull();
+    expect(getMeta(fix.reading().selection!.after).title).toBe("Another pending edit");
+  });
+
+  it("falls back to a local copy when the page disconnects before its pending edits are confirmed", async () => {
+    const live = document("Locally saved edit");
+    const api = client();
+    const fix = mountRouted(api, null, live, { connected: true, confirmed: false });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("middle"));
+    expect(fix.reading().localComparison?.waiting).toBe("sync");
+    fix.sync({ connected: false, confirmed: false });
+    await act(async () => {});
+    expect(fix.reading()).toMatchObject({ busy: false, localComparison: { waiting: null, offline: true } });
+    expect(getMeta(fix.reading().selection!.after).title).toBe("Locally saved edit");
+    expect(vi.mocked(api.list).mock.calls.filter(call => call[2]?.refresh)).toHaveLength(0);
+  });
+
+  it("falls back while history is refreshing and ignores that refresh's late result", async () => {
+    const pending = deferred<DocumentHistoryList>();
+    const live = document("Available on this computer");
+    const api = client();
+    vi.mocked(api.list).mockImplementation(async (_uuid, _signal, options) => options?.refresh ? pending.promise : listed(entries));
+    const fix = mountRouted(api, null, live, { connected: true, confirmed: true });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("middle"));
+    expect(fix.reading().localComparison?.waiting).toBe("history");
+    fix.sync({ connected: false, confirmed: false });
+    await act(async () => {});
+    const selected = fix.reading().selection!;
+    expect(fix.reading()).toMatchObject({ busy: false, localComparison: { waiting: null, offline: true } });
+    expect(getMeta(selected.after).title).toBe("Available on this computer");
+
+    await act(async () => pending.resolve(listed([{ ...entries[0]!, id: "later" }, ...entries])));
+    expect(fix.reading().selection).toBe(selected);
+    expect(fix.reading().localComparison).toMatchObject({ waiting: null, offline: true });
+  });
+
+  it("continues a downloading history refresh to a local comparison without another user action", async () => {
+    vi.useFakeTimers();
+    const live = document("Confirmed current content");
+    const api = client();
+    let refreshes = 0;
+    const refreshedHistory = { ...history, lastRefresh: "2026-10-29T04:00:00.000Z" };
+    vi.mocked(api.list).mockImplementation(async (_uuid, _signal, options) => {
+      if (!options?.refresh) return listed(entries);
+      refreshes++;
+      if (refreshes === 1) throw new DocumentHistoryError("downloading", undefined, { history });
+      return listed(entries, refreshedHistory);
+    });
+    const fix = mountRouted(api, null, live, { connected: true, confirmed: true });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("middle"));
+    expect(fix.reading()).toMatchObject({ selection: null, busy: false, downloading: true, localComparison: { waiting: "history" } });
+    expect(api.get).not.toHaveBeenCalled();
+
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(refreshes).toBe(2);
+    expect(fix.reading()).toMatchObject({ busy: false, downloading: false, error: null, history: refreshedHistory,
+      localComparison: { waiting: null, offline: false } });
+    expect(getMeta(fix.reading().selection!.after).title).toBe("Confirmed current content");
+    expect(getMeta(fix.reading().selection!.before!).title).toBe("middle");
+  });
+
+  it("keeps a polled disconnect when an older connected refresh responds before effects settle", async () => {
+    vi.useFakeTimers();
+    const refresh = deferred<DocumentHistoryList>();
+    const publication = deferred<DocumentHistoryList>();
+    const live = document("Content available offline");
+    const api = client();
+    let awaitingPublication = false;
+    const publicationRead = vi.fn(() => publication.promise);
+    vi.mocked(api.list).mockImplementation((_uuid, _signal, options) => {
+      if (options?.refresh) return refresh.promise;
+      return awaitingPublication ? publicationRead() : Promise.resolve(listed(entries));
+    });
+    const fix = mountRouted(api, null, live, { connected: true, confirmed: true });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("middle"));
+    expect(fix.reading().localComparison?.waiting).toBe("history");
+    awaitingPublication = true;
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(publicationRead).toHaveBeenCalledTimes(1);
+    const offlineEntries = entries.map(entry => entry.id === "middle" ? { ...entry, checksum: "offline-publication" } : entry);
+    await act(async () => {
+      publication.resolve(listed(offlineEntries, { ...history, offline: true }));
+      await Promise.resolve();
+      refresh.resolve(listed(entries));
+    });
+
+    expect(fix.reading()).toMatchObject({ busy: false, error: null, history: { offline: true },
+      localComparison: { waiting: null, offline: true } });
+    expect(fix.reading().selection?.entry.checksum).toBe("offline-publication");
+    expect(getMeta(fix.reading().selection!.after).title).toBe("Content available offline");
+    expect(vi.mocked(api.list).mock.calls.filter(call => call[2]?.refresh)).toHaveLength(1);
+    expect(api.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds both inputs through remote and local changes, then replaces them only on Refresh", async () => {
+    vi.useFakeTimers();
+    const live = document("First local version");
+    const paragraph = appendBlock(live, { type: "paragraph", text: "First paragraph" });
+    let downloadedTitle = "First downloaded version";
+    const api = client(async (_uuid, id) => document(id === "newest" ? downloadedTitle : id));
+    vi.mocked(api.list).mockResolvedValue(listed([{ ...entries[0]!, checksum: "one" }, ...entries.slice(1)], { ...history, offline: true }));
+    const fix = mountRouted(api, null, live, { connected: false, confirmed: false });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("newest"));
+    const selected = fix.reading().selection!;
+    const localState = Y.encodeStateAsUpdate(selected.after);
+    const downloadedState = Y.encodeStateAsUpdate(selected.before!);
+    downloadedTitle = "Updated downloaded version";
+    const changed = [{ ...entries[0]!, checksum: "two" }, ...entries.slice(1)];
+    vi.mocked(api.list).mockResolvedValue(listed(changed, { ...history, offline: true }));
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(fix.reading().entries).toEqual(changed);
+    expect(fix.reading().localComparison?.newer).toBe(true);
+    expect(fix.reading().selection!.before).toBe(selected.before);
+    expect(fix.reading().selection!.after).toBe(selected.after);
+    act(() => {
+      setTitle(live, "Later local version");
+      editBlock(live, paragraph, "First paragraph", "Later paragraph");
+    });
+    expect(Y.encodeStateAsUpdate(selected.after)).toEqual(localState);
+    expect(Y.encodeStateAsUpdate(selected.before!)).toEqual(downloadedState);
+    expect(api.get).toHaveBeenCalledTimes(1);
+
+    await act(async () => fix.reading().refresh());
+    const replacement = fix.reading().selection!;
+    expect(replacement.after).not.toBe(selected.after);
+    expect(replacement.before).not.toBe(selected.before);
+    expect(getMeta(replacement.after).title).toBe("Later local version");
+    expect(getBlocks(replacement.after)).toEqual(getBlocks(live));
+    expect(getMeta(replacement.before!).title).toBe("Updated downloaded version");
+    expect(fix.reading().localComparison).toMatchObject({ waiting: null, offline: true, newer: false });
+    expect(vi.mocked(api.list).mock.calls.filter(call => call[2]?.refresh)).toHaveLength(0);
+  });
+
+  it("signals a later local change without waiting for a history publication", async () => {
+    const live = document("Compared local version");
+    const fix = mountRouted(client(), null, live, { connected: false, confirmed: false });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("middle"));
+    const selected = fix.reading().selection!;
+    act(() => setTitle(live, "New local version"));
+    expect(fix.reading().localComparison?.newer).toBe(true);
+    expect(fix.reading().selection!.after).toBe(selected.after);
+    expect(getMeta(selected.after).title).toBe("Compared local version");
+  });
+
+  it("repeats the page confirmation and history refresh when refreshing a connected comparison", async () => {
+    const live = document("Initially confirmed");
+    const api = client();
+    const fix = mountRouted(api, null, live, { connected: true, confirmed: true });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("middle"));
+    expect(fix.reading().selection?.kind).toBe("local");
+    expect(vi.mocked(api.list).mock.calls.filter(call => call[2]?.refresh)).toHaveLength(1);
+
+    fix.sync({ connected: true, confirmed: false });
+    act(() => setTitle(live, "Pending next edit"));
+    await act(async () => fix.reading().refresh());
+    expect(fix.reading().localComparison?.waiting).toBe("sync");
+    expect(vi.mocked(api.list).mock.calls.filter(call => call[2]?.refresh)).toHaveLength(1);
+    fix.sync({ connected: true, confirmed: true });
+    await act(async () => {});
+    expect(vi.mocked(api.list).mock.calls.filter(call => call[2]?.refresh)).toHaveLength(2);
+    expect(getMeta(fix.reading().selection!.after).title).toBe("Pending next edit");
+    expect(fix.reading().localComparison).toMatchObject({ waiting: null, newer: false });
+  });
+
+  it("uses a reconnected page's confirmation when Refresh happens before the next cache poll", async () => {
+    const live = document("Offline local copy");
+    const api = client();
+    let offline = true;
+    vi.mocked(api.list).mockImplementation(async () => listed(entries, { ...history, offline }));
+    const fix = mountRouted(api, null, live, { connected: false, confirmed: false });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("middle"));
+    expect(fix.reading().localComparison).toMatchObject({ waiting: null, offline: true });
+
+    offline = false;
+    fix.sync({ connected: true, confirmed: false });
+    await act(async () => fix.reading().refresh());
+    expect(fix.reading()).toMatchObject({ busy: true, selection: null, localComparison: { waiting: "sync", offline: false } });
+    expect(vi.mocked(api.list).mock.calls.filter(call => call[2]?.refresh)).toHaveLength(0);
+    fix.sync({ connected: true, confirmed: true });
+    await act(async () => {});
+    expect(vi.mocked(api.list).mock.calls.filter(call => call[2]?.refresh)).toHaveLength(1);
+    expect(fix.reading().localComparison).toMatchObject({ waiting: null, offline: false });
+  });
+
+  it("uses a cache poll's disconnect reading while waiting for the page to be confirmed", async () => {
+    vi.useFakeTimers();
+    const live = document("Saved on this computer");
+    const api = client();
+    const fix = mountRouted(api, null, live, { connected: true, confirmed: false });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("middle"));
+    expect(fix.reading().localComparison?.waiting).toBe("sync");
+    vi.mocked(api.list).mockResolvedValue(listed(entries, { ...history, offline: true }));
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(fix.reading()).toMatchObject({ busy: false, localComparison: { waiting: null, offline: true } });
+    expect(getMeta(fix.reading().selection!.after).title).toBe("Saved on this computer");
+    expect(vi.mocked(api.list).mock.calls.filter(call => call[2]?.refresh)).toHaveLength(0);
+  });
+
+  it("discards a detached snapshot that arrives after leaving its local comparison", async () => {
+    const pending = deferred<Y.Doc>();
+    const downloaded = document("Late downloaded snapshot");
+    const live = document("Untouched live document");
+    const api = client(async () => pending.promise);
+    const fix = mountRouted(api, null, live, { connected: true, confirmed: true });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("middle"));
+    expect(api.get).toHaveBeenCalledWith(UUID, "middle", expect.any(AbortSignal));
+    act(() => fix.reading().now());
+    await act(async () => pending.resolve(downloaded));
+    expect(downloaded.isDestroyed).toBe(true);
+    expect(fix.reading()).toMatchObject({ active: false, selection: null, localComparison: null });
+    expect(live.isDestroyed).toBe(false);
+    expect(getMeta(live).title).toBe("Untouched live document");
+  });
+
+  it("starts no snapshot read when the view unmounts during its history refresh", async () => {
+    const pending = deferred<DocumentHistoryList>();
+    const live = document("Live document after teardown");
+    const api = client();
+    vi.mocked(api.list).mockImplementation(async (_uuid, _signal, options) => options?.refresh ? pending.promise : listed(entries));
+    const fix = mountRouted(api, null, live, { connected: true, confirmed: true });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("middle"));
+    const signal = vi.mocked(api.list).mock.calls.find(call => call[2]?.refresh)?.[1];
+    expect(signal?.aborted).toBe(false);
+    fix.view.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => pending.resolve(listed(entries)));
+    expect(api.get).not.toHaveBeenCalled();
+    expect(live.isDestroyed).toBe(false);
+  });
+
+  it.each(["sync", "history"] as const)("leaving cancels preparation while waiting for %s", async stage => {
+    const pending = deferred<DocumentHistoryList>();
+    const live = document("Still live");
+    const api = client();
+    vi.mocked(api.list).mockImplementation(async (_uuid, _signal, options) => options?.refresh ? pending.promise : listed(entries));
+    const fix = mountRouted(api, null, live, { connected: true, confirmed: stage === "history" });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("middle"));
+    expect(fix.reading().localComparison?.waiting).toBe(stage);
+    act(() => fix.reading().now());
+    fix.sync({ connected: true, confirmed: true });
+    await act(async () => pending.resolve(listed(entries)));
+    expect(fix.reading()).toMatchObject({ active: false, busy: false, selection: null, localComparison: null });
+    expect(api.get).not.toHaveBeenCalled();
+    expect(live.isDestroyed).toBe(false);
+  });
+
+  it("keeps the unaddressed local comparison visible across rerenders and respects a later addressed selection", async () => {
+    const live = document("Local document");
+    const fix = mountRouted(client(), { revision: "middle" }, live, { connected: false, confirmed: false });
+    await act(async () => {});
+    await act(async () => fix.reading().compareLocal("middle"));
+    const selected = fix.reading().selection!;
+    fix.sync({ connected: false, confirmed: false });
+    await act(async () => {});
+    expect(fix.reading().selection).toBe(selected);
+    expect(fix.reading()).toMatchObject({ active: true, localComparison: { revision: "middle" } });
+
+    fix.visit({ revision: "earliest" });
+    await act(async () => {});
+    expect(fix.reading().selection?.kind).not.toBe("local");
+    expect(fix.reading().localComparison).toBeNull();
+    expect(getMeta(fix.reading().selection!.after).title).toBe("earliest");
+    expect(live.isDestroyed).toBe(false);
+  });
+});
 
 describe("named history navigation", () => {
   it("opens named comparisons and steps between anchors from After, stopping at both ends", async () => {
