@@ -46,6 +46,9 @@ stays settled.
 
 ## What's inside
 
+Notion meets Jupyter meets Obsidian, optimized for MCP: built for humans and
+agents alike.
+
 - **Pages that hold the product.** Markdown with blocks for tables, charts on
   real data, [ablauf](https://github.com/uberblick-ai/ablauf) flow diagrams,
   wireframes, Figma frames, callouts, JSON trees and GitHub pills. Agents
