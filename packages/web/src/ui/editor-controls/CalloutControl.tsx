@@ -46,7 +46,7 @@ function CalloutCaption({ editor, id, canWrite, shortcuts }: {
   const listId = useId();
   const controlsHost = useEditorControlsHost();
   const found = findBlockById(editor.state.doc, id);
-  const eligible = found?.node.type.name === "callout" && editor.isEditable && canWrite();
+  const eligible = !editor.isDestroyed && found?.node.type.name === "callout" && editor.isEditable && canWrite();
   const dom = eligible ? editor.view.nodeDOM(found.pos) : null;
   const caption = dom instanceof HTMLElement ? dom.querySelector(".ub-callout-caption") : null;
 
@@ -60,7 +60,7 @@ function CalloutCaption({ editor, id, canWrite, shortcuts }: {
 
   useEffect(() => {
     shortcuts.set(id, () => {
-      if (!editor.isEditable || !canWrite()) return;
+      if (editor.isDestroyed || !editor.isEditable || !canWrite()) return;
       rememberSelection();
       setMenuOpen(true);
     });
@@ -94,11 +94,11 @@ function CalloutCaption({ editor, id, canWrite, shortcuts }: {
     const offset = (value: number): number => live.pos + 1 + Math.max(0, Math.min(live.node.content.size, value));
     editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc,
       offset(saved.current.anchor), offset(saved.current.head))));
-    editor.view.focus();
+    if (!editor.isDestroyed) editor.view.focus();
   };
 
   const choose = (choice: { variant: string } | { icon: string | null } | { type: "quote" | "paragraph" }): void => {
-    if (!editor.isEditable || !canWrite()) return;
+    if (editor.isDestroyed || !editor.isEditable || !canWrite()) return;
     const live = findBlockById(editor.state.doc, id);
     if (live?.node.type.name !== "callout") return;
     const tr = editor.state.tr;
@@ -122,19 +122,19 @@ function CalloutCaption({ editor, id, canWrite, shortcuts }: {
     returnToBlock.current = true;
     setMenuOpen(false);
     setPickerOpen(false);
-    editor.view.focus();
+    if (!editor.isDestroyed) editor.view.focus();
   };
 
   return createPortal(
     <DropdownMenu open={menuOpen} onOpenChange={(next) => {
       if (next) {
-        if (!editor.isEditable || !canWrite()) return;
+        if (editor.isDestroyed || !editor.isEditable || !canWrite()) return;
         rememberSelection();
       }
       setMenuOpen(next);
     }}>
       <Popover open={pickerOpen} onOpenChange={(next) => {
-        if (next && (!editor.isEditable || !canWrite())) return;
+        if (next && (editor.isDestroyed || !editor.isEditable || !canWrite())) return;
         setPickerOpen(next);
       }}>
         <PopoverAnchor asChild>
@@ -210,10 +210,11 @@ export function CalloutControl({ editor, canWrite }: { editor: Editor; canWrite:
   const [, tick] = useState(0);
   const shortcuts = useRef(new Map<string, () => void>());
   useEffect(() => {
+    if (editor.isDestroyed) return;
     const dom = editor.view.dom;
     const read = (): void => tick((value) => value + 1);
     const key = (event: KeyboardEvent): void => {
-      if (event.isComposing || event.keyCode === 229 || event.key !== "F10" || !event.shiftKey ||
+      if (editor.isDestroyed || event.isComposing || event.keyCode === 229 || event.key !== "F10" || !event.shiftKey ||
         event.ctrlKey || event.altKey || event.metaKey || !editor.isEditable || !canWrite()) return;
       const block = selectedBlock(editor.state, "callout");
       if (typeof block?.node.attrs.id !== "string") return;

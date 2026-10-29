@@ -39,15 +39,17 @@ export function CodeLanguageControl({ editor, canWrite }: {
   const controlsHost = useEditorControlsHost();
 
   useEffect(() => {
+    if (editor.isDestroyed) return;
     const read = (): void => tick((value) => value + 1);
     editor.on("transaction", read);
     return () => { editor.off("transaction", read); };
   }, [editor]);
 
   useEffect(() => {
+    if (editor.isDestroyed) return;
     const dom = editor.view.dom;
     const key = (event: KeyboardEvent): void => {
-      if (event.isComposing || event.keyCode === 229 || event.key !== "F10" || !event.shiftKey ||
+      if (editor.isDestroyed || event.isComposing || event.keyCode === 229 || event.key !== "F10" || !event.shiftKey ||
         event.ctrlKey || event.altKey || event.metaKey || !editor.isEditable || !canWrite()) return;
       const block = selectedBlock(editor.state, "code");
       const node = block === null ? null : editor.view.nodeDOM(block.pos);
@@ -65,16 +67,17 @@ export function CodeLanguageControl({ editor, canWrite }: {
   const caret = selectedBlock(editor.state, "code");
   const id = target?.id ?? caret?.node.attrs.id;
   const found = typeof id === "string" ? findBlockById(editor.state.doc, id) : null;
-  const eligible = found?.node.type.name === "code";
+  const eligible = !editor.isDestroyed && found?.node.type.name === "code";
+  const writable = !editor.isDestroyed && editor.isEditable;
   const dom = eligible ? editor.view.nodeDOM(found.pos) : null;
   const caption = dom instanceof HTMLElement ? dom.querySelector(".ub-code-caption") : null;
 
   useEffect(() => {
-    if (!eligible || !editor.isEditable) {
+    if (!eligible || !writable) {
       setOpen(false);
       setTarget(null);
     }
-  }, [eligible, editor.isEditable]);
+  }, [eligible, writable]);
 
   if (!eligible || caption === null) return null;
   const language = typeof found.node.attrs.language === "string" ? found.node.attrs.language : "";
@@ -90,7 +93,7 @@ export function CodeLanguageControl({ editor, canWrite }: {
   const choose = (next: string): void => {
     // Focus and the selection can move while a menu is open. Resolve the
     // control's identity again, never the block under the current selection.
-    if (target === null || !canWrite() || !editor.isEditable) return;
+    if (editor.isDestroyed || target === null || !canWrite() || !editor.isEditable) return;
     const live = findBlockById(editor.state.doc, target.id);
     if (live?.node.type.name !== "code") return;
     const transaction = editor.state.tr;
@@ -111,7 +114,7 @@ export function CodeLanguageControl({ editor, canWrite }: {
   return createPortal(
     <Popover open={open} onOpenChange={(next) => {
       if (next) {
-        if (!canWrite() || !editor.isEditable) return;
+        if (editor.isDestroyed || !canWrite() || !editor.isEditable) return;
         picked.current = false;
         returnToBlock.current = false;
         const selection = editor.state.selection;
@@ -138,7 +141,7 @@ export function CodeLanguageControl({ editor, canWrite }: {
             const live = findBlockById(editor.state.doc, target.id);
             if (live?.node.type.name === "code") {
               if (!picked.current) editor.view.dispatch(editor.state.tr.setSelection(selectionInBlock(live, target, editor.state.doc)));
-              editor.view.focus();
+              if (!editor.isDestroyed) editor.view.focus();
             }
           }
           setTarget(null);

@@ -45,6 +45,10 @@ interface Draft {
   marks: Record<FlagMark, MarkReading> & { link: MarkReading };
 }
 
+function selectedCellStartOf(draft: Draft | null): number | null {
+  return draft !== null && "cellPos" in draft.target ? draft.target.contentStart : null;
+}
+
 function supportsFormatting(target: Draft["target"]): boolean {
   return !target.clamped && (isProseBlockType(target.blockType) || "cellPos" in target || "part" in target);
 }
@@ -56,6 +60,7 @@ function rangeOf(target: CommentTarget | CellTextTarget | CardTextTarget | Figma
 
 /** Read the editor's stored range even while a link or comment field has focus. */
 function selectionRange(editor: Editor, target: CommentTarget | CellTextTarget | CardTextTarget | FigmaTextTarget | null): Range | null {
+  if (editor.isDestroyed) return null;
   const { from, to } = target === null ? editor.state.selection : {
     from: target.contentStart + target.start, to: target.contentStart + target.end,
   };
@@ -125,7 +130,7 @@ function formattingTarget(editor: Editor, ydoc: Y.Doc): CommentTarget | CellText
 }
 
 function toggleFlag(editor: Editor, ydoc: Y.Doc, name: FlagMark): void {
-  if (!editor.isEditable) return;
+  if (editor.isDestroyed || !editor.isEditable) return;
   const target = formattingTarget(editor, ydoc);
   if (target === null) return;
   const from = target.contentStart + target.start;
@@ -148,7 +153,7 @@ function setExternalLink(
   ydoc: Y.Doc,
   href: string,
 ): LinkRefusal | null {
-  if (!editor.isEditable) return "invalid-url";
+  if (editor.isDestroyed || !editor.isEditable) return "invalid-url";
   const target = formattingTarget(editor, ydoc);
   if (target === null || !isExternalHref(href)) {
     return "invalid-url";
@@ -260,12 +265,14 @@ export function CommentComposer({
   const controlsHost = useEditorControlsHost();
 
   useEffect(() => {
+    if (editor.isDestroyed) return;
     // Capture once: the editor can destroy its view before React runs this
     // component's passive cleanup during a route or fallback transition.
     const editorDom = editor.view.dom;
     const ownerDocument = editorDom.ownerDocument;
     let previousSelection = editor.state.selection;
     const read = (event?: { transaction: Transaction }): void => {
+      if (editor.isDestroyed) return;
       const selectionChanged = !editor.state.selection.eq(previousSelection);
       previousSelection = editor.state.selection;
       // A pointer down may just pan a table. Adopt its selection intent only
@@ -323,6 +330,7 @@ export function CommentComposer({
       });
     };
     const dismiss = (event: KeyboardEvent): void => {
+      if (editor.isDestroyed) return;
       const currentDraft = readDraft();
       if (event.defaultPrevented || event.key !== "Escape" || currentDraft === null) return;
       const path = event.composedPath();
@@ -359,6 +367,7 @@ export function CommentComposer({
       navigationInput.current = false;
     };
     const keyboard = (event: KeyboardEvent): void => {
+      if (editor.isDestroyed) return;
       if (event.key === "Tab") {
         // TableKit selects the next cell's whole text. That is navigation,
         // not a request for formatting. Capture before its synchronous handler.
@@ -393,11 +402,11 @@ export function CommentComposer({
   }, [editor, ydoc, formattingOnly]);
 
   const open = draft !== null;
-  const selectedCellStart = draft !== null && "cellPos" in draft.target ? draft.target.contentStart : null;
+  const selectedCellStart = selectedCellStartOf(draft);
   // biome-ignore lint/correctness/useExhaustiveDependencies: mode changes the mounted card's shape; measure it again immediately when a field opens or closes.
   useEffect(() => {
     const element = floating.current;
-    if (!open || !element) return;
+    if (editor.isDestroyed || !open || !element) return;
     const boundary = controlsHost?.boundary ?? host.current?.closest<HTMLElement>(".ub-pane") ?? undefined;
     // The selected paragraph is inside the table scrollport. Using it as the
     // virtual reference context lets Floating UI subscribe to sideways scroll.
@@ -414,6 +423,7 @@ export function CommentComposer({
     const collision = { boundary, padding: 6 };
     let disposed = false;
     const update = async (): Promise<void> => {
+      if (editor.isDestroyed) return;
       const position = await computePosition(reference, element, {
         strategy: "fixed",
         placement: touch ? "bottom" : "top",
@@ -435,7 +445,7 @@ export function CommentComposer({
           hide({ boundary: tableWrapper ? [tableWrapper, ...(boundary ? [boundary] : [])] : boundary }),
         ],
       });
-      if (disposed) return;
+      if (disposed || editor.isDestroyed) return;
       const focused = selectedCellStart === null && element.contains(element.ownerDocument.activeElement);
       // A focused prose field stays reachable even if Safari scrolls its selection
       // out of view as the keyboard opens. Cell fields still respect table clipping.
@@ -464,7 +474,7 @@ export function CommentComposer({
     return () => { disposed = true; editor.off("transaction", update); stop(); };
   }, [editor, host, open, mode, touch, selectedCellStart, controlsHost?.boundary]);
 
-  if (draft === null) return null;
+  if (editor.isDestroyed || draft === null) return null;
   const { target } = draft;
   const cell = "cellPos" in target;
   const card = "part" in target;
@@ -478,10 +488,11 @@ export function CommentComposer({
     setMode("toolbar");
     setHref("");
     setError(null);
-    editor.view.focus();
+    if (!editor.isDestroyed) editor.view.focus();
   };
 
   const create = (text: string): boolean => {
+    if (editor.isDestroyed) return false;
     try {
       const thread = writeDocument(ydoc, catalogConnection?.ydoc ?? null, () => createAnnotation(
         ydoc,
@@ -497,7 +508,7 @@ export function CommentComposer({
       ), undefined, canCleanupTags);
       close();
       onCreated(thread.id);
-      editor.commands.focus(target.contentStart + target.end);
+      if (!editor.isDestroyed) editor.commands.focus(target.contentStart + target.end);
       return true;
     } catch (failure) {
       setError(refusal(failure));

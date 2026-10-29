@@ -10,12 +10,14 @@ export function useCaretMenuKeys(
 ): void {
   const current = useRef({ handleKey, listId, activeId });
   useLayoutEffect(() => {
+    if (editor.isDestroyed) return;
     Object.assign(current.current, { handleKey, listId, activeId });
     // React's highlight changes view attributes, not document state or history.
     editor.view.updateState(editor.state);
   }, [editor, handleKey, listId, activeId]);
 
   useLayoutEffect(() => {
+    if (editor.isDestroyed) return;
     const controller = current.current;
     const { menus } = editor.storage.caretMenuKeys;
     menus.add(controller);

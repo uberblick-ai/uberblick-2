@@ -66,6 +66,7 @@ export function MentionMenu({
   // Validate sessions from current state; opening still requires the
   // qualifying local transaction.
   useEffect(() => {
+    if (editor.isDestroyed) return;
     // Without a workspace, skip the session and its per-keystroke rendering.
     const publish = (next: MentionSession | null): void => {
       liveSession.current = next;
@@ -76,6 +77,7 @@ export function MentionMenu({
       return;
     }
     const read = (transaction: Transaction | null): void => {
+      if (editor.isDestroyed) return;
       const trigger = mentionTriggerAt(editor);
       if (trigger === null) {
         dismissed.current = false;
@@ -114,7 +116,7 @@ export function MentionMenu({
     const onTransaction = ({ transaction }: { transaction: Transaction }): void =>
       read(transaction);
     const onUpdate = (): void => {
-      if (!editor.isEditable) read(null);
+      if (editor.isDestroyed || !editor.isEditable) read(null);
     };
     editor.on("transaction", onTransaction);
     editor.on("update", onUpdate);
@@ -156,7 +158,7 @@ export function MentionMenu({
 
   const choose = useCallback(
     (entry: MentionCandidate | undefined): void => {
-      if (entry === undefined || session === null || liveSession.current !== session) return;
+      if (editor.isDestroyed || entry === undefined || session === null || liveSession.current !== session) return;
       // Close after either a pick or refusal. Do not remember dismissal: a
       // successful reference removes the trigger, and retaining it would
       // suppress the next @.

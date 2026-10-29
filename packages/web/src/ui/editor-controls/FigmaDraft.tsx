@@ -12,6 +12,7 @@ export function FigmaDraft({ editor }: { editor: Editor }): ReactElement | null 
   const [draft, setDraft] = useState<Draft | null>(() => currentFigmaDraft(editor));
   useEffect(() => {
     const read = (): void => {
+      if (editor.isDestroyed) return;
       if (!editor.isEditable) discardFigmaDraft(editor);
       setDraft(currentFigmaDraft(editor));
     };
@@ -23,7 +24,7 @@ export function FigmaDraft({ editor }: { editor: Editor }): ReactElement | null 
       discardFigmaDraft(editor);
     };
   }, [editor]);
-  if (draft === null) return null;
+  if (editor.isDestroyed || draft === null) return null;
   return createPortal(<>
     <span className="ub-block-caption">
       <span className="ub-block-label">Figma</span>
@@ -37,7 +38,7 @@ export function FigmaDraft({ editor }: { editor: Editor }): ReactElement | null 
       focusLink
       discardInvalid
       saveOnBlur={false}
-      onSave={(values) => { commitFigmaDraft(editor, draft, values); }}
+      onSave={(values) => { if (!editor.isDestroyed) commitFigmaDraft(editor, draft, values); }}
       onDone={() => { discardFigmaDraft(editor); if (!editor.isDestroyed) editor.view.focus(); }}
     />
   </>, draft.slot);

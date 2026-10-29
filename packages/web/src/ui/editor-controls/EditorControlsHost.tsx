@@ -17,7 +17,7 @@ export function useEditorControlsHost(): EditorControlsHostValue | null {
 /** Radix captures before ProseMirror, which skips already-prevented key events. */
 export function editorControlsOwnEscape(container: HTMLElement | null, event: KeyboardEvent, editor: Editor | null): boolean {
   if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return true;
-  if (container?.querySelector('[data-slot="caret-menu-content"]') && editor !== null) {
+  if (container?.querySelector('[data-slot="caret-menu-content"]') && editor !== null && !editor.isDestroyed) {
     for (const menu of editor.storage.caretMenuKeys.menus) {
       if (menu.handleKey?.("Escape")) return true;
     }

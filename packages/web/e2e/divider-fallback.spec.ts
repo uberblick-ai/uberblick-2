@@ -9,9 +9,13 @@ import { docTitle, editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import { expectMcp, proveBrowserArrival, proveMcpArrival } from "./settle.js";
 
-const { harness, openApp } = setupHarness();
+const pageErrors: string[] = [];
+const { harness, openApp } = setupHarness({ app: { beforeNavigate: async (page) => {
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+} } });
 let agent: McpAgent | null = null;
 
+test.beforeEach(() => { pageErrors.length = 0; });
 test.beforeAll(() => {
   agent = new McpAgent({
     workspace: harness().workspace,
@@ -20,7 +24,10 @@ test.beforeAll(() => {
     statePrefix: "uberblick-e2e-divider-fallback-",
   });
 });
-test.afterEach(async () => { await agent?.closeSessions(); });
+test.afterEach(async () => {
+  await agent?.closeSessions();
+  expect(pageErrors).toEqual([]);
+});
 test.afterAll(async () => { await agent?.close(); agent = null; });
 
 interface WrittenDoc {
