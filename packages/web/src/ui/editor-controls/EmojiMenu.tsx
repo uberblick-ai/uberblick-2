@@ -20,6 +20,7 @@ export function EmojiMenu({ editor, host }: {
   const [, setDataReady] = useState(false);
 
   useEffect(() => {
+    if (editor.isDestroyed) return;
     let disposed = false;
     const publish = (trigger: EmojiTrigger | null): void => {
       live.current = trigger;
@@ -30,6 +31,7 @@ export function EmojiMenu({ editor, host }: {
       return data === null || !/^[a-z]{2}/i.test(trigger.query) || filterEmoji(data, trigger.query).length > 0;
     };
     const read = ({ transaction }: { transaction: Transaction }): void => {
+      if (editor.isDestroyed) return;
       const trigger = emojiTriggerAt(editor);
       if (trigger === null || !hasMatches(trigger)) { publish(null); return; }
       const current = live.current;
@@ -53,7 +55,7 @@ export function EmojiMenu({ editor, host }: {
         && parent.pos === trigger.parentFrom && end.pos === trigger.to
         && current.blockId === trigger.blockId ? trigger : null);
     };
-    const checkEditable = (): void => { if (!editor.isEditable) publish(null); };
+    const checkEditable = (): void => { if (editor.isDestroyed || !editor.isEditable) publish(null); };
     editor.on("transaction", read);
     editor.on("update", checkEditable);
     return () => {
@@ -74,7 +76,7 @@ export function EmojiMenu({ editor, host }: {
     setHighlight({ query, index, keyboard });
   }, [query]);
   const choose = useCallback((entry: EmojiEntry | undefined): void => {
-    if (entry === undefined || session === null || live.current !== session) return;
+    if (editor.isDestroyed || entry === undefined || session === null || live.current !== session) return;
     pickEmojiAtTrigger(editor, session, entry);
     dismiss();
   }, [editor, session, dismiss]);

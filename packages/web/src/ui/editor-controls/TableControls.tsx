@@ -139,7 +139,7 @@ function TableMenuGlyph({ icon }: { icon: TableMenuIcon }): ReactElement {
 export function TableControls({ editor, host }: {
   editor: Editor;
   host: RefObject<HTMLElement | null>;
-}): ReactElement {
+}): ReactElement | null {
   const ids = (): string[] => {
     const result: string[] = [];
     editor.state.doc.forEach((node) => {
@@ -159,6 +159,7 @@ export function TableControls({ editor, host }: {
     editor.on("transaction", read);
     return () => { editor.off("transaction", read); };
   }, [editor]);
+  if (editor.isDestroyed) return null;
   return <>{tables.map((tableId) => <TableControlSurface key={tableId} tableId={tableId} editor={editor} host={host} />)}</>;
 }
 
@@ -179,7 +180,7 @@ function TableControlSurface({ tableId, editor, host }: {
   const [cellPoint, setCellPoint] = useState<{ x: number; y: number } | null>(null);
   const cellPointRef = useRef<{ x: number; y: number } | null>(null);
   const hovered = useRef<{ id: string; row: number | null; column?: number | null; x?: number | undefined; y?: number | undefined } | null>(null);
-  const touch = useRef(editor.view.dom.ownerDocument.defaultView?.matchMedia?.("(pointer: coarse)").matches ?? false);
+  const touch = useRef(!editor.isDestroyed && (editor.view.dom.ownerDocument.defaultView?.matchMedia?.("(pointer: coarse)").matches ?? false));
   const lastTouch = useRef<{ x: number; y: number } | null>(null);
   const columnStrip = useRef<HTMLDivElement | null>(null);
   const focusDestination = useRef<EventTarget | null>(null);
@@ -244,7 +245,7 @@ function TableControlSurface({ tableId, editor, host }: {
   // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
   useEffect(() => {
     const frame = host.current;
-    if (frame === null) return;
+    if (editor.isDestroyed || frame === null) return;
     const dom = editor.view.dom;
     const owner = dom.ownerDocument;
     const win = owner.defaultView;
@@ -417,6 +418,7 @@ function TableControlSurface({ tableId, editor, host }: {
     };
     const leave = (): void => { hovered.current = null; read(); };
     const focus = (): void => {
+      if (editor.isDestroyed) return;
       focusDestination.current = null;
       const strip = columnStrip.current;
       if (strip?.contains(owner.activeElement)) {
@@ -481,8 +483,10 @@ function TableControlSurface({ tableId, editor, host }: {
   }, [geometry]);
 
   useEffect(() => {
+    if (editor.isDestroyed) return;
     const dom = editor.view.dom;
     const context = (event: MouseEvent): void => {
+      if (editor.isDestroyed) return;
       const element = event.target instanceof Element ? event.target : null;
       let cell = element?.closest<HTMLTableCellElement>("td, th") ?? null;
       // The keyboard's menu key targets the editor itself; use the caret's cell.
@@ -507,6 +511,7 @@ function TableControlSurface({ tableId, editor, host }: {
     return () => dom.removeEventListener("contextmenu", context);
   }, [editor, openCell, tableId]);
 
+  if (editor.isDestroyed) return null;
   const size = geometry?.touch ? 44 : 24;
   // Mouse handles are thin, so they straddle a border without covering text.
   const thin = geometry?.touch ? 44 : 12;
@@ -528,28 +533,33 @@ function TableControlSurface({ tableId, editor, host }: {
   );
   const finish = (): void => {
     closeMenus();
-    if (acted.current) editor.view.focus();
+    if (!editor.isDestroyed && acted.current) editor.view.focus();
   };
   const act = (target: TableRowTarget | null | undefined, column: number, action: TableAction): void => {
+    if (editor.isDestroyed) return;
     acted.current = target !== null && target !== undefined && actOnTable(editor, target, column, action);
     finish();
   };
   const insertColumn = (action: "column-before" | "column-after"): void => {
+    if (editor.isDestroyed) return;
     const live = columnMenuRef.current === null ? null : resolveTableColumn(editor, columnMenuRef.current);
     act(menuRef.current ?? geometry?.rows[0]?.target, live?.columnIndex ?? -1, action);
   };
   const moveRow = (direction: -1 | 1): void => {
+    if (editor.isDestroyed) return;
     const target = menuRef.current;
     const live = target === null ? null : resolveTableRow(editor, target);
     acted.current = target !== null && live !== null && moveTableRow(editor, target, live.rowIndex + (direction === -1 ? -1 : 2));
     finish();
   };
   const deleteColumn = (): void => {
+    if (editor.isDestroyed) return;
     const target = columnMenuRef.current;
     acted.current = target !== null && deleteTableColumn(editor, target);
     finish();
   };
   const moveColumn = (direction: -1 | 1): void => {
+    if (editor.isDestroyed) return;
     const target = columnMenuRef.current;
     acted.current = target !== null && moveTableColumn(editor, target, direction);
     finish();
@@ -581,6 +591,7 @@ function TableControlSurface({ tableId, editor, host }: {
   const columnDelete = (index: number | null): ReactElement =>
     item("column-delete", "Delete column", index === null || columnCount === 1, deleteColumn, true);
   const closeFocus = (event: Event, keep: boolean): void => {
+    if (editor.isDestroyed) { event.preventDefault(); return; }
     closing.current = false;
     queueMicrotask(() => refresh.current());
     if (keep && !acted.current) return;
@@ -615,12 +626,14 @@ function TableControlSurface({ tableId, editor, host }: {
     <DragDropProvider sensors={tableRowSensors}
       plugins={(defaults) => defaults.filter((plugin) => plugin !== Feedback && plugin !== Accessibility)}
       onBeforeDragStart={(event) => {
+        if (editor.isDestroyed) { event.preventDefault(); return; }
         const data = event.operation.source?.data as TableDragData | undefined;
         const allowed = data?.kind === "row" ? (resolveTableRow(editor, data.target)?.rowIndex ?? 0) > 0
           : data?.kind === "column" && (resolveTableColumn(editor, data.target)?.node.child(0).childCount ?? 1) > 1;
         if (!allowed || menuRef.current !== null || columnMenuRef.current !== null) event.preventDefault();
       }}
       onDragStart={(event, manager) => {
+        if (editor.isDestroyed) return;
         const data = event.operation.source?.data as TableDragData;
         dragged.current = true;
         drag.current = { data, manager, point: event.operation.position.current, focused: editor.isFocused };
@@ -637,7 +650,7 @@ function TableControlSurface({ tableId, editor, host }: {
         const frame = host.current;
         drag.current = null;
         setGap(null);
-        if (active === null) return;
+        if (editor.isDestroyed || active === null) return;
         let moved = false;
         let caret: (() => number | null) | null = null;
         if (!event.canceled && current !== null && frame !== null) {
@@ -672,7 +685,7 @@ function TableControlSurface({ tableId, editor, host }: {
         // and maps it through received edits. On a no-op, focus() redraws that
         // selection only if the editor already had focus; only a move needs a
         // new caret in the moved row or column.
-        if (moved || active.focused) {
+        if (!editor.isDestroyed && (moved || active.focused)) {
           const place = caret;
           const win = editor.view.dom.ownerDocument.defaultView;
           const restore = (): void => {
@@ -685,7 +698,7 @@ function TableControlSurface({ tableId, editor, host }: {
               if (position === null || !Number.isFinite(position)) return;
               editor.commands.setTextSelection(position);
             }
-            editor.view.focus();
+            if (!editor.isDestroyed) editor.view.focus();
           };
           win?.requestAnimationFrame(restore);
         }
@@ -701,6 +714,7 @@ function TableControlSurface({ tableId, editor, host }: {
         style={{ left: "calc(0px - var(--ub-table-control-overhang))", top: -thin / 2,
           width: `calc(${geometry.viewportWidth}px + 2 * var(--ub-table-control-overhang))`, height: thin }}
         onScroll={(event) => {
+          if (editor.isDestroyed) return;
           // Only native control focus drives the table back. A programmatic
           // strip scroll follows the table and must never feed an old offset
           // back into it while a cell-formatting field owns focus.
@@ -728,7 +742,7 @@ function TableControlSurface({ tableId, editor, host }: {
           <DropdownMenuContent align="center" collisionPadding={8}
             container={controlsHost?.portalContainer}
             collisionBoundary={controlsHost?.boundary ?? []}
-            onCloseAutoFocus={(event) => closeFocus(event, resolveTableColumn(editor, column.target) !== null)}>
+            onCloseAutoFocus={(event) => closeFocus(event, !editor.isDestroyed && resolveTableColumn(editor, column.target) !== null)}>
             {columnItems(index)}
             <DropdownMenuSeparator />
             {columnMoves(index)}

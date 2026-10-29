@@ -51,6 +51,7 @@ function blockAt(
   editor: Editor,
   target: EventTarget | null,
 ): { blockId: string; pos: number } | null {
+  if (editor.isDestroyed) return null;
   const { view } = editor;
   let element =
     target instanceof HTMLElement
@@ -86,6 +87,7 @@ function gutterTop(
   frame: HTMLElement | null,
   touch: boolean,
 ): number {
+  if (editor.isDestroyed) return 0;
   const dom = editor.view.nodeDOM(pos);
   if (frame === null || !(dom instanceof HTMLElement)) return 0;
   const rect = dom.getBoundingClientRect();
@@ -110,7 +112,7 @@ export function BlockMenu({
   /** The positioned element the menu and the gutter button are placed inside. */
   host: RefObject<HTMLElement | null>;
   entries?: readonly BlockMenuEntry[];
-}): ReactElement {
+}): ReactElement | null {
   const [slash, setSlash] = useState<SlashSession | null>(null);
   const [hover, setHover] = useState<GutterTarget | null>(null);
   /** The open gutter menu: which block it will insert below, and where it sits. */
@@ -133,7 +135,7 @@ export function BlockMenu({
   // event. Use the primary pointer only as that initial fallback; real events
   // below override it so an iPad's trackpad still uses hover.
   const touchInput = useRef(
-    editor.view.dom.ownerDocument.defaultView?.matchMedia?.("(pointer: coarse)").matches ?? false,
+    !editor.isDestroyed && (editor.view.dom.ownerDocument.defaultView?.matchMedia?.("(pointer: coarse)").matches ?? false),
   );
   const lastTouch = useRef<{ x: number; y: number } | null>(null);
   // iOS may blur the editor between a gutter press and its click. The target
@@ -146,6 +148,7 @@ export function BlockMenu({
   // an empty paragraph; peer edits, undo and navigation cannot open one.
   useEffect(() => {
     const read = (transaction: Transaction | null): void => {
+      if (editor.isDestroyed) return;
       const trigger = slashTriggerAt(editor);
       if (trigger === null) {
         dismissed.current = false;
@@ -176,6 +179,7 @@ export function BlockMenu({
   // frame's reserved gutter bridges travel to its outside button so crossing
   // the gap does not hide it.
   useEffect(() => {
+    if (editor.isDestroyed) return;
     const dom = editor.view.dom;
     const frame = host.current;
     const ownerDocument = dom.ownerDocument;
@@ -189,7 +193,7 @@ export function BlockMenu({
       );
     };
     const readCaret = (): void => {
-      if (!touchInput.current) return;
+      if (editor.isDestroyed || !touchInput.current) return;
       const { selection } = editor.state;
       const { $head } = selection;
       if (!editor.isEditable || (!editor.isFocused && !gutterPressed.current) ||
@@ -338,7 +342,7 @@ export function BlockMenu({
 
   const choose = useCallback(
     (entry: BlockMenuEntry | undefined): void => {
-      if (entry === undefined) return;
+      if (editor.isDestroyed || entry === undefined) return;
       if (gutter !== null) {
         // A refusal means the block is gone; either way the menu has had its
         // answer and closes.
@@ -369,6 +373,7 @@ export function BlockMenu({
   /** The keys the menu owns while it is open. Returns false for the rest. */
   const handleKey = useCallback(
     (key: string): boolean => {
+      if (editor.isDestroyed) return false;
       if (key === "ArrowDown") {
         step(1);
         return true;
@@ -408,6 +413,7 @@ export function BlockMenu({
 
   const anchor = gutter ?? hover;
   const visible = anchor !== null;
+  if (editor.isDestroyed) return null;
   return (
     <>
       <FigmaDraft editor={editor} />

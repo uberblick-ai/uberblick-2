@@ -56,11 +56,12 @@ export function CaretMenu({
 
   useEffect(() => {
     const element = card.current;
-    if (!open || !element) return;
+    if (editor.isDestroyed || !open || !element) return;
     const boundary = controlsHost?.boundary ?? host.current?.closest<HTMLElement>(".ub-pane") ?? undefined;
     const reference = {
       contextElement: anchor?.current ?? editor.view.dom,
       getBoundingClientRect: (): DOMRect => {
+        if (editor.isDestroyed) return new DOMRect();
         if (anchor?.current) return anchor.current.getBoundingClientRect();
         try {
           const caret = editor.view.coordsAtPos(editor.state.selection.from);
@@ -74,6 +75,7 @@ export function CaretMenu({
     const collision = { boundary, padding: 6 };
     let disposed = false;
     const update = async (): Promise<void> => {
+      if (disposed || editor.isDestroyed) return;
       const position = await computePosition(reference, element, {
         strategy: "fixed",
         placement: "bottom-start",
@@ -91,7 +93,7 @@ export function CaretMenu({
           }),
         ],
       });
-      if (disposed) return;
+      if (disposed || editor.isDestroyed) return;
       Object.assign(element.style, { left: `${position.x}px`, top: `${position.y}px` });
       element.dataset.side = position.placement.split("-")[0];
     };
@@ -102,7 +104,7 @@ export function CaretMenu({
   }, [open, editor, host, anchor, controlsHost?.boundary]);
 
   useEffect(() => {
-    if (!open) return;
+    if (editor.isDestroyed || !open) return;
     const ownerDocument = editor.view.dom.ownerDocument;
     const outside = (event: MouseEvent): void => {
       const path = event.composedPath();
@@ -117,7 +119,7 @@ export function CaretMenu({
     return () => ownerDocument.removeEventListener("click", outside);
   }, [open, editor, anchor, onDismiss]);
 
-  if (!open) return null;
+  if (editor.isDestroyed || !open) return null;
   return createPortal(
     <div
       ref={card}

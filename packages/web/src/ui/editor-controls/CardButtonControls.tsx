@@ -24,14 +24,16 @@ function buttonsFromValue(value: unknown): CardButton[] {
 export function CardButtonControls({ editor, canWrite }: {
   editor: Editor;
   canWrite: () => boolean;
-}): ReactElement {
+}): ReactElement | null {
   const [, tick] = useState(0);
   useEffect(() => {
+    if (editor.isDestroyed) return;
     const read = (): void => tick((value) => value + 1);
     editor.on("transaction", read);
     editor.on("update", read);
     return () => { editor.off("transaction", read); editor.off("update", read); };
   }, [editor]);
+  if (editor.isDestroyed) return null;
   const cards: { id: string; slot: Element; buttons: CardButton[] }[] = [];
   editor.state.doc.forEach((node, pos) => {
     if (node.type.name !== "card" || typeof node.attrs.id !== "string") return;
@@ -61,7 +63,7 @@ function CardActions({ id, editor, buttons, canWrite }: {
   const [color, setColor] = useState<CardButtonColor>("neutral");
   const [error, setError] = useState<string | null>(null);
   const formId = useId();
-  const writable = editor.isEditable && canWrite();
+  const writable = !editor.isDestroyed && editor.isEditable && canWrite();
   useEffect(() => { if (!writable) setOpen(false); }, [writable]);
   const occurrences = new Map<string, number>();
   const keyedButtons = buttons.map((button) => {
@@ -81,7 +83,7 @@ function CardActions({ id, editor, buttons, canWrite }: {
     setError(null);
   };
   const change = (button: CardButton | null): void => {
-    if (!editor.isEditable || !canWrite()) return;
+    if (editor.isDestroyed || !editor.isEditable || !canWrite()) return;
     const live = findBlockById(editor.state.doc, id);
     if (live?.node.type.name !== "card") return;
     const next = buttonsFromValue(live.node.attrs.button);
@@ -120,7 +122,7 @@ function CardActions({ id, editor, buttons, canWrite }: {
     change({ text, href, style, color });
   };
   const remove = (): void => {
-    if (!editor.isEditable || !canWrite()) return;
+    if (editor.isDestroyed || !editor.isEditable || !canWrite()) return;
     const live = findBlockById(editor.state.doc, id);
     if (live?.node.type.name !== "card") return;
     const hasFollowing = live.pos + live.node.nodeSize < editor.state.doc.content.size;
@@ -130,7 +132,7 @@ function CardActions({ id, editor, buttons, canWrite }: {
     undo?.stopCapturing();
     editor.view.dispatch(tr);
     undo?.stopCapturing();
-    editor.view.focus();
+    if (!editor.isDestroyed) editor.view.focus();
   };
   return <>
     {keyedButtons.map(({ button, key }) => <Button key={key} type="button"
@@ -141,7 +143,7 @@ function CardActions({ id, editor, buttons, canWrite }: {
     {writable && <div className="ub-card-edit-controls">
       <Button type="button" variant="outline" size="sm" onClick={remove}>Remove card</Button>
       <Popover open={open} onOpenChange={(next) => {
-      if (next && (!editor.isEditable || !canWrite())) return;
+      if (next && (editor.isDestroyed || !editor.isEditable || !canWrite())) return;
       if (next) select(buttons.length === 0 ? null : 0);
       setOpen(next);
     }}>
