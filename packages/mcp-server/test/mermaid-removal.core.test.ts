@@ -109,7 +109,7 @@ describe("stored Mermaid removal through MCP", () => {
     expect(rig.instance.store.logSize()).toBe(before);
   });
 
-  it("keeps orphan discussions counted and permits replies, resolution and reopening on decided records", async () => {
+  it("keeps orphan discussions counted and permits replies and final resolution on decided records", async () => {
     const rig = await server();
     const old = legacy(true);
     rig.instance.store.appendUpdate(roomForDoc(WORKSPACE, old.uuid), Y.encodeStateAsUpdate(old.doc), "local");
@@ -118,12 +118,13 @@ describe("stored Mermaid removal through MCP", () => {
       { uuid: old.uuid, openThreadCount: 1 },
     ]);
     expect(directoryStub(rig.instance, old.uuid)?.approvalChanged).toBe(true);
-    for (const resolved of [false, true, false]) {
+    for (const resolved of [undefined, true]) {
       const replied = await rig.ok("annotate", { uuid: old.uuid, thread_id: old.thread.id, text: "Continue discussion", resolved });
-      expect(replied.annotation).toMatchObject({ range: null, resolved });
+      expect(replied.annotation).toMatchObject({ range: null });
+      expect(replied.annotation.resolved).toBe(resolved);
       expect((await rig.ok("list_docs", { kind: "decision" })).docs[0].openThreadCount).toBe(resolved ? 0 : 1);
     }
-    expect((await rig.ok("get_doc", { uuid: old.uuid })).annotations[0].comments).toHaveLength(4);
+    expect((await rig.ok("get_doc", { uuid: old.uuid })).annotations[0].comments).toHaveLength(3);
     expect(getMeta(rig.instance.replicas.replica(old.uuid).doc).approvalFingerprint).toBe(getMeta(old.doc).approvalFingerprint);
   });
 

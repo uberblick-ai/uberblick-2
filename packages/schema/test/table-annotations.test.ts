@@ -209,7 +209,7 @@ describe("table-cell annotation contract", () => {
     doc.destroy();
   });
 
-  it("changes neither table content nor decided approval when opening, replying, resolving or reopening", () => {
+  it("changes neither table content nor decided approval when opening, replying or resolving", () => {
     const { doc, id } = fixture();
     setKind(doc, "decision");
     setStatus(doc, "decided");
@@ -219,7 +219,7 @@ describe("table-cell annotation contract", () => {
     const thread = createAnnotation(doc, id, 0, 5, "reader", "Alpha", { row: 1, column: 0 });
     addComment(doc, thread.id, "writer", "Reply");
     setAnnotationResolved(doc, thread.id, true);
-    setAnnotationResolved(doc, thread.id, false);
+    expect(setAnnotationResolved(doc, thread.id, false)).toBeNull();
     expect(getBlock(doc, id)).toEqual(before);
     expect(decisionApprovalFingerprint(doc)).toBe(fingerprint);
     expect(decisionApprovalChanged(doc)).toBe(false);

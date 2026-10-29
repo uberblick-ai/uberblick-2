@@ -134,8 +134,9 @@ test("decided prose and cells offer only Comment, keep threads keyboard reachabl
     await expect(highlight).not.toHaveClass(/(?:^| )ub-comment(?: |$)/);
     await rail.getByRole("button", { name: /resolved$/ }).click();
     await card.locator(".ub-thread").click();
-    await card.getByRole("button", { name: "Reopen", exact: true }).click();
-    await expect(highlight).toHaveAccessibleName("Comment");
+    await expect(card.getByRole("button", { name: "Reopen", exact: true })).toHaveCount(0);
+    await expect(card.getByPlaceholder("Reply…")).toHaveCount(0);
+    await expect(highlight).not.toHaveAttribute("role");
   }
   await expect(prose).toHaveText("Selected words remain readable after deciding.");
   await proveMcpArrival(page, writer, uuid, { path: "upstream" });
@@ -189,9 +190,10 @@ test("touch selection on a decided record starts a thread and its highlight open
   await page.locator(".ub-threads-toggle").tap();
   await rail.getByRole("button", { name: "1 resolved" }).tap();
   await rail.locator(".ub-thread").tap();
-  await rail.getByRole("button", { name: "Reopen", exact: true }).tap();
+  await expect(rail.getByRole("button", { name: "Reopen", exact: true })).toHaveCount(0);
+  await expect(rail.getByPlaceholder("Reply…")).toHaveCount(0);
   await closeIfOpen(close, page.locator(".ub-threads-toggle"), { touch: true });
-  await expect(highlight).toHaveAccessibleName("Comment");
+  await expect(highlight).not.toHaveAttribute("role");
   await expect(paragraph).toHaveText("Selected words remain readable after deciding.");
 });
 

@@ -150,10 +150,10 @@ describe("directory stub repair", () => {
     repair(client, T0 + 3_000, T0 + 3_000);
     expect(stub(client)).toMatchObject({ openThreadCount: 0, updatedAt: T0 + 3_000 });
 
-    setAnnotationResolved(client.doc, thread.id, false);
+    expect(setAnnotationResolved(client.doc, thread.id, false)).toBeNull();
     repair(client, T0 + 4_000, T0 + 4_000);
-    expect(stub(client)).toMatchObject({ openThreadCount: 1, updatedAt: T0 + 4_000 });
-    expect(client.crossed()).toBe(3);
+    expect(stub(client)).toMatchObject({ openThreadCount: 0, updatedAt: T0 + 3_000 });
+    expect(client.crossed()).toBe(2);
   });
 
   it("bumps updatedAt at most once per window under a typing burst", () => {

@@ -85,9 +85,10 @@ describe("structured tables through MCP", () => {
     const escaped = await rig.ok("annotate", { uuid: created.uuid, block_id: id, row: 1, column: 1,
       start: 1, end: 99, text: "Discuss pipe" });
     expect(escaped.annotation.range).toEqual({ row: 1, column: 1, start: 1, end: 3, collapsed: false });
-    for (const resolved of [true, false]) {
+    for (const resolved of [undefined, true]) {
       const reply = await rig.ok("annotate", { uuid: created.uuid, thread_id: threadId, resolved, text: "Reply" });
-      expect(reply.annotation).toMatchObject({ resolved, range: opened.annotation.range });
+      expect(reply.annotation).toMatchObject({ range: opened.annotation.range });
+      expect(reply.annotation.resolved).toBe(resolved);
     }
     const read = await rig.ok("get_doc", { uuid: created.uuid });
     expect(read.blocks[0]).toEqual(before);

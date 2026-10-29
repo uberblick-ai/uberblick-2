@@ -85,8 +85,8 @@ describe("retired Mermaid blocks", () => {
     expect(getAnnotation(doc, thread.id)?.comments).toHaveLength(2);
     setAnnotationResolved(doc, thread.id, true);
     expect(documentDirectoryFields(doc).openThreadCount).toBe(0);
-    setAnnotationResolved(doc, thread.id, false);
-    expect(documentDirectoryFields(doc).openThreadCount).toBe(1);
+    expect(setAnnotationResolved(doc, thread.id, false)).toBeNull();
+    expect(documentDirectoryFields(doc).openThreadCount).toBe(0);
 
     const restored = new Y.Doc();
     Y.applyUpdate(restored, Y.encodeStateAsUpdate(doc));

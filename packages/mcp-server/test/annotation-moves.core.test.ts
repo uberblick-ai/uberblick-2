@@ -82,7 +82,6 @@ describe("moving annotation anchors through MCP", () => {
 
   it("moves an existing thread in one document update and returns its new block and range", async () => {
     const { rig, doc, threadId } = await fixture();
-    await rig.ok("annotate", { uuid: doc.uuid, thread_id: threadId, text: "Answered", resolved: true });
     const replica = rig.instance.replicas.replica(doc.uuid);
     const before = rig.instance.replicas.store.updateCount(replica.room);
     const moved = await rig.ok("annotate", {
@@ -91,10 +90,11 @@ describe("moving annotation anchors through MCP", () => {
     });
     expect(rig.instance.replicas.store.updateCount(replica.room)).toBe(before + 1);
     expect(moved.annotation).toMatchObject({
-      id: threadId, blockId: doc.blocks[1].id, resolved: true,
+      id: threadId, blockId: doc.blocks[1].id,
       range: { start: 0, end: 3, collapsed: false },
-      comments: [{ text: "Question" }, { text: "Answered" }, { author: "Agent", text: "New context" }],
+      comments: [{ text: "Question" }, { author: "Agent", text: "New context" }],
     });
+    expect(moved.annotation.resolved).not.toBe(true);
     expect(listAnnotationRanges(replica.doc, doc.blocks[0].id)).toEqual([]);
     const read = await rig.ok("get_doc", { uuid: doc.uuid });
     expect(read.annotations[0]).toEqual(moved.annotation);

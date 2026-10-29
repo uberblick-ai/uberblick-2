@@ -209,9 +209,10 @@ describe("cards through MCP", () => {
     expect(linked.payload.recovery).toEqual(expect.any(String));
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
     expect(rig.instance.store.logSize()).toBe(writes);
-    for (const resolved of [true, false]) {
+    for (const resolved of [undefined, true]) {
       const reply = await rig.ok("annotate", { uuid: created.uuid, thread_id: thread.id, resolved, text: "Reply" });
-      expect(reply.annotation).toMatchObject({ resolved, range: { part: "body", start: 0, end: 4, collapsed: false } });
+      expect(reply.annotation).toMatchObject({ range: { part: "body", start: 0, end: 4, collapsed: false } });
+      expect(reply.annotation.resolved).toBe(resolved);
     }
     const after = await rig.ok("get_doc", { uuid: created.uuid });
     expect(after.blocks).toEqual(read.blocks);

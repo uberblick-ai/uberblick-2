@@ -110,7 +110,7 @@ describe("card block contract", () => {
       const thread = createAnnotation(doc, id, 0, 1, "Reader", "question", { part });
       expect(listAnnotationRanges(doc, id).some((range) => range.threadId === thread.id && range.part === part)).toBe(true);
       setAnnotationResolved(doc, thread.id, true);
-      setAnnotationResolved(doc, thread.id, false);
+      expect(setAnnotationResolved(doc, thread.id, false)).toBeNull();
       expect(decisionApprovalFingerprint(doc)).toBe(approval);
     }
   });

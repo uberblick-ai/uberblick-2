@@ -1,7 +1,8 @@
 
-import { addComment, createAnnotation, getDirectoryMap, getMeta, listAnnotations, roomForDoc, setAnnotationResolved } from "@uberblick/schema";
+import { addComment, createAnnotation, getAnnotationsMap, getDirectoryMap, getMeta, listAnnotations, roomForDoc, setAnnotationResolved } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
 import { afterEach, describe, expect, it } from "vitest";
+import type * as Y from "yjs";
 import { cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, peerClient, startHub, startServer, tempDatabasePath, testConfig, TEST_SECRET, waitUntil, WORKSPACE } from "./helpers.js";
 import type { PeerClient, Rig } from "./helpers.js";
 
@@ -74,7 +75,7 @@ describe("open comment threads through directory stubs", () => {
     expect((await rows(restarted, { has_open_threads: true })).map(row => [row.uuid, row.openThreadCount]).sort()).toEqual([[live.uuid, 1], [archived.uuid, 1]].sort());
   });
 
-  it("backfills a hydrated peer document and follows peer open, reply, resolve and reopen updates through the hub", async () => {
+  it("backfills a hydrated peer document and follows peer open, reply, resolve and legacy reopen updates through the hub", async () => {
     const hub = await startHub();
     hubs.push(hub);
     const config = () => testConfig({ authSecret: TEST_SECRET, hubUrl: hubUrl(hub.port), ...LIVE_HUB_SETTLE });
@@ -112,7 +113,7 @@ describe("open comment threads through directory stubs", () => {
       (await rows(observer))[0]?.openThreadCount === 0,
     );
     expect(await rows(observer, { has_open_threads: true })).toEqual([]);
-    setAnnotationResolved(peer.doc, first.id, false);
+    (getAnnotationsMap(peer.doc).get(first.id) as Y.Map<unknown>).set("resolved", false);
     await waitUntil("the MCP directory to reflect the reopened peer thread", async () =>
       (await rows(observer, { has_open_threads: true }))[0]?.openThreadCount === 1,
     );

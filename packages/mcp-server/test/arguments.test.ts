@@ -290,6 +290,11 @@ describe("annotate", () => {
       text: "the first thread",
     });
     const threadId = opened.annotation.id;
+    const moved = await rig.ok("annotate", {
+      uuid: doc.uuid, thread_id: threadId, block_id: doc.blockId,
+      start: 4, end: 7, text: "Move to the next word",
+    });
+    expect(moved.annotation.range).toEqual({ start: 4, end: 7, collapsed: false });
     const room = rig.instance.replicas.replica(doc.uuid).room;
     const logged = rig.instance.replicas.store.updateCount(room);
     const replied = await rig.ok("annotate", {
@@ -299,23 +304,8 @@ describe("annotate", () => {
       resolved: true,
     });
     expect(rig.instance.replicas.store.updateCount(room)).toBe(logged + 1);
-    expect(replied.annotation.comments).toHaveLength(2);
+    expect(replied.annotation.comments).toHaveLength(3);
     expect(replied.annotation.resolved).toBe(true);
-
-    const reopened = await rig.ok("annotate", {
-      uuid: doc.uuid,
-      thread_id: threadId,
-      text: "reopening with a reason",
-      resolved: false,
-    });
-    expect(reopened.annotation.comments).toHaveLength(3);
-    expect(reopened.annotation.resolved).toBe(false);
-
-    const moved = await rig.ok("annotate", {
-      uuid: doc.uuid, thread_id: threadId, block_id: doc.blockId,
-      start: 4, end: 7, text: "Move to the next word",
-    });
-    expect(moved.annotation.range).toEqual({ start: 4, end: 7, collapsed: false });
 
     const refused = [
       // A move needs the complete range; a plain reply takes no range fields.
@@ -348,8 +338,8 @@ describe("annotate", () => {
     // The document holds only the valid calls.
     const read = await rig.ok("get_doc", { uuid: doc.uuid });
     expect(read.annotations).toHaveLength(1);
-    expect(read.annotations[0].comments).toHaveLength(4);
-    expect(read.annotations[0].resolved).toBe(false);
+    expect(read.annotations[0].comments).toHaveLength(3);
+    expect(read.annotations[0].resolved).toBe(true);
     expect(read.annotations[0].range).toEqual({ start: 4, end: 7, collapsed: false });
   });
 });

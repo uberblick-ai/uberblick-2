@@ -151,12 +151,10 @@ describe("a thread over a marked range becomes a card", () => {
     addComment(ydoc, thread.id, "Reader", "Still here");
     setAnnotationResolved(ydoc, thread.id, true);
     expect(threadsFromDoc(ydoc)[0]).toMatchObject({ id: thread.id, blockRef: "Table 1", excerpt: "", orphaned: true, replyCount: 1, resolved: true });
-    setAnnotationResolved(ydoc, thread.id, false);
-    expect(threadsFromDoc(ydoc)[0]).toMatchObject({ orphaned: true, resolved: false });
     ydoc.destroy();
   });
 
-  it("keeps a legacy table conversation as an orphan that can be replied to, resolved and reopened", () => {
+  it("keeps a legacy table conversation as an orphan that can be replied to and resolved", () => {
     const ydoc = new Y.Doc();
     initDoc(ydoc, { uuid: "legacy-thread", title: "Tables" });
     const id = appendBlock(ydoc, { type: "paragraph", text: "| Name |\n| --- |\n| Alpha |" });
@@ -171,8 +169,6 @@ describe("a thread over a marked range becomes a card", () => {
     addComment(ydoc, thread.id, "Reader", "Still replyable");
     setAnnotationResolved(ydoc, thread.id, true);
     expect(threadsFromDoc(ydoc)[0]).toMatchObject({ replyCount: 1, resolved: true });
-    setAnnotationResolved(ydoc, thread.id, false);
-    expect(threadsFromDoc(ydoc)[0]).toMatchObject({ replyCount: 1, resolved: false, orphaned: true });
     ydoc.destroy();
   });
 

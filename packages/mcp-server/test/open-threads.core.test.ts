@@ -68,10 +68,10 @@ describe("open comment threads through directory stubs", () => {
     expect(resolved.annotation).toMatchObject({ blockId: doc.blocks[0].id, range: null, resolved: true });
     expect(await rows(rig)).toMatchObject([{ openThreadCount: 0 }]);
     expect(await rows(rig, { has_open_threads: true, include_superseded: true })).toEqual([]);
-    await rig.ok("annotate", { uuid: doc.uuid, thread_id: first.annotation.id, text: "A reply to the resolved thread" });
+    expect((await rig.call("annotate", { uuid: doc.uuid, thread_id: first.annotation.id, text: "A reply to the resolved thread" })).payload.error).toBe("thread_resolved");
     expect(await rows(rig)).toMatchObject([{ openThreadCount: 0 }]);
-    await rig.ok("annotate", { uuid: doc.uuid, thread_id: first.annotation.id, text: "Reconsider", resolved: false });
-    expect(await rows(rig, { has_open_threads: true })).toMatchObject([{ openThreadCount: 1 }]);
+    expect((await rig.call("annotate", { uuid: doc.uuid, thread_id: first.annotation.id, text: "Reconsider", resolved: false })).payload.error).toBe("resolution_final");
+    expect(await rows(rig, { has_open_threads: true })).toEqual([]);
   });
 
   it("filters known regular caches, combines tags and archives, and refuses false without writing", async () => {

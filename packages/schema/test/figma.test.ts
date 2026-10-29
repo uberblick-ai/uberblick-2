@@ -321,7 +321,7 @@ describe("Figma block contract", () => {
     expect(listAnnotationRanges(doc, id)[0]).toMatchObject({ threadId: thread.id, part: "caption" });
     expect(addComment(doc, thread.id, "Agent", "reply")!.comments).toHaveLength(2);
     expect(setAnnotationResolved(doc, thread.id, true)!.resolved).toBe(true);
-    expect(setAnnotationResolved(doc, thread.id, false)!.resolved).toBe(false);
+    expect(setAnnotationResolved(doc, thread.id, false)).toBeNull();
   });
 
   it("removes optional headers without creating a default height attribute", () => {

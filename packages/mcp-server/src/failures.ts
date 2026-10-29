@@ -117,7 +117,7 @@ const RECOVERIES: Record<string, Recovery> = {
   },
   annotation_card: {
     recoveryClass: "manual",
-    guidance: "Open a card comment on selected text in the web editor, then use annotate with its thread_id to reply, resolve or reopen it. Nothing was written.",
+    guidance: "Open a card comment on selected text in the web editor, then use annotate with its thread_id to reply or resolve it while open. Resolving is final. Nothing was written.",
   },
   invalid_figma: {
     recoveryClass: "manual",
@@ -125,7 +125,7 @@ const RECOVERIES: Record<string, Recovery> = {
   },
   annotation_figma: {
     recoveryClass: "manual",
-    guidance: "Use annotate with an existing Figma thread_id to reply, resolve or reopen it; MCP cannot open a new Figma caption thread. Nothing was written.",
+    guidance: "Use annotate with an open Figma thread_id to reply or resolve it; resolving is final. MCP cannot open a new Figma caption thread. Nothing was written.",
   },
   table_mapping_required: {
     recoveryClass: "manual",
@@ -200,8 +200,17 @@ const RECOVERIES: Record<string, Recovery> = {
   annotation_range: {
     recoveryClass: "reread",
     guidance:
-      "Call get_doc for the block's current text and its existing threads, then annotate a range that fits it — " +
-      "`reason` says which of the two is in the way.",
+      "Call get_doc for the block's current text and its existing threads, then annotate a nonempty range that fits. " +
+      "New threads may cover resolved text, detaching the resolved threads; moves cannot overlap another thread. " +
+      "An overlap with an open thread is refused. Nothing was written.",
+  },
+  resolution_final: {
+    recoveryClass: "manual",
+    guidance: "Start a new comment to continue; it may cover resolved text. Resolving is final. Nothing was written.",
+  },
+  thread_resolved: {
+    recoveryClass: "manual",
+    guidance: "This conversation was resolved. Start a new comment to continue. It may cover resolved text. Nothing was written.",
   },
   open_thread_anchored: {
     recoveryClass: "manual",
