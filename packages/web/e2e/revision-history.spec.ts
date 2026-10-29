@@ -10,6 +10,7 @@ import { activateControl, createDoc, docTitle, editor, setupHarness } from "./ap
 import { assertNoViolations, WCAG_TAGS } from "./accessibility-assertions.js";
 import { waitForAcknowledged } from "./settle.js";
 import { setPointerSelection } from "./native-selection.js";
+import { placeCaretIn } from "./harness.js";
 import { mockFigmaLookup } from "./figma-fixtures.js";
 import { renderedText } from "./contrast-helpers.js";
 import { alphaOf } from "../test/colour.js";
@@ -468,8 +469,8 @@ function linkedHistory(uuid: string, title: string, target: string, deleted: str
 
 async function caretInComparisonLink(page: Page, side: Locator, label: string): Promise<void> {
   const paragraph = side.locator(":scope > p").filter({ hasText: `Read ${label}.` });
-  // Place the caret before the link with a real click, then enter it with the keyboard.
-  await setPointerSelection(paragraph, () => paragraph.click({ position: { x: 2, y: 10 } }));
+  // Establish the paragraph's start before entering its link with native keys.
+  await placeCaretIn(paragraph, { edge: "start" });
   for (let step = 0; step < 6; step += 1) await page.keyboard.press("ArrowRight");
   // Arrow keys move the DOM caret before selectionchange imports it into ProseMirror.
   await expect.poll(() => paragraph.locator("a").evaluate(element => {
