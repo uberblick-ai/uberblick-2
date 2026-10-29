@@ -59,25 +59,31 @@ export async function handleOAuthToken(
     refuse(response, "invalid_request");
     return true;
   }
-  if (parameters.get("grant_type") !== "authorization_code") {
+  const grantType = parameters.get("grant_type");
+  if (grantType !== "authorization_code" && grantType !== "refresh_token") {
     refuse(response, "unsupported_grant_type");
     return true;
   }
-  const code = parameters.get("code");
-  const codeVerifier = parameters.get("code_verifier");
+  const code = parameters.get("code") ?? "";
+  const codeVerifier = parameters.get("code_verifier") ?? "";
   const clientId = parameters.get("client_id");
-  const redirectUri = parameters.get("redirect_uri");
-  if (!code || !codeVerifier || !clientId || !redirectUri) {
+  const redirectUri = parameters.get("redirect_uri") ?? "";
+  const refreshToken = parameters.get("refresh_token") ?? "";
+  if (!clientId || (grantType === "authorization_code" && (!code || !codeVerifier || !redirectUri)) ||
+    (grantType === "refresh_token" && !refreshToken)) {
     refuse(response, "invalid_request");
     return true;
   }
   const resource = parameters.get("resource");
+  const scope = parameters.get("scope");
   try {
-    const result = authorizations.exchange({ code, codeVerifier, clientId, redirectUri,
-      ...(resource ? { resource } : {}) });
+    const result = grantType === "refresh_token"
+      ? authorizations.refresh({ refreshToken, clientId, ...(resource ? { resource } : {}),
+        ...(scope === null ? {} : { scope }) })
+      : authorizations.exchange({ code, codeVerifier, clientId, redirectUri, ...(resource ? { resource } : {}) });
     if (result.status !== "issued") refuse(response, result.status);
     else replyJson(response, 200, { access_token: result.accessToken, token_type: "Bearer", expires_in: 3600,
-      scope: result.scope }, { Pragma: "no-cache" });
+      scope: result.scope, refresh_token: result.refreshToken }, { Pragma: "no-cache" });
   } catch { refuse(response, "server_error", 500); }
   return true;
 }

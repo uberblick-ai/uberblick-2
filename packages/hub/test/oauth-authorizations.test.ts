@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { AgentGrantRegistry } from "../src/agent-grants.js";
+import { CredentialRegistry } from "../src/credentials.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { MAX_PENDING_AUTHORIZATIONS, OAuthAuthorizations, type PendingAuthorization } from "../src/oauth-authorizations.js";
 import { HubDatabase } from "../src/persistence.js";
@@ -22,7 +23,8 @@ function rig(path = ":memory:", clock = { now: 1000 }) {
   databases.push(database);
   const memberships = new MembershipRegistry(database);
   memberships.grant({ workspaceId: WORKSPACE, principalId: PRINCIPAL, role: "member" });
-  const authorizations = new OAuthAuthorizations(database, memberships, new WorkspaceNameReader(database), () => clock.now);
+  const authorizations = new OAuthAuthorizations(database, memberships, new WorkspaceNameReader(database),
+    new CredentialRegistry(database, undefined, undefined, () => clock.now), () => clock.now);
   return { database, memberships, authorizations, clock };
 }
 
