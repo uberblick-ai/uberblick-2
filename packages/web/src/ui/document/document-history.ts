@@ -240,6 +240,11 @@ async function selectTarget(owner: Session | null, target: Target, liveDocument:
   update(owner, { busy: true, error: null, downloading: false, active: true, localComparison: null });
   try {
     if (entering && fresh === null) destroyDocuments(owner.documents);
+    if (refresh && !fromRoute && owner.listing !== null) {
+      // A control reads again after the opening read settles, even if it failed.
+      await owner.listing.catch(() => undefined);
+      if (owner.operation !== operation) return;
+    }
     const entries = await targetEntries(owner, target, refresh, operation, fresh ?? owner.documents, update);
     if (owner.operation !== operation) return;
     if (owner.state.entries === null) update(owner, { entries, titles: listedTitles(entries) });
