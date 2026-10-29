@@ -21,6 +21,7 @@ import { resolveUpdateAuthor } from "./update-attribution.js";
 import { handleAuthorizationServerMetadata } from "./oauth-discovery.js";
 import { handleOAuthAuthorization, type OAuthClientLookup } from "./oauth-authorization.js";
 import { OAuthAuthorizations } from "./oauth-authorizations.js";
+import { handleOAuthToken } from "./oauth-token.js";
 
 export interface TeamHub extends Hub {
   /** Hub-internal authorities; never exposed through a public route. */
@@ -93,6 +94,7 @@ function createTeamExtension(
       if (handleAuthorizationServerMetadata(config.publicUrl, signIn !== undefined, request, response)) return true;
       if (await handleOAuthAuthorization(config.publicUrl, signIn, authorizations, hubAdmins,
         options.oauthClients ?? (async () => null), request, response)) return true;
+      if (await handleOAuthToken(config.publicUrl, signIn !== undefined, authorizations, request, response)) return true;
       if (handleHubClaimState(claims, signIn !== undefined, request, response)) return true;
       if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response, workspaceNames)) return true;
       if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts, hubAdmins, options.hubVersion)) return true;
