@@ -72,7 +72,7 @@ function createTeamExtension(
       promotions = new WorkspacePromotions(database, memberships, hasLiveDocuments, hubAdmins);
       signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims, workspaceNames);
       accounts = new GithubAccountLookup(config.github.fetch, config.github.now);
-      if (config.publicUrl !== undefined) authorizations = new OAuthAuthorizations(database, memberships, workspaceNames, config.github.now);
+      if (config.publicUrl !== undefined) authorizations = new OAuthAuthorizations(database, memberships, workspaceNames, credentials, config.github.now);
     }
   }
   if (deviceCredentials && credentials !== undefined && memberships !== undefined) {
