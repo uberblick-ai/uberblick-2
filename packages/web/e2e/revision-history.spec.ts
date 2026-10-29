@@ -2912,6 +2912,7 @@ test.describe("document history through ub open", () => {
   });
 
   test("Inline follows document links by click and Enter, and native Tab leaves lists and tables", { tag: "@webkit" }, async ({ browser }, info) => {
+    test.fixme(info.project.name === "webkit-ipad", "The iPad Inline link caret intermittently never settles inside the link (#2488).");
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
       ...(info.project.name === "webkit-ipad" ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 900 } }), reducedMotion: "reduce",
     } });
