@@ -7,14 +7,15 @@
 [![MCP: Claude Code · Codex](https://img.shields.io/badge/MCP-Claude%20Code%20%C2%B7%20Codex-6e56cf)](https://uberblick.ai/docs/agents)
 [![Website](https://img.shields.io/badge/web-uberblick.ai-222)](https://uberblick.ai)
 
-Your coding agent starts every session cold. It does not know what the product
-is for, which questions you settled last month, or which number the last
-release was meant to move. So it reads the code, guesses, and writes a
-confident plan that reopens a decision you already made.
+Your coding agent has some context: a `CLAUDE.md`, memory files, the plan it
+drafted with you last week. But that context is gathered on each developer's
+machine. It is not synced, nobody reviews it, and it goes out of date. The
+agent on your laptop and the one on your colleague's work from different
+pictures, and a question settled in one session gets reopened in the next.
 
-Uberblick is where that context lives. Plans, rules, decisions and numbers sit
-in one workspace: people review them in the browser, agents read and edit them
-over MCP. The agent reads the pages its change needs before it builds and
+Uberblick gives that context one shared home. Plans, rules, decisions and
+numbers sit in one workspace: people review them in the browser, agents read
+and edit them over MCP. The agent reads the pages its change needs before it builds and
 brings them up to date after. Delivery stays on GitHub.
 
 Free and MIT licensed. Local-first, no account to start, synced by a hub you
