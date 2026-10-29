@@ -17,6 +17,9 @@ These instructions apply to interactive sessions and delivery roles alike.
   the live corpus document that owns it, when one exists. Comments that tools
   read, such as `biome-ignore` or `@ts-expect-error` with their reason, stay allowed.
   A new suppression needs a reason the reviewer accepts as justifying the exception.
+  One line marking an accepted known limit where it lives is allowed too,
+  `known limit: <the limit>; revisit when <trigger>`: reviews and audits read
+  it as a decision rather than a defect.
 - **GitHub:** authorized work scope, maintainer decisions, reviews and evidence.
 
 A discrepancy is a gap to resolve, not permission to silently override another

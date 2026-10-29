@@ -34,6 +34,12 @@ consequence. Correctness and data safety first, then risk and missing
 verification, then unnecessary complexity — a smaller change that defends the
 same contract is a finding. No findings is itself a verdict and is stated as one.
 
+Read past the diff. A change can break code it does not touch: when it changes
+a function's signature, return value or behavior, search every caller and check
+each still holds. A fix applied in one caller while the shared function stays
+wrong is a finding. Each finding names a concrete input or sequence that leads
+to the wrong result; without one it is an assumption, not a finding.
+
 Check the PR's mechanism and evidence under
 [library and custom-mechanism choices](delivery-policy.md#library-and-custom-mechanism-choices),
 including live web UI criteria and owner-confirmed exceptions where required.
@@ -113,7 +119,11 @@ hidden bug, secret exposure or damage the product cannot repair.
 A visible edge case is P3 at most and a known limit, not a maintainer question; it
 never blocks, escalates or reopens settled work. The limit qualifies any
 guarantee the issue states: name it beside the criterion, and acceptance counts
-that criterion met except for the named limit. Prefer the known limit to a fix
+that criterion met except for the named limit. The implementer marks it in code
+with a `known limit:` comment under
+[AGENTS.md's comment rule](../../AGENTS.md#find-the-right-authority); a later
+review or audit treats a marked limit as settled unless supported usage now
+crosses it. Prefer the known limit to a fix
 unless the fix is local and needs no edge-case code; the point is to save loop
 rounds and edge-case code. If it happens in use, it is filed as a bug then.
 
