@@ -996,20 +996,17 @@ describe("address-controlled history views", () => {
 });
 
 describe("document history navigation", () => {
-  it("opens history through Previous while the initial catalog is still loading", async () => {
+  it("cancels entry into history before the opening list settles without reading again", async () => {
     const pending = deferred<DocumentHistoryList>();
     const api = client();
-    vi.mocked(api.list).mockReturnValue(pending.promise);
+    vi.mocked(api.list).mockReturnValueOnce(pending.promise);
     const fix = mount(api);
-    expect(fix.reading()).toMatchObject({ active: false, busy: true, entries: null });
-    await act(async () => fix.reading().back());
-    expect(fix.reading()).toMatchObject({ active: true, busy: true, entries: null });
-    expect(api.list).toHaveBeenCalledTimes(1);
+    act(() => fix.reading().back());
+    act(() => fix.reading().now());
     await act(async () => pending.resolve(listed(entries)));
-    expect(fix.reading()).toMatchObject({ active: true, busy: false, error: null });
-    expect(fix.reading().entry?.id).toBe("newest");
-    expect(getMeta(fix.reading().selection!.before!).title).toBe("middle");
     expect(api.list).toHaveBeenCalledTimes(1);
+    expect(api.get).not.toHaveBeenCalled();
+    expect(fix.reading()).toMatchObject({ active: false, busy: false, selection: null, error: null });
   });
 
   it("follows cache publications while keeping the displayed comparison and attribution fixed until another pick", async () => {

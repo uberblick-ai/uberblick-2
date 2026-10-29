@@ -615,6 +615,72 @@ function visualHistory(uuid: string, title: string): Record<string, string> {
 test.describe("document history through ub open", () => {
   const { harness, openApp } = setupHarness({ accessRole: "admin" });
 
+  test("live Previous waits for the opening catalog and reads the newest state again", { tag: "@webkit-touch" }, async ({ browser, browserName }) => {
+    const uuid = randomUUID();
+    const title = docTitle("Pending opening history");
+    const source = new Y.Doc();
+    try {
+      initDoc(source, { uuid, title });
+      appendBlock(source, { type: "paragraph", text: "The live document." });
+      await harness().seedDocument(source);
+    } finally { source.destroy(); }
+    const opening: RevisionEntry[] = [{ id: "stale", author: null, startedAt: 1_000, endedAt: null }];
+    const later: RevisionEntry[] = [
+      { id: "latest", author: null, startedAt: 3_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 2_000, endedAt: 3_000 },
+    ];
+    const states: Record<string, string> = {
+      stale: savedState(uuid, title, "The opening catalog's stale state."),
+      latest: savedState(uuid, title, "The later catalog's newest state."),
+      earlier: savedState(uuid, title, "The later catalog's predecessor."),
+    };
+    let releaseOpening = (): void => {};
+    const openingGate = new Promise<void>(resolve => { releaseOpening = resolve; });
+    let releaseLater = (): void => {};
+    const laterGate = new Promise<void>(resolve => { releaseLater = resolve; });
+    let catalogReads = 0;
+    const snapshotReads: string[] = [];
+    try {
+      const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+        readySelector: ".ub-editor .ProseMirror", contextOptions: {
+          ...(browserName === "webkit" ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 900 } }), reducedMotion: "reduce",
+        },
+        beforeNavigate: async target => {
+          await target.route("**/api/revisions?**", async route => {
+            const revision = new URL(route.request().url()).searchParams.get("revision");
+            const name = revision === null ? null : Object.keys(states).find(name => revisionId(name) === revision) ?? revision;
+            const read = revision === null ? ++catalogReads : 0;
+            if (revision === null) await (read === 1 ? openingGate : laterGate);
+            else if (name !== null) snapshotReads.push(name);
+            const revisions = read === 1 ? opening : later;
+            await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+              history: { complete: true, lastRefresh: new Date().toISOString(), refreshFailed: false, offline: false,
+                newestDownloadedRevision: revisions[0] === undefined ? null : revisionId(revisions[0].id) },
+              ...(name === null ? { revisions: revisions.map(entry => ({ ...entry, id: revisionId(entry.id) })) } : { state: states[name] }),
+            }) });
+          });
+        },
+      });
+      await expect.poll(() => catalogReads).toBe(1);
+      const back = history(page).getByRole("button", { name: "Previous revision", exact: true });
+      await expect(back).toBeEnabled();
+      await activateControl(back);
+      const pane = page.locator(".ub-revision-pane");
+      await expect(pane).toBeVisible();
+      await expect(pane).toContainText("Loading history…");
+      expect(catalogReads).toBe(1);
+      expect(snapshotReads).toEqual([]);
+      releaseOpening();
+      await expect.poll(() => catalogReads).toBe(2);
+      await expect(pane).toContainText("Loading history…");
+      expect(snapshotReads).toEqual([]);
+      releaseLater();
+      await expect(historicalEditor(page)).toContainText("The later catalog's newest state.");
+      await expect(history(page).locator(".ub-history-position")).toHaveText("1 of 2 ·");
+      expect(snapshotReads.toSorted()).toEqual(["earlier", "latest"]);
+    } finally { releaseOpening(); releaseLater(); }
+  });
+
   test("an offline local comparison keeps downloaded content, local title, data and unsent work through Refresh and Back to now", { tag: "@webkit" }, async ({ browser, browserName }) => {
     const uuid = randomUUID();
     const title = docTitle("Local comparison data");

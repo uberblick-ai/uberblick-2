@@ -4,8 +4,9 @@ import * as Y from "yjs";
 import { toast } from "sonner";
 import { appendBlock, editBlock, initDoc, type RevisionEntry } from "@uberblick/schema";
 import { act, cleanup, render } from "./react-render.js";
-import type { DocumentHistory } from "../src/ui/document/document-history.js";
-import { RevisionPane } from "../src/ui/document/RevisionPane.js";
+import { useDocumentHistory, type DocumentHistory } from "../src/ui/document/document-history.js";
+import { DocumentHistoryError, type DocumentHistoryList, type DocumentRevisionsClient } from "../src/shell/document-revisions.js";
+import { HistoryControls, RevisionPane } from "../src/ui/document/RevisionPane.js";
 
 const person = { githubUsername: "ben", surface: { kind: "browser", name: "Browser" } };
 const entries: RevisionEntry[] = [
@@ -53,6 +54,75 @@ function description(button: HTMLButtonElement): HTMLElement {
   if (element === null) throw new Error("Restore has no accessible description");
   return element;
 }
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+function HistoryDocument({ api, live }: { api: DocumentRevisionsClient; live: Y.Doc }) {
+  const history = useDocumentHistory(api, "9f3c1a2b-0000-4000-8000-0123456789ab", "/document/one", live);
+  return history.active ? <RevisionPane history={history} docLinks={null} workspaceSettings={null} />
+    : <HistoryControls history={history} liveDocument={live} />;
+}
+
+describe("entering history through the live control", () => {
+  it.each([
+    { opening: "succeeds", later: "succeeds" },
+    { opening: "fails", later: "succeeds" },
+    { opening: "succeeds", later: "fails" },
+  ])("opens the pane while the opening list $opening, then the later list $later", async ({ opening, later }) => {
+    const pending = deferred<DocumentHistoryList>();
+    const refreshed = deferred<DocumentHistoryList>();
+    const listed = (revisions: RevisionEntry[]): DocumentHistoryList => ({ revisions, history: {
+      complete: true, lastRefresh: null, refreshFailed: false, offline: false, newestDownloadedRevision: revisions[0]?.id ?? null,
+    } });
+    const api: DocumentRevisionsClient = {
+      list: vi.fn<DocumentRevisionsClient["list"]>().mockReturnValueOnce(pending.promise).mockReturnValueOnce(refreshed.promise),
+      get: vi.fn<DocumentRevisionsClient["get"]>(async (_uuid, id) => snapshot(id)),
+      name: vi.fn(), rename: vi.fn(), removeName: vi.fn(), restore: vi.fn(),
+    };
+    const live = snapshot("Unsynced live page");
+    const liveState = Y.encodeStateAsUpdate(live);
+    const view = render(<HistoryDocument api={api} live={live} />);
+    expect(view.container.querySelector(".ub-revision-pane")).toBeNull();
+    const previous = screen.getByRole<HTMLButtonElement>("button", { name: "Previous revision" });
+    expect(previous.disabled).toBe(false);
+    fireEvent.click(previous);
+    expect(view.container.querySelector(".ub-revision-pane")).not.toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Loading history…");
+    expect(api.list).toHaveBeenCalledTimes(1);
+    expect(api.get).not.toHaveBeenCalled();
+
+    await act(async () => {
+      if (opening === "succeeds") pending.resolve(listed(entries.slice(2)));
+      else pending.reject(new DocumentHistoryError("unreachable"));
+    });
+    expect(api.list).toHaveBeenCalledTimes(2);
+    expect(api.get).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toBe("Loading history…");
+
+    await act(async () => {
+      if (later === "succeeds") refreshed.resolve(listed(entries.slice(0, 2)));
+      else refreshed.reject(new DocumentHistoryError("unreachable"));
+    });
+    expect(view.container.querySelector(".ub-revision-pane")).not.toBeNull();
+    if (later === "succeeds") {
+      expect(screen.getByRole("heading", { name: "newest" })).toBeTruthy();
+      expect(vi.mocked(api.get).mock.calls.map(call => call[1])).toEqual(["newest", "selected"]);
+      expect(view.container.querySelector(".ProseMirror")?.textContent).toContain("selected");
+      expect(view.container.querySelector(".ProseMirror")?.textContent).toContain("newest");
+    } else {
+      expect(screen.getByRole("status").textContent).toContain("History is unavailable");
+      expect(screen.getByRole<HTMLButtonElement>("button", { name: "Try again" }).disabled).toBe(false);
+      expect(api.get).not.toHaveBeenCalled();
+    }
+    expect(Y.encodeStateAsUpdate(live)).toEqual(liveState);
+    expect(live.isDestroyed).toBe(false);
+  });
+});
 
 describe("revision attribution", () => {
   it("keeps comparison attribution and content fixed when the live catalog changes", () => {
