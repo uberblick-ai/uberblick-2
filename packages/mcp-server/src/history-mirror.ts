@@ -236,13 +236,20 @@ export class HistoryMirror {
       this.check(epoch, stampKey);
       const response = await this.source.request(page.room, operation);
       this.check(epoch, stampKey);
+      if (operation.operation === "list" && response.ok &&
+        (!("version" in response) || response.version === undefined ||
+          ("revisions" in response && response.revisions.some(revision =>
+            revision.checksum === undefined || revision.final === undefined)))) {
+        throw new RevisionClientError("unsupported");
+      }
       return response;
     };
     try {
       const catalog = await revalidateHistoryCatalog(this.cache, uuid, request, () => this.source.now());
       this.check(epoch, stampKey);
       ready(await this.cache.evict(uuid, this.retention, this.source.now()));
-      if (catalog.version === null || catalog.revisions.some(revision =>
+      // A competing name publication invalidates its conditional token, not hub support.
+      if (catalog.revisions.some(revision =>
         revision.checksum === undefined || revision.final === undefined)) {
         throw new RevisionClientError("unsupported");
       }

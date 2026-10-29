@@ -16,11 +16,13 @@ const entries = [
   { id: "earlier", author: null, startedAt: null, endedAt: 100 },
 ];
 const documents: Y.Doc[] = [];
+const history = { complete: true, lastRefresh: "2026-10-28T12:00:00.000Z", refreshFailed: false, offline: false, newestDownloadedRevision: "newest" };
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => { for (const doc of documents.splice(0)) doc.destroy(); });
 
 function client(body: unknown, status = 200) {
-  const fetchImpl = vi.fn<typeof fetch>(async () => Response.json(body, { status }));
+  const fetchImpl = vi.fn<typeof fetch>(async () => Response.json(
+    body !== null && typeof body === "object" && !Array.isArray(body) ? { history, ...body } : body, { status }));
   return { api: createDocumentRevisionsClient("workspace", "browser", fetchImpl as typeof fetch), fetchImpl };
 }
 
@@ -41,7 +43,7 @@ describe("document revision reads", () => {
     const revision = { ...entries[0], endedAt: 120, name: {
       text: "Reviewed", namer: { githubUsername: "ben", surface: { kind: "browser", name: "Browser" } }, namedAt: 120, canManage: true,
     } };
-    await expect(client({ revisions: [revision] }).api.list(UUID, new AbortController().signal)).resolves.toEqual([revision]);
+    await expect(client({ revisions: [revision] }).api.list(UUID, new AbortController().signal)).resolves.toEqual({ revisions: [revision], history });
     const { api, fetchImpl } = client({ revision });
     const controller = new AbortController();
     await expect(api.name(UUID, "Reviewed", "browser-sha", controller.signal)).resolves.toEqual(revision);
@@ -111,7 +113,7 @@ describe("document revision reads", () => {
   it("keeps newest-first metadata and authenticates uncached local requests with the page session", async () => {
     const { api, fetchImpl } = client({ revisions: entries });
     const controller = new AbortController();
-    await expect(api.list(UUID, controller.signal)).resolves.toEqual(entries);
+    await expect(api.list(UUID, controller.signal)).resolves.toEqual({ revisions: entries, history });
     await api.list(UUID, controller.signal);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(mintHubAuthMessage).toHaveBeenNthCalledWith(1, "workspace", "browser");
@@ -149,8 +151,64 @@ describe("document revision reads", () => {
   });
 
   it("accepts an empty list only after a successful well-formed reply", async () => {
-    await expect(client({ revisions: [] }).api.list(UUID, new AbortController().signal)).resolves.toEqual([]);
+    await expect(client({ revisions: [] }).api.list(UUID, new AbortController().signal)).resolves.toEqual({ revisions: [], history });
     await expect(client({ revisions: [] }, 503).api.list(UUID, new AbortController().signal)).rejects.toBeInstanceOf(DocumentHistoryError);
+  });
+
+  it("carries cache status, explicit refresh and the missing offline revision through the local transport", async () => {
+    const offline = { ...history, offline: true, complete: false, refreshFailed: true };
+    const { api, fetchImpl } = client({ revisions: entries, history: offline });
+    await expect(api.list(UUID, new AbortController().signal, { refresh: true })).resolves.toEqual({ revisions: entries, history: offline });
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe(`/api/revisions?uuid=${UUID}&refresh=true`);
+    const missing = client({ reason: "not-downloaded", revision: "earlier", history: offline }, 503);
+    await expect(missing.api.get(UUID, "earlier", new AbortController().signal)).rejects.toMatchObject({
+      reason: "not-downloaded", revision: "earlier", history: offline,
+      message: "Revision “earlier” is not downloaded on this computer. Connect to download it.",
+    });
+    await expect(client({ reason: "downloading" }, 503).api.list(UUID, new AbortController().signal))
+      .rejects.toThrow("History is still downloading");
+    await expect(client({ reason: "not-downloaded" }, 503).api.list(UUID, new AbortController().signal))
+      .rejects.toThrow("Connect once to download history.");
+  });
+
+  it.each([undefined, null, {}, { ...history, complete: "yes" }])("rejects unusable cache status %j", async history => {
+    await expect(client({ revisions: entries, history }).api.list(UUID, new AbortController().signal)).rejects.toBeInstanceOf(DocumentHistoryError);
+  });
+
+  it("resumes the original bounded read and recovers an expired continuation without losing its target", async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ reason: "downloading", readId: "pending-read" }, { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ error: "invalid_history_read" }, { status: 400 }))
+      .mockResolvedValueOnce(Response.json({ revisions: entries, history }));
+    const api = createDocumentRevisionsClient("workspace", "browser", fetchImpl);
+    const signal = new AbortController().signal;
+    await expect(api.list(UUID, signal, { refresh: true })).rejects.toMatchObject({ reason: "downloading" });
+    await expect(api.list(UUID, signal, { refresh: true })).resolves.toEqual({ revisions: entries, history });
+    expect(fetchImpl.mock.calls.map(call => call[0])).toEqual([
+      `/api/revisions?uuid=${UUID}&refresh=true`,
+      `/api/revisions?uuid=${UUID}&refresh=true&readId=pending-read`,
+      `/api/revisions?uuid=${UUID}&refresh=true`,
+    ]);
+  });
+
+  it("invalidates pre-mutation refresh continuations, including replies arriving after acknowledgement", async () => {
+    let finish: (response: Response) => void = () => {};
+    const pending = new Promise<Response>(resolve => { finish = resolve; });
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockReturnValueOnce(pending)
+      .mockResolvedValueOnce(Response.json({ revision: entries[0] }))
+      .mockResolvedValueOnce(Response.json({ revisions: entries, history }));
+    const api = createDocumentRevisionsClient("workspace", "browser", fetchImpl);
+    const signal = new AbortController().signal;
+    const oldRefresh = api.list(UUID, signal, { refresh: true });
+    // Wait for the request to own its position before the mutation.
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+    await api.rename(UUID, "newest", "Acknowledged name", signal);
+    const oldFailure = expect(oldRefresh).rejects.toMatchObject({ reason: "downloading" });
+    finish(Response.json({ reason: "downloading", readId: "pre-mutation" }, { status: 503 }));
+    await oldFailure;
+    await api.list(UUID, signal, { refresh: true });
+    expect(fetchImpl.mock.calls[2]?.[0]).toBe(`/api/revisions?uuid=${UUID}&refresh=true`);
   });
 
   it.each([

@@ -32,7 +32,7 @@ export function RevisionNameControls({ history, liveDocument, writable }: {
   const id = useId();
   const entry = history.entry;
   const naming = history.selection === null;
-  const allowed = writable && (naming ? liveDocument !== null : entry?.name?.canManage === true);
+  const allowed = history.connected && writable && (naming ? liveDocument !== null : entry?.name?.canManage === true);
   const stillTargeted = target === null || (target.kind === "name" ? naming : entry?.id === target.revisionId);
   // Authority or the revision can change while the field is open; it then closes unsaved.
   useEffect(() => {

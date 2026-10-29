@@ -10,6 +10,7 @@ import { activateControl, createDoc, docTitle, editor, setupHarness } from "./ap
 import { assertNoViolations, WCAG_TAGS } from "./accessibility-assertions.js";
 import { waitForAcknowledged } from "./settle.js";
 import { setPointerSelection } from "./native-selection.js";
+import { placeCaretIn } from "./harness.js";
 import { mockFigmaLookup } from "./figma-fixtures.js";
 import { renderedText } from "./contrast-helpers.js";
 import { alphaOf } from "../test/colour.js";
@@ -62,6 +63,15 @@ async function comparisonView(page: Page, value: "Split" | "Inline"): Promise<vo
 /** The live status line's ‹ opens history; in history it steps to an older revision. */
 async function previous(page: Page): Promise<void> {
   await activateControl(history(page).getByRole("button", { name: "Previous revision", exact: true }));
+}
+
+async function waitForHistoryCatalog(page: Page, accepts: (entries: RevisionEntry[]) => boolean): Promise<void> {
+  await page.waitForResponse(async response => {
+    const url = new URL(response.url());
+    if (response.request().method() !== "GET" || url.pathname !== "/api/revisions" || url.searchParams.has("revision") || !response.ok()) return false;
+    const body = await response.json();
+    return Array.isArray(body.revisions) && accepts(body.revisions);
+  });
 }
 
 async function backToNow(page: Page): Promise<void> {
@@ -123,6 +133,9 @@ function revisionId(name: string): string {
 
 async function serveHistory(page: Page, revisions: RevisionEntry[], states: Record<string, string>): Promise<string[]> {
   const snapshotReads: string[] = [];
+  let servedCatalog = (): void => {};
+  const catalog = new Promise<void>(resolve => { servedCatalog = resolve; });
+  const reading = page.url().startsWith("http");
   await page.route("**/api/revisions?**", async route => {
     const revision = new URL(route.request().url()).searchParams.get("revision");
     const name = revision === null ? null : Object.keys(states).find(name => revisionId(name) === revision) ?? revision;
@@ -130,10 +143,15 @@ async function serveHistory(page: Page, revisions: RevisionEntry[], states: Reco
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(name === null ? { revisions: revisions.map(entry => ({ ...entry, id: revisionId(entry.id) })) }
-        : { state: states[name] }),
+      body: JSON.stringify({ history: { complete: true, lastRefresh: new Date().toISOString(), refreshFailed: false,
+        offline: false, newestDownloadedRevision: revisions[0] === undefined ? null : revisionId(revisions[0].id) },
+        ...(name === null ? { revisions: revisions.map(entry => ({ ...entry, id: revisionId(entry.id) })) }
+        : { state: states[name] }) }),
     });
+    if (revision === null) servedCatalog();
   });
+  // An already mounted page may still be finishing its real initial catalog.
+  if (reading) await catalog;
   return snapshotReads;
 }
 
@@ -451,8 +469,8 @@ function linkedHistory(uuid: string, title: string, target: string, deleted: str
 
 async function caretInComparisonLink(page: Page, side: Locator, label: string): Promise<void> {
   const paragraph = side.locator(":scope > p").filter({ hasText: `Read ${label}.` });
-  // Place the caret before the link with a real click, then enter it with the keyboard.
-  await setPointerSelection(paragraph, () => paragraph.click({ position: { x: 2, y: 10 } }));
+  // Establish the paragraph's start before entering its link with native keys.
+  await placeCaretIn(paragraph, { edge: "start" });
   for (let step = 0; step < 6; step += 1) await page.keyboard.press("ArrowRight");
   // Arrow keys move the DOM caret before selectionchange imports it into ProseMirror.
   await expect.poll(() => paragraph.locator("a").evaluate(element => {
@@ -583,6 +601,47 @@ function visualHistory(uuid: string, title: string): Record<string, string> {
 
 test.describe("document history through ub open", () => {
   const { harness, openApp } = setupHarness({ accessRole: "admin" });
+
+  test("downloaded history survives an upstream outage and follows cache publications without changing the shown comparison", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+    const uuid = await newDocument(page, docTitle("Offline downloaded history"));
+    const path = new URL(page.url()).pathname;
+    const room = `${harness().workspaceUuid}/${uuid}`;
+    await activateControl(editor(page));
+    await page.keyboard.type("Downloaded original.");
+    await waitForAcknowledged(page, { path: "upstream" });
+    const baseline = await harness().nameRevisionAsOther(uuid, "Downloaded baseline");
+    await waitForHistoryCatalog(page, entries => entries.some(entry => entry.id === baseline.id && entry.name?.text === "Downloaded baseline"));
+    await previous(page);
+    await expect(historicalEditor(page)).toContainText("Downloaded original.");
+    const address = page.url();
+    const peer = await openApp(browser, path, { readySelector: ".ub-editor .ProseMirror" });
+    await activateControl(editor(peer));
+    await peer.keyboard.press("ControlOrMeta+End");
+    await peer.keyboard.type(" Later state.");
+    await expect.poll(() => harness().hubText(room)).toBe("Downloaded original. Later state.");
+    await harness().nameRevisionAsOther(uuid, "Later downloaded state");
+    const drawer = await showHistoryList(page);
+    await expect(historyList(page)).toContainText("Later downloaded state");
+    await closeHistoryList(page, drawer);
+    // The later catalog reached this reader, but its addressed snapshot stays fixed.
+    await expect(historicalEditor(page)).toContainText("Downloaded original.");
+    await expect(historicalEditor(page)).not.toContainText("Later state.");
+    await expect(page).toHaveURL(address);
+    await harness().stopHub();
+    try {
+      await page.reload();
+      await expect(historicalEditor(page)).toContainText("Downloaded original.");
+      const offlineDrawer = await showHistoryList(page);
+      await expect(historyList(page)).toContainText("Offline");
+      await expect(historyList(page)).toContainText("Newest downloaded state");
+      await closeHistoryList(page, offlineDrawer);
+      await expect(history(page).getByRole("button", { name: "Rename revision", exact: true })).toHaveCount(0);
+      await backToNow(page);
+      await expect(editor(page)).toContainText("Downloaded original. Later state.");
+      await expect(history(page).getByRole("button", { name: "Name current revision", exact: true })).toHaveCount(0);
+    } finally { await harness().startHub(); }
+  });
 
   test("divider revisions draw and label added and removed lines in Split and Inline and fold unchanged dividers", { tag: "@webkit" }, async ({ browser }) => {
     const uuid = randomUUID();
@@ -1084,6 +1143,8 @@ test.describe("document history through ub open", () => {
       await page.keyboard.type(after);
     }
     await expect.poll(() => harness().hubText(room)).toContain("The latest paragraph.");
+    await waitForHistoryCatalog(page, entries => entries[0]?.name?.text !== "Reviewed after auth rewrite" &&
+      entries.some(entry => entry.name?.text === "Reviewed after auth rewrite"));
     await previous(page);
     await expect(historicalEditor(page)).toBeVisible();
     const drawer = await showHistoryList(page);
@@ -1134,6 +1195,7 @@ test.describe("document history through ub open", () => {
     await expect.poll(() => harness().hubText(`${harness().workspaceUuid}/${uuid}`)).toBe("A state reviewed by another teammate.");
     const named = await harness().nameRevisionAsOther(uuid, "Reviewed by teammate");
     expect(named.name?.namer).toMatchObject({ githubUsername: "other-admin", surface: { kind: "mcp", name: "Review client" } });
+    await waitForHistoryCatalog(page, entries => entries.some(entry => entry.id === named.id && entry.name?.text === "Reviewed by teammate"));
     await previous(page);
     await expect(history(page)).toContainText("“Reviewed by teammate”, named by other-admin via Review client at ");
     const trigger = history(page).getByRole("button", { name: "Rename revision", exact: true });
@@ -1503,6 +1565,7 @@ test.describe("document history through ub open", () => {
     await page.keyboard.press("Backspace");
     await expect(live.locator(":scope > p")).toHaveText(["The blue fox stays.", "A surviving paragraph."]);
     await expect.poll(() => harness().hubText(room)).not.toContain("A removed paragraph.");
+    await waitForHistoryCatalog(page, entries => entries.length === 2);
 
     const path = new URL(page.url()).pathname;
     const peer = await openApp(browser, path, { readySelector: ".ub-editor .ProseMirror" });

@@ -472,13 +472,20 @@ test.fixme("split history draws each caption and keeps callout links keyboard re
   const page = await openApp(browser, `/${harness().workspace}/${created.uuid}`, {
     contextOptions: { viewport: { width: 1440, height: 1000 } },
   });
+  const catalogReady = page.waitForResponse(response => {
+    const url = new URL(response.url());
+    return url.pathname === "/api/revisions" && !url.searchParams.has("revision") && response.ok();
+  });
   await page.route("**/api/revisions?**", async route => {
     const revision = new URL(route.request().url()).searchParams.get("revision");
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(revision === null ? {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      history: { complete: true, lastRefresh: new Date().toISOString(), refreshFailed: false, offline: false, newestDownloadedRevision: latest },
+      ...(revision === null ? {
       revisions: [{ id: latest, author: null, startedAt: 2_000, endedAt: null },
         { id: earlier, author: null, startedAt: 1_000, endedAt: 2_000 }],
-    } : { state: states[revision] }) });
+    } : { state: states[revision] }) }) });
   });
+  await catalogReady;
   await page.context().route("https://example.invalid/**", route => route.fulfill({
     contentType: "text/html", body: "<p>Historical destination</p>",
   }));

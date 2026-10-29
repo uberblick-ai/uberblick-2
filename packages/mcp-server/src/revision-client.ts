@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import * as Y from "yjs";
+import type * as Y from "yjs";
 import { getDirectoryEntry, getMeta, isDocId, snapshotRevision, type RevisionEntry, type RevisionRequest } from "@uberblick/schema";
 import type { Replicas } from "./replica.js";
 import { HistoryMirrorCache } from "./history-mirror-cache.js";
@@ -156,22 +156,6 @@ function historyReadError(error: unknown, uuid: string): unknown {
   return error instanceof RevisionClientError ? new RevisionClientError(error.code, { ...error.details, uuid }) : error;
 }
 
-/** Online browser adapter; MCP uses readDocumentHistory's cache contract. */
-export async function listDocumentRevisions(
-  replicas: Replicas,
-  uuid: string,
-  options: RevisionReadOptions = {},
-): Promise<RevisionEntry[]> {
-  const response = await requestRevisions(replicas, uuid, {
-    operation: "list", ...(options.includeNames === true ? { includeNames: true } : {}),
-    ...(options.includeTitles === true ? { includeTitles: true } : {}),
-  }, options);
-  if (!response.ok) throw new RevisionClientError(response.error === "unavailable" ? "unreachable" : response.error,
-    response.error === "deleted" ? { uuid } : {});
-  if (!("revisions" in response)) throw new RevisionClientError("unsupported");
-  return response.revisions;
-}
-
 /** Hub-owned naming leaves the local document and its update log unchanged. */
 export async function mutateDocumentRevision(
   replicas: Replicas,
@@ -218,27 +202,6 @@ export async function restoreDocumentRevision(
 /** The checksum covers exactly the title, visible blocks and data shown to this client. */
 export function documentRevisionChecksum(doc: Y.Doc): string {
   return createHash("sha256").update(snapshotRevision(doc).checksum).digest("hex");
-}
-
-/** Online browser adapter returning a detached view with no document write-back route. */
-export async function getDocumentRevision(
-  replicas: Replicas,
-  uuid: string,
-  revisionId: string,
-  options: RevisionReadOptions = {},
-): Promise<Y.Doc> {
-  const response = await requestRevisions(replicas, uuid, { operation: "get", revisionId }, options);
-  if (!response.ok) throw new RevisionClientError(response.error === "unavailable" ? "unreachable" : response.error,
-    response.error === "deleted" ? { uuid } : {});
-  if (!("state" in response)) throw new RevisionClientError("unsupported");
-  const snapshot = new Y.Doc();
-  try {
-    Y.applyUpdate(snapshot, response.state);
-    return snapshot;
-  } catch {
-    snapshot.destroy();
-    throw new RevisionClientError("unsupported");
-  }
 }
 
 export async function readDocumentRevision(replicas: Replicas, uuid: string, revisionId: string, options: RevisionReadOptions = {}) {

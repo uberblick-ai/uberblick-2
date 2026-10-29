@@ -37,9 +37,9 @@ function snapshot(title: string): Y.Doc {
 function historyAt(index: number, since = false, busy = false): DocumentHistory {
   const baseline = entries[3]!;
   return {
-    entries, entry: entries[index]!, titles: {}, active: true, available: true, busy, error: null,
+    entries, entry: entries[index]!, titles: {}, active: true, available: true, connected: true, history: null, downloading: false, busy, error: null,
     filter: "all", setFilter: vi.fn(), comparisonView: "split", setComparisonView: vi.fn(), canBack: index < entries.length - 1, canForward: true,
-    selection: { index, before: snapshot(since ? baseline.id : entries[index + 1]!.id), after: snapshot(entries[index]!.id),
+    selection: { index, entry: entries[index]!, entries, before: snapshot(since ? baseline.id : entries[index + 1]!.id), after: snapshot(entries[index]!.id),
       ...(since ? { comparedWith: baseline } : {}) },
     collapseUnchanged: true, setCollapseUnchanged: vi.fn(), back: vi.fn(), forward: vi.fn(), open: vi.fn(), openSession: vi.fn(),
     sinceLastNamed: vi.fn(), sinceNamed: vi.fn(), name: vi.fn(async () => {}), rename: vi.fn(async () => {}),
@@ -55,6 +55,25 @@ function description(button: HTMLButtonElement): HTMLElement {
 }
 
 describe("revision attribution", () => {
+  it("keeps comparison attribution and content fixed when the live catalog changes", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1200, 900));
+    const history = historyAt(1, true);
+    const view = render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);
+    const header = view.container.querySelector(".ub-history-who")!.textContent;
+    const sides = Array.from(view.container.querySelectorAll(".ub-revision-side")).map(side => side.textContent);
+    const editors = Array.from(view.container.querySelectorAll(".ProseMirror"));
+    const changed = { ...entries[1]!, author: { ...person, githubUsername: "later-author" }, title: "Later title" };
+    const published = [{ ...entries[0]!, id: "later" }, entries[0]!, changed, entries[2]!, { ...entries[3]!, author: changed.author }];
+    view.rerender(<RevisionPane history={{ ...history, entries: published, selection: { ...history.selection!, index: 2 } }} docLinks={null} workspaceSettings={null} writable />);
+    expect(view.container.querySelector(".ub-history-who")!.textContent).toBe(header);
+    expect(Array.from(view.container.querySelectorAll(".ub-revision-side")).map(side => side.textContent)).toEqual(sides);
+    const preserved = view.container.querySelectorAll(".ProseMirror");
+    expect(preserved[0]).toBe(editors[0]);
+    expect(preserved[1]).toBe(editors[1]);
+    expect(screen.getByText("2 of 4 ·")).toBeTruthy();
+    expect(screen.queryByText(/later-author/)).toBeNull();
+  });
+
   it.each([
     [{ kind: "browser", name: "Browser" }, "written by hand 👏", "in the browser"],
     [{ kind: "mcp", name: "Claude Desktop" }, "via Claude", "via Claude"],
@@ -66,6 +85,7 @@ describe("revision attribution", () => {
       text: "Accepted", namer: { githubUsername: "alice", surface }, namedAt: 40, canManage: false,
     } };
     history.entries = [entries[0]!, history.entry, entries[2]!, entries[3]!];
+    history.selection = { ...history.selection!, entry: history.entry, entries: history.entries };
     const view = render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} />);
     const header = view.container.querySelector(".ub-history-who")!;
     expect(header.querySelector(".ub-history-author")?.textContent).toBe(`ben ${authorLabel}`);
@@ -92,7 +112,7 @@ describe("revision attribution", () => {
     history.entries = revisions;
     history.entry = revisions[1]!;
     history.filter = filter;
-    history.selection = { ...history.selection!, comparedWith: revisions[5]! };
+    history.selection = { ...history.selection!, entry: history.entry, entries: revisions, comparedWith: revisions[5]! };
     const view = render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);
     const header = view.container.querySelector(".ub-history-who")!;
     const authors = "ben written by hand 👏, uberblick-agent via Claude, ben via Codex";
@@ -111,6 +131,39 @@ describe("revision attribution", () => {
     expect(span.textContent).not.toBe("");
     expect(after.textContent).toContain(span.textContent);
     expect(screen.getByText("Before · lena · “Reviewed”")).not.toBeNull();
+  });
+});
+
+describe("cached history states", () => {
+  it("identifies an offline downloaded comparison and hides its name management control", () => {
+    const history = historyAt(0);
+    const entry = { ...entries[0]!, name: { ...entries[3]!.name!, canManage: true } };
+    history.entry = entry;
+    history.selection = { ...history.selection!, entry, entries: [entry, ...entries.slice(1)] };
+    history.connected = false;
+    history.history = { complete: true, lastRefresh: null, refreshFailed: false, offline: true, newestDownloadedRevision: entry.id };
+    const view = render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);
+    expect(screen.getByRole("status").textContent).toBe("Offline. Showing downloaded history.");
+    expect(screen.getByText(/· newest downloaded state/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Rename revision" })).toBeNull();
+    view.rerender(<RevisionPane history={{ ...history, connected: true, history: { ...history.history, offline: false } }} docLinks={null} workspaceSettings={null} writable archived />);
+    expect(screen.queryByRole("button", { name: "Rename revision" })).toBeNull();
+  });
+
+  it("distinguishes an incomplete empty catalog, a failed refresh and never-downloaded offline history", () => {
+    const history = { ...historyAt(0), entry: null, selection: null, entries: [], history: {
+      complete: false, lastRefresh: null, refreshFailed: false, offline: false, newestDownloadedRevision: null,
+    } };
+    const view = render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} />);
+    expect(screen.getByRole("status").textContent).toBe("History is still downloading…");
+    expect(screen.queryByText("No revisions yet")).toBeNull();
+    view.rerender(<RevisionPane history={{ ...history, history: { ...history.history, refreshFailed: true } }} docLinks={null} workspaceSettings={null} />);
+    expect(screen.getByRole("status").textContent).toContain("Last history refresh failed.");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh history" }));
+    expect(history.refresh).toHaveBeenCalledOnce();
+    view.rerender(<RevisionPane history={{ ...history, error: "Connect once to download history.", history: { ...history.history, offline: true } }} docLinks={null} workspaceSettings={null} />);
+    expect(screen.getByText("Connect once to download history.")).toBeTruthy();
+    expect(screen.getByText("Offline. History is not fully downloaded.")).toBeTruthy();
   });
 });
 
@@ -235,7 +288,7 @@ describe("revision comparison controls", () => {
     Y.applyUpdate(after, Y.encodeStateAsUpdate(before));
     editBlock(after, changed, "Keep old words.", "Keep new words.");
     editBlock(after, last, "Earlier ending", "Later ending");
-    history.selection = { index: 1, before, after };
+    history.selection = { index: 1, entry: entries[1]!, entries, before, after };
     history.comparisonView = preference;
     const view = render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);
     expect(view.container.querySelector(".ub-revision-split")).toBeNull();
@@ -286,7 +339,7 @@ describe("revision comparison controls", () => {
     history.entries = [entries[0]!, selected, entries[2]!, baseline];
     history.entry = selected;
     history.filter = "named";
-    history.selection = { ...history.selection!, comparedWith: baseline };
+    history.selection = { ...history.selection!, entry: selected, entries: history.entries, comparedWith: baseline };
     const view = render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);
     expect(screen.getByText("Before · lena · “Reviewed”")).not.toBeNull();
     expect(view.container.querySelectorAll(".ub-revision-side-label")[1]?.textContent).toContain("After · ben written by hand 👏");
@@ -307,7 +360,7 @@ describe("revision comparison controls", () => {
     const selected = { ...entries[1]!, name: { text: "Kickoff", namer: person, namedAt: 40, canManage: false } };
     history.entries = [entries[0]!, selected, entries[2]!, baseline];
     history.entry = selected;
-    history.selection = { ...history.selection!, comparedWith: baseline };
+    history.selection = { ...history.selection!, entry: selected, entries: history.entries, comparedWith: baseline };
     render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);
     expect(screen.getByText("Before · Earlier content")).not.toBeNull();
     expect(screen.getByText("· compared with Earlier content")).not.toBeNull();

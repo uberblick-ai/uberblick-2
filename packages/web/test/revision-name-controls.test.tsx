@@ -26,7 +26,7 @@ const named: RevisionEntry = { id: "rev-1", author: person, startedAt: 1, endedA
 
 function fakeHistory(overrides: Partial<DocumentHistory> = {}): DocumentHistory {
   return {
-    entries: [named], selection: null, busy: false, error: null, titles: {}, collapseUnchanged: true, setCollapseUnchanged: vi.fn(), available: true, active: false, entry: null,
+    entries: [named], selection: null, busy: false, error: null, titles: {}, collapseUnchanged: true, setCollapseUnchanged: vi.fn(), available: true, active: false, connected: true, history: null, downloading: false, entry: null,
     name: vi.fn(async () => {}), rename: vi.fn(async () => {}), removeName: vi.fn(async () => {}),
     ...overrides,
   } as unknown as DocumentHistory;
@@ -47,6 +47,26 @@ async function openNaming(history = fakeHistory()) {
 }
 
 describe("inline revision naming", () => {
+  it("offers naming and management only while connected, including names created by another writer", () => {
+    const live = liveDocument();
+    const history = fakeHistory({ connected: false });
+    const view = render(<RevisionNameControls history={history} liveDocument={live} writable />);
+    expect(screen.queryByRole("button", { name: "Name current revision" })).toBeNull();
+    const otherWriter = { ...named, name: { ...named.name!, namer: { ...person, githubUsername: "lena" } } };
+    const selected = fakeHistory({ connected: false, entry: otherWriter, selection: { index: 0 } as DocumentHistory["selection"] });
+    view.rerender(<RevisionNameControls history={selected} liveDocument={null} writable />);
+    expect(screen.queryByRole("button", { name: "Rename revision" })).toBeNull();
+    view.rerender(<RevisionNameControls history={{ ...selected, connected: true }} liveDocument={null} writable />);
+    expect(screen.getByRole("button", { name: "Rename revision" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Rename revision" }));
+    fireEvent.change(field(), { target: { value: "Changed while disconnecting" } });
+    view.rerender(<RevisionNameControls history={selected} liveDocument={null} writable />);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(selected.rename).not.toHaveBeenCalled();
+    expect(selected.removeName).not.toHaveBeenCalled();
+    live.destroy();
+  });
+
   it("submits once on Enter, even when blur follows", async () => {
     const { history } = await openNaming();
     fireEvent.change(field(), { target: { value: "Reviewed" } });

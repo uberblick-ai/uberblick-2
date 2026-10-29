@@ -6,6 +6,7 @@
 import { useState, type ReactElement } from "react";
 import { renamedFrom } from "../document/document-history.js";
 import type { DocumentHistory } from "../document/document-history.js";
+import { historyCacheMessage, newestHistoryLabel } from "../document/history-presentation.js";
 import { revisionAuthor, revisionAuthors, revisionGroups, revisionSpan, revisionTime, type RevisionAuthor, type RevisionItem } from "../document/revision-list.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
 import { SidebarContent as SidebarScrollContent, SidebarHeader } from "../shadcn/sidebar.js";
@@ -43,7 +44,7 @@ function RevisionRow({ item: { entry, index }, history, selected, now }: {
           {author.name}{author.surface !== "" && <span className="font-normal text-(--sidebar-muted-foreground)"> {author.surface}</span>}
         </span>
         {(latest || when !== null || renamed) && <span className="ub-type-caption text-(--sidebar-muted-foreground)">
-          {latest && "Current version"}{latest && when !== null && " · "}
+          {latest && newestHistoryLabel(history)}{latest && when !== null && " · "}
           {when !== null && <time dateTime={when.dateTime} title={when.title}>{when.label}</time>}
           {renamed && <span className="ub-history-renamed-tag">{latest || when !== null ? " · renamed" : "renamed"}</span>}
         </span>}
@@ -78,7 +79,7 @@ function SessionRow({ item, history, selected, revealIndex, now }: {
               <TagIcon /><span className="min-w-0 wrap-anywhere">{entry.name.text}</span>
             </span>])}
             <span className="ub-type-ui font-medium text-sidebar-foreground wrap-anywhere">{authors.map(author => `${author.name}${author.surface === "" ? "" : ` ${author.surface}`}`).join(", ")}</span>
-            <span className="ub-type-caption text-(--sidebar-muted-foreground)" title={span.title}>{item.index === 0 && "Current version · "}{span.label}</span>
+            <span className="ub-type-caption text-(--sidebar-muted-foreground)" title={span.title}>{item.index === 0 && `${newestHistoryLabel(history)} · `}{span.label}</span>
           </span>
         </Button>
         <CollapsibleTrigger asChild>
@@ -110,6 +111,7 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
   const revealIndex = selected ?? (history.selection?.index === 0 && history.selection.comparedWith?.name != null
     ? entries.findIndex(entry => entry.id === history.selection?.comparedWith?.id) : null);
   const count = entries.length === 1 ? "1 revision" : `${entries.length} revisions`;
+  const cacheMessage = historyCacheMessage(history);
   return (
     <>
       <SidebarHeader className="pr-12 [@media(any-pointer:coarse)]:pr-15 pb-1">
@@ -155,6 +157,10 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
         </label>
       </div>
       <SidebarScrollContent className="pb-2 [&>*]:shrink-0">
+        {cacheMessage !== null && <div className="px-4 py-2 ub-type-caption text-(--sidebar-muted-foreground)" role="status">
+          <p className="m-0">{cacheMessage}</p>
+          {history.history?.refreshFailed === true && <Button variant="plain" size="custom" type="button" className="mt-1.5 p-0 ub-type-caption font-medium text-sidebar-foreground underline" onClick={history.refresh}>Refresh history</Button>}
+        </div>}
         {history.error !== null && (
           <div className="px-4 py-2 ub-type-caption text-(--sidebar-muted-foreground)" role="status">
             <p className="m-0">{history.error}</p>
@@ -164,7 +170,7 @@ export function HistorySidebar({ history, title, onNow = history.now }: {
         {history.error === null && history.entries === null && history.busy && (
           <p className="m-0 px-4 py-2 ub-type-caption text-(--sidebar-muted-foreground)" role="status">Loading history…</p>
         )}
-        {history.entries !== null && entries.length === 0 && history.error === null && (
+        {history.entries !== null && entries.length === 0 && history.error === null && history.history?.complete !== false && (
           <p className="m-0 px-4 py-2 ub-type-caption text-(--sidebar-muted-foreground)" role="status">No revisions yet</p>
         )}
         {filter === "named" && entries.length > 0 && groups.length === 0 && (

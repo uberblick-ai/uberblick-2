@@ -11,7 +11,7 @@ import { createTeamHub } from "@uberblick/hub/team";
 import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { writeHubLogin } from "../src/auth-store.js";
 import { acquireInitLock } from "../src/init-lock.js";
-import { documentRevisionChecksum, getDocumentRevision, listDocumentRevisions, mutateDocumentRevision, readDocumentHistory, readDocumentRevision, restoreDocumentRevision } from "../src/revision-client.js";
+import { documentRevisionChecksum, mutateDocumentRevision, readDocumentHistory, readDocumentRevision, restoreDocumentRevision } from "../src/revision-client.js";
 import { HubSync } from "../src/sync.js";
 import { openWorkspaceReplicas, type WorkspaceReplicaSet } from "../src/workspace-replicas.js";
 import { rememberWorkspaceBindings } from "../src/workspace-registry.js";
@@ -179,7 +179,7 @@ it("updates an already cached catalog before a successful naming call returns", 
 it("returns an empty list only when the hub confirms there are no revisions", async () => {
   const fixture = await admitted();
   fixture.reply((request, send) => send({ requestId: request.requestId, ok: true, revisions: [] }));
-  await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid)).resolves.toEqual([]);
+  await expect(readDocumentHistory(fixture.opened.replicas, fixture.uuid)).resolves.toMatchObject({ revisions: [] });
 });
 
 it("delivers revision name notices with their attached room until unsubscribed", async () => {
@@ -197,7 +197,7 @@ it("delivers revision name notices with their attached room until unsubscribed",
   unsubscribe();
   connection.sendStateless(encodeRevisionCatalogChanged());
   fixture.reply((request, send) => send({ requestId: request.requestId, ok: true, revisions: [] }));
-  await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid)).resolves.toEqual([]);
+  await expect(readDocumentHistory(fixture.opened.replicas, fixture.uuid)).resolves.toMatchObject({ revisions: [] });
   expect(notices).toEqual([room]);
 });
 
@@ -215,7 +215,7 @@ it("rechecks background priority at send time while foreground history remains a
   const background = sync.requestRevisions(room, { operation: "list" }, 5_000, { background: true });
   quiet = false;
 
-  await expect(listDocumentRevisions(fixture.opened.replicas, fixture.uuid)).resolves.toEqual([]);
+  await expect(readDocumentHistory(fixture.opened.replicas, fixture.uuid)).resolves.toMatchObject({ revisions: [] });
   expect(requests).toHaveLength(1);
 
   quiet = true;
@@ -238,8 +238,6 @@ it.each(["directory", "document"] as const)("refuses decision history known thro
   }
   const request = vi.spyOn(opened.replicas.sync, "requestRevisions");
   const expected = { code: "decision-no-history", details: { uuid, topic } };
-  await expect(listDocumentRevisions(opened.replicas, uuid)).rejects.toMatchObject(expected);
-  await expect(getDocumentRevision(opened.replicas, uuid, "earlier")).rejects.toMatchObject(expected);
   await expect(readDocumentHistory(opened.replicas, uuid)).rejects.toMatchObject(expected);
   await expect(readDocumentRevision(opened.replicas, uuid, "earlier")).rejects.toMatchObject(expected);
   await expect(mutateDocumentRevision(opened.replicas, uuid, { operation: "name", name: "Reviewed", checksum: "unused" }))
@@ -329,7 +327,6 @@ it.each([
 it("distinguishes local-only, missing sign-in and an unreachable hub", async () => {
   const uuid = randomUUID();
   const local = workspace();
-  await expect(listDocumentRevisions(local.replicas, uuid)).rejects.toMatchObject({ code: "local-only" });
   await expect(readDocumentHistory(local.replicas, uuid)).rejects.toMatchObject({ code: "local-only" });
 
   const hub = await startDeviceSyncHub({ directory: tempDir() });
