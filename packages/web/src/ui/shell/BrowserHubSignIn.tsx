@@ -50,12 +50,12 @@ function sessionFields(value: unknown): { username: string; expiresAt: number } 
     ? { username: fields.username, expiresAt: fields.expiresAt } : null;
 }
 
-async function postBrowser(requests: Set<AbortController>, path: string, body: object, token: string | undefined, timeoutMs: number): Promise<Answer> {
+export async function postBrowser(requests: Set<AbortController>, path: `/auth/browser/${string}` | "/oauth/consent/read" | "/oauth/consent/submit", body: object, token?: string, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Answer> {
   const request = new AbortController();
   requests.add(request);
   const deadline = setTimeout(() => request.abort(), timeoutMs);
   try {
-    const response = await fetch(new URL(`/auth/browser/${path}`, window.location.origin).href, {
+    const response = await fetch(new URL(path, window.location.origin).href, {
       method: "POST", credentials: "omit", cache: "no-store", redirect: "error",
       headers: { "Content-Type": "application/json", Accept: "application/json",
         ...(token === undefined ? {} : { "X-Uberblick-Session": token }) },
@@ -79,7 +79,7 @@ function useSessionPolling(session: BrowserSession | null, busy: { current: bool
   }, [session, busy, checkSession]);
 }
 
-function useBrowserSignIn(onClaim: () => void) {
+export function useBrowserSignIn(onClaim: () => void) {
   const [availability, setAvailability] = useState<"checking" | "configured" | "not-configured" | "unavailable">("checking");
   const [session, setSession] = useState<BrowserSession | null>(null);
   const [approval, setApproval] = useState<Approval | null>(null);
@@ -96,7 +96,7 @@ function useBrowserSignIn(onClaim: () => void) {
   sessionRef.current = session;
 
   const post = useCallback((path: string, body: object = {}, token?: string, timeoutMs = REQUEST_TIMEOUT_MS) =>
-    postBrowser(requests.current, path, body, token, timeoutMs), []);
+    postBrowser(requests.current, `/auth/browser/${path}`, body, token, timeoutMs), []);
 
   const signedOut = useCallback((token: string, message: string | null = null): void => {
     if (tokenRef.current !== token) return;
@@ -269,7 +269,7 @@ function useBrowserSignIn(onClaim: () => void) {
     void checkSession(tokenRef.current);
   }
 
-  return { availability, session, approval, claimedWorkspaceId, error, busy, start, cancel, signOut, retry };
+  return { availability, session, approval, claimedWorkspaceId, error, busy, start, cancel, signOut, retry, signedOut };
 }
 
 /** The session is sent only to this page's origin, never to a configured websocket hub. */
@@ -278,19 +278,30 @@ export function BrowserHubSignIn({ claimStateKnown, claimable, onClaim }: {
   claimable: boolean;
   onClaim: () => void;
 }): ReactElement {
-  const { availability, session, approval, claimedWorkspaceId, error, busy, start, cancel, signOut, retry } = useBrowserSignIn(onClaim);
+  const signIn = useBrowserSignIn(onClaim);
+  return <BrowserHubSignInControls signIn={signIn} claimable={claimable} claimStateKnown={claimStateKnown} />;
+}
+
+export function BrowserHubSignInControls({ signIn, claimStateKnown, claimable, disabled = false, showClaimResult = true }: {
+  signIn: ReturnType<typeof useBrowserSignIn>;
+  claimStateKnown: boolean;
+  claimable: boolean;
+  disabled?: boolean;
+  showClaimResult?: boolean;
+}): ReactElement {
+  const { availability, session, approval, claimedWorkspaceId, error, busy, start, cancel, signOut, retry } = signIn;
   return (
     <section className="mt-4 space-y-3" aria-label="Browser sign-in">
       <div role="status">
         {session !== null ? <>
           <p>Signed in as <strong>{session.username}</strong>.</p>
-          {claimedWorkspaceId !== null && <p className="mt-2">Claimed this hub: you are a hub administrator and administrator of the default workspace (<code>{claimedWorkspaceId}</code>).</p>}
+          {showClaimResult && claimedWorkspaceId !== null && <p className="mt-2">Claimed this hub: you are a hub administrator and administrator of the default workspace (<code>{claimedWorkspaceId}</code>).</p>}
         </> : <p>{availability === "checking" ? "Checking this browser’s sign-in…" : "This browser is not signed in."}</p>}
       </div>
       <p>This page has no document access. Browser sessions last 24 hours, with no automatic renewal.</p>
       {availability === "not-configured" && <p>Browser sign-in is not configured on this hub.</p>}
       {error !== null && <p role="alert">{error}</p>}
-      {session !== null ? <Button variant="outline" disabled={busy !== ""} onClick={() => void signOut()}>
+      {session !== null ? <Button variant="outline" disabled={disabled || busy !== ""} onClick={() => void signOut()}>
         {busy === "sign-out" ? "Signing out…" : "Sign out"}
       </Button> : approval !== null ? <>
         <p>Open <a className="underline" href={approval.verificationUri} target="_blank" rel="noopener noreferrer">{approval.verificationUri}</a> and enter this code:</p>
