@@ -5,6 +5,36 @@ first. The first paragraph of each release is its summary; uberblick.ai shows
 the five newest. Upgrade steps appear only when a release needs more than
 updating the client and the hub.
 
+## v0.4.12 — 2026-10-29
+
+Downloaded document history for offline reading and local comparisons, history sessions and an Inline view, divider blocks, labelled scatter plots, and more control over comments and this computer's workspace copies.
+
+### Added
+
+- Web and MCP read history downloaded on this computer, including offline. One background refresher per workspace maintains the shared cache while connected (#2403, #2443, #2447, #2450, #2469).
+- Compare a downloaded revision with this computer's current title, blocks and data. Refresh updates the comparison, and Back to now keeps unsynced edits and unsent comments (#2481).
+- Divider blocks in the editor and MCP, with thematic-break and setext-heading Markdown support (#2454, #2466).
+- Labelled scatter plots with stored uncertainty ranges, colour and shape groups, selected-point details and keyboard selection (#2456).
+- `ub workspace detach <id|prefix>` makes this computer's hub workspace copy local, preserving its documents, settings and pending edits while leaving the hub and other computers unchanged (#2457).
+- Find pages and decisions by code-block language through MCP, document-list search and the command palette (#2437).
+- Public-client OAuth authorization-code exchange through the hub's `POST /oauth/token` endpoint (#2479).
+
+### Improved
+
+- Nearby revisions form history sessions with their authors, time span and named states; a session compares its changes together (#2468).
+- Switch history comparisons between Split and Inline, with the choice remembered across documents and visits (#2430).
+- Delete your own comments in the web app or through MCP, and edit your own comments through MCP `annotate`. Comments from other MCP clients are identified as agents (#2472, #2475, #2476).
+- The document header identifies local-only workspaces (#2471).
+- MCP reads expose prose formatting and table column widths, table writes can set those widths, and drawing-source writes return advisory diagnostics without rejecting the source (#2449, #2470).
+
+### Fixed
+
+- Markdown beginning with a divider is no longer mistaken for frontmatter unless the complete frontmatter shape is valid (#2454).
+- Large history word comparisons use bounded work and retain shared beginnings and ends when a stretch cannot be resolved (#2431).
+- Concurrent history refreshes keep downloaded catalogs and snapshots consistent (#2469).
+- macOS role selection and Figma control focus are more reliable (#2421).
+- Unknown MCP tag filters offer read recovery, and `get_doc` help agrees with its read contract (#2449, #2467).
+
 ## v0.4.11 — 2026-10-27
 
 Callout blocks, clearer comments and mentions, more useful history comparisons, wireframe.md 0.3.2, and fixes that keep local replicas and everyday editing reliable.
