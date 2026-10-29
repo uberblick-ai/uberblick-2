@@ -271,7 +271,7 @@ async function reloadSelection(owner: Session, operation: number, update: Update
     if (selected !== null) {
       const next = await readSelection(owner, entries, selected.index, operation, fresh, baseline);
       if (owner.operation !== operation) return;
-      if (next?.after !== selected.after || next?.before !== selected.before || next?.comparedWith !== selected.comparedWith) replacement.selection = next;
+      replacement.selection = next;
     }
     for (const [id, doc] of owner.documents) if (fresh.get(id) !== doc) doc.destroy();
     owner.documents = fresh;

@@ -6,6 +6,7 @@ import * as Y from "yjs";
 import { removeHubLogin, writeHubLogin } from "../src/auth-store.js";
 import { HistoryCache, type CachedHistoryCatalog, type HistoryCacheResult, type HistoryCacheStamp } from "../src/history-cache.js";
 import { HistoryMirrorCache } from "../src/history-mirror-cache.js";
+import { HistoryMirror, type MirrorCache } from "../src/history-mirror.js";
 import { HistoryReader, type HistoryReaderSource } from "../src/history-reader.js";
 import { acquireInitLock } from "../src/init-lock.js";
 import type { HistoryRetention } from "../src/local-settings.js";
@@ -77,7 +78,7 @@ async function storage() {
   const putSnapshot = (value: ReturnType<typeof snapshot>) => {
     ready(cache.putSnapshot(token, PAGE, value.revision.id, value.checksum, value.state));
   };
-  return { env, store, worker, cache, token, seed, putSnapshot };
+  return { path, env, store, worker, cache, token, seed, putSnapshot };
 }
 
 async function fixture() {
@@ -117,6 +118,96 @@ it("reads cached history and a verified snapshot without invoking the hub reques
   try { expect(getMeta(read.doc).title).toBe("Downloaded title"); }
   finally { read.doc.destroy(); }
   expect(test.request).not.toHaveBeenCalled();
+});
+
+it("keeps the workspace mirror running when name write-through wins a catalog publication", async () => {
+  const test = await fixture();
+  const other = "2840680a-c086-44bd-b54a-b4be9adc7d84";
+  const original = snapshot("original");
+  const named = { ...original.revision, name: { text: "Reviewed", namer: null, namedAt: 3, canManage: true } };
+  test.seed([original.revision]);
+  test.putSnapshot(original);
+
+  // Capture the reader's real write-through publication, then put it at the CAS seam.
+  const writes = vi.spyOn(test.worker, "putCatalog");
+  await test.reader.writeThrough(PAGE, named);
+  const namePublication = writes.mock.calls[0]?.[1];
+  expect(namePublication).toMatchObject({ version: null, revisions: [named] });
+  if (namePublication === undefined) throw new Error("The name was not published.");
+  test.seed([original.revision]);
+  const competing = new HistoryCache(test.path, WORKSPACE, test.env);
+  resources.push(() => competing.close());
+  ready(competing.open(STAMP));
+  const hold = test.cache.hold.bind(test.cache);
+  vi.spyOn(test.cache, "hold").mockImplementationOnce((token, uuid, revision) => {
+    const held = hold(token, uuid, revision);
+    ready(competing.putCatalog(token, uuid, namePublication));
+    return held;
+  });
+  const publications: HistoryCacheResult<void>[] = [];
+  const mirrorCache: MirrorCache = {
+    open: stamp => test.worker.open(stamp), resume: () => test.worker.resume(),
+    readCatalog: uuid => test.worker.readCatalog(uuid),
+    putCatalog: async (uuid, input) => {
+      const result = test.cache.putCatalog(test.token, uuid, input);
+      publications.push(result);
+      return result;
+    },
+    markRefreshFailed: uuid => test.worker.markRefreshFailed(uuid),
+    listPages: () => test.worker.listPages(),
+    hasSnapshot: (uuid, revision, checksum) => test.worker.hasSnapshot(uuid, revision, checksum),
+    putVerifiedSnapshot: (uuid, revision, checksum, state) => test.worker.putVerifiedSnapshot(uuid, revision, checksum, state),
+    evict: (uuid, retention, now) => test.worker.evict(uuid, retention, now),
+    close: async () => {},
+  };
+  let releaseList!: (response: RevisionResponse) => void;
+  const firstList = new Promise<RevisionResponse>(resolve => { releaseList = resolve; });
+  settleReplies.push(() => releaseList(listed([original.revision])));
+  let pages = [PAGE, other].map(uuid => ({ uuid, room: `${WORKSPACE}/${uuid}`, sequence: 1, archived: false }));
+  let reply = async (_room: string, operation: Operation): Promise<RevisionResponse> => operation.operation === "list"
+    ? listed([original.revision]) : downloaded(original);
+  const request = vi.fn(async (room: string, operation: Operation) => reply(room, operation));
+  request.mockImplementationOnce(async () => firstList);
+  const mirror = new HistoryMirror({
+    pages: () => pages, retention: () => test.state.retention, stamp: () => STAMP,
+    ready: () => true, request, now: () => 2_000, deadlineDelay: deadline => deadline - 2_000,
+  }, mirrorCache);
+  resources.unshift(() => mirror.close());
+  mirror.refresh();
+  mirror.connectionChanged(true);
+  await waitUntil("the mirror's first list request", () => request.mock.calls.length === 1);
+  releaseList(listed([original.revision]));
+  await waitUntil("the second page's catalog after the competing publication", () => ready(test.cache.readCatalog(test.token, other))?.complete === true);
+  expect(publications[0]).toEqual({ status: "superseded" });
+  expect(ready(test.cache.readCatalog(test.token, PAGE))).toMatchObject({ version: null, revisions: [named] });
+
+  const renamed = { ...named, name: { ...named.name, text: "Reviewed again" } };
+  await test.reader.writeThrough(PAGE, renamed);
+  reply = async (_room, operation) => operation.operation === "list" ? listed([renamed], "renamed") : downloaded(original);
+  mirror.notice(`${WORKSPACE}/${PAGE}`);
+  await waitUntil("the later name notice to refresh the catalog", () => ready(test.cache.readCatalog(test.token, PAGE))?.version === "renamed");
+  expect(request.mock.calls.filter(([room, operation]) => room.endsWith(PAGE) && operation.operation === "list")
+    .map(([, operation]) => operation.ifVersion)).toEqual(["version-one", undefined]);
+
+  const otherNamed = { ...named, name: { ...named.name, text: "Named on another page" } };
+  reply = async (room, operation) => operation.operation === "list"
+    ? listed(room.endsWith(PAGE) ? [renamed] : [otherNamed], "other-named") : downloaded(original);
+  mirror.notice(`${WORKSPACE}/${other}`);
+  await waitUntil("a hub name notice on the other page to reach the cache", () =>
+    ready(test.cache.readCatalog(test.token, other))?.version === "other-named");
+  expect(ready(test.cache.readCatalog(test.token, other))?.revisions).toEqual([otherNamed]);
+
+  const edited = snapshot("edited", "Edited after naming");
+  const otherEdited = snapshot("other-edited", "Another page after naming");
+  reply = async (room, operation) => operation.operation === "list"
+    ? listed(room.endsWith(PAGE) ? [edited.revision, renamed] : [otherEdited.revision, otherNamed], "edited")
+    : downloaded(room.endsWith(PAGE) ? edited : otherEdited);
+  pages = pages.map(page => ({ ...page, sequence: page.sequence + 1 }));
+  mirror.refresh();
+  await waitUntil("ordinary edits on both pages to be downloaded", () => ready(test.cache.hasSnapshot(test.token, PAGE, edited.revision.id, edited.checksum)) &&
+    ready(test.cache.hasSnapshot(test.token, other, otherEdited.revision.id, otherEdited.checksum)));
+  expect(ready(test.cache.readCatalog(test.token, PAGE))?.revisions).toEqual([edited.revision, renamed]);
+  expect(ready(test.cache.readCatalog(test.token, other))?.revisions).toEqual([otherEdited.revision, otherNamed]);
 });
 
 it("keeps downloaded history readable after sign-out and refused admission", async () => {

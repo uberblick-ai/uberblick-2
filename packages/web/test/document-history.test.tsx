@@ -406,6 +406,25 @@ describe("address-controlled history views", () => {
     expect(fix.navigate).not.toHaveBeenCalled();
   });
 
+  it("refreshes a closed revision's naming metadata while reusing its unchanged snapshots", async () => {
+    const api = client();
+    const fix = mountRouted(api, { revision: "middle" });
+    await act(async () => {});
+    const selected = fix.reading().selection!;
+    const named: RevisionEntry = { ...entries[1]!, name: {
+      text: "Reviewed by another writer", namer: null, namedAt: 120, canManage: true,
+    } };
+    const refreshed = [entries[0]!, named, entries[2]!];
+    vi.mocked(api.list).mockResolvedValue(listed(refreshed));
+    await act(async () => fix.reading().refresh());
+    expect(fix.reading().selection).toMatchObject({ after: selected.after, before: selected.before, entry: named, entries: refreshed });
+    expect(fix.reading().entry).toEqual(named);
+    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(selected.after.isDestroyed).toBe(false);
+    expect(selected.before?.isDestroyed).toBe(false);
+    expect(fix.navigate).not.toHaveBeenCalled();
+  });
+
   it("keeps a history address loading until its client becomes available", async () => {
     const fix = mountRouted(null, { revision: "middle" });
     expect(fix.reading()).toMatchObject({ available: false, active: true, busy: true, selection: null, error: null });

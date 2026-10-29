@@ -509,6 +509,10 @@ it.each([
   { name: "a disabled hub", response: { requestId: "request", ok: false, error: "unsupported" } as RevisionResponse },
   { name: "a legacy catalog", response: { requestId: "request", ok: true,
     revisions: [{ id: "legacy", author: null, startedAt: 1, endedAt: 2 }] } as RevisionResponse },
+  { name: "a catalog without a version", response: { requestId: "request", ok: true,
+    revisions: [revision("closed")] } as RevisionResponse },
+  { name: "a versioned legacy catalog", response: { requestId: "request", ok: true, version: "legacy",
+    revisions: [{ id: "legacy", author: null, startedAt: 1, endedAt: 2 }] } as RevisionResponse },
 ])("suspends unsupported mirroring for $name until reconnect", async ({ response }) => {
   const test = fixture();
   test.state.reply = async () => response;
