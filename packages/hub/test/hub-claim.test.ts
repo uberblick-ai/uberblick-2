@@ -133,7 +133,7 @@ describe("fresh deployed hub initialization", () => {
       expect(name).not.toBeNull();
       expect(validateWorkspaceName(name!)).toBe(name);
       expect(isTagCatalogSeeded(settings)).toBe(true);
-      expect(listTagCatalog(settings).map(({ id, name }) => ({ id, name }))).toEqual([...EXAMPLE_TAGS]);
+      expect(listTagCatalog(settings)).toEqual([...EXAMPLE_TAGS]);
       deleteTagCatalogEntry(settings, EXAMPLE_TAGS[0].id);
       setWorkspaceName(settings, "Renamed team workspace");
       first.database.connection.prepare("UPDATE documents SET data = ? WHERE name = ?")

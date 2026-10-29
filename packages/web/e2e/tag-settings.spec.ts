@@ -112,6 +112,9 @@ test("Tags settings is address-selected and its catalog changes converge", async
   await expect(first.getByRole("heading", { name: "New tag", level: 2 })).toBeVisible();
   await expect(first.locator("[data-tag-list] tbody tr")).toHaveCount(examples.length);
   await expect(first.locator("[data-tag-list] .ub-tag .ub-tag-name")).toHaveText(examples);
+  await expect(first.locator("[data-tag-list] tbody tr td:nth-child(2)")).toHaveText(
+    EXAMPLE_TAGS.map((entry) => "description" in entry ? entry.description : "No description"),
+  );
   await expect(first.locator("[data-tag-list]").getByRole("columnheader")).toHaveText(["Name", "Description", "Actions"]);
 
   const name = first.getByLabel("Name", { exact: true });

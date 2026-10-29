@@ -9,6 +9,7 @@ import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Hub } from "@uberblick/hub";
 import {
+  EXAMPLE_TAGS,
   appendBlock,
   getBlocks,
   getDirectoryMap,
@@ -352,8 +353,7 @@ describe("transport-free MCP engine", () => {
     });
     engines.push(engine);
     expect(isTagCatalogSeeded(engine.replicas.settings().doc)).toBe(true);
-    expect(listTagCatalog(engine.replicas.settings().doc).map((tag) => tag.name))
-      .toEqual(["auth", "billing", "guidance", "mcp", "permissions", "rfc", "sync"]);
+    expect(listTagCatalog(engine.replicas.settings().doc)).toEqual([...EXAMPLE_TAGS]);
     expect(readSidebar(engine.replicas.sidebar().doc)).toHaveLength(0);
 
     let ticks = 0;
