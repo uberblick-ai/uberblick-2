@@ -189,7 +189,7 @@ describe("workspace tag catalog", () => {
     expect(readDocumentTags(document([BILLING]), deleted)).toEqual([recreated]);
   });
 
-  it("seeds one example set and never recreates a deleted curated example", () => {
+  it("seeds eight fixed identities with exactly three starting descriptions", () => {
     const first = new Y.Doc();
     const second = new Y.Doc();
     seedTagCatalog(first);
@@ -197,18 +197,39 @@ describe("workspace tag catalog", () => {
     syncDocs(first, second);
     expect(isTagCatalogSeeded(first)).toBe(true);
     expect(listTagCatalog(first)).toEqual(listTagCatalog(second));
-    expect(listTagCatalog(first)).toHaveLength(EXAMPLE_TAGS.length);
+    expect(listTagCatalog(first)).toEqual([
+      { id: "00000000-0000-4000-8000-000000000001", name: "auth" },
+      { id: "00000000-0000-4000-8000-000000000002", name: "billing" },
+      {
+        id: "00000000-0000-4000-8000-000000000007", name: "guidance",
+        description: "Workspace rules for writing and editing pages; agents are pointed to these at startup and read them before their first write.",
+      },
+      { id: "00000000-0000-4000-8000-000000000003", name: "mcp" },
+      { id: "00000000-0000-4000-8000-000000000004", name: "permissions" },
+      {
+        id: "00000000-0000-4000-8000-000000000006", name: "rfc",
+        description: "The discussion behind a decision record: options, evidence and the detail developers need to align; the decision record holds the answer.",
+      },
+      { id: "00000000-0000-4000-8000-000000000005", name: "sync" },
+      {
+        id: "00000000-0000-4000-8000-000000000008", name: "technical-reference",
+        description: "Readers act on exact names, fields, codes or formats, such as API clients or agents.",
+      },
+    ]);
+  });
+
+  it.each(["rfc", "guidance", "technical-reference"])("never recreates deleted example %s", (name) => {
     const fresh = new Y.Doc();
-    createTagCatalogEntry(fresh, "rfc", AUTH);
+    createTagCatalogEntry(fresh, name, AUTH);
     deleteTagCatalogEntry(fresh, AUTH);
     seedTagCatalog(fresh);
-    expect(listTagCatalog(fresh).some((entry) => entry.name === "rfc")).toBe(false);
+    expect(listTagCatalog(fresh).some((entry) => entry.name === name)).toBe(false);
     const before = Y.encodeStateAsUpdate(fresh);
     seedTagCatalog(fresh);
     expect(Y.encodeStateAsUpdate(fresh)).toEqual(before);
   });
 
-  it.each(["rfc", "guidance"])("does not add %s to an already seeded catalog", (newName) => {
+  it.each(["rfc", "guidance", "technical-reference"])("does not add %s or descriptions to an already seeded catalog", (newName) => {
     const older = new Y.Doc();
     for (const example of EXAMPLE_TAGS.filter((entry) => entry.name !== newName)) createTagCatalogEntry(older, example.name, example.id);
     getTagCatalogFlags(older).set("examples-seeded", true);
@@ -216,6 +237,28 @@ describe("workspace tag catalog", () => {
     seedTagCatalog(older);
     expect(Y.encodeStateAsUpdate(older)).toEqual(before);
     expect(listTagCatalog(older).some((entry) => entry.name === newName)).toBe(false);
+    expect(listTagCatalog(older).every((entry) => entry.description === undefined)).toBe(true);
+  });
+
+  it.each(["rfc", "guidance", "technical-reference"])("preserves an existing %s tag's identity and description when first seeding", (name) => {
+    for (const description of [undefined, "Workspace-specific guidance"]) {
+      const catalog = new Y.Doc();
+      const existing = createTagCatalogEntry(catalog, name, AUTH, description);
+      seedTagCatalog(catalog);
+      expect(listTagCatalog(catalog).find((entry) => entry.name === name)).toEqual(existing);
+      expect(getTagCatalogIdentities(catalog).size).toBe(EXAMPLE_TAGS.length);
+      expect(catalog.getMap<string>(TAG_CATALOG_DESCRIPTIONS_KEY).has(AUTH)).toBe(description !== undefined);
+    }
+  });
+
+  it("does not restore edited or cleared seed descriptions when seeded again", () => {
+    const catalog = new Y.Doc();
+    seedTagCatalog(catalog);
+    setTagCatalogDescription(catalog, "00000000-0000-4000-8000-000000000007", "Workspace-specific guidance");
+    setTagCatalogDescription(catalog, "00000000-0000-4000-8000-000000000006", null);
+    const before = Y.encodeStateAsUpdate(catalog);
+    seedTagCatalog(catalog);
+    expect(Y.encodeStateAsUpdate(catalog)).toEqual(before);
   });
 
   it("does not write catalogs without legacy state or consume lifecycle before its identity arrives", () => {

@@ -28,11 +28,21 @@ const TAG_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const EXAMPLE_TAGS = [
   { id: "00000000-0000-4000-8000-000000000001", name: "auth" },
   { id: "00000000-0000-4000-8000-000000000002", name: "billing" },
-  { id: "00000000-0000-4000-8000-000000000007", name: "guidance" },
+  {
+    id: "00000000-0000-4000-8000-000000000007", name: "guidance",
+    description: "Workspace rules for writing and editing pages; agents are pointed to these at startup and read them before their first write.",
+  },
   { id: "00000000-0000-4000-8000-000000000003", name: "mcp" },
   { id: "00000000-0000-4000-8000-000000000004", name: "permissions" },
-  { id: "00000000-0000-4000-8000-000000000006", name: "rfc" },
+  {
+    id: "00000000-0000-4000-8000-000000000006", name: "rfc",
+    description: "The discussion behind a decision record: options, evidence and the detail developers need to align; the decision record holds the answer.",
+  },
   { id: "00000000-0000-4000-8000-000000000005", name: "sync" },
+  {
+    id: "00000000-0000-4000-8000-000000000008", name: "technical-reference",
+    description: "Readers act on exact names, fields, codes or formats, such as API clients or agents.",
+  },
 ] as const;
 
 export function isTagName(value: unknown): value is string {
@@ -118,6 +128,7 @@ function catalogIndex(catalogDoc: Y.Doc): CatalogIndex {
     const id = identities[0];
     if (id === undefined) continue;
     // An explicit empty register clears a description, including alias fallback.
+    // known limit: a concurrent first-use seed can supply a same-name tag's description; revisit when seeding expands beyond fresh hub defaults and initialized local workspaces.
     const stored = identities.map((identity) => storedDescriptions.get(identity)).find((value) => typeof value === "string");
     const description = typeof stored === "string" && stored.length <= MAX_DESCRIPTION_LENGTH && !/[\r\n\u2028\u2029]/.test(stored) ? stored.trim() : "";
     const entry: TagCatalogEntry = { id, name, ...(description === "" ? {} : { description }) };
@@ -221,6 +232,7 @@ export function seedTagCatalog(catalogDoc: Y.Doc): void {
       // Seeding reuses an existing fixed identity, rather than explicitly
       // creating a fresh identity that supersedes legacy name lifecycle.
       identities.set(example.id, example.name);
+      if ("description" in example) descriptions(catalogDoc).set(example.id, example.description);
     }
     getTagCatalogFlags(catalogDoc).set(SEEDED_FLAG, true);
   });

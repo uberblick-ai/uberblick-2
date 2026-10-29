@@ -69,7 +69,7 @@ describe("the workspace tag catalog", () => {
     expect(listed).toMatchObject({
       workspace: WORKSPACE,
       complete: true,
-      tags: EXAMPLE_TAGS.map(({ id, name }) => ({ id, name })),
+      tags: [...EXAMPLE_TAGS],
       hub: { status: "disabled" },
     });
     expect(first.instance.store.hasRoom(settingsRoom(WORKSPACE))).toBe(true);
@@ -107,7 +107,7 @@ describe("the workspace tag catalog", () => {
 
     const restarted = await local(databasePath);
     expect((await restarted.ok("list_tags")).tags).toEqual(
-      EXAMPLE_TAGS.map(({ id, name }) => ({ id, name })),
+      [...EXAMPLE_TAGS],
     );
   });
 
