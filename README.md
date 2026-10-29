@@ -14,10 +14,10 @@ agent on your laptop and the one on your colleague's work from different
 pictures, and a question settled in one session gets reopened in the next.
 
 Uberblick is that context, shared: like your local Claude Code session's
-memory, but visible to the whole team and kept current. Plans, rules,
-decisions and numbers sit in one workspace: people review them in the browser, agents read
-and edit them over MCP. The agent reads the pages its change needs before it builds and
-brings them up to date after. Delivery stays on GitHub.
+memory, but visible to the whole team and kept current. Plans, rules, decisions
+and numbers sit in one workspace: people review them in the browser, agents
+read and edit them over MCP. The agent reads the pages its change needs before
+it builds and brings them up to date after. Delivery stays on GitHub.
 
 Free and MIT licensed. Local-first, no account to start, synced by a hub you
 run when the team needs one. Built by a small team in Berlin that ships its own
