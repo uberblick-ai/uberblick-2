@@ -7,7 +7,26 @@ import type { WorkspaceNameReader } from "./workspace-names.js";
 
 export const OAUTH_PENDING_LIFETIME_MS = 5 * 60_000;
 export const OAUTH_CODE_LIFETIME_MS = 60_000;
+export const OAUTH_ACCESS_TOKEN_LIFETIME_MS = 60 * 60_000;
 export const MAX_PENDING_AUTHORIZATIONS = 1000;
+
+export interface OAuthCodeExchange {
+  code: string;
+  codeVerifier: string;
+  clientId: string;
+  redirectUri: string;
+  resource?: string;
+}
+
+export interface OAuthAccessToken {
+  grantId: string;
+  resource: string;
+  scope: string;
+  expiresAt: number;
+}
+
+type CodeExchangeResult = { status: "issued"; accessToken: string; scope: string }
+  | { status: "invalid_grant" | "invalid_target" };
 
 export interface PendingAuthorization {
   clientId: string;
@@ -41,7 +60,7 @@ function pendingFromRow(row: Record<string, unknown>): PendingAuthorization {
   };
 }
 
-/** The shared SQLite handle serializes consent and rolls back consumption with failed issuance. */
+/** The shared SQLite handle serializes consent and redemption with their persisted authority. */
 export class OAuthAuthorizations {
   private readonly grants: AgentGrantRegistry;
   private stopped = false;
@@ -70,6 +89,15 @@ export class OAuthAuthorizations {
       resource TEXT NOT NULL,
       scope TEXT NOT NULL CHECK(scope IN ('docs:read', 'docs:read docs:write')),
       expires_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS hub_oauth_access_tokens (
+      token_hash TEXT PRIMARY KEY NOT NULL,
+      code_hash TEXT UNIQUE NOT NULL,
+      grant_id TEXT NOT NULL,
+      resource TEXT NOT NULL,
+      scope TEXT NOT NULL CHECK(scope IN ('docs:read', 'docs:read docs:write')),
+      expires_at INTEGER NOT NULL,
+      revoked_at INTEGER
     )`);
   }
 
@@ -149,6 +177,56 @@ export class OAuthAuthorizations {
       db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  exchange(request: OAuthCodeExchange): CodeExchangeResult {
+    if (this.stopped) return { status: "invalid_grant" };
+    const db = this.database.connection;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const now = this.now();
+      const codeHash = createHash("sha256").update(request.code).digest("hex");
+      const code = db.prepare(`SELECT * FROM hub_oauth_authorization_codes
+        WHERE code_hash = ? AND expires_at > ?`).get(codeHash, now);
+      let result: CodeExchangeResult;
+      if (code === undefined || request.clientId !== code.client_id || request.redirectUri !== code.redirect_uri ||
+        !/^[A-Za-z0-9._~-]{43,128}$/.test(request.codeVerifier) ||
+        createHash("sha256").update(request.codeVerifier).digest("base64url") !== code.code_challenge) {
+        result = { status: "invalid_grant" };
+      } else if (request.resource !== undefined && request.resource !== code.resource) {
+        result = { status: "invalid_target" };
+      } else if (db.prepare("SELECT 1 FROM hub_oauth_access_tokens WHERE code_hash = ?").get(codeHash) !== undefined) {
+        // Only a fully bound, unexpired replay can revoke the first redemption's token.
+        db.prepare(`UPDATE hub_oauth_access_tokens SET revoked_at = ?
+          WHERE code_hash = ? AND revoked_at IS NULL`).run(now, codeHash);
+        result = { status: "invalid_grant" };
+      } else {
+        const accessToken = randomBytes(32).toString("base64url");
+        const scope = code.scope as string;
+        // A token row also records consumption; its lifetime exceeds the code's replay window.
+        db.prepare("DELETE FROM hub_oauth_access_tokens WHERE expires_at <= ?").run(now);
+        db.prepare(`INSERT INTO hub_oauth_access_tokens
+          (token_hash, code_hash, grant_id, resource, scope, expires_at)
+          VALUES (?, ?, ?, ?, ?, ?)`).run(createHash("sha256").update(accessToken).digest("hex"), codeHash,
+          code.grant_id as string, code.resource as string, scope, now + OAUTH_ACCESS_TOKEN_LIFETIME_MS);
+        result = { status: "issued", accessToken, scope };
+      }
+      db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  /** Callers must also enforce grant validity and current membership before granting access. */
+  getAccessToken(token: string): OAuthAccessToken | null {
+    if (this.stopped) return null;
+    const row = this.database.connection.prepare(`SELECT grant_id, resource, scope, expires_at FROM hub_oauth_access_tokens
+      WHERE token_hash = ? AND expires_at > ? AND revoked_at IS NULL`)
+      .get(createHash("sha256").update(token).digest("hex"), this.now());
+    return row === undefined ? null : { grantId: row.grant_id as string, resource: row.resource as string,
+      scope: row.scope as string, expiresAt: row.expires_at as number };
   }
 
   private get(requestId: string): PendingAuthorization | null {
