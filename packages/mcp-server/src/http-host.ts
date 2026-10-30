@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { join } from "node:path";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { MCP_SOCKET_TIMEOUT_MS } from "@uberblick/hub";
+import { MCP_SOCKET_TIMEOUT_MS } from "@uberblick/hub/mcp-channel";
 import { isUuid } from "@uberblick/schema";
 import type { CredentialProvider } from "./credential-provider.js";
 import { resolveMcpConfig } from "./config.js";

@@ -1,4 +1,4 @@
-import { introspectMcpToken } from "@uberblick/hub";
+import { introspectMcpToken } from "@uberblick/hub/mcp-channel";
 
 /** A fresh hub answer for one presented access token; never a credential. */
 export interface McpHostGrant {
