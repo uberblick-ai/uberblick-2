@@ -48,7 +48,7 @@ index 1fcf63aae3d5ba0152566c584d3ed972b4ba1cce..a6664be4c8dc3b34b3bfe157a53b0937
       * Fired when the content from Yjs is initially rendered to ProseMirror
       */
 diff --git a/dist/y-prosemirror.cjs b/dist/y-prosemirror.cjs
-index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..24b7a83949c09cdc4b1dcb9cb8b7ab9b89c63b71 100644
+index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..632407cbfe068807fcc06961c5378ce8ac060ee1 100644
 --- a/dist/y-prosemirror.cjs
 +++ b/dist/y-prosemirror.cjs
 @@ -101,6 +101,9 @@ const hashOfJSON = (json) => buf__namespace.toBase64(_convolute(sha256__namespac
@@ -83,16 +83,19 @@ index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..24b7a83949c09cdc4b1dcb9cb8b7ab9b
    const plugin = new prosemirrorState.Plugin({
      props: {
        editable: (state) => {
-@@ -331,7 +336,7 @@ const restoreRelativeSelection = (tr, relSel, binding) => {
+@@ -331,7 +336,10 @@ const restoreRelativeSelection = (tr, relSel, binding) => {
          relSel.anchor,
          binding.mapping
        );
 -      tr.setSelection(prosemirrorState.NodeSelection.create(tr.doc, anchor));
-+      if (anchor !== null) tr.setSelection(prosemirrorState.NodeSelection.create(tr.doc, anchor));
++      const decoded = anchor === null ? Y__namespace.createAbsolutePositionFromRelativePosition(relSel.anchor, binding.doc) : null;
++      const insideOpaque = decoded !== null && [...binding.opaqueElements.keys()].some(el =>
++        decoded.type === el || (decoded.type._item !== null && Y__namespace.isParentOf(el, decoded.type._item)));
++      if (!insideOpaque) tr.setSelection(prosemirrorState.NodeSelection.create(tr.doc, anchor));
      } else {
        const anchor = relativePositionToAbsolutePosition(
          binding.doc,
-@@ -380,8 +385,9 @@ class ProsemirrorBinding {
+@@ -380,8 +388,9 @@ class ProsemirrorBinding {
    /**
     * @param {Y.XmlFragment} yXmlFragment The bind source
     * @param {ProsemirrorMapping} mapping
@@ -103,7 +106,7 @@ index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..24b7a83949c09cdc4b1dcb9cb8b7ab9b
      this.type = yXmlFragment;
      /**
       * this will be set once the view is created
-@@ -390,6 +396,9 @@ class ProsemirrorBinding {
+@@ -390,6 +399,9 @@ class ProsemirrorBinding {
      this.prosemirrorView = null;
      this.mux = mutex.createMutex();
      this.mapping = mapping;
@@ -113,7 +116,7 @@ index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..24b7a83949c09cdc4b1dcb9cb8b7ab9b
      /**
       * Is overlapping mark - i.e. mark does not exclude itself.
       *
-@@ -686,7 +695,10 @@ class ProsemirrorBinding {
+@@ -686,7 +698,10 @@ class ProsemirrorBinding {
          (struct) => {
            if (struct.constructor === Y__namespace.Item) {
              const type = /** @type {Y.ContentType} */ (/** @type {Y.Item} */ (struct).content).type;
@@ -125,7 +128,7 @@ index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..24b7a83949c09cdc4b1dcb9cb8b7ab9b
            }
          }
        );
-@@ -745,6 +757,7 @@ class ProsemirrorBinding {
+@@ -745,6 +760,7 @@ class ProsemirrorBinding {
      if (this.prosemirrorView == null) return
      this.prosemirrorView = null;
      this.type.unobserveDeep(this._observeFunction);
@@ -133,7 +136,7 @@ index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..24b7a83949c09cdc4b1dcb9cb8b7ab9b
      this.doc.off('beforeAllTransactions', this.beforeAllTransactions);
      this.doc.off('afterAllTransactions', this.afterAllTransactions);
    }
-@@ -768,6 +781,8 @@ const createNodeIfNotExists = (
+@@ -768,6 +784,8 @@ const createNodeIfNotExists = (
    prevSnapshot,
    computeYChange
  ) => {
@@ -142,7 +145,7 @@ index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..24b7a83949c09cdc4b1dcb9cb8b7ab9b
    const node = /** @type {PModel.Node} */ (meta.mapping.get(el));
    if (node === undefined) {
      if (el instanceof Y__namespace.XmlElement) {
-@@ -786,6 +801,27 @@ const createNodeIfNotExists = (
+@@ -786,6 +804,27 @@ const createNodeIfNotExists = (
    return node
  };
  
@@ -170,7 +173,7 @@ index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..24b7a83949c09cdc4b1dcb9cb8b7ab9b
  /**
   * @private
   * @param {Y.XmlElement} el
-@@ -804,6 +840,8 @@ const createNodeFromYElement = (
+@@ -804,6 +843,8 @@ const createNodeFromYElement = (
    prevSnapshot,
    computeYChange
  ) => {
@@ -179,7 +182,7 @@ index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..24b7a83949c09cdc4b1dcb9cb8b7ab9b
    const children = [];
    /**
     * @param {Y.XmlElement | Y.XmlText} type
-@@ -946,6 +984,7 @@ const createTypeFromTextNodes = (nodes, meta) => {
+@@ -946,6 +987,7 @@ const createTypeFromTextNodes = (nodes, meta) => {
   * @return {Y.XmlElement}
   */
  const createTypeFromElementNode = (node, meta) => {
@@ -187,7 +190,7 @@ index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..24b7a83949c09cdc4b1dcb9cb8b7ab9b
    const type = new Y__namespace.XmlElement(node.type.name);
    for (const key in node.attrs) {
      const val = node.attrs[key];
-@@ -1217,6 +1256,21 @@ const marksToAttributes = (marks, meta) => {
+@@ -1217,6 +1259,21 @@ const marksToAttributes = (marks, meta) => {
   * @param {BindingMetadata} meta
   */
  const updateYFragment = (y, yDomFragment, pNode, meta) => {
@@ -209,7 +212,7 @@ index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..24b7a83949c09cdc4b1dcb9cb8b7ab9b
    if (
      yDomFragment instanceof Y__namespace.XmlElement &&
      yDomFragment.nodeName !== pNode.type.name
-@@ -1244,10 +1298,35 @@ const updateYFragment = (y, yDomFragment, pNode, meta) => {
+@@ -1244,10 +1301,35 @@ const updateYFragment = (y, yDomFragment, pNode, meta) => {
        }
      }
    }
@@ -248,7 +251,7 @@ index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..24b7a83949c09cdc4b1dcb9cb8b7ab9b
    const yChildCnt = yChildren.length;
    const minCnt = math__namespace.min(pChildCnt, yChildCnt);
    let left = 0;
-@@ -1340,9 +1419,9 @@ const updateYFragment = (y, yDomFragment, pNode, meta) => {
+@@ -1340,9 +1422,9 @@ const updateYFragment = (y, yDomFragment, pNode, meta) => {
            );
            right += 1;
          } else {
@@ -261,7 +264,7 @@ index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..24b7a83949c09cdc4b1dcb9cb8b7ab9b
              createTypeFromTextOrElementNode(leftP, meta)
            ]);
            left += 1;
-@@ -1351,22 +1430,22 @@ const updateYFragment = (y, yDomFragment, pNode, meta) => {
+@@ -1351,22 +1433,22 @@ const updateYFragment = (y, yDomFragment, pNode, meta) => {
      }
      const yDelLen = yChildCnt - left - right;
      if (
@@ -288,7 +291,7 @@ index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..24b7a83949c09cdc4b1dcb9cb8b7ab9b
      }
    }, ySyncPluginKey);
  };
-@@ -1515,6 +1594,14 @@ const relativePositionToAbsolutePosition = (y, documentType, relPos, mapping) =>
+@@ -1515,6 +1597,14 @@ const relativePositionToAbsolutePosition = (y, documentType, relPos, mapping) =>
    if (decodedPos === null || (decodedPos.type !== documentType && !Y__namespace.isParentOf(documentType, decodedPos.type._item))) {
      return null
    }
@@ -323,7 +326,7 @@ index 3f484971b5daae6d81b17afb01e238b170d0b03b..0a42ccc91ab142720a653527528ff6fd
    let pos = 0
    if (type.constructor === Y.XmlText) {
 diff --git a/src/plugins/sync-plugin.js b/src/plugins/sync-plugin.js
-index dccfb76918c8c70fe5a5b12372cdabcc9d8c58dd..57d8601838e4e5953bac866c2c8b5cda0cfaa197 100644
+index dccfb76918c8c70fe5a5b12372cdabcc9d8c58dd..ab208c91859858c7aa4eea3c9dc95a9e1e459a56 100644
 --- a/src/plugins/sync-plugin.js
 +++ b/src/plugins/sync-plugin.js
 @@ -27,6 +27,9 @@ import * as utils from '../utils.js'
@@ -358,16 +361,19 @@ index dccfb76918c8c70fe5a5b12372cdabcc9d8c58dd..57d8601838e4e5953bac866c2c8b5cda
    const plugin = new Plugin({
      props: {
        editable: (state) => {
-@@ -257,7 +262,7 @@ const restoreRelativeSelection = (tr, relSel, binding) => {
+@@ -257,7 +262,10 @@ const restoreRelativeSelection = (tr, relSel, binding) => {
          relSel.anchor,
          binding.mapping
        )
 -      tr.setSelection(NodeSelection.create(tr.doc, anchor))
-+      if (anchor !== null) tr.setSelection(NodeSelection.create(tr.doc, anchor))
++      const decoded = anchor === null ? Y.createAbsolutePositionFromRelativePosition(relSel.anchor, binding.doc) : null
++      const insideOpaque = decoded !== null && [...binding.opaqueElements.keys()].some(el =>
++        decoded.type === el || (decoded.type._item !== null && Y.isParentOf(el, decoded.type._item)))
++      if (!insideOpaque) tr.setSelection(NodeSelection.create(tr.doc, anchor))
      } else {
        const anchor = relativePositionToAbsolutePosition(
          binding.doc,
-@@ -306,8 +311,9 @@ export class ProsemirrorBinding {
+@@ -306,8 +314,9 @@ export class ProsemirrorBinding {
    /**
     * @param {Y.XmlFragment} yXmlFragment The bind source
     * @param {ProsemirrorMapping} mapping
@@ -378,7 +384,7 @@ index dccfb76918c8c70fe5a5b12372cdabcc9d8c58dd..57d8601838e4e5953bac866c2c8b5cda
      this.type = yXmlFragment
      /**
       * this will be set once the view is created
-@@ -316,6 +322,9 @@ export class ProsemirrorBinding {
+@@ -316,6 +325,9 @@ export class ProsemirrorBinding {
      this.prosemirrorView = null
      this.mux = createMutex()
      this.mapping = mapping
@@ -388,7 +394,7 @@ index dccfb76918c8c70fe5a5b12372cdabcc9d8c58dd..57d8601838e4e5953bac866c2c8b5cda
      /**
       * Is overlapping mark - i.e. mark does not exclude itself.
       *
-@@ -612,7 +621,10 @@ export class ProsemirrorBinding {
+@@ -612,7 +624,10 @@ export class ProsemirrorBinding {
          (struct) => {
            if (struct.constructor === Y.Item) {
              const type = /** @type {Y.ContentType} */ (/** @type {Y.Item} */ (struct).content).type
@@ -400,7 +406,7 @@ index dccfb76918c8c70fe5a5b12372cdabcc9d8c58dd..57d8601838e4e5953bac866c2c8b5cda
            }
          }
        )
-@@ -671,6 +683,7 @@ export class ProsemirrorBinding {
+@@ -671,6 +686,7 @@ export class ProsemirrorBinding {
      if (this.prosemirrorView == null) return
      this.prosemirrorView = null
      this.type.unobserveDeep(this._observeFunction)
@@ -408,7 +414,7 @@ index dccfb76918c8c70fe5a5b12372cdabcc9d8c58dd..57d8601838e4e5953bac866c2c8b5cda
      this.doc.off('beforeAllTransactions', this.beforeAllTransactions)
      this.doc.off('afterAllTransactions', this.afterAllTransactions)
    }
-@@ -694,6 +707,8 @@ const createNodeIfNotExists = (
+@@ -694,6 +710,8 @@ const createNodeIfNotExists = (
    prevSnapshot,
    computeYChange
  ) => {
@@ -417,7 +423,7 @@ index dccfb76918c8c70fe5a5b12372cdabcc9d8c58dd..57d8601838e4e5953bac866c2c8b5cda
    const node = /** @type {PModel.Node} */ (meta.mapping.get(el))
    if (node === undefined) {
      if (el instanceof Y.XmlElement) {
-@@ -712,6 +727,27 @@ const createNodeIfNotExists = (
+@@ -712,6 +730,27 @@ const createNodeIfNotExists = (
    return node
  }
  
@@ -445,7 +451,7 @@ index dccfb76918c8c70fe5a5b12372cdabcc9d8c58dd..57d8601838e4e5953bac866c2c8b5cda
  /**
   * @private
   * @param {Y.XmlElement} el
-@@ -730,6 +766,8 @@ export const createNodeFromYElement = (
+@@ -730,6 +769,8 @@ export const createNodeFromYElement = (
    prevSnapshot,
    computeYChange
  ) => {
@@ -454,7 +460,7 @@ index dccfb76918c8c70fe5a5b12372cdabcc9d8c58dd..57d8601838e4e5953bac866c2c8b5cda
    const children = []
    /**
     * @param {Y.XmlElement | Y.XmlText} type
-@@ -872,6 +910,7 @@ const createTypeFromTextNodes = (nodes, meta) => {
+@@ -872,6 +913,7 @@ const createTypeFromTextNodes = (nodes, meta) => {
   * @return {Y.XmlElement}
   */
  const createTypeFromElementNode = (node, meta) => {
@@ -462,7 +468,7 @@ index dccfb76918c8c70fe5a5b12372cdabcc9d8c58dd..57d8601838e4e5953bac866c2c8b5cda
    const type = new Y.XmlElement(node.type.name)
    for (const key in node.attrs) {
      const val = node.attrs[key]
-@@ -1143,6 +1182,21 @@ const marksToAttributes = (marks, meta) => {
+@@ -1143,6 +1185,21 @@ const marksToAttributes = (marks, meta) => {
   * @param {BindingMetadata} meta
   */
  export const updateYFragment = (y, yDomFragment, pNode, meta) => {
@@ -484,7 +490,7 @@ index dccfb76918c8c70fe5a5b12372cdabcc9d8c58dd..57d8601838e4e5953bac866c2c8b5cda
    if (
      yDomFragment instanceof Y.XmlElement &&
      yDomFragment.nodeName !== pNode.type.name
-@@ -1170,10 +1224,35 @@ export const updateYFragment = (y, yDomFragment, pNode, meta) => {
+@@ -1170,10 +1227,35 @@ export const updateYFragment = (y, yDomFragment, pNode, meta) => {
        }
      }
    }
@@ -523,7 +529,7 @@ index dccfb76918c8c70fe5a5b12372cdabcc9d8c58dd..57d8601838e4e5953bac866c2c8b5cda
    const yChildCnt = yChildren.length
    const minCnt = math.min(pChildCnt, yChildCnt)
    let left = 0
-@@ -1266,9 +1345,9 @@ export const updateYFragment = (y, yDomFragment, pNode, meta) => {
+@@ -1266,9 +1348,9 @@ export const updateYFragment = (y, yDomFragment, pNode, meta) => {
            )
            right += 1
          } else {
@@ -536,7 +542,7 @@ index dccfb76918c8c70fe5a5b12372cdabcc9d8c58dd..57d8601838e4e5953bac866c2c8b5cda
              createTypeFromTextOrElementNode(leftP, meta)
            ])
            left += 1
-@@ -1277,22 +1356,22 @@ export const updateYFragment = (y, yDomFragment, pNode, meta) => {
+@@ -1277,22 +1359,22 @@ export const updateYFragment = (y, yDomFragment, pNode, meta) => {
      }
      const yDelLen = yChildCnt - left - right
      if (

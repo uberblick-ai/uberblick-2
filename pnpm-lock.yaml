@@ -16,7 +16,7 @@ patchedDependencies:
     hash: 37ecaf52e2a37385ff6971a89b8b7b4ce2b316016ed7a67effc72a965cdfdf8b
     path: patches/@hocuspocus__server@4.7.1.patch
   y-prosemirror@1.3.7:
-    hash: 71038d64d444e71adfe5e424f319fb107557b86d68aa0ef18a35fd39f9554b5b
+    hash: 4262b7d55dc073b22f0ba695ce771f4a1b7a776f729ff05d7d0f7bb4d74d2573
     path: patches/y-prosemirror@1.3.7.patch
 
 importers:
@@ -266,7 +266,7 @@ importers:
         version: 2.0.8(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       y-prosemirror:
         specifier: 1.3.7
-        version: 1.3.7(patch_hash=71038d64d444e71adfe5e424f319fb107557b86d68aa0ef18a35fd39f9554b5b)(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-view@1.42.6)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
+        version: 1.3.7(patch_hash=4262b7d55dc073b22f0ba695ce771f4a1b7a776f729ff05d7d0f7bb4d74d2573)(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-view@1.42.6)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
       y-protocols:
         specifier: 1.0.7
         version: 1.0.7(yjs@13.6.32)
@@ -4734,7 +4734,7 @@ snapshots:
 
   xmlchars@2.2.0: {}
 
-  y-prosemirror@1.3.7(patch_hash=71038d64d444e71adfe5e424f319fb107557b86d68aa0ef18a35fd39f9554b5b)(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-view@1.42.6)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32):
+  y-prosemirror@1.3.7(patch_hash=4262b7d55dc073b22f0ba695ce771f4a1b7a776f729ff05d7d0f7bb4d74d2573)(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-view@1.42.6)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32):
     dependencies:
       lib0: 0.2.117
       prosemirror-model: 1.25.12

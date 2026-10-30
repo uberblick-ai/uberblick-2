@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Editor } from "@tiptap/core";
 import { Fragment } from "@tiptap/pm/model";
-import { AllSelection } from "@tiptap/pm/state";
-import { absolutePositionToRelativePosition, redo, relativePositionToAbsolutePosition, undo, ySyncPluginKey, yUndoPluginKey } from "y-prosemirror";
+import { AllSelection, NodeSelection } from "@tiptap/pm/state";
+import { absolutePositionToRelativePosition, getRelativeSelection, redo, relativePositionToAbsolutePosition, undo, ySyncPluginKey, yUndoPluginKey } from "y-prosemirror";
 import * as Y from "yjs";
-import { appendBlock, getBlocks, getBlocksFragment, initDoc } from "@uberblick/schema";
+import { appendBlock, cardPartElement, getBlocks, getBlocksFragment, initDoc } from "@uberblick/schema";
 import { bindGuardedEditor } from "../src/editor/guarded-binding.js";
 import { findForeignBlocks, hasPageFallback } from "../src/editor/palette.js";
 import { retypeBlockInTransaction } from "../src/editor/retype.js";
@@ -272,6 +272,66 @@ describe("opaque unsupported blocks in the bound editor", () => {
       Y.createRelativePositionFromTypeIndex(after, 2), binding.mapping)).toBe(position);
     expect(relativePositionToAbsolutePosition(ydoc, fragment,
       absolutePositionToRelativePosition(position, fragment, binding.mapping), binding.mapping)).toBe(position);
+  });
+
+  it("keeps the supported-only node-selection fallback when a selected ancestor is deleted remotely", () => {
+    const ydoc = new Y.Doc();
+    onTestCleanup(() => ydoc.destroy());
+    initDoc(ydoc, { uuid: "supported-selection", title: "Selection" });
+    appendBlock(ydoc, { type: "paragraph", text: "Before" });
+    appendBlock(ydoc, { type: "card", text: "title: Title\n\nBody" });
+    appendBlock(ydoc, { type: "paragraph", text: "After" });
+    const editor = mount(ydoc);
+    let position = -1;
+    editor.state.doc.descendants((node, pos, parent) => {
+      if (node.type.name === "paragraph" && parent?.type.name === "cardTitle") position = pos;
+    });
+    expect(position).toBeGreaterThan(0);
+    editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, position)));
+    const mapping = ySyncPluginKey.getState(editor.state).binding.mapping;
+    const relative = absolutePositionToRelativePosition(position, getBlocksFragment(ydoc), mapping);
+    const peer = new Y.Doc();
+    onTestCleanup(() => peer.destroy());
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+    getBlocksFragment(peer).delete(1, 1);
+
+    Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(peer));
+
+    expect(relativePositionToAbsolutePosition(ydoc, getBlocksFragment(ydoc), relative, mapping)).toBeNull();
+    expect(findForeignBlocks(getBlocksFragment(ydoc))).toEqual([]);
+    expect(editor.isDestroyed).toBe(false);
+    expect(editor.state.selection).toBeInstanceOf(NodeSelection);
+    expect((editor.state.selection as NodeSelection).node.type.name).toBe("paragraph");
+    expect(editor.state.selection.anchor).toBe(editor.state.doc.child(0).nodeSize);
+  });
+
+  it("keeps a selected nested node's caret valid when its root becomes opaque", () => {
+    const ydoc = documentWithContext();
+    appendBlock(ydoc, { type: "card", text: "title: Title\n\nBody" });
+    const editor = mount(ydoc);
+    let position = -1;
+    editor.state.doc.descendants((node, pos, parent) => {
+      if (node.type.name === "paragraph" && parent?.type.name === "cardTitle") position = pos;
+    });
+    expect(position).toBeGreaterThan(0);
+    editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, position)));
+    const peer = new Y.Doc();
+    onTestCleanup(() => peer.destroy());
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+    cardPartElement(getBlocksFragment(peer).get(2) as Y.XmlElement, "title")!.setAttribute("future", "shape");
+
+    Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(peer));
+
+    expect(editor.state.doc.child(2).type.name).toBe("unsupportedBlock");
+    expect(editor.state.selection.anchor).not.toBeNull();
+    const binding = ySyncPluginKey.getState(editor.state).binding;
+    const relative = getRelativeSelection(binding, editor.state);
+    expect(relativePositionToAbsolutePosition(ydoc, getBlocksFragment(ydoc), relative.anchor, binding.mapping)).not.toBeNull();
+    const intact = protect(ydoc, getBlocksFragment(ydoc).get(2) as Y.XmlElement);
+    editor.commands.setTextSelection(2);
+    typeText(editor, " edited");
+    expect(getBlocks(ydoc)[0]?.text).toContain(" edited");
+    intact();
   });
 
   it("replaces only the affected block in both live directions without rebinding", () => {
