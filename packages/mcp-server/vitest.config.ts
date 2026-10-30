@@ -19,6 +19,7 @@ const osSensitive = [
   "history-mirror-cache",
   "history-refresher-role",
   "history-refresher",
+  "host-entry",
   "log",
   "pending-shutdown",
   "search-store",

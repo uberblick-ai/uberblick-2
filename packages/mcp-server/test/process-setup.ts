@@ -7,6 +7,7 @@ import { builtSource, hubCheckoutInvocation, HUB_ROOT, PACKAGE_ROOT } from "./pr
 export default async function setup(): Promise<void> {
   const sources = new Set([
     join(PACKAGE_ROOT, "src/main.ts"),
+    join(PACKAGE_ROOT, "src/host-main.ts"),
     join(HUB_ROOT, "src/main.ts"),
     ...hubCheckoutInvocation().sources,
     ...["serving-engine", "store-open", "device-login", "store-upgrade", "shutdown-timeout", "history-holds", "history-cache", "history-refresher-role", "history-refresher", "workspace-detach"]
