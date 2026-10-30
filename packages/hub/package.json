@@ -10,6 +10,7 @@
     "./test-device-credentials": "./test/device-credentials.ts",
     ".": "./src/index.ts",
     "./config": "./src/config.ts",
+    "./mcp-channel": "./src/mcp-channel.ts",
     "./team": "./src/team.ts",
     "./team-config": "./src/team-config.ts",
     "./test-device-sync": "./test/device-sync-hub.ts"

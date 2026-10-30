@@ -13,3 +13,6 @@ export type { HubLogger, HubLogRecord } from "./log.js";
 export { getUpdateAttribution } from "./update-attribution.js";
 export type { UpdateAttribution, UpdateAuthor } from "./update-attribution.js";
 export { purgeDetachedDocumentCopies } from "./offline-storage.js";
+export { introspectMcpToken, requestMcpCredential, MCP_SOCKET_TIMEOUT_MS } from "./mcp-channel.js";
+export type { HubMcpTokenResult } from "./mcp-channel.js";
+export type { CredentialRecord } from "./credentials.js";

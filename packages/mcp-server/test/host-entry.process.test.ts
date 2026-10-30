@@ -18,6 +18,10 @@ describe("host configuration", () => {
   it("uses the shared public-origin parser and denies origins by default", () => {
     expect(resolveMcpHostConfig(configEnv()).issuer).toBeUndefined();
     expect(resolveMcpHostConfig(configEnv()).allowedOrigins).toEqual([]);
+    expect(resolveMcpHostConfig(configEnv()).hubMcpSocket).toBeUndefined();
+    expect(resolveMcpHostConfig(configEnv({ HUB_MCP_SOCKET: "/private/hub-mcp.sock" })).hubMcpSocket)
+      .toBe("/private/hub-mcp.sock");
+    expect(resolveMcpHostConfig(configEnv({ HUB_MCP_SOCKET: "  " })).hubMcpSocket).toBeUndefined();
     expect(resolveMcpHostConfig(configEnv({ HUB_PUBLIC_URL: "HTTPS://HUB.EXAMPLE.COM:443/" })).issuer)
       .toBe(ISSUER);
     expect(resolveMcpHostConfig(configEnv({ HUB_PUBLIC_URL: "http://127.0.0.1:8080/" })).issuer)
