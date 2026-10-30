@@ -273,9 +273,9 @@ function observeDocMeta(
 }
 
 /**
- * Observe foreign content deeply, including nested elements and marks. Never
- * bind while the palette gate is nonempty: y-prosemirror deletes unknown
- * nodes. Mid-session arrivals must unbind and render the fallback.
+ * Observe foreign content deeply, including nested elements and marks, so the
+ * page can switch to the fallback for stray roots and link conflicts. Other
+ * unsupported blocks keep their place through the binding's opaque nodes.
  */
 export function useForeignBlocks(
   connection: RoomConnection | null,

@@ -5,17 +5,20 @@
  */
 
 import { Extension } from "@tiptap/core";
-import type { Plugin } from "@tiptap/pm/state";
+import { Plugin } from "@tiptap/pm/state";
+import type { Node as ProseMirrorNode, Schema } from "@tiptap/pm/model";
 import {
   redo,
   undo,
   yCursorPlugin,
   ySyncPlugin,
   yUndoPlugin,
+  yUndoPluginKey,
 } from "y-prosemirror";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import { AGENT_CLIENT } from "../collab/identity.js";
+import { UNSUPPORTED_BLOCK } from "./unsupported-block.js";
 
 /**
  * Retain a departed agent cursor and title avatar for 30 seconds from departure.
@@ -251,19 +254,34 @@ interface CollaborationOptions {
   fragment: Y.XmlFragment | null;
   /** Provider awareness. `null` disables remote cursors (tests, read-only views). */
   awareness: Awareness | null;
+  /** Classify once per Yjs transaction; the caller owns the editor schema. */
+  opaqueElements: () => Set<Y.XmlElement>;
 }
 
 export const Collaboration = Extension.create<CollaborationOptions>({
   name: "uberblickCollaboration",
 
   addOptions() {
-    return { fragment: null, awareness: null };
+    return { fragment: null, awareness: null, opaqueElements: () => new Set() };
   },
 
   addProseMirrorPlugins() {
-    const { fragment, awareness } = this.options;
+    const { fragment, awareness, opaqueElements } = this.options;
     if (fragment === null) return [];
-    const plugins: Plugin[] = [ySyncPlugin(fragment) as unknown as Plugin];
+    const placeholders = new WeakMap<Y.XmlElement, ProseMirrorNode>();
+    let opaque = opaqueElements();
+    const plugins: Plugin[] = [ySyncPlugin(fragment, {
+      opaqueNode(element: Y.XmlElement, schema: Schema) {
+        if (!opaque.has(element)) return null;
+        let node = placeholders.get(element);
+        if (node === undefined) {
+          node = schema.nodes[UNSUPPORTED_BLOCK]?.create();
+          if (node === undefined) throw new Error("Missing unsupported block schema");
+          placeholders.set(element, node);
+        }
+        return node;
+      },
+    }) as unknown as Plugin];
     if (awareness !== null) {
       plugins.push(
         yCursorPlugin(
@@ -272,6 +290,22 @@ export const Collaboration = Extension.create<CollaborationOptions>({
       );
     }
     plugins.push(yUndoPlugin() as unknown as Plugin);
+    plugins.push(new Plugin({
+      view(view) {
+        const protectUndo = (): void => {
+          const current = opaqueElements();
+          if ([...current].some((element) => !opaque.has(element))) {
+            // Earlier undo entries can address a block that has just become
+            // opaque. Yjs restores content before ProseMirror sees a transaction.
+            const undoState = yUndoPluginKey.getState(view.state) as { undoManager: Y.UndoManager } | undefined;
+            undoState?.undoManager.clear();
+          }
+          opaque = current;
+        };
+        fragment.doc?.on("beforeObserverCalls", protectUndo);
+        return { destroy: () => fragment.doc?.off("beforeObserverCalls", protectUndo) };
+      },
+    }));
     return plugins;
   },
 

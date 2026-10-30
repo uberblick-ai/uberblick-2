@@ -29,7 +29,7 @@ const LIVE: RoomStatus = {
   tokenMissing: false,
 };
 
-function fixture(): RoomConnection {
+function fixture(status = LIVE): RoomConnection {
   const ydoc = new Y.Doc();
   initDoc(ydoc, { uuid: UUID, title: "Editor lifetime" });
   appendBlock(ydoc, { type: "paragraph", text: PROSE });
@@ -41,9 +41,9 @@ function fixture(): RoomConnection {
     room: roomForDoc(WORKSPACE, UUID),
     ydoc,
     provider: { awareness: null },
-    status: LIVE,
+    status,
     onStatusChange: (listener: (status: RoomStatus) => void) => {
-      listener(LIVE);
+      listener(status);
       return () => {};
     },
   } as unknown as RoomConnection;
@@ -51,9 +51,9 @@ function fixture(): RoomConnection {
 
 const onSelectThread = (): void => {};
 
-function pane(connection: RoomConnection, selectThread = onSelectThread, author = "Writer"): ReactElement {
+function pane(connection: RoomConnection, selectThread = onSelectThread, author = "Writer", archived = false): ReactElement {
   return <EditorPane connection={connection} segment={WORKSPACE} presence={[]} author={author}
-    archived={false} docLinks={null} onSelectThread={selectThread} />;
+    archived={archived} docLinks={null} onSelectThread={selectThread} />;
 }
 
 function editorFrom(binding: { mock: { results: readonly { value?: unknown }[] } }, index: number): Editor {
@@ -102,7 +102,7 @@ describe("editor lifetime in the document pane", () => {
     expect(view.container.querySelector('[aria-label="Callout variant"]')).not.toBeNull();
   });
 
-  it("shows intact unsupported content when the guard tears down before pending control effects", async () => {
+  it("keeps the editor and pending controls live when a block becomes unsupported", async () => {
     const connection = fixture();
     onTestCleanup(() => connection.ydoc.destroy());
     const dividerId = appendBlock(connection.ydoc, { type: "divider" });
@@ -113,8 +113,8 @@ describe("editor lifetime in the document pane", () => {
 
     function Arrival({ arrive }: { arrive: boolean }): ReactElement {
       useLayoutEffect(() => {
-        // BoundEditor's changed author schedules control effects. Arrival in
-        // this layout effect destroys it before those passive effects run.
+        // BoundEditor's changed author schedules control effects while the
+        // layout effect replaces only the affected block with a placeholder.
         if (arrive) divider?.insert(0, [new Y.XmlText("Written by an older client")]);
       }, [arrive]);
       return pane(connection, onSelectThread, arrive ? "Writer renamed" : "Writer");
@@ -128,19 +128,92 @@ describe("editor lifetime in the document pane", () => {
 
     await act(async () => view.rerender(<Arrival arrive />));
 
-    expect(editor.isDestroyed).toBe(true);
-    const fallback = view.container.querySelector(".ub-foreign");
-    expect(fallback).not.toBeNull();
-    expect(fallback?.textContent).toContain("unsupported type (#divider-shape)");
-    expect(fallback?.textContent).toContain(PROSE);
-    expect(fallback?.textContent).toContain("Written by an older client");
-    expect(view.container.querySelector(".ub-editor .ProseMirror")).toBeNull();
-    expect(view.container.querySelector('[contenteditable="true"]')).toBeNull();
-    expect(getBlocks(connection.ydoc).slice(0, -1)).toEqual(original.slice(0, -1));
+    expect(editor.isDestroyed).toBe(false);
+    expect(binding).toHaveBeenCalledOnce();
+    expect(view.container.querySelector(".ub-foreign")).toBeNull();
+    expect(view.container.querySelector(".ub-unsupported-block")?.textContent).toBe("This block needs a newer version.");
+    expect(view.container.querySelector(".ub-editor .ProseMirror")?.getAttribute("contenteditable")).toBe("true");
+    expect(view.container.querySelector('[aria-label="Callout variant"]')).not.toBeNull();
+    act(() => { editor.commands.insertContentAt(PROSE.length + 1, " Edited."); });
+    expect(getBlocks(connection.ydoc)[0]?.text).toBe(`${PROSE} Edited.`);
+    expect(getBlocks(connection.ydoc).slice(1, -1)).toEqual(original.slice(1, -1));
     expect(findBlockElement(connection.ydoc, dividerId)).toBe(divider);
     expect(divider.getAttributes()).toEqual({ id: dividerId });
     expect(divider.length).toBe(1);
     expect(divider.firstChild?.toString()).toBe("Written by an older client");
+
+    await act(async () => divider.delete(0, divider.length));
+    expect(editor.isDestroyed).toBe(false);
+    expect(binding).toHaveBeenCalledOnce();
+    expect(view.container.querySelector(".ub-unsupported-block")).toBeNull();
+    expect(view.container.querySelector(".ub-divider")).not.toBeNull();
+  });
+
+  it("tears down before pending controls observe a stray root and binds after its removal", async () => {
+    const connection = fixture();
+    onTestCleanup(() => connection.ydoc.destroy());
+    const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
+    const stray = new Y.XmlText("Unrepresentable top-level text");
+    function Arrival({ arrive }: { arrive: boolean }): ReactElement {
+      useLayoutEffect(() => {
+        if (arrive) getBlocksFragment(connection.ydoc).insert(1, [stray]);
+      }, [arrive]);
+      return pane(connection, onSelectThread, arrive ? "Writer renamed" : "Writer");
+    }
+    const view = await renderSettled(<Arrival arrive={false} />);
+    const editor = editorFrom(binding, 0);
+    await act(async () => view.rerender(<Arrival arrive />));
+    expect(editor.isDestroyed).toBe(true);
+    expect(view.container.querySelector(".ub-foreign")?.textContent).toContain("Unrepresentable top-level text");
+    expect(view.container.querySelector(".ub-editor .ProseMirror")).toBeNull();
+    expect(getBlocksFragment(connection.ydoc).get(1)).toBe(stray);
+    await act(async () => getBlocksFragment(connection.ydoc).delete(1, 1));
+    expect(view.container.querySelector(".ub-foreign")).toBeNull();
+    expect(view.container.querySelector(".ub-editor .ProseMirror")?.getAttribute("contenteditable")).toBe("true");
+  });
+
+  it.each([
+    { name: "archived document", archived: true, writable: true },
+    { name: "unwritable room", archived: false, writable: false },
+  ])("renders supported blocks beside placeholders in an $name", async ({ archived, writable }) => {
+    const connection = fixture({ ...LIVE, writable });
+    onTestCleanup(() => connection.ydoc.destroy());
+    const foreign = new Y.XmlElement("future-block");
+    foreign.insert(0, [new Y.XmlText("Unrepresented content")]);
+    getBlocksFragment(connection.ydoc).insert(1, [foreign]);
+    const before = Y.encodeStateAsUpdate(connection.ydoc);
+    const view = await renderSettled(pane(connection, onSelectThread, "Reader", archived));
+    expect(view.container.querySelector(".ub-editor .ProseMirror")?.getAttribute("contenteditable")).toBe("false");
+    expect(view.container.querySelector(".ub-editor")?.textContent).toContain(PROSE);
+    expect(view.container.querySelector(".ub-unsupported-block")?.textContent).toBe("This block needs a newer version.");
+    expect(view.container.querySelector(".ub-foreign")).toBeNull();
+    expect(view.container.querySelector('[aria-label="Callout variant"]')).toBeNull();
+    expect(Y.encodeStateAsUpdate(connection.ydoc)).toEqual(before);
+  });
+
+  it.each(["text", "hook"] as const)("keeps nested hooks opaque while a stray top-level %s takes page precedence", async (kind) => {
+    const connection = fixture();
+    onTestCleanup(() => connection.ydoc.destroy());
+    const fragment = getBlocksFragment(connection.ydoc);
+    const block = fragment.get(0) as Y.XmlElement;
+    const nested = new Y.XmlHook("future-inline");
+    nested.set("payload", { shape: "unrepresented" });
+    block.insert(1, [nested as unknown as Y.XmlElement]);
+    const before = block.toJSON();
+    const view = await renderSettled(pane(connection));
+    expect(view.container.querySelectorAll(".ub-unsupported-block")).toHaveLength(1);
+    expect(view.container.querySelector(".ub-foreign")).toBeNull();
+    const root = kind === "text" ? new Y.XmlText("Stray root text") : new Y.XmlHook("future-root");
+    await act(async () => fragment.insert(0, [root as unknown as Y.XmlElement]));
+    expect(view.container.querySelector(".ub-foreign")).not.toBeNull();
+    expect(view.container.querySelector(".ub-editor .ProseMirror")).toBeNull();
+    expect(fragment.get(0)).toBe(root);
+    await act(async () => fragment.delete(0, 1));
+    expect(view.container.querySelector(".ub-foreign")).toBeNull();
+    expect(view.container.querySelectorAll(".ub-unsupported-block")).toHaveLength(1);
+    expect(block.get(1)).toBe(nested);
+    expect(block.toJSON()).toEqual(before);
+    expect(view.container.querySelector(".ub-editor .ProseMirror")?.getAttribute("contenteditable")).toBe("true");
   });
 
   it.each([

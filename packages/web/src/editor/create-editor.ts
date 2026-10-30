@@ -6,7 +6,7 @@ import { Editor, getSchema } from "@tiptap/core";
 import type { Extensions } from "@tiptap/core";
 import type { Schema } from "@tiptap/pm/model";
 import type { Awareness } from "y-protocols/awareness";
-import type * as Y from "yjs";
+import * as Y from "yjs";
 import { seedNewInlineParts } from "@uberblick/schema";
 import { BlockIds } from "./block-ids.js";
 import type { BlockMenuEntry } from "./block-menu.js";
@@ -39,6 +39,8 @@ import { DividerBlocks } from "./divider.js";
 import { ySyncPluginKey } from "y-prosemirror";
 import { cleanupDeletedDocumentTags } from "@uberblick/schema";
 import { setEditorTagCatalog } from "./document-write.js";
+import { UnsupportedBlockProtection } from "./unsupported-block.js";
+import { findForeignBlocks } from "./palette.js";
 
 /**
  * Share one schema; context-dependent behavior belongs to each editor.
@@ -83,6 +85,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
   const extensions: Extensions = [
     ...paletteExtensions.map((extension) => extension.name === "chart"
       ? ChartBlock.configure({ ydoc: options.fragment.doc }) : extension),
+    UnsupportedBlockProtection,
     BlockIds.configure({
       ...(options.newBlockId === undefined ? {} : { newId: options.newBlockId }),
       ...(options.canWrite === undefined ? {} : { canWrite: options.canWrite }),
@@ -128,6 +131,13 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     Collaboration.configure({
       fragment: options.fragment,
       awareness: options.awareness ?? null,
+      opaqueElements: () => {
+        const children = options.fragment.toArray();
+        return new Set(findForeignBlocks(options.fragment).flatMap(({ index }) => {
+          const element = children[index];
+          return element instanceof Y.XmlElement ? [element] : [];
+        }));
+      },
     }),
   ];
 

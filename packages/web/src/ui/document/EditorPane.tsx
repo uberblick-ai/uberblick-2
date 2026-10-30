@@ -23,7 +23,7 @@ import { bindGuardedEditor } from "../../editor/guarded-binding.js";
 import { docLinkFromTarget } from "../../editor/doc-links.js";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import { linkAnchorFromTarget } from "../../editor/external-links.js";
-import { describeForeignBlocks } from "../../editor/palette.js";
+import { describeForeignBlocks, hasPageFallback } from "../../editor/palette.js";
 import type { LinkConflict } from "../../editor/palette.js";
 import { repairLinkConflict } from "../../editor/link-repair.js";
 import { writeDocument } from "../../collab/document-write.js";
@@ -600,9 +600,8 @@ function LinkConflictRepair({
 }
 
 /**
- * Do not bind unsupported content: y-prosemirror deletes elements absent from
- * its schema. Preserve it read-only, and let summary distinguish foreign
- * content from supported link marks that conflict on one range.
+ * Stray roots and conflicting links require the page-level reader. Preserve
+ * them until an explicit link repair or a newer client makes binding safe.
  */
 function ForeignFallback({
   connection,
@@ -699,8 +698,9 @@ const BoundEditor = memo(function BoundEditor({
     const element = host.current;
     if (element === null) return;
     // bindGuardedEditor registers its synchronous guard before binding. A
-    // foreign block arriving later unbinds the editor without deleting it,
-    // then useForeignBlocks displays the fallback.
+    // stray root or link conflict arriving later unbinds the editor without
+    // deleting it, then useForeignBlocks displays the fallback. Other foreign
+    // blocks remain bound as opaque placeholders.
     const binding = bindGuardedEditor({
       element,
       fragment: getBlocksFragment(connection.ydoc),
@@ -1084,7 +1084,7 @@ export function EditorPane({
               setTldrEditorRoom(editing ? connection.room : null)
             }
           />}
-          {foreign.length > 0 ? (
+          {hasPageFallback(getBlocksFragment(connection.ydoc)) ? (
             <ForeignFallback
               connection={connection}
               catalogConnection={catalogConnection}

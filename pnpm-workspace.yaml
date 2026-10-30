@@ -6,6 +6,7 @@ packages:
 # close-then-refuse reply are pinned beside the dependency's other seams.
 patchedDependencies:
   "@hocuspocus/server@4.7.1": patches/@hocuspocus__server@4.7.1.patch
+  "y-prosemirror@1.3.7": patches/y-prosemirror@1.3.7.patch
 
 # Postinstall builds we explicitly trust (pnpm 10 blocks these by default).
 # Nothing here compiles a native addon any more: SQLite comes from `node:sqlite`

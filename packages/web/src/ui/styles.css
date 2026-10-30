@@ -3006,6 +3006,19 @@ h6.ub-heading {
   line-height: var(--type-ui-leading);
 }
 
+.ub-unsupported-block {
+  -webkit-user-select: none;
+  user-select: none;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  margin-block: 0.75rem;
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+}
+
 .ub-link-repair {
   margin: 0.75rem 0;
   font-size: var(--type-ui-size);

@@ -1,0 +1,565 @@
+diff --git a/dist/src/plugins/sync-plugin.d.ts b/dist/src/plugins/sync-plugin.d.ts
+index 1fcf63aae3d5ba0152566c584d3ed972b4ba1cce..a6664be4c8dc3b34b3bfe157a53b0937cb17e43a 100644
+--- a/dist/src/plugins/sync-plugin.d.ts
++++ b/dist/src/plugins/sync-plugin.d.ts
+@@ -1,6 +1,6 @@
+ export function createEmptyMeta(): BindingMetadata;
+ export function isVisible(item: Y.Item, snapshot?: Y.Snapshot): boolean;
+-export function ySyncPlugin(yXmlFragment: Y.XmlFragment, { colors, colorMapping, permanentUserData, onFirstRender, mapping }?: YSyncOpts): any;
++export function ySyncPlugin(yXmlFragment: Y.XmlFragment, { colors, colorMapping, permanentUserData, onFirstRender, mapping, opaqueNode }?: YSyncOpts): any;
+ export function getRelativeSelection(pmbinding: ProsemirrorBinding, state: import('prosemirror-state').EditorState): {
+     type: any;
+     anchor: any;
+@@ -16,7 +16,7 @@ export class ProsemirrorBinding {
+      * @param {Y.XmlFragment} yXmlFragment The bind source
+      * @param {ProsemirrorMapping} mapping
+      */
+-    constructor(yXmlFragment: Y.XmlFragment, mapping?: ProsemirrorMapping);
++    constructor(yXmlFragment: Y.XmlFragment, mapping?: ProsemirrorMapping, opaqueNode?: (element: Y.XmlElement, schema: PModel.Schema) => PModel.Node | null);
+     type: Y.XmlFragment;
+     /**
+      * this will be set once the view is created
+@@ -25,6 +25,8 @@ export class ProsemirrorBinding {
+     prosemirrorView: any;
+     mux: import("lib0/mutex").mutex;
+     mapping: ProsemirrorMapping;
++    opaqueNode?: (element: Y.XmlElement, schema: PModel.Schema) => PModel.Node | null;
++    opaqueElements: Map<Y.XmlElement, PModel.Node>;
+     /**
+      * Is overlapping mark - i.e. mark does not exclude itself.
+      *
+@@ -94,6 +96,9 @@ export function updateYFragment(y: {
+ }, yDomFragment: Y.XmlFragment, pNode: any, meta: BindingMetadata): void;
+ export type BindingMetadata = {
+     mapping: ProsemirrorMapping;
++    type?: Y.XmlFragment;
++    opaqueNode?: (element: Y.XmlElement, schema: PModel.Schema) => PModel.Node | null;
++    opaqueElements?: Map<Y.XmlElement, PModel.Node>;
+     /**
+      * - is overlapping mark
+      */
+@@ -112,6 +117,8 @@ export type YSyncOpts = {
+     colorMapping?: Map<string, ColorDef>;
+     permanentUserData?: Y.PermanentUserData | null;
+     mapping?: ProsemirrorMapping;
++    /** Represent unsupported root elements without reading or writing their contents. Returned nodes must have a yOpaque node spec. */
++    opaqueNode?: (element: Y.XmlElement, schema: PModel.Schema) => PModel.Node | null;
+     /**
+      * Fired when the content from Yjs is initially rendered to ProseMirror
+      */
+diff --git a/dist/y-prosemirror.cjs b/dist/y-prosemirror.cjs
+index de4d1e6609bba2ffbc2a57048023cdf5bad44b18..24b7a83949c09cdc4b1dcb9cb8b7ab9b89c63b71 100644
+--- a/dist/y-prosemirror.cjs
++++ b/dist/y-prosemirror.cjs
+@@ -101,6 +101,9 @@ const hashOfJSON = (json) => buf__namespace.toBase64(_convolute(sha256__namespac
+  * @typedef {Object} BindingMetadata
+  * @property {ProsemirrorMapping} BindingMetadata.mapping
+  * @property {Map<import('prosemirror-model').MarkType, boolean>} BindingMetadata.isOMark - is overlapping mark
++ * @property {Y.XmlFragment} [BindingMetadata.type]
++ * @property {function(Y.XmlElement, PModel.Schema): (PModel.Node|null)} [BindingMetadata.opaqueNode]
++ * @property {Map<Y.XmlElement, PModel.Node>} [BindingMetadata.opaqueElements]
+  */
+ 
+ /**
+@@ -140,6 +143,7 @@ const isVisible = (item, snapshot) =>
+  * @property {Y.PermanentUserData|null} [YSyncOpts.permanentUserData]
+  * @property {ProsemirrorMapping} [YSyncOpts.mapping]
+  * @property {function} [YSyncOpts.onFirstRender] Fired when the content from Yjs is initially rendered to ProseMirror
++ * @property {function(Y.XmlElement, PModel.Schema): (PModel.Node|null)} [YSyncOpts.opaqueNode] Represent unsupported root elements without reading or writing their contents. Returned nodes must have a yOpaque node spec.
+  */
+ 
+ /**
+@@ -179,10 +183,11 @@ const ySyncPlugin = (yXmlFragment, {
+   colorMapping = new Map(),
+   permanentUserData = null,
+   onFirstRender = () => {},
+-  mapping
++  mapping,
++  opaqueNode
+ } = {}) => {
+   let initialContentChanged = false;
+-  const binding = new ProsemirrorBinding(yXmlFragment, mapping);
++  const binding = new ProsemirrorBinding(yXmlFragment, mapping, opaqueNode);
+   const plugin = new prosemirrorState.Plugin({
+     props: {
+       editable: (state) => {
+@@ -331,7 +336,7 @@ const restoreRelativeSelection = (tr, relSel, binding) => {
+         relSel.anchor,
+         binding.mapping
+       );
+-      tr.setSelection(prosemirrorState.NodeSelection.create(tr.doc, anchor));
++      if (anchor !== null) tr.setSelection(prosemirrorState.NodeSelection.create(tr.doc, anchor));
+     } else {
+       const anchor = relativePositionToAbsolutePosition(
+         binding.doc,
+@@ -380,8 +385,9 @@ class ProsemirrorBinding {
+   /**
+    * @param {Y.XmlFragment} yXmlFragment The bind source
+    * @param {ProsemirrorMapping} mapping
++   * @param {function(Y.XmlElement, PModel.Schema): (PModel.Node|null)} [opaqueNode]
+    */
+-  constructor (yXmlFragment, mapping = new Map()) {
++  constructor (yXmlFragment, mapping = new Map(), opaqueNode) {
+     this.type = yXmlFragment;
+     /**
+      * this will be set once the view is created
+@@ -390,6 +396,9 @@ class ProsemirrorBinding {
+     this.prosemirrorView = null;
+     this.mux = mutex.createMutex();
+     this.mapping = mapping;
++    this.opaqueNode = opaqueNode;
++    /** @type {Map<Y.XmlElement, PModel.Node>} */
++    this.opaqueElements = new Map();
+     /**
+      * Is overlapping mark - i.e. mark does not exclude itself.
+      *
+@@ -686,7 +695,10 @@ class ProsemirrorBinding {
+         (struct) => {
+           if (struct.constructor === Y__namespace.Item) {
+             const type = /** @type {Y.ContentType} */ (/** @type {Y.Item} */ (struct).content).type;
+-            type && this.mapping.delete(type);
++            if (type) {
++              this.mapping.delete(type);
++              this.opaqueElements.delete(type);
++            }
+           }
+         }
+       );
+@@ -745,6 +757,7 @@ class ProsemirrorBinding {
+     if (this.prosemirrorView == null) return
+     this.prosemirrorView = null;
+     this.type.unobserveDeep(this._observeFunction);
++    this.opaqueElements.clear();
+     this.doc.off('beforeAllTransactions', this.beforeAllTransactions);
+     this.doc.off('afterAllTransactions', this.afterAllTransactions);
+   }
+@@ -768,6 +781,8 @@ const createNodeIfNotExists = (
+   prevSnapshot,
+   computeYChange
+ ) => {
++  const opaque = createOpaqueNode(el, schema, meta);
++  if (opaque !== undefined) return opaque
+   const node = /** @type {PModel.Node} */ (meta.mapping.get(el));
+   if (node === undefined) {
+     if (el instanceof Y__namespace.XmlElement) {
+@@ -786,6 +801,27 @@ const createNodeIfNotExists = (
+   return node
+ };
+ 
++/**
++ * Classify root elements before traversing children or reusing a cached node.
++ * A changed familiar block may now contain content its schema cannot express.
++ * @param {Y.XmlElement|Y.XmlHook} el
++ * @param {PModel.Schema} schema
++ * @param {BindingMetadata} meta
++ * @return {PModel.Node|undefined}
++ */
++const createOpaqueNode = (el, schema, meta) => {
++  if (meta.opaqueNode === undefined || el.parent !== meta.type || !(el instanceof Y__namespace.XmlElement)) return undefined
++  const node = meta.opaqueNode(el, schema);
++  if (node !== null) {
++    if (node.type.spec.yOpaque !== true) throw new Error('Opaque nodes require a yOpaque node spec')
++    meta.opaqueElements.set(el, node);
++    meta.mapping.set(el, node);
++    return node
++  }
++  if (meta.opaqueElements.delete(el)) meta.mapping.delete(el);
++  return undefined
++};
++
+ /**
+  * @private
+  * @param {Y.XmlElement} el
+@@ -804,6 +840,8 @@ const createNodeFromYElement = (
+   prevSnapshot,
+   computeYChange
+ ) => {
++  const opaque = createOpaqueNode(el, schema, meta);
++  if (opaque !== undefined) return opaque
+   const children = [];
+   /**
+    * @param {Y.XmlElement | Y.XmlText} type
+@@ -946,6 +984,7 @@ const createTypeFromTextNodes = (nodes, meta) => {
+  * @return {Y.XmlElement}
+  */
+ const createTypeFromElementNode = (node, meta) => {
++  if (node.type.spec.yOpaque === true) throw new Error('Opaque nodes cannot be stored')
+   const type = new Y__namespace.XmlElement(node.type.name);
+   for (const key in node.attrs) {
+     const val = node.attrs[key];
+@@ -1217,6 +1256,21 @@ const marksToAttributes = (marks, meta) => {
+  * @param {BindingMetadata} meta
+  */
+ const updateYFragment = (y, yDomFragment, pNode, meta) => {
++  if (meta.opaqueElements?.has(yDomFragment)) return
++  const pChildren = normalizePNodeContent(pNode);
++  const yChildren = yDomFragment.toArray();
++  const opaqueChildren = yChildren.filter(child => meta.opaqueElements?.has(child));
++  if (yDomFragment === meta.type) {
++    const expected = opaqueChildren.map(child => meta.opaqueElements.get(child));
++    const actual = [];
++    pNode.descendants(node => {
++      if (node.type.spec.yOpaque === true) actual.push(node);
++    });
++    // Refuse removals, moves, copies, nested placeholders and forged nodes
++    // before any attribute or child mutation can enter the shared document.
++    if (actual.length !== expected.length || expected.some((node, i) => actual[i] !== node) ||
++      expected.some(node => !pChildren.includes(node))) return
++  }
+   if (
+     yDomFragment instanceof Y__namespace.XmlElement &&
+     yDomFragment.nodeName !== pNode.type.name
+@@ -1244,10 +1298,35 @@ const updateYFragment = (y, yDomFragment, pNode, meta) => {
+       }
+     }
+   }
+-  // update children
+-  const pChildren = normalizePNodeContent(pNode);
++  if (opaqueChildren.length > 0) {
++    let pStart = 0;
++    let yStart = 0;
++    // Reconcile each editable segment separately. Opaque elements are anchors,
++    // never candidates for matching, replacement, deletion or serialization.
++    for (const anchor of opaqueChildren) {
++      const pEnd = pChildren.indexOf(meta.opaqueElements.get(anchor), pStart);
++      const yEnd = yDomFragment.toArray().indexOf(anchor);
++      updateYChildren(y, yDomFragment, pChildren.slice(pStart, pEnd), meta, yStart, yEnd - yStart);
++      pStart = pEnd + 1;
++      yStart = yDomFragment.toArray().indexOf(anchor) + 1;
++    }
++    updateYChildren(y, yDomFragment, pChildren.slice(pStart), meta, yStart, yDomFragment.length - yStart);
++    return
++  }
++  updateYChildren(y, yDomFragment, pChildren, meta, 0, yChildren.length);
++};
++
++/**
++ * @param {{transact: Function}} y
++ * @param {Y.XmlFragment} yDomFragment
++ * @param {NormalizedPNodeContent} pChildren
++ * @param {BindingMetadata} meta
++ * @param {number} start
++ * @param {number} length
++ */
++const updateYChildren = (y, yDomFragment, pChildren, meta, start, length) => {
+   const pChildCnt = pChildren.length;
+-  const yChildren = yDomFragment.toArray();
++  const yChildren = yDomFragment.toArray().slice(start, start + length);
+   const yChildCnt = yChildren.length;
+   const minCnt = math__namespace.min(pChildCnt, yChildCnt);
+   let left = 0;
+@@ -1340,9 +1419,9 @@ const updateYFragment = (y, yDomFragment, pNode, meta) => {
+           );
+           right += 1;
+         } else {
+-          meta.mapping.delete(yDomFragment.get(left));
+-          yDomFragment.delete(left, 1);
+-          yDomFragment.insert(left, [
++          meta.mapping.delete(yDomFragment.get(start + left));
++          yDomFragment.delete(start + left, 1);
++          yDomFragment.insert(start + left, [
+             createTypeFromTextOrElementNode(leftP, meta)
+           ]);
+           left += 1;
+@@ -1351,22 +1430,22 @@ const updateYFragment = (y, yDomFragment, pNode, meta) => {
+     }
+     const yDelLen = yChildCnt - left - right;
+     if (
+-      yChildCnt === 1 && pChildCnt === 0 && yChildren[0] instanceof Y__namespace.XmlText
++      start === 0 && yDomFragment.length === 1 && yChildCnt === 1 && pChildCnt === 0 && yChildren[0] instanceof Y__namespace.XmlText
+     ) {
+       meta.mapping.delete(yChildren[0]);
+       // Edge case handling https://github.com/yjs/y-prosemirror/issues/108
+       // Only delete the content of the Y.Text to retain remote changes on the same Y.Text object
+       yChildren[0].delete(0, yChildren[0].length);
+     } else if (yDelLen > 0) {
+-      yDomFragment.slice(left, left + yDelLen).forEach(type => meta.mapping.delete(type));
+-      yDomFragment.delete(left, yDelLen);
++      yDomFragment.slice(start + left, start + left + yDelLen).forEach(type => meta.mapping.delete(type));
++      yDomFragment.delete(start + left, yDelLen);
+     }
+     if (left + right < pChildCnt) {
+       const ins = [];
+       for (let i = left; i < pChildCnt - right; i++) {
+         ins.push(createTypeFromTextOrElementNode(pChildren[i], meta));
+       }
+-      yDomFragment.insert(left, ins);
++      yDomFragment.insert(start + left, ins);
+     }
+   }, ySyncPluginKey);
+ };
+@@ -1515,6 +1594,14 @@ const relativePositionToAbsolutePosition = (y, documentType, relPos, mapping) =>
+   if (decodedPos === null || (decodedPos.type !== documentType && !Y__namespace.isParentOf(documentType, decodedPos.type._item))) {
+     return null
+   }
++  // Opaque roots collapse their stored descendants to one leaf position.
++  // Cursors and comment anchors inside those descendants have no visible range.
++  let ancestor = decodedPos.type;
++  while (ancestor !== documentType && ancestor !== null) {
++    const mapped = mapping.get(ancestor);
++    if (mapped !== undefined && !(mapped instanceof Array) && mapped.type.spec.yOpaque === true) return null
++    ancestor = ancestor.parent;
++  }
+   let type = decodedPos.type;
+   let pos = 0;
+   if (type.constructor === Y__namespace.XmlText) {
+diff --git a/src/lib.js b/src/lib.js
+index 3f484971b5daae6d81b17afb01e238b170d0b03b..0a42ccc91ab142720a653527528ff6fda731555e 100644
+--- a/src/lib.js
++++ b/src/lib.js
+@@ -143,6 +143,14 @@ export const relativePositionToAbsolutePosition = (y, documentType, relPos, mapp
+   if (decodedPos === null || (decodedPos.type !== documentType && !Y.isParentOf(documentType, decodedPos.type._item))) {
+     return null
+   }
++  // Opaque roots collapse their stored descendants to one leaf position.
++  // Cursors and comment anchors inside those descendants have no visible range.
++  let ancestor = decodedPos.type
++  while (ancestor !== documentType && ancestor !== null) {
++    const mapped = mapping.get(ancestor)
++    if (mapped !== undefined && !(mapped instanceof Array) && mapped.type.spec.yOpaque === true) return null
++    ancestor = ancestor.parent
++  }
+   let type = decodedPos.type
+   let pos = 0
+   if (type.constructor === Y.XmlText) {
+diff --git a/src/plugins/sync-plugin.js b/src/plugins/sync-plugin.js
+index dccfb76918c8c70fe5a5b12372cdabcc9d8c58dd..57d8601838e4e5953bac866c2c8b5cda0cfaa197 100644
+--- a/src/plugins/sync-plugin.js
++++ b/src/plugins/sync-plugin.js
+@@ -27,6 +27,9 @@ import * as utils from '../utils.js'
+  * @typedef {Object} BindingMetadata
+  * @property {ProsemirrorMapping} BindingMetadata.mapping
+  * @property {Map<import('prosemirror-model').MarkType, boolean>} BindingMetadata.isOMark - is overlapping mark
++ * @property {Y.XmlFragment} [BindingMetadata.type]
++ * @property {function(Y.XmlElement, PModel.Schema): (PModel.Node|null)} [BindingMetadata.opaqueNode]
++ * @property {Map<Y.XmlElement, PModel.Node>} [BindingMetadata.opaqueElements]
+  */
+ 
+ /**
+@@ -66,6 +69,7 @@ export const isVisible = (item, snapshot) =>
+  * @property {Y.PermanentUserData|null} [YSyncOpts.permanentUserData]
+  * @property {ProsemirrorMapping} [YSyncOpts.mapping]
+  * @property {function} [YSyncOpts.onFirstRender] Fired when the content from Yjs is initially rendered to ProseMirror
++ * @property {function(Y.XmlElement, PModel.Schema): (PModel.Node|null)} [YSyncOpts.opaqueNode] Represent unsupported root elements without reading or writing their contents. Returned nodes must have a yOpaque node spec.
+  */
+ 
+ /**
+@@ -105,10 +109,11 @@ export const ySyncPlugin = (yXmlFragment, {
+   colorMapping = new Map(),
+   permanentUserData = null,
+   onFirstRender = () => {},
+-  mapping
++  mapping,
++  opaqueNode
+ } = {}) => {
+   let initialContentChanged = false
+-  const binding = new ProsemirrorBinding(yXmlFragment, mapping)
++  const binding = new ProsemirrorBinding(yXmlFragment, mapping, opaqueNode)
+   const plugin = new Plugin({
+     props: {
+       editable: (state) => {
+@@ -257,7 +262,7 @@ const restoreRelativeSelection = (tr, relSel, binding) => {
+         relSel.anchor,
+         binding.mapping
+       )
+-      tr.setSelection(NodeSelection.create(tr.doc, anchor))
++      if (anchor !== null) tr.setSelection(NodeSelection.create(tr.doc, anchor))
+     } else {
+       const anchor = relativePositionToAbsolutePosition(
+         binding.doc,
+@@ -306,8 +311,9 @@ export class ProsemirrorBinding {
+   /**
+    * @param {Y.XmlFragment} yXmlFragment The bind source
+    * @param {ProsemirrorMapping} mapping
++   * @param {function(Y.XmlElement, PModel.Schema): (PModel.Node|null)} [opaqueNode]
+    */
+-  constructor (yXmlFragment, mapping = new Map()) {
++  constructor (yXmlFragment, mapping = new Map(), opaqueNode) {
+     this.type = yXmlFragment
+     /**
+      * this will be set once the view is created
+@@ -316,6 +322,9 @@ export class ProsemirrorBinding {
+     this.prosemirrorView = null
+     this.mux = createMutex()
+     this.mapping = mapping
++    this.opaqueNode = opaqueNode
++    /** @type {Map<Y.XmlElement, PModel.Node>} */
++    this.opaqueElements = new Map()
+     /**
+      * Is overlapping mark - i.e. mark does not exclude itself.
+      *
+@@ -612,7 +621,10 @@ export class ProsemirrorBinding {
+         (struct) => {
+           if (struct.constructor === Y.Item) {
+             const type = /** @type {Y.ContentType} */ (/** @type {Y.Item} */ (struct).content).type
+-            type && this.mapping.delete(type)
++            if (type) {
++              this.mapping.delete(type)
++              this.opaqueElements.delete(type)
++            }
+           }
+         }
+       )
+@@ -671,6 +683,7 @@ export class ProsemirrorBinding {
+     if (this.prosemirrorView == null) return
+     this.prosemirrorView = null
+     this.type.unobserveDeep(this._observeFunction)
++    this.opaqueElements.clear()
+     this.doc.off('beforeAllTransactions', this.beforeAllTransactions)
+     this.doc.off('afterAllTransactions', this.afterAllTransactions)
+   }
+@@ -694,6 +707,8 @@ const createNodeIfNotExists = (
+   prevSnapshot,
+   computeYChange
+ ) => {
++  const opaque = createOpaqueNode(el, schema, meta)
++  if (opaque !== undefined) return opaque
+   const node = /** @type {PModel.Node} */ (meta.mapping.get(el))
+   if (node === undefined) {
+     if (el instanceof Y.XmlElement) {
+@@ -712,6 +727,27 @@ const createNodeIfNotExists = (
+   return node
+ }
+ 
++/**
++ * Classify root elements before traversing children or reusing a cached node.
++ * A changed familiar block may now contain content its schema cannot express.
++ * @param {Y.XmlElement|Y.XmlHook} el
++ * @param {PModel.Schema} schema
++ * @param {BindingMetadata} meta
++ * @return {PModel.Node|undefined}
++ */
++const createOpaqueNode = (el, schema, meta) => {
++  if (meta.opaqueNode === undefined || el.parent !== meta.type || !(el instanceof Y.XmlElement)) return undefined
++  const node = meta.opaqueNode(el, schema)
++  if (node !== null) {
++    if (node.type.spec.yOpaque !== true) throw new Error('Opaque nodes require a yOpaque node spec')
++    meta.opaqueElements.set(el, node)
++    meta.mapping.set(el, node)
++    return node
++  }
++  if (meta.opaqueElements.delete(el)) meta.mapping.delete(el)
++  return undefined
++}
++
+ /**
+  * @private
+  * @param {Y.XmlElement} el
+@@ -730,6 +766,8 @@ export const createNodeFromYElement = (
+   prevSnapshot,
+   computeYChange
+ ) => {
++  const opaque = createOpaqueNode(el, schema, meta)
++  if (opaque !== undefined) return opaque
+   const children = []
+   /**
+    * @param {Y.XmlElement | Y.XmlText} type
+@@ -872,6 +910,7 @@ const createTypeFromTextNodes = (nodes, meta) => {
+  * @return {Y.XmlElement}
+  */
+ const createTypeFromElementNode = (node, meta) => {
++  if (node.type.spec.yOpaque === true) throw new Error('Opaque nodes cannot be stored')
+   const type = new Y.XmlElement(node.type.name)
+   for (const key in node.attrs) {
+     const val = node.attrs[key]
+@@ -1143,6 +1182,21 @@ const marksToAttributes = (marks, meta) => {
+  * @param {BindingMetadata} meta
+  */
+ export const updateYFragment = (y, yDomFragment, pNode, meta) => {
++  if (meta.opaqueElements?.has(yDomFragment)) return
++  const pChildren = normalizePNodeContent(pNode)
++  const yChildren = yDomFragment.toArray()
++  const opaqueChildren = yChildren.filter(child => meta.opaqueElements?.has(child))
++  if (yDomFragment === meta.type) {
++    const expected = opaqueChildren.map(child => meta.opaqueElements.get(child))
++    const actual = []
++    pNode.descendants(node => {
++      if (node.type.spec.yOpaque === true) actual.push(node)
++    })
++    // Refuse removals, moves, copies, nested placeholders and forged nodes
++    // before any attribute or child mutation can enter the shared document.
++    if (actual.length !== expected.length || expected.some((node, i) => actual[i] !== node) ||
++      expected.some(node => !pChildren.includes(node))) return
++  }
+   if (
+     yDomFragment instanceof Y.XmlElement &&
+     yDomFragment.nodeName !== pNode.type.name
+@@ -1170,10 +1224,35 @@ export const updateYFragment = (y, yDomFragment, pNode, meta) => {
+       }
+     }
+   }
+-  // update children
+-  const pChildren = normalizePNodeContent(pNode)
++  if (opaqueChildren.length > 0) {
++    let pStart = 0
++    let yStart = 0
++    // Reconcile each editable segment separately. Opaque elements are anchors,
++    // never candidates for matching, replacement, deletion or serialization.
++    for (const anchor of opaqueChildren) {
++      const pEnd = pChildren.indexOf(meta.opaqueElements.get(anchor), pStart)
++      const yEnd = yDomFragment.toArray().indexOf(anchor)
++      updateYChildren(y, yDomFragment, pChildren.slice(pStart, pEnd), meta, yStart, yEnd - yStart)
++      pStart = pEnd + 1
++      yStart = yDomFragment.toArray().indexOf(anchor) + 1
++    }
++    updateYChildren(y, yDomFragment, pChildren.slice(pStart), meta, yStart, yDomFragment.length - yStart)
++    return
++  }
++  updateYChildren(y, yDomFragment, pChildren, meta, 0, yChildren.length)
++}
++
++/**
++ * @param {{transact: Function}} y
++ * @param {Y.XmlFragment} yDomFragment
++ * @param {NormalizedPNodeContent} pChildren
++ * @param {BindingMetadata} meta
++ * @param {number} start
++ * @param {number} length
++ */
++const updateYChildren = (y, yDomFragment, pChildren, meta, start, length) => {
+   const pChildCnt = pChildren.length
+-  const yChildren = yDomFragment.toArray()
++  const yChildren = yDomFragment.toArray().slice(start, start + length)
+   const yChildCnt = yChildren.length
+   const minCnt = math.min(pChildCnt, yChildCnt)
+   let left = 0
+@@ -1266,9 +1345,9 @@ export const updateYFragment = (y, yDomFragment, pNode, meta) => {
+           )
+           right += 1
+         } else {
+-          meta.mapping.delete(yDomFragment.get(left))
+-          yDomFragment.delete(left, 1)
+-          yDomFragment.insert(left, [
++          meta.mapping.delete(yDomFragment.get(start + left))
++          yDomFragment.delete(start + left, 1)
++          yDomFragment.insert(start + left, [
+             createTypeFromTextOrElementNode(leftP, meta)
+           ])
+           left += 1
+@@ -1277,22 +1356,22 @@ export const updateYFragment = (y, yDomFragment, pNode, meta) => {
+     }
+     const yDelLen = yChildCnt - left - right
+     if (
+-      yChildCnt === 1 && pChildCnt === 0 && yChildren[0] instanceof Y.XmlText
++      start === 0 && yDomFragment.length === 1 && yChildCnt === 1 && pChildCnt === 0 && yChildren[0] instanceof Y.XmlText
+     ) {
+       meta.mapping.delete(yChildren[0])
+       // Edge case handling https://github.com/yjs/y-prosemirror/issues/108
+       // Only delete the content of the Y.Text to retain remote changes on the same Y.Text object
+       yChildren[0].delete(0, yChildren[0].length)
+     } else if (yDelLen > 0) {
+-      yDomFragment.slice(left, left + yDelLen).forEach(type => meta.mapping.delete(type))
+-      yDomFragment.delete(left, yDelLen)
++      yDomFragment.slice(start + left, start + left + yDelLen).forEach(type => meta.mapping.delete(type))
++      yDomFragment.delete(start + left, yDelLen)
+     }
+     if (left + right < pChildCnt) {
+       const ins = []
+       for (let i = left; i < pChildCnt - right; i++) {
+         ins.push(createTypeFromTextOrElementNode(pChildren[i], meta))
+       }
+-      yDomFragment.insert(left, ins)
++      yDomFragment.insert(start + left, ins)
+     }
+   }, ySyncPluginKey)
+ }

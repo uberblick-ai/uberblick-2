@@ -2,7 +2,7 @@
  * Inline formatting and external links require one prose block or single
  * cell or card part. Source and cross-block selections offer Comment alone because
  * annotations can clamp honestly. Decided content offers only Comment;
- * archived or foreign-content panes never mount this surface.
+ * archived panes and the page-level fallback never mount this surface.
  */
 
 import { useEffect, useEffectEvent, useRef, useState } from "react";
@@ -15,6 +15,8 @@ import { writeDocument } from "../../collab/document-write.js";
 import {
   AnnotationRangeError,
   createAnnotation,
+  findBlockElement,
+  getBlocksFragment,
   isExternalHref,
   isProseBlockType,
 } from "@uberblick/schema";
@@ -22,6 +24,7 @@ import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import { endUndoCapture } from "../../editor/blocks.js";
+import { findForeignBlocks } from "../../editor/palette.js";
 import { cellTextTargetOf, commentTargetOf } from "../../editor/selection.js";
 import type { CardTextTarget, CellTextTarget, CommentTarget, FigmaTextTarget } from "../../editor/selection.js";
 import { CommentForm } from "./CommentForm.js";
@@ -493,6 +496,14 @@ export function CommentComposer({
 
   const create = (text: string): boolean => {
     if (editor.isDestroyed) return false;
+    const current = commentTargetOf(editor, ydoc);
+    if (current === null || rangeOf(current) !== rangeOf(target) || current.contentStart !== target.contentStart) return false;
+    const fragment = getBlocksFragment(ydoc);
+    if (findForeignBlocks(fragment).some(({ index }) => index === current.blockIndex)) return false;
+    // The form can still hold its former target in the task that makes a
+    // block opaque. Id-addressed annotation writes must also reach the live
+    // supported element rather than an opaque sibling with the same id.
+    if (findBlockElement(ydoc, current.blockId) !== fragment.get(current.blockIndex)) return false;
     try {
       const thread = writeDocument(ydoc, catalogConnection?.ydoc ?? null, () => createAnnotation(
         ydoc,

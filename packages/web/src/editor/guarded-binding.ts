@@ -1,12 +1,12 @@
 /**
- * Refuse foreign content before binding and synchronously destroy the editor
- * before y-prosemirror observes incoming foreign content. Its catch-and-delete
- * paths can destroy unknown elements or text with unknown marks; unrepresented
- * embeds disappear on the next edit.
+ * Refuse page-fallback content before binding and synchronously destroy the
+ * editor before y-prosemirror observes it. Unsupported blocks use the sync
+ * binding's opaque placeholders; stray roots and conflicting links still
+ * require a page-level reader and, for links, an explicit repair.
  *
  * Register beforeObserverCalls before editor creation. Shallow fragment.observe
- * misses nested edits, while observeDeep runs too late. findForeignBlocks must
- * scan recursively, including marks and string-only text inserts.
+ * misses nested edits, while observeDeep runs too late. Fallback detection must
+ * include nested link marks even behind another unsupported shape.
  */
 
 import { normalizeLegacyTables, removeLegacyMermaidBlocks, repairDuplicateBlocks } from "@uberblick/schema";
@@ -14,12 +14,12 @@ import type { Editor } from "@tiptap/core";
 import type * as Y from "yjs";
 import { createUberblickEditor } from "./create-editor.js";
 import type { CreateEditorOptions } from "./create-editor.js";
-import { findForeignBlocks } from "./palette.js";
+import { hasPageFallback } from "./palette.js";
 
 export interface GuardedBinding {
   /** The editor, or null when the gate refused to bind. */
   editor: Editor | null;
-  /** True when binding was refused because the fragment holds foreign blocks. */
+  /** True when binding was refused because the fragment requires page fallback. */
   refused: boolean;
   destroy(): void;
 }
@@ -47,7 +47,7 @@ export function bindGuardedEditor(
     normalizeLegacyTables(ydoc);
     repairDuplicateBlocks(ydoc);
   }
-  if (findForeignBlocks(fragment).length > 0) {
+  if (hasPageFallback(fragment)) {
     return { editor: null, refused: true, destroy: () => {} };
   }
 
@@ -61,7 +61,7 @@ export function bindGuardedEditor(
       removeLegacyMermaidBlocks(ydoc);
       repairDuplicateBlocks(ydoc);
     }
-    if (findForeignBlocks(fragment).length === 0) return;
+    if (!hasPageFallback(fragment)) return;
     const doomed = instance;
     instance = null;
     doomed.destroy();
