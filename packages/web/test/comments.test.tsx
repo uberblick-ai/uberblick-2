@@ -30,7 +30,7 @@ import {
   tableRows,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
-import { TextSelection } from "@tiptap/pm/state";
+import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { CellSelection } from "@tiptap/pm/tables";
 import { CommentComposer } from "../src/ui/comments/CommentComposer.js";
 import { ThreadsPane } from "../src/ui/comments/ThreadsPane.js";
@@ -703,7 +703,7 @@ describe("the table-cell selection toolbar", () => {
     } finally { view.unmount(); ydoc.destroy(); }
   });
 
-  it("anchors visible cell offsets across concurrent Y text children", () => {
+  it("keeps unrepresentable concurrent cell texts opaque without a comment target", () => {
     const ydoc = tableDoc();
     const table = getBlocksFragment(ydoc).get(0) as Y.XmlElement;
     const cell = tableRows(table)[1]![0]!;
@@ -715,15 +715,16 @@ describe("the table-cell selection toolbar", () => {
       paragraph.insert(1, [second]);
       second.insert(0, " delta");
     });
+    const before = snapshotFragment(ydoc);
     const view = mountComposer(ydoc);
     try {
-      selectCell(view.editor, 2, 3, 8);
-      expect(commentTargetOf(view.editor, ydoc)).toMatchObject({ row: 1, column: 0, start: 3, end: 8, text: "ma de" });
-      view.open();
-      view.type("Across both text children");
-      view.submit();
-      expect(view.editor.view.dom.querySelector(`[data-comment-thread="${view.created[0]}"]`)?.textContent).toBe("ma de");
-      expect(listAnnotationRanges(ydoc, getBlocks(ydoc)[0]!.id)).toMatchObject([{ row: 1, column: 0, start: 3, end: 8 }]);
+      expect(view.editor.state.doc.child(0).type.name).toBe("unsupportedBlock");
+      expect(view.editor.view.dom.querySelectorAll(".ub-unsupported-block")).toHaveLength(1);
+      act(() => view.editor.view.dispatch(view.editor.state.tr.setSelection(NodeSelection.create(view.editor.state.doc, 0))));
+      expect(commentTargetOf(view.editor, ydoc)).toBeNull();
+      expect(querySelectionComposer()).toBeNull();
+      expect(snapshotFragment(ydoc)).toEqual(before);
+      expect(listAnnotations(ydoc)).toEqual([]);
     } finally { view.unmount(); ydoc.destroy(); }
   });
 
@@ -1120,6 +1121,61 @@ describe("starting a thread from the prose", () => {
         { threadId: thread?.id, start: 4, end: 15 },
       ]);
       expect(getAnnotation(remote, thread!.id)?.comments).toHaveLength(1);
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it.each([false, true])("refuses a pending comment when its target becomes unsupported before submit (observers pending: %s)", (pendingObservers) => {
+    const { ydoc } = annotatedDoc();
+    const view = mountComposer(ydoc, { author: "ben" });
+    try {
+      select(view.editor, 1, 4, 15);
+      view.open();
+      view.type("Keep the unsupported text unchanged.");
+      const submit = within(commentComposer()).getByRole<HTMLButtonElement>("button", { name: "Comment" });
+      const block = getBlocksFragment(ydoc).get(1) as Y.XmlElement;
+      const text = block.firstChild as Y.XmlText;
+      let beforeSubmit: unknown;
+      const arriveAndSubmit = (): void => {
+        text.format(0, 3, { futureMark: { version: 2 } });
+        beforeSubmit = snapshotFragment(ydoc);
+        // A pending Yjs transaction delays editor observers; an observed
+        // arrival still leaves the earlier React form until this task commits.
+        submit.click();
+      };
+      act(() => {
+        if (pendingObservers) ydoc.transact(arriveAndSubmit);
+        else arriveAndSubmit();
+      });
+      expect(view.editor.state.doc.child(1).type.name).toBe("unsupportedBlock");
+      expect(snapshotFragment(ydoc)).toEqual(beforeSubmit);
+      expect(listAnnotations(ydoc)).toEqual([]);
+      expect(view.created).toEqual([]);
+      expect(querySelectionComposer()).toBeNull();
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it("never redirects a supported selection's comment through an opaque block's duplicate id", () => {
+    const { ydoc, blocks } = annotatedDoc();
+    const foreign = new Y.XmlElement("paragraph");
+    foreign.setAttribute("id", blocks[1]!);
+    const text = new Y.XmlText(PARAGRAPH);
+    foreign.insert(0, [text]);
+    getBlocksFragment(ydoc).insert(1, [foreign]);
+    text.format(0, 3, { futureMark: { version: 2 } });
+    const view = mountComposer(ydoc, { author: "ben" });
+    try {
+      select(view.editor, 2, 4, 15);
+      view.open();
+      view.type("Comment on supported prose.");
+      const before = snapshotFragment(ydoc);
+      view.submit();
+      expect(snapshotFragment(ydoc)).toEqual(before);
+      expect(listAnnotations(ydoc)).toEqual([]);
+      expect(view.created).toEqual([]);
     } finally {
       view.unmount();
     }

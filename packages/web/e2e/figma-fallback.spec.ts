@@ -90,11 +90,12 @@ for (const arrivesWhileBound of [false, true]) {
   });
 }
 
-test("an unsupported Figma shape still names the block and makes the document read-only", async ({ browser }) => {
+test("an unsupported Figma shape stays opaque beside editable prose", async ({ browser }) => {
   if (agent === null) throw new Error("e2e: the MCP agent is not configured");
   const writer = agent.open({ name: "figma-foreign-shape-e2e" });
   const created = await writer.call<StoredDoc>("create_doc", {
-    title: docTitle("Future design"), description: "Unsupported Figma grammar must remain untouched.", blocks: [reference],
+    title: docTitle("Future design"), description: "Unsupported Figma grammar must remain untouched.",
+    blocks: [{ type: "paragraph", text: "Before the reference." }, reference, { type: "paragraph", text: "After the reference." }],
   });
   const doc = new Y.Doc();
   const secret = await importRootSecret(harness().authSecret);
@@ -106,7 +107,7 @@ test("an unsupported Figma shape still names the block and makes the document re
     })),
   });
   try {
-    const blockId = created.blocks[0]?.id ?? "";
+    const blockId = created.blocks[1]?.id ?? "";
     await expect.poll(() => findBlockElement(doc, blockId), {
       message: `e2e: unsupported Figma fixture block ${blockId} is missing`,
       timeout: 20_000,
@@ -115,13 +116,20 @@ test("an unsupported Figma shape still names the block and makes the document re
     if (block === null) throw new Error("e2e: unsupported Figma fixture is missing");
     block.setAttribute("future", "unrecognized");
     const page = await openApp(browser, `/${harness().workspace}/${created.uuid}`, { upstream: true });
-    const fallback = page.locator(".ub-foreign");
-    await expect(fallback).toBeVisible();
-    await expect(fallback.locator(".ub-foreign-banner")).toContainText("unsupported type (#figma-shape)");
-    await expect(editor(page)).toHaveCount(0);
-    await expect(page.locator('[contenteditable="true"]')).toHaveCount(0);
+    const placeholder = editor(page).locator(".ub-unsupported-block");
+    await expect(placeholder).toHaveText("This block needs a newer version.");
+    await expect(placeholder).toHaveAttribute("contenteditable", "false");
+    await expect(page.locator(".ub-foreign")).toHaveCount(0);
+    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    await editor(page).locator(".ub-paragraph").last().click();
+    await page.keyboard.press("End");
+    await page.keyboard.insertText(" Edited.");
+    await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: created.uuid }), stored => {
+      expect(stored.blocks[2]?.text).toBe("After the reference. Edited.");
+    });
     await proveBrowserArrival(page, { path: "upstream", readTags: () => getMeta(doc).tags });
     expect(block.getAttribute("future")).toBe("unrecognized");
+    expect(findBlockElement(doc, blockId)).toBe(block);
     await expect(page.locator("iframe")).toHaveCount(0);
   } finally { provider.destroy(); doc.destroy(); }
 });

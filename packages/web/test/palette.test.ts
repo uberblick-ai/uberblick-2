@@ -6,10 +6,8 @@
  *
  *  - Foreign *node types* must be rejected by the ProseMirror schema, not
  *    normalised into something else.
- *  - Foreign blocks already in the document must keep the editor from binding,
- *    because y-prosemirror's node factory deletes Y.XmlElements whose node name
- *    it cannot instantiate. The gate is what turns silent CRDT data loss into a
- *    visible banner.
+ *  - Foreign blocks already in the document bind as opaque placeholders, while
+ *    link conflicts and stray roots keep the page-level gate.
  */
 
 import { describe, expect, it } from "vitest";
@@ -64,6 +62,7 @@ describe("the editor palette and stored block types", () => {
       "tableRow",
       "terminal",
       "text",
+      "unsupportedBlock",
     ]);
     // The closed mark set: the schema package's six inline marks, plus the
     // annotation anchor.
@@ -139,10 +138,8 @@ describe("the editor palette and stored block types", () => {
 
   /**
    * The docLink half of the palette, end to end: a reference an agent wrote is
-   * bindable (the gate opens), renders as marked text carrying its class, and
-   * one whose target the schema package's reader rejects keeps the editor shut
-   * — a web `Y.Text` write bypasses the model boundary, so the gate is where
-   * the shape is checked. Input rules and navigation are tested separately.
+   * bindable and renders as marked text carrying its class. A malformed target
+   * is detected before the binding can promote it into a supported link.
    */
   it("binds and renders a stored docLink, and refuses a malformed one", () => {
     const target = "0189abcd-2222-4333-8444-555566667777";
@@ -292,7 +289,7 @@ describe("stored dividers", () => {
     } finally { binding?.destroy(); host.remove(); ydoc.destroy(); peer.destroy(); }
   });
 
-  it.each([false, true])("preserves a divider's child without binding when it arrives during editing: %s", (arrivesWhileBound) => {
+  it.each([false, true])("preserves a divider's child as a placeholder when it arrives during editing: %s", (arrivesWhileBound) => {
     const ydoc = new Y.Doc();
     const peer = new Y.Doc();
     initDoc(ydoc, { uuid: "divider-children", title: "Older client safety" });
@@ -313,9 +310,10 @@ describe("stored dividers", () => {
       Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(peer));
       if (!arrivesWhileBound) {
         binding = bindGuardedEditor({ element: host, fragment: getBlocksFragment(ydoc), awareness: null });
-        expect(binding.refused).toBe(true);
-        expect(binding.editor).toBeNull();
-      } else expect(unbound).toEqual(["unbound"]);
+      }
+      expect(binding?.refused).toBe(false);
+      expect(binding?.editor?.state.doc.child(1).type.name).toBe("unsupportedBlock");
+      expect(unbound).toEqual([]);
       const stored = getBlocksFragment(ydoc).get(1) as Y.XmlElement;
       expect(stored.nodeName).toBe("divider");
       expect(stored.getAttributes()).toEqual({ id });
@@ -327,7 +325,7 @@ describe("stored dividers", () => {
 });
 
 describe("foreign blocks already in the document", () => {
-  it.each([false, true])("preserves an unsupported figma shape without binding when it arrives %s", (arrivesWhileBound) => {
+  it.each([false, true])("preserves an unsupported figma shape as a placeholder when it arrives %s", (arrivesWhileBound) => {
     const ydoc = new Y.Doc();
     const peer = new Y.Doc();
     initDoc(ydoc, { uuid: "figma-palette", title: "Design reference" });
@@ -352,9 +350,10 @@ describe("foreign blocks already in the document", () => {
       Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(peer));
       if (!arrivesWhileBound) {
         binding = bindGuardedEditor({ element: host, fragment: getBlocksFragment(ydoc), awareness: null });
-        expect(binding.refused).toBe(true);
-        expect(binding.editor).toBeNull();
-      } else expect(unbound).toEqual(["unbound"]);
+      }
+      expect(binding?.refused).toBe(false);
+      expect(binding?.editor?.state.doc.child(1).type.name).toBe("unsupportedBlock");
+      expect(unbound).toEqual([]);
       const stored = getBlocksFragment(ydoc).get(1) as Y.XmlElement;
       expect(stored.nodeName).toBe("figma");
       expect(stored.getAttributes()).toEqual(figma.getAttributes());
@@ -399,8 +398,7 @@ describe("foreign blocks already in the document", () => {
     expect(looseFindings).toHaveLength(1);
     expect(looseFindings[0]?.nodeName).toBe("#text");
 
-    // And a fragment made only of palette blocks is reported as safe to bind:
-    // the detector has to be quiet, or the gate would never open.
+    // A fragment made only of supported shapes needs no placeholders.
     const clean = new Y.Doc();
     initDoc(clean, { uuid: "doc-2", title: "Fine" });
     appendBlock(clean, { type: "heading", text: "h", level: 2 });
@@ -410,28 +408,23 @@ describe("foreign blocks already in the document", () => {
     expect(describeForeignBlocks([])).toBe("");
   });
 
-  /**
-   * The reason the gate exists, pinned as a test: bind an editor to a fragment
-   * holding a foreign block and y-prosemirror destroys it. If this test ever
-   * starts failing because y-prosemirror learned to preserve unknown nodes, the
-   * gate can be relaxed — until then it must stay.
-   */
-  it("would be DESTROYED by binding the editor, which is why binding is gated", () => {
+  it("preserves the foreign element when binding the shared editor factory", () => {
     const { ydoc } = docWithForeignBlock();
+    const foreign = getBlocksFragment(ydoc).get(1);
     expect(getBlocksFragment(ydoc).length).toBe(2);
 
     const { editor } = mountEditor(ydoc);
     try {
-      // The foreign element is gone from the CRDT — not merely unrendered.
-      expect(getBlocksFragment(ydoc).length).toBe(1);
-      expect(findForeignBlocks(getBlocksFragment(ydoc))).toEqual([]);
-      expect(editor.state.doc.childCount).toBe(1);
+      expect(getBlocksFragment(ydoc).length).toBe(2);
+      expect(getBlocksFragment(ydoc).get(1)).toBe(foreign);
+      expect(findForeignBlocks(getBlocksFragment(ydoc))).toHaveLength(1);
+      expect(editor.state.doc.child(1).type.name).toBe("unsupportedBlock");
     } finally {
       editor.destroy();
     }
   });
 
-  it("leaves the foreign block untouched when the gate refuses to bind", () => {
+  it("leaves the foreign block untouched when the editor binds", () => {
     const { ydoc, foreignId } = docWithForeignBlock();
     const element = document.createElement("div");
     document.body.appendChild(element);
@@ -440,10 +433,9 @@ describe("foreign blocks already in the document", () => {
       fragment: getBlocksFragment(ydoc),
       awareness: null,
     });
-    expect(binding.refused).toBe(true);
-    expect(binding.editor).toBeNull();
+    expect(binding.refused).toBe(false);
+    expect(binding.editor?.state.doc.child(1).type.name).toBe("unsupportedBlock");
 
-    // Nothing was bound, so nothing was dropped.
     expect(getBlocksFragment(ydoc).length).toBe(2);
     const stored = getBlocksFragment(ydoc).get(1);
     expect(stored instanceof Y.XmlElement).toBe(true);
@@ -460,12 +452,6 @@ describe("foreign blocks already in the document", () => {
     binding.destroy();
   });
 
-  /**
-   * The run-time half of the gate, and the subtle one. A foreign block arriving
-   * from another client is deleted inside the same Yjs transaction cleanup that
-   * delivered it, so the guard has to be synchronous — a React re-render is far
-   * too late.
-   */
   it("survives a foreign block arriving while the editor is bound", () => {
     const ydoc = new Y.Doc();
     initDoc(ydoc, { uuid: "doc-5", title: "Mid-session" });
@@ -491,9 +477,9 @@ describe("foreign blocks already in the document", () => {
     foreign.insert(0, [new Y.XmlText("arrived mid-session")]);
     getBlocksFragment(ydoc).insert(1, [foreign]);
 
-    // Still there, attributes and text intact — the guard unbound the editor
-    // before y-prosemirror's deep observer could delete it.
-    expect(unbound).toEqual(["unbound"]);
+    expect(unbound).toEqual([]);
+    expect(binding.editor?.isDestroyed).toBe(false);
+    expect(binding.editor?.state.doc.child(1).type.name).toBe("unsupportedBlock");
     expect(getBlocksFragment(ydoc).length).toBe(2);
     const stored = getBlocksFragment(ydoc).get(1);
     expect(stored instanceof Y.XmlElement).toBe(true);
@@ -507,29 +493,20 @@ describe("foreign blocks already in the document", () => {
     binding.destroy();
   });
 
-  it("re-binds cleanly once the foreign block is gone", () => {
+  it("keeps the same editor when the foreign block is removed", () => {
     const { ydoc } = docWithForeignBlock();
     const element = document.createElement("div");
     document.body.appendChild(element);
 
-    expect(
-      bindGuardedEditor({
-        element,
-        fragment: getBlocksFragment(ydoc),
-        awareness: null,
-      }).refused,
-    ).toBe(true);
+    const binding = bindGuardedEditor({ element, fragment: getBlocksFragment(ydoc), awareness: null });
+    expect(binding.refused).toBe(false);
+    expect(binding.editor?.state.doc.child(1).type.name).toBe("unsupportedBlock");
 
     // Whoever owns the foreign type removes it; the palette is clean again.
     getBlocksFragment(ydoc).delete(1, 1);
-    const second = bindGuardedEditor({
-      element,
-      fragment: getBlocksFragment(ydoc),
-      awareness: null,
-    });
-    expect(second.refused).toBe(false);
-    expect(second.editor?.state.doc.childCount).toBe(1);
-    second.destroy();
+    expect(binding.editor?.isDestroyed).toBe(false);
+    expect(binding.editor?.state.doc.childCount).toBe(1);
+    binding.destroy();
   });
 
   /**
@@ -653,10 +630,8 @@ describe("foreign blocks already in the document", () => {
 });
 
 /**
- * The same hazard, one level down. A block name the palette knows is not enough:
- * y-prosemirror recurses into the block's children and builds every mark, and
- * both failure paths end in the same catch-and-delete. So the gate has to look
- * inside the block, at load *and* mid-session.
+ * Familiar block names can contain unknown children, marks or embeds. The
+ * detector protects the entire top-level block before the binding reads it.
  */
 describe("foreign content inside a known block", () => {
   /** A paragraph the palette can name, holding an element it cannot. */
@@ -749,10 +724,13 @@ describe("foreign content inside a known block", () => {
       expect(findForeignBlocks(getBlocksFragment(written)), label).toEqual([
         expect.objectContaining({ nodeName: `#mark:${mark}` }),
       ]);
-      expect(bind(written).refused, label).toBe(true);
+      const binding = bind(written);
+      expect(binding.refused, label).toBe(false);
+      expect(binding.editor?.state.doc.child(0).type.name, label).toBe("unsupportedBlock");
+      binding.destroy();
     }
 
-    // The values the reader *does* read bind, or the gate would never open.
+    // Reader-supported marks need no placeholders.
     for (const [mark, value] of [
       ["bold", {}],
       ["italic", true],
@@ -767,9 +745,7 @@ describe("foreign content inside a known block", () => {
   });
 
   /**
-   * The three kinds of foreign content a known block can hold, and the two
-   * guards that have to catch each of them. One test per guard, because the
-   * guard is the subject; the kind of content only varies the fixture.
+   * The detector must find these shapes both at bind and during editing.
    */
   const kinds: Array<{
     what: string;
@@ -823,7 +799,8 @@ describe("foreign content inside a known block", () => {
       expect(findForeignBlocks(getBlocksFragment(ydoc)), what).toHaveLength(1);
 
       const binding = bind(ydoc);
-      expect(binding.refused, what).toBe(true);
+      expect(binding.refused, what).toBe(false);
+      expect(binding.editor?.state.doc.child(0).type.name, what).toBe("unsupportedBlock");
       intact(ydoc);
       binding.destroy();
     }
@@ -838,7 +815,9 @@ describe("foreign content inside a known block", () => {
 
       plant(ydoc);
 
-      expect(unbound, what).toEqual(["unbound"]);
+      expect(unbound, what).toEqual([]);
+      expect(binding.editor?.isDestroyed, what).toBe(false);
+      expect(binding.editor?.state.doc.child(0).type.name, what).toBe("unsupportedBlock");
       intact(ydoc);
       expect(findForeignBlocks(getBlocksFragment(ydoc)), what).toHaveLength(1);
       binding.destroy();
@@ -846,17 +825,11 @@ describe("foreign content inside a known block", () => {
   });
 
   /**
-   * The quiet variant, and the reason the delta scan checks `insert` as well as
-   * `attributes`. An embed throws nothing while binding: y-prosemirror's
-   * `createTextNodesFromYText` only ever calls `schema.text(insert, marks)`, so
-   * a non-string insert simply never reaches the editor state — and the next
-   * keystroke writes the block's text back to the Y.XmlText without it. Silent
-   * loss on a later mutation, which is why the gate has to refuse up front.
+   * Non-string inserts need detection even though y-prosemirror drops them
+   * without throwing; placeholder mapping must happen before text conversion.
    */
   it("names an embed as the silent kind, and binds through the mark it declares", () => {
-    // The embed is the one kind that throws NOTHING while binding, so it is
-    // named separately: without the delta scan reporting it the gate would open
-    // and the loss would happen on the next keystroke instead.
+    // The delta scan reports an embed before text conversion can drop it.
     const ydoc = docWithBlock();
     firstBlockText(ydoc).insertEmbed(1, { future: "keep-me" });
     const foreign = findForeignBlocks(getBlocksFragment(ydoc));

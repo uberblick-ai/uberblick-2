@@ -30,6 +30,7 @@ import { jsonTreeBlockView } from "./json-tree.js";
 import { Card, CardParts } from "./card.js";
 import { Figma, FigmaCaption } from "./figma.js";
 import { Callout } from "./callout.js";
+import { UnsupportedBlock } from "./unsupported-block.js";
 
 /**
  * BlockIds assigns null ids. y-prosemirror skips null attributes, so a transient
@@ -370,6 +371,7 @@ export const paletteExtensions = [
   Doc,
   Text,
   Paragraph,
+  UnsupportedBlock,
   Divider,
   Heading,
   CodeBlock,

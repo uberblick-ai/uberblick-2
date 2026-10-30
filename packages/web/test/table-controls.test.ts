@@ -264,7 +264,7 @@ describe("shared table column deletion", () => {
     } finally { f.close(); }
   });
 
-  it("recovers the accepted concurrent deletion of different remaining columns with local undo", () => {
+  it("keeps a concurrently emptied table opaque through supported edits and undo", () => {
     const f = fixture("| A | B |\n| --- | --- |\n| alpha | bravo |");
     const remoteEditor = mountEditor(f.b).editor;
     try {
@@ -274,13 +274,21 @@ describe("shared table column deletion", () => {
       expect(deleteTableColumn(remoteEditor, columnTargetOf(remoteEditor, f.id, 1))).toBe(true);
       Y.applyUpdate(f.a, Y.encodeStateAsUpdate(f.b));
       Y.applyUpdate(f.b, Y.encodeStateAsUpdate(f.a));
-      expect(cells(f.editor)).toEqual([[], []]);
+      expect(f.editor.state.doc.child(0).type.name).toBe("unsupportedBlock");
       expect(isOrdinaryTable(f.editor.state.doc.child(0))).toBe(false);
       expect(tableColumnTargets(f.editor, f.id)).toBeNull();
       expect(getBlocks(f.a).find((block) => block.id === nextId)?.text).toBe("Surrounding content");
+      const table = getBlocksFragment(f.a).get(0) as Y.XmlElement;
+      const before = table.toJSON();
+      expect(undo(f.editor.state)).toBe(false);
+      const paragraph = f.editor.state.doc.child(0).nodeSize + 1;
+      f.editor.commands.insertContentAt(paragraph, "Edit: ");
+      expect(getBlocks(f.a).find((block) => block.id === nextId)?.text).toBe("Edit: Surrounding content");
       expect(undo(f.editor.state)).toBe(true);
       Y.applyUpdate(f.b, Y.encodeStateAsUpdate(f.a));
-      expect(cells(f.editor)).toEqual([["A"], ["alpha"]]);
+      expect(f.editor.state.doc.child(0).type.name).toBe("unsupportedBlock");
+      expect(getBlocksFragment(f.a).get(0)).toBe(table);
+      expect(table.toJSON()).toEqual(before);
       expect(getBlocks(f.b)).toEqual(getBlocks(f.a));
       expect(getBlocks(f.a).find((block) => block.id === nextId)?.text).toBe("Surrounding content");
     } finally { remoteEditor.destroy(); f.close(); }

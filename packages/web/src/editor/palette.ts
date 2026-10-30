@@ -2,14 +2,14 @@
  * Match schema-owned nodes, attributes and marks exactly: updateYFragment drops
  * undeclared attributes and a wider palette writes unreadable shapes.
  *
- * Refuse binding before y-prosemirror can delete unknown elements or texts with
- * unknown marks. Scan recursively: disallowed/invalid marks, unsafe link values
- * and non-string inserts can change meaning or disappear on the next edit.
+ * Scan recursively so the sync binding can preserve unsupported top-level
+ * elements as opaque placeholders, including familiar blocks with unknown
+ * marks, unsafe link values or non-string inserts inside them.
  * Link/docLink overlaps also need the reader's precedence: y-prosemirror builds
  * both marks without honoring excludes and would render nested anchors.
  *
- * No catch-all schema node can preserve these shapes. Leave all foreign content
- * untouched and show the read-only fallback instead.
+ * Stray roots and link conflicts retain the page-level fallback. The latter
+ * need an explicit choice instead of a placeholder.
  */
 
 import * as Y from "yjs";
@@ -98,7 +98,8 @@ function shapeProblem(child: Y.XmlElement): string | null | undefined {
 
 /**
  * Return one offender per top-level block. Stray text/hooks are foreign because
- * the doc schema accepts block+ only; an empty result permits binding.
+ * the doc schema accepts block+ only. Each remaining offender is represented by
+ * an opaque placeholder unless the document requires page fallback.
  */
 export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
   const foreign: ForeignBlock[] = [];
@@ -261,6 +262,12 @@ export function findLinkConflicts(fragment: Y.XmlFragment): LinkConflict[] {
     }
   }
   return conflicts;
+}
+
+/** Link conflicts can sit behind a block's first unsupported shape or mark. */
+export function hasPageFallback(fragment: Y.XmlFragment): boolean {
+  return fragment.toArray().some((child) => !(child instanceof Y.XmlElement)) ||
+    findLinkConflicts(fragment).length > 0;
 }
 
 /**

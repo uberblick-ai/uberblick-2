@@ -9,6 +9,7 @@
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { Transaction } from "@tiptap/pm/state";
+import { UNSUPPORTED_BLOCK } from "./unsupported-block.js";
 
 const blockIdPluginKey = new PluginKey("uberblick/block-ids");
 
@@ -32,6 +33,7 @@ export function blockIdPlugin(options: Partial<BlockIdOptions> = {}): Plugin {
       const seen = new Set<string>();
       let tr: Transaction | null = null;
       newState.doc.forEach((node, offset) => {
+        if (node.type.name === UNSUPPORTED_BLOCK) return;
         const id = node.attrs.id;
         const usable = typeof id === "string" && id !== "" && !seen.has(id);
         if (usable) {

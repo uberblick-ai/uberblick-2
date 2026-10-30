@@ -175,24 +175,26 @@ describe("card editor", () => {
     expect(card.toJSON()).toEqual(before);
   });
 
-  it("refuses malformed cards before binding and tears down before observing a later unsupported shape", () => {
+  it("keeps malformed cards opaque at bind and when an unsupported shape arrives later", () => {
     const { ydoc, card } = cardDoc();
     const element = document.createElement("div");
     document.body.appendChild(element);
     onTestCleanup(() => element.remove());
     cardPartElement(card, "title")!.setAttribute("future", "shape");
     const before = Y.encodeStateAsUpdate(ydoc);
-    const refused = bindGuardedEditor({ element, fragment: getBlocksFragment(ydoc) });
-    expect(refused).toMatchObject({ editor: null, refused: true });
-    expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
-    cardPartElement(card, "title")!.removeAttribute("future");
     let unbound = false;
     const binding = bindGuardedEditor({ element, fragment: getBlocksFragment(ydoc), onUnbind: () => { unbound = true; } });
     onTestCleanup(() => binding.destroy());
+    expect(binding.refused).toBe(false);
     expect(binding.editor).not.toBeNull();
+    expect(element.querySelectorAll(".ub-unsupported-block")).toHaveLength(1);
+    expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
+    cardPartElement(card, "title")!.removeAttribute("future");
+    expect(element.querySelector(".ub-unsupported-block")).toBeNull();
     cardPartElement(card, "body")!.insert(1, [new Y.XmlElement("futureBody")]);
-    expect(unbound).toBe(true);
-    expect(binding.editor?.isDestroyed).toBe(true);
+    expect(unbound).toBe(false);
+    expect(binding.editor?.isDestroyed).toBe(false);
+    expect(element.querySelectorAll(".ub-unsupported-block")).toHaveLength(1);
     expect(cardPartElement(card, "body")!.toArray()).toHaveLength(2);
     expect(cardPartTexts(card, "body")[0]!.toString()).toBe("Body words");
   });

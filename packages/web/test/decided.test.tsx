@@ -395,6 +395,20 @@ describe("read-only decision records", () => {
     expect(plainText(textAt(ydoc))).toBe(PROSE);
   });
 
+  it("renders a decision's supported answer beside an opaque read-only placeholder", async () => {
+    const ydoc = stage();
+    const foreign = new Y.XmlElement("future-block");
+    foreign.insert(0, [new Y.XmlText("Future answer content")]);
+    getBlocksFragment(ydoc).insert(1, [foreign]);
+    const before = Y.encodeStateAsUpdate(ydoc);
+    const host = await openApp();
+    expect(editorElement(host).getAttribute("contenteditable")).toBe("false");
+    expect(editorElement(host).textContent).toContain(PROSE);
+    expect(host.querySelector(".ub-unsupported-block")?.textContent).toBe("This block needs a newer version.");
+    expect(host.querySelector(".ub-foreign")).toBeNull();
+    expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
+  });
+
   it("offers no link-conflict repair while existing threads stay open in the rail", async () => {
     const ydoc = stage();
     const thread = createAnnotation(ydoc, getBlocks(ydoc)[0]!.id, 20, 25, "Reader", "Why jumps?");

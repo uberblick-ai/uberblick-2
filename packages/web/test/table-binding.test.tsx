@@ -48,10 +48,11 @@ function fixture(status = LIVE, ydoc = legacyDoc()) {
 
 it("waits for writable and synchronized state, then converts and binds without reloading", () => {
   const fix = fixture({ ...LIVE, writable: false, synced: false });
-  expect(fix.host.querySelector(".ProseMirror")).toBeNull();
+  expect(fix.host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
+  expect(fix.host.querySelectorAll(".ub-unsupported-block")).toHaveLength(1);
   expect((getBlocksFragment(fix.ydoc).get(0) as Y.XmlElement).firstChild).toBeInstanceOf(Y.XmlText);
   fix.status({ writable: true });
-  expect(fix.host.querySelector(".ProseMirror")).toBeNull();
+  expect(fix.host.querySelectorAll(".ub-unsupported-block")).toHaveLength(1);
   fix.status({ synced: true });
   expect(fix.host.querySelectorAll(".ub-table th")).toHaveLength(2);
   expect(fix.host.querySelectorAll(".ub-table td")).toHaveLength(2);
@@ -66,15 +67,18 @@ it("binds initially writable legacy content and rebinds after a late legacy writ
   expect(getBlocks(fix.ydoc).map((block) => block.id)).toEqual(["table-one", "late-table"]);
 });
 
-it("keeps malformed table content intact behind the disabled fallback", () => {
+it("keeps malformed table content intact behind its placeholder", () => {
   const fix = fixture();
   const table = getBlocksFragment(fix.ydoc).get(0) as Y.XmlElement;
   const cell = tableRows(table)[0]![0]!;
   act(() => (cell as unknown as { setAttribute(key: string, value: unknown): void }).setAttribute("rowspan", 2));
-  expect(fix.host.querySelector(".ProseMirror")).toBeNull();
+  expect(fix.host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("true");
   expect(cell.getAttribute("rowspan")).toBe(2);
   expect(getBlocks(fix.ydoc)[0]?.text).toBe(SOURCE);
-  expect(fix.host.textContent).toContain("Editor disabled");
+  expect(fix.host.querySelector(".ub-unsupported-block")?.textContent).toBe("This block needs a newer version.");
+  act(() => (cell as unknown as { setAttribute(key: string, value: unknown): void }).setAttribute("rowspan", 1));
+  expect(fix.host.querySelector(".ub-unsupported-block")).toBeNull();
+  expect(fix.host.querySelectorAll(".ub-table th")).toHaveLength(2);
 });
 
 it.each([SOURCE, "This legacy source is not a table."])(

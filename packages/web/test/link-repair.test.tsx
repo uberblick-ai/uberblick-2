@@ -484,7 +484,7 @@ describe("the fallback offers the person the choice, and takes only that write",
     expect(prose(host)).not.toBeNull();
   });
 
-  it("stays in the fallback while another foreign reason is left", async () => {
+  it("binds supported content beside a placeholder once the link conflict is repaired", async () => {
     const { ydoc } = stage();
     const foreign = new Y.XmlElement("future-block");
     foreign.insert(0, [new Y.XmlText("from the future")]);
@@ -493,12 +493,30 @@ describe("the fallback offers the person the choice, and takes only that write",
     const host = await openApp(`/${WORKSPACE}/${UUID}`);
     act(() => buttonSaying(host, "The hub")?.click());
 
-    // Repaired, and still not bound: the gate is re-run whole, and what is left
-    // is named on its own terms.
     expect(findLinkConflicts(getBlocksFragment(ydoc))).toEqual([]);
+    expect(prose(host)).not.toBeNull();
+    expect(host.querySelector(".ub-foreign")).toBeNull();
+    expect(host.querySelector(".ub-unsupported-block")?.textContent).toBe("This block needs a newer version.");
+    expect(getBlocksFragment(ydoc).get(1)).toBe(foreign);
+    expect(foreign.firstChild?.toString()).toBe("from the future");
+    expect(repairOffer(host)).toBeNull();
+  });
+
+  it("keeps the page fallback for a link conflict hidden behind another unsupported reason", async () => {
+    const { ydoc } = stage();
+    const block = getBlocksFragment(ydoc).get(0) as Y.XmlElement;
+    const marked = new Y.XmlText("Unknown mark first. ");
+    block.insert(0, [marked]);
+    marked.format(0, marked.length, { underline: {} });
+    expect(findForeignBlocks(getBlocksFragment(ydoc))[0]?.nodeName).toBe("#mark:underline");
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
     expect(prose(host)).toBeNull();
-    expect(banner(host)).toContain("future-block");
-    expect(banner(host)).not.toContain("conflicting external and document links");
+    expect(repairOffer(host)).not.toBeNull();
+    act(() => buttonSaying(host, "The hub")?.click());
+    expect(findLinkConflicts(getBlocksFragment(ydoc))).toEqual([]);
+    expect(prose(host)).not.toBeNull();
+    expect(host.querySelector(".ub-unsupported-block")?.textContent).toBe("This block needs a newer version.");
+    expect(marked.toDelta()).toEqual([{ insert: "Unknown mark first. ", attributes: { underline: {} } }]);
     expect(repairOffer(host)).toBeNull();
   });
 
