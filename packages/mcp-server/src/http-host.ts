@@ -3,10 +3,11 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { join } from "node:path";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { MCP_SOCKET_TIMEOUT_MS } from "@uberblick/hub";
 import { isUuid } from "@uberblick/schema";
 import type { CredentialProvider } from "./credential-provider.js";
 import { resolveMcpConfig } from "./config.js";
-import { type McpHostGrant, type McpHostTokenCheck, unavailableTokenCheck } from "./host-token-check.js";
+import { hubTokenCheck, type McpHostGrant, type McpHostTokenCheck } from "./host-token-check.js";
 import { log } from "./log.js";
 import { handleProtectedResourceMetadata, replyMcpUnauthorized } from "./oauth-discovery.js";
 import { createMcpRuntime, type UberblickMcpRuntime, type UberblickMcpSession } from "./server.js";
@@ -18,6 +19,7 @@ export interface McpHostConfig {
   allowedOrigins: readonly string[];
   hubUrl: string;
   databaseDirectory: string;
+  hubMcpSocket?: string | undefined;
 }
 
 export interface McpHostDependencies {
@@ -35,7 +37,11 @@ interface HostSession {
   transport: StreamableHTTPServerTransport;
   closed: boolean;
   closing?: Promise<void>;
+  streams: Set<() => void>;
 }
+
+// Leave room for the hub's absolute reply deadline inside the stream's 30-second bound.
+const STREAM_CHECK_INTERVAL_MS = 30_000 - MCP_SOCKET_TIMEOUT_MS;
 
 function reply(response: ServerResponse, status: number): void {
   response.writeHead(status, { "Cache-Control": "no-store" });
@@ -44,7 +50,7 @@ function reply(response: ServerResponse, status: number): void {
 
 /** Compose HTTP admission with the same runtime and session tools as stdio. */
 export function createMcpHost(config: McpHostConfig, dependencies: McpHostDependencies = {}) {
-  const checkToken = dependencies.checkToken ?? unavailableTokenCheck;
+  const checkToken = dependencies.checkToken ?? hubTokenCheck(config.hubMcpSocket);
   // known limit: no capacity limits or idle eviction; revisit when host limits land.
   const runtimes = new Map<string, Promise<UberblickMcpRuntime>>();
   const sessions = new Map<string, HostSession>();
@@ -55,11 +61,53 @@ export function createMcpHost(config: McpHostConfig, dependencies: McpHostDepend
   function closeSession(record: HostSession): Promise<void> {
     if (record.closing !== undefined) return record.closing;
     record.closed = true;
+    for (const stop of record.streams) stop();
     record.closing = record.session.close().finally(() => {
       if (record.transport.sessionId !== undefined) sessions.delete(record.transport.sessionId);
       allSessions.delete(record);
     });
     return record.closing;
+  }
+
+  function watchStream(record: HostSession, response: ServerResponse, token: string, checkedAt: number): void {
+    let stopped = false;
+    let pollTimer: ReturnType<typeof setTimeout>;
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    const stop = (): void => {
+      stopped = true;
+      clearTimeout(pollTimer);
+      clearTimeout(deadlineTimer);
+      record.streams.delete(stop);
+    };
+    const close = (): void => {
+      if (stopped || response.writableEnded || response.destroyed) return;
+      stop();
+      record.transport.closeStandaloneSSEStream();
+    };
+    const schedule = (startedAt: number): void => {
+      pollTimer = setTimeout(poll, Math.max(0, startedAt + STREAM_CHECK_INTERVAL_MS - performance.now()));
+      pollTimer.unref();
+    };
+    const poll = (): void => {
+      if (stopped) return;
+      // The SDK's request promise lasts for the stream; refused GETs finish without becoming a stream.
+      if (!response.headersSent || response.statusCode !== 200) {
+        stop();
+        return;
+      }
+      schedule(performance.now());
+      deadlineTimer = setTimeout(close, MCP_SOCKET_TIMEOUT_MS);
+      deadlineTimer.unref();
+      void Promise.resolve().then(() => checkToken(token)).then(answer => {
+        if (stopped || response.writableEnded || response.destroyed) return;
+        clearTimeout(deadlineTimer);
+        if (answer.status !== "positive" || answer.workspace !== record.workspace || answer.grantId !== record.grantId) close();
+      }, close);
+    };
+    record.streams.add(stop);
+    response.once("close", stop);
+    response.once("finish", stop);
+    schedule(checkedAt);
   }
 
   function runtimeFor(grant: McpHostGrant): Promise<UberblickMcpRuntime> {
@@ -100,6 +148,7 @@ export function createMcpHost(config: McpHostConfig, dependencies: McpHostDepend
     const authorization = request.headers.authorization;
     const token = authorization?.match(/^Bearer ([A-Za-z0-9\-._~+/]+=*)$/i)?.[1];
     if (token === undefined) return replyMcpUnauthorized(response, config.issuer, workspace);
+    const checkedAt = performance.now();
     const answer = await checkToken(token);
     if (answer.status === "unavailable") return reply(response, 503);
     if (answer.status === "negative" || answer.workspace !== workspace) {
@@ -112,6 +161,7 @@ export function createMcpHost(config: McpHostConfig, dependencies: McpHostDepend
       if (record === undefined || record.closed || record.grantId !== answer.grantId || record.workspace !== workspace) {
         return reply(response, 404);
       }
+      if (request.method === "GET") watchStream(record, response, token, checkedAt);
       await record.transport.handleRequest(request, response);
       return;
     }
@@ -124,7 +174,7 @@ export function createMcpHost(config: McpHostConfig, dependencies: McpHostDepend
     if (stopping) return reply(response, 503);
     const session = runtime.openSession();
     const record: HostSession = {
-      grantId: grant.grantId, workspace: grant.workspace, session, closed: false,
+      grantId: grant.grantId, workspace: grant.workspace, session, closed: false, streams: new Set(),
       transport: new StreamableHTTPServerTransport({
         sessionIdGenerator: randomUUID,
         onsessioninitialized(id) { if (!record.closed) sessions.set(id, record); },

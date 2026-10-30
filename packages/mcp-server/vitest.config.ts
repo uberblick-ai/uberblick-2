@@ -20,6 +20,8 @@ const osSensitive = [
   "history-refresher-role",
   "history-refresher",
   "host-entry",
+  "http-host-hub-channel",
+  "http-host-streams",
   "log",
   "pending-shutdown",
   "search-store",

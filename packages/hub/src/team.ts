@@ -23,6 +23,8 @@ import { handleOAuthAuthorization, type OAuthClientLookup } from "./oauth-author
 import { OAuthAuthorizations } from "./oauth-authorizations.js";
 import { handleOAuthToken } from "./oauth-token.js";
 import { OAuthMetadataClients } from "./oauth-client-metadata.js";
+import { AgentGrantRegistry } from "./agent-grants.js";
+import { startMcpChannel } from "./mcp-channel.js";
 
 export interface TeamHub extends Hub {
   /** Hub-internal authorities; never exposed through a public route. */
@@ -80,6 +82,7 @@ function createTeamExtension(
   }
 
   let adminSetup: Awaited<ReturnType<typeof startAdminSetup>> | undefined;
+  let mcpChannel: Awaited<ReturnType<typeof startMcpChannel>> | undefined;
   return {
     ...(credentials === undefined ? {} : { credentials }),
     ...(memberships === undefined ? {} : { memberships }),
@@ -105,6 +108,9 @@ function createTeamExtension(
       return handleGithubSignIn(signIn, request, response, config.behindReleaseProxy);
     },
     async start() {
+      if (config.mcpSocketPath !== undefined && (authorizations === undefined || credentials === undefined || hubAdmins === undefined)) {
+        throw new Error("HUB_MCP_SOCKET requires GitHub sign-in and HUB_PUBLIC_URL");
+      }
       if (options.operatorSetup) {
         if (principals === undefined || memberships === undefined || hubAdmins === undefined || isEphemeralDatabase(config.databasePath ?? "")) {
           throw new Error("hub setup: durable hub database required");
@@ -113,6 +119,10 @@ function createTeamExtension(
           github: config.github, log, hasLiveDocuments,
           operator: createOperatorControls(context, config, claims, principals, hubAdmins) });
       }
+      if (config.mcpSocketPath !== undefined && authorizations !== undefined && credentials !== undefined && hubAdmins !== undefined) {
+        mcpChannel = await startMcpChannel({ path: config.mcpSocketPath, authorizations, credentials, admins: hubAdmins,
+          grants: new AgentGrantRegistry(database) });
+      }
     },
     async stop() {
       // Fence asynchronous identity reads before the core tears down storage.
@@ -120,6 +130,7 @@ function createTeamExtension(
       accounts?.stop();
       authorizations?.stop();
       metadataClients.stop();
+      await mcpChannel?.stop();
       await adminSetup?.stop();
     },
   };
