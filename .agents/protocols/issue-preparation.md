@@ -104,9 +104,9 @@ estimates assessable, grants no priority authority and never alone waives review
 - **`split`:** work cannot fit one independently reviewable PR. Follow
   [ISSUE_SPEC's sizing](../../.github/ISSUE_SPEC.md#sizing): substantial independent
   pieces, not tiny technical steps. Create unlabelled native sub-issues with the
-  source milestone and only real ordering blockers; a maintainer starts each with
-  `needs-preparation`. Keep the source open as their parent, blocked by each child
-  so priority inherits. Product-changing decomposition needs a human decision.
+  source milestone and only real ordering blockers; the launcher starts each with
+  `needs-preparation` when the run reports `split`. Keep the source open as
+  their parent, blocked by each child so priority inherits. Product-changing decomposition needs a human decision.
 
 For new, unsplit work worth doing:
 
