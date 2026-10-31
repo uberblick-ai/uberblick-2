@@ -24,7 +24,7 @@ except `defer` removes that label and adds the next one:
 | --- | --- | --- |
 | issue-preparer | `ready` | issue: `needs-preparation` → `ready` |
 | issue-preparer | `review` | issue: `needs-preparation` → `needs-review` |
-| issue-preparer | `split` | issue: `needs-preparation` removed; its sub-issues wait, unlabelled, for a maintainer to add `needs-preparation` |
+| issue-preparer | `split` | issue: `needs-preparation` removed; the sub-issues the run created get `needs-preparation`; others are named for a maintainer |
 | issue-preparer | `wontfix` | `needs-preparation` removed; the run has closed the issue as not planned |
 | implementer | `review` | its pull request gets `needs-review`; the issue loses `ready`, or the pull request `needs-changes` |
 | implementer | `integrate` | its pull request gets `ready-to-merge`; the issue loses `ready`, or the pull request `needs-changes` |
@@ -59,18 +59,19 @@ Schema risk uses those reviews and gates, not package locks.
 
 ### Milestone gate
 
-New issue starts also require the active milestone. ub-agents selects the
-open milestone with open issues or pull requests whose title comes first in
-alphabetical order. Later and unassigned issues wait even when the active
-milestone has no eligible issue. PR work, owned runs and recovery continue;
-priority orders eligible work within the gate.
+New issue starts follow the open milestones with open issues or pull
+requests, by title. ub-agents starts the next eligible issue of the earliest
+milestone that has one; an issue without a milestone goes ahead of it only at
+strictly higher priority, and later milestones never jump ahead. When no
+milestone has eligible work, the remaining issues run in priority order. PR
+work, owned runs and recovery continue; priority orders eligible work within
+the gate.
 
-Milestones advance when the active milestone closes or has no open items, not
-when a release is published. Titles set the roadmap order; creation time and
-due dates do not. The comparison is plain character order, so `v0.4.12` comes
-before `v0.5.0` but `v0.4.9` would come after `v0.4.10`: choose titles that sort
-in roadmap order, and rename a milestone to move it. Check native dependencies
-before changing the order: a blocker in a later milestone can stall the gate.
+Titles set the roadmap order; creation time, due dates and published releases
+do not. Numbers in titles compare as numbers, so `v0.4.9` comes before
+`v0.4.10`: choose titles that sort in roadmap order, and rename a milestone to
+move it. Check native dependencies before changing the order: a blocker in a
+later milestone can hold back the issue it blocks.
 
 ### Priority
 
@@ -88,8 +89,9 @@ comment (owner decision, 2026-09-07).
 ## Issue lifecycle
 
 Unlabelled drafts and split parents run no role. A person or human intake starts
-`needs-preparation`; run-created issues wait unlabelled for a maintainer, under
-[follow-up operations](run-operations.md#follow-up-issues). `needs-review` means
+`needs-preparation`; run-created follow-ups wait unlabelled for a maintainer, under
+[follow-up operations](run-operations.md#follow-up-issues), while the launcher
+starts a split's sub-issues. `needs-review` means
 prepared and awaiting the single issue review; `ready` asserts
 [ISSUE_SPEC](../../.github/ISSUE_SPEC.md) compliance. People may grant `ready`;
 role outcomes follow the transition map. `needs-human` parks a human question.
@@ -109,7 +111,8 @@ neither exit grants `ready`.
 A split source stays open outside the queues and is never `ready`. Children
 inherit its milestone, use native sub-issue relationships and receive blockers
 only for real ordering prerequisites; the parent is blocked by every child.
-A maintainer starts children with `needs-preparation`. Only children carry
+The launcher starts the children a split run creates with `needs-preparation`,
+under the parent's start; a maintainer starts any other child. Only children carry
 preparation or implementation queue labels, and the parent-to-child blocker
 relationships propagate effective priority without label writes.
 
