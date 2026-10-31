@@ -24,7 +24,7 @@ except `defer` removes that label and adds the next one:
 | --- | --- | --- |
 | issue-preparer | `ready` | issue: `needs-preparation` → `ready` |
 | issue-preparer | `review` | issue: `needs-preparation` → `needs-review` |
-| issue-preparer | `split` | issue: `needs-preparation` removed; the sub-issues the run created get `needs-preparation` |
+| issue-preparer | `split` | issue: `needs-preparation` removed; the sub-issues the run created get `needs-preparation`; others are named for a maintainer |
 | issue-preparer | `wontfix` | `needs-preparation` removed; the run has closed the issue as not planned |
 | implementer | `review` | its pull request gets `needs-review`; the issue loses `ready`, or the pull request `needs-changes` |
 | implementer | `integrate` | its pull request gets `ready-to-merge`; the issue loses `ready`, or the pull request `needs-changes` |
@@ -111,8 +111,8 @@ neither exit grants `ready`.
 A split source stays open outside the queues and is never `ready`. Children
 inherit its milestone, use native sub-issue relationships and receive blockers
 only for real ordering prerequisites; the parent is blocked by every child.
-The launcher starts the children a split creates with `needs-preparation`,
-under the parent's start. Only children carry
+The launcher starts the children a split run creates with `needs-preparation`,
+under the parent's start; a maintainer starts any other child. Only children carry
 preparation or implementation queue labels, and the parent-to-child blocker
 relationships propagate effective priority without label writes.
 
