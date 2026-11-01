@@ -35,9 +35,14 @@ Nobody is present to answer the intent pass, so:
   integrator follows every existing gate, merges, then asks on the pull request
   and finishes `merged`. Use human-decisions.md's question presentation and
   recipient rules, without its pause-and-resume instructions for this question.
-- Do not reshape a page that has no purpose sentence and promises inside a pull
-  request, and do not fix old sentences the change does not touch. Name the page
-  on the pull request for a maintainer pass.
+- A page without a purpose sentence and promises gets no new text inside a pull
+  request: do not reshape it, extend it or fix old sentences the change does not
+  touch. Its `Compared` entry says the page states no promises, so a `matches`
+  checks nothing, and names the page on the pull request for a maintainer pass.
+- An issue's request to add text to a page does not override `Writing pages`.
+  Write only the promise the issue decided, never its commands, variables or
+  defaults, and raise anything else it asks for as a question under
+  `Corpus update`.
 - A reviewer reads the whole resulting page, not only the changed block. On a
   feature page, a sentence outside the notes that describes how the screen looks
   or how the feature is built, or a missing promise for a decision the issue

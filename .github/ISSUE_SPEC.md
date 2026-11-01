@@ -105,6 +105,10 @@ waives neither this ready bar nor review and merge gates.
   see #14"). Cite a product doc as `title (uuid)`, using its discovered title and
   UUID from live `list_docs` discovery; the repository holds no corpus copy or
   UUID table. Cite rather than copy content; the agent reads the live source.
+  A corpus instruction names the promise the change adds or changes, as a
+  sentence a person can rely on, never commands, variables or defaults to copy
+  onto the page. When the owning page states no promises, say so and get the
+  intent decided before the issue is ready.
   When the change touches a user-facing surface (a `ub` command, an MCP tool, a
   web UI flow), cite the page that owns it, even when the issue did not start
   from that page.
