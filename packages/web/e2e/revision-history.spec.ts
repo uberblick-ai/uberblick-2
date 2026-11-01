@@ -1792,8 +1792,9 @@ test.describe("document history through ub open", () => {
     for (const scheme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme: scheme });
       expect(await restoreNamed.locator("span").evaluate(label => ({
-        overflow: getComputedStyle(label).textOverflow, clipped: label.scrollWidth > label.clientWidth,
-      }))).toEqual({ overflow: "ellipsis", clipped: true });
+        overflow: getComputedStyle(label).textOverflow, clip: getComputedStyle(label).overflowX,
+        clipped: label.scrollWidth > label.clientWidth,
+      }))).toEqual({ overflow: "ellipsis", clip: "hidden", clipped: true });
       const label = await beforeLabel.evaluate(element => {
         const owner = element.parentElement;
         const button = owner?.querySelector("button");
@@ -1809,12 +1810,14 @@ test.describe("document history through ub open", () => {
         }
         const box = element.getBoundingClientRect();
         const bounds = owner.getBoundingClientRect();
-        return { overflow: getComputedStyle(element).textOverflow, clipped: element.scrollWidth > element.clientWidth,
+        return { overflow: getComputedStyle(element).textOverflow, clip: getComputedStyle(element).overflowX,
+          clipped: element.scrollWidth > element.clientWidth,
           leftInset: box.left - bounds.left, rightInset: bounds.right - box.right,
           buttonGap: button.getBoundingClientRect().left - box.right,
           prefixRoom: box.right - prefix.getBoundingClientRect().right, ellipsisRoom: Number.parseFloat(getComputedStyle(element).fontSize) };
       });
       expect(label.overflow).toBe("ellipsis");
+      expect(label.clip).toBe("hidden");
       expect(label.clipped).toBe(true);
       expect(label.leftInset).toBeGreaterThanOrEqual(0);
       expect(label.rightInset).toBeGreaterThanOrEqual(0);
@@ -1841,12 +1844,14 @@ test.describe("document history through ub open", () => {
         const buttonBox = button.getBoundingClientRect();
         return { headingWidth: heading.getBoundingClientRect().width, titleWidth: titleBox.width,
           titleRight: titleBox.right, buttonLeft: buttonBox.left,
-          clipped: label.scrollWidth > label.clientWidth, overflow: getComputedStyle(label).textOverflow };
+          clipped: label.scrollWidth > label.clientWidth, overflow: getComputedStyle(label).textOverflow,
+          clip: getComputedStyle(label).overflowX };
       });
       expect(geometry.titleWidth).toBeGreaterThan(geometry.headingWidth * 0.4);
       expect(geometry.titleRight).toBeLessThanOrEqual(geometry.buttonLeft);
       expect(geometry.clipped).toBe(true);
       expect(geometry.overflow).toBe("ellipsis");
+      expect(geometry.clip).toBe("hidden");
       await expect(restoreNamed).toHaveAccessibleName(`Restore “${baselineName}”`);
     }
   });
