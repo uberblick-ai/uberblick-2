@@ -3884,7 +3884,6 @@ test.describe("document history through ub open", () => {
   for (const layout of ["Split", "Inline", "narrow Split"] as const) {
   for (const reducedMotion of ["no-preference", "reduce"] as const) {
     test(`the collapse switch keeps the reader's row through drawings and motion — ${layout}, ${reducedMotion}`, { tag: "@webkit" }, async ({ browser }, info) => {
-      test.fixme(layout === "Split" && reducedMotion === "no-preference", "The normal-motion variant intermittently loses the reader's row.");
       const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
         ...(info.project.name === "webkit-ipad" ? devices[layout === "narrow Split" ? "iPad (gen 7)" : "iPad (gen 7) landscape"]
           : { viewport: { width: layout === "narrow Split" ? 860 : 1440, height: 420 } }),
