@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -131,7 +131,7 @@ else if (command === "tailscale") {
 `;
 
 function fixture(t, overrides = {}) {
-	const scratch = mkdtempSync(join(process.env.UB_AGENTS_SCRATCH ?? tmpdir(), `setup-hub-${process.env.UB_AGENTS_RUN ?? "test"}-`));
+	const scratch = realpathSync(mkdtempSync(join(process.env.UB_AGENTS_SCRATCH ?? tmpdir(), `setup-hub-${process.env.UB_AGENTS_RUN ?? "test"}-`)));
 	t.after(() => rmSync(scratch, { recursive: true, force: true }));
 	const bin = join(scratch, "bin");
 	const hub = join(scratch, "hub");
