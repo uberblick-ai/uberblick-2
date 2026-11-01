@@ -2997,11 +2997,16 @@ test.describe("document history through ub open", () => {
   });
 
   test("Inline follows document links by click and Enter, and native Tab leaves lists and tables", { tag: "@webkit" }, async ({ browser }, info) => {
+    const targetTitle = docTitle("Inline link target");
+    const target = randomUUID();
+    const targetDocument = new Y.Doc();
+    try {
+      initDoc(targetDocument, { uuid: target, title: targetTitle });
+      await harness().seedDocument(targetDocument);
+    } finally { targetDocument.destroy(); }
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
       ...(info.project.name === "webkit-ipad" ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 900 } }), reducedMotion: "reduce",
     } });
-    const targetTitle = docTitle("Inline link target");
-    const target = await newDocument(page, targetTitle);
     const title = docTitle("Inline native keyboard");
     const uuid = await newDocument(page, title);
     await serveHistory(page, [
@@ -3135,10 +3140,10 @@ test.describe("document history through ub open", () => {
     await expect(toast).toBeFocused();
     await page.clock.runFor(300);
     await expect(toast).toHaveCount(0);
-    await expect.poll(() => side.evaluate(element => ({
-      withinSide: element.contains(document.activeElement), documentFocused: document.hasFocus(),
+    await expect.poll(() => side.evaluate(element => element.contains(document.activeElement) ? {
+      documentFocused: document.hasFocus(),
       activeElement: document.activeElement?.outerHTML.slice(0, 350),
-    })), { message: "This revision: Tab stays outside the list after the toast unmounts" }).toMatchObject({ withinSide: false });
+    } : null), { message: "This revision: Tab stays outside the list after the toast unmounts" }).toBeNull();
   });
 
   test("native Tab and Shift+Tab leave lists and tables on each Split side", { tag: "@webkit" }, async ({ browser, browserName }) => {
@@ -3165,10 +3170,10 @@ test.describe("document history through ub open", () => {
           await expect(side).toBeFocused();
           await page.keyboard.press(key);
           const message = `${await side.getAttribute("aria-label")}: ${key} leaves the ${name}`;
-          await expect.poll(() => side.evaluate(element => ({
-            withinSide: element.contains(document.activeElement), documentFocused: document.hasFocus(),
+          await expect.poll(() => side.evaluate(element => element.contains(document.activeElement) ? {
+            documentFocused: document.hasFocus(),
             activeElement: document.activeElement?.outerHTML.slice(0, 350),
-          })), { message }).toMatchObject({ withinSide: false });
+          } : null), { message }).toBeNull();
           expect(await side.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON()), message).toEqual(original);
         }
       }
