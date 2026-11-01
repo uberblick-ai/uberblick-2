@@ -113,11 +113,17 @@ omit if absent>
 For issue creation, reuse any priority the human already stated; otherwise ask,
 suggesting a value when useful. Never infer or choose priority for the human.
 
+Propose a milestone too: the active one when the work serves its goal, otherwise
+the next one that fits. Ask as for priority and use the milestone the human
+confirms. An issue without a milestone waits until no milestone has work that can
+start, unless its priority is higher, so leave it unset only when the human says so.
+
 Create with `gh issue create --repo uberblick-ai/uberblick-2`. Posting as a
 maintainer: add `--label needs-preparation`. Posting as `uberblick-agent`: add
 no trigger label; ask the human to add `needs-preparation` from their account.
 Add only the human-stated `priority:<value>`, recording that decision in a comment;
-otherwise leave it unset. Tell the human to set Request Source `Human` in the sidebar.
+otherwise leave it unset. Add the confirmed milestone with `--milestone`. Tell the
+human to set Request Source `Human` in the sidebar.
 
 Do not invent `Touches`, relationships, architecture, acceptance criteria,
 Pointers or `ready`; preparation supplies the grounded contract under ISSUE_SPEC.
