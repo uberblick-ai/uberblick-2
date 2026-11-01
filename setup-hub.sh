@@ -139,7 +139,7 @@ setup_check_port() {
 }
 
 setup_cleanup() {
-  [ -z "${stage:-}" ] || rm -rf "$stage"
+  [ -z "${setup_stage:-}" ] || rm -rf "$setup_stage"
 }
 
 setup_main() {
@@ -149,6 +149,8 @@ setup_main() {
   local step='preflight' fix='Correct the error above and re-run.'
   trap 'setup_fail "$step failed. $fix"' ERR
   local stage=''
+  # Bash 3.2 unwinds function locals before its EXIT trap runs.
+  setup_stage=''
   trap setup_cleanup EXIT
   trap 'exit 130' INT TERM HUP
   local directory=${HUB_DIR:-$HOME/uberblick-remote}
@@ -278,6 +280,7 @@ $(setup_bindings "$id")"
   umask 077
   mkdir -p "$directory"
   stage=$(mktemp -d "$directory/.setup-hub.XXXXXXXX")
+  setup_stage=$stage
   for file in compose.yml remote.env.example remote.https.yml remote.tailscale.yml; do
     setup_fetch "$url/download/hub-v$target/$file" "$stage/$file"
   done
