@@ -1,3 +1,5 @@
+import { introspectMcpToken } from "@uberblick/hub/mcp-channel";
+
 /** A fresh hub answer for one presented access token; never a credential. */
 export interface McpHostGrant {
   grantId: string;
@@ -15,5 +17,9 @@ export type McpHostTokenResult =
 
 export type McpHostTokenCheck = (token: string) => Promise<McpHostTokenResult>;
 
-/** Fail closed until the hub introspection channel is installed. */
+/** Fail closed when no local hub channel is configured. */
 export const unavailableTokenCheck: McpHostTokenCheck = async () => ({ status: "unavailable" });
+
+export function hubTokenCheck(socketPath: string | undefined): McpHostTokenCheck {
+  return socketPath === undefined ? unavailableTokenCheck : token => introspectMcpToken(socketPath, token);
+}

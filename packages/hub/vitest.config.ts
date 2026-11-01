@@ -7,6 +7,7 @@ import { vitestBudgets } from "../../scripts/vitest-budget-config.mjs";
 const osSensitive = [
   "admin-setup",
   "admin-setup-public",
+  "mcp-channel",
   "operator-restore-access",
   "operator-restore-command",
   "database-release",

@@ -27,6 +27,8 @@ export interface HubConfig {
   behindReleaseProxy?: boolean;
   /** Configured OAuth issuer origin, resolved from `HUB_PUBLIC_URL`. */
   publicUrl?: string;
+  /** Private host channel; served only when `HUB_MCP_SOCKET` names a Unix socket. */
+  mcpSocketPath?: string;
   /** SQLite file; creates its parent. `":memory:"` loses everything on restart. */
   databasePath?: string;
   /** Local-only HMAC signing secret (`HUB_AUTH_TOKEN`). */
@@ -67,6 +69,7 @@ export function resolveCoreHubConfig(
 ): HubConfig {
   const publicUrl = parseHubPublicUrl(env.HUB_PUBLIC_URL);
   const host = env.HUB_HOST?.trim();
+  const mcpSocketPath = env.HUB_MCP_SOCKET?.trim();
   const address = host === undefined || host === "" ? DEFAULT_HOST : host;
   // Remote admission uses device credentials and current membership, never a leftover secret.
   const authSecret = isLoopbackHost(address) ? env.HUB_AUTH_TOKEN : undefined;
@@ -82,6 +85,7 @@ export function resolveCoreHubConfig(
     address,
     databasePath,
     ...(publicUrl === undefined ? {} : { publicUrl }),
+    ...(mcpSocketPath === undefined || mcpSocketPath === "" ? {} : { mcpSocketPath }),
     ...(env.HUB_RELEASE_PROXY === "1" ? { behindReleaseProxy: true } : {}),
     ...(authSecret === undefined ? {} : { authSecret }),
   };
