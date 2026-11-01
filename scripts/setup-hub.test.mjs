@@ -194,7 +194,7 @@ function noDownloads(f) {
 }
 
 function assertSetting(env, key, value) {
-	assert.match(env, new RegExp(`^${key}=${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
+	assert.deepEqual(env.split("\n").filter((line) => line.startsWith(`${key}=`)), [`${key}=${value}`]);
 }
 
 test("hosted installer help and a truncated transfer perform no work", { timeout: 60_000 }, (t) => {
