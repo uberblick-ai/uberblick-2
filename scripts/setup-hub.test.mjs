@@ -89,6 +89,7 @@ else if (command === "tailscale") {
     out(containers.map((container) => container.id).join("\n") + (containers.length ? "\n" : ""));
   }
   else if (args[0] === "inspect") {
+    if (config.inspectError === args.at(-1)) die("synthetic Docker inspect failure");
     const container = [...config.containers, ...config.foreignContainers].find((candidate) => candidate.id === args.at(-1));
     if (!container) die("No such container");
     const format = args[args.indexOf("--format") + 1];
@@ -386,6 +387,22 @@ test("Docker publications conflict even without a userspace socket and UDP publi
 	noDownloads(own);
 	const udp = fixture(t, { foreignContainers: [{ id: "other-docker", running: true, ports: [{ protocol: "80/udp", address: "0.0.0.0", port: 8080 }] }] });
 	passed(udp.run());
+});
+
+test("a failed inspect of another Docker publication stops preflight before downloading or changing files", { timeout: 60_000 }, (t) => {
+	const f = fixture(t, { inspectError: "other-docker", foreignContainers: [{ id: "other-docker", running: true, ports: [] }] });
+	f.env("HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml\nCUSTOM_VALUE=preserved\n");
+	const before = f.files();
+	failed(f.run(), /inspect|preflight/i);
+	noDownloads(f);
+	assert.deepEqual(f.files(), before);
+});
+
+test("macOS wildcard socket notation still recognizes this deployment's public HTTPS port", { timeout: 60_000 }, (t) => {
+	const f = fixture(t, { os: "Darwin", arch: "arm64", listeners: [{ address: "0.0.0.0", port: 443 }] });
+	f.env("HUB_VERSION=0.4.13\nCOMPOSE_FILE=compose.yml:remote.https.yml\nWEB_HOST=hub.example.com\n");
+	f.config.containers = [{ id: "caddy-own", service: "caddy", workingDir: f.hub, running: true, ports: [{ protocol: "443/tcp", address: "0.0.0.0", port: 443 }] }];
+	passed(f.run());
 });
 
 test("download failures preserve every installed file and a subsequent run succeeds", { timeout: 60_000 }, (t) => {

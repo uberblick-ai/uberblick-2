@@ -4,6 +4,7 @@
 setup_help() {
   cat <<'HELP'
 Start or update a Docker hub on this host.
+Requires curl, Docker Engine 28.0.0+, Compose 2.24.4+, and Linux ss or macOS netstat.
 
   /bin/bash -c "$(curl -fsSL https://uberblick.ai/setup-hub.sh)"
 
@@ -100,12 +101,13 @@ setup_owns_binding() {
 }
 
 setup_check_port() {
-  local sockets candidates id protocol ip port endpoint own_id ours
-  if [ "$os" = Linux ] && command -v ss >/dev/null 2>&1; then
+  local sockets candidates id protocol ip port endpoint own_id ours bindings
+  if [ "$os" = Linux ]; then
+    command -v ss >/dev/null 2>&1 || setup_fail 'port check requires ss from iproute2. Install it: https://wiki.linuxfoundation.org/networking/iproute2'
     sockets=$(ss -H -ltn) || setup_fail 'port check: ss failed; install iproute2 or repair access and re-run.'
     sockets=$(printf '%s\n' "$sockets" | awk '{print $4}')
   else
-    command -v netstat >/dev/null 2>&1 || setup_fail 'port check needs ss (Linux: install iproute2) or netstat (macOS: /usr/sbin/netstat).'
+    command -v netstat >/dev/null 2>&1 || setup_fail 'port check requires macOS /usr/sbin/netstat. Restore the system tool and re-run.'
     sockets=$(netstat -an) || setup_fail 'port check: netstat failed; repair access to the system socket table and re-run.'
     sockets=$(printf '%s\n' "$sockets" | awk '/^tcp/ && !/^tcp6[[:space:]]/ && /LISTEN/ {print $4}')
   fi
@@ -114,12 +116,13 @@ setup_check_port() {
     ours=0
     for own_id in $ids; do [ "$id" != "$own_id" ] || ours=1; done
     [ "$ours" = 0 ] || continue
+    bindings=$(setup_bindings "$id") || setup_fail 'port check: Docker could not inspect a container publication. Check docker info and re-run before updating.'
     while read -r protocol ip port; do
       case "$protocol" in */tcp) ;; *) continue ;; esac
       if [ "$port" = "$listen_port" ] && setup_overlap "$ip"; then
         setup_fail "port check: $bind:$listen_port is published by another Docker deployment. Stop that listener or choose another route/LOOPBACK_PORT."
       fi
-    done <<< "$(setup_bindings "$id")"
+    done <<< "$bindings"
   done
   while read -r endpoint; do
     [ -n "$endpoint" ] || continue
@@ -128,6 +131,7 @@ setup_check_port() {
       *.*) port=${endpoint##*.}; ip=${endpoint%.*} ;;
       *) continue ;;
     esac
+    if [ "$ip" = '*' ]; then ip=0.0.0.0; fi
     if [ "$port" = "$listen_port" ] && setup_overlap "$ip" && ! setup_owns_binding "$ip"; then
       setup_fail "port check: $bind:$listen_port is in use. Stop that listener or choose another route/LOOPBACK_PORT."
     fi
