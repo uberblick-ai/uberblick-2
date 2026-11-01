@@ -459,6 +459,23 @@ test("a running release is backed up before changing files and a protocol change
 	assert.ok(!broken.calls().some((call) => call.command === "docker" && call.args.includes("pull")));
 });
 
+test("older status output without a release line retains the env version for update reporting and downgrade refusal", { timeout: 60_000 }, (t) => {
+	const f = fixture(t, { oldStatus: "hub running\nprotocol 1\nclaimed no\n" });
+	f.env("HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml\nCUSTOM_VALUE=preserved\n");
+	f.config.containers = [{ id: "hub-own", service: "hub", workingDir: f.hub, running: true, ports: [] }];
+	const result = f.run();
+	passed(result);
+	assert.match(result.stdout, /Updated hub from 0\.4\.12 to 0\.4\.13/);
+	assert.match(result.stdout, /backup \/data\/backups\/hub-before-update\.tar\.gz/);
+	const downgrade = fixture(t, { oldStatus: "hub running\nprotocol 1\nclaimed no\n" });
+	downgrade.env("HUB_VERSION=0.4.13\nCOMPOSE_FILE=compose.yml\nCUSTOM_VALUE=preserved\n");
+	downgrade.config.containers = [{ id: "hub-own", service: "hub", workingDir: downgrade.hub, running: true, ports: [] }];
+	const before = downgrade.files();
+	failed(downgrade.run({ HUB_VERSION: "0.4.12" }), /downgrade|rollback/i);
+	assert.deepEqual(downgrade.files(), before);
+	assert.ok(!downgrade.calls().some((call) => call.command === "curl" && call.args.some((arg) => arg.includes("/releases/download/"))));
+});
+
 test("failed Compose steps stop the sequence and bounded status failure prints hub and Caddy logs", { timeout: 60_000 }, (t) => {
 	for (const step of ["config", "pull", "up"]) {
 		const f = fixture(t, { failStep: step });

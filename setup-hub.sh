@@ -197,8 +197,10 @@ $(setup_bindings "$id")"
     fi
   done
   if [ -n "$hub_id" ]; then
+    local reported_release
     status=$(docker exec "$hub_id" ub-hub status) || setup_fail 'status check failed on the running hub. Run docker compose exec hub ub-hub doctor from HUB_DIR before retrying.'
-    previous=$(printf '%s\n' "$status" | awk '$1=="release" {print $2}')
+    reported_release=$(printf '%s\n' "$status" | awk '$1=="release" {print $2}')
+    if [ -n "$reported_release" ]; then previous=$reported_release; fi
     old_protocol=$(printf '%s\n' "$status" | awk '$1=="protocol" {print $2}')
   fi
   if [ -n "$host_given" ]; then
