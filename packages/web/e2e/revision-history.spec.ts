@@ -1701,8 +1701,13 @@ test.describe("document history through ub open", () => {
     const header = page.locator(".ub-revision-header");
     const split = page.locator(".ub-revision-split");
     await expect(split).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const currentHeaderHeight = await header.evaluate(element => element.getBoundingClientRect().height);
+    expect(await page.getByText("This is the current version.", { exact: true })
+      .evaluate(element => element.getBoundingClientRect().height)).toBeLessThanOrEqual(1);
     await previous(page);
     await expect(restore).toBeEnabled();
+    expect(await header.evaluate(element => element.getBoundingClientRect().height)).toBeCloseTo(currentHeaderHeight, 0);
     const drawer = await showHistoryList(page);
     const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true });
     if (await collapse.getAttribute("aria-checked") === "true") await activateControl(collapse);
