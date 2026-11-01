@@ -486,17 +486,23 @@ async function caretInComparisonLink(page: Page, side: Locator, label: string): 
   await placeCaretIn(paragraph, { edge: "start" });
   for (let step = 0; step < 6; step += 1) await page.keyboard.press("ArrowRight");
   // Arrow keys move the DOM caret before selectionchange imports it into ProseMirror.
-  await expect.poll(() => paragraph.locator("a").evaluate(element => {
+  await expect.poll(() => paragraph.locator("a").evaluate(async element => {
     const root = element.closest(".ProseMirror") as HTMLElement & { editor: Editor };
-    return new Promise<boolean>(resolve => requestAnimationFrame(() => {
-      const selection = document.getSelection();
-      if (selection?.anchorNode == null || selection.focusNode === null || !selection.isCollapsed ||
-        !element.contains(selection.anchorNode) || !root.contains(document.activeElement)) { resolve(false); return; }
-      const view = root.editor.view;
-      resolve(view.state.selection.anchor === view.posAtDOM(selection.anchorNode, selection.anchorOffset) &&
-        view.state.selection.head === view.posAtDOM(selection.focusNode, selection.focusOffset));
-    }));
-  })).toBe(true);
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    const selection = document.getSelection();
+    const view = root.editor.view;
+    return {
+      collapsedSelection: selection?.isCollapsed === true,
+      anchorInsideLink: selection?.anchorNode != null && element.contains(selection.anchorNode),
+      focusInsideEditor: root.contains(document.activeElement),
+      agreesWithProseMirror: selection?.anchorNode != null && selection.focusNode !== null &&
+        root.contains(selection.anchorNode) && root.contains(selection.focusNode) &&
+        view.state.selection.anchor === view.posAtDOM(selection.anchorNode, selection.anchorOffset) &&
+        view.state.selection.head === view.posAtDOM(selection.focusNode, selection.focusOffset),
+    };
+  }), { message: `${await side.getAttribute("aria-label")}: comparison caret in ${label}` }).toEqual({
+    collapsedSelection: true, anchorInsideLink: true, focusInsideEditor: true, agreesWithProseMirror: true,
+  });
 }
 
 /** Animations still running in either document view: none once motion has settled. */
@@ -2991,11 +2997,16 @@ test.describe("document history through ub open", () => {
   });
 
   test("Inline follows document links by click and Enter, and native Tab leaves lists and tables", { tag: "@webkit" }, async ({ browser }, info) => {
+    const targetTitle = docTitle("Inline link target");
+    const target = randomUUID();
+    const targetDocument = new Y.Doc();
+    try {
+      initDoc(targetDocument, { uuid: target, title: targetTitle });
+      await harness().seedDocument(targetDocument);
+    } finally { targetDocument.destroy(); }
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
       ...(info.project.name === "webkit-ipad" ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 900 } }), reducedMotion: "reduce",
     } });
-    const targetTitle = docTitle("Inline link target");
-    const target = await newDocument(page, targetTitle);
     const title = docTitle("Inline native keyboard");
     const uuid = await newDocument(page, title);
     await serveHistory(page, [
@@ -3040,11 +3051,10 @@ test.describe("document history through ub open", () => {
     expect(await view.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON())).toEqual(original);
   });
 
-  // Keyboard focus can remain inside a comparison side during this journey.
-  test.fixme("each comparison side follows document links by click and Enter, and Tab leaves lists and tables", { tag: "@webkit" }, async ({ browser }) => {
-    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: { viewport: { width: 1440, height: 900 } } });
-    const targetTitle = docTitle("Historical link target");
-    const target = await newDocument(page, targetTitle);
+  test("each Split side opens external links on Enter and keeps deleted links inert", { tag: "@webkit" }, async ({ browser, browserName }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+      ...(browserName === "webkit" ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 900 } }), reducedMotion: "reduce",
+    } });
     const deleted = await newDocument(page, docTitle("Deleted historical link target"));
     await activateControl(page.getByRole("button", { name: "Document actions", exact: true }));
     await activateControl(page.getByRole("menuitem", { name: "Archive document", exact: true }));
@@ -3060,35 +3070,17 @@ test.describe("document history through ub open", () => {
     await serveHistory(page, [
       { id: "latest", author: null, startedAt: 2_000, endedAt: null },
       { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
-    ], linkedHistory(uuid, title, target, deleted));
+    ], linkedHistory(uuid, title, randomUUID(), deleted));
     await previous(page);
     const drawer = await showHistoryList(page);
-    await activateControl(historyList(page).getByRole("switch", { name: "Collapse unchanged" }));
+    await historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true }).uncheck();
     await closeHistoryList(page, drawer);
     const split = page.locator(".ub-revision-split");
     await expect(split).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/${uuid}/rev/${revisionId("latest")}$`));
     const sourceAddress = page.url();
     for (const side of [earlierSide(page), historicalEditor(page)]) {
-      const caretInLink = (label: string): Promise<void> => caretInComparisonLink(page, side, label);
-      for (const open of ["click", "Enter"] as const) {
-        const link = side.locator(`a.ub-doclink[data-doc-id="${target}"]`);
-        await expect(link).toHaveAttribute("data-doc-id", target);
-        if (open === "click") {
-          await link.click();
-        } else {
-          await caretInLink("the linked document");
-          await page.keyboard.press("Enter");
-        }
-        await expect(page).toHaveURL(new RegExp(`/${harness().workspace}/${target}$`));
-        await expect(page.locator(".ub-title")).toHaveValue(targetTitle);
-        await expect(split).toHaveCount(0);
-        await page.goBack();
-        await expect(page).toHaveURL(sourceAddress);
-        await expect(page.locator(".ub-revision-title")).toHaveText(title);
-        await expect(split).toBeVisible();
-      }
-      await caretInLink("the external page");
+      await caretInComparisonLink(page, side, "the external page");
       const [popup] = await Promise.all([
         page.context().waitForEvent("page", { timeout: 5_000 }),
         page.keyboard.press("Enter"),
@@ -3105,20 +3097,86 @@ test.describe("document history through ub open", () => {
       await deletedLink.click();
       await expect(page).toHaveURL(sourceAddress);
       await expect(split).toBeVisible();
-      await caretInLink("the deleted document");
+      await caretInComparisonLink(page, side, "the deleted document");
       await page.keyboard.press("Enter");
       await expect(page).toHaveURL(sourceAddress);
       await expect(split).toBeVisible();
+    }
+  });
+
+  // https://github.com/uberblick-ai/uberblick-2/issues/2541 — toast teardown restores the editing host's focus.
+  test.fixme("removing the toast reached by Tab keeps focus outside the Split list", async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+      viewport: { width: 1440, height: 900 }, reducedMotion: "reduce",
+    } });
+    await page.clock.install();
+    const archivedTitle = docTitle("Tab archive toast");
+    await newDocument(page, archivedTitle);
+    await activateControl(page.getByRole("button", { name: "Document actions", exact: true }));
+    await activateControl(page.getByRole("menuitem", { name: "Archive document", exact: true }));
+    await activateControl(page.getByRole("alertdialog").getByRole("button", { name: "Archive", exact: true }));
+    const toast = page.locator("[data-sonner-toast]");
+    await expect(toast).toContainText(archivedTitle);
+    const toastAt = await page.evaluate(() => Date.now());
+    const title = docTitle("Split toast focus");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], linkedHistory(uuid, title, randomUUID(), randomUUID()));
+    await previous(page);
+    const drawer = await showHistoryList(page);
+    await historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true }).uncheck();
+    await closeHistoryList(page, drawer);
+    await expect(page.locator(".ub-revision-split")).toBeVisible();
+    const side = historicalEditor(page);
+    await placeCaretIn(side.getByRole("listitem"));
+    await expect(side).toBeFocused();
+    // Hold the toast's exit window so native Tab reaches it before unmount.
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+    await page.clock.runFor(Math.max(0, toastAt + 4_050 - await page.evaluate(() => Date.now())));
+    await expect(toast).toHaveAttribute("data-removed", "true");
+    await page.keyboard.press("Tab");
+    await expect(toast).toBeFocused();
+    await page.clock.runFor(300);
+    await expect(toast).toHaveCount(0);
+    await expect.poll(() => side.evaluate(element => element.contains(document.activeElement) ? {
+      documentFocused: document.hasFocus(),
+      activeElement: document.activeElement?.outerHTML.slice(0, 350),
+    } : null), { message: "This revision: Tab stays outside the list after the toast unmounts" }).toBeNull();
+  });
+
+  test("native Tab and Shift+Tab leave lists and tables on each Split side", { tag: "@webkit" }, async ({ browser, browserName }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+      ...(browserName === "webkit" ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 900 } }), reducedMotion: "reduce",
+    } });
+    const title = docTitle("Split native keyboard");
+    const uuid = await newDocument(page, title);
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], linkedHistory(uuid, title, randomUUID(), randomUUID()));
+    await previous(page);
+    const drawer = await showHistoryList(page);
+    await historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true }).uncheck();
+    await closeHistoryList(page, drawer);
+    await expect(page.locator(".ub-revision-split")).toBeVisible();
+    for (const side of [earlierSide(page), historicalEditor(page)]) {
+      await expect(side).toHaveAttribute("contenteditable", "true");
       const original = await side.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON());
-      for (const block of [side.getByRole("listitem"), side.locator("td").last()]) {
+      for (const [name, block] of [["list", side.getByRole("listitem")], ["table", side.locator("td").last()]] as const) {
         for (const key of ["Tab", "Shift+Tab"]) {
-          await setPointerSelection(block, () => block.click());
+          await placeCaretIn(block);
           await expect(side).toBeFocused();
           await page.keyboard.press(key);
-          await expect.poll(() => side.evaluate(element => element.contains(document.activeElement))).toBe(false);
+          const message = `${await side.getAttribute("aria-label")}: ${key} leaves the ${name}`;
+          await expect.poll(() => side.evaluate(element => element.contains(document.activeElement) ? {
+            documentFocused: document.hasFocus(),
+            activeElement: document.activeElement?.outerHTML.slice(0, 350),
+          } : null), { message }).toBeNull();
+          expect(await side.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON()), message).toEqual(original);
         }
       }
-      expect(await side.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON())).toEqual(original);
     }
   });
 
