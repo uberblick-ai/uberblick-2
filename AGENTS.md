@@ -139,6 +139,15 @@ A pointer is a route to the source, not a substitute for reading it.
 - **Run a role:** `.agents/roles/README.md`, then `.agents/roles/<role>.md`.
 - **Prepare an issue:** `.agents/protocols/issue-preparation.md` and
   `.github/ISSUE_SPEC.md` for the issue contract.
+- **Open an attended pull request:** when a maintainer directs your session
+  without a loop assignment and you will open the pull request yourself, follow
+  [delivery-policy Workflow step 1](.agents/protocols/delivery-policy.md#workflow):
+  file the change's issue conforming to `.github/ISSUE_SPEC.md` before creating
+  a branch or opening the pull request, unless that step's technical-PR clause
+  covers it.
+  File the issue with no workflow trigger label (such as `ready`,
+  `needs-preparation` or `needs-review`), so no loop run starts it, and close it
+  from the pull request with `Closes #N`.
 - **Build or validate:** `.agents/development.md` and
   `.agents/protocols/delivery-policy.md` before editing.
 - **Review or integrate:** `.agents/protocols/delivery-policy.md`, then
