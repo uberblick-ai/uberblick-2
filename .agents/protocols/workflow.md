@@ -59,18 +59,18 @@ Schema risk uses those reviews and gates, not package locks.
 
 ### Milestone gate
 
-New issue starts also require the active milestone. ub-agents selects the
-open milestone with open issues or pull requests whose title comes first in
-alphabetical order. Later and unassigned issues wait even when the active
-milestone has no eligible issue. PR work, owned runs and recovery continue;
-priority orders eligible work within the gate.
+New issues start from the active milestone: the earliest open milestone with an
+issue the launcher can start now. An issue that cannot start, for lack of a trigger
+label, a stop label, an open blocker or another launcher's claim, does not hold its
+milestone. Within the active milestone, priority orders the work. Later milestones
+never jump ahead. An issue without a milestone starts ahead only when its priority is
+higher than the active milestone's next issue; otherwise it waits until no milestone
+has work that can start. PR work, owned runs and recovery ignore milestones.
 
-Milestones advance when the active milestone closes or has no open items, not
-when a release is published. Titles set the roadmap order; creation time and
-due dates do not. The comparison is plain character order, so `v0.4.12` comes
-before `v0.5.0` but `v0.4.9` would come after `v0.4.10`: choose titles that sort
-in roadmap order, and rename a milestone to move it. Check native dependencies
-before changing the order: a blocker in a later milestone can stall the gate.
+Titles set the roadmap order; creation time, due dates and release publication do
+not. Numbers in titles compare as numbers, so `v0.4.9` comes before `v0.4.10`.
+Rename a milestone to move it. A blocker counts as work of its dependents' earliest
+milestone, so a prerequisite filed in a later milestone or none still starts in time.
 
 ### Priority
 
