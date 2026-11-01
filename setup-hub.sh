@@ -176,7 +176,21 @@ setup_main() {
   case "$directory" in /*) ;; *) directory=$PWD/$directory ;; esac
   if [ -d "$directory" ]; then directory=$(cd "$directory" && pwd -P); fi
   if [ -f "$directory/.env" ]; then
-    resolved=$(docker compose --env-file "$directory/.env" -f - config --environment <<< 'services: {}') || setup_fail 'read .env failed. Repair its Compose dotenv syntax, then re-run.'
+    # config --images is available at the Compose floor and prints these
+    # interpolated strings without YAML/JSON quoting or evaluating shell code.
+    resolved=$(docker compose --env-file "$directory/.env" -f - config --images <<'COMPOSE'
+name: uberblick-remote
+services:
+  version: {image: 'HUB_VERSION=${HUB_VERSION:-}'}
+  web: {image: 'WEB_HOST=${WEB_HOST:-}'}
+  tail: {image: 'TAILSCALE_HOST=${TAILSCALE_HOST:-}'}
+  tail-ip: {image: 'TAILSCALE_IP=${TAILSCALE_IP:-}'}
+  https-ip: {image: 'HTTPS_BIND_IP=${HTTPS_BIND_IP:-}'}
+  port: {image: 'LOOPBACK_PORT=${LOOPBACK_PORT:-}'}
+  files: {image: 'COMPOSE_FILE=${COMPOSE_FILE:-}'}
+  project: {image: 'COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-}'}
+COMPOSE
+    ) || setup_fail 'read .env failed. Repair its Compose dotenv syntax, then re-run.'
     web_host=$(setup_env_value WEB_HOST); tail_host=$(setup_env_value TAILSCALE_HOST)
     tail_ip=$(setup_env_value TAILSCALE_IP); https_ip=$(setup_env_value HTTPS_BIND_IP)
     loop_port=$(setup_env_value LOOPBACK_PORT); loop_port=${loop_port:-8080}

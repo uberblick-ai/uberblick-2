@@ -37,9 +37,11 @@ const dotenv = (file) => {
     const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(.*)$/);
     if (!match) continue;
     let value = match[2];
-    if (value.startsWith("'")) value = value.slice(1, value.lastIndexOf("'"));
+    const literal = value.startsWith("'");
+    if (literal) value = value.slice(1, value.lastIndexOf("'"));
     else if (value.startsWith('"')) value = value.slice(1, value.lastIndexOf('"'));
     else value = value.replace(/\s+#.*$/, "").trim();
+    if (!literal) value = value.replace(/\$\{([A-Za-z_][A-Za-z_0-9]*)(?::-(.*?))?\}/g, (_, key, fallback) => process.env[key] ?? values[key] ?? fallback ?? "");
     values[match[1]] = value;
   }
   return values;
@@ -85,7 +87,8 @@ else if (command === "tailscale") {
   } else if (args[0] === "version") out(config.engine + "\n");
   else if (joined === "compose version --short") out(config.compose + "\n");
   else if (args[0] === "ps") {
-    const containers = args.includes("-a") ? config.containers : [...config.containers, ...config.foreignContainers];
+    const projectMatches = args.includes("label=com.docker.compose.project=" + (config.projectName ?? "uberblick-remote"));
+    const containers = args.includes("-a") ? (projectMatches ? config.containers : []) : [...config.containers, ...config.foreignContainers];
     out(containers.map((container) => container.id).join("\n") + (containers.length ? "\n" : ""));
   }
   else if (args[0] === "inspect") {
@@ -107,10 +110,13 @@ else if (command === "tailscale") {
       out("backup /data/backups/hub-before-update.tar.gz\nsha256 synthetic-checksum\n");
     } else die("Unexpected exec command: " + joined);
   } else if (args[0] === "compose") {
-    if (args.includes("--environment")) {
-      fs.readFileSync(0, "utf8");
+    if (args.includes("--environment")) die("unknown flag: --environment (Compose 2.24.4)");
+    if (args.includes("--images")) {
+      const input = fs.readFileSync(0, "utf8");
       const envFile = args[args.indexOf("--env-file") + 1];
-      for (const [key, value] of Object.entries(dotenv(envFile))) out(key + "=" + value + "\n");
+      const values = dotenv(envFile);
+      values.COMPOSE_PROJECT_NAME ??= input.match(/^name:\s*([A-Za-z0-9_-]+)/m)?.[1] ?? path.basename(process.cwd()).toLowerCase();
+      for (const key of ["HUB_VERSION", "WEB_HOST", "TAILSCALE_HOST", "TAILSCALE_IP", "HTTPS_BIND_IP", "LOOPBACK_PORT", "COMPOSE_FILE", "COMPOSE_PROJECT_NAME"]) out(key + "=" + (process.env[key] ?? values[key] ?? "") + "\n");
     } else if (args.includes("logs")) out("hub synthetic startup failure\ncaddy synthetic startup failure\n");
     else if (args.at(-1) === "status") {
       if (config.statusError) die(config.statusError);
@@ -330,6 +336,21 @@ test("supplying only LOOPBACK_PORT keeps an existing HTTPS route and bind settin
 	assertSetting(env, "WEB_HOST", "hub.example.com");
 	assertSetting(env, "HTTPS_BIND_IP", "192.0.2.4");
 	assertSetting(env, "LOOPBACK_PORT", "9191");
+});
+
+test("quoted and interpolated dotenv settings keep their literal text and select the resolved HTTPS route", { timeout: 60_000 }, (t) => {
+	const f = fixture(t, { listeners: [{ address: "192.0.2.4", port: 443 }] });
+	const settings = `HOST_ZONE=example.com\nWEB_HOST="hub.\${HOST_ZONE}"\nHTTPS_BIND_IP="192.0.2.4"\nCOMPOSE_FILE='compose.yml:remote.https.yml'\n`;
+	f.env(`HUB_VERSION=0.4.12\n${settings}`);
+	const before = f.files();
+	failed(f.run(), /192\.0\.2\.4:443/);
+	noDownloads(f);
+	assert.deepEqual(f.files(), before);
+	f.config.listeners = [];
+	const result = f.run();
+	passed(result);
+	assert.match(result.stdout, /ub auth login https:\/\/hub\.example\.com/);
+	assert.ok(f.files()[".env"].includes(settings));
 });
 
 test("Tailscale selection requires Linux and a working client and records the current IPv4 address", { timeout: 60_000 }, (t) => {
