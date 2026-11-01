@@ -395,6 +395,38 @@ test("an occupied port is allowed only for this running deployment and missing e
 	assert.deepEqual(foreign.files(), {});
 });
 
+test("symlinked deployment directories remain updatable while other working directories are refused", { timeout: 60_000 }, (t) => {
+	for (const parentLink of [false, true]) {
+		const f = fixture(t);
+		const link = join(f.scratch, "hub-link");
+		if (!parentLink) mkdirSync(f.hub);
+		symlinkSync(parentLink ? f.scratch : f.hub, link);
+		const directory = parentLink ? join(link, "hub") : link;
+		passed(f.run({ HUB_DIR: directory, HUB_VERSION: "0.4.12" }));
+		f.config.listeners = [{ address: "127.0.0.1", port: 8080 }];
+		f.config.containers = [
+			{ id: "hub-own", service: "hub", workingDir: directory, running: true, ports: [] },
+			{ id: "caddy-own", service: "caddy", workingDir: directory, running: true, ports: [{ address: "127.0.0.1", port: 8080 }] },
+		];
+		const result = f.run({ HUB_DIR: directory });
+		passed(result);
+		assertSetting(f.files()[".env"], "HUB_VERSION", "0.4.13");
+		assert.match(result.stdout, /backup \/data\/backups\/hub-before-update\.tar\.gz/);
+		assert.match(result.stdout, /Updated hub from 0\.4\.12 to 0\.4\.13/);
+	}
+	for (const available of [false, true]) {
+		const f = fixture(t);
+		f.env("HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml\nCUSTOM_VALUE=preserved\n");
+		const other = join(f.scratch, "other");
+		if (available) mkdirSync(other);
+		f.config.containers = [{ id: "hub-foreign", service: "hub", workingDir: other, running: true, ports: [] }];
+		const before = f.files();
+		failed(f.run(), /deployment check:.*belongs to/);
+		noDownloads(f);
+		assert.deepEqual(f.files(), before);
+	}
+});
+
 test("Docker publications conflict even without a userspace socket and UDP publications do not occupy TCP", { timeout: 60_000 }, (t) => {
 	const f = fixture(t, { foreignContainers: [{ id: "other-docker", running: true, ports: [{ address: "0.0.0.0", port: 8080 }] }] });
 	failed(f.run(), /8080/);

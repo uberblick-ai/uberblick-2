@@ -203,6 +203,7 @@ COMPOSE
   for id in $ids; do
     [ -f "$directory/.env" ] || setup_fail "deployment check: project $project already exists, but HUB_DIR has no .env. Set HUB_DIR to its existing deployment directory."
     workdir=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "$id")
+    if [ -d "$workdir" ]; then workdir=$(cd "$workdir" && pwd -P); fi
     [ "$workdir" = "$directory" ] || setup_fail "deployment check: project $project belongs to $workdir. Set HUB_DIR to that existing deployment directory."
     service=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$id")
     running=$(docker inspect --format '{{.State.Running}}' "$id")
