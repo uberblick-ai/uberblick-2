@@ -4,6 +4,7 @@ pnpm = "10"
 fnox = "1"
 # Line counts for the CI health report: code without comments or blank lines.
 "aqua:boyter/scc" = "4"
+shellcheck = "0.11.0"
 
 # Plaintext local defaults. Only real secrets belong in fnox.toml.
 #
@@ -132,11 +133,11 @@ description = "Install workspace dependencies (frozen lockfile in CI)"
 run = 'pnpm install --frozen-lockfile ${PNPM_STORE_DIR:+--store-dir "$PNPM_STORE_DIR"}'
 
 [tasks.lint]
-description = "Lint the workspace with Biome and browser settle checks (the formatter stays off)"
+description = "Lint the workspace with Biome, browser settle checks and ShellCheck"
 # Biome is one root-level binary, not a per-package script, so this is `pnpm
 # lint` rather than `pnpm -r lint`. The root script carries the flags so the
 # Docker review runs the identical command.
-run = "pnpm lint"
+run = ["pnpm lint", "shellcheck setup-hub.sh"]
 
 [tasks.typecheck]
 description = "Typecheck every package (tsc --noEmit)"
