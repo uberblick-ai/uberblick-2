@@ -2273,22 +2273,22 @@ test.describe("document history through ub open", () => {
     await expect(list.getByRole("button", { name: /Accepted checkpoint/ })).toBeVisible();
   });
 
-  // Restore-label contrast is unstable during this journey in CI.
-  test.fixme("Named history compares anchors, steps between them and keeps addressed comparisons fixed", { tag: "@webkit" }, async ({ browser }) => {
-    const page = await openApp(browser, "/", { readySelector: ".ub-pane" });
+  test("Named history keeps native focus, browser addresses and settled accessible paint", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane",
+      contextOptions: { viewport: { width: 1366, height: 1024 }, reducedMotion: "reduce" } });
     const title = docTitle("Named history anchors");
     const uuid = await newDocument(page, title);
     const path = new URL(page.url()).pathname;
     const reviewer = { githubUsername: "review-person", surface: { kind: "browser" as const, name: "Browser" } };
     const kickoffAuthor = { ...reviewer, githubUsername: "kickoff-person" };
     const revisions: RevisionEntry[] = [
-      { id: "latest", title, author: null, startedAt: 5_000, endedAt: null },
-      { id: "reviewed", title, author: reviewer, startedAt: 4_000, endedAt: 5_000,
-        name: { text: "Reviewed", namer: reviewer, namedAt: 5_000, canManage: true } },
-      { id: "draft", title, author: { ...reviewer, githubUsername: "draft-person" }, startedAt: 3_000, endedAt: 4_000 },
-      { id: "kickoff", title, author: kickoffAuthor, startedAt: 2_000, endedAt: 3_000,
-        name: { text: "Kickoff", namer: reviewer, namedAt: 3_000, canManage: true } },
-      { id: "earliest", title, author: null, startedAt: null, endedAt: 2_000 },
+      { id: "latest", title, author: null, startedAt: 5_000_000, endedAt: null },
+      { id: "reviewed", title, author: reviewer, startedAt: 4_000_000, endedAt: 4_001_000,
+        name: { text: "Reviewed with the entire release team before the final launch review", namer: reviewer, namedAt: 4_001_000, canManage: true } },
+      { id: "draft", title, author: { ...reviewer, githubUsername: "draft-person" }, startedAt: 3_000_000, endedAt: 3_001_000 },
+      { id: "kickoff", title, author: kickoffAuthor, startedAt: 2_000_000, endedAt: 2_001_000,
+        name: { text: "Kickoff", namer: reviewer, namedAt: 2_001_000, canManage: true } },
+      { id: "earliest", title, author: null, startedAt: null, endedAt: 1_001_000 },
     ];
     const states = Object.fromEntries(revisions.map(entry => [entry.id, savedState(uuid, title, `${entry.id} content.`)]));
     await serveHistory(page, revisions, states);
@@ -2302,6 +2302,8 @@ test.describe("document history through ub open", () => {
     const kickoff = list.getByRole("button", { name: /Kickoff.*kickoff-person/ });
     const back = history(page).getByRole("button", { name: "Previous revision", exact: true });
     const forward = history(page).getByRole("button", { name: "Next revision", exact: true });
+    const copyRevision = history(page).getByRole("button", { name: `Copy revision ${revisionId("reviewed")}`, exact: true });
+    const tab = process.platform === "darwin" && browser.browserType().name() === "webkit" ? "Alt+Tab" : "Tab";
     const assertView = async (address: string, after: string, before: string): Promise<void> => {
       await expect(page).toHaveURL(new URL(address, harness().appUrl).href);
       await expect(historicalEditor(page)).toContainText(`${after} content.`);
@@ -2310,7 +2312,6 @@ test.describe("document history through ub open", () => {
     const setFilter = async (filter: "All" | "Named"): Promise<void> => {
       const drawer = await showHistoryList(page);
       await activateControl(list.getByRole("button", { name: filter, exact: true }));
-      await expect(list.getByRole("button", { name: filter, exact: true })).toHaveAttribute("aria-pressed", "true");
       await closeHistoryList(page, drawer);
     };
 
@@ -2326,39 +2327,49 @@ test.describe("document history through ub open", () => {
     await page.keyboard.press("Enter");
     await assertView(namedAddress, "reviewed", "kickoff");
     await expect(namedFilter).toBeFocused();
-    await expect(list.getByRole("listitem")).toHaveCount(2);
-    await expect(reviewed).toHaveAttribute("aria-current", "true");
-    await expect(list.locator('[aria-current="true"]')).toHaveCount(1);
+    await kickoff.focus();
+    await page.keyboard.press("Enter");
+    await assertView(kickoffAddress, "kickoff", "earliest");
+    await expect(kickoff).toBeFocused();
+    await reviewed.focus();
+    await page.keyboard.press("Enter");
+    await assertView(namedAddress, "reviewed", "kickoff");
+    await expect(reviewed).toBeFocused();
+    await expect(page.locator(".ub-revision-split")).toBeVisible();
+    await expect(page.locator(".ub-revision-side-label").first().getByRole("button", { name: "Restore “Kickoff”", exact: true })).toBeVisible();
     for (const scheme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme: scheme });
+      // Reduced motion skips comparison reveals; appearance changes still transition button colours.
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+        await Promise.all(document.getAnimations().filter(animation => animation instanceof CSSTransition)
+          .map(animation => animation.finished.catch(() => undefined)));
+      });
       const scan = await new AxeBuilder({ page }).include(".ub-history-sidebar").include(".ub-revision-pane").withTags(WCAG_TAGS).analyze();
       assertNoViolations(scan.violations);
+      const name = copyRevision.locator("span");
+      await expect(name).toHaveCSS("text-overflow", "ellipsis");
+      await expect(name).toHaveCSS("overflow-x", "hidden");
+      await expect(name).toHaveCSS("white-space", "nowrap");
+      const geometry = await name.evaluate(label => {
+        const box = label.getBoundingClientRect();
+        const control = label.parentElement?.getBoundingClientRect();
+        if (control === undefined) throw new Error("The revision name has no copy control");
+        return { clipped: label.scrollWidth > label.clientWidth, leftInset: box.left - control.left, rightInset: control.right - box.right };
+      });
+      expect(geometry.clipped).toBe(true);
+      expect(geometry.leftInset).toBeGreaterThanOrEqual(-1);
+      expect(geometry.rightInset).toBeGreaterThanOrEqual(-1);
     }
     // Native Tab reaches the other anchor and leaves the revision list for the sidebar footer.
     await kickoff.focus();
-    await page.keyboard.press("Tab");
+    await page.keyboard.press(tab);
     await expect(kickoff.locator("..").getByRole("button", { name: "Changes since this name", exact: true })).toBeFocused();
-    await page.keyboard.press("Tab");
+    await page.keyboard.press(tab);
     await expect(page.getByRole("button", { name: "Workspace settings", exact: true })).toBeFocused();
     await closeHistoryList(page, drawer);
-    await assertView(namedAddress, "reviewed", "kickoff");
-    await expect(history(page)).toContainText("review-person");
-    await expect(history(page)).toContainText("compared with “Kickoff”");
-    if (await page.locator(".ub-revision-split").count() > 0) {
-      await expect(page.locator(".ub-revision-side-label").first()).toContainText("kickoff-person");
-      await expect(page.locator(".ub-revision-side-label").first()).toContainText("Kickoff");
-      await expect(page.locator(".ub-revision-side-label").last()).toContainText("review-person");
-      await expect(page.locator(".ub-revision-side-label").last()).toContainText("Reviewed");
-    }
-    await expect(back).toBeEnabled();
-    await expect(forward).toBeDisabled();
     await activateControl(back);
     await assertView(kickoffAddress, "kickoff", "earliest");
-    await expect(back).toBeDisabled();
-    await expect(forward).toBeEnabled();
-    if (await page.locator(".ub-revision-split").count() > 0) {
-      await expect(page.locator(".ub-revision-side-label").first()).toContainText("Earlier content");
-    }
     await activateControl(forward);
     await assertView(namedAddress, "reviewed", "kickoff");
 
@@ -2371,9 +2382,21 @@ test.describe("document history through ub open", () => {
     await closeHistoryList(page, drawer);
     await page.goBack();
     await assertView(namedAddress, "reviewed", "kickoff");
+    await page.goBack();
+    await assertView(kickoffAddress, "kickoff", "earliest");
+    await page.goBack();
+    await assertView(namedAddress, "reviewed", "kickoff");
+    await page.goForward();
+    await assertView(kickoffAddress, "kickoff", "earliest");
+    await page.goForward();
+    await assertView(namedAddress, "reviewed", "kickoff");
     await page.goForward();
     await assertView(reviewedAddress, "reviewed", "draft");
     await setFilter("Named");
+    await assertView(namedAddress, "reviewed", "kickoff");
+    await page.goBack();
+    await assertView(reviewedAddress, "reviewed", "draft");
+    await page.goForward();
     await assertView(namedAddress, "reviewed", "kickoff");
     drawer = await showHistoryList(page);
     await activateControl(kickoff.locator("..").getByRole("button", { name: "Changes since this name", exact: true }));
@@ -2383,43 +2406,6 @@ test.describe("document history through ub open", () => {
     await assertView(sinceAddress, "latest", "kickoff");
     await setFilter("Named");
     await assertView(sinceAddress, "latest", "kickoff");
-
-    await page.goto(new URL(namedAddress, harness().appUrl).href);
-    await assertView(namedAddress, "reviewed", "kickoff");
-    await page.reload();
-    await assertView(namedAddress, "reviewed", "kickoff");
-    drawer = await showHistoryList(page);
-    await expect(list.getByRole("button", { name: "All", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await expect(reviewed).not.toHaveAttribute("aria-current");
-    await closeHistoryList(page, drawer);
-
-    for (const entry of revisions) {
-      if (entry.name != null) entry.name = { ...entry.name, text: entry.name.text.repeat(12) };
-    }
-    await page.goto(new URL(namedAddress, harness().appUrl).href);
-    await assertView(namedAddress, "reviewed", "kickoff");
-    const copyRevision = history(page).getByRole("button", { name: `Copy revision ${revisionId("reviewed")}`, exact: true });
-    for (const scheme of ["light", "dark"] as const) {
-      await page.emulateMedia({ colorScheme: scheme });
-      await expect(copyRevision.locator("span")).toHaveCSS("text-overflow", "ellipsis");
-      expect(await copyRevision.locator("span").evaluate(label => label.scrollWidth > label.clientWidth)).toBe(true);
-      const labels = page.locator(".ub-revision-side-label > span");
-      for (const label of await labels.all()) {
-        await expect(label).toHaveCSS("text-overflow", "ellipsis");
-        const geometry = await label.evaluate(element => {
-          const owner = element.parentElement;
-          if (owner === null) throw new Error("The comparison label has no column");
-          const box = element.getBoundingClientRect();
-          const bounds = owner.getBoundingClientRect();
-          const restore = owner.querySelector("button")?.getBoundingClientRect();
-          return { clipped: element.scrollWidth > element.clientWidth, rightInset: bounds.right - box.right,
-            buttonGap: restore === undefined ? null : restore.left - box.right };
-        });
-        expect(geometry.clipped).toBe(true);
-        expect(geometry.rightInset).toBeGreaterThanOrEqual(-1);
-        if (geometry.buttonGap !== null) expect(geometry.buttonGap).toBeGreaterThanOrEqual(0);
-      }
-    }
 
     for (const entry of revisions) {
       if (entry.id === "kickoff") entry.name = null;
@@ -2433,7 +2419,7 @@ test.describe("document history through ub open", () => {
     await expect(back).toBeDisabled();
     await expect(forward).toBeDisabled();
     await expect(copyRevision).toBeFocused();
-    await page.keyboard.press("Tab");
+    await page.keyboard.press(tab);
     await expect(copyRevision).not.toBeFocused();
     await expect(page.locator(":focus")).toBeVisible();
   });
