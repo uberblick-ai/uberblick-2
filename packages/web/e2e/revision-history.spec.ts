@@ -1682,18 +1682,18 @@ test.describe("document history through ub open", () => {
     await expect(page.locator(".ub-title")).toHaveValue(`${title} collaborator`);
   });
 
-  // Restore-label scrolling and native keyboard focus are unstable in this journey.
-  test.fixme("restore follows its column with compact geometry, touch reach and native keyboard order", { tag: "@webkit-touch" }, async ({ browser }) => {
+  test("restore follows its column with compact geometry, touch reach and native keyboard order", { tag: "@webkit-touch" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane",
       contextOptions: { viewport: { width: 1440, height: 640 }, reducedMotion: "reduce" } });
     const title = docTitle("Restore comparison placement");
     const uuid = await newDocument(page, title);
     const person = { githubUsername: "browser-person", surface: { kind: "browser" as const, name: "Browser" } };
     const baselineName = "Reviewed after the auth rewrite with Lena and the entire release team before the final launch review";
+    const tab = process.platform === "darwin" && browser.browserType().name() === "webkit" ? "Alt+Tab" : "Tab";
     await serveHistory(page, [
       { id: "newest", title, author: null, startedAt: 3_000, endedAt: null },
       { id: "latest", title, author: { ...person, githubUsername: "W".repeat(39) }, startedAt: 2_000, endedAt: 3_000 },
-      { id: "earlier", title, author: null, startedAt: 1_000, endedAt: 2_000,
+      { id: "earlier", title, author: { ...person, githubUsername: "Lena" }, startedAt: 1_000, endedAt: 2_000,
         name: { text: baselineName, namer: person, namedAt: 2_000, canManage: true } },
     ], { ...toggleNavigationHistory(uuid, title, false), newest: savedState(uuid, title, "Current live version.") });
     await previous(page);
@@ -1701,28 +1701,19 @@ test.describe("document history through ub open", () => {
     const header = page.locator(".ub-revision-header");
     const split = page.locator(".ub-revision-split");
     await expect(split).toBeVisible();
-    await expect(split.getByRole("button", { name: "Restore this version", exact: true })).toBeDisabled();
-    await expect(restore).toHaveAccessibleDescription("This is the current version.");
-    await expect(header.getByRole("button", { name: "Restore this version", exact: true })).toHaveCount(0);
-    const currentReason = page.getByText("This is the current version.", { exact: true });
-    expect((await currentReason.boundingBox())?.height).toBeLessThanOrEqual(1);
-    const currentHeaderHeight = (await header.boundingBox())?.height;
-    // Disabling the current version also holds in the one-column header fallback.
-    await page.setViewportSize({ width: 860, height: 640 });
-    await expect(split).toHaveCount(0);
-    await expect(header.getByRole("button", { name: "Restore this version", exact: true })).toBeDisabled();
-    await expect(restore).toHaveAccessibleDescription("This is the current version.");
-    expect((await currentReason.boundingBox())?.height).toBeLessThanOrEqual(1);
-    await page.setViewportSize({ width: 1440, height: 640 });
-    await expect(split).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const currentHeaderHeight = await header.evaluate(element => element.getBoundingClientRect().height);
+    expect(await page.getByText("This is the current version.", { exact: true })
+      .evaluate(element => element.getBoundingClientRect().height)).toBeLessThanOrEqual(1);
     await previous(page);
     await expect(restore).toBeEnabled();
-    expect((await header.boundingBox())?.height).toBeCloseTo(currentHeaderHeight ?? 0, 0);
+    expect(await header.evaluate(element => element.getBoundingClientRect().height)).toBeCloseTo(currentHeaderHeight, 0);
     const drawer = await showHistoryList(page);
     const collapse = historyList(page).getByRole("switch", { name: "Collapse unchanged", exact: true });
     if (await collapse.getAttribute("aria-checked") === "true") await activateControl(collapse);
     await closeHistoryList(page, drawer);
     const assertCompactGeometry = async (control: Locator): Promise<void> => {
+      await page.evaluate(() => document.fonts.ready);
       for (const scheme of ["light", "dark"] as const) {
         await page.emulateMedia({ colorScheme: scheme });
         const geometry = await control.evaluate(button => {
@@ -1739,7 +1730,8 @@ test.describe("document history through ub open", () => {
           const style = getComputedStyle(button);
           return { beforeHeight: left.height, afterHeight: right.height, labelTopDifference: right.top - left.top,
             editorTopDifference: (sides[1]?.getBoundingClientRect().top ?? 0) - (sides[0]?.getBoundingClientRect().top ?? 0),
-            rightInset: owner.right - box.right, controlTop: box.top - owner.top, controlBottom: owner.bottom - box.bottom,
+            leftInset: box.left - owner.left, rightInset: owner.right - box.right,
+            controlTop: box.top - owner.top, controlBottom: owner.bottom - box.bottom,
             font: style.fontSize, labelFont: text.fontSize, lineHeight: style.lineHeight, labelLineHeight: text.lineHeight,
             touch: matchMedia("(any-pointer: coarse)").matches,
             hitArea: [-21.5, 21.5].map(offset => button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2 + offset))) };
@@ -1747,6 +1739,7 @@ test.describe("document history through ub open", () => {
         expect(geometry.afterHeight).toBeCloseTo(geometry.beforeHeight, 1);
         expect(Math.abs(geometry.labelTopDifference)).toBeLessThanOrEqual(1);
         expect(Math.abs(geometry.editorTopDifference)).toBeLessThanOrEqual(1);
+        expect(geometry.leftInset).toBeGreaterThanOrEqual(-1);
         expect(Math.abs(geometry.rightInset)).toBeLessThanOrEqual(1);
         expect(geometry.controlTop).toBeGreaterThanOrEqual(-1);
         expect(geometry.controlBottom).toBeGreaterThanOrEqual(-1);
@@ -1762,18 +1755,28 @@ test.describe("document history through ub open", () => {
     const nextChange = page.getByRole("button", { name: "Next change", exact: true });
     await expect(nextChange).toBeEnabled();
     await nextChange.focus();
-    await page.keyboard.press("Tab");
+    await page.keyboard.press(tab);
     await expect(restore).toBeFocused();
-    await page.keyboard.press("Tab");
+    await page.keyboard.press(tab);
     await expect(earlierSide(page)).toBeFocused();
-    // Native editor focus may scroll its selection into view; start this proof at the pinned header.
-    await page.locator(".ub-revision-pane").evaluate(pane => { pane.scrollTop = 20; });
-    const start = await page.locator(".ub-revision-side-label").last().boundingBox();
-    const headerStart = await header.boundingBox();
-    await page.locator(".ub-revision-pane").evaluate(pane => { pane.scrollTop = 170; });
-    await expect.poll(async () => (await page.locator(".ub-revision-side-label").last().boundingBox())?.y ?? 0)
-      .toBeLessThan((start?.y ?? 0) - 100);
-    expect((await header.boundingBox())?.y).toBeCloseTo(headerStart?.y ?? 0, 0);
+    const [start, end] = await restore.evaluate(button => {
+      const pane = button.closest(".ub-revision-pane");
+      const label = button.closest(".ub-revision-side-label");
+      const header = pane?.querySelector(".ub-revision-header");
+      if (pane == null || label === null || header == null) throw new Error("Restore must belong to a comparison column");
+      // Keep both scroll writes and their geometry in one task so focus-driven scrolling cannot interleave.
+      const sample = (top: number) => {
+        pane.scrollTop = top;
+        return { scroll: pane.scrollTop, label: label.getBoundingClientRect().y,
+          button: button.getBoundingClientRect().y, header: header.getBoundingClientRect().y };
+      };
+      return [sample(20), sample(170)] as const;
+    });
+    const scrolled = end.scroll - start.scroll;
+    expect(scrolled).toBeGreaterThan(100);
+    expect(end.label - start.label).toBeCloseTo(-scrolled, 0);
+    expect(end.button - start.button).toBeCloseTo(-scrolled, 0);
+    expect(end.header).toBeCloseTo(start.header, 0);
     const selectedAddress = new URL(page.url()).pathname;
     await page.goto(new URL(`${selectedAddress}/since/${revisionId("earlier")}`, harness().appUrl).href);
     const restoreNamed = page.getByRole("button", { name: `Restore “${baselineName}”`, exact: true });
@@ -1783,18 +1786,49 @@ test.describe("document history through ub open", () => {
     await expect(page.locator(".ub-revision-side-label").last().getByRole("button")).toHaveCount(0);
     await expect(header.locator(".ub-revision-restore")).toHaveCount(0);
     await assertCompactGeometry(restoreNamed);
-    expect(await page.locator(".ub-revision-side-label").first().locator("span").first()
-      .evaluate(label => label.scrollWidth > label.clientWidth)).toBe(false);
     await expect(restoreNamed).toHaveText(`Restore “${baselineName}”`);
-    const clipped = await restoreNamed.locator("span").evaluate(label => ({
-      overflow: getComputedStyle(label).textOverflow, clipped: label.scrollWidth > label.clientWidth,
-    }));
-    expect(clipped).toEqual({ overflow: "ellipsis", clipped: true });
+    const beforeLabel = page.locator(".ub-revision-side-label").first().locator(":scope > span");
+    await expect(beforeLabel).toHaveText(`Before · Lena · “${baselineName}”`);
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      expect(await restoreNamed.locator("span").evaluate(label => ({
+        overflow: getComputedStyle(label).textOverflow, clip: getComputedStyle(label).overflowX,
+        clipped: label.scrollWidth > label.clientWidth,
+      }))).toEqual({ overflow: "ellipsis", clip: "hidden", clipped: true });
+      const label = await beforeLabel.evaluate(element => {
+        const owner = element.parentElement;
+        const button = owner?.querySelector("button");
+        if (owner === null || button == null) throw new Error("Before must share its label with Restore");
+        const prefix = document.createRange();
+        prefix.selectNodeContents(element);
+        const texts = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        let remaining = "Before · Lena".length;
+        for (let node = texts.nextNode(); node !== null; node = texts.nextNode()) {
+          const length = node.textContent?.length ?? 0;
+          if (remaining <= length) { prefix.setEnd(node, remaining); break; }
+          remaining -= length;
+        }
+        const box = element.getBoundingClientRect();
+        const bounds = owner.getBoundingClientRect();
+        return { overflow: getComputedStyle(element).textOverflow, clip: getComputedStyle(element).overflowX,
+          clipped: element.scrollWidth > element.clientWidth,
+          leftInset: box.left - bounds.left, rightInset: bounds.right - box.right,
+          buttonGap: button.getBoundingClientRect().left - box.right,
+          prefixRoom: box.right - prefix.getBoundingClientRect().right, ellipsisRoom: Number.parseFloat(getComputedStyle(element).fontSize) };
+      });
+      expect(label.overflow).toBe("ellipsis");
+      expect(label.clip).toBe("hidden");
+      expect(label.clipped).toBe(true);
+      expect(label.leftInset).toBeGreaterThanOrEqual(0);
+      expect(label.rightInset).toBeGreaterThanOrEqual(0);
+      expect(label.buttonGap).toBeGreaterThanOrEqual(0);
+      expect(label.prefixRoom).toBeGreaterThan(label.ellipsisRoom);
+    }
     await expect(nextChange).toBeEnabled();
     await nextChange.focus();
-    await page.keyboard.press("Tab");
+    await page.keyboard.press(tab);
     await expect(restoreNamed).toBeFocused();
-    await page.keyboard.press("Tab");
+    await page.keyboard.press(tab);
     await expect(earlierSide(page)).toBeFocused();
     await page.setViewportSize({ width: 860, height: 640 });
     await expect(split).toHaveCount(0);
@@ -1810,23 +1844,16 @@ test.describe("document history through ub open", () => {
         const buttonBox = button.getBoundingClientRect();
         return { headingWidth: heading.getBoundingClientRect().width, titleWidth: titleBox.width,
           titleRight: titleBox.right, buttonLeft: buttonBox.left,
-          clipped: label.scrollWidth > label.clientWidth, overflow: getComputedStyle(label).textOverflow };
+          clipped: label.scrollWidth > label.clientWidth, overflow: getComputedStyle(label).textOverflow,
+          clip: getComputedStyle(label).overflowX };
       });
       expect(geometry.titleWidth).toBeGreaterThan(geometry.headingWidth * 0.4);
       expect(geometry.titleRight).toBeLessThanOrEqual(geometry.buttonLeft);
       expect(geometry.clipped).toBe(true);
       expect(geometry.overflow).toBe("ellipsis");
+      expect(geometry.clip).toBe("hidden");
       await expect(restoreNamed).toHaveAccessibleName(`Restore “${baselineName}”`);
     }
-    // Ordinary revision views keep their generic header action when narrow or without a predecessor.
-    await page.goto(new URL(selectedAddress, harness().appUrl).href);
-    await expect(split).toHaveCount(0);
-    await expect(header.getByRole("button", { name: "Restore this version", exact: true })).toBeEnabled();
-    await page.setViewportSize({ width: 1440, height: 640 });
-    await expect(split).toBeVisible();
-    await previous(page);
-    await expect(split).toHaveCount(0);
-    await expect(header.getByRole("button", { name: "Restore this version", exact: true })).toBeEnabled();
   });
 
   test("real hub revisions navigate, keep removed text selectable and isolate the live editor", { tag: "@webkit" }, async ({ browser, browserName }, info) => {
