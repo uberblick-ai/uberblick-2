@@ -901,21 +901,26 @@ for (const { touch, appearance } of [
     const currentRfc = await create(writer, "Current answer RFC", "Discuss the current answer here.");
     const rfc = await create(writer, "Replacement RFC", "Discuss the proposed replacement here.");
     const first = await create(writer, "Initial topic title", "Earlier answer remains available as history.", {
+      description: "Start with the screens the team uses.",
       kind: "decision", status: "decided", related: formerOwner.uuid, discussion: firstRfc.uuid, answer: answer(longRecordedName),
     });
     await writer.call("pin_doc", { uuid: first.uuid, group: "Reading" });
     const current = await create(writer, undefined, "Current answer stays in force during review. Keep the embedded database in the hub process so each workspace remains portable, backups remain straightforward, and readers can inspect the same durable answer while the proposed replacement is discussed.", {
+      description: "Keep workspaces portable and backups straightforward.",
       kind: "decision", status: "decided", supersedes: first.uuid, related: owner.uuid, discussion: currentRfc.uuid, answer: answer("Recorded answerer"),
     });
     const rejected = await create(writer, undefined, "Rejected answer remains available as history.", {
+      description: "The proposed change breaks compatibility.",
       kind: "decision", supersedes: current.uuid, discussion: firstRfc.uuid,
     });
     await writer.call("set_status", { uuid: rejected.uuid, status: "rejected", answer: answer("Recorded rejecter"), reason: "The proposal does not meet the constraint." });
     const withdrawn = await create(writer, undefined, "Withdrawn answer remains available as history.", {
+      description: "Another proposal covers the same need.",
       kind: "decision", supersedes: current.uuid,
     });
     await writer.call("set_status", { uuid: withdrawn.uuid, status: "withdrawn" });
     const pending = await create(writer, undefined, "Pending answer remains an open proposal.", {
+      description: "Consider the new workspace constraint.",
       kind: "decision", supersedes: current.uuid, discussion: rfc.uuid,
     });
     await comment(writer, first, "Conversation about the earlier answer.");
@@ -970,6 +975,15 @@ for (const { touch, appearance } of [
     await expect(entry(page, first.uuid)).toContainText("Linked record");
     await expect(page.locator(".ub-decision-timeline > li")).toHaveCount(5);
     await expect(page.locator(".ub-decision-record-state")).toHaveText(["Under review", "Withdrawn", "Rejected", "In force", "Superseded"]);
+    await expect(page.locator(".ub-decision-preview")).toHaveText([
+      "Consider the new workspace constraint.", "Another proposal covers the same need.",
+      "The proposed change breaks compatibility.", "Keep workspaces portable and backups straightforward.",
+      "Start with the screens the team uses.",
+    ]);
+    const changedDescription = "Keep the embedded database in the hub process so each workspace remains portable, backups remain straightforward, and readers can inspect the same durable answer while the proposed replacement is discussed.";
+    await writer.call("set_metadata", { uuid: current.uuid, description: changedDescription });
+    await expect(entry(page, current.uuid).locator(".ub-decision-preview")).toHaveText(changedDescription);
+    await expect(editor(page)).toHaveText(answerText(current));
     await expect(entry(page, rejected.uuid).getByLabel("1 comment", { exact: true })).toHaveText("1");
     await expect(entry(page, pending.uuid).locator(".ub-decision-record-comments")).toHaveCount(0);
     await expect(entry(page, rejected.uuid).locator(".ub-decision-event")).toHaveText("Recorded rejecter");

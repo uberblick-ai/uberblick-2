@@ -59,6 +59,10 @@ const DESCRIPTION_NUDGE =
   "whatever best helps an agent find this page with list_docs and search and decide whether to open it, such as what it " +
   "covers and the terms someone would search for. A keyword list is fine.";
 
+const DECISION_DESCRIPTION_NUDGE =
+  "This decision record has no description: call set_metadata with `description`, a short line on why this answer " +
+  "was chosen or what changed. People see it in the topic's history; it stays editable after the record is decided.";
+
 /** The one-line prompt a mutating tool carries when a document has no tags. */
 const TAG_NUDGE =
   "This document has no tags: to add some, call list_tags for the workspace vocabulary, then set_metadata with " +
@@ -434,10 +438,14 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
     if (replica.isDirectory || replica.isSidebar || replica.isSettings) {
       return {};
     }
-    if (getMeta(replica.doc, replica.id).description !== null) {
+    const meta = getMeta(replica.doc, replica.id);
+    if (meta.description !== null) {
       return {};
     }
-    return { description: null, descriptionHint: DESCRIPTION_NUDGE };
+    return {
+      description: null,
+      descriptionHint: meta.kind === "decision" ? DECISION_DESCRIPTION_NUDGE : DESCRIPTION_NUDGE,
+    };
   };
 
   /** A non-blocking prompt for an untagged document when this replica has choices. */

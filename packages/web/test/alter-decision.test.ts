@@ -348,7 +348,7 @@ describe("MCP-compatible stored successors", () => {
     if (!result.ok) throw new Error(result.message);
     const doc = stored(result.decision);
     expect(getMeta(doc)).toMatchObject({
-      uuid: result.decision, title: original.title, description: original.description,
+      uuid: result.decision, title: original.title, description: null,
       tags: original.tags, kind: "decision", status: "decided", topic: CURRENT,
       supersedes: CURRENT, governs: RELATED, discussion: null,
       decidedBy: "Current reader", decidedAt: NOW,
@@ -359,11 +359,12 @@ describe("MCP-compatible stored successors", () => {
     expect(decisionApprovalChanged(doc)).toBe(false);
     expect(getBlocksWithInline(doc)).toEqual(getBlocksWithInline(input.draft));
     expect(getDirectoryEntry(directory.connection.ydoc, result.decision)).toMatchObject({
-      uuid: result.decision, title: original.title, description: original.description,
+      uuid: result.decision, title: original.title,
       tags: original.tags, kind: "decision", status: "decided", topic: CURRENT,
       supersedes: CURRENT, governs: RELATED, answerPreview: "The current answer.",
       decidedBy: "Current reader", decidedAt: NOW, agentStance: false, approvalChanged: false,
     });
+    expect(getDirectoryEntry(directory.connection.ydoc, result.decision)?.description).toBeUndefined();
     const topic = resolveDecisionTopics(directory.connection.ydoc)[0]!;
     expect(topic.inForce?.uuid).toBe(result.decision);
     expect(topic.superseded.map((record) => record.uuid)).toEqual([CURRENT]);
@@ -405,10 +406,11 @@ describe("MCP-compatible stored successors", () => {
     const proposal = stored(result.decision);
     const rfc = stored(result.rfc);
     expect(getMeta(proposal)).toMatchObject({
-      title: "Current question", description: "A useful description.", tags: [TAG],
+      title: "Current question", description: null, tags: [TAG],
       kind: "decision", status: "open", topic: CURRENT, supersedes: CURRENT,
       governs: RELATED, discussion: result.rfc,
     });
+    expect(getDirectoryEntry(directory.connection.ydoc, result.decision)?.description).toBeUndefined();
     const meta = getMetaMap(proposal);
     for (const key of ["decidedBy", "decidedAt", "decidedWhere", "agentStance", "approvalFingerprint", "approvalTitle"]) {
       expect(meta.has(key)).toBe(false);

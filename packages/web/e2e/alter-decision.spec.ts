@@ -22,6 +22,7 @@ test.afterAll(async () => { await agent?.close(); agent = null; });
 interface StoredDoc {
   uuid: string;
   title: string;
+  description?: string | null;
   status?: string;
   decidedBy?: string;
   decidedAt?: string;
@@ -77,6 +78,18 @@ async function unchanged(writer: McpSession, source: StoredDoc, page: Page): Pro
   });
   await expectMcp(() => writer.call<{ docs: Array<{ title: string }> }>("list_docs", {}), (listed) => {
     expect(listed.docs.some((doc) => doc.title === source.title)).toBe(false);
+  });
+}
+
+async function descriptionReads(writer: McpSession, uuid: string, title: string, description: string | null, includeSuperseded = false): Promise<void> {
+  await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid }), (stored) => {
+    expect(stored).toMatchObject({ uuid, description });
+  });
+  await expectMcp(() => writer.call<{ docs: StoredDoc[] }>("list_docs", { kind: "decision", include_superseded: includeSuperseded }), (listed) => {
+    expect(listed.docs.find((doc) => doc.uuid === uuid)).toMatchObject({ uuid, description });
+  });
+  await expectMcp(() => writer.call<{ hits: StoredDoc[] }>("search", { query: title, kind: "decision" }), (found) => {
+    expect(found.hits.find((doc) => doc.uuid === uuid)).toMatchObject({ uuid, description });
   });
 }
 
@@ -294,6 +307,16 @@ test("Decide records a successor at the topic address and RFC opens its new page
       { type: "paragraph", text: "Keep the third answer block." },
     ]);
   });
+  if (decided === undefined) throw new Error("e2e: the new decision has no identity");
+  await descriptionReads(writer, decided, source.title, null);
+  await expect(newest.locator(".ub-decision-preview")).toHaveCount(0);
+  await expect(page.locator(`.ub-decision-timeline > li[data-record="${source.uuid}"] .ub-decision-preview`))
+    .toHaveText("Alter decision browser acceptance fixture.");
+  const description = "Keep all three answer blocks while the team grows.";
+  await writer.call("set_metadata", { uuid: decided, description });
+  await expect(newest.locator(".ub-decision-preview")).toHaveText(description);
+  await descriptionReads(writer, decided, source.title, description);
+  await expect(editor(page)).toContainText("Use the replacement answer.");
 
   await openDialog(page);
   await expect(dialog(page).getByRole("button", { name: "Decide", exact: true })).toBeEnabled();
@@ -328,6 +351,10 @@ test("Decide records a successor at the topic address and RFC opens its new page
     expect(stored.blocks.map(({ type, text }) => ({ type, text })))
       .toEqual([{ type: "paragraph", text: "Discuss this proposed replacement first." }]);
   });
+  if (proposal === undefined) throw new Error("e2e: the new proposal has no identity");
+  await descriptionReads(writer, proposal, source.title, null, true);
+  await expect(page.locator(`.ub-decision-timeline > li[data-record="${proposal}"] .ub-decision-preview`)).toHaveCount(0);
+  await expect(page.locator(`.ub-decision-timeline > li[data-record="${decided}"] .ub-decision-preview`)).toHaveText(description);
   for (const relatedUuid of relatedUuids) {
     await page.goto(new URL(`/${harness().workspace}/${relatedUuid}`, harness().appUrl).href);
     await expect(page.getByRole("link", { name: "1 decision · 1 under review", exact: true })).toBeVisible();

@@ -4,7 +4,7 @@ import { strictInput } from "./inputs.js";
 
 const count = z.number().int().nonnegative();
 const uuid = z.string().describe("Document identity; a UUID, never a title or path.");
-const description = z.string().nullable().describe("Agent-facing document description; null when unwritten.");
+const description = z.string().nullable().describe("Document description; null when unwritten.");
 const tldr = z.string().nullable().describe("Person-facing regular-document summary; null when unwritten and always null for decisions, which have no TL;DR.");
 const discussion = z.string().nullable().describe("Explicit RFC discussion document UUID for this decision record; null when none. Distinct from curated links and the recorded answer.");
 const status = z.enum(DECISION_STATUSES);
@@ -46,7 +46,7 @@ const durability = {
 };
 const documentDurability = {
   ...durability,
-  description: z.null().optional().describe("Present when the written document has no agent-facing description."),
+  description: z.null().optional().describe("Present when the written document has no description."),
   descriptionHint: z.string().optional().describe("Non-blocking request to supply the missing document description."),
   tagHint: z.string().optional().describe("Non-blocking request to assign tags from the active vocabulary."),
 };

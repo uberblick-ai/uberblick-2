@@ -13,6 +13,11 @@ it("preserves the ordered tools/list catalog and input contract", async () => {
   const rig = await startServer();
   try {
     const { tools } = await rig.client.listTools();
+    for (const name of ["create_doc", "set_metadata"]) {
+      const field = tools.find((tool) => tool.name === name)?.inputSchema.properties?.description as { description: string };
+      expect(field.description).toContain("Regular pages: agent-only discovery text; a keyword list is fine.");
+      expect(field.description).toContain("Decisions: short line on why this answer was chosen or what changed, shown in the topic's history.");
+    }
     expect(
       tools.map(({ name, title, inputSchema, description, annotations }) => ({
         name,
