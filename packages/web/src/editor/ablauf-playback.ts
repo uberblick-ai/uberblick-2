@@ -1,12 +1,10 @@
-/** Play control for an ablauf drawing: ablauf's own controls, mounted under it when it nears view or on demand. */
+/** Play control for an ablauf drawing: ablauf's own controls, mounted under it on demand. */
 import type { Timeline } from "@uberblick/ablauf";
 import type { PlaybackMount } from "@uberblick/ablauf/playback";
 import playbackUrl from "./ablauf-playback-url.js";
 import { lazyRenderer, showDiagnostics, showFailure } from "./source-chrome.js";
 
 const playbacks = lazyRenderer(() => import("@uberblick/ablauf/playback"), playbackUrl);
-// Load the controls a little before the drawing is reached, so ablauf can start it once half is in view.
-const NEAR_VIEW = "200px 0px";
 // ablauf's controls pick their own scheme from the system preference; the
 // host palette follows the app's appearance instead, which may be pinned.
 const HOST_STYLE = ".ab-playback.ab-playback.ab-playback { color-scheme: inherit; background: transparent; font-family: var(--font-sans); }"
@@ -19,7 +17,7 @@ const HOST_STYLE = ".ab-playback.ab-playback.ab-playback { color-scheme: inherit
 export interface AblaufPlayback {
   /**
    * Toolbar toggle: Play mounts the controls and starts, Stop removes them.
-   * The first time a playable drawing comes into view it plays once on its own; Stop keeps it static.
+   * A playable drawing stays static until the reader presses Play.
    */
   readonly play: HTMLButtonElement;
   /** Touch pointers get no toolbar, so a playable drawing offers Play under it. */
@@ -48,9 +46,6 @@ export function ablaufPlayback(column: HTMLElement): AblaufPlayback {
   let mount: PlaybackMount | null = null;
   let wanted = false;
   let destroyed = false;
-  let nearView = false;
-  // Each drawing starts on its own once; after that the reader or a redraw decides.
-  let autoplayed = false;
   const play = playButton("ub-ablauf-play");
   play.setAttribute("aria-pressed", "false");
   const touchPlay = playButton("ub-ablauf-touch-play");
@@ -81,21 +76,21 @@ export function ablaufPlayback(column: HTMLElement): AblaufPlayback {
     mount = null;
     root.replaceChildren();
   };
-  const mountOn = (start: boolean, autoplay = false): void => {
+  const mountOn = (start: boolean): void => {
     const module = playbacks.current();
     unmount();
     if (module === null || svg === null || timelines.length === 0) return;
     const style = document.createElement("style");
     style.textContent = HOST_STYLE;
     root.append(style);
-    mount = module.mountPlayback(root, svg, timelines, { autoplay });
+    mount = module.mountPlayback(root, svg, timelines);
     if (start) mount.player.play();
   };
-  const open = (start: boolean, autoplay: boolean): void => {
+  const open = (): void => {
     wanted = true;
     playbacks.load().then(() => {
       if (destroyed || !wanted || mount !== null) return;
-      mountOn(start, autoplay);
+      mountOn(true);
       show();
       showDiagnostics(diagnostics, []);
     }, (cause: unknown) => {
@@ -105,29 +100,14 @@ export function ablaufPlayback(column: HTMLElement): AblaufPlayback {
   };
   const toggle = (): void => {
     if (destroyed || timelines.length === 0) return;
-    autoplayed = true;
     if (mount !== null) {
       wanted = false;
       unmount();
       show();
       return;
     }
-    open(true, false);
+    open();
   };
-  // ablauf's autoplay leaves a figure still under reduced motion; the reader keeps Play instead.
-  const reducedMotion = (): boolean => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-  const autoplay = (): void => {
-    if (autoplayed || destroyed || !nearView || timelines.length === 0 || mount !== null || reducedMotion()) return;
-    autoplayed = true;
-    view?.disconnect();
-    open(false, true);
-  };
-  // Without IntersectionObserver nothing can tell the drawing is in view, so it waits for Play.
-  const view = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver((entries) => {
-    nearView = entries.some((entry) => entry.isIntersecting);
-    autoplay();
-  }, { rootMargin: NEAR_VIEW });
-  view?.observe(column);
   play.addEventListener("click", toggle);
   touchPlay.addEventListener("click", toggle);
 
@@ -141,12 +121,10 @@ export function ablaufPlayback(column: HTMLElement): AblaufPlayback {
       if (wanted) mountOn(false);
       else unmount();
       show();
-      autoplay();
     },
     destroy() {
       destroyed = true;
       resize.disconnect();
-      view?.disconnect();
       unmount();
     },
   };

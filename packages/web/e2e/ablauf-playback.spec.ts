@@ -1,4 +1,4 @@
-/** Ablauf playback: ablauf's own controls under a host-themed drawing, started once in view or on demand. */
+/** Ablauf playback: static drawings until Play mounts ablauf's own controls under them. */
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { activateControl, setupHarness } from "./app-helpers.js";
@@ -24,8 +24,9 @@ function writer(): McpSession {
 }
 
 const FLOW = 'flow v0\ncolumns main\npill draft tone=agent "Draft"\nbox check tone=system "Check draft"\nend done tone=done "Done"\n\ndraft --> check\ncheck --> done : Accepted';
-const PLAYED = `${FLOW}\n\nplay "Happy path"\n  tempo 10s\n  step draft actor="Author" "Writes a draft"\n  step check actor="Reviewer" "Checks it"\n  step done\n\nplay "Quick"\n  step draft\n  step check`;
-const SINGLE = `${FLOW.replace('"Draft"', '"Other draft"')}\n\nplay\n  step draft 10s actor="Author" "Takes a while"\n  step check`;
+// Keep the current step stable while the reader operates the other drawing's controls.
+const PLAYED = `${FLOW}\n\nplay "Happy path"\n  tempo 60s\n  step draft actor="Author" "Writes a draft"\n  step check actor="Reviewer" "Checks it"\n  step done\n\nplay "Quick"\n  step draft\n  step check`;
+const SINGLE = `${FLOW.replace('"Draft"', '"Other draft"')}\n\nplay\n  step draft 60s actor="Author" "Takes a while"\n  step check`;
 
 interface Block { id: string; type: string; language?: string; text: string; rev: string }
 
@@ -50,24 +51,74 @@ async function hasClass(locator: Locator, name: string): Promise<boolean> {
   return locator.evaluate((element, className) => element.classList.contains(className), name);
 }
 
-test("Playable drawings start once in view, play independently and remount idle after source edits", async ({ browser }) => {
+async function expectStatic(block: Locator): Promise<void> {
+  await expect(controls(block)).toHaveCount(0);
+  await expect(svg(block)).not.toHaveClass(/\bab-(playing|in-progress)\b/);
+  await expect(svg(block).locator("[data-ab-part].ab-current, [data-ab-part].ab-played")).toHaveCount(0);
+  const opacities = await svg(block).locator("[data-ab-part]").evaluateAll(parts => parts.map(part => getComputedStyle(part).opacity));
+  expect(opacities.length).toBeGreaterThan(0);
+  expect(opacities.every(opacity => opacity === "1")).toBe(true);
+}
+
+/** Cross a real viewport observation and paint before checking that scrolling left a drawing static. */
+async function waitForInView(block: Locator): Promise<void> {
+  await svg(block).evaluate(element => new Promise<void>(resolve => {
+    const observer = new IntersectionObserver(entries => {
+      if (!entries.some(entry => entry.isIntersecting)) return;
+      observer.disconnect();
+      requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 0)));
+    });
+    observer.observe(element);
+  }));
+}
+
+test("Playable drawings wait for Play, play independently and remount idle after source edits", async ({ browser }) => {
   const session = writer();
   const { uuid } = await session.call<{ uuid: string }>("create_doc", {
     title: "Played Ablauf", description: "Two playable flows around a static one.",
     blocks: [PLAYED, FLOW, SINGLE].map(text => ({ type: "code", language: "ablauf", text })),
   });
   const errors: string[] = [];
+  const playbackRequests: string[] = [];
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
     // Tall enough that all three drawings are in view at once.
     contextOptions: { viewport: { width: 1280, height: 1400 } },
-    beforeNavigate: async page => { page.on("pageerror", error => errors.push(error.message)); },
+    beforeNavigate: async page => {
+      page.on("pageerror", error => errors.push(error.message));
+      page.on("request", request => {
+        if (/\/assets\/ablauf-playback-[^/]+\.js(?:\?.*)?$/.test(request.url())) playbackRequests.push(request.url());
+      });
+    },
   });
   await waitForDocumentDraw(page, session, uuid, { index: "all" });
   const [first, plain, third] = [blocks(page).nth(0), blocks(page).nth(1), blocks(page).nth(2)];
   await expect(play(plain)).toHaveAttribute("hidden", "");
   for (const block of [first, third]) {
+    await waitForInView(block);
+    await expectStatic(block);
+    await expect(play(block)).toHaveText("Play");
+    await expect(play(block)).toHaveAttribute("aria-pressed", "false");
+  }
+
+  // A source edit with the controls closed also leaves the drawing static.
+  const closedEdit = PLAYED.replace('"Draft"', '"Edited draft"');
+  await editSource(session, uuid, 0, closedEdit);
+  await waitForDocumentDraw(page, session, uuid, { index: 0, source: closedEdit });
+  await expect(svg(first)).toContainText("Edited draft");
+  await expectStatic(first);
+  expect(playbackRequests).toEqual([]);
+
+  await svg(first).hover();
+  await play(first).click();
+  await expect(toggle(first)).toHaveText("Pause");
+  await expectStatic(third);
+  await svg(third).hover();
+  await play(third).click();
+  for (const block of [first, third]) {
     await expect(toggle(block)).toHaveText("Pause");
     await expect.poll(() => hasClass(svg(block), "ab-playing")).toBe(true);
+    await expect(svg(block)).toHaveClass(/\bab-in-progress\b/);
+    await expect(svg(block).locator("[data-ab-part].ab-current")).not.toHaveCount(0);
   }
   await expect(controls(first).getByRole("tab")).toHaveText(["Happy path", "Quick"]);
   await expect(controls(first).locator(".abp-caption")).toHaveText("Writes a draft");
@@ -85,9 +136,8 @@ test("Playable drawings start once in view, play independently and remount idle 
   // Stop restores the static drawing; Play mounts the controls again and starts.
   await svg(first).hover();
   await play(first).click();
-  await expect(controls(first)).toHaveCount(0);
+  await expectStatic(first);
   await expect(play(first)).toHaveText("Play");
-  expect(await hasClass(svg(first), "ab-in-progress")).toBe(false);
   await svg(first).hover();
   await play(first).click();
   await expect(toggle(first)).toHaveText("Pause");
@@ -122,10 +172,8 @@ test("Playable drawings start once in view, play independently and remount idle 
 
   await svg(third).hover();
   await play(third).click();
-  await expect(controls(third)).toHaveCount(0);
+  await expectStatic(third);
   await expect(play(third)).toHaveText("Play");
-  expect(await hasClass(svg(third), "ab-in-progress")).toBe(false);
-  expect(await svg(third).locator("[data-ab-part].ab-current, [data-ab-part].ab-played").count()).toBe(0);
 
   // Playing never touches the stored block: reads and export keep the exact source.
   await expectMcp(async () => {
@@ -173,26 +221,35 @@ test("a successful playback chunk retry removes the load error and preserves sou
   expect(new URL(requests[1] ?? "").search).toBe("?retry=1");
 });
 
-test("A playable drawing below the fold plays only once it is scrolled into view", async ({ browser }) => {
-  const session = writer();
-  const { uuid } = await session.call<{ uuid: string }>("create_doc", {
-    title: "Played Ablauf below the fold", description: "Static flows above a playable one.",
-    blocks: [FLOW, FLOW, FLOW, FLOW, FLOW, PLAYED].map(text => ({ type: "code", language: "ablauf", text })),
-  });
-  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-    contextOptions: { viewport: { width: 1280, height: 480 } },
-  });
-  await waitForDocumentDraw(page, session, uuid, { index: "all" });
-  const last = blocks(page).last();
-  await expect(play(last)).toBeAttached();
-  // The controls may already be mounted while the drawings above lay out; only playing waits for the reader.
-  expect(await hasClass(svg(last), "ab-playing")).toBe(false);
-  expect(await hasClass(svg(last), "ab-in-progress")).toBe(false);
+for (const reducedMotion of ["no-preference", "reduce"] as const) {
+  test(`A playable drawing stays static when scrolled into view (${reducedMotion})`, async ({ browser }) => {
+    const session = writer();
+    const { uuid } = await session.call<{ uuid: string }>("create_doc", {
+      title: "Played Ablauf below the fold", description: "Static flows above a playable one.",
+      blocks: [FLOW, FLOW, FLOW, FLOW, FLOW, PLAYED].map(text => ({ type: "code", language: "ablauf", text })),
+    });
+    const playbackRequests: string[] = [];
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      contextOptions: { viewport: { width: 1280, height: 480 }, reducedMotion },
+      beforeNavigate: async page => {
+        page.on("request", request => {
+          if (/\/assets\/ablauf-playback-[^/]+\.js(?:\?.*)?$/.test(request.url())) playbackRequests.push(request.url());
+        });
+      },
+    });
+    await waitForDocumentDraw(page, session, uuid, { index: "all" });
+    const last = blocks(page).last();
+    await expect(play(last)).toBeAttached();
+    await expect(svg(last)).not.toBeInViewport();
+    await expectStatic(last);
 
-  await svg(last).scrollIntoViewIfNeeded();
-  await expect(toggle(last)).toHaveText("Pause");
-  await expect.poll(() => hasClass(svg(last), "ab-playing")).toBe(true);
-});
+    await svg(last).scrollIntoViewIfNeeded();
+    await waitForInView(last);
+    await expect(svg(last)).toBeInViewport();
+    await expectStatic(last);
+    expect(playbackRequests).toEqual([]);
+  });
+}
 
 test("Under reduced motion nothing starts on its own, and touch Play mounts the controls", { tag: "@webkit-touch" }, async ({ browser }) => {
   const session = writer();
@@ -207,7 +264,8 @@ test("Under reduced motion nothing starts on its own, and touch Play mounts the 
   const block = blocks(page).first();
   const touchPlay = block.getByRole("button", { name: "Play ablauf diagram", exact: true });
   await expect(touchPlay).toBeVisible();
-  await expect(controls(block)).toHaveCount(0);
+  await waitForInView(block);
+  await expectStatic(block);
   const bounds = await touchPlay.boundingBox();
   if (bounds === null) throw new Error("e2e: touch Play is missing");
   expect(bounds.width).toBeGreaterThanOrEqual(44);
@@ -215,6 +273,7 @@ test("Under reduced motion nothing starts on its own, and touch Play mounts the 
   await touchPlay.tap();
   await expect(controls(block).getByRole("tab")).toHaveText(["Happy path", "Quick"]);
   await expect(touchPlay).toBeHidden();
+  await expect(toggle(block)).toHaveText("Play");
   await expect(page.getByRole("dialog", { name: "Ablauf diagram", exact: true })).toHaveCount(0);
   expect(await hasClass(svg(block), "ab-playing")).toBe(false);
 });
@@ -241,7 +300,9 @@ for (const appearance of ["light", "dark"] as const) {
     await expect(page.locator(".ProseMirror")).toHaveAttribute("contenteditable", "false");
     const block = blocks(page).first();
     await expect(block.locator(".ub-ablauf-diagnostics")).toBeHidden();
-    // In view on load, so it starts on its own; the controls take the touch Play's place.
+    const touchPlay = block.locator(".ub-ablauf-touch-play");
+    await expectStatic(block);
+    await touchPlay.tap();
     await expect(toggle(block)).toHaveText("Pause");
     await expect(block.locator(".ub-ablauf-touch-play")).toBeHidden();
     await activateControl(toggle(block));

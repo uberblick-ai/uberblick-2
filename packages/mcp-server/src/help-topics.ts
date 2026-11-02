@@ -407,9 +407,9 @@ inspect the drawing in the web editor when someone can open it.
 ## Flow playback
 
 A flow may end with one or more \`play\` sections. In the web editor the drawing
-gains scenario tabs, step controls and captions under it, and plays once on its
-own the first time it comes into view. Each step names a node id and lights it
-plus the edge from the previous step:
+stays whole and undimmed until the reader presses Play. Play adds scenario tabs,
+step controls and captions under the drawing and starts playback. Each step
+names a node id and lights it plus the edge from the previous step:
 
 \`\`\`ablauf
 flow v0
