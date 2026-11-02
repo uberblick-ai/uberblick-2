@@ -2264,29 +2264,56 @@ h6.ub-heading {
   word-spacing: 0;
 }
 .ub-editor .ProseMirror > .ub-toggle-folded { display: none; }
+/* The disclosure takes a fixed slot before the heading text, centred on the
+   heading's first line, so its hover surface never reaches the first letter. */
 .ub-toggle-heading-control {
-  display: inline-block;
+  display: inline-flex;
   position: relative;
-  width: 1.25em;
-  height: 1em;
-  vertical-align: text-bottom;
+  align-items: center;
+  justify-content: center;
+  width: var(--toggle-heading-target);
+  height: 1lh;
+  margin-inline-end: 0.3rem;
+  vertical-align: top;
+  --toggle-heading-target: 1.75rem;
 }
 .ub-toggle-heading-button {
+  display: inline-grid;
   position: absolute;
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
-  top: calc((1em - 2.25rem) / 2);
+  width: var(--toggle-heading-target);
+  height: var(--toggle-heading-target);
+  place-items: center;
+  transform: translate(-50%, -50%);
   padding: 0;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted-foreground);
-  font: inherit;
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease;
 }
-.ub-toggle-heading-button > span { font-size: var(--type-body-size); }
 .ub-toggle-heading-button:hover { color: var(--foreground); background: var(--muted); }
+.ub-toggle-heading-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 150ms ease;
+}
+.ub-toggle-heading-button[aria-expanded="true"] .ub-toggle-heading-icon { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) {
+  .ub-toggle-heading-button,
+  .ub-toggle-heading-icon { transition: none; }
+}
+/* Touch widens the slot itself to the 44px target, so the target and its
+   pressed surface stay clear of the heading's first character. */
 @media (any-pointer: coarse) {
-  .ub-toggle-heading-button { top: calc((1em - 44px) / 2); }
+  .ub-toggle-heading-control { --toggle-heading-target: 44px; }
 }
 .ub-inline-icon {
   display: inline-block;
