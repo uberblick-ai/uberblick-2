@@ -416,6 +416,18 @@ it("keeps the replacement's last use after both generations of its mirror retire
   expect(statSync(mirrorDirectory).mtimeMs).toBe(firstUse + 2_000);
 });
 
+it("preserves a mirror's last use when the host shuts down before idle eviction", async () => {
+  const rig = await fixture();
+  const firstUse = Date.now();
+  const wallClock = vi.spyOn(Date, "now").mockReturnValue(firstUse);
+  const first = await rig.initialize();
+  wallClock.mockReturnValue(firstUse + 1_000);
+  expect((await rig.listed("first", first.id)).status).toBe(200);
+  wallClock.mockReturnValue(firstUse + 2_000);
+  await rig.host.close();
+  expect(statSync(dirname(rig.runtimes[0]!.store.databasePath)).mtimeMs).toBe(firstUse + 1_000);
+});
+
 it("retains an unacknowledged runtime across idle expiry and evicts it after the hub acknowledges", async () => {
   const hub = await startDeviceSyncHub({ directory: tempDir() });
   hubs.push(hub);

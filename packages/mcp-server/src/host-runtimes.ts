@@ -147,8 +147,12 @@ export class HostRuntimes {
   }
 
   async close(deadline: number): Promise<void> {
-    const opened = await Promise.allSettled([...this.allRuntimes].map(record => record.opening));
-    await Promise.all(opened.map(result => result.status === "fulfilled" ? result.value.close(deadline) : undefined));
+    const opened = await Promise.allSettled([...this.allRuntimes].map(async record => ({ record, runtime: await record.opening })));
+    await Promise.all(opened.map(async result => {
+      if (result.status !== "fulfilled") return;
+      await result.value.runtime.close(deadline);
+      this.touchDirectory(result.value.record);
+    }));
     await Promise.all([...this.retired]);
   }
 }
