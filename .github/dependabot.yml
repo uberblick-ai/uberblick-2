@@ -31,6 +31,16 @@ updates:
       - dependency-name: "@hocuspocus/*"
       - dependency-name: "@modelcontextprotocol/sdk"
 
+  # Scans every root Dockerfile, including the hub release, review and FUE.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Give compromised publishes the same detection window as npm updates.
+    cooldown:
+      default-days: 7
+
   # Workflows pin actions by commit SHA; Dependabot moves the SHA and its
   # version comment together.
   - package-ecosystem: github-actions
