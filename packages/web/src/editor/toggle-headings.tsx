@@ -149,8 +149,10 @@ export const ToggleHeadings = Extension.create({
       }}><span><CollapsibleTrigger asChild
         aria-controls={undefined}
         aria-label={`${expanded ? "Collapse" : "Expand"} ${label}`}
-      ><Button variant="outline" size="icon" className="ub-toggle-heading-button">
-        <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+      ><Button variant="plain" size="custom" className="ub-toggle-heading-button">
+        <svg aria-hidden="true" viewBox="0 0 16 16" className="ub-toggle-heading-icon">
+          <path d="M6 3.5 10.5 8 6 12.5" />
+        </svg>
       </Button></CollapsibleTrigger></span></Collapsible>);
     };
     return [new Plugin<FoldState>({
