@@ -51,10 +51,10 @@ async function historyList(page: Page): Promise<void> {
   await closeIfOpen(page.getByRole("button", { name: "Close document list", exact: true }), show);
 }
 
-async function decisionWithoutDocumentHistory(page: Page, uuid: string, text: string): Promise<void> {
+async function decisionWithoutDocumentHistory(page: Page, uuid: string, text: string, editable = false): Promise<void> {
   await expect(page.locator(`.ub-decision-timeline > li[data-record="${uuid}"] .ub-decision-record`)).toHaveAttribute("aria-current", "true");
   await expect(editor(page)).toHaveText(text);
-  await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+  await expect(editor(page)).toHaveAttribute("contenteditable", String(editable));
   await expect(page.locator(".ub-decision-answer-header")).toBeVisible();
   await expect(page.getByRole("region", { name: "Decision history", exact: true })).toBeVisible();
   await expect(page.locator(".ub-decision-timeline > li")).toHaveCount(3);
@@ -139,7 +139,7 @@ test("decision topics keep only their record timeline while regular pages retain
   for (const [record, text] of [[first, firstText], [current, currentText], [pending, pendingText]] as const) {
     await activateControl(page.locator(`.ub-decision-timeline > li[data-record="${record.uuid}"] .ub-decision-record`));
     await expect(page).toHaveURL(new RegExp(`${topicPath}/record/${record.uuid}$`));
-    await decisionWithoutDocumentHistory(page, record.uuid, text);
+    await decisionWithoutDocumentHistory(page, record.uuid, text, record === pending);
   }
   await expect(page.locator(".ub-decision-record-state")).toHaveText(["Under review", "In force", "Superseded"]);
 
