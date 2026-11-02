@@ -2,13 +2,13 @@
 import { randomUUID } from "node:crypto";
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
-import { appendBlock, editBlock, findBlockElement, initDoc, snapshotRevision } from "@uberblick/schema";
+import type { Editor } from "@tiptap/core";
+import { appendBlock, editBlock, initDoc, snapshotRevision } from "@uberblick/schema";
 import * as Y from "yjs";
 import { activateControl, docTitle, editor, setupHarness } from "./app-helpers.js";
 import { placeCaretIn } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
-import { setPointerSelection } from "./native-selection.js";
 import { expectMcp } from "./settle.js";
 
 const { harness, openApp } = setupHarness();
@@ -446,72 +446,63 @@ test("callout marks, inline icons, links and comments remain usable in editable,
   });
 });
 
-// History content and native link activation are intermittent in this journey.
-test.fixme("split history draws each caption and keeps callout links keyboard reachable", { tag: "@webkit" }, async ({ browser }) => {
+test.fixme("native Enter opens a callout body link on a split comparison side", {
+  tag: "@webkit-touch",
+  annotation: { type: "issue", description: "https://github.com/uberblick-ai/uberblick-2/issues/2538" },
+}, async ({ browser }, info) => {
   const session = writer();
-  const title = docTitle("Compared passages");
+  const title = docTitle("Compared callout link");
   const created = await session.call<StoredDoc>("create_doc", {
-    title, description: "Callout history retains its reading behavior.", blocks: [{ type: "paragraph", text: "Live text." }],
+    title, description: "Native link activation in a historical callout.", blocks: [{ type: "paragraph", text: "Live text." }],
   });
   const earlier = randomUUID(), latest = randomUUID();
   const document = new Y.Doc();
   const states: Record<string, string> = {};
   try {
     initDoc(document, { uuid: created.uuid, title });
-    const id = appendBlock(document, { type: "callout", variant: "warning", icon: "🚀", inline: [
-      { text: "Keep earlier words. ", marks: {} }, { text: "external", marks: { link: TARGET } },
+    const id = appendBlock(document, { type: "callout", variant: "warning", inline: [
+      { text: "Read ", marks: {} }, { text: "external", marks: { link: TARGET } }, { text: ".", marks: {} },
     ] });
     states[earlier] = Buffer.from(snapshotRevision(document).state).toString("base64");
-    const block = findBlockElement(document, id);
-    if (block === null) throw new Error("e2e: callout history fixture is missing");
-    block.setAttribute("variant", "caution");
-    block.setAttribute("icon", ":claude:");
-    editBlock(document, id, "Keep earlier words. external", "Keep later words. external");
+    editBlock(document, id, "Read external.", "Visit external.");
     states[latest] = Buffer.from(snapshotRevision(document).state).toString("base64");
   } finally { document.destroy(); }
-  const page = await openApp(browser, `/${harness().workspace}/${created.uuid}`, {
-    contextOptions: { viewport: { width: 1440, height: 1000 } },
+  const touch = info.project.use.hasTouch === true;
+  const page = await openApp(browser, `/${harness().workspace}/${created.uuid}/rev/${latest}`, {
+    contextOptions: touch ? devices["iPad (gen 7) landscape"] : contextOptions(false),
+    beforeNavigate: async page => {
+      await page.route("**/api/revisions?**", async route => {
+        const revision = new URL(route.request().url()).searchParams.get("revision");
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+          history: { complete: true, lastRefresh: new Date().toISOString(), refreshFailed: false, offline: false, newestDownloadedRevision: latest },
+          ...(revision === null ? { revisions: [
+            { id: latest, author: null, startedAt: 2_000, endedAt: null },
+            { id: earlier, author: null, startedAt: 1_000, endedAt: 2_000 },
+          ] } : { state: states[revision] }),
+        }) });
+      });
+      await page.context().route("https://example.invalid/**", route => route.fulfill({
+        contentType: "text/html", body: "<p>Historical destination</p>",
+      }));
+    },
   });
-  const catalogReady = page.waitForResponse(response => {
-    const url = new URL(response.url());
-    return url.pathname === "/api/revisions" && !url.searchParams.has("revision") && response.ok();
-  });
-  await page.route("**/api/revisions?**", async route => {
-    const revision = new URL(route.request().url()).searchParams.get("revision");
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-      history: { complete: true, lastRefresh: new Date().toISOString(), refreshFailed: false, offline: false, newestDownloadedRevision: latest },
-      ...(revision === null ? {
-      revisions: [{ id: latest, author: null, startedAt: 2_000, endedAt: null },
-        { id: earlier, author: null, startedAt: 1_000, endedAt: 2_000 }],
-    } : { state: states[revision] }) }) });
-  });
-  await catalogReady;
-  await page.context().route("https://example.invalid/**", route => route.fulfill({
-    contentType: "text/html", body: "<p>Historical destination</p>",
-  }));
-  await activateControl(page.getByRole("group", { name: "Document history", exact: true })
-    .getByRole("button", { name: "Previous revision", exact: true }));
-  const before = page.locator('.ub-revision-pane .ProseMirror[aria-label="Before this revision"]');
-  const after = page.locator('.ub-revision-pane .ProseMirror[aria-label="This revision"]');
-  await expect(before.getByRole("button", { name: "Callout variant", exact: true })).toHaveCount(0);
-  await expect(after.getByRole("button", { name: "Callout variant", exact: true })).toHaveCount(0);
-  await expect(before.getByRole("note", { name: "Warning", exact: true })).toBeVisible();
-  await expect(before.locator(".ub-callout-icon")).toHaveText("🚀");
-  await expect(after.getByRole("note", { name: "Caution", exact: true })).toBeVisible();
-  await expect(after.locator(".ub-callout-icon.ub-inline-icon svg")).toBeVisible();
-  await expect(after.locator(".ub-revision-fields")).toHaveText("Changed: icon, variant");
-  await expect(before.locator(".ub-revision-removed")).toHaveText("earlier");
-  await expect(after.locator(".ub-revision-added")).toHaveText("later");
-  for (const [side, prefix] of [[before, "Keep earlier words. "], [after, "Keep later words. "]] as const) {
-    const external = side.getByRole("link", { name: "external", exact: true });
-    const body = side.locator(".ub-callout-body");
-    await setPointerSelection(body, () => body.click({ position: { x: 2, y: 10 } }));
-    for (let step = 0; step <= prefix.length; step += 1) await page.keyboard.press("ArrowRight");
-    await expect.poll(() => external.evaluate(element => {
+  const side = page.locator('.ub-revision-split .ProseMirror[aria-label="Before this revision"]');
+  const body = side.locator(".ub-callout-body");
+  const external = body.getByRole("link", { name: "external", exact: true });
+  await expect(external).toBeVisible();
+  await placeCaretIn(body, { edge: "start", touch });
+  for (let step = 0; step < 6; step += 1) await page.keyboard.press("ArrowRight");
+  // Native arrows move the DOM caret before ProseMirror imports selectionchange.
+  await expect.poll(() => external.evaluate(element => {
+    const root = element.closest(".ProseMirror") as HTMLElement & { editor: Editor };
+    return new Promise<boolean>(resolve => requestAnimationFrame(() => {
       const selection = window.getSelection();
-      return selection?.isCollapsed && element.contains(selection.anchorNode);
-    })).toBe(true);
-    await followExternal(page, () => page.keyboard.press("Enter"));
-    await expect(side.getByRole("note")).toBeVisible();
-  }
+      if (selection?.anchorNode == null || selection.focusNode === null || !selection.isCollapsed ||
+        !element.contains(selection.anchorNode) || !root.contains(root.ownerDocument.activeElement)) { resolve(false); return; }
+      const view = root.editor.view;
+      resolve(view.state.selection.anchor === view.posAtDOM(selection.anchorNode, selection.anchorOffset) &&
+        view.state.selection.head === view.posAtDOM(selection.focusNode, selection.focusOffset));
+    }));
+  })).toBe(true);
+  await followExternal(page, () => page.keyboard.press("Enter"));
 });
