@@ -425,7 +425,7 @@ step left, branches to outcomes, arrows to destinations with reasons below)
 or \`style ladder\` (step above, rail of dots, reasons below outcomes,
 destinations right-aligned, no arrows).
 
-[Full Ablauf authoring primer](https://github.com/uberblick-ai/ablauf/blob/v0.2.0/spike/PRIMER.md)`;
+[Full Ablauf authoring primer](https://github.com/uberblick-ai/ablauf/blob/v0.3.0/spike/PRIMER.md)`;
 
 const wireframe = `# Wireframes
 
