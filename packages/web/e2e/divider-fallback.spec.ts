@@ -242,3 +242,151 @@ for (const arrivesWhileBound of [false, true]) {
     } finally { provider.destroy(); doc.destroy(); }
   });
 }
+
+test("horizontal caret movement skips consecutive opaque blocks while other arrows stay native", { tag: "@webkit" }, async ({ browser }, info) => {
+  if (agent === null) throw new Error("e2e: the MCP agent is not configured");
+  const writer = agent.open({ name: "opaque-arrow-e2e" });
+  const created = await writer.call<WrittenDoc>("create_doc", {
+    title: docTitle("Opaque block keyboard movement"), description: "Native selection and opaque boundaries agree.",
+    blocks: [{ type: "paragraph", text: "Before opaque blocks." }, { type: "divider" }, { type: "divider" }, { type: "paragraph", text: "After opaque blocks." }],
+  });
+  const doc = new Y.Doc();
+  const secret = await importRootSecret(harness().authSecret);
+  const provider = new HocuspocusProvider({
+    url: harness().hubUrl, name: roomForDoc(harness().workspaceUuid, created.uuid), document: doc,
+    token: async () => wrapToken(await mintToken(secret, {
+      typ: "room", sub: randomUUID(), workspace: harness().workspaceUuid,
+      scope: "read-write", kid: null, lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+    })),
+  });
+  try {
+    for (const index of [1, 2]) {
+      const id = created.blocks[index]?.id ?? "";
+      await expect.poll(() => findBlockElement(doc, id)).not.toBeNull();
+      const divider = findBlockElement(doc, id);
+      if (divider === null) throw new Error("e2e: the divider fixture is missing");
+      divider.insert(0, [new Y.XmlText("Keep the old divider child.")]);
+    }
+    const page = await openApp(browser, `/${harness().workspace}/${created.uuid}`, {
+      upstream: true,
+      contextOptions: info.project.use.hasTouch === true ? devices["iPad (gen 7)"] : {},
+    });
+    await expect(editor(page).locator(".ub-unsupported-block")).toHaveCount(2);
+    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+
+    for (const forward of [true, false]) {
+      await editor(page).evaluate((element, forwards) => {
+        const root = element as HTMLElement & { editor: Editor; resumeSelectionChanges?: () => void; staleSelection?: boolean };
+        const mounted = root.editor;
+        mounted.commands.setTextSelection(forwards ? 1 : mounted.state.doc.content.size - 1);
+        mounted.view.focus();
+        // Reproduce native movement reaching the next key before selectionchange.
+        const hold = (event: Event): void => event.stopImmediatePropagation();
+        const position = forwards ? mounted.state.doc.child(0).nodeSize - 1 :
+          mounted.state.doc.content.size - mounted.state.doc.child(3).nodeSize + 1;
+        const placeNativeCaret = (event: KeyboardEvent): void => {
+          if (event.key !== (forwards ? "ArrowRight" : "ArrowLeft")) return;
+          document.removeEventListener("keydown", placeNativeCaret, true);
+          const target = mounted.view.domAtPos(position);
+          document.getSelection()?.collapse(target.node, target.offset);
+          root.staleSelection = mounted.state.selection.head !== position;
+        };
+        document.addEventListener("selectionchange", hold, true);
+        document.addEventListener("keydown", placeNativeCaret, true);
+        root.resumeSelectionChanges = () => {
+          document.removeEventListener("selectionchange", hold, true);
+          document.removeEventListener("keydown", placeNativeCaret, true);
+        };
+      }, forward);
+      try {
+        await page.keyboard.press(forward ? "ArrowRight" : "ArrowLeft");
+        expect(await editor(page).evaluate(element =>
+          (element as HTMLElement & { staleSelection?: boolean }).staleSelection)).toBe(true);
+        await expect.poll(() => editor(page).evaluate(element => {
+          const { selection } = (element as HTMLElement & { editor: Editor }).editor.state;
+          return { block: selection.$head.parent.attrs.id, offset: selection.$head.parentOffset };
+        })).toEqual({
+          block: created.blocks[forward ? 3 : 0]?.id,
+          offset: forward ? 0 : "Before opaque blocks.".length,
+        });
+      } finally {
+        await editor(page).evaluate(element => {
+          (element as HTMLElement & { resumeSelectionChanges?: () => void }).resumeSelectionChanges?.();
+        });
+      }
+    }
+
+    const compareNativeArrows = async (keys: string[], withinFirstBlock = false): Promise<void> => {
+      for (const key of keys) {
+        const results: unknown[] = [];
+        for (const enabled of [false, true]) {
+          await editor(page).evaluate((element, handlerEnabled) => {
+            const root = element as HTMLElement & { editor: Editor; arrowPrevented?: boolean; restoreArrowHandler?: () => void };
+            const mounted = root.editor;
+            const protection = mounted.state.plugins.find(plugin => plugin.props.transformCopied !== undefined &&
+              plugin.props.transformPasted !== undefined && plugin.props.handleKeyDown !== undefined);
+            if (protection === undefined) throw new Error("Missing unsupported-block keyboard protection");
+            const original = protection.props.handleKeyDown;
+            if (original === undefined) throw new Error("Missing unsupported-block key handler");
+            if (!handlerEnabled) protection.props.handleKeyDown = () => false;
+            mounted.commands.setTextSelection(mounted.state.doc.child(0).nodeSize - 1);
+            mounted.view.focus();
+            delete root.arrowPrevented;
+            const observe = (event: KeyboardEvent): void => {
+              if (!event.key.startsWith("Arrow")) return;
+              root.arrowPrevented = event.defaultPrevented;
+              root.removeEventListener("keydown", observe);
+            };
+            root.addEventListener("keydown", observe);
+            root.restoreArrowHandler = () => {
+              protection.props.handleKeyDown = original;
+              root.removeEventListener("keydown", observe);
+            };
+          }, enabled);
+          try {
+            await page.keyboard.press(key);
+            await expect.poll(() => editor(page).evaluate(element => {
+              const root = element as HTMLElement & { editor: Editor; arrowPrevented?: boolean };
+              const native = document.getSelection();
+              const view = root.editor.view;
+              return root.arrowPrevented !== undefined && native?.anchorNode != null && native.focusNode != null &&
+                view.state.selection.anchor === view.posAtDOM(native.anchorNode, native.anchorOffset) &&
+                view.state.selection.head === view.posAtDOM(native.focusNode, native.focusOffset);
+            })).toBe(true);
+            const result = await editor(page).evaluate(element => {
+              const root = element as HTMLElement & { editor: Editor; arrowPrevented?: boolean };
+              const { selection, doc } = root.editor.state;
+              return {
+                prevented: root.arrowPrevented, anchor: selection.anchor, head: selection.head,
+                spans: selection.from < doc.child(0).nodeSize && selection.to > doc.child(0).nodeSize + 2,
+                block: selection.$head.parent.attrs.id, offset: selection.$head.parentOffset,
+              };
+            });
+            if (key === "Shift+ArrowRight") expect(result.spans).toBe(true);
+            if (withinFirstBlock) {
+              expect(result.block).toBe(created.blocks[0]?.id);
+              expect(result.offset).toBeLessThan("Before אבג".length);
+            }
+            results.push(result);
+          } finally {
+            await editor(page).evaluate(element =>
+              (element as HTMLElement & { restoreArrowHandler?: () => void }).restoreArrowHandler?.());
+          }
+        }
+        expect(results[1]).toEqual(results[0]);
+      }
+    };
+    await compareNativeArrows(["Shift+ArrowRight", "Alt+Shift+ArrowRight", "Control+Shift+ArrowRight", "Meta+Shift+ArrowRight", "ArrowUp", "ArrowDown"]);
+    const beforeText = findBlockElement(doc, created.blocks[0]?.id ?? "")?.firstChild;
+    if (!(beforeText instanceof Y.XmlText)) throw new Error("e2e: the first paragraph text is missing");
+    doc.transact(() => {
+      beforeText.delete(0, beforeText.length);
+      beforeText.insert(0, "Before אבג");
+    });
+    await expect(editor(page).locator(".ub-paragraph").first()).toHaveText("Before אבג");
+    await compareNativeArrows(["ArrowLeft"], true);
+    await proveBrowserTitleArrival(page, { path: "upstream", readTitle: () => getMeta(doc).title });
+    expect(findBlockElement(doc, created.blocks[1]?.id ?? "")?.firstChild?.toString()).toBe("Keep the old divider child.");
+    expect(findBlockElement(doc, created.blocks[2]?.id ?? "")?.firstChild?.toString()).toBe("Keep the old divider child.");
+  } finally { provider.destroy(); doc.destroy(); }
+});
