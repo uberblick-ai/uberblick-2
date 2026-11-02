@@ -2,7 +2,7 @@
 import type { Timeline } from "@uberblick/ablauf";
 import type { PlaybackMount } from "@uberblick/ablauf/playback";
 import playbackUrl from "./ablauf-playback-url.js";
-import { lazyRenderer } from "./source-chrome.js";
+import { lazyRenderer, showDiagnostics, showFailure } from "./source-chrome.js";
 
 const playbacks = lazyRenderer(() => import("@uberblick/ablauf/playback"), playbackUrl);
 // Load the controls a little before the drawing is reached, so ablauf can start it once half is in view.
@@ -10,7 +10,11 @@ const NEAR_VIEW = "200px 0px";
 // ablauf's controls pick their own scheme from the system preference; the
 // host palette follows the app's appearance instead, which may be pinned.
 const HOST_STYLE = ".ab-playback.ab-playback.ab-playback { color-scheme: inherit; background: transparent; font-family: var(--font-sans); }"
-  + " .ab-playback button { font-family: var(--font-mono); }";
+  + " .ab-playback button { font-family: var(--font-mono); }"
+  + " @media (any-pointer: coarse) {"
+  + " .ab-playback.ab-playback button, .ab-playback.ab-playback .abp-segment { min-width: 44px; min-height: 44px; }"
+  + " .ab-playback .abp-actions, .ab-playback .abp-segments { flex-wrap: wrap; }"
+  + " }";
 
 export interface AblaufPlayback {
   /**
@@ -21,6 +25,7 @@ export interface AblaufPlayback {
   /** Touch pointers get no toolbar, so a playable drawing offers Play under it. */
   readonly touchPlay: HTMLButtonElement;
   readonly controls: HTMLElement;
+  readonly diagnostics: HTMLElement;
   /** Follow a redraw; open controls mount again on the new drawing, waiting for the reader. */
   redraw(svg: SVGSVGElement | null, timelines: Timeline[]): void;
   destroy(): void;
@@ -37,7 +42,7 @@ function playButton(className: string): HTMLButtonElement {
   return button;
 }
 
-export function ablaufPlayback(column: HTMLElement, failed: (cause: unknown) => void): AblaufPlayback {
+export function ablaufPlayback(column: HTMLElement): AblaufPlayback {
   let svg: SVGSVGElement | null = null;
   let timelines: Timeline[] = [];
   let mount: PlaybackMount | null = null;
@@ -52,6 +57,9 @@ export function ablaufPlayback(column: HTMLElement, failed: (cause: unknown) => 
   const controls = document.createElement("div");
   controls.className = "ub-ablauf-playback";
   controls.hidden = true;
+  const diagnostics = document.createElement("ul");
+  diagnostics.className = "ub-ablauf-playback-diagnostics";
+  diagnostics.hidden = true;
   const root = controls.attachShadow({ mode: "open" });
   // The controls may grow past a narrow drawing, up to the column.
   const resize = new ResizeObserver(() => {
@@ -89,9 +97,10 @@ export function ablaufPlayback(column: HTMLElement, failed: (cause: unknown) => 
       if (destroyed || !wanted || mount !== null) return;
       mountOn(start, autoplay);
       show();
+      showDiagnostics(diagnostics, []);
     }, (cause: unknown) => {
       wanted = false;
-      if (!destroyed) failed(cause);
+      if (!destroyed) showFailure(diagnostics, "Playback cannot be loaded", cause);
     });
   };
   const toggle = (): void => {
@@ -122,8 +131,9 @@ export function ablaufPlayback(column: HTMLElement, failed: (cause: unknown) => 
   touchPlay.addEventListener("click", toggle);
 
   return {
-    play, touchPlay, controls,
+    play, touchPlay, controls, diagnostics,
     redraw(drawn, resolved) {
+      showDiagnostics(diagnostics, []);
       svg = drawn;
       timelines = resolved;
       if (timelines.length === 0) wanted = false;

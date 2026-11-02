@@ -116,7 +116,7 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
   const showSource = (): void => openSource(editor, getPos, true)(new Event("source"));
   const source = sourceButton("Open ablauf source", toggleSource(editor, getPos, viewport));
   const expand = expandButton();
-  const playback = ablaufPlayback(dom, (cause) => showFailure(diagnostics, "Playback cannot be loaded", cause));
+  const playback = ablaufPlayback(dom);
   const toolbar = document.createElement("div");
   toolbar.className = "ub-figure-toolbar";
   toolbar.contentEditable = "false";
@@ -161,7 +161,7 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
   const diagnostics = document.createElement("ul");
   diagnostics.className = "ub-ablauf-diagnostics";
   diagnostics.hidden = true;
-  panel.append(viewport, toolbar, playback.controls, playback.touchPlay, stale, diagnostics);
+  panel.append(viewport, toolbar, playback.controls, playback.touchPlay, stale, diagnostics, playback.diagnostics);
   const contentDOM = document.createElement("pre");
   contentDOM.className = "ub-ablauf-source";
   sourceFrame.append(header.row, contentDOM);

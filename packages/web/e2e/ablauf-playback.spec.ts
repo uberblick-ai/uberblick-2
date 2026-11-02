@@ -138,6 +138,41 @@ test("Playable drawings start once in view, play independently and remount idle 
   expect(errors).toEqual([]);
 });
 
+test("a successful playback chunk retry removes the load error and preserves source diagnostics", async ({ browser }) => {
+  const session = writer();
+  const source = `${PLAYED}\n  step nowhere`;
+  const { uuid } = await session.call<{ uuid: string }>("create_doc", {
+    title: "Ablauf playback recovery", description: "Retry playback without losing source diagnostics.",
+    blocks: [{ type: "code", language: "ablauf", text: source }],
+  });
+  const requests: string[] = [];
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    contextOptions: { reducedMotion: "reduce" },
+    beforeNavigate: async page => {
+      await page.route(/\/assets\/ablauf-playback-[^/]+\.js(?:\?.*)?$/, async route => {
+        requests.push(route.request().url());
+        if (requests.length === 1) {
+          await route.fulfill({ status: 503, contentType: "text/javascript", headers: { "Cache-Control": "no-store" }, body: "Temporarily unavailable" });
+        } else await route.continue();
+      });
+    },
+  });
+  await waitForDocumentDraw(page, session, uuid, { source });
+  const block = blocks(page).first();
+  const sourceDiagnostic = `Line ${source.split("\n").length}: error: unknown playback target \`nowhere\``;
+  await expect(block.locator(".ub-ablauf-diagnostics")).toContainText(sourceDiagnostic);
+  await svg(block).hover();
+  await play(block).click();
+  await expect(block).toContainText("Playback cannot be loaded:");
+  await expect(block.locator(".ub-ablauf-diagnostics")).toContainText(sourceDiagnostic);
+  await play(block).click();
+  await expect(controls(block)).toBeVisible();
+  await expect(block).not.toContainText("Playback cannot be loaded:");
+  await expect(block.locator(".ub-ablauf-diagnostics")).toContainText(sourceDiagnostic);
+  expect(requests).toHaveLength(2);
+  expect(new URL(requests[1] ?? "").search).toBe("?retry=1");
+});
+
 test("A playable drawing below the fold waits until it is scrolled into view", async ({ browser }) => {
   const session = writer();
   const { uuid } = await session.call<{ uuid: string }>("create_doc", {
@@ -186,9 +221,10 @@ test("Under reduced motion nothing starts on its own, and touch Play mounts the 
 for (const appearance of ["light", "dark"] as const) {
   test(`read-only iPad playback follows the pinned ${appearance} palette over the opposite system preference`, { tag: "@webkit-touch" }, async ({ browser }) => {
     const session = writer();
+    const source = PLAYED.replace('\n\nplay "Quick"', '\n  step draft\n  step check\n  step done\n\nplay "Quick"');
     const { uuid } = await session.call<{ uuid: string }>("create_doc", {
       title: `Read-only played Ablauf (${appearance})`, description: "A playable flow in an archived document.",
-      blocks: [{ type: "code", language: "ablauf", text: PLAYED }],
+      blocks: [{ type: "code", language: "ablauf", text: source }],
     });
     await session.call("archive_doc", { uuid });
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
@@ -197,7 +233,7 @@ for (const appearance of ["light", "dark"] as const) {
         await page.addInitScript(theme => { localStorage.setItem("uberblick.settings.v1", JSON.stringify({ appearance: theme })); }, appearance);
       },
     });
-    await waitForDocumentDraw(page, session, uuid, { source: PLAYED });
+    await waitForDocumentDraw(page, session, uuid, { source });
     await expect(page.locator("html")).toHaveAttribute("data-theme", appearance);
     await expect(page.locator(".ProseMirror")).toHaveAttribute("contenteditable", "false");
     const block = blocks(page).first();
@@ -206,6 +242,43 @@ for (const appearance of ["light", "dark"] as const) {
     await expect(block.locator(".ub-ablauf-touch-play")).toBeHidden();
     await activateControl(toggle(block));
     await expect(controls(block).locator(".abp-actor")).toHaveText("Author");
+
+    const layout = await controls(block).evaluate(async root => {
+      await root.ownerDocument.fonts.ready;
+      const bounds = root.getBoundingClientRect();
+      const targets = [...root.querySelectorAll("button, .abp-segments:not(.abp-inactive) .abp-segment")].map((target, index) => {
+        const rect = target.getBoundingClientRect();
+        return {
+          name: target.getAttribute("aria-label") ?? (target.textContent?.trim() || `Step ${index - 4}`),
+          left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height,
+        };
+      });
+      return {
+        left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom,
+        width: root.clientWidth, scrollWidth: root.scrollWidth, viewportWidth: root.ownerDocument.documentElement.clientWidth,
+        targets,
+      };
+    });
+    // Both scenario tabs, Previous/Play/Next and six step targets that need to wrap.
+    expect(layout.targets).toHaveLength(11);
+    expect(layout.left).toBeGreaterThanOrEqual(0);
+    expect(layout.right).toBeLessThanOrEqual(layout.viewportWidth);
+    expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width + 1);
+    for (const target of layout.targets) {
+      expect(target.width, `${target.name} touch width`).toBeGreaterThanOrEqual(44);
+      expect(target.height, `${target.name} touch height`).toBeGreaterThanOrEqual(44);
+      expect(target.left, `${target.name} left edge`).toBeGreaterThanOrEqual(layout.left);
+      expect(target.right, `${target.name} right edge`).toBeLessThanOrEqual(layout.right);
+      expect(target.top, `${target.name} top edge`).toBeGreaterThanOrEqual(layout.top);
+      expect(target.bottom, `${target.name} bottom edge`).toBeLessThanOrEqual(layout.bottom);
+    }
+    for (const [index, target] of layout.targets.entries()) {
+      for (const other of layout.targets.slice(index + 1)) {
+        const overlaps = Math.min(target.right, other.right) > Math.max(target.left, other.left)
+          && Math.min(target.bottom, other.bottom) > Math.max(target.top, other.top);
+        expect(overlaps, `${target.name} overlaps ${other.name}`).toBe(false);
+      }
+    }
 
     const paint = await block.evaluate(element => {
       const probe = document.createElement("span");
