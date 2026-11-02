@@ -149,6 +149,9 @@ it("points Markdown authors to Ablauf help, its play sections and the diagnostic
   expect(help.read("ablauf").description).toContain("flow, fan-out and sequence diagrams");
   const ablauf = help.read("ablauf").text.replace(/\s+/g, " ");
   expect(ablauf).toContain("## Flow playback");
+  expect(ablauf).toContain("stays whole and undimmed until the reader presses Play");
+  expect(ablauf).toContain("Play adds scenario tabs, step controls and captions under the drawing and starts playback");
+  expect(ablauf).not.toContain("plays once on its own");
   expect(ablauf).toContain("## Sequence");
   expect(ablauf).toContain("Sequence diagrams take no `play` sections");
   expect(ablauf).toContain("answers with a `drawing` summary for it");
