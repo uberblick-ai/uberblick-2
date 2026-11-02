@@ -19,7 +19,7 @@ export const STARTUP_ORIENTATION =
   "Read `get_help(edit_doc)` before you create or edit a document, and follow each failure's recovery. " +
   "This repo's conventions are in the corpus, not in help. " +
   "Help topics, through `get_help({topic})` or uberblick://help/{topic}: orientation, edit_doc, decisions, " +
-  "workspaces, markdown, ablauf, wireframe, data, tools, tool-contracts.";
+  "workspaces, markdown, ablauf (diagrams), wireframe (UI sketches), data (charts and tables), tools, tool-contracts.";
 
 const workspaces = `# Workspaces and documents
 
@@ -81,6 +81,7 @@ Create and change documents with the fewest calls. Details live in \`decisions\`
 - Write \`---\` with a blank line above it for a divider, or use \`type: "divider"\` with empty text over MCP. Text directly above \`---\` becomes a level-2 heading.
 - A block's \`text\` is plain text: \`**bold**\` stays literal. For formatting or links in prose, pass \`inline\` runs with marks when creating or inserting.
 - Tables, cards, embeds and GitHub references are in \`markdown\`.
+- Visual blocks: flow, fan-out and sequence diagrams in \`ablauf\`, UI sketches in \`wireframe\`, charts, scatter plots and data tables in \`data\`, and Figma designs in \`markdown\`.
 - Check the result with \`export_markdown\`.
 
 ## Related
