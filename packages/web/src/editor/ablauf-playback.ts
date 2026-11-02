@@ -115,18 +115,19 @@ export function ablaufPlayback(column: HTMLElement): AblaufPlayback {
     open(true, false);
   };
   // ablauf's autoplay leaves a figure still under reduced motion; the reader keeps Play instead.
-  const reducedMotion = (): boolean => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reducedMotion = (): boolean => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
   const autoplay = (): void => {
     if (autoplayed || destroyed || !nearView || timelines.length === 0 || mount !== null || reducedMotion()) return;
     autoplayed = true;
-    view.disconnect();
+    view?.disconnect();
     open(false, true);
   };
-  const view = new IntersectionObserver((entries) => {
+  // Without IntersectionObserver nothing can tell the drawing is in view, so it waits for Play.
+  const view = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver((entries) => {
     nearView = entries.some((entry) => entry.isIntersecting);
     autoplay();
   }, { rootMargin: NEAR_VIEW });
-  view.observe(column);
+  view?.observe(column);
   play.addEventListener("click", toggle);
   touchPlay.addEventListener("click", toggle);
 
@@ -145,7 +146,7 @@ export function ablaufPlayback(column: HTMLElement): AblaufPlayback {
     destroy() {
       destroyed = true;
       resize.disconnect();
-      view.disconnect();
+      view?.disconnect();
       unmount();
     },
   };
