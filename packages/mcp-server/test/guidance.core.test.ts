@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
-import { createTagCatalogEntry, deleteTagCatalogEntry, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
+import { createTagCatalogEntry, deleteTagCatalogEntry, listDirectory, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
 import { STARTUP_ORIENTATION } from "../src/help-topics.js";
 import { startupInstructions } from "../src/startup-instructions.js";
 import { tools } from "../src/tool-table.js";
@@ -43,6 +43,30 @@ it("selects only the ten most recently updated live guidance pointers from local
   const pointers = documents.slice(2).reverse().map(({ title, uuid }) => `${title} (\`${uuid}\`)`).join(", ");
   expect(startupInstructions(replicas)).toBe(`${STARTUP_ORIENTATION}\n\nWorkspace guidance: before your first write, read the pages that apply to your change with \`get_doc\`: ${pointers}.`);
   for (const method of ["replica", "refresh", "settle"] as const) expect(replicas[method]).not.toHaveBeenCalled();
+});
+
+it("renders guidance titles as single bounded lines without changing stored titles or UUIDs", async () => {
+  const rig = await local();
+  const { replicas } = rig.instance;
+  const marker = createTagCatalogEntry(replicas.settings().doc, "guidance").id;
+  const directory = replicas.directory().doc;
+  const controls = Array.from({ length: 32 }, (_, index) => String.fromCharCode(index)).join("") +
+    Array.from({ length: 33 }, (_, index) => String.fromCharCode(127 + index)).join("");
+  const cases = [
+    { title: " \tFirst\r\nsecond\u2028third\u2029fourth\u00a0\u2003 ", shown: "First second third fourth" },
+    { title: `${controls}Control${controls} \t title${controls}`, shown: "Control title" },
+    { title: " \u0000\r\n\u2028\u2029\u009f ", shown: "" },
+    { title: "a".repeat(80), shown: "a".repeat(80) },
+    { title: "a".repeat(81), shown: `${"a".repeat(79)}…` },
+    { title: `${"a".repeat(79)}🧭`, shown: `${"a".repeat(79)}🧭` },
+    { title: `${"a".repeat(78)}🧭bc`, shown: `${"a".repeat(78)}🧭…` },
+    { title: `  ${" \r\n\u0000 ".repeat(100)}Short guide  `, shown: "Short guide" },
+  ].map((entry, index) => ({ ...entry, uuid: randomUUID(), tags: [marker], updatedAt: 100 - index }));
+  for (const entry of cases) upsertDirectoryEntry(directory, entry);
+
+  const pointers = cases.map(({ shown, uuid }) => `${shown} (\`${uuid}\`)`).join(", ");
+  expect(startupInstructions(replicas)).toBe(`${STARTUP_ORIENTATION}\n\nWorkspace guidance: before your first write, read the pages that apply to your change with \`get_doc\`: ${pointers}.`);
+  expect(listDirectory(directory)).toEqual(expect.arrayContaining(cases.map(({ uuid, title }) => expect.objectContaining({ uuid, title }))));
 });
 
 it("keeps the plain orientation for an empty replica, absent or deleted tag, and archived guidance", async () => {
