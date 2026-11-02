@@ -42,7 +42,8 @@ agents:
     outcomes:
       ready: {add: [ready]}
       review: {add: [needs-review]}
-      split: {}
+      # The launcher starts the sub-issues a split creates. Needs ub-agents 0.3.1 or later.
+      split: {sub-issues: {add: [needs-preparation]}}
       wontfix: {}
       needs-human: {add: [needs-human]}
     agent-timeout-minutes: 60
