@@ -405,10 +405,10 @@ inspect the drawing in the web editor when someone can open it.
 
 ## Flow playback
 
-A flow may end with one or more \`play\` sections. In the web editor, Play in
-the drawing's toolbar mounts scenario tabs, step controls and captions under it;
-nothing plays on its own. Each step names a node id and lights it plus the edge
-from the previous step:
+A flow may end with one or more \`play\` sections. In the web editor the drawing
+gains scenario tabs, step controls and captions under it, and plays once on its
+own the first time it comes into view. Each step names a node id and lights it
+plus the edge from the previous step:
 
 \`\`\`ablauf
 flow v0
