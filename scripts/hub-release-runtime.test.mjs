@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -20,6 +20,28 @@ function execute(script, overrides = {}, args = [], cwd = root) {
 		cwd, env: { ...process.env, ...settings, ...overrides }, encoding: "utf8",
 	});
 }
+
+test("hub release frontend and base images cannot float with upstream tags", () => {
+	const dockerfile = readFileSync(join(root, "Dockerfile.hub-release"), "utf8");
+	const references = [
+		dockerfile.match(/^# syntax=(\S+)$/m)?.[1],
+		...[...dockerfile.matchAll(/^FROM (?:--platform=\S+ )?(\S+) AS /gm)].map((match) => match[1]),
+	];
+	assert.equal(references.length, 4);
+	for (const reference of references) {
+		assert.match(reference ?? "", /:[\w.-]+@sha256:[a-f0-9]{64}$/);
+	}
+});
+
+const releaseWorkflow = join(root, ".github/workflows/release-hub.yml");
+test("QEMU setup runs an explicitly versioned and digest-pinned privileged image", {
+	skip: !existsSync(releaseWorkflow) && ".github/workflows is absent from the isolated review context",
+}, () => {
+	const workflow = readFileSync(releaseWorkflow, "utf8");
+	const qemu = workflow.match(/^ {8}uses: docker\/setup-qemu-action@[^\n]+\n((?: {8,}[^\n]*\n)*)/m)?.[1];
+	assert.match(qemu ?? "", /^ {8}with:\n/);
+	assert.match(qemu, /^ {10}image: (?:docker\.io\/)?tonistiigi\/binfmt:qemu-v[\w.-]+@sha256:[a-f0-9]{64}$/m);
+});
 
 test("web deployment imports the generated policy for the app and its deep-link fallback", () => {
 	const caddyfile = readFileSync(join(root, "Caddyfile"), "utf8");

@@ -1,6 +1,7 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+# known limit: Dependabot does not refresh the frontend; refresh its tag and index digest manually; revisit when Docker scans support syntax directives.
 
-FROM --platform=$BUILDPLATFORM node:26-bookworm-slim AS build
+FROM --platform=$BUILDPLATFORM node:26-bookworm-slim@sha256:bc0a2afd3b74ce12222fc8bab99271e66257f021078f5f4a5d687a77d280c1d9 AS build
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 WORKDIR /source
@@ -29,7 +30,7 @@ RUN node scripts/build-hub-release-payload.mjs /out "$HUB_RELEASE_VERSION" "$HUB
 # No source checkout, package manager, dependencies or deployment config are
 # copied into either runtime image. Node's builtin SQLite, sh and the node user
 # remain available for the operator backup/restore/setup commands.
-FROM node:26-bookworm-slim AS hub
+FROM node:26-bookworm-slim@sha256:bc0a2afd3b74ce12222fc8bab99271e66257f021078f5f4a5d687a77d280c1d9 AS hub
 ARG HUB_RELEASE_VERSION
 ARG HUB_RELEASE_COMMIT
 ARG HUB_SYNC_PROTOCOL_VERSION
@@ -53,7 +54,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=2s -
 ENTRYPOINT ["sh", "/usr/local/bin/hub-release-entrypoint.sh"]
 CMD ["node", "/app/hub.mjs"]
 
-FROM caddy:2.10.2-alpine AS web
+FROM caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d AS web
 ARG HUB_RELEASE_VERSION
 ARG HUB_RELEASE_COMMIT
 ARG HUB_SYNC_PROTOCOL_VERSION
