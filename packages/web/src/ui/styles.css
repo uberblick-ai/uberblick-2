@@ -2310,9 +2310,10 @@ h6.ub-heading {
   .ub-toggle-heading-button,
   .ub-toggle-heading-icon { transition: none; }
 }
-/* Touch keeps a 44px target; only the visible slot stays beside the text. */
+/* Touch widens the slot itself to the 44px target, so the target and its
+   pressed surface stay clear of the heading's first character. */
 @media (any-pointer: coarse) {
-  .ub-toggle-heading-button { width: 44px; height: 44px; }
+  .ub-toggle-heading-control { --toggle-heading-target: 44px; }
 }
 .ub-inline-icon {
   display: inline-block;

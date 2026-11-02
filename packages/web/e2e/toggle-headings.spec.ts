@@ -305,6 +305,20 @@ test("archived pages and decision records keep accessible reader toggles in both
       const bounds = await disclosure.boundingBox();
       expect(bounds?.width).toBeGreaterThanOrEqual(info.project.use.hasTouch === true ? 44 : 24);
       expect(bounds?.height).toBeGreaterThanOrEqual(info.project.use.hasTouch === true ? 44 : 24);
+      // The target, including its hover and pressed surface, ends before the first heading character.
+      const textLeft = await block(page, created, 0).evaluate((heading) => {
+        const walker = heading.ownerDocument.createTreeWalker(heading, NodeFilter.SHOW_TEXT, {
+          acceptNode: node => node.parentElement?.closest(".ub-toggle-heading-control, .ub-toggle-heading-marker") === null &&
+            (node.textContent ?? "").trim() !== "" ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP,
+        });
+        const text = walker.nextNode();
+        if (text === null) throw new Error("e2e: toggle heading has no visible text");
+        const range = heading.ownerDocument.createRange();
+        range.setStart(text, 0);
+        range.setEnd(text, 1);
+        return range.getBoundingClientRect().left;
+      });
+      expect((bounds?.x ?? 0) + (bounds?.width ?? 0)).toBeLessThanOrEqual(textLeft);
       await activateControl(disclosure);
       await expect(control(page, "Reader section", true)).toHaveAttribute("aria-expanded", "true");
       await expect(block(page, created, 1)).toBeVisible();
