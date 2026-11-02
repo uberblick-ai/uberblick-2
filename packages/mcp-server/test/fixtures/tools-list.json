@@ -93,7 +93,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 300,
-          "description": "Read only by agents, never shown to people: whatever best helps an agent find this document with list_docs and search and decide whether to open it. A keyword list is fine."
+          "description": "Regular pages: agent-only discovery text; a keyword list is fine. Decisions: short line on why this answer was chosen or what changed, shown in the topic's history."
         },
         "tldr": {
           "anyOf": [
@@ -1215,7 +1215,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 300,
-          "description": "Read only by agents, never shown to people: whatever best helps an agent find this document with list_docs and search and decide whether to open it. A keyword list is fine."
+          "description": "Regular pages: agent-only discovery text; a keyword list is fine. Decisions: short line on why this answer was chosen or what changed, shown in the topic's history."
         },
         "tldr": {
           "description": "Person-facing regular-document summary, at most 300 characters. Null clears it without changing a deliberate removal mark. On a marked page, a non-null summary requires tldr_opt_in: true. Decisions have no TL;DR; open records accept null.",

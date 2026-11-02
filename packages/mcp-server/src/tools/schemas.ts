@@ -31,16 +31,16 @@ export const revisionArg = z.string().min(1).max(256)
 export const descriptionArg = z
   .string({
     error:
-      "create_doc requires `description`, and set_metadata accepts it: read only by agents, it is whatever best helps an " +
-      "agent find the document with list_docs and search and decide whether to open it. A keyword list is fine.",
+      "create_doc requires `description`, and set_metadata accepts it. For regular pages, use agent-only discovery text; " +
+      "a keyword list is fine. For decisions, write a short line on why this answer was chosen or what changed; people see it in the topic's history.",
   })
   .trim()
   .min(1, "a description cannot be empty or whitespace")
   .max(
     MAX_DESCRIPTION_LENGTH,
-    `a description is at most ${MAX_DESCRIPTION_LENGTH} characters — keep the terms that best help an agent find it`,
+    `a description is at most ${MAX_DESCRIPTION_LENGTH} characters`,
   )
-  .describe("Read only by agents, never shown to people: whatever best helps an agent find this document with list_docs and search and decide whether to open it. A keyword list is fine.");
+  .describe("Regular pages: agent-only discovery text; a keyword list is fine. Decisions: short line on why this answer was chosen or what changed, shown in the topic's history.");
 
 export const tldrArg = z
   .string({

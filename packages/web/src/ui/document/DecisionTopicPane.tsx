@@ -192,7 +192,7 @@ function Timeline({ topic, selected, linkedRecord, segment, navigate, docLinks, 
               {event && <span className="ub-decision-event">{event}</span>}
               {linkedRecord === record.uuid && <span className="ub-decision-linked">Linked record</span>}
             </span>
-            {record.answerPreview && <span className="ub-decision-preview">{record.answerPreview}</span>}
+            {record.description && <span className="ub-decision-preview">{record.description}</span>}
             {(record.commentCount ?? 0) > 0 && <span className="ub-decision-record-comments" role="img"
               aria-label={`${record.commentCount} ${record.commentCount === 1 ? "comment" : "comments"}`}>
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">

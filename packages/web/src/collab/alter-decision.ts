@@ -149,7 +149,6 @@ function stageDecision(input: AlterDecisionInput, draft: Y.Doc, uuid: string, rf
   try {
     initDoc(record, {
       uuid, title: decisionTopicTitle(topic),
-      ...(predecessor.description == null ? {} : { description: predecessor.description }),
       tags: predecessor.tags, topic: predecessor.topic ?? predecessor.uuid,
       supersedes: predecessor.uuid,
       ...(predecessor.related === undefined ? {} : { related: predecessor.related }),

@@ -130,6 +130,7 @@ afterEach(() => {
 });
 
 interface RecordOptions {
+  description?: string;
   supersedes?: string;
   related?: string | string[];
   discussion?: string;
@@ -151,6 +152,7 @@ function record(uuid: string, title: string, status: DecisionStatus, answer: str
   const ydoc = room(roomForDoc(WORKSPACE, uuid)).ydoc;
   initDoc(ydoc, {
     uuid, title,
+    ...(options.description === undefined ? {} : { description: options.description }),
     ...(options.supersedes === undefined ? {} : { topic: FIRST, supersedes: options.supersedes }),
     ...(options.related === undefined ? {} : typeof options.related === "string"
       ? { governs: options.related } : { related: options.related }),
@@ -172,6 +174,7 @@ function publishRecord(ydoc: Y.Doc, options: RecordOptions = {}): void {
   const meta = getMetaMap(ydoc);
   upsertDirectoryEntry(directory(), {
     uuid: String(meta.get("uuid")), title: String(meta.get("title")),
+    ...(typeof meta.get("description") === "string" ? { description: String(meta.get("description")) } : {}),
     kind: "decision", status: meta.get("status") as DecisionStatus,
     topic: String(meta.get("topic") ?? meta.get("uuid")),
     ...(typeof meta.get("supersedes") === "string" ? { supersedes: String(meta.get("supersedes")) } : {}),
@@ -189,19 +192,25 @@ function story(): void {
   regular(RELATED_CURRENT, "Current related page");
   regular(RFC, "Proposal discussion");
   regular(EARLIER_RFC, "Earlier discussion");
-  const first = record(FIRST, "Original title", "decided", "Keep the original answer.", { related: RELATED_FIRST, discussion: EARLIER_RFC, agent: true });
+  const first = record(FIRST, "Original title", "decided", "Keep the original answer.", {
+    description: "Start with the team's existing tools.", related: RELATED_FIRST, discussion: EARLIER_RFC, agent: true,
+  });
   createAnnotation(first, getBlocks(first)[0]!.id, 0, 4, "Earlier reader", "Earlier record comment");
   publishRecord(first);
   const current = record(CURRENT, "Current topic title", "decided", "Use the current answer.", {
-    supersedes: FIRST, related: RELATED_CURRENT, answerer: "Ben", answerDate: DATE, order: 1,
+    description: "Support the growing team.", supersedes: FIRST, related: RELATED_CURRENT, answerer: "Ben", answerDate: DATE, order: 1,
   });
   createAnnotation(current, getBlocks(current)[0]!.id, 0, 3, "Current reader", "Current record comment");
   publishRecord(current, { order: 1 });
   record(REJECTED, "Rejected proposal", "rejected", "Use the rejected alternative.", {
-    supersedes: CURRENT, answerer: "Alex", answerDate: "2026-10-10T12:00:00Z", rejectionReason: "It loses compatibility.", order: 2,
+    description: "Compatibility rules out this alternative.", supersedes: CURRENT, answerer: "Alex", answerDate: "2026-10-10T12:00:00Z", rejectionReason: "It loses compatibility.", order: 2,
   });
-  record(WITHDRAWN, "Withdrawn proposal", "withdrawn", "A withdrawn alternative.", { supersedes: REJECTED, order: 3 });
-  record(OPEN, "Open proposal", "open", "A replacement under discussion.", { supersedes: CURRENT, discussion: RFC, order: 4 });
+  record(WITHDRAWN, "Withdrawn proposal", "withdrawn", "A withdrawn alternative.", {
+    description: "Another proposal already covers this.", supersedes: REJECTED, order: 3,
+  });
+  record(OPEN, "Open proposal", "open", "A replacement under discussion.", {
+    description: "Consider the new workspace constraint.", supersedes: CURRENT, discussion: RFC, order: 4,
+  });
 }
 
 async function open(path = docPath(WORKSPACE, FIRST)) {
@@ -696,7 +705,7 @@ describe("decision topic navigation and history", () => {
     view.unmount();
   });
 
-  it("renders cached history newest first with matching answer pills and the rail through the answer in force", async () => {
+  it("renders current descriptions in all history states with matching pills and the rail through the answer in force", async () => {
     story();
     const first = room(roomForDoc(WORKSPACE, FIRST)).ydoc;
     createAnnotation(first, getBlocks(first)[0]!.id, 5, 9, "Another reader", "Another earlier record comment");
@@ -708,14 +717,15 @@ describe("decision topic navigation and history", () => {
       .toEqual([OPEN, WITHDRAWN, REJECTED, CURRENT, FIRST]);
     expect(item(host, FIRST).querySelector(".ub-decision-linked")?.textContent?.trim()).toBe("Linked record");
     const rows = [
-      { uuid: OPEN, state: "under-review", label: "Under review", event: null, green: true },
-      { uuid: WITHDRAWN, state: "withdrawn", label: "Withdrawn", event: null, green: true },
-      { uuid: REJECTED, state: "rejected", label: "Rejected", event: "Alex", green: true },
-      { uuid: CURRENT, state: "in-force", label: "In force", event: "Ben", green: true },
-      { uuid: FIRST, state: "superseded", label: "Superseded", event: "Agent stance, never confirmed", green: false },
+      { uuid: OPEN, description: "Consider the new workspace constraint.", state: "under-review", label: "Under review", event: null, green: true },
+      { uuid: WITHDRAWN, description: "Another proposal already covers this.", state: "withdrawn", label: "Withdrawn", event: null, green: true },
+      { uuid: REJECTED, description: "Compatibility rules out this alternative.", state: "rejected", label: "Rejected", event: "Alex", green: true },
+      { uuid: CURRENT, description: "Support the growing team.", state: "in-force", label: "In force", event: "Ben", green: true },
+      { uuid: FIRST, description: "Start with the team's existing tools.", state: "superseded", label: "Superseded", event: "Agent stance, never confirmed", green: false },
     ];
-    for (const { uuid, state, label, event, green } of rows) {
+    for (const { uuid, description, state, label, event, green } of rows) {
       const row = item(host, uuid);
+      expect(row.querySelector(".ub-decision-preview")?.textContent).toBe(description);
       expect(row.getAttribute("data-state")).toBe(state);
       expect(row.getAttribute("data-in-force")).toBe(String(uuid === CURRENT));
       expect(row.getAttribute("data-rail-green")).toBe(String(green));
@@ -738,6 +748,13 @@ describe("decision topic navigation and history", () => {
     expect(item(host, OPEN).querySelector(".ub-decision-record-comments")).toBeNull();
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, RFC));
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, EARLIER_RFC));
+    await act(async () => upsertDirectoryEntry(directory(), {
+      ...getDirectoryEntry(directory(), CURRENT)!, description: "Handle the team's revised constraint.",
+    }));
+    expect(item(host, CURRENT).querySelector(".ub-decision-preview")?.textContent).toBe("Handle the team's revised constraint.");
+    await choose(host, CURRENT);
+    expect(answer(host).textContent).toContain("Use the current answer.");
+    expect(answer(host).textContent).not.toContain("Handle the team's revised constraint.");
   });
 
   it.each([
@@ -780,6 +797,8 @@ describe("decision topic navigation and history", () => {
     expect(item(host, OPEN).querySelector(".ub-decision-record-comments")).toBeNull();
     expect(item(host, OPEN).querySelector(".ub-decision-record-rfc")).toBeNull();
     expect(item(host, FIRST).querySelector(".ub-decision-event")).toBeNull();
+    expect(getDirectoryEntry(directory(), FIRST)?.answerPreview).toBe("The answer in force.");
+    expect(item(host, FIRST).querySelector(".ub-decision-preview")).toBeNull();
     expect(item(host, FIRST).getAttribute("data-in-force")).toBe("true");
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, REJECTED));
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, OPEN));

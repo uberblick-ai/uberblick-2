@@ -82,7 +82,11 @@ describe("create_doc requires a description", () => {
     const rig = await localRig();
     const missing = await rig.call("create_doc", { title: "Undescribed" });
     expect(missing.isError).toBe(true);
-    expect(missing.payload.message).toContain("A keyword list is fine.");
+    expect(missing.payload.message).toContain("For regular pages, use agent-only discovery text; a keyword list is fine.");
+    expect(missing.payload.message).toContain("For decisions, write a short line on why this answer was chosen or what changed");
+    const decisionMissing = await rig.call("create_doc", { title: "Undescribed decision", kind: "decision" });
+    expect(decisionMissing.isError).toBe(true);
+    expect(decisionMissing.payload.message).toBe(missing.payload.message);
     // Spaces are not a description. Accepting them would satisfy the
     // requirement on paper, store blanks in the document and the stub, and
     // silence the nudge that exists to get a real one written.
@@ -247,6 +251,8 @@ describe("a document nobody described", () => {
     expect(inserted.applied).toBe(true);
     expect(inserted.description).toBeNull();
     expect(inserted.descriptionHint).toContain("set_metadata");
+    expect(inserted.descriptionHint).toContain("Only agents read it, never people");
+    expect(inserted.descriptionHint).toContain("A keyword list is fine.");
     expect(inserted.tagHint).toBe("This document has no tags: to add some, call list_tags for the workspace vocabulary, " +
       "then set_metadata with `tags`; leave it untagged if no tag fits.");
 
@@ -263,6 +269,27 @@ describe("a document nobody described", () => {
     expect(described.descriptionHint).toBeUndefined();
     const after = await rig.ok("set_metadata", { uuid, tags: ["mcp"] });
     expect(after.descriptionHint).toBeUndefined();
+  });
+
+  it("asks an undescribed decision for its visible history line, before and after it is decided", async () => {
+    const rig = await localRig();
+    const uuid = webDoc(rig, "Made in the browser");
+    await rig.ok("set_status", { uuid, status: "open" });
+
+    const inserted = await rig.ok("insert_block", {
+      uuid, blocks: [{ type: "paragraph", text: "Use the shared implementation." }],
+    });
+    expect(inserted).toMatchObject({ applied: true, description: null });
+    expect(inserted.descriptionHint).toContain("call set_metadata with `description`");
+    expect(inserted.descriptionHint).toContain("a short line on why this answer was chosen or what changed");
+    expect(inserted.descriptionHint).toContain("People see it in the topic's history");
+    expect(inserted.descriptionHint).not.toMatch(/keyword|[Oo]nly agents|never people/);
+
+    const decided = await rig.ok("set_status", { uuid, status: "decided" });
+    expect(decided.descriptionHint).toBe(inserted.descriptionHint);
+    const described = await rig.ok("set_metadata", { uuid, description: "Keeps all callers consistent." });
+    expect(described).toMatchObject({ applied: true, description: "Keeps all callers consistent." });
+    expect(described).not.toHaveProperty("descriptionHint");
   });
 
   it("does not nudge on writes that are not about a document", async () => {

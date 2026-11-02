@@ -27,6 +27,23 @@ it("documents the zoned decision-answer time and current-time guidance", async (
   expect(text).toContain("normalises it to UTC");
 });
 
+it("distinguishes visible decision history descriptions from regular-page discovery text", async () => {
+  const rig = await local();
+  const { text: decisions } = await rig.ok("get_help", { topic: "decisions" });
+  expect(decisions).toContain("Title, description, tags, links and comments stay editable after the record is decided");
+  expect(decisions).toContain("The description is a short line on why this answer was chosen or what changed; people see it in the topic's history.");
+
+  for (const topic of ["workspaces", "edit_doc"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    expect(text).toMatch(/[Rr]egular page[s, ]/);
+    expect(text).toContain("keyword list is fine");
+    expect(text).toContain("short line on why this answer was chosen or what changed");
+    expect(text).toContain("topic's history");
+    expect(text).not.toContain("Only agents read the description");
+    expect(text).not.toContain("`description` is read only by agents");
+  }
+});
+
 it("documents the closed version-1 data vocabulary and demonstrates a schema the validator accepts", async () => {
   const rig = await local();
   const { text } = await rig.ok("get_help", { topic: "data" });
