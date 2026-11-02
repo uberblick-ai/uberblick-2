@@ -543,7 +543,7 @@ export async function createHub(config: HubConfig, options: {
       database: databasePath,
       error: String(error),
     });
-  }, { revisions: deviceCredentials });
+  }, { revisions: deviceCredentials, log });
 
   /** Releasing the handle is never the reason a shutdown fails; it is logged. */
   const closeDatabase = (): void => {

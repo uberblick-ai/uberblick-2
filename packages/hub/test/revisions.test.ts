@@ -23,12 +23,15 @@ import {
   sidebarRoom,
   tombstoneDirectoryEntry,
   snapshotRevision,
+  type UpdateOriginMetadata,
 } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
+import { CredentialRegistry } from "../src/credentials.js";
+import type { HubLogRecord } from "../src/log.js";
 import { HubDatabase } from "../src/persistence.js";
 import { backupDatabase, restoreDatabase } from "../src/operator-database.js";
-import { OriginUpdates, type UpdateAuthor } from "../src/update-attribution.js";
+import { OriginUpdates, resolveUpdateAuthor, type UpdateAuthor } from "../src/update-attribution.js";
 import { removeTempDatabases, tempDatabasePath } from "./helpers.js";
 
 const WORKSPACE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -40,10 +43,11 @@ const claude: UpdateAuthor = { principalId: "ben", surface: { kind: "mcp", name:
 const MINUTE = 60_000;
 const documents: Y.Doc[] = [];
 const databases: HubDatabase[] = [];
+const logs: HubLogRecord[] = [];
 let clock = 0;
 
 function database(enabled = true, failure: (error: unknown) => void = () => {}): HubDatabase {
-  const created = new HubDatabase(":memory:", failure, { revisions: enabled, now: () => clock });
+  const created = new HubDatabase(":memory:", failure, { revisions: enabled, now: () => clock, log: record => logs.push(record) });
   created.open();
   databases.push(created);
   return created;
@@ -56,8 +60,11 @@ async function load(db: HubDatabase, room = ROOM): Promise<Document> {
   return document;
 }
 
-function title(doc: Y.Doc, value: string, author: UpdateAuthor | null = browser): void {
-  doc.transact(() => doc.getMap("meta").set("title", value), { attribution: { author } });
+function title(doc: Y.Doc, value: string, author: UpdateAuthor | null = browser, principalId?: string): void {
+  doc.transact(() => doc.getMap("meta").set("title", value), { attribution: {
+    author,
+    ...(principalId === undefined ? {} : { deliveredBy: { principalId, credentialId: "credential", deviceId: "device" } }),
+  } });
 }
 
 function revision(db: HubDatabase, id: string, room = ROOM): Y.Doc {
@@ -74,6 +81,7 @@ function checksum(doc: Y.Doc): string {
 afterEach(() => {
   for (const doc of documents.splice(0)) doc.destroy();
   for (const db of databases.splice(0)) db.close();
+  logs.length = 0;
   removeTempDatabases();
   clock = 0;
 });
@@ -561,6 +569,62 @@ describe("automatic hub revisions", () => {
     expect(rows[2]!.author).toBeNull();
   });
 
+  it("logs delivering members for unknown origins without changing authors or grouping", async () => {
+    const db = database();
+    const hub = await load(db);
+    const source = new Y.Doc();
+    documents.push(source);
+    const credentials = new CredentialRegistry(db);
+    const connection = (principalId: string) => ({
+      context: { principalId, deviceId: "computer", credentialId: credentials.issue({
+        principalId, deviceId: "computer", workspaces: [], publicKey: new Uint8Array(32),
+      }).record.id },
+      readOnly: false,
+      sendStateless() {},
+    });
+    const ben = connection("ben");
+    const alice = connection("alice");
+    const bob = connection("bob");
+    const carol = connection("carol");
+    const extension = new OriginUpdates({
+      requireMetadata: true,
+      assertCurrent() {},
+      resolveAuthor: (context, origin) => resolveUpdateAuthor(context, credentials, origin),
+    });
+    const apply = async (sender: typeof ben, payload: string): Promise<void> => {
+      await extension.onStateless({ connection: sender, document: hub, documentName: ROOM, payload,
+      } as unknown as Parameters<OriginUpdates["onStateless"]>[0]);
+    };
+    const deliver = async (sender: typeof ben, value: string, origin: Omit<UpdateOriginMetadata, "updateId"> | null): Promise<string> => {
+      const before = Y.encodeStateVector(source);
+      title(source, value);
+      const payload = encodeOriginUpdate(value, Y.encodeStateAsUpdate(source, before), origin === null ? null : { ...origin, updateId: value });
+      await apply(sender, payload);
+      return payload;
+    };
+
+    await deliver(ben, "Resolved origin", { credentialId: ben.context.credentialId, surface: browser.surface });
+    expect(logs).toEqual([]);
+    await deliver(alice, "Missing metadata", null);
+    await deliver(ben, "Missing credential", { credentialId: null, surface: browser.surface });
+    await deliver(bob, "Missing surface", { credentialId: bob.context.credentialId, surface: null });
+    const duplicate = await deliver(carol, "Mismatched credential", { credentialId: ben.context.credentialId, surface: browser.surface });
+    const rows = db.revisions.list(ROOM);
+    expect(rows).toHaveLength(2);
+    expect(rows.map(row => row.author)).toEqual([null, browser]);
+    expect(logs).toEqual(["alice", "ben", "bob", "carol"].map(principalId => ({
+      event: "hub.revision.unknownAuthor", room: ROOM, revisionId: rows[0]!.id, principalId,
+    })));
+
+    await apply(carol, duplicate);
+    const before = Y.encodeStateVector(source);
+    getMetaMap(source).set("description", "Excluded from revision content");
+    await apply(alice, encodeOriginUpdate("description", Y.encodeStateAsUpdate(source, before), null));
+    title(hub, "No delivering member", null);
+    expect(logs).toHaveLength(4);
+    expect(db.revisions.list(ROOM).map(row => row.author)).toEqual([null, browser]);
+  });
+
   it.each(["open", "decided", "rejected", "withdrawn"] as const)("records no first content or later title, blocks or data for %s decisions", async status => {
     const db = database();
     const doc = await load(db);
@@ -689,20 +753,31 @@ describe("automatic hub revisions", () => {
     const failures: unknown[] = [];
     const db = database(true, error => failures.push(error));
     const doc = await load(db);
-    title(doc, "One");
+    title(doc, "One", browser, "ben");
     db.connection.exec(`CREATE TRIGGER fail_head_update BEFORE UPDATE ON document_revision_heads
+      BEGIN SELECT RAISE(ABORT, 'capture failed'); END;
+      CREATE TRIGGER fail_head_insert BEFORE INSERT ON document_revision_heads
       BEGIN SELECT RAISE(ABORT, 'capture failed'); END`);
     clock = 5 * MINUTE;
-    expect(() => title(doc, "Unrecorded edit")).toThrow("capture failed");
+    expect(() => title(doc, "Unrecorded edit", browser, "ben")).toThrow("capture failed");
     expect(db.revisions.list(ROOM)[0]!.deadlineAt).toBe(15 * MINUTE);
-    db.connection.exec("DROP TRIGGER fail_head_update");
-    title(doc, "Another author's edit", claude);
-    expect(failures).toHaveLength(1);
+    expect(() => title(doc, "Another unrecorded edit", { ...browser, principalId: "alice" }, "alice")).toThrow("capture failed");
+    expect(logs).toEqual([]);
+    db.connection.exec("DROP TRIGGER fail_head_update; DROP TRIGGER fail_head_insert");
+    const recoveringAuthor = { ...claude, principalId: "carol" };
+    title(doc, "Another author's edit", recoveringAuthor, "carol");
+    expect(failures).toHaveLength(2);
     const rows = db.revisions.list(ROOM);
     expect(rows).toHaveLength(2);
     expect(rows[0]!.author).toBeNull();
     expect(getMeta(revision(db, rows[0]!.id)).title).toBe("Another author's edit");
     expect(getMeta(revision(db, rows[1]!.id)).title).toBe("One");
+    expect(logs).toEqual(["ben", "alice", "carol"].map(principalId => ({
+      event: "hub.revision.unknownAuthor", room: ROOM, revisionId: rows[0]!.id, principalId,
+    })));
+    title(doc, "Resolved again", recoveringAuthor, "carol");
+    expect(db.revisions.list(ROOM)[0]!.author).toEqual(recoveringAuthor);
+    expect(logs).toHaveLength(3);
   });
 
   it("records integrated out-of-order changes from several authors as unknown", async () => {
@@ -732,15 +807,17 @@ describe("automatic hub revisions", () => {
       sendStateless() {},
     };
     const deliver = async (update: Uint8Array, id: string, author: UpdateAuthor): Promise<void> => {
+      connection.context.principalId = author.principalId;
       await extension.onStateless({
         connection, document: hub, documentName: ROOM,
         payload: encodeOriginUpdate(id, update, { updateId: id, credentialId: "credential", surface: author.surface }),
       } as unknown as Parameters<OriginUpdates["onStateless"]>[0]);
     };
 
-    await deliver(successor, "successor-first", claude);
+    await deliver(successor, "successor-first", { ...claude, principalId: "alice" });
     expect(getMeta(hub).title).toBe("");
     expect(db.revisions.list(ROOM)).toEqual([]);
+    expect(logs).toEqual([]);
     await deliver(predecessor, "predecessor-later", browser);
     const rows = db.revisions.list(ROOM);
     expect(rows).toEqual([{
@@ -749,6 +826,9 @@ describe("automatic hub revisions", () => {
     }]);
     expect(getMeta(hub).title).toBe("Claude's edited title");
     expect(getMeta(revision(db, rows[0]!.id)).title).toBe("Claude's edited title");
+    expect(logs).toEqual([{
+      event: "hub.revision.unknownAuthor", room: ROOM, revisionId: rows[0]!.id, principalId: "ben",
+    }]);
   });
 
   it("carries closed revisions, open heads and document state through backup and restore", async () => {
