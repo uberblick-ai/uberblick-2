@@ -1,4 +1,4 @@
-import { decisionTopicArchived, deleteDecisionTopic, deleteDirectoryEntry, unpinDoc } from "@uberblick/schema";
+import { decisionTopicArchived, deleteDecisionRecord, deleteDecisionTopic, deleteDirectoryEntry, unpinDoc } from "@uberblick/schema";
 import { z } from "zod";
 import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
@@ -8,15 +8,15 @@ import { uuidArg } from "./schemas.js";
 
 export const inputSchema = strictInput({
   uuid: uuidArg,
-  topic: z.boolean().optional().describe("True deletes every record of an archived decision topic, given its topic UUID or any record UUID; individual deletion is unavailable."),
+  topic: z.boolean().optional().describe("True deletes the whole archived decision topic via any record UUID. Omit or false deletes one record; the first record requires topic: true."),
 });
 
 export const deleteDocOperation = operation(DOCUMENT_WRITE, inputSchema, (context, { uuid, topic }) => {
   const { replicas, requireStub, titleFor, durabilityAcross } = context;
   const stub = requireStub(uuid);
   const directory = replicas.directory();
-  if (stub.kind === "decision" && topic !== true) {
-    throw new ToolError("decision_delete_unsupported", "One decision record cannot be deleted on its own yet. Deleting its archived topic requires topic: true.", { uuid });
+  if (stub.kind === "decision" && topic !== true && (stub.topic ?? uuid) === uuid) {
+    throw new ToolError("decision_delete_unsupported", "A topic's first record can be deleted only with its whole topic using topic: true. Other records can be deleted one at a time.", { uuid });
   }
   if (stub.kind === "decision" ? !decisionTopicArchived(directory.doc, uuid) : stub.deleted !== true) {
     throw new ToolError("doc_not_archived", "Archive the document or whole decision topic before deleting it permanently.", { uuid });
@@ -32,7 +32,8 @@ export const deleteDocOperation = operation(DOCUMENT_WRITE, inputSchema, (contex
   );
   let records = [uuid];
   stage("directory", directory, () => {
-    if (stub.kind === "decision") records = deleteDecisionTopic(directory.doc, uuid);
+    if (stub.kind === "decision" && topic === true) records = deleteDecisionTopic(directory.doc, uuid);
+    else if (stub.kind === "decision") deleteDecisionRecord(directory.doc, uuid);
     else deleteDirectoryEntry(directory.doc, uuid);
   });
   stage("sidebar", sidebar, () => sidebar.doc.transact(() => {

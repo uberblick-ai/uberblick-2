@@ -528,9 +528,9 @@ export const tools: readonly Tool[] = [
     description:
       "Archive a document or every record of a decision topic, preserving content and UUID reads while hiding " +
       "directory/search entries and unpinning. unpinned asserts the unpin, not whether a pin was found. " +
-      "An unseen concurrent pin may survive; get_sidebar shows it as archived and unpin_doc removes it. " +
-      "Restoration uses restore_doc and never re-pins. To delete an archived topic, call delete_doc with topic: true; " +
-      "one decision record cannot be deleted on its own yet. Directory/sidebar rooms persist independently without " +
+      "An unseen concurrent pin may survive; get_sidebar shows it archived and unpin_doc removes it. " +
+      "restore_doc never re-pins. delete_doc removes one archived decision record; " +
+      "the first record requires whole-topic deletion using topic: true. Directory/sidebar rooms persist independently without " +
       "rollback. Results name rooms and indexed; persistence_failed names completed/failed rooms and recovery. " +
       "Follow recovery before retrying.",
     input: archiveDocInput,
@@ -545,13 +545,13 @@ export const tools: readonly Tool[] = [
     name: "delete_doc",
     title: "Permanently delete an archived document",
     description:
-      "Permanently delete an archived regular document, or with topic: true an archived decision topic given its " +
-      "topic UUID or any record UUID. Every topic record goes, including individually archived records. Deletes " +
-      "content, comments, data and history; only permanent UUID deletion evidence remains. Offline restores cannot undo it; " +
-      "replicas drop copies and the hub refuses rooms. Live topics/documents refuse with doc_not_archived; deleted " +
-      "UUIDs with doc_deleted. A decision UUID " +
-      "without topic: true refuses; one decision record cannot be deleted on its own yet. " +
-      "Other documents keep stored links. Directory/sidebar writes report independent durability.",
+      "Permanently delete an archived document or one record of an archived decision topic. topic: true deletes " +
+      "every topic record via any record UUID, including individually archived records. The first record requires " +
+      "topic: true or refuses with decision_delete_unsupported. Live topics/documents refuse with doc_not_archived; " +
+      "deleted UUIDs with doc_deleted. Deletes content, comments, data and history; " +
+      "evidence keeps UUIDs plus a deleted record's topic/predecessor references. Offline restores cannot undo deletion. " +
+      "Other documents keep stored links. Directory/sidebar writes report independent durability. MCP archive_doc " +
+      "always archives whole topics.",
     input: deleteDocInput,
     operation: deleteDocOperation,
     hints: { destructive: true, idempotent: true },
@@ -700,8 +700,9 @@ export const tools: readonly Tool[] = [
     name: "unpin_doc",
     title: "Unpin a document",
     description:
-      "Unpin without changing the document. archive_doc hides documents or topics; delete_doc permanently deletes " +
-      "archived documents or whole topics with topic: true. One decision record cannot be deleted on its own yet. Unpin " +
+      "Unpin without changing the document. archive_doc hides documents or whole topics; delete_doc permanently deletes " +
+      "archived documents, one record of an archived topic, or a whole topic with topic: true. The first record " +
+      "can go only with its topic. Unpin " +
       "beats concurrent moves; no group is needed because each document has at most one pin. unpinned:false " +
       "means none existed. Empty groups remain; groupHint names sidebar_group to delete them.",
     input: unpinDocInput,

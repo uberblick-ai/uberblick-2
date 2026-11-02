@@ -125,11 +125,62 @@ describe("delete_doc", () => {
         isError: true, payload: { error: "doc_not_archived", applied: false, partial: false, synced: false },
       });
       expect(await rig.call("delete_doc", { uuid })).toMatchObject({
-        isError: true, payload: { error: "decision_delete_unsupported", recovery: expect.stringContaining("topic: true"), applied: false },
+        isError: true, payload: { error: uuid === first.uuid ? "decision_delete_unsupported" : "doc_not_archived", applied: false },
       });
     }
     expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
     expect(rig.instance.store.logSize()).toBe(size);
+  });
+
+  it("deletes only one archived record and resolves every MCP topic projection through it", async () => {
+    const rig = await local();
+    const page = await rig.ok("create_doc", { title: "Topic owner", description: "Keeps its related topic." });
+    const fields = {
+      title: "Which answer remains?", description: "Keep this record's reason.", kind: "decision", related: page.uuid,
+      blocks: [{ type: "paragraph", text: "Keep this answer and its comments." }],
+    };
+    const answer = { who: "A person", when: "2026-10-22T12:00:00Z", where: "Recorded approval." };
+    const first = await rig.ok("create_doc", { ...fields, status: "decided" });
+    const middle = await rig.ok("create_doc", { ...fields, supersedes: first.uuid, status: "decided", answer });
+    const current = await rig.ok("create_doc", { ...fields, supersedes: middle.uuid, status: "decided", answer });
+    await rig.ok("annotate", { uuid: first.uuid, block_id: first.blocks[0].id, start: 0, end: 4, text: "Keep the first record's comment." });
+    await rig.ok("annotate", { uuid: middle.uuid, block_id: middle.blocks[0].id, start: 0, end: 4, text: "Erase only this comment." });
+    await rig.ok("annotate", { uuid: current.uuid, block_id: current.blocks[0].id, start: 0, end: 4, text: "Keep the current record's comment." });
+    const { replicas, store } = rig.instance;
+    const survivors = [first, current];
+    const retained = survivors.map(record => Y.encodeStateAsUpdate(replicas.replica(record.uuid).doc));
+    await rig.ok("archive_doc", { uuid: current.uuid });
+
+    const deleted = await rig.ok("delete_doc", { uuid: middle.uuid });
+    expect(deleted).toMatchObject({ uuid: middle.uuid, records: [middle.uuid], deleted: true, applied: true });
+    expect(await rig.call("get_doc", { uuid: middle.uuid })).toMatchObject({ isError: true, payload: { error: "doc_deleted" } });
+    expect(store.hasRoom(`${rig.config.workspaceId}/${middle.uuid}`)).toBe(false);
+    expect(survivors.map(record => Y.encodeStateAsUpdate(replicas.replica(record.uuid).doc))).toEqual(retained);
+    expect((await rig.ok("get_doc", { uuid: current.uuid }))).toMatchObject({
+      predecessors: [{ uuid: first.uuid }], successors: [],
+      resolution: { inForce: current.uuid, pending: [], conflicts: [], archived: true },
+    });
+    expect((await rig.ok("get_doc", { uuid: first.uuid })).successors.map((record: { uuid: string }) => record.uuid)).toEqual([current.uuid]);
+    expect((await rig.ok("list_docs", { kind: "decision", include_deleted: true })).docs).toMatchObject([
+      { uuid: current.uuid, topic: first.uuid, inForce: current.uuid, pending: [], conflicts: [] },
+    ]);
+    expect((await rig.ok("list_docs", { kind: "decision", include_deleted: true, include_superseded: true })).docs.map((record: { uuid: string }) => record.uuid).sort()).toEqual([first.uuid, current.uuid].sort());
+
+    const restored = await rig.ok("restore_doc", { uuid: first.uuid });
+    expect(restored.records.sort()).toEqual([first.uuid, current.uuid].sort());
+    expect((await rig.ok("get_doc", { uuid: page.uuid })).decisions).toMatchObject([
+      { uuid: current.uuid, topic: first.uuid, inForce: current.uuid, pending: [], conflicts: [] },
+    ]);
+    expect((await rig.ok("get_doc", { uuid: current.uuid })).resolution).toEqual({ inForce: current.uuid, pending: [], conflicts: [], archived: false });
+
+    await rig.ok("archive_doc", { uuid: first.uuid });
+    expect((await rig.ok("delete_doc", { uuid: current.uuid, topic: false })).records).toEqual([current.uuid]);
+    expect((await rig.ok("get_doc", { uuid: first.uuid })).resolution).toEqual({ inForce: first.uuid, pending: [], conflicts: [], archived: true });
+    const before = Y.encodeStateAsUpdate(replicas.directory().doc);
+    expect(await rig.call("delete_doc", { uuid: first.uuid })).toMatchObject({
+      isError: true, payload: { error: "decision_delete_unsupported", recovery: expect.stringContaining("Other records"), applied: false },
+    });
+    expect(Y.encodeStateAsUpdate(replicas.directory().doc)).toEqual(before);
   });
 
   it.each(["topic", "record"])("deletes every archived topic record via its %s UUID and removes every entry point", async (address) => {

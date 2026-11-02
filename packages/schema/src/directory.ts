@@ -31,6 +31,9 @@ export const DIRECTORY_DELETED_KEY = "deleted-docs";
 /** UUID-only topic evidence survives deletion of a late record's metadata. */
 export const DIRECTORY_DELETED_DECISION_TOPICS_KEY = "deleted-decision-topics";
 
+/** Deleted records retain only the UUID edges that surviving answers traverse. */
+export const DIRECTORY_DELETED_DECISION_RECORDS_KEY = "deleted-decision-records";
+
 /** Individual archives survive whole-stub rewrites by older clients. */
 export const DIRECTORY_ARCHIVED_RECORDS_KEY = "archived-records";
 
@@ -182,6 +185,35 @@ export function listDeletedDirectoryUuids(dirDoc: Y.Doc): string[] {
   return [...deleted].sort();
 }
 
+interface DeletedDecisionRecord {
+  topic: string;
+  supersedes?: string;
+}
+
+function deletedDecisionRecord(dirDoc: Y.Doc, uuid: string): DeletedDecisionRecord | null {
+  if (dirDoc.getMap<unknown>(DIRECTORY_DELETED_KEY).get(uuid) !== true) return null;
+  const value = dirDoc.getMap<unknown>(DIRECTORY_DELETED_DECISION_RECORDS_KEY).get(uuid);
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Partial<DeletedDecisionRecord>;
+  if (typeof record.topic !== "string" || canonicalDocumentUuid(record.topic) === null || record.topic === uuid) return null;
+  if (record.supersedes !== undefined && (typeof record.supersedes !== "string" || canonicalDocumentUuid(record.supersedes) === null)) return null;
+  return { topic: record.topic, ...(record.supersedes === undefined ? {} : { supersedes: record.supersedes }) };
+}
+
+/** Public stubs bypass deleted records without rewriting surviving documents. */
+function survivingPredecessor(dirDoc: Y.Doc, uuid: string, entry: StoredEntry): string | undefined {
+  const topic = entry.topic ?? uuid;
+  const visited = new Set([uuid]);
+  let next = entry.supersedes;
+  while (next !== undefined && !visited.has(next)) {
+    visited.add(next);
+    const deleted = deletedDecisionRecord(dirDoc, next);
+    if (deleted === null || deleted.topic !== topic) return next;
+    next = deleted.supersedes;
+  }
+  return undefined;
+}
+
 /** Remove metadata that an unseen whole-entry writer may have reintroduced. */
 export function enforceDeletedDirectoryEntries(dirDoc: Y.Doc): void {
   const deleted = new Set(listDeletedDirectoryUuids(dirDoc));
@@ -195,8 +227,17 @@ export function enforceDeletedDirectoryEntries(dirDoc: Y.Doc): void {
       if (entry?.kind === "decision" && entry.topic !== undefined && entry.topic !== uuid &&
         deleted.has(entry.topic) && topics.get(uuid) !== entry.topic) topics.set(uuid, entry.topic);
       if (marks.get(uuid) !== true) marks.set(uuid, true);
-      if (docs.has(uuid)) docs.delete(uuid);
+      const record = deletedDecisionRecord(dirDoc, uuid);
+      if (docs.has(uuid)) {
+        if (record !== null && !deleted.has(record.topic)) {
+          const value = docs.get(uuid);
+          // Released hubs accept a late record's mark only with its own archive.
+          if (typeof value !== "object" || value === null || Object.keys(value).length !== 1 ||
+            (value as { deleted?: unknown }).deleted !== true) docs.set(uuid, { deleted: true });
+        } else docs.delete(uuid);
+      }
       dirDoc.getMap<unknown>(DIRECTORY_RELATED_PAGES_KEY).delete(uuid);
+      if (record !== null) dirDoc.getMap<unknown>(DIRECTORY_ARCHIVED_RECORDS_KEY).delete(uuid);
     }
     const stamps = getUpdatedAtMap(dirDoc);
     for (const key of stamps.keys()) {
@@ -214,6 +255,23 @@ export function deleteDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
     }
     enforceDeletedDirectoryEntries(dirDoc);
   });
+}
+
+/** A topic's identity survives; only archived, non-first records can go alone. */
+export function deleteDecisionRecord(dirDoc: Y.Doc, uuid: string): boolean {
+  const entry = readStored(getDirectoryMap(dirDoc).get(uuid));
+  if (entry?.kind !== "decision" || isDirectoryEntryDeleted(dirDoc, uuid) ||
+    (entry.topic ?? uuid) === uuid || !decisionTopicArchived(dirDoc, uuid)) return false;
+  const topic = entry.topic ?? uuid;
+  dirDoc.transact(() => {
+    dirDoc.getMap<unknown>(DIRECTORY_DELETED_DECISION_RECORDS_KEY).set(uuid, {
+      topic, ...(entry.supersedes === undefined ? {} : { supersedes: entry.supersedes }),
+    });
+    getDirectoryMap(dirDoc).set(uuid, { deleted: true });
+    dirDoc.getMap<unknown>(DIRECTORY_DELETED_KEY).set(uuid, true);
+    enforceDeletedDirectoryEntries(dirDoc);
+  });
+  return true;
 }
 
 /** The caller owns access and whole-topic archive checks, including record archives. */
@@ -471,7 +529,8 @@ export function repairDirectoryStub(
 ): void {
   const meta = getMeta(doc, uuid);
   if (meta.uuid === "" || isDirectoryEntryDeleted(directory, uuid)) return;
-  const stub = getDirectoryEntry(directory, uuid);
+  const stored = withResolvedUpdatedAt(readStored(getDirectoryMap(directory).get(uuid)), recordedUpdatedAt(directory, uuid));
+  const stub = stored === null ? null : toEntry(uuid, stored, directory, false, false);
   if (stub?.deleted === true && meta.kind !== "decision") return;
 
   const fields = documentStubFields(doc, uuid);
@@ -700,9 +759,15 @@ export interface ListDirectoryOptions {
   includeDeleted?: boolean;
 }
 
-function toEntry(uuid: string, stored: StoredEntry, dirDoc: Y.Doc, recordArchived = false): DirectoryEntry {
+function toEntry(uuid: string, stored: StoredEntry, dirDoc: Y.Doc, recordArchived = false, projectPredecessor = true): DirectoryEntry {
   const related = stored.kind === "decision"
     ? readRelatedPages(dirDoc.getMap<unknown>(DIRECTORY_RELATED_PAGES_KEY).get(uuid), stored.governs) : [];
+  const decisionFields = stored.kind === "decision" ? readDecisionFields(stored as unknown as Record<string, unknown>) : {};
+  if (stored.kind === "decision" && projectPredecessor) {
+    const supersedes = survivingPredecessor(dirDoc, uuid, stored);
+    if (supersedes === undefined) delete decisionFields.supersedes;
+    else decisionFields.supersedes = supersedes;
+  }
   return {
     uuid,
     title: stored.title,
@@ -718,7 +783,7 @@ function toEntry(uuid: string, stored: StoredEntry, dirDoc: Y.Doc, recordArchive
     ...(stored.status === undefined ? {} : { status: stored.status }),
     ...(stored.openThreadCount === undefined ? {} : { openThreadCount: stored.openThreadCount }),
     ...(stored.kind === "decision" || stored.code_check === undefined ? {} : { code_check: stored.code_check }),
-    ...(stored.kind === "decision" ? readDecisionFields(stored as unknown as Record<string, unknown>) : {}),
+    ...decisionFields,
     ...(related.length > 0 ? { governs: related[0], related } : {}),
   };
 }
