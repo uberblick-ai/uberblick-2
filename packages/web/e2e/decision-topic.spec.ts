@@ -941,8 +941,18 @@ for (const { touch, appearance } of [
     const currentRfcTitle = "RFC: Current guidance and its implementation constraints for the shared workspace";
     await writer.call("set_metadata", { uuid: currentRfc.uuid, title: currentRfcTitle });
     await selectedRfc(page, currentRfc, currentRfcTitle);
-    await writer.call("archive_doc", { uuid: currentRfc.uuid });
-    await archivedLink(page.locator(".ub-decision-rfc a"));
+    const hubDirectory = harness().observeHubDirectoryEntry(currentRfc.uuid);
+    let archiveResult: unknown = null;
+    try {
+      archiveResult = await writer.call("archive_doc", { uuid: currentRfc.uuid });
+      await archivedLink(page.locator(".ub-decision-rfc a"));
+    } catch (error) {
+      await test.info().attach("rfc-archive-delivery", {
+        contentType: "application/json",
+        body: JSON.stringify({ uuid: currentRfc.uuid, archiveResult, hub: hubDirectory.readings }, null, 2),
+      });
+      throw error;
+    } finally { hubDirectory.stop(); }
     await selectedTopicPin(page, touch);
     const topicRecords = [first.uuid, current.uuid, rejected.uuid, withdrawn.uuid, pending.uuid];
     const actions = page.getByRole("button", { name: "Document actions", exact: true });

@@ -47,8 +47,8 @@ import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { AgentGrantRegistry } from "../../hub/src/agent-grants.js";
 import { HubDatabase } from "../../hub/src/persistence.js";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
-import { createRevisionResponseReader, directoryRoom, encodeRevisionRequest, getBlocks, getMeta, getWorkspaceMainRepository, getWorkspaceName, listTagCatalog, repairDirectoryStub, roomForDoc, seedTagCatalog, settingsRoom, snapshotRevision } from "@uberblick/schema";
-import type { RevisionEntry, RevisionResponse } from "@uberblick/schema";
+import { createRevisionResponseReader, directoryRoom, encodeRevisionRequest, getBlocks, getDirectoryEntry, getMeta, getWorkspaceMainRepository, getWorkspaceName, listTagCatalog, repairDirectoryStub, roomForDoc, seedTagCatalog, settingsRoom, snapshotRevision } from "@uberblick/schema";
+import type { DirectoryEntry, RevisionEntry, RevisionResponse } from "@uberblick/schema";
 import { wrapToken } from "@uberblick/schema/protocol";
 import { importCredentialKey, mintToken } from "@uberblick/schema/token";
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
@@ -247,6 +247,11 @@ export type HubTextHistory = {
   stop(): void;
 };
 
+export type HubDirectoryHistory = {
+  readings: { entry: DirectoryEntry | null; update: string }[];
+  stop(): void;
+};
+
 export interface Harness {
   /** Give a separate MCP replica this fixture machine's existing sign-in. */
   createMcpAgent(statePrefix: string): McpAgent;
@@ -289,6 +294,8 @@ export interface Harness {
   seedDocument(source: Y.Doc): Promise<void>;
   /** Inspect public document content received by one of the fixture hubs. */
   hubText(room: string, secondary?: boolean): string | null;
+  /** Retain hub directory arrivals before garbage collection hides losing entries. */
+  observeHubDirectoryEntry(uuid: string): HubDirectoryHistory;
   hubWorkspaceSettings(): { name: string | null; mainRepository: string | null; tags: string[] } | null;
   /** Observe completed refusal recovery without connecting a browser that claims its notice. */
   localSettingsReset(): { seq: number; notice: string } | null;
@@ -752,6 +759,22 @@ export async function startHarness(options: {
       hubText(room, secondary = false) {
         const document = (secondary ? secondHub : hub)?.hocuspocus.documents.get(room);
         return document === undefined ? null : getBlocks(document).map((block) => block.text).join("\n");
+      },
+      observeHubDirectoryEntry(uuid) {
+        const document = hub?.hocuspocus.documents.get(directoryRoom(workspaceUuid));
+        if (document === undefined) throw new Error("e2e: directory history needs a loaded hub directory");
+        const readings: HubDirectoryHistory["readings"] = [{
+          entry: getDirectoryEntry(document, uuid),
+          update: Buffer.from(Y.encodeStateAsUpdate(document)).toString("base64"),
+        }];
+        const record = (transaction: Y.Transaction): void => {
+          readings.push({
+            entry: getDirectoryEntry(document, uuid),
+            update: Buffer.from(Y.encodeStateAsUpdate(document, Y.encodeStateVector(transaction.beforeState))).toString("base64"),
+          });
+        };
+        document.on("afterTransaction", record);
+        return { readings, stop: () => { document.off("afterTransaction", record); } };
       },
       hubWorkspaceSettings() {
         const document = hub?.hocuspocus.documents.get(settingsRoom(workspaceUuid));
