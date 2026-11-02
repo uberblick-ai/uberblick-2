@@ -135,6 +135,7 @@ export function collectServingSyncStatus(
  */
 export async function collectSyncStatus(
   replicas: Replicas,
+  reading: "diagnostic" | "mcp" = "diagnostic",
 ): Promise<SyncStatus> {
   await replicas.settle({ requireHealthy: false });
   const local = replicas.config.localWorkspace === true;
@@ -145,7 +146,7 @@ export async function collectSyncStatus(
     agent: replicas.name,
     workspace: replicas.config.workspaceId,
     database: replicas.store.databasePath,
-    hub: replicas.hubState(),
+    hub: replicas.hubState(reading),
     caughtUp: local
       ? !replicas.store.isRemoved() && !replicas.store.isDetached() && replicas.persistenceError() === null
       : collectReplicaSyncState(replicas).caughtUp,

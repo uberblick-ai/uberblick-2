@@ -827,7 +827,11 @@ export const toolHelpDetails = {
     "The edge shows up in backlinks without touching `meta.links`, which stays the curated doc-level list set_metadata owns.",
   sync_status:
     "What this replica holds and what the hub has acknowledged.\n\n" +
-    "`hub.status` distinguishes `hub-down`, a retryable connection or renewal failure, from `auth-failed`, an " +
+    "`hub.status: connecting` means the first hub connection is still pending and no attempt has failed. " +
+    "Changes are saved on this computer and sync once the connection opens; nothing needs repeating. " +
+    "A failed first attempt immediately reports `hub-down`; a first attempt still pending after 30 seconds " +
+    "also reports `hub-down`. Both keep `hub.recoveryClass: retry`. " +
+    "`hub-down`, a retryable connection or renewal failure, differs from `auth-failed`, an " +
     "authentication problem that needs human action. `disabled` means sync is disabled, so this server is " +
     "local-only. `local` means a local workspace whose hub runs only while `ub open` does: changes are saved " +
     "on this computer, nothing needs retrying, and `ub open` syncs them as it starts. Every hub reading carries `hub.recoveryClass`: `retry` means a missing room can still arrive as " +

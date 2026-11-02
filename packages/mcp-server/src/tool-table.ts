@@ -652,15 +652,15 @@ export const tools: readonly Tool[] = [
     name: "sync_status",
     title: "Sync status",
     description:
-      "Inspect local replica state, pending rooms and hub connection/acknowledgements. hub.status distinguishes " +
-      "local, disabled, retryable hub-down, auth-failed requiring action, and update-required protocol mismatch. " +
-      "hub.recoveryClass, authRecovery and reason explain recovery; protocolVersion and hubProtocolVersion " +
-      "identify the incompatible side. Tools still work locally. unsyncedChanges counts durable pending rooms; " +
-      "inFlightUpdates counts provider sync messages on the current connection, resetting on reconnect. " +
-      "lastSync is this machine's stored UTC time when its full replica caught up, or null; it never moves " +
-      "backwards across processes. persistence diagnoses a failed log append and remains readable when ordinary " +
-      "replica tools are quarantined until restart. See this tool's help for counter units and lastSync " +
-      "conditions.",
+      "Inspect sync state. hub.status: connecting means the first attempt is pending without failures; " +
+      "hub-down means retryable connection/renewal failure or a first attempt pending for 30s; auth-failed " +
+      "needs action; update-required means protocol mismatch; local and disabled are local-only. " +
+      "Applied writes are saved here and sync once connected; do not repeat. hub.recoveryClass, authRecovery " +
+      "and reason guide recovery; protocolVersion and hubProtocolVersion identify the incompatible side. " +
+      "Tools work locally. unsyncedChanges counts durable pending rooms; inFlightUpdates counts provider sync " +
+      "messages, resetting on reconnect. lastSync is this machine's stored UTC when the full replica caught " +
+      "up, or null; never backwards across processes. persistence reports a failed log append and stays " +
+      "readable while ordinary replica tools are quarantined until restart.",
     input: syncStatusInput,
     operation: syncStatusOperation,
     example: {},
