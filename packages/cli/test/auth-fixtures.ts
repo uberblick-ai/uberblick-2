@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { hostname } from "node:os";
 import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { DatabaseSync } from "node:sqlite";
-import { createTeamHub as createHub, type TeamHub as Hub } from "@uberblick/hub/team";
+import { createTeamHub as createHub, type TeamHub as Hub, type TeamHubOptions } from "@uberblick/hub/team";
 import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { expect } from "vitest";
 import { type Run, type Sandbox, sandbox } from "./helpers.js";
@@ -134,7 +134,8 @@ export async function serve(handler: (request: IncomingMessage, response: Server
   return { server, origin: `http://127.0.0.1:${address.port}` };
 }
 
-export async function rig(workspaces: string[] = [], configured = true, initializeDefaultWorkspace = false, deviceCredentials = false, protocolVersion?: number, hubVersion?: string) {
+export async function rig(workspaces: string[] = [], configured = true, initializeDefaultWorkspace = false, deviceCredentials = false, protocolVersion?: number, hubVersion?: string,
+  hosted?: { publicUrl: string; oauthClients: NonNullable<TeamHubOptions["oauthClients"]>; mcpSocketPath: string }) {
   const box = sandbox();
   const github = new GithubFake();
   const logs: unknown[] = [];
@@ -143,9 +144,11 @@ export async function rig(workspaces: string[] = [], configured = true, initiali
     const hub = await createHub({
       authSecret: SIGNING_SECRET, port: 0, databasePath, log: (line) => logs.push(line),
       ...(protocolVersion === undefined ? {} : { protocolVersion }),
+      ...(hosted === undefined ? {} : { publicUrl: hosted.publicUrl, mcpSocketPath: hosted.mcpSocketPath }),
       ...(configured ? { github: { clientId: "Iv23AbCdEF0123456789", fetch: github.fetch, pollMaxWaitMs: 1 } } : {}),
     }, { initializeDefaultWorkspace, ...(deviceCredentials ? { deviceCredentials: true } : {}),
-      ...(hubVersion === undefined ? {} : { hubVersion }) });
+      ...(hubVersion === undefined ? {} : { hubVersion }),
+      ...(hosted === undefined ? {} : { oauthClients: hosted.oauthClients }) });
     hubs.push(hub);
     return hub;
   };

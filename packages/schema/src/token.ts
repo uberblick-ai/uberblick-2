@@ -74,6 +74,7 @@ export type RequestAction =
   | { operation: "renew-credential"; publicKey: string }
   | { operation: "promote-workspace"; workspaceId: string; attemptId: string }
   | { operation: "list-devices" }
+  | { operation: "revoke-browser-sessions" }
   | { operation: "own-hub-role" }
   | { operation: "list-hub-admins"; cursor?: string }
   | { operation: "list-hub-workspaces"; cursor?: string }
@@ -386,6 +387,7 @@ export function readRequestAction(payload: Record<string, unknown>): RequestActi
       action = { operation, workspaceId, attemptId };
       break;
     case "list-devices":
+    case "revoke-browser-sessions":
     case "own-hub-role":
       action = { operation };
       break;

@@ -7,7 +7,7 @@ import { isUuid, validateWorkspaceName } from "@uberblick/schema";
 import { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
 import { isGithubUsername } from "@uberblick/schema/github-identity";
 
-export type AccessAction = Exclude<RequestAction, { operation: "renew-credential" | "promote-workspace" }>;
+export type AccessAction = Exclude<RequestAction, { operation: "renew-credential" | "promote-workspace" | "revoke-browser-sessions" }>;
 export type AccessRole = "member" | "admin";
 export interface AccessMember {
   principalId: string;

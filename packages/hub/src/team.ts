@@ -9,6 +9,7 @@ import { startAdminSetup } from "./admin-setup.js";
 import { createOperatorControls } from "./operator-control.js";
 import { GithubSignIn, handleGithubSignIn } from "./github-sign-in.js";
 import { handleBrowserSignIn } from "./browser-sign-in.js";
+import { BrowserSessions } from "./browser-sessions.js";
 import { GithubAccountLookup } from "./github-account-lookup.js";
 import { HubClaimState, handleHubClaimState } from "./hub-claim.js";
 import { HubAdminRegistry } from "./hub-admins.js";
@@ -49,6 +50,7 @@ function createTeamExtension(
 ): HubExtension & Pick<TeamHub, "credentials" | "memberships" | "principals" | "hubAdmins"> {
   const { database, server, deviceCredentials, protocolVersion, log } = context;
   let signIn: GithubSignIn | undefined;
+  let browserSessions: BrowserSessions | undefined;
   let accounts: GithubAccountLookup | undefined;
   let credentials: CredentialRegistry | undefined;
   let principals: PrincipalRegistry | undefined;
@@ -72,7 +74,8 @@ function createTeamExtension(
     if (config.github !== undefined) {
       credentials = new CredentialRegistry(database, hubAdmins, log, undefined, workspaceNames);
       promotions = new WorkspacePromotions(database, memberships, hasLiveDocuments, hubAdmins);
-      signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims, workspaceNames);
+      browserSessions = new BrowserSessions(database, config.github.now);
+      signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims, workspaceNames, browserSessions);
       accounts = new GithubAccountLookup(config.github.fetch, config.github.now);
       if (config.publicUrl !== undefined) authorizations = new OAuthAuthorizations(database, memberships, workspaceNames, credentials, config.github.now);
     }
@@ -103,7 +106,7 @@ function createTeamExtension(
       if (await handleOAuthToken(config.publicUrl, signIn !== undefined, authorizations, request, response)) return true;
       if (handleHubClaimState(claims, signIn !== undefined, request, response)) return true;
       if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response, workspaceNames)) return true;
-      if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts, hubAdmins, options.hubVersion)) return true;
+      if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts, hubAdmins, options.hubVersion, browserSessions)) return true;
       if (await handleBrowserSignIn(signIn, request, response, config.behindReleaseProxy)) return true;
       return handleGithubSignIn(signIn, request, response, config.behindReleaseProxy);
     },
