@@ -178,6 +178,8 @@
   --ab-rework-bg: light-dark(oklch(0.97 0.006 65), oklch(0.22 0.012 65));
   --ab-stop: light-dark(oklch(0.53 0.07 10), var(--block-rose-bar));
   --ab-stop-bg: var(--block-rose-tint);
+  /* Playback's current step and controls; text on the page keeps 4.5:1. */
+  --ab-play: light-dark(oklch(0.47 0.09 185), oklch(0.78 0.1 185));
 
   /* Cursor labels and user tiles keep white ink in both appearances:
      the inline #rrggbb awareness palette in src/collab/identity.ts gives it

@@ -14,17 +14,17 @@ import { fileURLToPath } from "node:url";
 /** Shared with ub open: this filename and syncProtocolVersion gate bundle compatibility. */
 const BUILD_STAMP = "uberblick-build.json";
 
-/** Resolve the retry URL through the bundler without preloading the renderer. */
-function diagramRendererUrlPlugin(language: "wireframe" | "ablauf"): Plugin {
-  const urlModule = fileURLToPath(new URL(`./src/editor/${language}-renderer-url.ts`, import.meta.url));
+/** Resolve a lazy module's retry URL through the bundler without preloading it. */
+function diagramRendererUrlPlugin(name: "wireframe-renderer" | "ablauf-renderer" | "ablauf-playback", specifier: string): Plugin {
+  const urlModule = fileURLToPath(new URL(`./src/editor/${name}-url.ts`, import.meta.url));
   return {
-    name: `uberblick:${language}-renderer-url`,
+    name: `uberblick:${name}-url`,
     apply: "build",
     async load(id) {
       if (id !== urlModule) return;
-      const renderer = await this.resolve(`@uberblick/${language}`, urlModule);
-      if (renderer === null) throw new Error(`Cannot resolve the ${language} renderer`);
-      const reference = this.emitFile({ type: "chunk", id: renderer.id, name: `${language}-renderer`, preserveSignature: "strict" });
+      const renderer = await this.resolve(specifier, urlModule);
+      if (renderer === null) throw new Error(`Cannot resolve ${specifier}`);
+      const reference = this.emitFile({ type: "chunk", id: renderer.id, name, preserveSignature: "strict" });
       return `export default import.meta.ROLLUP_FILE_URL_${reference};`;
     },
   };
@@ -72,7 +72,7 @@ export default defineConfig(async (): Promise<UserConfig> => {
     // Omit Tailwind preflight to preserve editor and unmigrated control defaults.
     // Editor content remains plain CSS; see src/ui/tailwind.css.
     // The entry imports React's module preamble; its inline HTML preamble is blocked by script-src.
-    plugins: [tailwindcss(), react().map((plugin) => ({ ...plugin, transformIndexHtml: undefined })), ...(dev === null ? [] : [dev.devConfigDocumentPlugin()]), buildStampPlugin(webPolicy.WEB_CONTENT_SECURITY_POLICY), diagramRendererUrlPlugin("wireframe"), diagramRendererUrlPlugin("ablauf")],
+    plugins: [tailwindcss(), react().map((plugin) => ({ ...plugin, transformIndexHtml: undefined })), ...(dev === null ? [] : [dev.devConfigDocumentPlugin()]), buildStampPlugin(webPolicy.WEB_CONTENT_SECURITY_POLICY), diagramRendererUrlPlugin("wireframe-renderer", "@uberblick/wireframe"), diagramRendererUrlPlugin("ablauf-renderer", "@uberblick/ablauf"), diagramRendererUrlPlugin("ablauf-playback", "@uberblick/ablauf/playback")],
     define: {
       __RUNTIME_CONFIG_ONLY__: JSON.stringify(runtimeConfigOnly),
       __HUB_URL__: JSON.stringify(config?.hubUrl ?? ""),
