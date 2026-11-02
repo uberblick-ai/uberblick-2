@@ -7,7 +7,7 @@ import { afterEach, expect, it } from "vitest";
 import { credentialsPath, writeHubLogin } from "../src/auth-store.js";
 import { ensureDeviceLogin } from "../src/device-login.js";
 import { manageRequest } from "../src/management-client.js";
-import { cleanupTestResources, startServer, tempDir, testConfig, trackListener, WORKSPACE } from "./helpers.js";
+import { cleanupTestResources, startServer, tempDir, testConfig, trackListener, WAIT_TIMEOUT_MS, WORKSPACE } from "./helpers.js";
 import { client, closeDeviceSync, config, environment, hub } from "./device-sync-fixture.js";
 
 const clients: (() => Promise<void>)[] = [];
@@ -73,7 +73,7 @@ it("syncs and renews only the explicitly allowed non-loopback fixture", async ()
   const env = { ...environment(), UB_INSECURE_HUBS: new URL(endpoint).host };
   await writeHubLogin(origin, fixture.issue({ workspaces: [] }), env);
   const rig = await client({ ...config(fixture, env), hubUrl: endpoint });
-  expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
+  expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
   expect(fixture.renewalCount).toBe(1);
   expect((await rig.ok("sync_status")).hub.status).toBe("connected");
 });

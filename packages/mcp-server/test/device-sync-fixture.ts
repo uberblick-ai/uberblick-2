@@ -8,6 +8,8 @@ import { cleanupTestResources, LIVE_HUB_SETTLE, startServer, tempDir, testConfig
 import type { TestCleanup } from "./helpers.js";
 
 export type DeviceHub = Awaited<ReturnType<typeof startDeviceSyncHub>>;
+/** One recovery poll can take 30s; leave 10s for admission and edit propagation. */
+export const DEVICE_RECOVERY_TIMEOUT_MS = 40_000;
 const hubs: DeviceHub[] = [];
 const rigs: Rig[] = [];
 export const listeners: TestCleanup[] = [];

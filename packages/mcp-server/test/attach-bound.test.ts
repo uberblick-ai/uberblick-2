@@ -562,9 +562,8 @@ function frozenClock(): { advance: (ms: number) => void; restore: () => void } {
 /**
  * Await `promise`, failing by name rather than as a bare runner timeout.
  *
- * What {@link waitUntil} does for a condition, for a promise — and needed
- * separately because `waitUntil` reads the very clock this suite is holding
- * still. The deadline is a diagnostic, never the assertion: what is asserted is
+ * What {@link waitUntil} does for a condition, for a promise. The deadline is
+ * a diagnostic, never the assertion: what is asserted is
  * that the wait ends when the clock says its budget is spent, so this is the
  * suite's own generous deadline and only decides how a hang is reported.
  */

@@ -25,6 +25,8 @@ import type { Rig } from "./helpers.js";
 
 /** Past the hub's pending-room ceiling, so an unbounded attach would breach it. */
 const BURST = MAX_PENDING_DOCUMENTS + 20;
+/** Allow the full admission burst while leaving 20s for earlier work and cleanup. */
+const BURST_TIMEOUT_MS = 40_000;
 
 const hubs: Hub[] = [];
 const rigs: Rig[] = [];
@@ -116,7 +118,7 @@ describe("fresh-room admission", () => {
       () =>
         terminations().length > 0 ||
         rooms.every((room) => sync.isRoomQuiet(room)),
-      60_000,
+      BURST_TIMEOUT_MS,
     );
 
     expect(terminations()).toEqual([]);
@@ -167,7 +169,7 @@ describe("fresh-room admission", () => {
         sync.state().status === "connected" &&
         rooms.every((room) => sync.isRoomQuiet(room)) &&
         !sync.isDraining(),
-      60_000,
+      BURST_TIMEOUT_MS,
     );
 
     expect(terminations()).toEqual([]);

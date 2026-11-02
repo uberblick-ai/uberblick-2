@@ -7,8 +7,8 @@ import { getMeta, roomForDoc } from "@uberblick/schema";
 import { resolveMcpConfig } from "../src/config.js";
 import { createMcpEngine } from "../src/engine.js";
 import { inspectRemote, syncWorkspace } from "../src/remote.js";
-import { client, closeClient, closeDeviceSync, config, environment, expireRenewalCooldown, hub } from "./device-sync-fixture.js";
-import { testConfig, waitUntil, WORKSPACE } from "./helpers.js";
+import { client, closeClient, closeDeviceSync, config, DEVICE_RECOVERY_TIMEOUT_MS, environment, expireRenewalCooldown, hub } from "./device-sync-fixture.js";
+import { testConfig, WAIT_TIMEOUT_MS, waitUntil, WORKSPACE } from "./helpers.js";
 
 afterEach(closeDeviceSync);
 
@@ -24,8 +24,8 @@ describe("stored-login sync", () => {
     try {
       const [first, second] = await Promise.all([client(config(fixture, env)), client(config(fixture, env))]);
       await Promise.all([
-        first.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 }),
-        second.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 }),
+        first.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS }),
+        second.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS }),
       ]).then(results => expect(results).toMatchObject([{ caughtUp: true }, { caughtUp: true }]));
       expect(fixture.renewalCount).toBe(0);
       now += 500;
@@ -37,8 +37,8 @@ describe("stored-login sync", () => {
         first.instance.replicas.sync.state().status === "connected" &&
         second.instance.replicas.sync.state().status === "connected");
       await Promise.all([
-        first.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 }),
-        second.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 }),
+        first.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS }),
+        second.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS }),
       ]).then(results => expect(results).toMatchObject([{ caughtUp: true }, { caughtUp: true }]));
       expect(fixture.renewalCount).toBe(1);
       const written = await second.ok("create_doc", { title: "After idle renewal", description: "No user action or reconnect trigger." });
@@ -61,8 +61,8 @@ describe("stored-login sync", () => {
     await writeHubLogin(fixture.origin, fixture.issue({ workspaces: [WORKSPACE] }), env);
     await waitUntil("the hub to apply the local proxy admission edit", () =>
       fixture.readRoom(roomForDoc(WORKSPACE, written.uuid), getMeta)?.title === "Login after local proxy admission",
-    70_000);
-    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
+    DEVICE_RECOVERY_TIMEOUT_MS);
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
   });
 
   it.each(["missing", "revoked"] as const)("resumes a running refused process after later login (%s)", async kind => {
@@ -91,8 +91,8 @@ describe("stored-login sync", () => {
     await writeHubLogin(fixture.origin, fixture.issue({ workspaces: [WORKSPACE] }), env);
     await waitUntil("the hub to apply the edit after login", () =>
       fixture.readRoom(roomForDoc(WORKSPACE, written.uuid), getMeta)?.title === `Pending ${kind}`,
-    70_000);
-    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
+    DEVICE_RECOVERY_TIMEOUT_MS);
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
   });
 
   it("discovers a grant after a confirmed denial without login or restart", async () => {
@@ -107,8 +107,8 @@ describe("stored-login sync", () => {
     expireRenewalCooldown(env);
     await waitUntil("the hub to apply the edit after granting access", () =>
       fixture.readRoom(roomForDoc(WORKSPACE, written.uuid), getMeta)?.title === "Granted later",
-    70_000);
-    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
+    DEVICE_RECOVERY_TIMEOUT_MS);
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
   });
 
   it.each(["revoke", "membership"] as const)("ends live sync and retains downloaded documents (%s)", async kind => {
@@ -119,7 +119,7 @@ describe("stored-login sync", () => {
     await writeHubLogin(fixture.origin, login, env);
     const rig = await client(config(fixture, env));
     const written = await rig.ok("create_doc", { title: "Downloaded stays", description: "Access cannot erase local data." });
-    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
     if (kind === "revoke") fixture.revoke(login.credential.record.id);
     else fixture.removeMembership(WORKSPACE);
     await waitUntil("live access ended", () => rig.instance.replicas.sync.state().authRecovery === (kind === "revoke" ? "sign-in-required" : "no-workspace-access"));
@@ -138,7 +138,7 @@ describe("stored-login sync", () => {
     const cfg = config(fixture, env);
     const rig = await client(cfg);
     const created = await rig.ok("create_doc", { title: "Device document", description: "Private local replica." });
-    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
     await waitUntil("the hub to apply the device document", () =>
       fixture.readRoom(roomForDoc(WORKSPACE, created.uuid), getMeta)?.title === "Device document",
     );
@@ -154,7 +154,7 @@ describe("stored-login sync", () => {
     await writeHubLogin(fixture.origin, replacement, env);
     fixture.closeConnections();
     await waitUntil("new login to reach the running server", () => fixture.authentications.some(({ claims }) => claims?.kid === replacement.credential.record.id));
-    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
     expect(rig.instance.replicas.sync.mintCount).toBeGreaterThan(count);
     expect(fixture.renewalCount).toBe(0);
     const output = JSON.stringify(await rig.ok("sync_status"));
@@ -166,7 +166,7 @@ describe("stored-login sync", () => {
     await fixture.resume();
     const restarted = await client(cfg);
     expect((await restarted.ok("get_doc", { uuid: created.uuid })).title).toBe("Device document");
-    expect(await restarted.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
+    expect(await restarted.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
     expect(fixture.renewalCount).toBe(0);
   });
 
@@ -178,7 +178,7 @@ describe("stored-login sync", () => {
     const cfg = config(fixture, env);
     const engine = await createMcpEngine(cfg);
     try {
-      expect(await engine.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
+      expect(await engine.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
     } finally { await engine.close(); }
     const probe = await inspectRemote(cfg);
     expect(probe.hub.status).toBe("connected");
@@ -198,10 +198,10 @@ describe("stored-login sync", () => {
     await waitUntil("both clients to finish workspace renewal", () =>
       first.instance.replicas.sync.state().status === "connected" &&
       second.instance.replicas.sync.state().status === "connected",
-    70_000);
+    WAIT_TIMEOUT_MS);
     const settled = await Promise.all([
-      first.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 }),
-      second.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 }),
+      first.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS }),
+      second.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS }),
     ]);
     expect(settled).toMatchObject([{ caughtUp: true }, { caughtUp: true }]);
     expect(fixture.renewalCount).toBe(1);

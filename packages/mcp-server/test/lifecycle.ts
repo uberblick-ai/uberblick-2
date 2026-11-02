@@ -18,7 +18,7 @@ export async function drainWaits(): Promise<void> {
   if (errors.length) throw new AggregateError(errors, "test polling failed");
 }
 
-/** Wait for a condition, ending polling when its test times out or tears down. */
+/** Wait on a monotonic clock, ending polling when its test times out or tears down. */
 export function waitUntil(
   label: string,
   predicate: () => boolean | Promise<boolean>,
@@ -32,14 +32,14 @@ export function waitUntil(
   signal?.addEventListener("abort", cancel, { once: true });
   const poll: Poll = { cancel, cancellation, finished: Promise.resolve({}) };
   const run = async () => {
-    const deadline = Date.now() + timeoutMs;
+    const deadline = performance.now() + timeoutMs;
     try {
       while (true) {
         if (cancelled) throw cancellation;
         const ready = await predicate();
         if (cancelled) throw cancellation;
         if (ready) return;
-        if (Date.now() > deadline) throw new Error(`timed out waiting for ${label}`);
+        if (performance.now() > deadline) throw new Error(`timed out waiting for ${label}`);
         await new Promise<void>((resolve) => {
           const timer = setTimeout(resolve, 25);
           wake = () => { clearTimeout(timer); resolve(); };

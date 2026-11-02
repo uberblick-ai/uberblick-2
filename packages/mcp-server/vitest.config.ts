@@ -80,7 +80,7 @@ export default defineConfig({
           include: suites("{,.*}"),
           exclude: [core, processes],
           isolate: true,
-          // Exceed the named real-time waits so their diagnostics arrive first.
+          // 60s phases leave room around named waits of at most 40s.
           testTimeout: 60_000,
           hookTimeout: 60_000,
         },
