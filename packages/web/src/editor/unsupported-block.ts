@@ -1,7 +1,8 @@
 import { Extension, Node } from "@tiptap/core";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
-import { Plugin } from "@tiptap/pm/state";
+import { Plugin, Selection, TextSelection } from "@tiptap/pm/state";
+import type { EditorView } from "@tiptap/pm/view";
 import { ySyncPluginKey } from "y-prosemirror";
 
 export const UNSUPPORTED_BLOCK = "unsupportedBlock";
@@ -43,6 +44,50 @@ export function withoutUnsupportedBlocks(slice: Slice): Slice {
   return new Slice(withoutUnsupported(slice.content), slice.openStart, slice.openEnd);
 }
 
+function stepPastUnsupported(view: EditorView, event: KeyboardEvent): boolean {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" ||
+    event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || view.composing ||
+    !view.editable || !view.hasFocus() || !(view.state.selection instanceof TextSelection)) return false;
+  const native = view.dom.ownerDocument.getSelection();
+  if (native?.rangeCount !== 1 || !native.isCollapsed || native.focusNode === null ||
+    !view.dom.contains(native.focusNode)) return false;
+  for (let element = native.focusNode.nodeType === 1 ? native.focusNode as HTMLElement : native.focusNode.parentElement;
+    element !== null && element !== view.dom; element = element.parentElement) {
+    if (element.contentEditable === "false") return false;
+  }
+  // End can move the native caret before selectionchange updates editor state.
+  const $head = view.state.doc.resolve(view.posAtDOM(native.focusNode, native.focusOffset));
+  if ($head.depth !== 1 || !$head.parent.isTextblock) return false;
+  const atStart = $head.parentOffset === 0;
+  const atEnd = $head.parentOffset === $head.parent.content.size;
+  if (!atStart && !atEnd) return false;
+  const block = view.nodeDOM($head.before());
+  if (!(block instanceof HTMLElement)) return false;
+  const forward = atEnd && (!atStart || (event.key === "ArrowRight") !== (getComputedStyle(block).direction === "rtl"));
+  const direction = forward ? 1 : -1;
+  let position = forward ? $head.after() : $head.before();
+  let skipped = false;
+  for (;;) {
+    const $position = view.state.doc.resolve(position);
+    const neighbor = forward ? $position.nodeAfter : $position.nodeBefore;
+    if (neighbor?.type.name !== UNSUPPORTED_BLOCK) break;
+    const placeholder = view.nodeDOM(forward ? position : position - neighbor.nodeSize);
+    if (!(placeholder instanceof HTMLElement) || placeholder.getClientRects().length === 0) return false;
+    position += direction * neighbor.nodeSize;
+    skipped = true;
+  }
+  if (!skipped) return false;
+  const current = TextSelection.create(view.state.doc, $head.pos);
+  if (!current.eq(view.state.selection)) view.dispatch(view.state.tr.setSelection(current));
+  // The framework checks visual edges too, including mixed-direction text.
+  if (!view.endOfTextblock(event.key === "ArrowRight" ? "right" : "left")) return false;
+  const next = Selection.findFrom(view.state.doc.resolve(position), direction);
+  if (!(next instanceof TextSelection)) return false;
+  // Commit the move before focus reconciliation can restore the old selection.
+  view.dispatch(view.state.tr.setSelection(next).scrollIntoView());
+  return true;
+}
+
 export const UnsupportedBlockProtection = Extension.create({
   name: "unsupportedBlockProtection",
   extendNodeSchema(extension) {
@@ -69,6 +114,7 @@ export const UnsupportedBlockProtection = Extension.create({
         return valid && expected.size === 0;
       },
       props: {
+        handleKeyDown: stepPastUnsupported,
         transformCopied: withoutUnsupportedBlocks,
         transformPasted: withoutUnsupportedBlocks,
       },
