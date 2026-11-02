@@ -5,6 +5,56 @@ first. The first paragraph of each release is its summary; uberblick.ai shows
 the five newest. Upgrade steps appear only when a release needs more than
 updating the client and the hub.
 
+## v0.4.15 — 2026-11-02
+
+Decision history that shows why each record exists, steadier keyboard movement past unsupported blocks, cleaner toggle headings, and hub downloads pinned to their attested images.
+
+### Improved
+
+- A decision topic's history shows each record's description as its second line instead of the start of its answer. Alter decision starts a successor without its predecessor's description (#2577).
+- `create_doc` states when a decision record is warranted and what its answer holds. MCP help teaches ablauf sequence diagrams and names the visual blocks where agents start reading (#2562, #2564, #2565).
+- Toggle headings keep their disclosure button clear of the text, with a larger touch target on iPad (#2568).
+- Downloaded hub Compose files pin `hub` and `hub-web` to the attested images of their release; deployment settings cannot change them (#2580).
+
+### Fixed
+
+- Arrow keys step reliably past unsupported blocks in Chromium (#2578).
+
+## v0.4.14 — 2026-11-02
+
+Edit and settle open decision records in the web, playable ablauf drawings, a standalone Docker hub installer, and pages that stay editable beside blocks this version cannot show.
+
+### Added
+
+- Edit an open decision record's answer in place, including open proposals, and settle it from its state pill with Decide, Reject or Withdraw. Settled answers stay read-only (#2555, #2558).
+- Ablauf drawings with a `play` section show Play in their toolbar and play once as they scroll into view. Ablauf 0.3.0 (#2556, #2557).
+- `setup-hub.sh` installs a standalone Docker hub: it checks the route, stages one release, keeps private settings, backs up a running hub before changing releases and prints claim instructions (#2530).
+
+### Improved
+
+- A page containing a block this version cannot show stays editable. Each unsupported block appears as a read-only placeholder and is preserved unchanged (#2506).
+
+## v0.4.13 — 2026-10-30
+
+Approve agents in the browser and manage them in Devices, final comment resolution, and hardened OAuth.
+
+### Added
+
+- Approve or deny an agent's access request on the hub's connect page after GitHub sign-in, with read-only access by default (#2490).
+- Hosted agent grants appear in Devices with their client name, workspace and scope; revoking one ends its access (#2480).
+- New workspaces get a `technical-reference` seed tag, and seed tags come with descriptions (#2501).
+
+### Improved
+
+- Resolving a comment is final: resolved conversations take no replies and cannot reopen, and a new comment can take over a resolved highlight (#2485).
+- OAuth refresh tokens rotate on every use, and reusing a spent token revokes the grant (#2496).
+- The hub fetches OAuth client metadata documents through an SSRF guard (#2486).
+
+### Fixed
+
+- History's ‹ button opens the newest revision even while the first history list is still loading (#2500).
+- A page keeps its content-preserving fallback when its editor is replaced mid-render (#2495).
+
 ## v0.4.12 — 2026-10-29
 
 Downloaded document history for offline reading and local comparisons, history sessions and an Inline view, divider blocks, labelled scatter plots, and more control over comments and this computer's workspace copies.
