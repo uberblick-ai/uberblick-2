@@ -73,8 +73,7 @@ function renderDrawing(text: string, idPrefix: string, mono: FontOptions): Ablau
   const height = Number(svg.getAttribute("height"));
   if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) throw new Error("Renderer returned invalid dimensions");
   const hostStyle = document.createElement("style");
-  // Fan-out ignores fonts options. Its mono role still uses the host face.
-  hostStyle.textContent = '.ab { display: block; width: 100%; height: auto; background: var(--ab-bg); } .ab .m, .ab .cap { font-family: var(--font-mono); }';
+  hostStyle.textContent = '.ab { display: block; width: 100%; height: auto; background: var(--ab-bg); }';
   const drawing = document.createElement("div");
   drawing.className = "ub-ablauf-drawing";
   drawing.attachShadow({ mode: "open" }).replaceChildren(document.importNode(svg, true), hostStyle);

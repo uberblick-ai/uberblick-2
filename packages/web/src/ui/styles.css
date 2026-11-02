@@ -157,9 +157,9 @@
   --block-caution-ink: light-dark(oklch(0.47 0.13 25), oklch(0.82 0.10 25));
 
   /* Ablauf diagrams take their palette from these --ab-* properties, so a
-     figure reads like the blocks above. Light tone ink sits at L 0.53, a
-     step under the block bars, to keep text at least 4.5:1 on its tint and
-     on the page. --ab-bg stays opaque: edge-crossing knockouts paint it. */
+     figure reads like the blocks above. Light tone ink keeps text at least
+     4.5:1 across the renderer's paint contract, including section bands.
+     --ab-bg stays opaque: edge-crossing knockouts paint it. */
   --ab-bg: var(--background);
   --ab-ink: var(--foreground);
   --ab-muted: var(--muted-foreground);
@@ -168,15 +168,15 @@
   --ab-surface: var(--card);
   --ab-neutral: var(--muted-foreground);
   --ab-neutral-bg: light-dark(oklch(0.922 0 0), oklch(0.26 0 0));
-  --ab-agent: light-dark(oklch(0.53 0.07 185), var(--block-teal-bar));
+  --ab-agent: light-dark(oklch(0.50 0.07 185), var(--block-teal-bar));
   --ab-agent-bg: var(--block-teal-tint);
-  --ab-system: light-dark(oklch(0.53 0.07 240), var(--block-blue-bar));
+  --ab-system: light-dark(oklch(0.50 0.07 240), var(--block-blue-bar));
   --ab-system-bg: var(--block-blue-tint);
-  --ab-done: light-dark(oklch(0.53 0.07 145), var(--block-green-bar));
+  --ab-done: light-dark(oklch(0.50 0.07 145), var(--block-green-bar));
   --ab-done-bg: var(--block-green-tint);
-  --ab-rework: light-dark(oklch(0.53 0.07 65), oklch(0.7 0.07 65));
+  --ab-rework: light-dark(oklch(0.50 0.07 65), oklch(0.7 0.07 65));
   --ab-rework-bg: light-dark(oklch(0.97 0.006 65), oklch(0.22 0.012 65));
-  --ab-stop: light-dark(oklch(0.53 0.07 10), var(--block-rose-bar));
+  --ab-stop: light-dark(oklch(0.50 0.07 10), var(--block-rose-bar));
   --ab-stop-bg: var(--block-rose-tint);
   /* Playback's current step and controls; text on the page keeps 4.5:1. */
   --ab-play: light-dark(oklch(0.47 0.09 185), oklch(0.78 0.1 185));
