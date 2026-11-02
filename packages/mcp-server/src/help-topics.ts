@@ -226,7 +226,7 @@ An embed is visual content the web draws from data stored in the document: a flo
 
 | Embed | Written as | Data |
 | --- | --- | --- |
-| Ablauf | \`ablauf\` fence | flow or fan-out source; see [Ablauf diagrams](uberblick://help/ablauf) |
+| Ablauf | \`ablauf\` fence | flow or fan-out source; a flow may end with one or more \`play\` sections that readers play step by step; see [Ablauf diagrams](uberblick://help/ablauf) and its primer |
 | Wireframe | \`wireframe\` fence | wireframe-md source; see [Wireframes](uberblick://help/wireframe) |
 | Chart or data table | \`chart\` fence | JSON mapping to the document's structured data; see [Structured data](uberblick://help/data) |
 | Figma | \`:::figma\` container | link, title, height and caption |
@@ -402,6 +402,31 @@ answers with a \`drawing\` summary for it: \`status\` \`clean\`, \`warnings\` or
 the web editor shows below the drawing. Fix every diagnostic and write again.
 The check never refuses the write. A clean source can still cross or crowd, so
 inspect the drawing in the web editor when someone can open it.
+
+## Flow playback
+
+A flow may end with one or more \`play\` sections. In the web editor the drawing
+gains scenario tabs, step controls and captions under it, and plays once on its
+own the first time it comes into view. Each step names a node id and lights it
+plus the edge from the previous step:
+
+\`\`\`ablauf
+flow v0
+columns main
+box work title="Implement"
+end merged "Merged"
+work --> merged
+
+play "Clean merge"
+  tempo 1.8s
+  step work actor="Implementer" "Prepares the change"
+  step merged
+\`\`\`
+
+Grammar: \`play ["Name"]\`, optional \`tempo DURATION\` before steps, then
+\`step TARGET [DURATION] [actor="..."] ["caption"]\`, with JSON strings.
+Durations run from \`100ms\` to \`60s\`; the default tempo is 1.6s. Unknown
+targets or a missing edge diagnose and skip the step. Fan-out has no playback.
 
 ## Fan-out
 

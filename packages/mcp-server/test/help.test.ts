@@ -139,12 +139,14 @@ it.each(["delete_doc", "archive_doc", "unpin_doc"])("explains explicit topic del
   }
 });
 
-it("points Markdown authors to Ablauf help and to the diagnostics every drawing write returns", () => {
+it("points Markdown authors to Ablauf help, its play sections and the diagnostics every drawing write returns", () => {
   const help = new HelpCatalog();
   const markdown = help.read("markdown").text;
   expect(markdown).toContain("[Ablauf diagrams](uberblick://help/ablauf)");
   expect(markdown).not.toContain("github.com/uberblick-ai/ablauf");
+  expect(markdown).toContain("a flow may end with one or more `play` sections");
   const ablauf = help.read("ablauf").text.replace(/\s+/g, " ");
+  expect(ablauf).toContain("## Flow playback");
   expect(ablauf).toContain("answers with a `drawing` summary for it");
   expect(ablauf).toContain("The check never refuses the write.");
 });

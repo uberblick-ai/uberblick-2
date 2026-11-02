@@ -4,13 +4,14 @@ import type { Editor, NodeViewRenderer, NodeViewRendererProps } from "@tiptap/co
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { AllSelection, Selection } from "@tiptap/pm/state";
 import type { NodeView } from "@tiptap/pm/view";
-import type { Diagnostic, FontOptions, TextStyle } from "@uberblick/ablauf";
+import type { Diagnostic, FontOptions, TextStyle, Timeline } from "@uberblick/ablauf";
 import {
   blockCaption, carriesComment, chromeFilters, codeBlockChrome, lazyRenderer, openSource,
   selectedBlock, showDiagnostics, showFailure, sourceButton, sourceEditingPlugin,
 } from "./source-chrome.js";
 import { openAblaufViewer } from "./ablauf-viewer.js";
 import type { AblaufComparison, AblaufDrawing } from "./ablauf-viewer.js";
+import { ablaufPlayback, withoutPlayback } from "./ablauf-playback.js";
 import rendererUrl from "./ablauf-renderer-url.js";
 import { DRAW_ATTRIBUTES, dataRevision, recordDraw } from "./render-state.js";
 
@@ -46,11 +47,20 @@ function languageCaption(): HTMLElement {
   return caption;
 }
 
+function expandButton(): HTMLButtonElement {
+  const expand = document.createElement("button");
+  expand.type = "button";
+  expand.textContent = "Expand";
+  expand.setAttribute("aria-label", "Expand ablauf diagram");
+  expand.disabled = true;
+  return expand;
+}
+
 export function ablaufBlockView(comparison?: { source: string; side: "before" | "after" }): NodeViewRenderer {
   return (props) => ablaufNodeView(props, comparison);
 }
 
-function renderDrawing(text: string, idPrefix: string, mono: FontOptions): AblaufDrawing & { diagnostics: Diagnostic[] } {
+function renderDrawing(text: string, idPrefix: string, mono: FontOptions): AblaufDrawing & { diagnostics: Diagnostic[]; timelines: Timeline[] } {
   const renderer = renderers.current();
   if (renderer === null) throw new Error("Renderer is unavailable");
   const result = renderer.render(text, { idPrefix, fonts: { mono } });
@@ -68,7 +78,7 @@ function renderDrawing(text: string, idPrefix: string, mono: FontOptions): Ablau
   const drawing = document.createElement("div");
   drawing.className = "ub-ablauf-drawing";
   drawing.attachShadow({ mode: "open" }).replaceChildren(document.importNode(svg, true), hostStyle);
-  return { drawing, width, height, diagnostics: result.diagnostics };
+  return { drawing, width, height, diagnostics: result.diagnostics, timelines: result.timelines };
 }
 
 function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
@@ -105,21 +115,19 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
   viewport.append(drawing);
   const showSource = (): void => openSource(editor, getPos, true)(new Event("source"));
   const source = sourceButton("Open ablauf source", toggleSource(editor, getPos, viewport));
-  const expand = document.createElement("button");
-  expand.type = "button";
-  expand.textContent = "Expand";
-  expand.setAttribute("aria-label", "Expand ablauf diagram");
-  expand.disabled = true;
+  const expand = expandButton();
+  const playback = ablaufPlayback(dom);
   const toolbar = document.createElement("div");
   toolbar.className = "ub-figure-toolbar";
   toolbar.contentEditable = "false";
-  toolbar.append(source, expand);
+  toolbar.append(source, playback.play, expand);
   const openViewer = (): void => {
     if (!hasDrawing || destroyed) return;
     viewer?.close();
     const fullDrawing = document.createElement("div");
     fullDrawing.className = "ub-ablauf-drawing";
     fullDrawing.attachShadow({ mode: "open" }).replaceChildren(...Array.from(shadow.childNodes, (child) => child.cloneNode(true)));
+    if (fullDrawing.shadowRoot !== null) withoutPlayback(fullDrawing.shadowRoot);
     let compared: AblaufComparison | undefined;
     if (comparison !== undefined) {
       try {
@@ -153,7 +161,7 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
   const diagnostics = document.createElement("ul");
   diagnostics.className = "ub-ablauf-diagnostics";
   diagnostics.hidden = true;
-  panel.append(viewport, toolbar, stale, diagnostics);
+  panel.append(viewport, toolbar, playback.controls, playback.touchPlay, stale, diagnostics, playback.diagnostics);
   const contentDOM = document.createElement("pre");
   contentDOM.className = "ub-ablauf-source";
   sourceFrame.append(header.row, contentDOM);
@@ -192,6 +200,7 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
       const result = renderDrawing(current.textContent, idPrefix, { family: monoFamily(), measureText });
       const { width, height } = result;
       shadow.replaceChildren(...Array.from(result.drawing.shadowRoot?.childNodes ?? []));
+      playback.redraw(shadow.querySelector("svg"), result.timelines);
       naturalWidth = width;
       naturalHeight = height;
       panel.style.width = `min(100%, ${width}px)`;
@@ -238,6 +247,7 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
     ...chromeFilters(dom, [header.row, panel], ["id", "data-language", "data-annotated", ...DRAW_ATTRIBUTES]),
     destroy: () => {
       destroyed = true;
+      playback.destroy();
       viewer?.close();
       resize.disconnect();
       if (pending !== null) clearTimeout(pending);
