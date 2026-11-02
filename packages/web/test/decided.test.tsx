@@ -1,5 +1,5 @@
 /**
- * Decision records protect their text while keeping discussion and metadata open.
+ * Open answers use the page editor; settled answers retain discussion and metadata.
  * Shared Y.Docs exercise the document metadata authority and live pane wiring;
  * native pointer/touch selection belongs to the browser suite.
  */
@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderSettled } from "./react-render.js";
 import { screen } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
+import { redo, undo, yUndoPluginKey } from "y-prosemirror";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -24,6 +25,7 @@ import {
   setStatus,
   settingsRoom,
   setTldr,
+  tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DecisionStatus } from "@uberblick/schema";
@@ -53,21 +55,30 @@ const LIVE: RoomStatus = {
 };
 
 const rooms = new Map<string, RoomConnection>();
+const statusListeners = new Map<string, Set<(status: RoomStatus) => void>>();
 function room(name: string): RoomConnection {
   const existing = rooms.get(name);
   if (existing !== undefined) return existing;
+  const listeners = new Set<(status: RoomStatus) => void>();
   const connection = {
     room: name,
     ydoc: new Y.Doc(),
     provider: { awareness: null },
     status: LIVE,
     onStatusChange: (listener: (status: RoomStatus) => void) => {
-      listener(LIVE);
-      return () => {};
+      listeners.add(listener);
+      listener(connection.status);
+      return () => listeners.delete(listener);
     },
   } as unknown as RoomConnection;
   rooms.set(name, connection);
+  statusListeners.set(name, listeners);
   return connection;
+}
+
+function updateStatus(connection: RoomConnection, patch: Partial<RoomStatus>): void {
+  connection.status = { ...connection.status, ...patch };
+  for (const listener of statusListeners.get(connection.room) ?? []) listener(connection.status);
 }
 
 vi.mock("../src/collab/rooms.js", async (importOriginal) => ({
@@ -89,6 +100,7 @@ beforeEach(() => {
 
 afterEach(() => {
   rooms.clear();
+  statusListeners.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -156,14 +168,19 @@ function card(host: HTMLElement, id: string): HTMLElement {
   return element;
 }
 
-describe("read-only decision records", () => {
+describe("decision record content permissions", () => {
   it("never binds an editable frame when a decision route precedes room kind metadata", async () => {
     const connection = room(roomForDoc(WORKSPACE, UUID));
+    const directory = room(directoryRoom(WORKSPACE));
+    upsertDirectoryEntry(directory.ydoc, {
+      uuid: UUID, title: "Known topic", kind: "decision", status: "open", topic: UUID,
+    });
     initDoc(connection.ydoc, { uuid: UUID, title: "Known topic" });
     appendBlock(connection.ydoc, { type: "paragraph", text: PROSE });
     const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
     const { container: host } = await renderSettled(<EditorPane
       connection={connection}
+      directoryConnection={directory}
       segment={WORKSPACE}
       presence={[]}
       author="Reader"
@@ -180,10 +197,10 @@ describe("read-only decision records", () => {
     expect(host.querySelector('[aria-label="Insert block below"]')).toBeNull();
     act(() => typeInto(host.querySelector<HTMLTextAreaElement>(".ub-title")!, "Changed"));
     expect(getMeta(connection.ydoc).title).toBe("Known topic");
-    await act(async () => setKind(connection.ydoc, "decision"));
+    await act(async () => { setKind(connection.ydoc, "decision"); setStatus(connection.ydoc, "open"); });
     expect(binding).toHaveBeenCalledOnce();
     expect(editorElement(host)).toBe(prose);
-    expect(prose.getAttribute("contenteditable")).toBe("false");
+    expect(prose.getAttribute("contenteditable")).toBe("true");
   });
 
   it("shows a code caption without a language control when first opened decided", async () => {
@@ -199,7 +216,7 @@ describe("read-only decision records", () => {
     expect(editorElement(host).getAttribute("contenteditable")).toBe("false");
   });
 
-  it("keeps open-record code read-only across every decision status", async () => {
+  it("makes code controls available only while the record is open without rebinding", async () => {
     const ydoc = stage("open");
     const id = appendBlock(ydoc, { type: "code", text: "const answer = 42;", language: "ts" });
     const peer = new Y.Doc();
@@ -215,12 +232,12 @@ describe("read-only decision records", () => {
     const prose = editorElement(host);
     for (const status of ["open", "decided", "rejected", "withdrawn"] as const) {
       await act(async () => setStatus(peer, status));
-      expect(screen.queryByRole("button", { name: "Code language" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Code language" }) !== null).toBe(status === "open");
       expect(screen.queryByRole("combobox", { name: "Search languages" })).toBeNull();
       expect(host.querySelector(".ub-code-caption-text")?.textContent).toBe("TypeScript");
       expect(getBlocks(ydoc).find((node) => node.id === id)?.language).toBe("ts");
       expect(editorElement(host)).toBe(prose);
-      expect(prose.getAttribute("contenteditable")).toBe("false");
+      expect(prose.getAttribute("contenteditable")).toBe(String(status === "open"));
       expect(host.querySelector(".ub-toolbar")).toBeNull();
       expect(binding).toHaveBeenCalledOnce();
     }
@@ -239,7 +256,7 @@ describe("read-only decision records", () => {
     for (const status of ["open", "decided", "rejected", "withdrawn"] as const) {
       await act(async () => setStatus(ydoc, status));
       expect(editorElement(host)).toBe(prose);
-      expect(prose.getAttribute("contenteditable")).toBe("false");
+      expect(prose.getAttribute("contenteditable")).toBe(String(status === "open"));
       expect(screen.queryByRole("button", { name: "Add button" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Edit button" })).toBeNull();
       const before = Y.encodeStateVector(ydoc);
@@ -251,7 +268,7 @@ describe("read-only decision records", () => {
     expect(opened).toHaveBeenCalledTimes(4);
   });
 
-  for (const status of ["open", "decided", "rejected", "withdrawn"] as const) it(`binds ${status} content read-only immediately and keeps tags, pin and archive available`, async () => {
+  for (const status of ["open", "decided", "rejected", "withdrawn"] as const) it(`binds ${status} content with its permissions immediately and keeps tags, pin and archive available`, async () => {
     const ydoc = stage(status);
     const originalBind = guardedBinding.bindGuardedEditor;
     const initialTitles: boolean[] = [];
@@ -263,11 +280,11 @@ describe("read-only decision records", () => {
     const host = await openApp();
 
     expect(binding).toHaveBeenCalledOnce();
-    expect(binding.mock.calls[0]?.[0].editable).toBe(false);
+    expect(binding.mock.calls[0]?.[0].editable).toBe(status === "open");
     expect(initialTitles).toEqual([false]);
-    expect(editorElement(host).getAttribute("contenteditable")).toBe("false");
-    expect(editorElement(host).getAttribute("aria-readonly")).toBe("true");
-    expect(host.querySelector('[aria-label="Insert block below"]')).toBeNull();
+    expect(editorElement(host).getAttribute("contenteditable")).toBe(String(status === "open"));
+    expect(editorElement(host).getAttribute("aria-readonly")).toBe(String(status !== "open"));
+    if (status !== "open") expect(host.querySelector('[aria-label="Insert block below"]')).toBeNull();
     const title = host.querySelector<HTMLTextAreaElement>(".ub-title")!;
     expect(title.readOnly).toBe(false);
     act(() => typeInto(title, "A wording fix"));
@@ -304,8 +321,11 @@ describe("read-only decision records", () => {
     const editor = binding.mock.results[0]?.value.editor;
     if (editor == null) throw new Error("fixture editor did not bind");
     act(() => editor.commands.setTextSelection({ from: 5, to: 16 }));
-    expect(prose.getAttribute("contenteditable")).toBe("false");
-    expect(document.querySelector('[data-slot="selection-composer"] button[aria-label="External link"]')).toBeNull();
+    expect(prose.getAttribute("contenteditable")).toBe("true");
+    const externalLink = document.querySelector<HTMLButtonElement>('[data-slot="selection-composer"] button[aria-label="External link"]');
+    expect(externalLink).not.toBeNull();
+    act(() => externalLink?.click());
+    expect(screen.getByRole("textbox", { name: "External link URL" })).toBeDefined();
     const beforeText = textAt(ydoc).toDelta();
 
     const updates = vi.fn();
@@ -339,11 +359,148 @@ describe("read-only decision records", () => {
       expect(binding).toHaveBeenCalledOnce();
       expect(editorElement(host)).toBe(prose);
       expect(pane.scrollTop).toBe(173);
-      expect(prose.getAttribute("contenteditable")).toBe("false");
+      expect(prose.getAttribute("contenteditable")).toBe(String(status === "open"));
       expect(host.querySelector(".ub-tldr-form")).toBeNull();
       expect(screen.queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
-      expect(host.querySelector('[aria-label="Insert block below"]')).toBeNull();
+      if (status !== "open") expect(host.querySelector('[aria-label="Insert block below"]')).toBeNull();
     }
+    peer.destroy();
+  });
+
+  it.each([
+    { roomName: "record", patch: { writable: false } },
+    { roomName: "record", patch: { synced: false } },
+    { roomName: "directory", patch: { writable: false } },
+    { roomName: "directory", patch: { synced: false } },
+  ] as const)("keeps an open answer read-only when the $roomName initially has $patch", async ({ roomName, patch }) => {
+    const ydoc = stage("open");
+    const connection = room(roomName === "record" ? roomForDoc(WORKSPACE, UUID) : directoryRoom(WORKSPACE));
+    updateStatus(connection, patch);
+    const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
+    const host = await openApp();
+    const editor = binding.mock.results[0]?.value.editor;
+    if (editor == null) throw new Error("fixture editor did not bind");
+    expect(binding.mock.calls[0]?.[0].editable).toBe(false);
+    expect(editorElement(host).getAttribute("contenteditable")).toBe("false");
+    act(() => editor.commands.setTextSelection({ from: 5, to: 16 }));
+    const composer = document.querySelector('[data-slot="selection-composer"]');
+    const canComment = roomName !== "record" || !("writable" in patch);
+    expect(composer !== null).toBe(canComment);
+    if (composer !== null) {
+      expect(composer.querySelectorAll("button")).toHaveLength(1);
+      expect(button(composer, "Comment")).toBeDefined();
+    }
+    expect(plainText(textAt(ydoc))).toBe(PROSE);
+  });
+
+  it.each([
+    { change: "decided", comments: true },
+    { change: "rejected", comments: true },
+    { change: "withdrawn", comments: true },
+    { change: "topic archived", comments: false },
+    { change: "record unwritable", comments: false },
+    { change: "record unsynced", comments: true },
+    { change: "directory unwritable", comments: true },
+    { change: "directory unsynced", comments: true },
+  ] as const)("locks local writes before rendering after $change and preserves the comment gate", async ({ change, comments }) => {
+    const ydoc = stage("open");
+    const thread = createAnnotation(ydoc, getBlocks(ydoc)[0]!.id, 4, 15, "Reader", "Existing conversation");
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+    peer.on("update", (update: Uint8Array) => Y.applyUpdate(ydoc, update));
+    const directory = room(directoryRoom(WORKSPACE));
+    const directoryPeer = new Y.Doc();
+    Y.applyUpdate(directoryPeer, Y.encodeStateAsUpdate(directory.ydoc));
+    directoryPeer.on("update", (update: Uint8Array) => Y.applyUpdate(directory.ydoc, update));
+    directory.ydoc.on("update", (update: Uint8Array) => Y.applyUpdate(directoryPeer, update));
+    const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
+    const host = await openApp();
+    const editor = binding.mock.results[0]?.value.editor;
+    if (editor == null) throw new Error("fixture editor did not bind");
+    const prose = editorElement(host);
+    const pane = host.querySelector<HTMLElement>(".ub-document-pane")!;
+    pane.scrollTop = 173;
+
+    // Leave both an undo and a redo entry while the answer is still editable.
+    act(() => {
+      editor.commands.insertContentAt(PROSE.length + 1, " First.");
+      yUndoPluginKey.getState(editor.state)?.undoManager.stopCapturing();
+      editor.commands.insertContentAt(PROSE.length + 8, " Second.");
+      undo(editor.state);
+      editor.commands.setTextSelection({ from: 5, to: 16 });
+    });
+    expect(plainText(textAt(ydoc))).toBe(`${PROSE} First.`);
+    const bold = button(document.querySelector('[data-slot="selection-composer"]')!, "Bold");
+    const before = getBlocks(ydoc);
+    const beforeInline = textAt(ydoc).toDelta();
+    const unchanged = (): void => {
+      expect(getBlocks(ydoc)).toEqual(before);
+      expect(textAt(ydoc).toDelta()).toEqual(beforeInline);
+    };
+
+    act(() => {
+      if (change === "decided" || change === "rejected" || change === "withdrawn") setStatus(peer, change);
+      else if (change === "topic archived") tombstoneDirectoryEntry(directoryPeer, UUID);
+      else if (change === "record unwritable") updateStatus(room(roomForDoc(WORKSPACE, UUID)), { writable: false });
+      else if (change === "record unsynced") updateStatus(room(roomForDoc(WORKSPACE, UUID)), { synced: false });
+      else if (change === "directory unwritable") updateStatus(directory, { writable: false });
+      else updateStatus(directory, { synced: false });
+      expect(editor.isEditable).toBe(false);
+      bold.click();
+      unchanged();
+      editor.view.dispatch(editor.state.tr.insertText("Refused before render", 5, 16));
+      unchanged();
+      editor.commands.insertContentAt(1, "Also refused");
+      unchanged();
+      undo(editor.state);
+      unchanged();
+      redo(editor.state);
+      unchanged();
+      expect(editor.state.selection.from).toBe(5);
+      expect(editor.state.selection.to).toBe(16);
+    });
+
+    expect(binding).toHaveBeenCalledOnce();
+    expect(editorElement(host)).toBe(prose);
+    expect(prose.getAttribute("contenteditable")).toBe("false");
+    expect(pane.scrollTop).toBe(173);
+    expect(card(host, thread.id).textContent).toContain("Existing conversation");
+    const composer = document.querySelector('[data-slot="selection-composer"]');
+    expect(composer !== null).toBe(comments);
+    if (composer !== null) {
+      expect(composer.querySelectorAll("button")).toHaveLength(1);
+      expect(button(composer, "Comment")).toBeDefined();
+    }
+    expect(host.querySelector('[aria-label="Insert block below"]')).toBeNull();
+    if (change === "decided") expect(host.querySelector(".ub-decision-answer-state")?.textContent).toBe("In force");
+    if (change === "rejected") expect(host.querySelector(".ub-decision-answer-state")?.textContent).toBe("Rejected");
+    if (change === "withdrawn") expect(host.querySelector(".ub-decision-answer-state")?.textContent).toBe("Withdrawn");
+    peer.destroy();
+    directoryPeer.destroy();
+  });
+
+  it("refuses a code-language pick received after settlement before the picker re-renders", async () => {
+    const ydoc = stage("open");
+    const id = appendBlock(ydoc, { type: "code", text: "const answer = 42;", language: "ts" });
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+    peer.on("update", (update: Uint8Array) => Y.applyUpdate(ydoc, update));
+    const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
+    const host = await openApp();
+    const editor = binding.mock.results[0]?.value.editor;
+    if (editor == null) throw new Error("fixture editor did not bind");
+    act(() => editor.commands.setTextSelection(editor.state.doc.child(0).nodeSize + 3));
+    act(() => screen.getByRole("button", { name: "Code language" }).click());
+    const option = screen.getByRole<HTMLElement>("option", { name: /^javascript$/ });
+    act(() => {
+      setStatus(peer, "decided");
+      option.click();
+      expect(getBlocks(ydoc).find((block) => block.id === id)?.language).toBe("ts");
+    });
+    expect(screen.queryByRole("combobox", { name: "Search languages" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Code language" })).toBeNull();
+    expect(binding).toHaveBeenCalledOnce();
+    expect(editorElement(host).getAttribute("contenteditable")).toBe("false");
     peer.destroy();
   });
 
@@ -357,9 +514,9 @@ describe("read-only decision records", () => {
     const composer = document.querySelector<HTMLElement>('[data-slot="selection-composer"]')!;
     expect(composer).not.toBeNull();
     for (const label of ["Bold", "Italic", "Strikethrough", "Inline code", "External link"]) {
-      expect(composer.querySelector(`button[aria-label="${label}"]`)).toBeNull();
+      expect(composer.querySelector(`button[aria-label="${label}"]`) !== null).toBe(status === "open");
     }
-    expect(composer.querySelector('[role="toolbar"]')).toBeNull();
+    expect(composer.querySelector('[role="toolbar"]') !== null).toBe(status === "open");
     await act(async () => button(composer, "Comment").click());
     expect(composer.querySelector('[data-slot="selection-excerpt"]')?.textContent).toBe("quick brown");
     const field = composer.querySelector<HTMLTextAreaElement>("textarea")!;
@@ -369,7 +526,7 @@ describe("read-only decision records", () => {
     expect(thread?.comments.map((comment) => comment.text)).toEqual(["Why this protocol?"]);
     if (thread === undefined) throw new Error("thread was not created");
     expect(plainText(textAt(ydoc))).toBe(PROSE);
-    expect(editorElement(host).getAttribute("contenteditable")).toBe("false");
+    expect(editorElement(host).getAttribute("contenteditable")).toBe(String(status === "open"));
 
     const highlight = host.querySelector<HTMLElement>(`[data-comment-thread="${thread.id}"]`)!;
     expect(highlight.tabIndex).toBe(0);

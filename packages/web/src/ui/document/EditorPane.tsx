@@ -3,12 +3,14 @@
  * loud read-only fallback when the palette gate is closed.
  */
 
-import { memo, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement, ReactNode } from "react";
 import {
   getAnnotation,
   getBlocksFragment,
+  getDirectoryEntry,
   getMeta,
+  isDirectoryEntryArchived,
   isExternalHref,
   MAX_TLDR_LENGTH,
   parseRoom,
@@ -20,6 +22,7 @@ import type { Editor } from "@tiptap/core";
 import type { CodeCheck } from "@uberblick/schema";
 import { DocumentTitle } from "./DocumentTitle.js";
 import { bindGuardedEditor } from "../../editor/guarded-binding.js";
+import { DECISION_ANSWER_MENU_ENTRIES } from "../../editor/block-menu.js";
 import { docLinkFromTarget } from "../../editor/doc-links.js";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import { linkAnchorFromTarget } from "../../editor/external-links.js";
@@ -91,6 +94,35 @@ function isDecision(connection: RoomConnection): boolean {
  */
 function canWriteContent(connection: RoomConnection, contentReadOnly: boolean): boolean {
   return !contentReadOnly && !isDecision(connection) && connection.status.writable;
+}
+
+/** The room and directory must agree on the open record before authoring. */
+function canEditAnswer(connection: RoomConnection, directory: RoomConnection | null, readOnly: boolean, decisionView: boolean): boolean {
+  if (readOnly || !connection.status.writable) return false;
+  if (directory !== null && isDirectoryEntryArchived(directory.ydoc, parseRoom(connection.room).uuid)) return false;
+  const meta = getMeta(connection.ydoc);
+  if (meta.kind !== "decision") return !decisionView;
+  if (directory === null || !directory.status.writable || !directory.status.synced || !connection.status.synced) return false;
+  const uuid = parseRoom(connection.room).uuid;
+  const record = getDirectoryEntry(directory.ydoc, uuid);
+  return meta.uuid === uuid && meta.status === "open" && record?.kind === "decision" && record.status === "open" &&
+    (meta.topic ?? uuid) === (record.topic ?? uuid) && !isDirectoryEntryArchived(directory.ydoc, uuid);
+}
+
+/** Keep binding callbacks stable while reading the latest committed props. */
+function useContentPermissions(connection: RoomConnection, directoryConnection: RoomConnection | null,
+  readOnly: boolean, decisionView: boolean, canCleanupTags: (() => boolean) | undefined) {
+  const permissions = useRef({ connection, directoryConnection, readOnly, decisionView, canCleanupTags });
+  useLayoutEffect(() => {
+    permissions.current = { connection, directoryConnection, readOnly, decisionView, canCleanupTags };
+  }, [connection, directoryConnection, readOnly, decisionView, canCleanupTags]);
+  const canEdit = useCallback(() => {
+    const live = permissions.current;
+    return live.connection === connection && live.directoryConnection === directoryConnection &&
+      canEditAnswer(connection, directoryConnection, live.readOnly, live.decisionView);
+  }, [connection, directoryConnection]);
+  const canCleanup = useCallback(() => permissions.current.canCleanupTags?.() !== false, []);
+  return { canEdit, canCleanup };
 }
 
 /**
@@ -652,6 +684,7 @@ function ForeignFallback({
 // live, and actual binding inputs still pass through React's props comparison.
 const BoundEditor = memo(function BoundEditor({
   connection,
+  directoryConnection,
   catalogConnection,
   canCleanupTags,
   author,
@@ -659,10 +692,12 @@ const BoundEditor = memo(function BoundEditor({
   archived,
   historyActive = false,
   contentReadOnly,
+  decisionView,
   docLinks,
   onSelectThread,
 }: {
   connection: RoomConnection;
+  directoryConnection: RoomConnection | null;
   catalogConnection: RoomConnection | null;
   canCleanupTags: (() => boolean) | undefined;
   author: string;
@@ -672,6 +707,7 @@ const BoundEditor = memo(function BoundEditor({
   historyActive?: boolean;
   /** Title, decision line and blocks cannot change; comments may stay open. */
   contentReadOnly: boolean;
+  decisionView: boolean;
   /** See {@link EditorPane}. Must be referentially stable — it binds the editor. */
   docLinks: DocLinkContext | null;
   onSelectThread: SelectThread;
@@ -685,18 +721,24 @@ const BoundEditor = memo(function BoundEditor({
   useEffect(() => {
     if (editor !== null && !editor.isDestroyed) setEditorMembers(editor, members);
   }, [editor, members]);
-  /**
-   * The binding effect reads the latest read-only flag without depending on
-   * it: initial binding must already enforce read-only, and later permission
-   * changes must not rebind.
-   */
-  const readContentReadOnly = useEffectEvent(() => contentReadOnly);
-  const readCleanupPermission = useEffectEvent(() => canCleanupTags?.() !== false);
+  const { canEdit: readCanEdit, canCleanup: readCleanupPermission } = useContentPermissions(
+    connection, directoryConnection, archived || historyActive, decisionView, canCleanupTags,
+  );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: The epoch rebinds after the synchronous guard destroys an editor that normalization immediately made bindable again.
   useEffect(() => {
     const element = host.current;
     if (element === null) return;
+    let liveEditor: Editor | null = null;
+    const refreshEditable = (): void => {
+      if (liveEditor === null || liveEditor.isDestroyed) return;
+      const editable = readCanEdit();
+      if (liveEditor.isEditable !== editable) liveEditor.setEditable(editable);
+    };
+    // Run before y-prosemirror sees metadata in the same remote transaction.
+    // known limit: edits sent before settlement is received can still merge; revisit when the hub enforces settled answers.
+    connection.ydoc.on("beforeObserverCalls", refreshEditable);
+    directoryConnection?.ydoc.on("beforeObserverCalls", refreshEditable);
     // bindGuardedEditor registers its synchronous guard before binding. A
     // stray root or link conflict arriving later unbinds the editor without
     // deleting it, then useForeignBlocks displays the fallback. Other foreign
@@ -705,9 +747,12 @@ const BoundEditor = memo(function BoundEditor({
       element,
       fragment: getBlocksFragment(connection.ydoc),
       awareness: connection.provider.awareness,
-      editable: canWriteContent(connection, readContentReadOnly()),
+      editable: readCanEdit(),
+      canEditContent: () => readCanEdit(),
+      decisionAnswer: () => isDecision(connection),
+      ...(isDecision(connection) || decisionView ? { blockMenuEntries: DECISION_ANSWER_MENU_ENTRIES } : {}),
       canWrite: () => connection.status.writable,
-      canCleanupTags: () => canWriteContent(connection, readContentReadOnly()) && readCleanupPermission(),
+      canCleanupTags: () => readCanEdit() && readCleanupPermission(),
       canNormalize: () => connection.status.writable && connection.status.synced,
       onUnbind: () => {
         setEditor(null);
@@ -716,6 +761,10 @@ const BoundEditor = memo(function BoundEditor({
       docLinks,
       workspaceSettings: catalogConnection?.ydoc ?? null,
     });
+    liveEditor = binding.editor;
+    const stopSourceStatus = connection.onStatusChange(refreshEditable);
+    const stopDirectoryStatus = directoryConnection?.onStatusChange(refreshEditable);
+    refreshEditable();
     // Delegate comment-highlight clicks on the host. Document references and
     // external links win over surrounding thread selection so one gesture has
     // one action; the conversation remains reachable from adjacent highlight
@@ -794,9 +843,13 @@ const BoundEditor = memo(function BoundEditor({
       element.removeEventListener("click", activate);
       element.removeEventListener("keydown", activateThread, true);
       setEditor(null);
+      stopSourceStatus();
+      stopDirectoryStatus?.();
+      connection.ydoc.off("beforeObserverCalls", refreshEditable);
+      directoryConnection?.ydoc.off("beforeObserverCalls", refreshEditable);
       binding.destroy();
     };
-  }, [connection, catalogConnection, docLinks, onSelectThread, bindingEpoch]);
+  }, [connection, directoryConnection, catalogConnection, docLinks, onSelectThread, bindingEpoch]);
 
   /**
    * Change ProseMirror editable in place to preserve caret, scroll, selection
@@ -806,14 +859,14 @@ const BoundEditor = memo(function BoundEditor({
    */
   useLayoutEffect(() => {
     if (editor === null || editor.isDestroyed) return;
-    editor.setEditable(!contentReadOnly && !isDecision(connection) && writable);
+    editor.setEditable(!contentReadOnly && canEditAnswer(connection, directoryConnection, archived || historyActive, decisionView));
     if (!archived && !historyActive && writable) {
       // A repair suppressed while the link was gone gets another plugin pass
       // as soon as the admitted room is writable again. Automatic block-id
       // maintenance remains independent of decision content permissions.
       editor.view.dispatch(editor.state.tr.setMeta("uberblick:writable", true));
     }
-  }, [editor, connection, archived, contentReadOnly, historyActive, writable]);
+  }, [editor, connection, directoryConnection, archived, contentReadOnly, historyActive, decisionView, writable]);
 
   return (
     <>
@@ -830,19 +883,18 @@ const BoundEditor = memo(function BoundEditor({
         {editor !== null && !contentReadOnly && writable && (
           <CodeLanguageControl
             editor={editor}
-            canWrite={() => canWriteContent(connection, contentReadOnly)}
+            canWrite={() => canEditAnswer(connection, directoryConnection, archived || historyActive, decisionView)}
           />
         )}
         {editor !== null && !contentReadOnly && writable && (
           <CalloutControl
             editor={editor}
-            canWrite={() => canWriteContent(connection, contentReadOnly)}
+            canWrite={() => canEditAnswer(connection, directoryConnection, archived || historyActive, decisionView)}
           />
         )}
-        {/* Decision content offers no editing controls, but discussion stays
-            open. An archive also withholds the comment composer. */}
+        {/* Settled answers keep discussion; archives also withhold comments. */}
         {editor !== null && !contentReadOnly && writable && (
-          <BlockMenu editor={editor} host={frame} />
+          <BlockMenu editor={editor} host={frame} {...(isDecision(connection) ? { entries: DECISION_ANSWER_MENU_ENTRIES } : {})} />
         )}
         {editor !== null && !contentReadOnly && writable && (
           <TableControls editor={editor} host={frame} />
@@ -883,6 +935,7 @@ const BoundEditor = memo(function BoundEditor({
 
 export function EditorPane({
   connection,
+  directoryConnection = null,
   segment,
   presence,
   author,
@@ -914,6 +967,8 @@ export function EditorPane({
   historyActive = false,
 }: {
   connection: RoomConnection;
+  /** Live decision status and archives, separate from the settings room. */
+  directoryConnection?: RoomConnection | null;
   /** The workspace as the address spells it — see {@link DocMetaLine}. */
   segment: string;
   /** This room's presence reading, passed through to {@link StatusLine}. */
@@ -988,7 +1043,21 @@ export function EditorPane({
   // after mounting, so read this exact connection on the first frame too.
   const meta = observedMeta ?? readRoomMeta(connection);
   const decision = decisionView || meta?.kind === "decision";
-  const contentReadOnly = archived || decision || historyActive;
+  const subscribePermissions = useCallback((changed: () => void) => {
+    connection.ydoc.on("update", changed);
+    directoryConnection?.ydoc.on("update", changed);
+    const stopSource = connection.onStatusChange(changed);
+    const stopDirectory = directoryConnection?.onStatusChange(changed);
+    return () => {
+      connection.ydoc.off("update", changed);
+      directoryConnection?.ydoc.off("update", changed);
+      stopSource();
+      stopDirectory?.();
+    };
+  }, [connection, directoryConnection]);
+  const readPermission = useCallback(() => canEditAnswer(connection, directoryConnection, archived || historyActive, decisionView),
+    [connection, directoryConnection, archived, historyActive, decisionView]);
+  const contentReadOnly = !useSyncExternalStore(subscribePermissions, readPermission);
   const foreign = useForeignBlocks(connection);
   const { writable } = useRoomStatus(connection);
   const openThreads = threads.filter((thread) => !thread.resolved).length;
@@ -1046,7 +1115,7 @@ export function EditorPane({
         />
         {header ?? <DocumentTitle
           value={meta?.title ?? ""}
-          readOnly={contentReadOnly || !writable}
+          readOnly={decision || contentReadOnly || !writable}
           // Guard the live write too: a document may become a decision before
           // this readOnly render updates.
           onChange={(value) => {
@@ -1090,13 +1159,14 @@ export function EditorPane({
               catalogConnection={catalogConnection}
               canCleanupTags={canCleanupTags}
               summary={describeForeignBlocks(foreign, { repairable: !contentReadOnly, decision })}
-              contentReadOnly={contentReadOnly}
+              contentReadOnly={contentReadOnly || decision}
               writable={writable}
               docLinks={docLinks}
             />
           ) : (
             <BoundEditor
               connection={connection}
+              directoryConnection={directoryConnection}
               catalogConnection={catalogConnection}
               canCleanupTags={canCleanupTags}
               author={author}
@@ -1104,6 +1174,7 @@ export function EditorPane({
               archived={archived}
               historyActive={historyActive}
               contentReadOnly={contentReadOnly}
+              decisionView={decisionView}
               docLinks={docLinks}
               onSelectThread={onSelectThread}
             />

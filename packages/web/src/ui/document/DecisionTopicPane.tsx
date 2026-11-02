@@ -249,7 +249,19 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
   }): ReactElement {
   const sourceStatus = useRoomStatus(editorProps.connection);
   const directoryStatus = useRoomStatus(directoryConnection);
+  const observedMeta = useDocMeta(editorProps.connection);
   if (topic === null || selected === null) return <EditorPane {...editorProps} />;
+  const meta = observedMeta ?? readRoomMeta(editorProps.connection);
+  const cachedStatus = topic.allRecords.find((entry) => entry.uuid === selected)?.status;
+  // A room's settlement can arrive first. An older room must not override
+  // a final rejection or withdrawal already received through the directory.
+  if (meta.uuid === selected && meta.kind === "decision" && meta.status !== undefined && meta.status !== "open" &&
+    (cachedStatus === "open" || (cachedStatus === "decided" && meta.status !== "decided"))) {
+    const status = meta.status;
+    topic = resolveDecisionTopics(topic.allRecords.map((entry) => entry.uuid === selected
+      ? { ...entry, status, agentStance: meta.agentStance === true } : entry))
+      .find((entry) => entry.topic === topic?.topic) ?? topic;
+  }
   const current = decisionCurrentRecord(topic);
   const record = topic.allRecords.find((entry) => entry.uuid === selected);
   if (current === null || record === undefined) throw new Error("Decision selection must belong to its topic");
@@ -261,6 +273,7 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
   const discussionTitle = !record.discussion || directoryConnection === null ? undefined
     : getDirectoryEntry(directoryConnection.ydoc, record.discussion)?.title || undefined;
   return <EditorPane {...editorProps}
+    directoryConnection={directoryConnection}
     isDecisionTopic
     topicArchived={topic.archived}
     actionTitle={decisionTopicTitle(topic)}

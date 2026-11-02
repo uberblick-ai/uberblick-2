@@ -343,7 +343,7 @@ describe("decision topic navigation and history", () => {
     expect(getMetaMap(room(roomForDoc(WORKSPACE, CURRENT)).ydoc).get("uuid")).toBe(FIRST);
   });
 
-  it.each(["open", "decided", "rejected", "withdrawn"] as const)("renames the current %s record while its answer stays read-only", async (status) => {
+  it.each(["open", "decided", "rejected", "withdrawn"] as const)("renames the current %s record while preserving its answer permissions", async (status) => {
     const ydoc = record(FIRST, "Original question", status, "Stored answer.");
     const host = (await open()).container;
     const title = within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
@@ -352,7 +352,65 @@ describe("decision topic navigation and history", () => {
     await act(async () => fireEvent.change(title, { target: { value: "Clearer question" } }));
     expect(getMeta(ydoc).title).toBe("Clearer question");
     expect(getBlocks(ydoc)[0]?.text).toBe("Stored answer.");
-    expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
+    expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe(String(status === "open"));
+  });
+
+  it.each(["under review", "earlier open record", "conflict"] as const)("edits the selected open answer during %s without permitting an earlier title rename", async (scenario) => {
+    let selected: Y.Doc;
+    if (scenario === "earlier open record") {
+      selected = record(FIRST, "The topic question", "open", "Earlier unsettled answer.");
+      record(NEXT, "Later proposal", "open", "Another unsettled answer.", { supersedes: FIRST, order: 1 });
+    } else {
+      record(FIRST, "The topic question", "decided", "The first answer.", { agent: true });
+      record(CURRENT, "Current answer", "decided", "The answer in force.", { supersedes: FIRST, order: 1 });
+      if (scenario === "conflict") record(NEXT, "Competing answer", "decided", "A competing answer.", { supersedes: FIRST, order: 4 });
+      selected = record(OPEN, "Open proposal", "open", "Unsettled proposal answer.", { supersedes: CURRENT, order: 3 });
+    }
+    const selectedId = scenario === "earlier open record" ? FIRST : OPEN;
+    const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
+    const host = (await open(decisionRecordPath(WORKSPACE, FIRST, selectedId))).container;
+    const editor = binding.mock.results.at(-1)?.value.editor;
+    if (editor == null) throw new Error("fixture editor did not bind");
+    expect(selection(host)).toBe(selectedId);
+    expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("true");
+    expectAnswerState(host, scenario === "conflict" ? "Open proposal" : scenario === "earlier open record" ? "Not yet decided" : "Under review");
+    if (scenario === "conflict") expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("Nothing is in force.");
+    const title = within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
+    expect(title.readOnly).toBe(true);
+    const originalTitle = getMeta(room(roomForDoc(WORKSPACE, FIRST)).ydoc).title;
+    await act(async () => {
+      editor.commands.insertContentAt(1, "Reworded: ");
+      fireEvent.change(title, { target: { value: "Refused earlier-record rename" } });
+    });
+    expect(getBlocks(selected)[0]?.text).toMatch(/^Reworded: /);
+    expect(getMeta(room(roomForDoc(WORKSPACE, FIRST)).ydoc).title).toBe(originalTitle);
+    expect(within(host).queryByRole("button", { name: "Alter decision" })).toBeNull();
+  });
+
+  it("locks an archived open record before rendering while retaining its answer and existing conversation", async () => {
+    record(FIRST, "The topic question", "decided", "The answer in force.");
+    const selected = record(OPEN, "Open proposal", "open", "Unsettled proposal answer.", { supersedes: FIRST, order: 1 });
+    const thread = createAnnotation(selected, getBlocks(selected)[0]!.id, 0, 9, "Reader", "Keep this conversation readable.");
+    const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
+    const host = (await open(decisionRecordPath(WORKSPACE, FIRST, OPEN))).container;
+    const editor = binding.mock.results.at(-1)?.value.editor;
+    if (editor == null) throw new Error("fixture editor did not bind");
+    const prose = host.querySelector(".ProseMirror");
+    const bindings = binding.mock.calls.length;
+    act(() => editor.commands.setTextSelection({ from: 1, to: 10 }));
+    const before = getBlocks(selected);
+    act(() => {
+      expect(archiveDecisionRecord(directory(), room(sidebarRoom(WORKSPACE)).ydoc, OPEN)).toBe(true);
+      expect(editor.isEditable).toBe(false);
+      editor.view.dispatch(editor.state.tr.insertText("Refused after archive", 1, 10));
+      expect(getBlocks(selected)).toEqual(before);
+    });
+    expect(binding).toHaveBeenCalledTimes(bindings);
+    expect(host.querySelector(".ProseMirror")).toBe(prose);
+    expect(prose?.getAttribute("contenteditable")).toBe("false");
+    expect(document.querySelector('[data-slot="selection-composer"]')).toBeNull();
+    expect(host.textContent).toContain("Keep this conversation readable.");
+    expect(host.querySelector(`[data-comment-thread="${thread.id}"]`)).not.toBeNull();
   });
 
   it("renames only the first record during review, then keeps the topic title read-only in history", async () => {
@@ -1163,7 +1221,7 @@ describe("decision topic navigation and history", () => {
   });
 });
 
-describe("decision hydration never exposes editable content", () => {
+describe("decision hydration admits editing only with the record and topic context", () => {
   it("waits for topic context when the directory cannot yet repair a known decision room", async () => {
     const ydoc = record(FIRST, "Room without topic context", "open", "An open proposal.", { publish: false });
     Object.defineProperty(room(directoryRoom(WORKSPACE)), "status", { value: { ...LIVE, synced: false } });
@@ -1175,20 +1233,24 @@ describe("decision hydration never exposes editable content", () => {
     expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
   });
 
-  it("binds read-only on every frame when the open decision room arrives first", async () => {
+  it("edits a room-first open answer once its topic context is present", async () => {
     const ydoc = record(FIRST, "Room before directory", "open", "An open decision answer.", { publish: false });
     const bindings: boolean[] = [];
     const original = guardedBinding.bindGuardedEditor;
     vi.spyOn(guardedBinding, "bindGuardedEditor").mockImplementation((options) => {
       bindings.push(options.editable ?? true);
+      if (options.editable) expect(getDirectoryEntry(directory(), FIRST)?.kind).toBe("decision");
       return original(options);
     });
     const host = (await open()).container;
-    expect(bindings.every((editable) => !editable)).toBe(true);
+    const prose = host.querySelector(".ProseMirror");
+    const bindingCount = bindings.length;
+    expect(prose?.getAttribute("contenteditable")).toBe("true");
     await act(async () => publishRecord(ydoc));
     expect(bindings).not.toHaveLength(0);
-    expect(bindings.every((editable) => !editable)).toBe(true);
-    expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
+    expect(bindings).toHaveLength(bindingCount);
+    expect(host.querySelector(".ProseMirror")).toBe(prose);
+    expect(prose?.getAttribute("contenteditable")).toBe("true");
     expect(host.querySelector<HTMLTextAreaElement>(".ub-title")?.readOnly).toBe(false);
     expectAnswerState(host, "Not yet decided");
   });
@@ -1207,8 +1269,8 @@ describe("decision hydration never exposes editable content", () => {
     expect(bindings).toHaveLength(0);
     await act(async () => record(FIRST, "Directory before room", "open", "Arrived open answer."));
     expect(bindings).not.toHaveLength(0);
-    expect(bindings.every((editable) => !editable)).toBe(true);
-    expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
+    expect(bindings.every((editable) => editable)).toBe(true);
+    expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("true");
     expect(host.querySelector<HTMLTextAreaElement>(".ub-title")?.readOnly).toBe(false);
     expect(answer(host).textContent).toContain("Arrived open answer.");
   });

@@ -5,7 +5,9 @@
  */
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
-import { closeIfOpen, editor, setupHarness } from "./app-helpers.js";
+import type { Editor } from "@tiptap/core";
+import { activateControl, closeIfOpen, editor, setupHarness } from "./app-helpers.js";
+import { placeCaretIn } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
 import { expectMcp, proveMcpArrival } from "./settle.js";
 import type { McpSession } from "./mcp-agent.js";
@@ -197,30 +199,144 @@ test("touch selection on a decided record starts a thread and its highlight open
   await expect(paragraph).toHaveText("Selected words remain readable after deciding.");
 });
 
-test("an open decision keeps prose and tables read-only through later states while its title stays editable", async ({ browser }) => {
+test("an open answer edits and saves before remote settlement locks the same view and its native input", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const touch = info.project.use.hasTouch === true;
   const writer = session();
-  const prose = "Approved content survives every editor input.";
+  const prose = "Selected words remain open to revision.";
+  const initialSource = Array.from({ length: 40 }, (_, index) => `const reason${index} = "Keep this answer editable until settled.";`).join("\n");
+  const source = `${initialSource} // revised`;
   const uuid = await record(writer, "open", [
     { type: "paragraph", text: prose },
-    { type: "table", text: "| Approved cell |\n| --- |\n| Approved value |" },
-    ...Array.from({ length: 30 }, (_, index) => ({ type: "paragraph", text: `Reason ${index}: ${prose}` })),
+    { type: "code", text: initialSource },
+    { type: "table", text: "| Name | Value |\n| --- | --- |\n| Original | Kept |" },
   ]);
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { upstream: true });
   const view = editor(page);
-  await expect(view).toHaveAttribute("contenteditable", "false");
+  const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+  await expect(view).toHaveAttribute("contenteditable", "true");
+  await expect(page.locator(".ub-decision-answer-header .ub-decision-answer-state")).toHaveText("Not yet decided");
   await expect(page.getByRole("region", { name: "TL;DR", exact: true })).toHaveCount(0);
+  const paragraph = view.locator(":scope > p").first();
+  await placeCaretIn(paragraph, { touch });
+  await page.keyboard.type(" Reworded here.");
+  await expect(paragraph).toHaveText(`${prose} Reworded here.`);
+  for (let count = 0; count < 9; count += 1) await page.keyboard.press("Shift+ArrowLeft");
+  for (const name of ["Bold", "Italic", "Strikethrough", "Inline code", "External link", "Comment"]) {
+    await expect(composer(page).getByRole("button", { name, exact: true })).toBeVisible();
+  }
+  await activateControl(composer(page).getByRole("button", { name: "Bold", exact: true }), { touch });
+  await expect(paragraph.locator("strong")).toHaveText("ded here.");
+  await activateControl(composer(page).getByRole("button", { name: "External link", exact: true }), { touch });
+  await page.getByLabel("External link URL").fill("https://example.org/open-answer");
+  await activateControl(composer(page).getByRole("button", { name: "Apply", exact: true }), { touch });
+  const external = paragraph.locator('a[href="https://example.org/open-answer"]');
+  await expect(external).toHaveText("ded here.");
+  await addComment(page, "Discuss the answer while it is still open.", touch);
+  await closeIfOpen(page.getByRole("button", { name: "Close comments", exact: true }), page.locator(".ub-threads-toggle"), { touch });
+
+  // The page's real block menu offers only answer types. Its fourth-block
+  // insertion is refused before any content changes.
+  await placeCaretIn(paragraph, { touch });
+  await activateControl(page.getByRole("button", { name: "Insert block below", exact: true }), { touch });
+  const menu = page.getByRole("listbox", { name: "Block types", exact: true });
+  await expect.poll(() => menu.getByRole("option").evaluateAll((options) => options.map((option) => option.getAttribute("aria-label"))))
+    .toEqual(["Paragraph", "Bullet list", "Numbered list", "Code", "Table"]);
+  await activateControl(menu.getByRole("option", { name: "Paragraph", exact: true }), { touch });
+  await expect(view.locator(":scope > p")).toHaveCount(1);
+  const code = view.locator("pre > code");
+  await placeCaretIn(code, { touch });
+  await page.keyboard.insertText(" // revised");
+  await expect(code).toHaveText(source);
+  await activateControl(page.getByRole("button", { name: "Code language", exact: true }), { touch });
+  await page.getByRole("combobox", { name: "Search languages", exact: true }).fill("typescript");
+  await activateControl(page.getByRole("option", { name: "typescript", exact: true }), { touch });
+  await expect(page.getByRole("button", { name: "Code language", exact: true })).toHaveText(/TypeScript/);
+  const table = view.locator("table");
+  await placeCaretIn(table.locator("td").first(), { touch });
+  await page.keyboard.type(" revised");
+  await activateControl(page.getByRole("button", { name: "Column 1 actions", exact: true }), { touch });
+  await activateControl(page.getByRole("menuitem", { name: "Move column right", exact: true }), { touch });
+  await expect(table.locator("th")).toHaveText(["Value", "Name"]);
+  await expect(table.locator("td")).toHaveText(["Kept", "Original revised"]);
+  await placeCaretIn(paragraph, { touch });
+  await page.keyboard.press("Enter");
+  await expect(view.locator(":scope > p")).toHaveCount(1);
+  await expect(paragraph).toHaveText(`${prose} Reworded here.`);
+  if (!touch) {
+    await placeCaretIn(paragraph);
+    await page.keyboard.press(`${modifier}+a`);
+    await expect.poll(() => page.evaluate(() => document.getSelection()?.toString())).toContain("reason39");
+    await page.keyboard.press(`${modifier}+c`);
+    await placeCaretIn(paragraph);
+    await page.keyboard.press(`${modifier}+v`);
+    await expect(view.locator(":scope > p")).toHaveCount(1);
+    await expect(paragraph).toHaveText(`${prose} Reworded here.`);
+    await expect(code).toHaveText(source);
+    await expect(view.locator("table")).toHaveCount(1);
+  }
+  if (touch) await activateControl(page.locator(".ub-threads-toggle"), { touch });
+  else await activateControl(view.locator("[data-comment-thread]"));
+  const rail = page.getByRole("region", { name: "Comments", exact: true });
+  await expect(rail).toContainText("Discuss the answer while it is still open.");
+  if (touch) await activateControl(rail.locator(".ub-thread-select"), { touch });
+  await rail.getByPlaceholder("Reply…").fill("The refined answer keeps this conversation.");
+  await activateControl(rail.getByRole("button", { name: "Reply", exact: true }), { touch });
+  await expect(rail).toContainText("The refined answer keeps this conversation.");
+  await closeIfOpen(page.getByRole("button", { name: "Close comments", exact: true }), page.locator(".ub-threads-toggle"), { touch });
+  await proveMcpArrival(page, writer, uuid, { path: "upstream" });
+  type SavedAnswer = { blocks: Array<{ type: string; text: string; rev: string; language?: string }> };
+  let approved: SavedAnswer["blocks"] = [];
+  await expectMcp(() => writer.call<SavedAnswer>("get_doc", { uuid }), saved => {
+    expect(saved.blocks).toHaveLength(3);
+    expect(saved.blocks[0]?.text).toBe(`${prose} Reworded here.`);
+    expect(saved.blocks[1]).toMatchObject({ type: "code", text: source, language: "typescript" });
+    expect(saved.blocks[2]?.text).toContain("Original revised");
+    approved = saved.blocks;
+  });
+
+  // Leave the native range and its formatting toolbar open when metadata arrives
+  // through the hub. The view retains that range and the pane's position.
+  await placeCaretIn(paragraph, { touch });
+  for (let count = 0; count < 9; count += 1) await page.keyboard.press("Shift+ArrowLeft");
+  await expect(composer(page).getByRole("button", { name: "Bold", exact: true })).toBeVisible();
   const originalView = await view.elementHandle();
   if (originalView === null) throw new Error("e2e: missing live editor");
   const pane = page.locator(".ub-pane");
-  await pane.evaluate((element) => { element.scrollTop = 400; });
+  await pane.evaluate((element) => { element.scrollTop = 80; });
   const scroll = await pane.evaluate((element) => element.scrollTop);
   expect(scroll).toBeGreaterThan(0);
+  const selection = await view.evaluate((element) => {
+    const mounted = element as HTMLElement & { editor: Editor };
+    const native = document.getSelection();
+    return {
+      anchor: mounted.editor.state.selection.anchor, head: mounted.editor.state.selection.head,
+      native: native === null || native.anchorNode === null || native.focusNode === null ? null : {
+        anchor: mounted.editor.view.posAtDOM(native.anchorNode, native.anchorOffset),
+        head: mounted.editor.view.posAtDOM(native.focusNode, native.focusOffset), text: native.toString(),
+      },
+    };
+  });
+  expect(selection.anchor).not.toBe(selection.head);
+  expect(selection.native?.text).toBe("ded here.");
   const peer = await legacyDecisionPeer(harness(), uuid);
   peers.push(peer);
   peer.decide("decided");
   await expect(view).toHaveAttribute("contenteditable", "false");
+  await expect(page.locator(".ub-decision-answer-header .ub-decision-answer-state")).toHaveText("In force");
+  await onlyComment(page);
   expect(await originalView.evaluate((element) => element === document.querySelector(".ub-editor .ProseMirror"))).toBe(true);
   expect(await pane.evaluate((element) => element.scrollTop)).toBe(scroll);
+  expect(await view.evaluate((element) => {
+    const mounted = element as HTMLElement & { editor: Editor };
+    const native = document.getSelection();
+    return {
+      anchor: mounted.editor.state.selection.anchor, head: mounted.editor.state.selection.head,
+      native: native === null || native.anchorNode === null || native.focusNode === null ? null : {
+        anchor: mounted.editor.view.posAtDOM(native.anchorNode, native.anchorOffset),
+        head: mounted.editor.view.posAtDOM(native.focusNode, native.focusOffset), text: native.toString(),
+      },
+    };
+  })).toEqual(selection);
   await expect(page.getByRole("textbox", { name: "Document title" })).toHaveValue("Decided editor");
   await expect(page.getByRole("textbox", { name: "Document title" })).toBeEditable();
   await expect(page.getByRole("button", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
@@ -228,36 +344,40 @@ test("an open decision keeps prose and tables read-only through later states whi
   await expect(page.getByRole("menuitem", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
   await expect(page.getByRole("menuitem", { name: "Add TL;DR", exact: true })).toHaveCount(0);
   await expect(page.getByRole("menuitem", { name: "Remove TL;DR", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("menuitem", { name: "Pin to sidebar", exact: true })).toBeEnabled();
-  await expect(page.getByRole("menuitem", { name: "Archive topic", exact: true })).toBeEnabled();
   await page.keyboard.press("Escape");
-  await expect(page.locator(".ub-tag-placeholder")).toHaveText("Add tags");
 
-  // Native events that the editable ProseMirror view normally consumes must
-  // not alter prose or TableKit cells once the remote status has arrived.
-  const paragraph = view.locator(":scope > p").first();
-  await paragraph.click();
+  // Desktop keyboard shortcuts use a real non-empty system clipboard. The iPad
+  // path retains native tap/selection and text input without an OS edit menu.
+  await activateControl(paragraph, { touch });
+  if (!touch) {
+    await page.keyboard.press(`${modifier}+a`);
+    await expect.poll(() => page.evaluate(() => document.getSelection()?.toString())).toContain(prose);
+    await page.keyboard.press(`${modifier}+c`);
+    await page.keyboard.press("ArrowRight");
+  }
   await page.keyboard.type("typed mutation");
-  await page.keyboard.press("ControlOrMeta+b");
-  await view.evaluate((element) => {
-    const paste = new DataTransfer();
-    paste.setData("text/plain", "pasted mutation");
-    element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: paste, bubbles: true, cancelable: true }));
+  if (!touch) {
+    await page.keyboard.press(`${modifier}+b`);
+    await page.keyboard.press(`${modifier}+v`);
+    await page.keyboard.press(`${modifier}+z`);
+    await page.keyboard.press(`${modifier}+Shift+z`);
+  }
+  await expect(paragraph).toHaveText(`${prose} Reworded here.`);
+  const header = table.locator("th").first();
+  await activateControl(header, { touch });
+  await page.keyboard.type("table mutation");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("cell mutation");
+  await expect(header).toHaveText("Value");
+  await expect(table.locator("td")).toHaveText(["Kept", "Original revised"]);
+  await view.evaluate(element => {
     const drop = new DataTransfer();
     drop.setData("text/plain", "dropped mutation");
     element.dispatchEvent(new DragEvent("drop", { dataTransfer: drop, bubbles: true, cancelable: true }));
   });
-  await expect(paragraph).toHaveText(prose);
-  await expect(paragraph.locator("strong, em, s, code, a")).toHaveCount(0);
-  const header = view.locator(".ub-table th").first();
-  await header.click();
-  await page.keyboard.type("table mutation");
-  await page.keyboard.press("Tab");
-  await page.keyboard.type("cell mutation");
-  await expect(header).toHaveText("Approved cell");
-  await expect(view.locator(".ub-table td").first()).toHaveText("Approved value");
+  await expect(paragraph).toHaveText(`${prose} Reworded here.`);
   await expect(page.getByRole("button", { name: "Insert block below", includeHidden: true })).toHaveCount(0);
-  for (const status of ["open", "rejected", "withdrawn"] as const) {
+  for (const status of ["rejected", "withdrawn"] as const) {
     peer.decide(status);
     await expect(page.locator(".ub-lifecycle-badge")).toHaveText("Decision");
     await expect(view).toHaveAttribute("contenteditable", "false");
@@ -267,10 +387,7 @@ test("an open decision keeps prose and tables read-only through later states whi
   }
   await proveMcpArrival(page, writer, uuid, { path: "upstream" });
   await expectMcp(async () => {
-    const saved = await writer.call<{ blocks: Array<{ text: string }> }>("get_doc", { uuid });
-    expect(saved.blocks[0]?.text).toBe(prose);
-    expect(saved.blocks[1]?.text).toContain("Approved cell");
-    expect(saved.blocks[1]?.text).toContain("Approved value");
-    expect(saved.blocks).toHaveLength(32);
+    const saved = await writer.call<SavedAnswer>("get_doc", { uuid });
+    expect(saved.blocks).toEqual(approved);
   });
 });
