@@ -13,6 +13,7 @@ export function resolveMcpHostConfig(env: NodeJS.ProcessEnv = process.env): McpH
     issuer: parseHubPublicUrl(env.HUB_PUBLIC_URL),
     allowedOrigins: (env.MCP_ALLOWED_ORIGINS ?? "").split(",").map(origin => origin.trim()).filter(Boolean),
     hubUrl: env.HUB_URL ?? DEFAULT_HUB_URL,
+    hubMcpSocket: env.HUB_MCP_SOCKET?.trim() || undefined,
     databaseDirectory: env.MCP_DATA_DIR ?? join(resolveStorage({ env }).dataDir, "mcp-host"),
     host: env.MCP_HOST ?? "127.0.0.1",
     port,

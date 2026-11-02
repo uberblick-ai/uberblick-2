@@ -164,10 +164,10 @@ test("legacy decision dates stay calendar dates west of UTC at every decision ti
   } finally { peer.close(); }
 });
 
-async function selected(page: Page, uuid: string, text: string): Promise<void> {
+async function selected(page: Page, uuid: string, text: string, editable = false): Promise<void> {
   await expect(entry(page, uuid).locator(".ub-decision-record")).toHaveAttribute("aria-current", "true");
   await expect(page.locator(".ub-decision-timeline")).not.toContainText("viewing");
-  await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+  await expect(editor(page)).toHaveAttribute("contenteditable", String(editable));
   await expect(editor(page)).toHaveText(text);
   await expect(entry(page, uuid).locator(".ub-decision-record-state")).toHaveText(await page.locator(".ub-decision-answer-header .ub-decision-answer-state").innerText());
   await expect(page.locator(".ub-decision-related")).toHaveCount(0);
@@ -839,7 +839,7 @@ for (const { touch, appearance } of [
     await answerHeader(page, "Open proposal", "open-proposal");
     await expect(entry(page, proposal.uuid)).toHaveCount(0);
     await activateControl(page.getByRole("button", { name: "Restore", exact: true }), { touch });
-    await selected(page, proposal.uuid, answerText(proposal));
+    await selected(page, proposal.uuid, answerText(proposal), true);
     await expect(page.locator(".ub-archived-banner")).toHaveCount(0);
   });
 
@@ -1089,7 +1089,8 @@ for (const { touch, appearance } of [
     await expect(page).toHaveURL(new RegExp(`${topicPath}$`));
 
     await activateControl(entry(page, pending.uuid).locator(".ub-decision-record"), { touch });
-    await selected(page, pending.uuid, answerText(pending));
+    await selected(page, pending.uuid, answerText(pending), true);
+    await expect(page.getByRole("textbox", { name: "Document title" })).not.toBeEditable();
     await selectedRfc(page, rfc, "Replacement RFC");
     await answerHeader(page, "Under review", "under-review");
     await expect(page.locator(".ub-decision-notice")).toHaveCount(0);
@@ -1153,7 +1154,7 @@ test("undecided proposals, agent stances and conflicting answers show selected-r
   const rfc = await create(writer, "First topic RFC", "Discuss the first answer.");
   const proposal = await create(writer, "Unanswered topic", "Open proposal is not guidance in force.", { kind: "decision", discussion: rfc.uuid });
   const page = await openApp(browser, `/${harness().workspace}/${proposal.uuid}`, { upstream: true });
-  await selected(page, proposal.uuid, answerText(proposal));
+  await selected(page, proposal.uuid, answerText(proposal), true);
   await selectedRfc(page, rfc, "First topic RFC");
   await answerHeader(page, "Not yet decided", "not-yet-decided");
   await timelineRail(page, ["not-yet-decided"], null);
@@ -1194,5 +1195,6 @@ test("undecided proposals, agent stances and conflicting answers show selected-r
   await expect(entry(page, pending.uuid)).toBeVisible();
   await timelineRail(page, ["open-proposal", "conflict", "conflict", "superseded"], null);
   await activateControl(entry(page, pending.uuid).locator(".ub-decision-record"));
+  await selected(page, pending.uuid, answerText(pending), true);
   await answerHeader(page, "Open proposal", "open-proposal");
 });

@@ -8,6 +8,7 @@ import type { Schema } from "@tiptap/pm/model";
 import type { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { seedNewInlineParts } from "@uberblick/schema";
+import { ContentGuard, decisionAnswerDocEditAllowed } from "./decision-answer.js";
 import { BlockIds } from "./block-ids.js";
 import type { BlockMenuEntry } from "./block-menu.js";
 import { CaretMenuKeys } from "./caret-menu.js";
@@ -70,6 +71,10 @@ export interface CreateEditorOptions {
   workspaceSettings?: Y.Doc | null;
   /** Limit authored block choices and Markdown shortcuts without narrowing the stored schema. */
   blockMenuEntries?: readonly BlockMenuEntry[];
+  /** Live content gate, independent of React's last render and repair permissions. */
+  canEditContent?: () => boolean;
+  /** Enforce the decision answer shape on local transactions and undo/redo. */
+  decisionAnswer?: () => boolean;
 }
 
 export function createUberblickEditor(options: CreateEditorOptions): Editor {
@@ -86,6 +91,10 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     ...paletteExtensions.map((extension) => extension.name === "chart"
       ? ChartBlock.configure({ ydoc: options.fragment.doc }) : extension),
     UnsupportedBlockProtection,
+    ContentGuard.configure({
+      canEdit: options.canEditContent ?? (() => true),
+      decisionAnswer: options.decisionAnswer ?? (() => false),
+    }),
     BlockIds.configure({
       ...(options.newBlockId === undefined ? {} : { newId: options.newBlockId }),
       ...(options.canWrite === undefined ? {} : { canWrite: options.canWrite }),
@@ -130,6 +139,10 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     CommentAnchors.configure({ ydoc: options.fragment.doc }),
     Collaboration.configure({
       fragment: options.fragment,
+      canEdit: options.canEditContent ?? (() => true),
+      acceptUndo: (before, after) => options.decisionAnswer?.() !== true ||
+        decisionAnswerDocEditAllowed(before, after),
+      needsUndoCheck: options.decisionAnswer ?? (() => false),
       awareness: options.awareness ?? null,
       opaqueElements: () => {
         const children = options.fragment.toArray();
