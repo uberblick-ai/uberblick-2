@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { ensureHostDiskCapacity } from "../src/host-capacity.js";
+import { HistoryHoldSession, historyHoldPath } from "../src/history-holds.js";
 import { createMcpRuntime } from "../src/server.js";
 import { MirrorStore, readStoredSyncStatus } from "../src/store.js";
 import { removeTempDirs, tempDir, testConfig, TEST_SECRET, waitUntil, WORKSPACE } from "./shared.js";
@@ -85,7 +86,7 @@ it("refuses when reclaiming every clean closed mirror leaves too little free spa
   expect(existsSync(clean)).toBe(false);
 });
 
-it("reclaims a closed runtime's real mirror and history refresher sidecar", async () => {
+it.each(["empty", "abandoned"] as const)("reclaims a closed runtime's real mirror, history refresher sidecar and %s history holds", async holds => {
   const root = tempDir();
   const directory = join(root, createHash("sha256").update("runtime").digest("hex"));
   const databasePath = join(directory, `${WORKSPACE}.sqlite`);
@@ -93,9 +94,36 @@ it("reclaims a closed runtime's real mirror and history refresher sidecar", asyn
   try {
     await waitUntil("runtime history lock", () => existsSync(`${databasePath}.history-refresher-lock`));
   } finally { await runtime.close(); }
+  const hold = new HistoryHoldSession(databasePath);
+  hold.close();
+  if (holds === "abandoned") {
+    const path = historyHoldPath(databasePath, hold.id);
+    writeFileSync(path, "");
+    writeFileSync(`${path}-journal`, "");
+    writeFileSync(`${path}-wal`, "");
+    writeFileSync(`${path}-shm`, "");
+  }
   expect(readStoredSyncStatus(databasePath, WORKSPACE).pendingRooms).toEqual([]);
   expect(await ensureHostDiskCapacity({
     databaseDirectory: root, minFreeBytes: 100, excludedDirectories: new Set(), freeSpace: () => existsSync(directory) ? 0 : 100,
   })).toBe(true);
   expect(existsSync(directory)).toBe(false);
+});
+
+it("retains mirrors with unknown files or symlinks in history hold directories", async () => {
+  const root = tempDir();
+  const unknown = mirror(root, "unknown-hold", 1);
+  const linked = mirror(root, "linked-hold", 2);
+  const unknownHolds = join(unknown, `${WORKSPACE}.sqlite.history-holds`);
+  const linkedHolds = join(linked, `${WORKSPACE}.sqlite.history-holds`);
+  mkdirSync(unknownHolds);
+  mkdirSync(linkedHolds);
+  const unrelated = join(unknownHolds, "unrelated");
+  writeFileSync(unrelated, "preserve");
+  symlinkSync(unrelated, join(linkedHolds, `${WORKSPACE}.sqlite`));
+  expect(await ensureHostDiskCapacity({
+    databaseDirectory: root, minFreeBytes: 100, excludedDirectories: new Set(), freeSpace: () => 0,
+  })).toBe(false);
+  expect(existsSync(unrelated)).toBe(true);
+  expect(existsSync(linked)).toBe(true);
 });

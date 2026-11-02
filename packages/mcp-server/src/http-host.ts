@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { finished } from "node:stream/promises";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { MCP_SOCKET_TIMEOUT_MS } from "@uberblick/hub/mcp-channel";
@@ -199,9 +200,11 @@ export function createMcpHost(config: McpHostConfig, dependencies: McpHostDepend
     calls += parsed.calls;
     try {
       await record.transport.handleRequest(request, response, parsed.body);
+      // The SDK's stream reader can close before the HTTP response finishes.
+      await finished(response, { cleanup: true }).catch(() => {});
     } finally {
       // A disconnected response can finish before the admitted tool does.
-      await record.session.drain();
+      if (!response.writableFinished) await record.session.drain();
       calls -= parsed.calls;
     }
   }

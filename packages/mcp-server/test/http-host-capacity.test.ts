@@ -246,6 +246,23 @@ it("keeps a call slot until disconnected work finishes and refuses excess writes
   expect((await rig.listed("first", one.id)).status).toBe(200);
 });
 
+it("releases a completed call's slot while another call in its session remains busy", async () => {
+  const rig = await fixture({ maxCalls: 2 });
+  const one = await rig.initialize();
+  const two = await rig.initialize("second");
+  const runtime = rig.runtimes[0]!;
+  const held = gate();
+  const settle = runtime.replicas.settle.bind(runtime.replicas);
+  vi.spyOn(runtime.replicas, "settle").mockImplementationOnce(async (...args) => { await held.wait(); return settle(...args); });
+  const busy = rig.ok("first", one.id, "list_docs");
+  pending.push(busy);
+  await held.entered;
+  expect((await rig.listed("first", one.id)).status).toBe(200);
+  expect((await rig.listed("second", two.id)).status).toBe(200);
+  held.release();
+  await busy;
+});
+
 it("reserves every request in a batch before any of its writes starts", async () => {
   const rig = await fixture({ maxCalls: 1 });
   const one = await rig.initialize();

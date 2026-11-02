@@ -142,8 +142,11 @@ it("keeps concurrently admitted writes' acknowledgement rooms independent", asyn
     title: "Independent write", description: "Another room has its own acknowledgement.",
     blocks: [{ type: "paragraph", text: "Original second" }],
   });
-  const firstGate = holdUpdates(hub, `${WORKSPACE}/${created.uuid}`);
-  const secondGate = holdUpdates(hub, `${WORKSPACE}/${second.uuid}`);
+  const firstRoom = `${WORKSPACE}/${created.uuid}`;
+  const secondRoom = `${WORKSPACE}/${second.uuid}`;
+  const firstGate = holdUpdates(hub, firstRoom);
+  const secondGate = holdUpdates(hub, secondRoom);
+  const acknowledgements = vi.spyOn(runtime.replicas, "waitForSettled");
   let releaseSettles!: () => void;
   const settled = new Promise<void>(resolve => { releaseSettles = resolve; });
   releases.push(releaseSettles);
@@ -166,9 +169,18 @@ it("keeps concurrently admitted writes' acknowledgement rooms independent", asyn
   await Promise.all([firstGate.entered, secondGate.entered]);
   expect(session.activeCalls).toBe(2);
   firstGate.release();
-  expect(await firstWrite).toMatchObject({ applied: true, synced: true });
-  expect(await secondWrite).toMatchObject({ applied: true, synced: false });
-  secondGate.release();
+  try {
+    expect(await firstWrite).toMatchObject({ applied: true, synced: true });
+    const firstWait = acknowledgements.mock.calls.findIndex(([options]) => options?.rooms?.includes(firstRoom));
+    expect(firstWait).toBeGreaterThanOrEqual(0);
+    expect(await acknowledgements.mock.results[firstWait]?.value).toEqual({ caughtUp: true, reason: "caught-up" });
+    expect(session.activeCalls).toBe(1);
+    expect(runtime.store.pendingRooms().some(entry => entry.room === secondRoom)).toBe(true);
+  } finally {
+    secondGate.release();
+    await secondWrite;
+  }
+  expect(await secondWrite).toMatchObject({ applied: true, synced: true });
 });
 
 it("keeps hosted writes applied and unsynced when the hub is down", async () => {

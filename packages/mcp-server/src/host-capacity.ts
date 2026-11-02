@@ -53,6 +53,13 @@ function recognizedMirror(databasePath: string, workspace: string): boolean {
   } finally { db.close(); }
 }
 
+function recognizedHistoryHolds(directory: string): boolean {
+  return readdirSync(directory, { withFileTypes: true }).every(entry => {
+    const database = entry.name.replace(/-(?:journal|wal|shm)$/, "");
+    return entry.isFile() && database.endsWith(".sqlite") && isUuid(database.slice(0, -".sqlite".length));
+  });
+}
+
 function cleanMirrorDirectory(directory: string): boolean {
   try {
     const entries = readdirSync(directory, { withFileTypes: true });
@@ -62,7 +69,9 @@ function cleanMirrorDirectory(directory: string): boolean {
       const lock = `${entry.name}.history-refresher-lock`;
       return [entry.name, `${entry.name}-wal`, `${entry.name}-shm`, lock, `${lock}-journal`, `${lock}-wal`, `${lock}-shm`];
     }));
-    if (entries.some(entry => !entry.isFile() || !allowed.has(entry.name))) return false;
+    const holdDirectories = new Set(databases.map(entry => `${entry.name}.history-holds`));
+    if (entries.some(entry => entry.isFile() ? !allowed.has(entry.name)
+      : !entry.isDirectory() || !holdDirectories.has(entry.name) || !recognizedHistoryHolds(join(directory, entry.name)))) return false;
     return databases.every(entry => {
       const workspace = entry.name.slice(0, -".sqlite".length);
       if (!isUuid(workspace)) return false;
