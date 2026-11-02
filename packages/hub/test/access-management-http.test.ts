@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { MANAGEMENT_OPERATIONS } from "../src/access-management.js";
 import { AgentGrantRegistry } from "../src/agent-grants.js";
+import { BrowserSessions } from "../src/browser-sessions.js";
 import { CredentialRegistry, type CredentialRenewal } from "../src/credentials.js";
 import type { HubLogRecord } from "../src/log.js";
 import type { MembershipRole } from "../src/memberships.js";
@@ -93,7 +94,7 @@ function accessState(hub: Hub) {
   const db = new DatabaseSync(hub.databasePath, { readOnly: true });
   try {
     return Object.fromEntries(["hub_principals", "hub_memberships", "hub_credentials", "hub_admins",
-      "hub_workspace_suspensions", "hub_workspace_promotions"]
+      "hub_workspace_suspensions", "hub_workspace_promotions", "hub_browser_sessions"]
       .map(table => [table, db.prepare(`SELECT * FROM ${table}`).all()]));
   } finally {
     db.close();
@@ -111,6 +112,70 @@ function expireCredential(hub: Hub, credential: IssuedCredential): void {
 }
 
 describe("authenticated hub access management", () => {
+  it("ends only the signed-in account's browser sessions on every origin without revoking devices", async () => {
+    const { hub } = await rig();
+    const owner = person(hub, "1234", "owner");
+    const other = person(hub, "5678", "other");
+    const spare = issueCredential(hub.credentials!, { principalId: owner.principal.id, deviceId: randomUUID(), workspaces: [] });
+    const origin = `http://127.0.0.1:${hub.port}`;
+    const alternateOrigin = `https://127.0.0.1:${hub.port}`;
+    const database = new HubDatabase(hub.databasePath, error => { throw error; });
+    database.open();
+    try {
+      const sessions = new BrowserSessions(database);
+      const first = sessions.issue(owner.principal.id, owner.principal.githubUsername, origin);
+      const second = sessions.issue(owner.principal.id, owner.principal.githubUsername, alternateOrigin);
+      const foreign = sessions.issue(other.principal.id, other.principal.githubUsername, origin);
+      const session = async (token: string, sessionOrigin = origin) => {
+        const response = await fetch(`${origin}/auth/browser/session`, { method: "POST",
+          headers: { "Content-Type": "application/json", Origin: sessionOrigin, "X-Uberblick-Session": token }, body: "{}" });
+        return { code: response.status, result: await response.json() };
+      };
+      expect(await manage(hub, owner.issued, { operation: "revoke-device", deviceId: spare.record.deviceId }))
+        .toEqual({ code: 200, result: { status: "ok" } });
+      expect(await session(first.token)).toMatchObject({ code: 200, result: { status: "signed-in" } });
+      expect(await session(second.token, alternateOrigin)).toMatchObject({ code: 200, result: { status: "signed-in" } });
+      const action = { operation: "revoke-browser-sessions" } as const;
+      expect(await post(hub, envelope(await proof(owner.issued, { operation: "list-devices" }), action)))
+        .toEqual({ code: 401, result: { status: "sign-in-required" } });
+      expect(await post(hub, { ...envelope(await proof(owner.issued, action), action), principalId: other.principal.id }))
+        .toEqual({ code: 400, result: { status: "invalid-request" } });
+      expect(await post(hub, envelope(first.token, action))).toEqual({ code: 401, result: { status: "sign-in-required" } });
+      const request = envelope(await proof(owner.issued, action), action);
+      expect(await post(hub, request)).toEqual({ code: 200, result: { status: "ok" } });
+      expect(await post(hub, request)).toEqual({ code: 401, result: { status: "sign-in-required" } });
+      expect(await session(first.token)).toEqual({ code: 401, result: { status: "signed-out" } });
+      expect(await session(second.token, alternateOrigin)).toEqual({ code: 401, result: { status: "signed-out" } });
+      expect(await session(foreign.token)).toMatchObject({ code: 200, result: { status: "signed-in", username: "other" } });
+      expect(await manage(hub, owner.issued, { operation: "list-devices" })).toMatchObject({ code: 200,
+        result: { devices: [{ deviceId: owner.issued.record.deviceId, current: true }] } });
+      const later = sessions.issue(owner.principal.id, owner.principal.githubUsername, origin);
+      expect(await session(later.token)).toMatchObject({ code: 200, result: { status: "signed-in" } });
+    } finally { database.close(); }
+  });
+
+  it("does not confirm account browser sign-out when deletion fails and allows a fresh-proof retry", async () => {
+    const { hub, logs } = await rig();
+    const owner = person(hub, "1234", "owner");
+    const origin = `http://127.0.0.1:${hub.port}`;
+    const database = new HubDatabase(hub.databasePath, error => { throw error; });
+    database.open();
+    try {
+      const sessions = new BrowserSessions(database);
+      const session = sessions.issue(owner.principal.id, owner.principal.githubUsername, origin);
+      database.connection.exec(`CREATE TRIGGER browser_revoke_failure BEFORE DELETE ON hub_browser_sessions
+        BEGIN SELECT RAISE(ABORT, 'injected account sign-out failure'); END`);
+      expect(await manage(hub, owner.issued, { operation: "revoke-browser-sessions" }))
+        .toEqual({ code: 500, result: { status: "failed" } });
+      expect(sessions.get(session.token, origin)).not.toBeNull();
+      expect(logs).toContainEqual({ event: "hub.access.management.failed", applied: false });
+      database.connection.exec("DROP TRIGGER browser_revoke_failure");
+      expect(await manage(hub, owner.issued, { operation: "revoke-browser-sessions" }))
+        .toEqual({ code: 200, result: { status: "ok" } });
+      expect(sessions.get(session.token, origin)).toBeNull();
+    } finally { database.close(); }
+  });
+
   it.each(["read-only", "read-write"] as const)("refuses every management operation from a %s grant even for hub and workspace admins", async scope => {
     const { hub, github } = await rig();
     const owner = person(hub, "1234", "owner", [[WORKSPACE, "admin"]]);
@@ -706,7 +771,7 @@ describe("authenticated hub access management", () => {
 
   it("uses sign-in's not-configured result for every management operation", async () => {
     const { hub } = await rig({ github: false });
-    for (const operation of ["list-devices", "revoke-device", "own-role", "list-member-usernames", "list-members", "change-role", "remove-member",
+    for (const operation of ["list-devices", "revoke-device", "revoke-browser-sessions", "own-role", "list-member-usernames", "list-members", "change-role", "remove-member",
       "promote-workspace", "resolve-account", "grant-member"]) {
       expect(await post(hub, { operation })).toEqual({ code: 503, result: { status: "not-configured" } });
     }

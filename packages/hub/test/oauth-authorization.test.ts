@@ -3,6 +3,8 @@ import { request } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import { settingsRoom, setWorkspaceName } from "@uberblick/schema";
 import { workspaceResourceUrl } from "@uberblick/schema/oauth";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
+import { importCredentialKey, mintRequestProof } from "@uberblick/schema/token";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { silentLogger } from "../src/log.js";
@@ -10,6 +12,7 @@ import { createHub, type Hub } from "../src/server.js";
 import { createTeamHub } from "../src/team.js";
 import * as metadataFetch from "../src/oauth-metadata-fetch.js";
 import { removeTempDatabases, tempDatabasePath, TEST_SECRET, WORKSPACE, OTHER_WORKSPACE } from "./helpers.js";
+import { issueCredential } from "./device-credentials.js";
 
 const ISSUER = "https://hub.example.com";
 const CLIENT_ID = "test-mcp-client";
@@ -323,6 +326,28 @@ describe("OAuth browser consent", () => {
     }
     expect(rows(r.path, "hub_oauth_pending_authorizations")).toHaveLength(1);
     expect(authorityRows(r.path)).toEqual({ grants: [], codes: [], credentials: [] });
+  });
+
+  it("refuses consent reads and approvals after the account's browser sessions are revoked", async () => {
+    const r = await rig();
+    const requestId = await pending(r);
+    expect(await consent(r, "read", { requestId })).toMatchObject({ code: 200 });
+    const credential = issueCredential(r.hub.credentials!, { principalId: r.principal.id,
+      deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
+    const action = { operation: "revoke-browser-sessions" } as const;
+    const token = await mintRequestProof(await importCredentialKey(credential.keyBytes), {
+      kid: credential.record.id, ...action, lifetimeSeconds: 60,
+    });
+    const revoked = await http(r.hub, "/auth/manage", { method: "POST", headers: { "Content-Type": "application/json" },
+      text: JSON.stringify({ protocolVersion: SYNC_PROTOCOL_VERSION, token, ...action }) });
+    expect(revoked.code).toBe(200);
+    expect(JSON.parse(revoked.text)).toEqual({ status: "ok" });
+    expect(await consent(r, "read", { requestId })).toEqual({ code: 401, result: { status: "signed-out" } });
+    expect(await consent(r, "submit", { requestId, decision: "approve", accessLevel: "read-write" }))
+      .toEqual({ code: 401, result: { status: "signed-out" } });
+    expect(rows(r.path, "hub_agent_grants")).toEqual([]);
+    expect(rows(r.path, "hub_oauth_authorization_codes")).toEqual([]);
+    expect(rows(r.path, "hub_oauth_pending_authorizations")).toHaveLength(1);
   });
 
   it("rejects tampering, invalid access and denial extras without consuming the request", async () => {

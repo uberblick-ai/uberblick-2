@@ -18,6 +18,7 @@ export class BrowserSessions {
   private readonly insert: StatementSync;
   private readonly select: StatementSync;
   private readonly remove: StatementSync;
+  private readonly removeAll: StatementSync;
   private readonly expire: StatementSync;
 
   constructor(database: HubDatabase, private readonly now: () => number = Date.now) {
@@ -36,6 +37,7 @@ export class BrowserSessions {
         ON principals.id = sessions.principal_id
       WHERE sessions.token_hash = $hash AND sessions.origin = $origin AND sessions.expires_at > $now`);
     this.remove = db.prepare("DELETE FROM hub_browser_sessions WHERE token_hash = $hash AND origin = $origin");
+    this.removeAll = db.prepare("DELETE FROM hub_browser_sessions WHERE principal_id = $principalId");
     this.expire = db.prepare("DELETE FROM hub_browser_sessions WHERE expires_at <= $now");
   }
 
@@ -59,6 +61,11 @@ export class BrowserSessions {
   /** A successful synchronous DELETE has committed before HTTP confirms sign-out. */
   revoke(token: string, origin: string): void {
     this.remove.run({ hash: this.hash(token), origin });
+  }
+
+  revokeAll(principalId: string): void {
+    // known limit: later GitHub sign-ins survive; revisit when account-wide sign-in fencing is required.
+    this.removeAll.run({ principalId });
   }
 
   private hash(token: string): string {

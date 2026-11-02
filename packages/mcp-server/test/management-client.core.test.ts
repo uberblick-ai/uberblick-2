@@ -203,6 +203,7 @@ describe("management replies exposed to a browser", () => {
     [{ operation: "list-members", workspaceId: WORKSPACE }, { status: "ok", members: [member] }],
     [{ operation: "list-devices" }, { status: "ok", devices: [device] }],
     [{ operation: "revoke-device", deviceId: DEVICE }, { status: "ok" }],
+    [{ operation: "revoke-browser-sessions" }, { status: "ok" }],
   ] satisfies [ManagementAction, Record<string, unknown>][]) ("projects public %j replies and removes extra secrets", (action, publicBody) => {
     const privateBody: Record<string, unknown> = structuredClone(publicBody);
     privateBody.key = login.credential.key;
@@ -215,6 +216,21 @@ describe("management replies exposed to a browser", () => {
     if (Array.isArray(privateBody.workspaces)) privateBody.workspaces = privateBody.workspaces.map(value => ({ ...value as Record<string, unknown>, documents: "private-document-content" }));
     if (typeof privateBody.member === "object") privateBody.member = { ...privateBody.member as Record<string, unknown>, key: "private-member-key" };
     expect(sanitizeManagementReply(action, { status: 200, body: privateBody }, login)).toEqual({ status: 200, body: publicBody });
+  });
+
+  it("requires a confirmed browser-session sign-out and retains the older-hub refusal", () => {
+    const action = { operation: "revoke-browser-sessions" } as const;
+    expect(sanitizeManagementReply(action, { status: 400, body: { status: "invalid-request", message: "private" } }))
+      .toEqual({ status: 400, body: { status: "invalid-request" } });
+    for (const reply of [
+      { status: 500, body: { status: "ok" } },
+      { status: 200, body: { status: "invalid-request" } },
+      { status: 500, body: { status: "closure-failed", applied: true } },
+      { status: 404, body: { status: "device-not-found" } },
+      { status: 200, body: { status: "signed-out" } },
+    ]) {
+      expect(() => sanitizeManagementReply(action, reply)).toThrow(ManagementResponseError);
+    }
   });
 
   it("keeps identities and roles out of the member usernames projection", () => {

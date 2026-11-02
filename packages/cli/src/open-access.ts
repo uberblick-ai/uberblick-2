@@ -66,6 +66,7 @@ export async function readAccessAction(request: IncomingMessage): Promise<Manage
   try {
     const action = readRequestAction(fields);
     if (action === null || action.operation === "renew-credential" || action.operation === "promote-workspace" ||
+      action.operation === "revoke-browser-sessions" ||
       Object.keys(fields).some(field => !Object.hasOwn(action, field))) return null;
     return action;
   } catch {

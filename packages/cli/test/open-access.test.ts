@@ -337,6 +337,7 @@ describe("ub open: live Access bridge", () => {
         { headers, body: { ...action, workspaceId: REBOUND_WORKSPACE }, status: 403 },
         { headers, body: { operation: "promote-workspace", workspaceId: WORKSPACE, attemptId: crypto.randomUUID() }, status: 400 },
         { headers, body: { operation: "renew-credential" }, status: 400 },
+        { headers, body: { operation: "revoke-browser-sessions" }, status: 400 },
         { headers, body: { ...action, hubUrl: "https://another-hub.example" }, status: 400 },
         { headers, body: { ...action, token: "private" }, status: 400 },
         { headers, raw: "{", status: 400 },

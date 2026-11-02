@@ -36,6 +36,7 @@ const ACTIONS: RequestAction[] = [
   renewal,
   { operation: "promote-workspace", workspaceId: WORKSPACE, attemptId: KID },
   { operation: "list-devices" },
+  { operation: "revoke-browser-sessions" },
   { operation: "own-hub-role" },
   { operation: "list-hub-admins" },
   { operation: "list-hub-admins", cursor: "WzFd" },
@@ -204,6 +205,7 @@ describe("credential request proofs", () => {
       expect(readRequestAction({ operation, cursor: "x".repeat(160) })).toEqual({ operation, cursor: "x".repeat(160) });
     }
     expect(readRequestAction({ operation: "own-hub-role", cursor: "WzFd" })).toBeNull();
+    expect(readRequestAction({ operation: "revoke-browser-sessions", cursor: "WzFd" })).toBeNull();
   });
 
   it("binds a default member grant to the same role as an explicit member grant", async () => {
