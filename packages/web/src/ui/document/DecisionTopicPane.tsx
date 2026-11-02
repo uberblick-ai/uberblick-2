@@ -13,6 +13,8 @@ import { formatDecisionTimestamp, useTimestampClock } from "../timestamps.js";
 import { TOPIC_STATES } from "./decision-state.js";
 import { Button } from "../shadcn/button.js";
 import { DialogTrigger } from "../shadcn/dialog.js";
+import { SettlementPill } from "./SettlementPill.js";
+import type { SettlementSource } from "../../collab/settle-decision.js";
 
 function navigateLink(event: MouseEvent<HTMLAnchorElement>, navigate: Navigate): void {
   if (!isPlainClick(event)) return;
@@ -118,10 +120,11 @@ function replacementRecord(topic: DecisionTopicResolution, selected: string): Di
   });
 }
 
-function AnswerHeader({ topic, record, topicPath, navigate, docLinks, onAlterDecision }: {
+function AnswerHeader({ topic, record, topicPath, navigate, docLinks, onAlterDecision, settlement, displayName, archived }: {
   topic: DecisionTopicResolution; record: DirectoryEntry; topicPath: string;
   navigate: Navigate; docLinks: DocLinkContext | null;
   onAlterDecision: (() => void) | null;
+  settlement: SettlementSource | null; displayName: string; archived: boolean;
 }): ReactElement {
   const now = useTimestampClock();
   const state = answerState(topic, record);
@@ -140,7 +143,10 @@ function AnswerHeader({ topic, record, topicPath, navigate, docLinks, onAlterDec
         </>}
       </div>}
     <div className="ub-decision-answer-header">
-      <AnswerPill state={state} />
+      {settlement === null ? <AnswerPill state={state} />
+        : <SettlementPill key={record.uuid} source={settlement} state={state} displayName={displayName} disabled={archived}>
+          <AnswerPill state={state} />
+        </SettlementPill>}
       {onAlterDecision !== null && <DialogTrigger asChild><Button size="sm" variant="outline" className="ms-auto" onClick={onAlterDecision}>Alter decision</Button></DialogTrigger>}
     </div>
   </>;
@@ -285,6 +291,8 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
       directoryConnection={directoryConnection} catalogConnection={editorProps.catalogConnection ?? null} archived={editorProps.archived} />}
     beforeAnswer={<>
       <AnswerHeader topic={topic} record={record} topicPath={topicPath} navigate={navigate} docLinks={docLinks}
+        settlement={connection === null || directoryConnection === null ? null : { source: connection, directory: directoryConnection, uuid: selected }}
+        displayName={editorProps.author} archived={topic.archived || editorProps.archived}
         onAlterDecision={!topic.archived && !editorProps.archived && topic.inForce?.uuid === selected &&
           connection !== null && parseRoom(connection.room).uuid === selected &&
           sourceStatus.writable && sourceStatus.synced && directoryStatus.writable && directoryStatus.synced
