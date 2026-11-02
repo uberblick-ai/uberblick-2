@@ -16,6 +16,7 @@ test.afterAll(async () => { await agent?.close(); agent = null; });
 const sources = [
   'flow v0\ncolumns main\nbox start "Start"\nend done "Done"\nstart --> done',
   'fan-out v0\nstep "Check"\noutcome "Approved" reason="Ready" destination="Start" tone="done"',
+  'sequence v0\nparticipant A "Agent" tone=agent\nparticipant H "Hub" tone=system\nsection "Claim"\nA --> H: Claim workspace\nH -.-> A: Challenge\nnote over A, H: Challenge expires soon\nalt Verified\nH -.-> A: Granted\nelse Expired\nH -.-> A: Retry\nend',
 ];
 const colour = (value: string): string => `color(srgb ${srgb(value).join(" ")} / ${alphaOf(value)})`;
 for (const appearance of ["light", "dark"] as const) {
@@ -23,7 +24,7 @@ for (const appearance of ["light", "dark"] as const) {
     if (agent === null) throw new Error("e2e: missing Ablauf appearance writer");
     const session = agent.open({ name: "ablauf-appearance-e2e" });
     const { uuid } = await session.call<{ uuid: string }>("create_doc", {
-      title: "Ablauf host paint", description: "Host palette and fonts for both drawings.",
+      title: "Ablauf host paint", description: "Host palette and fonts for flow, fan-out and sequence drawings.",
       blocks: sources.map(text => ({ type: "code", language: "ablauf", text })),
     });
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
@@ -35,7 +36,7 @@ for (const appearance of ["light", "dark"] as const) {
     expect(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(appearance === "light");
     await page.evaluate(() => document.fonts.ready);
     expect(await page.evaluate(() => document.fonts.check('13px "Geist Mono"'))).toBe(true);
-    await expect(page.locator(".ub-ablauf-drawing svg")).toHaveCount(2);
+    await expect(page.locator(".ub-ablauf-drawing svg")).toHaveCount(3);
     for (const svg of await page.locator(".ub-ablauf-drawing svg").all()) {
       const values = await svg.evaluate((element, properties) => properties.map(property => {
         const probe = document.createElementNS("http://www.w3.org/2000/svg", "rect");

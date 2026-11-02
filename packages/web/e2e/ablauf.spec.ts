@@ -14,6 +14,7 @@ const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
 const FLOW = 'flow v0\ncolumns main\n\n# Authored spacing stays literal.  \npill draft tone=agent "Draft"\nbox check tone=system "Check draft"\nend done tone=done "Done"\n\ndraft --> check\ncheck --> done : Accepted';
 const FANOUT = 'fan-out v0\nstep "Check approval"\n\noutcome "Approved" reason="A maintainer started it" destination="Start the run" tone="done"\noutcome "Outside input" reason="The input is uncleared" destination="Ask a maintainer" tone="stop"';
+const SEQUENCE = 'sequence v0\nparticipant A "Agent" tone=agent\nparticipant H "Hub" tone=system\nsection "Claim"\nA --> H: Claim workspace\nH -.-> A: Challenge\nnote over A, H: Challenge expires soon\nalt Verified\nH -.-> A: Granted\nelse Expired\nH -.-> A: Retry\nend';
 const WIDE = `flow v0\ncolumns ${Array.from({ length: 12 }, (_, index) => `c${index}`).join(" ")}\n${Array.from({ length: 12 }, (_, index) =>
   `box n${index} col=c${index}${index === 0 ? "" : " row=n0"} "Outcome ${index + 1}"`).join("\n")}\n${Array.from({ length: 11 }, (_, index) => `n${index} --> n${index + 1}`).join("\n")}`;
 const TALL = `flow v0\ncolumns main\n${Array.from({ length: 50 }, (_, index) => `box n${index} "Step ${index + 1}"`).join("\n")}\n${Array.from({ length: 49 }, (_, index) => `n${index} --> n${index + 1}`).join("\n")}`;
@@ -672,15 +673,15 @@ test("source diagnostics are visible and a render failure retains a stale last-g
   expect(await good.evaluate((element) => element.isConnected)).toBe(false);
 });
 
-test("editing one block leaves other flow and fan-out drawings connected and styled", async ({ browser }) => {
+test("editing one block leaves other flow, fan-out and sequence drawings connected and styled", async ({ browser }) => {
   const session = writer();
   const { uuid } = await session.call<{ uuid: string }>("create_doc", {
     title: "Independent Ablauf blocks", description: "Editing a block keeps the other drawings and their styles intact.",
-    blocks: [FLOW, FANOUT, FLOW.replace('"Draft"', '"Third draft"')].map((text) => ({ type: "code", language: "ablauf", text })),
+    blocks: [FLOW, FANOUT, SEQUENCE, FLOW.replace('"Draft"', '"Fourth draft"')].map((text) => ({ type: "code", language: "ablauf", text })),
   });
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
   await waitForDocumentDraw(page, session, uuid, { index: "all" });
-  await expect(drawing(page).locator("svg")).toHaveCount(3);
+  await expect(drawing(page).locator("svg")).toHaveCount(4);
   const styles = async (): Promise<{ font: string; fill: string }[]> => drawing(page).evaluateAll((hosts) => hosts.map((host) => {
     const text = host.shadowRoot?.querySelector("text.m");
     if (text === undefined || text === null) throw new Error("e2e: diagram style probe is missing");
@@ -689,14 +690,18 @@ test("editing one block leaves other flow and fan-out drawings connected and sty
   const before = await styles();
   const first = await drawing(page).first().locator("svg").elementHandle();
   const second = await drawing(page).nth(1).locator("svg").elementHandle();
-  if (first === null || second === null) throw new Error("e2e: independent drawings are missing");
-  const revised = FLOW.replace('"Draft"', '"Only third changes"');
-  await editSource(session, uuid, revised, 2);
-  await waitForDocumentDraw(page, session, uuid, { index: 2, source: revised });
-  await expect(drawing(page).last().locator("svg")).toContainText("Only third changes");
+  const third = await drawing(page).nth(2).locator("svg").elementHandle();
+  const fourth = await drawing(page).last().locator("svg").elementHandle();
+  if (first === null || second === null || third === null || fourth === null) throw new Error("e2e: independent drawings are missing");
+  const revised = FLOW.replace('"Draft"', '"Only fourth changes"');
+  await editSource(session, uuid, revised, 3);
+  await waitForDocumentDraw(page, session, uuid, { index: 3, source: revised });
+  await expect(drawing(page).last().locator("svg")).toContainText("Only fourth changes");
   expect(await first.evaluate((element) => element.isConnected)).toBe(true);
   expect(await second.evaluate((element) => element.isConnected)).toBe(true);
-  expect((await styles()).slice(0, 2)).toEqual(before.slice(0, 2));
+  expect(await third.evaluate((element) => element.isConnected)).toBe(true);
+  expect(await fourth.evaluate((element) => element.isConnected)).toBe(false);
+  expect((await styles()).slice(0, 3)).toEqual(before.slice(0, 3));
 });
 
 test("importing a drawing with a hostile label executes nothing and raises no CSP violation", { tag: "@webkit" }, async ({ browser }) => {

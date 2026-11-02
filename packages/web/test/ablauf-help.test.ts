@@ -5,12 +5,12 @@ import { render } from "@uberblick/ablauf";
 import { expect, it } from "vitest";
 import { HelpCatalog } from "../../mcp-server/src/help.js";
 
-it("renders the published flow and fan-out help examples without diagnostics", () => {
+it("renders the published flow, fan-out and sequence help examples without diagnostics", () => {
   const text = new HelpCatalog().read("ablauf").text;
   const examples = [...text.matchAll(/^```ablauf\n([\s\S]*?)\n```/gm)]
     .map((match) => match[1]!);
   expect(examples.map((source) => source.split("\n")[0])).toEqual(
-    expect.arrayContaining(["flow v0", "fan-out v0"]),
+    expect.arrayContaining(["flow v0", "fan-out v0", "sequence v0"]),
   );
   for (const source of examples) {
     const result = render(source);
