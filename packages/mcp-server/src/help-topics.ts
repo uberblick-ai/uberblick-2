@@ -226,7 +226,7 @@ An embed is visual content the web draws from data stored in the document: a flo
 
 | Embed | Written as | Data |
 | --- | --- | --- |
-| Ablauf | \`ablauf\` fence | flow or fan-out source; a flow may end with one or more \`play\` sections that readers play step by step; see [Ablauf diagrams](uberblick://help/ablauf) and its primer |
+| Ablauf | \`ablauf\` fence | flow, fan-out or sequence source; a flow may end with one or more \`play\` sections that readers play step by step; see [Ablauf diagrams](uberblick://help/ablauf) and its primer |
 | Wireframe | \`wireframe\` fence | wireframe-md source; see [Wireframes](uberblick://help/wireframe) |
 | Chart or data table | \`chart\` fence | JSON mapping to the document's structured data; see [Structured data](uberblick://help/data) |
 | Figma | \`:::figma\` container | link, title, height and caption |
@@ -449,6 +449,58 @@ matching destinations. Before the step, choose \`style branches\` (default:
 step left, branches to outcomes, arrows to destinations with reasons below)
 or \`style ladder\` (step above, rail of dots, reasons below outcomes,
 destinations right-aligned, no arrows).
+
+## Sequence
+
+Start with \`sequence v0\`. Declare participants before messages, in column
+order, with unique one-token ids, optional flow-quoted titles (no escapes;
+backslashes are literal) and optional flow tones, defaulting to \`ink\`.
+Requests use \`-->\` (solid, filled head); responses use \`-.->\` (dashed,
+open head). Mermaid's \`->>\` and \`-->>\` are errors. Labels are everything
+after the first colon, including quotes. Matching endpoints make a self-message.
+Indentation, blank lines and whole-line comments are allowed. Messages keep
+source order and are numbered automatically; annotations have no numbers.
+
+\`\`\`ablauf
+sequence v0
+participant Creator
+participant Studio tone=system
+participant RSSFeed "RSS feed" tone=system
+section "Sign in"
+Creator --> Studio: Sign in, no show yet
+Studio -.-> Creator: Claim existing, Add via RSS, Start from scratch
+note over Studio: Session expires after 15 minutes
+alt Session exists
+Studio --> Studio: Check session
+else New session
+Studio -.-> Creator: Sign in again
+end
+\`\`\`
+
+Use UML groups \`alt LABEL\`, \`opt LABEL\`, \`loop LABEL\` or \`group LABEL\`,
+closed by bare \`end\`; groups may nest. Only the current \`alt\` accepts
+\`else LABEL\`. Labels require text and take the unquoted remainder literally,
+including arrows, colons, quotes and backslashes. Groups span touched lanes
+(all lanes when empty); only the outermost two depths add soft fills.
+Headings and branch labels wrap.
+
+Use \`note over A: text\` or \`note over A, B: text\` for lifeline placement.
+Ids must be distinct and already declared; spaces around commas and either
+order are fine. The first colon separates ids from non-blank literal note text.
+Notes wrap in their own rounded, accented row. Use \`section "Title"\` for a
+phase until the next section or end of source. Titles are non-blank flow strings
+with no trailing text. Sections cannot occur inside groups.
+
+The exact ids \`alt\`, \`opt\`, \`loop\`, \`group\`, \`else\`, \`end\`, \`note\` and
+\`section\` are reserved. At line start, these keywords followed by whitespace
+or end of line take precedence over messages; \`loopWorker\` is still a valid id.
+Invalid annotations diagnose on their lines, remain visible as rejected source
+and leave the group/phase state unchanged. Unclosed groups draw to the end of
+source and diagnose their opening lines.
+
+In Uberblick, the drawing fits the column without sideways scrolling and all
+sequence text uses Geist Mono. Sequence diagrams take no \`play\` sections;
+each \`play\` line reports \`sequence playback is not supported yet\`.
 
 [Full Ablauf authoring primer](https://github.com/uberblick-ai/ablauf/blob/v0.3.0/spike/PRIMER.md)`;
 
@@ -761,7 +813,7 @@ export const conceptTopics: readonly HelpTopic[] = [
   {
     id: "ablauf",
     title: "Ablauf diagrams",
-    description: "Reading, writing and editing flow and fan-out diagrams: placement, nodes, edges, legends and editing recipes.",
+    description: "Reading, writing and editing flow, fan-out and sequence diagrams: participants, messages, placement, nodes, edges, legends, flow playback and editing recipes.",
     text: ablauf,
   },
   {

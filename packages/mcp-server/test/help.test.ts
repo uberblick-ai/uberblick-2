@@ -145,8 +145,12 @@ it("points Markdown authors to Ablauf help, its play sections and the diagnostic
   expect(markdown).toContain("[Ablauf diagrams](uberblick://help/ablauf)");
   expect(markdown).not.toContain("github.com/uberblick-ai/ablauf");
   expect(markdown).toContain("a flow may end with one or more `play` sections");
+  expect(markdown).toContain("flow, fan-out or sequence source");
+  expect(help.read("ablauf").description).toContain("flow, fan-out and sequence diagrams");
   const ablauf = help.read("ablauf").text.replace(/\s+/g, " ");
   expect(ablauf).toContain("## Flow playback");
+  expect(ablauf).toContain("## Sequence");
+  expect(ablauf).toContain("Sequence diagrams take no `play` sections");
   expect(ablauf).toContain("answers with a `drawing` summary for it");
   expect(ablauf).toContain("The check never refuses the write.");
 });
