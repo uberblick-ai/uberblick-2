@@ -367,6 +367,60 @@ describe("decision record content permissions", () => {
     peer.destroy();
   });
 
+  it.each(["one peer transaction", "merged offline writes"] as const)("keeps remote answer content received with settlement in %s", async (delivery) => {
+    const ydoc = stage("open");
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+    ydoc.on("update", (update: Uint8Array, origin: unknown) => {
+      if (origin !== "peer") Y.applyUpdate(peer, update, "local");
+    });
+    if (delivery === "one peer transaction") peer.on("update", (update: Uint8Array, origin: unknown) => {
+      if (origin !== "local") Y.applyUpdate(ydoc, update, "peer");
+    });
+    const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
+    const host = await openApp();
+    const editor = binding.mock.results[0]?.value.editor;
+    if (editor == null) throw new Error("fixture editor did not bind");
+    const prose = editorElement(host);
+    const pane = host.querySelector<HTMLElement>(".ub-document-pane")!;
+    pane.scrollTop = 173;
+    act(() => editor.commands.setTextSelection({ from: 5, to: 16 }));
+    expect(editor.isEditable).toBe(true);
+
+    const retained = (): void => {
+      expect(getBlocks(ydoc).map((block) => block.text)).toEqual([PROSE, "Remote second"]);
+      expect(getBlocks(peer).map((block) => block.text)).toEqual([PROSE, "Remote second"]);
+      expect(getMeta(ydoc).status).toBe("decided");
+      expect(getMeta(peer).status).toBe("decided");
+    };
+    act(() => {
+      if (delivery === "one peer transaction") peer.transact(() => {
+        appendBlock(peer, { type: "paragraph", text: "Remote second" });
+        setStatus(peer, "decided");
+      });
+      else {
+        appendBlock(peer, { type: "paragraph", text: "Remote second" });
+        setStatus(peer, "decided");
+        Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(ydoc)), "peer");
+      }
+      expect(editor.isEditable).toBe(false);
+      retained();
+      editor.view.dispatch(editor.state.tr.insertText("Refused before render", 5, 16));
+      retained();
+      expect(editor.state.selection.from).toBe(5);
+      expect(editor.state.selection.to).toBe(16);
+    });
+
+    expect(binding).toHaveBeenCalledOnce();
+    expect(editorElement(host)).toBe(prose);
+    expect(prose.getAttribute("contenteditable")).toBe("false");
+    expect(prose.textContent).toBe(`${PROSE}Remote second`);
+    expect(pane.scrollTop).toBe(173);
+    expect(host.querySelector(".ub-decision-answer-state")?.textContent).toBe("In force");
+    retained();
+    peer.destroy();
+  });
+
   it.each([
     { roomName: "record", patch: { writable: false } },
     { roomName: "record", patch: { synced: false } },

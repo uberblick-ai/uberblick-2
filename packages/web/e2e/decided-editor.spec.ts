@@ -6,6 +6,7 @@
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
+import { editBlock, getBlocks, getMeta, setStatus } from "@uberblick/schema";
 import { activateControl, closeIfOpen, editor, setupHarness } from "./app-helpers.js";
 import { placeCaretIn } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
@@ -294,8 +295,8 @@ test("an open answer edits and saves before remote settlement locks the same vie
     approved = saved.blocks;
   });
 
-  // Leave the native range and its formatting toolbar open when metadata arrives
-  // through the hub. The view retains that range and the pane's position.
+  // Leave the native range and toolbar open when answer content and settlement
+  // arrive together through the hub. Keep the directory open until receipt.
   await placeCaretIn(paragraph, { touch });
   for (let count = 0; count < 9; count += 1) await page.keyboard.press("Shift+ArrowLeft");
   await expect(composer(page).getByRole("button", { name: "Bold", exact: true })).toBeVisible();
@@ -320,8 +321,21 @@ test("an open answer edits and saves before remote settlement locks the same vie
   expect(selection.native?.text).toBe("ded here.");
   const peer = await legacyDecisionPeer(harness(), uuid);
   peers.push(peer);
-  peer.decide("decided");
+  const remoteCode = getBlocks(peer.doc).find(block => block.type === "code");
+  if (remoteCode === undefined) throw new Error("e2e: missing open answer code");
+  expect(remoteCode.text).toBe(source);
+  const approvedSource = `${source}\n// approved remotely`;
+  peer.doc.transact(() => {
+    editBlock(peer.doc, remoteCode.id, remoteCode.text, approvedSource, { rev: remoteCode.rev });
+    setStatus(peer.doc, "decided");
+  });
+  const approvedCode = getBlocks(peer.doc).find(block => block.id === remoteCode.id);
+  if (approvedCode === undefined) throw new Error("e2e: settled answer lost its code");
+  expect(approvedCode.rev).not.toBe(remoteCode.rev);
+  approved = approved.map(block => block.type === "code"
+    ? { ...block, text: approvedSource, rev: approvedCode.rev } : block);
   await expect(view).toHaveAttribute("contenteditable", "false");
+  await expect(code).toHaveText(approvedSource);
   await expect(page.locator(".ub-decision-answer-header .ub-decision-answer-state")).toHaveText("In force");
   await onlyComment(page);
   expect(await originalView.evaluate((element) => element === document.querySelector(".ub-editor .ProseMirror"))).toBe(true);
@@ -385,7 +399,12 @@ test("an open answer edits and saves before remote settlement locks the same vie
     expect(await originalView.evaluate((element) => element === document.querySelector(".ub-editor .ProseMirror"))).toBe(true);
     await expect(page.getByRole("button", { name: "Insert block below", includeHidden: true })).toHaveCount(0);
   }
+  const peerTagsBeforeArrival = getMeta(peer.doc).tags;
   await proveMcpArrival(page, writer, uuid, { path: "upstream" });
+  await expect.poll(() => getMeta(peer.doc).tags).not.toEqual(peerTagsBeforeArrival);
+  expect(getBlocks(peer.doc).find(block => block.id === remoteCode.id)).toMatchObject({
+    text: approvedSource, rev: approvedCode.rev,
+  });
   await expectMcp(async () => {
     const saved = await writer.call<SavedAnswer>("get_doc", { uuid });
     expect(saved.blocks).toEqual(approved);

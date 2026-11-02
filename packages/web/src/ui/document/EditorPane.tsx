@@ -735,10 +735,11 @@ const BoundEditor = memo(function BoundEditor({
       const editable = readCanEdit();
       if (liveEditor.isEditable !== editable) liveEditor.setEditable(editable);
     };
-    // Run before y-prosemirror sees metadata in the same remote transaction.
+    // setEditable updates the view and can write its content back to Yjs.
+    // Let the sync observer render incoming blocks before updating that view.
     // known limit: edits sent before settlement is received can still merge; revisit when the hub enforces settled answers.
-    connection.ydoc.on("beforeObserverCalls", refreshEditable);
-    directoryConnection?.ydoc.on("beforeObserverCalls", refreshEditable);
+    connection.ydoc.on("afterTransaction", refreshEditable);
+    directoryConnection?.ydoc.on("afterTransaction", refreshEditable);
     // bindGuardedEditor registers its synchronous guard before binding. A
     // stray root or link conflict arriving later unbinds the editor without
     // deleting it, then useForeignBlocks displays the fallback. Other foreign
@@ -845,8 +846,8 @@ const BoundEditor = memo(function BoundEditor({
       setEditor(null);
       stopSourceStatus();
       stopDirectoryStatus?.();
-      connection.ydoc.off("beforeObserverCalls", refreshEditable);
-      directoryConnection?.ydoc.off("beforeObserverCalls", refreshEditable);
+      connection.ydoc.off("afterTransaction", refreshEditable);
+      directoryConnection?.ydoc.off("afterTransaction", refreshEditable);
       binding.destroy();
     };
   }, [connection, directoryConnection, catalogConnection, docLinks, onSelectThread, bindingEpoch]);
@@ -861,9 +862,8 @@ const BoundEditor = memo(function BoundEditor({
     if (editor === null || editor.isDestroyed) return;
     editor.setEditable(!contentReadOnly && canEditAnswer(connection, directoryConnection, archived || historyActive, decisionView));
     if (!archived && !historyActive && writable) {
-      // A repair suppressed while the link was gone gets another plugin pass
-      // as soon as the admitted room is writable again. Automatic block-id
-      // maintenance remains independent of decision content permissions.
+      // Retry repairs suppressed while the link was gone. Content permissions
+      // still gate automatic block-id maintenance.
       editor.view.dispatch(editor.state.tr.setMeta("uberblick:writable", true));
     }
   }, [editor, connection, directoryConnection, archived, contentReadOnly, historyActive, decisionView, writable]);
@@ -1158,7 +1158,7 @@ export function EditorPane({
               connection={connection}
               catalogConnection={catalogConnection}
               canCleanupTags={canCleanupTags}
-              summary={describeForeignBlocks(foreign, { repairable: !contentReadOnly, decision })}
+              summary={describeForeignBlocks(foreign, { repairable: !(archived || historyActive), decision })}
               contentReadOnly={contentReadOnly || decision}
               writable={writable}
               docLinks={docLinks}
