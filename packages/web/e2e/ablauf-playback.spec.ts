@@ -221,7 +221,9 @@ test("Under reduced motion nothing starts on its own, and touch Play mounts the 
 for (const appearance of ["light", "dark"] as const) {
   test(`read-only iPad playback follows the pinned ${appearance} palette over the opposite system preference`, { tag: "@webkit-touch" }, async ({ browser }) => {
     const session = writer();
-    const source = PLAYED.replace('\n\nplay "Quick"', '\n  step draft\n  step check\n  step done\n\nplay "Quick"');
+    const source = PLAYED.replace('\nend done', '\nbox approve "Approve"\nend done')
+      .replace("check --> done : Accepted", "check --> approve : Accepted\napprove --> done")
+      .replace("  step done", "  step approve\n  step done");
     const { uuid } = await session.call<{ uuid: string }>("create_doc", {
       title: `Read-only played Ablauf (${appearance})`, description: "A playable flow in an archived document.",
       blocks: [{ type: "code", language: "ablauf", text: source }],
@@ -237,6 +239,7 @@ for (const appearance of ["light", "dark"] as const) {
     await expect(page.locator("html")).toHaveAttribute("data-theme", appearance);
     await expect(page.locator(".ProseMirror")).toHaveAttribute("contenteditable", "false");
     const block = blocks(page).first();
+    await expect(block.locator(".ub-ablauf-diagnostics")).toBeHidden();
     // In view on load, so it starts on its own; the controls take the touch Play's place.
     await expect(toggle(block)).toHaveText("Pause");
     await expect(block.locator(".ub-ablauf-touch-play")).toBeHidden();
@@ -259,8 +262,8 @@ for (const appearance of ["light", "dark"] as const) {
         targets,
       };
     });
-    // Both scenario tabs, Previous/Play/Next and six step targets that need to wrap.
-    expect(layout.targets).toHaveLength(11);
+    // Both scenario tabs, Previous/Play/Next and four step targets that need to wrap.
+    expect(layout.targets).toHaveLength(9);
     expect(layout.left).toBeGreaterThanOrEqual(0);
     expect(layout.right).toBeLessThanOrEqual(layout.viewportWidth);
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width + 1);

@@ -12,7 +12,7 @@ const NEAR_VIEW = "200px 0px";
 const HOST_STYLE = ".ab-playback.ab-playback.ab-playback { color-scheme: inherit; background: transparent; font-family: var(--font-sans); }"
   + " .ab-playback button { font-family: var(--font-mono); }"
   + " @media (any-pointer: coarse) {"
-  + " .ab-playback.ab-playback button, .ab-playback.ab-playback .abp-segment { min-width: 44px; min-height: 44px; }"
+  + " .ab-playback button, .ab-playback.ab-playback .abp-segment { min-width: 44px; min-height: 44px; }"
   + " .ab-playback .abp-actions, .ab-playback .abp-segments { flex-wrap: wrap; }"
   + " }";
 
