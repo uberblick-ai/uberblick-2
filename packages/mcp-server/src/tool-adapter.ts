@@ -3,6 +3,7 @@ import type { Tool } from "./tool-table.js";
 import type { OperationRequest } from "./tools/operation.js";
 import type { ToolContext } from "./tools/context.js";
 import { toFailure } from "./failures.js";
+import { writeAcknowledgement } from "./write-acknowledgement.js";
 
 /**
  * Both wire answers carry the same JSON; failures stay text-only. The text copy
@@ -31,24 +32,42 @@ function mcpPayload(payload: object): object {
  * Workspace writes stay synchronous after opening settle so another await
  * cannot interleave writes to the same Y.Doc. Hub revision requests may await
  * detached reads or hub-only naming, without mutating a local Y.Doc. handler-invariants checks these boundaries;
- * static get_help never settles.
+ * static get_help never settles. Hosted replies may await acknowledgement once
+ * the complete synchronous write phase has finished.
  */
 export function guarded(
   tool: Pick<Tool, "name" | "output" | "operation" | "writes">,
   context: ToolContext,
+  waitForWriteAcknowledgement = false,
 ): (args: Record<string, unknown>, extra: Pick<OperationRequest, "signal" | "_meta">) => Promise<CallToolResult> {
   return async (args, extra) => {
     try {
-      const payload = mcpPayload(await context.work.run(() => tool.operation(context, args, {
-        signal: extra.signal,
-        ...(extra._meta === undefined ? {} : { _meta: extra._meta }),
-        ...(extra._meta?.progressToken === undefined ? {} : { progressToken: extra._meta.progressToken }),
-      })));
-      const parsed = tool.output.safeParse(payload);
-      if (!parsed.success) {
-        throw new Error(`Output validation failed for ${tool.name}: ${parsed.error.message}`);
-      }
-      return toolResult(payload);
+      return await context.work.run(async () => {
+        const acknowledgement = waitForWriteAcknowledgement && tool.writes !== null
+          ? writeAcknowledgement(context) : null;
+        let payload: object;
+        let isError = false;
+        try {
+          payload = await tool.operation(acknowledgement?.context ?? context, args, {
+            signal: extra.signal,
+            ...(extra._meta === undefined ? {} : { _meta: extra._meta }),
+            ...(extra._meta?.progressToken === undefined ? {} : { progressToken: extra._meta.progressToken }),
+          });
+        } catch (error) {
+          const failure = toFailure(tool, error);
+          payload = failure.payload;
+          isError = failure.isError;
+        }
+        if (acknowledgement !== null) payload = await acknowledgement.finish(payload);
+        payload = mcpPayload(payload);
+        if (!isError) {
+          const parsed = tool.output.safeParse(payload);
+          if (!parsed.success) {
+            throw new Error(`Output validation failed for ${tool.name}: ${parsed.error.message}`);
+          }
+        }
+        return toolResult(payload, isError);
+      });
     } catch (error) {
       const failure = toFailure(tool, error);
       return toolResult(mcpPayload(failure.payload), failure.isError);

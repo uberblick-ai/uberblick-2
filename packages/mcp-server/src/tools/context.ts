@@ -542,6 +542,7 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
     replicas,
     help,
     work,
+    runOperation<T>(body: () => T): T { return body(); },
     requireStub,
     requireKnownDoc,
     requireNotDeleted,

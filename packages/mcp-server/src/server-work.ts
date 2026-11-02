@@ -11,6 +11,10 @@ export class ServerWork {
   private active = 0;
   private readonly drained: (() => void)[] = [];
 
+  get activeCalls(): number {
+    return this.active;
+  }
+
   assertOpen(): void {
     if (this.stopping) throw new ServerShuttingDownError();
   }

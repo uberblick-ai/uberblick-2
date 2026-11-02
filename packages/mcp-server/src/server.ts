@@ -40,6 +40,9 @@ export interface UberblickMcpSession {
   readonly server: McpServer;
   readonly replicas: Replicas;
   readonly store: MirrorStore;
+  readonly activeCalls: number;
+  /** Await this session's admitted work without closing its transport. */
+  drain(): Promise<void>;
   /** Attach a transport and start serving. */
   connect(transport: Transport): Promise<void>;
   /** Close this session's transport and drain its admitted work. */
@@ -58,6 +61,8 @@ export interface McpRuntimeOptions {
   credentialProvider?: CredentialProvider;
   /** Fix the name on this runtime's cursors and MCP update surface. */
   agentName?: string;
+  /** Hosted writes await bounded hub acknowledgement before answering. */
+  waitForWriteAcknowledgement?: boolean;
 }
 
 export interface UberblickMcpRuntime {
@@ -108,6 +113,7 @@ function openRuntime(
           return seeding;
         },
         initializedClientIdentity,
+        waitForWriteAcknowledgement: options.waitForWriteAcknowledgement === true,
         released(session) {
           sessions.delete(session);
         },
@@ -142,6 +148,7 @@ function openSession(
   runtime: {
     seed(): Promise<void>;
     initializedClientIdentity: boolean;
+    waitForWriteAcknowledgement: boolean;
     released(session: UberblickMcpSession): void;
   },
 ): UberblickMcpSession {
@@ -161,7 +168,7 @@ function openSession(
       replicas.setWriteSurface({ kind: "mcp", name: mcpSurfaceName(server.server.getClientVersion()) });
     };
   }
-  const help = registerTools(server, replicas, work);
+  const help = registerTools(server, replicas, work, runtime.waitForWriteAcknowledgement);
   registerHelpResources(server, help, work);
   let closed = false;
   let closing: Promise<void> | null = null;
@@ -170,6 +177,8 @@ function openSession(
     server,
     replicas,
     store,
+    get activeCalls() { return work.activeCalls; },
+    drain() { return work.drain(); },
     async connect(transport) {
       if (closed) return;
       await work.run(async () => {
@@ -215,6 +224,7 @@ export function createMcpServer(
   const session = runtime.openSession();
   return {
     ...session,
+    get activeCalls() { return session.activeCalls; },
     close(deadline) {
       return runtime.close(deadline);
     },

@@ -60,7 +60,7 @@ export function operation<Args, Payload extends object, W extends Writes>(
 ): ToolOperation<Args, Payload, W> {
   const run = async (context: ToolContext, args: Args, request: OperationRequest): Promise<Payload> => {
     if (gates.settle) await context.replicas.settle();
-    return body(context, args, request);
+    return context.runOperation(() => body(context, args, request));
   };
   return Object.assign(run, { writes: gates.writes });
 }
