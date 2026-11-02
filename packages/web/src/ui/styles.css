@@ -2652,6 +2652,16 @@ h6.ub-heading {
 .ub-alter-hint { flex: 1; min-width: 12rem; color: var(--muted-foreground); font-size: var(--type-caption-size); line-height: var(--type-caption-leading); }
 
 /* State pills are tinted grounds without brand amber; marks match the Decisions block. */
+.ub-decision-settle-trigger {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: var(--history-target);
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  background: transparent;
+}
+
 .ub-decision-answer-state {
   --pill-ground: light-dark(oklch(0.92 0 0), oklch(1 0 0 / 10%));
   display: inline-flex;

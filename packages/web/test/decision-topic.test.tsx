@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
-import type { MouseEvent } from "react";
+import { useEffect, type MouseEvent } from "react";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -38,6 +38,8 @@ import { act, renderSettled } from "./react-render.js";
 import { decisionRecordPath, docPath } from "../src/ui/route.js";
 import { DecisionTopicPane } from "../src/ui/document/DecisionTopicPane.js";
 import { createDocLinkContext } from "../src/editor/doc-links.js";
+import { watchDocumentStub } from "../src/collab/directory-stub.js";
+import { useDirectory } from "../src/ui/hooks.js";
 import { toast, type Action, type ExternalToast } from "sonner";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
@@ -67,23 +69,32 @@ const LIVE: RoomStatus = {
 };
 
 const rooms = new Map<string, RoomConnection>();
+const statusListeners = new Map<string, Set<(status: RoomStatus) => void>>();
 const acquired: string[] = [];
 const released: string[] = [];
 function room(name: string): RoomConnection {
   const existing = rooms.get(name);
   if (existing !== undefined) return existing;
+  const listeners = new Set<(status: RoomStatus) => void>();
+  statusListeners.set(name, listeners);
   const connection = {
     room: name,
     ydoc: new Y.Doc(),
     provider: { awareness: null },
     status: LIVE,
     onStatusChange: (listener: (status: RoomStatus) => void) => {
-      listener(LIVE);
-      return () => {};
+      listeners.add(listener);
+      listener(connection.status);
+      return () => listeners.delete(listener);
     },
   } as unknown as RoomConnection;
   rooms.set(name, connection);
   return connection;
+}
+
+function updateStatus(connection: RoomConnection, patch: Partial<RoomStatus>): void {
+  connection.status = { ...connection.status, ...patch };
+  for (const listener of statusListeners.get(connection.room) ?? []) listener(connection.status);
 }
 
 vi.mock("../src/collab/rooms.js", async (importOriginal) => ({
@@ -110,6 +121,7 @@ beforeEach(() => {
 
 afterEach(() => {
   rooms.clear();
+  statusListeners.clear();
   acquired.length = 0;
   released.length = 0;
   Reflect.deleteProperty(navigator, "clipboard");
@@ -195,6 +207,42 @@ function story(): void {
 async function open(path = docPath(WORKSPACE, FIRST)) {
   window.history.replaceState(null, "", path);
   return renderSettled(<App />);
+}
+
+function TopicFixture({ selected, author }: { selected: string; author: string }) {
+  const source = room(roomForDoc(WORKSPACE, selected));
+  const workspaceDirectory = room(directoryRoom(WORKSPACE));
+  const entries = useDirectory(workspaceDirectory, true);
+  useEffect(() => watchDocumentStub(source.ydoc, workspaceDirectory.ydoc, selected, {
+    writable: () => workspaceDirectory.status.writable,
+    synchronized: () => workspaceDirectory.status.synced,
+    subscribe: (listener) => workspaceDirectory.onStatusChange(listener),
+  }), [source, workspaceDirectory, selected]);
+  return <DecisionTopicPane
+    topic={resolveDecisionTopics(entries).find((topic) => topic.topic === FIRST) ?? null}
+    selected={selected} linkedRecord={null} explicit navigate={() => {}}
+    directoryConnection={workspaceDirectory} connection={source} segment={WORKSPACE} presence={[]}
+    author={author} archived={false} docLinks={null} actions={{ onRestore: null }} onSelectThread={() => {}}
+  />;
+}
+
+async function renderTopic(selected = FIRST, author = "Reader") {
+  return renderSettled(<TopicFixture selected={selected} author={author} />);
+}
+
+async function openSettlement(host: HTMLElement, state = "Under review"): Promise<void> {
+  await act(async () => {
+    const pill = within(answerHeader(host)).getByRole("button", { name: state });
+    pill.focus();
+    fireEvent.keyDown(pill, { key: "Enter" });
+  });
+}
+
+async function chooseSettlement(action: "Decide" | "Reject" | "Withdraw"): Promise<HTMLElement> {
+  await act(async () => screen.getByRole("menuitem", { name: action }).click());
+  return screen.getByRole("alertdialog", {
+    name: action === "Withdraw" ? "Withdraw this proposal?" : `${action} this answer?`,
+  });
 }
 
 function timeline(host: HTMLElement): HTMLElement {
@@ -374,7 +422,10 @@ describe("decision topic navigation and history", () => {
     expect(selection(host)).toBe(selectedId);
     expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("true");
     expectAnswerState(host, scenario === "conflict" ? "Open proposal" : scenario === "earlier open record" ? "Not yet decided" : "Under review");
-    if (scenario === "conflict") expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("Nothing is in force.");
+    if (scenario === "conflict") {
+      expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("Nothing is in force.");
+      expect(within(answerHeader(host)).queryByRole("button", { name: "Open proposal" })).toBeNull();
+    }
     const title = within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
     expect(title.readOnly).toBe(true);
     const originalTitle = getMeta(room(roomForDoc(WORKSPACE, FIRST)).ydoc).title;
@@ -669,9 +720,11 @@ describe("decision topic navigation and history", () => {
       expect(row.getAttribute("data-in-force")).toBe(String(uuid === CURRENT));
       expect(row.getAttribute("data-rail-green")).toBe(String(green));
       expect(row.querySelector(".ub-decision-answer-state")?.textContent).toBe(label);
+      expect(within(row).queryByRole("button")).toBeNull();
       expect(row.querySelector(".ub-decision-event")?.textContent ?? null).toBe(event);
       await choose(host, uuid);
       expectAnswerState(host, label);
+      expect(within(answerHeader(host)).queryByRole("button", { name: label }) !== null).toBe(uuid === OPEN);
       if (uuid === REJECTED) {
         expect(host.querySelector(".ub-decision-rejection")?.textContent).toBe("Rejection reason: It loses compatibility.");
       }
@@ -955,6 +1008,7 @@ describe("decision topic navigation and history", () => {
     const ydoc = record(FIRST, "Initial stance", "decided", "An agent's initial answer.", { agent: true, discussion: RFC });
     const host = (await open()).container;
     expectAnswerState(host, "Agent stance");
+    expect(within(answerHeader(host)).queryByRole("button", { name: "Agent stance" })).toBeNull();
     expect(item(host, FIRST).querySelector(".ub-decision-answer-state")?.textContent).toBe("Agent stance");
     expect(item(host, FIRST).querySelector(".ub-decision-event")).toBeNull();
     expect(host.querySelector(".ub-decision-rfc")?.textContent).toBe("RFC Stance discussion");
@@ -999,6 +1053,7 @@ describe("decision topic navigation and history", () => {
     const host = (await open(docPath(WORKSPACE, OPEN))).container;
     expect(host.querySelector(".ub-archived-banner")).not.toBeNull();
     expectAnswerState(host, "Open proposal");
+    expect(within(answerHeader(host)).queryByRole("button", { name: "Open proposal" })).toBeNull();
     expect(host.querySelector(".ub-decision-notice")).toBeNull();
     expect(resolveDecisionTopics(directory())[0]?.pending).toHaveLength(0);
     await act(async () => within(host).getByRole("button", { name: "Restore" }).click());
@@ -1095,6 +1150,7 @@ describe("decision topic navigation and history", () => {
     tombstoneDirectoryEntry(directory(), CURRENT);
     const group = createGroup(sidebar, "Stale topic pins");
     const host = (await open(decisionRecordPath(WORKSPACE, FIRST, selected))).container;
+    expect(answerHeader(host).querySelector(".ub-decision-answer-state")?.closest("button")).toBeNull();
     act(() => {
       pinDoc(sidebar, group, FIRST);
       pinDoc(sidebar, group, REJECTED);
@@ -1218,6 +1274,139 @@ describe("decision topic navigation and history", () => {
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, RFC));
     expect(getMeta(room(roomForDoc(WORKSPACE, FIRST)).ydoc).discussion).toBe(RFC);
     expect(getDirectoryEntry(directory(), FIRST)?.discussion).toBe(RFC);
+  });
+});
+
+describe("settling the selected decision answer", () => {
+  it("confirms a first answer from its header while the history pill stays a label", async () => {
+    const source = record(FIRST, "An open question", "open", "The proposed answer.");
+    const host = (await renderTopic()).container;
+    expect(within(item(host, FIRST)).queryByRole("button")).toBeNull();
+    await openSettlement(host, "Not yet decided");
+    expect(screen.queryByRole("menuitem", { name: "Withdraw" })).toBeNull();
+    let dialog = await chooseSettlement("Decide");
+    expect(getMeta(source).status).toBe("open");
+    await act(async () => within(dialog).getByRole("button", { name: "Cancel" }).click());
+    expect(getMeta(source).status).toBe("open");
+    await openSettlement(host, "Not yet decided");
+    dialog = await chooseSettlement("Decide");
+    await act(async () => within(dialog).getByRole("button", { name: "Decide" }).click());
+    expect(getMeta(source).status).toBe("decided");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expectAnswerState(host, "In force");
+    expect(within(answerHeader(host)).queryByRole("button", { name: "In force" })).toBeNull();
+    expect(item(host, FIRST).textContent).toContain("In force");
+    expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
+  });
+
+  it("decides only the selected proposal among several pending answers", async () => {
+    record(FIRST, "A decided question", "decided", "The answer in force.", { answerer: "Ben" });
+    const other = record(OPEN, "Another proposal", "open", "Another possible answer.", { supersedes: FIRST, order: 1 });
+    const selected = record(NEXT, "Selected proposal", "open", "The selected replacement.", { supersedes: FIRST, order: 2 });
+    const host = (await renderTopic(NEXT)).container;
+    expect(within(item(host, OPEN)).queryByRole("button")).toBeNull();
+    expect(within(item(host, NEXT)).queryByRole("button")).toBeNull();
+    await openSettlement(host);
+    const dialog = await chooseSettlement("Decide");
+    expect(getMeta(selected).status).toBe("open");
+    await act(async () => within(dialog).getByRole("button", { name: "Decide" }).click());
+    expect(getMeta(selected).status).toBe("decided");
+    expect(getMeta(other).status).toBe("open");
+    expect(selection(host)).toBe(NEXT);
+    expectAnswerState(host, "In force");
+    expect(item(host, FIRST).textContent).toContain("Superseded");
+    expect(item(host, OPEN).textContent).toContain("Under review");
+    expect(answer(host).textContent).toContain("The selected replacement.");
+  });
+
+  it("requires a rejection reason and shows it without replacing the answer in force", async () => {
+    record(FIRST, "A decided question", "decided", "The answer in force.", { answerer: "Ben" });
+    const selected = record(OPEN, "Selected proposal", "open", "The proposed replacement.", { supersedes: FIRST, order: 1 });
+    const host = (await renderTopic(OPEN)).container;
+    await openSettlement(host);
+    const dialog = await chooseSettlement("Reject");
+    const confirm = within(dialog).getByRole<HTMLButtonElement>("button", { name: "Reject" });
+    expect(confirm.disabled).toBe(true);
+    expect(getMeta(selected).status).toBe("open");
+    await act(async () => fireEvent.change(within(dialog).getByRole("textbox", { name: "Rejection reason" }), {
+      target: { value: "  Preserve the existing guarantee.  " },
+    }));
+    expect(confirm.disabled).toBe(false);
+    await act(async () => confirm.click());
+    expectAnswerState(host, "Rejected");
+    expect(host.querySelector(".ub-decision-rejection")?.textContent).toBe("Rejection reason: Preserve the existing guarantee.");
+    expect(item(host, FIRST).textContent).toContain("In force");
+    expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
+  });
+
+  it("withdraws a proposal without requiring a display name or recording an answer", async () => {
+    record(FIRST, "A decided question", "decided", "The answer in force.", { answerer: "Ben" });
+    const selected = record(OPEN, "Selected proposal", "open", "The proposed replacement.", { supersedes: FIRST, order: 1 });
+    const host = (await renderTopic(OPEN, "  ")).container;
+    await openSettlement(host);
+    expect(screen.getByRole("menuitem", { name: /^Decide/ }).getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByRole("menuitem", { name: /^Reject/ }).getAttribute("aria-disabled")).toBe("true");
+    const dialog = await chooseSettlement("Withdraw");
+    expect(getMeta(selected).status).toBe("open");
+    await act(async () => within(dialog).getByRole("button", { name: "Withdraw" }).click());
+    expectAnswerState(host, "Withdrawn");
+    expect(getMeta(selected).decidedBy).toBeUndefined();
+    expect(item(host, FIRST).textContent).toContain("In force");
+  });
+
+  it.each([
+    { scenario: "blank answer", answer: " ", name: "Reader", supersedes: CURRENT, reason: /non-blank|empty answer/i },
+    { scenario: "missing display name", answer: "A possible answer.", name: " ", supersedes: CURRENT, reason: /display name/i },
+    { scenario: "stale proposal", answer: "A possible answer.", name: "Reader", supersedes: FIRST, reason: /conflict|replaced|in force/i },
+  ])("explains why Decide is unavailable for a $scenario", async ({ answer: proposedAnswer, name, supersedes, reason }) => {
+    record(FIRST, "Original question", "decided", "Original answer.", { agent: true });
+    record(CURRENT, "Current question", "decided", "Current answer.", { supersedes: FIRST, answerer: "Ben", order: 1 });
+    record(OPEN, "An open proposal", "open", proposedAnswer, { supersedes, order: 2 });
+    const host = (await renderTopic(OPEN, name)).container;
+    await openSettlement(host);
+    const decide = screen.getByRole("menuitem", { name: /^Decide/ });
+    expect(decide.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByRole("menu").textContent).toMatch(reason);
+    expect(screen.getByRole("menuitem", { name: /^Reject/ }).getAttribute("aria-disabled")).toBe(name.trim() === "" ? "true" : null);
+    expect(screen.getByRole("menuitem", { name: "Withdraw" }).getAttribute("aria-disabled")).toBeNull();
+  });
+
+  it.each([
+    ["source", "writable"], ["source", "synced"],
+    ["directory", "writable"], ["directory", "synced"],
+  ] as const)("keeps the pill a plain label when %s is not %s", async (which, flag) => {
+    record(FIRST, "An open question", "open", "The proposed answer.");
+    updateStatus(room(which === "source" ? roomForDoc(WORKSPACE, FIRST) : directoryRoom(WORKSPACE)), { [flag]: false });
+    const host = (await renderTopic()).container;
+    expectAnswerState(host, "Not yet decided");
+    expect(within(answerHeader(host)).queryByRole("button", { name: "Not yet decided" })).toBeNull();
+  });
+
+  it.each(["settled", "archived", "invalid answer", "directory lost sync"] as const)("keeps a live %s refusal in the confirmation and writes nothing", async (change) => {
+    const source = record(FIRST, "An open question", "open", "The proposed answer.");
+    const host = (await renderTopic()).container;
+    await openSettlement(host, "Not yet decided");
+    const dialog = await chooseSettlement("Decide");
+    const confirm = within(dialog).getByRole("button", { name: "Decide" });
+    await act(async () => {
+      if (change === "settled") setStatus(source, "withdrawn");
+      else if (change === "archived") tombstoneDirectoryEntry(directory(), FIRST);
+      else if (change === "invalid answer") {
+        appendBlock(source, { type: "paragraph", text: "A second block." });
+        appendBlock(source, { type: "paragraph", text: "A third block." });
+        appendBlock(source, { type: "paragraph", text: "A fourth block." });
+      } else updateStatus(room(directoryRoom(WORKSPACE)), { synced: false });
+      confirm.click();
+    });
+    expect(screen.getByRole("alertdialog", { name: "Decide this answer?" })).toBe(dialog);
+    expect(within(dialog).getByRole("alert").textContent).toMatch({
+      settled: /no longer open/i,
+      archived: /archived/i,
+      "invalid answer": /three blocks/i,
+      "directory lost sync": /directory.*synchronize/i,
+    }[change]);
+    expect(getMeta(source).status).toBe(change === "settled" ? "withdrawn" : "open");
+    expect(getMeta(source).decidedBy).toBeUndefined();
   });
 });
 
