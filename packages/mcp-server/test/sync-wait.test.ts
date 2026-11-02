@@ -2,12 +2,13 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { createServer as createTcpServer } from "node:net";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import { HubSync } from "../src/sync.js";
 import { formatHubFailure } from "../src/hub-failure.js";
-import { cleanupTestResources, hubUrl, trackListener, startHub, testConfig, TEST_SECRET, waitUntil, WORKSPACE } from "./helpers.js";
+import { collectSyncStatus } from "../src/status.js";
+import { cleanupTestResources, hubUrl, trackListener, startHub, startServer, testConfig, TEST_SECRET, waitUntil, WORKSPACE } from "./helpers.js";
 
 const cleanup: (() => void | Promise<void>)[] = [];
 const listeners: (() => Promise<void>)[] = [];
@@ -21,7 +22,14 @@ async function listener(open = false) {
   const server = createServer();
   const tracked = trackListener(server);
   const { sockets } = tracked;
-  const fixture = { open, port: 0, sockets, close, status: 0, closeCode: 0, dropUpgrade: false, upgrades: 0 };
+  const pendingUpgrades: (() => void)[] = [];
+  const fixture = {
+    open, port: 0, sockets, close, status: 0, closeCode: 0, dropUpgrade: false, upgrades: 0,
+    openPending() {
+      fixture.open = true;
+      for (const upgrade of pendingUpgrades.splice(0)) upgrade();
+    },
+  };
   server.on("upgrade", (request, socket) => {
     fixture.upgrades += 1;
     if (fixture.dropUpgrade) { socket.destroy(); return; }
@@ -29,17 +37,20 @@ async function listener(open = false) {
       socket.end(`HTTP/1.1 ${fixture.status} private-http-reason\r\nContent-Length: 12\r\n\r\nprivate-body`);
       return;
     }
-    if (!fixture.open) return;
-    const accept = createHash("sha1")
-      .update(`${request.headers["sec-websocket-key"]}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
-      .digest("base64");
-    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
-    if (fixture.closeCode) {
-      const body = Buffer.alloc(2 + Buffer.byteLength("private-close-reason"));
-      body.writeUInt16BE(fixture.closeCode);
-      body.write("private-close-reason", 2);
-      socket.end(Buffer.concat([Buffer.from([0x88, body.length]), body]));
-    }
+    const upgrade = () => {
+      const accept = createHash("sha1")
+        .update(`${request.headers["sec-websocket-key"]}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+        .digest("base64");
+      socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+      if (fixture.closeCode) {
+        const body = Buffer.alloc(2 + Buffer.byteLength("private-close-reason"));
+        body.writeUInt16BE(fixture.closeCode);
+        body.write("private-close-reason", 2);
+        socket.end(Buffer.concat([Buffer.from([0x88, body.length]), body]));
+      }
+    };
+    if (fixture.open) upgrade();
+    else pendingUpgrades.push(upgrade);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   fixture.port = (server.address() as { port: number }).port;
@@ -80,6 +91,7 @@ it("ends the first and later settles on a failed dial, then syncs when the hub o
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(instance.state()).toMatchObject({ status: "hub-down", url: hubUrl(endpoint.port) });
     expect(instance.state()).toMatchObject({ cause: "refused", detail: `ECONNREFUSED 127.0.0.1:${endpoint.port}` });
+    expect(instance.state("mcp")).toEqual(instance.state());
     expect(instance.isRoomQuiet(name)).toBe(false);
     expect(instance.isQuiet()).toBe(false);
   }
@@ -94,6 +106,22 @@ it("ends the first and later settles on a failed dial, then syncs when the hub o
   expect(instance.state()).not.toHaveProperty("detail");
 });
 
+it("reports an unclassified first upgrade close as hub-down without waiting for the connect grace", async () => {
+  const endpoint = await listener();
+  const instance = sync(endpoint.port, 5_000);
+  await waitUntil("the first upgrade request before its close", () => endpoint.upgrades === 1);
+
+  const started = Date.now();
+  await endpoint.close();
+  await instance.waitForQuiet();
+  expect(Date.now() - started).toBeLessThan(1_000);
+  expect(instance.state("mcp")).toMatchObject({
+    status: "hub-down", recoveryClass: "retry", reason: `no connection to ${hubUrl(endpoint.port)}`,
+  });
+  expect(instance.state("mcp")).not.toHaveProperty("cause");
+  expect(instance.state("mcp")).not.toHaveProperty("detail");
+});
+
 it("keeps the connect grace while the WebSocket upgrade is pending", async () => {
   const endpoint = await listener();
   const instance = sync(endpoint.port);
@@ -104,6 +132,51 @@ it("keeps the connect grace while the WebSocket upgrade is pending", async () =>
   expect(endpoint.sockets.size).toBeGreaterThan(0);
   await waitUntil("the pending upgrade's connect grace to expire", () => instance.state().status === "hub-down");
   expect(instance.state()).toMatchObject({ cause: "timeout", detail: `0.5 127.0.0.1:${endpoint.port}` });
+});
+
+it("reports applied MCP writes as connecting past the first grace until the delayed upgrade opens", async () => {
+  const endpoint = await listener();
+  const rig = await startServer(testConfig({
+    hubUrl: hubUrl(endpoint.port), authSecret: TEST_SECRET, connectTimeoutMs: 1_500,
+  }));
+  cleanup.push(() => rig.close());
+  await waitUntil("the first upgrade request", () => endpoint.upgrades === 1);
+
+  const created = await rig.ok("create_doc", { title: "Saved while connecting", description: "A test document." });
+  expect(created).toMatchObject({ applied: true, synced: false, hub: { status: "connecting", recoveryClass: "retry" } });
+  expect(created.hub.reason).toContain("changes are saved on this computer");
+  expect(created.hub.reason).toContain("sync once the connection opens");
+  expect(created.hub.reason).toContain("nothing needs repeating");
+  expect(created.rooms).toEqual(expect.arrayContaining([
+    expect.objectContaining({ purpose: "document", applied: true, synced: false }),
+    expect.objectContaining({ purpose: "directory", applied: true, synced: false }),
+  ]));
+  expect(rig.instance.replicas.sync.state()).toMatchObject({ status: "hub-down", cause: "timeout" });
+
+  const status = await rig.ok("sync_status", {});
+  expect(status.hub).toEqual(created.hub);
+  const diagnostic = await collectSyncStatus(rig.instance.replicas);
+  expect(diagnostic.hub).toMatchObject({ status: "hub-down", cause: "timeout" });
+
+  endpoint.openPending();
+  await waitUntil("the delayed upgrade to open", () => rig.instance.replicas.sync.state().status === "connected");
+  expect(rig.instance.replicas.hubState()).toMatchObject({ status: "connected" });
+});
+
+it("bounds the MCP connecting reading when the first upgrade never answers", async () => {
+  const endpoint = await listener();
+  const instance = sync(endpoint.port);
+  await waitUntil("the stalled first upgrade", () => endpoint.upgrades === 1);
+  expect(instance.state("mcp")).toMatchObject({ status: "connecting", recoveryClass: "retry" });
+
+  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 31_000);
+  try {
+    expect(instance.state("mcp")).toMatchObject({
+      status: "hub-down", recoveryClass: "retry", reason: `no connection to ${hubUrl(endpoint.port)}`, cause: "timeout",
+    });
+  } finally {
+    clock.mockRestore();
+  }
 });
 
 it("uses the sync budget after open even without an inbound frame", async () => {
@@ -125,6 +198,7 @@ it("keeps reconnect grace after open, but ends it once a re-dial fails", async (
   endpoint.open = false;
   for (const socket of endpoint.sockets) socket.destroy();
   await waitUntil("the open socket to close", () => instance.state().status === "hub-down");
+  expect(instance.state("mcp")).toEqual(instance.state());
   expect(instance.state()).not.toHaveProperty("cause");
   expect(instance.state()).not.toHaveProperty("detail");
 
@@ -133,6 +207,7 @@ it("keeps reconnect grace after open, but ends it once a re-dial fails", async (
   expect(Date.now() - started).toBeGreaterThanOrEqual(500);
   expect(Date.now() - started).toBeLessThan(2_000);
   expect(endpoint.sockets.size).toBeGreaterThan(0);
+  expect(instance.state("mcp")).toEqual(instance.state());
 
   // This retry never completed its upgrade, so closing it proves a failed dial.
   await endpoint.close();
@@ -145,6 +220,7 @@ it("records only the DNS code and dialled host", async () => {
   const instance = new HubSync(testConfig({ hubUrl: "wss://missing.invalid/ws" }), () => {}, { silent: true });
   cleanup.push(() => instance.destroy());
   await waitUntil("DNS failure", () => instance.state().cause === "dns");
+  expect(instance.state("mcp")).toEqual(instance.state());
   const reading = instance.state();
   // An isolated runner has no resolver and reports EAI_AGAIN instead of ENOTFOUND.
   expect(reading.detail).toMatch(/^(?:ENOTFOUND|EAI_AGAIN) missing\.invalid$/);
@@ -162,6 +238,7 @@ it("records a TLS failure without claiming a certificate problem", async () => {
   const instance = new HubSync(testConfig({ hubUrl: `wss://127.0.0.1:${port}`, authSecret: TEST_SECRET }), () => {});
   cleanup.push(() => instance.destroy());
   await waitUntil("TLS failure", () => instance.state().cause === "tls");
+  expect(instance.state("mcp")).toEqual(instance.state());
   expect(instance.state().detail).toBe("ERR_SSL_WRONG_VERSION_NUMBER 127.0.0.1");
   expect(formatHubFailure(instance.state())).toBe("TLS failed for 127.0.0.1 (ERR_SSL_WRONG_VERSION_NUMBER)");
 });
@@ -171,12 +248,14 @@ it("records an upgrade status and a hub close without their supplied text", asyn
   fixture.status = 502;
   const instance = sync(fixture.port);
   await waitUntil("upgrade failure", () => instance.state().cause === "http");
+  expect(instance.state("mcp")).toEqual(instance.state());
   expect(instance.state().detail).toBe("502 127.0.0.1");
   expect(formatHubFailure(instance.state())).toBe("HTTP 502 from 127.0.0.1 during WebSocket upgrade");
 
   fixture.status = 0;
   fixture.closeCode = 1001;
   await waitUntil("hub close", () => instance.state().cause === "closed");
+  expect(instance.state("mcp")).toEqual(instance.state());
   expect(instance.state().detail).toBe("1001");
   expect(formatHubFailure(instance.state())).toBe("closed by the hub (code 1001)");
   fixture.closeCode = 0;

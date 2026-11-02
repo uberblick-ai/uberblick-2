@@ -51,6 +51,9 @@ export const LOCAL_HUB_REASON =
   "Local workspace: changes are saved on this computer, so nothing needs retrying. " +
   "They reach the web editor when `ub open` runs.";
 
+/** MCP distinguishes a pending first dial from failure without extending tool waits. */
+const INITIAL_CONNECTION_TIMEOUT_MS = 30_000;
+
 export interface HubState {
   status: HubStatus;
   /** The endpoint being dialled, or null when sync is disabled. */
@@ -485,12 +488,14 @@ export class HubSync {
   /** A close or failed connect seen since the last successful open. */
   private sawFailure = false;
 
+  private hasConnected = false;
+
   /** A dial failed before opening; only a successful open clears it. */
   private failedDial = false;
 
   private readonly connection: HubConnection;
 
-  /** Start of the connect grace; expiry reports hub-down even without a close event. */
+  /** Start of the connect grace and the bounded first-connection reading. */
   private connectingSince = Date.now();
 
   /** Keep only refusal state, never the hub's token-related message. */
@@ -664,6 +669,7 @@ export class HubSync {
           }
         }
         if (status === "connected") {
+          this.hasConnected = true;
           // The provider repeats this status after its first inbound message.
           // Only a new socket may reset room state or cancel a recovery poll.
           if (previous === "connected") return;
@@ -1306,10 +1312,10 @@ export class HubSync {
   /**
    * Add our protocol version centrally so every reading, including offline, carries it.
    */
-  state(): HubState {
+  state(reading: "diagnostic" | "mcp" = "diagnostic"): HubState {
     // Diagnostics also discover detachment while the connection is otherwise idle.
     void this.stopped;
-    const reach = this.reach();
+    const reach = this.reach(reading);
     return {
       protocolVersion: SYNC_PROTOCOL_VERSION,
       recoveryClass: reach.status === "connecting" || reach.status === "connected" || reach.status === "hub-down" ? "retry" : "manual",
@@ -1317,7 +1323,7 @@ export class HubSync {
     };
   }
 
-  private reach(): Omit<HubState, "protocolVersion"> {
+  private reach(reading: "diagnostic" | "mcp"): Omit<HubState, "protocolVersion"> {
     if (this.quarantined) {
       return {
         status: "quarantined",
@@ -1360,9 +1366,13 @@ export class HubSync {
     if (this.socketStatus === "connected") {
       return { status: "connected", url: this.config.hubUrl };
     }
+    const pendingFirstConnection = reading === "mcp" && !this.hasConnected &&
+      !this.sawFailure && this.deviceReading === null;
+    const connectTimeoutMs = pendingFirstConnection
+      ? INITIAL_CONNECTION_TIMEOUT_MS : this.config.connectTimeoutMs;
     if (
       this.sawFailure ||
-      Date.now() - this.connectingSince > this.config.connectTimeoutMs
+      Date.now() - this.connectingSince > connectTimeoutMs
     ) {
       return {
         status: "hub-down",
@@ -1371,7 +1381,12 @@ export class HubSync {
         ...this.connection.failure(Date.now() - this.connectingSince > this.config.connectTimeoutMs),
       };
     }
-    return { status: "connecting", url: this.config.hubUrl };
+    return {
+      status: "connecting", url: this.config.hubUrl,
+      ...(pendingFirstConnection ? {
+        reason: "Connecting to the hub: changes are saved on this computer and sync once the connection opens, so nothing needs repeating.",
+      } : {}),
+    };
   }
 
   /**

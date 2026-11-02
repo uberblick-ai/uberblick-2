@@ -1358,8 +1358,8 @@ export class Replicas {
    * `ub open` does, so its absence is the normal state rather than an outage.
    * `ub open` itself reads `sync.state()` to supervise the hub it starts.
    */
-  hubState(): HubState {
-    const state = this.sync.state();
+  hubState(reading: "diagnostic" | "mcp" = "mcp"): HubState {
+    const state = this.sync.state(reading);
     if (this.config.localWorkspace !== true || state.status !== "hub-down") return state;
     return {
       protocolVersion: state.protocolVersion,

@@ -130,7 +130,7 @@ it("every registered tool is guarded and only hub revision requests wait after o
     if (operation === undefined) throw new Error(`No inspected operation for ${name}`);
     if (name === "sync_status") {
       // This read delegates its opening settle to the shared status helper.
-      expectOpeningWait(operation.handler, operation.source, /^collectSyncStatus\(context\.replicas\)$/);
+      expectOpeningWait(operation.handler, operation.source, /^collectSyncStatus\(context\.replicas, "mcp"\)$/);
     } else if (["list_revisions", "get_revision", "get_data", "name_revision", "restore_revision"].includes(name)) {
       expect(tools.find(tool => tool.name === name)?.writes)
         .toBe(name === "name_revision" || name === "restore_revision" ? "document" : null);
