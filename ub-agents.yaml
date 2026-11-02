@@ -30,6 +30,12 @@ checkout-setup:
   command: [sh, -c, 'mise trust ./mise.toml && exec mise run install']
   when-changed: [pnpm-lock.yaml, mise.toml]
 
+# Update ub and the launcher once a day between runs; the launcher restarts in
+# place when a release allows independent upgrades.
+runtime-updates:
+  ub: auto
+  ub-agents: auto
+
 agents:
   issue-preparer:
     # All launcher hosts need ub-agents 0.2.0 or later for health-check.
