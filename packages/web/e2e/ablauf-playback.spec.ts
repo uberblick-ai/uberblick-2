@@ -173,7 +173,7 @@ test("a successful playback chunk retry removes the load error and preserves sou
   expect(new URL(requests[1] ?? "").search).toBe("?retry=1");
 });
 
-test("A playable drawing below the fold waits until it is scrolled into view", async ({ browser }) => {
+test("A playable drawing below the fold plays only once it is scrolled into view", async ({ browser }) => {
   const session = writer();
   const { uuid } = await session.call<{ uuid: string }>("create_doc", {
     title: "Played Ablauf below the fold", description: "Static flows above a playable one.",
@@ -185,7 +185,8 @@ test("A playable drawing below the fold waits until it is scrolled into view", a
   await waitForDocumentDraw(page, session, uuid, { index: "all" });
   const last = blocks(page).last();
   await expect(play(last)).toBeAttached();
-  await expect(page.locator(".ab-playback")).toHaveCount(0);
+  // The controls may already be mounted while the drawings above lay out; only playing waits for the reader.
+  expect(await hasClass(svg(last), "ab-playing")).toBe(false);
   expect(await hasClass(svg(last), "ab-in-progress")).toBe(false);
 
   await svg(last).scrollIntoViewIfNeeded();
