@@ -74,16 +74,23 @@ cp remote.env.example .env
 chmod 600 .env
 ```
 
-Edit `.env`: set `HUB_VERSION=X.Y.Z` to the release that supplied these files,
+Edit `.env`: record `HUB_VERSION=X.Y.Z` for the release that supplied these files,
 without the `hub-v` prefix. Leave `COMPOSE_FILE=compose.yml` for same-computer use.
 Choose other settings from [the route guide below](#choose-how-clients-reach-the-hub).
-`compose.yml` selects both exact versioned images from `HUB_VERSION` and
-refuses an unset or empty version before pulling or starting containers. It
-has no host build. The same prebuilt web image serves every host, with its
-endpoint and workspace list supplied only by `/uberblick-config.json`.
+The downloaded `compose.yml` selects both images by the image-index digests
+built and attested for that release. Changing `HUB_VERSION` in `.env` cannot
+change those images; moving to another release requires its `compose.yml`.
+Keep the recorded version accurate because `setup-hub.sh` uses it when no hub
+is running. The file has no host build. The same prebuilt web image serves
+every host, with its endpoint and workspace list supplied only by
+`/uberblick-config.json`.
 Compose sets no `platform`; Docker selects the host's platform. An operator can
 override it with Docker's `DOCKER_DEFAULT_PLATFORM` setting. Older releases
 remain amd64-only; choose a multi-platform release for native arm64 hosting.
+
+Known limit: releases published before digest-pinned downloads keep their
+immutable, tag-based Compose files. Their image tags can still be moved in the
+registry; use a release with digest-pinned downloads for this guarantee.
 
 Validate and start the selected release:
 
@@ -150,8 +157,8 @@ attached to a release have no attestation. See the
 ### Updating the host — deliberately
 
 **The host does not update itself.** Choose a newer published version and
-run one operator session at a time. Before changing `HUB_VERSION`, download
-and compare the target release's three host files. Replace `X.Y.Z` below with
+run one operator session at a time. Download and compare the target release's
+three host files before replacing them. Replace `X.Y.Z` below with
 that version:
 
 ```sh
@@ -172,8 +179,10 @@ diff -u remote.tailscale.yml hub-vX.Y.Z/remote.tailscale.yml
 ```
 
 No output and exit 0 means a file is identical; exit 1 shows differences.
-If any file differs, refresh all three from the downloaded target copies
-before starting that version:
+A missing local file needs its target copy; stop on any other download or
+comparison error. Replace all three from the
+downloaded target copies before starting that release; its `compose.yml`
+selects its images by digest:
 
 ```sh
 cp hub-vX.Y.Z/compose.yml compose.yml
@@ -181,10 +190,10 @@ cp hub-vX.Y.Z/remote.https.yml remote.https.yml
 cp hub-vX.Y.Z/remote.tailscale.yml remote.tailscale.yml
 ```
 
-A missing local file also needs its target copy. Stop on any other download
-or comparison error. If all three files are identical, a version change alone
-suffices. Set `HUB_VERSION=X.Y.Z` in `.env`, keep its other settings, then pull
-and recreate the containers:
+Record `HUB_VERSION=X.Y.Z` in `.env` and keep its other settings. That value
+records the release for `setup-hub.sh`; changing it alone does not change the
+downloaded file's images.
+Pull and recreate the containers:
 
 ```sh
 cd ~/uberblick-remote
@@ -260,9 +269,12 @@ For an existing `~/uberblick-remote` release deployment, keep its `.env` and
 volumes. Take an operator backup with the existing deployment before changing
 files. Download `compose.yml` and both
 route files from the chosen version's release assets into that same directory;
-do not copy `remote.env.example` over `.env`.
+do not copy `remote.env.example` over `.env`. The chosen release's `compose.yml`
+selects the images by digest. Every later release change also requires that
+target release's copy.
 
-Add `HUB_VERSION=X.Y.Z` and the appropriate `COMPOSE_FILE` line to `.env`:
+Record `HUB_VERSION=X.Y.Z` and add the appropriate `COMPOSE_FILE` line to `.env`.
+`HUB_VERSION` does not select the downloaded file's images:
 
 | Existing route settings | Add to `.env` |
 | --- | --- |
@@ -273,9 +285,10 @@ Add `HUB_VERSION=X.Y.Z` and the appropriate `COMPOSE_FILE` line to `.env`:
 Retain the existing host name, bind address, workspace list and GitHub app
 settings. A host name alone does not select HTTPS with plain Compose; the
 `COMPOSE_FILE` line is required. Run `docker compose config` before starting:
-the project must remain `uberblick-remote`, the images must name the selected
-version, and the resolved `hub-data`, `caddy-data` and `caddy-config` volume
-names must match the existing ones. Run `docker compose pull` and
+the project must remain `uberblick-remote`, the images must match the digest
+references in the selected release's `compose.yml`, and the resolved
+`hub-data`, `caddy-data` and `caddy-config` volume names must match the existing
+ones. Run `docker compose pull` and
 `docker compose up -d`, then check the site, `/ws`, documents and claim state.
 No `down` or volume removal is needed. Compose prefers the new `compose.yml`
 over an old `docker-compose.yml`; keep using plain Compose from this directory
@@ -566,9 +579,10 @@ unset COMPOSE_FILE
 docker compose config
 ```
 
-Its project must match the recorded label, its images must name the chosen
-release, and its `hub-data`, `caddy-data` and `caddy-config` volumes must keep
-their existing project-prefixed names. Then pull and replace the containers:
+Its project must match the recorded label, its images must match the chosen
+release's downloaded `compose.yml` digest references, and its `hub-data`,
+`caddy-data` and `caddy-config` volumes must keep their existing project-prefixed
+names. Then pull and replace the containers:
 
 ```sh
 docker compose pull
@@ -1631,10 +1645,13 @@ operator backups and follow the same owner-managed retention policy.
 To return to an older release after an update, stop the hub and restore the
 startup copy logged before that update, using the current image's restore
 command below. Restore may ask about access changes it would undo. After it
-succeeds, select the older release's images and matching release files, keep
-the deployment's `.env` and volumes, and recreate the containers. Start only
-the older release against the restored database; starting the newer release
-first records the newer version again. Changes made after the copy are lost,
+succeeds, replace `compose.yml` and both route files with the older release's
+copies, keep the deployment's `.env` and volumes, record the older
+`HUB_VERSION` in `.env`, and recreate the containers. For releases with
+digest-pinned downloads, `compose.yml` selects the images; changing
+`HUB_VERSION` alone does not roll back. Start only the older release against
+the restored database; starting the newer release first records the newer
+version again. Changes made after the copy are lost,
 and all clients must match the restored hub's sync protocol.
 
 ```sh

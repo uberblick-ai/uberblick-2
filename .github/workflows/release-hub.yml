@@ -16,6 +16,9 @@ jobs:
   publish:
     if: github.event.sender.type == 'User' && github.event.sender.login != 'uberblick-agent' && github.event.deleted == false
     runs-on: ubuntu-latest
+    outputs:
+      hub-digest: ${{ steps.publish.outputs.hub-digest }}
+      web-digest: ${{ steps.publish.outputs.web-digest }}
     permissions:
       contents: read
       packages: write
@@ -84,3 +87,5 @@ jobs:
         run: node scripts/publish-hub-release-assets.mjs "$GITHUB_REF_NAME"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HUB_DIGEST: ${{ needs.publish.outputs.hub-digest }}
+          WEB_DIGEST: ${{ needs.publish.outputs.web-digest }}

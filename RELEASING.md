@@ -160,6 +160,9 @@ After publication, the job attests each complete image index, covering both
 platforms. It stores the attestations in this repository without pushing them
 to GHCR. The Compose and route release assets are not attested. See
 [REMOTE.md's verification commands](REMOTE.md#read-a-releases-identity).
+The in-image Compose payload used by installed clients keeps version tags:
+an image cannot embed its own published image-index digest. The separately
+generated download pins both images by digest.
 
 ## One-time registry setup
 
@@ -255,14 +258,23 @@ registry pulls; those remain attended release checks.
 
 The paired release task pushes `hub-vX.Y.Z` together with `vX.Y.Z`; each tag
 starts its own publisher. The hub workflow builds and checks both platforms of
-both images, then pushes them to GHCR. A separate job verifies both platforms
-of both published images against the
-tag's version, commit and protocol before attaching `compose.yml`,
+both images, then pushes them to GHCR and attests their image indexes. It
+supplies both index digests to the asset job. On a rerun that reuses published
+images, it resolves each tag once, verifies that exact digest's provenance for
+the release tag, and supplies the verified digests. A separate job inspects
+both platforms at those pinned digests against the tag's version, commit and
+protocol before generating `compose.yml` with literal
+`ghcr.io/uberblick-ai/hub@sha256:…` and
+`ghcr.io/uberblick-ai/hub-web@sha256:…` references and attaching it with
 `remote.env.example`, `remote.https.yml` and `remote.tailscale.yml` to this
 repository's GitHub release. Only that job holds `contents: write`; it uses
 runner tools and repository scripts without installing packages, building or
 running images. It runs on the same person's hub tag push as the image job,
 including when that job reuses both images on a rerun.
+The downloaded file selects the release's images independently of `.env`;
+`HUB_VERSION` only records the deployment's release for `setup-hub.sh`.
+Manual release changes require replacing `compose.yml` with the target
+release's copy. Older immutable downloads retain their tag-based references.
 
 The asset job is serialized across hub tags. It creates a draft, uploads all
 four host files and confirms their bytes before publishing. Publishing explicitly
@@ -283,8 +295,9 @@ or starting images:
 mise exec -- node scripts/hub-compose-config-proof.mjs
 ```
 
-This resolves all three routes, checks unchanged volume identities and refuses
-an unset version before `pull` or `up` can act. It also checks that the new
+This resolves all three routes, checks pinned image references and unchanged
+volume identities, and confirms that an unset, empty or different `HUB_VERSION`
+cannot change the images. It also checks that the new
 `compose.yml` takes precedence beside a migrated `docker-compose.yml`.
 
 Rerunning a tag resumes its draft, verifies existing assets against that tag's
@@ -295,6 +308,8 @@ and deletes the unpublished draft, then re-runs the workflow. A tag with more
 than one release, including drafts, or with a prerelease is refused by both
 publishers rather than guessed. A published release is only verified, never
 repaired: a missing or bad asset requires a new version.
+Reusing both verified image digests regenerates byte-identical host files, so
+draft resumption and published-release confirmation use the same comparisons.
 
 There is no `latest` tag or moving channel. A published version is immutable:
 a rerun verifies the recorded source commit and reuses matching published

@@ -92,10 +92,20 @@ export async function publishHubRelease(input, services) {
   const existing = await Promise.all(refs.map((ref) => services.getImage(ref)));
   for (const image of existing) if (image !== null) assertPublishedImage(image, input);
   if (existing.every((image) => image !== null)) {
-    if (!input.dryRun) for (const ref of refs) await services.verifyAttestation(`oci://${ref}`, input);
-    for (const image of existing) for (const platform of PLATFORMS) await services.scanImage(image[platform].Id, platform);
+    const digests = [];
+    const checked = input.dryRun ? existing : [];
+    if (!input.dryRun) for (const ref of refs) {
+      const digest = await services.resolveImageDigest(ref);
+      const pinned = `${ref.slice(0, ref.lastIndexOf(":"))}@${digest}`;
+      await services.verifyAttestation(`oci://${pinned}`, input);
+      const image = await services.getImage(pinned);
+      assertPublishedImage(image, input);
+      checked.push(image);
+      digests.push(digest);
+    }
+    for (const image of checked) for (const platform of PLATFORMS) await services.scanImage(image[platform].Id, platform);
     services.log(`Hub ${version} already matches; all platforms scanned, no images rebuilt or published.`);
-    return { outcome: "no-op", refs };
+    return { outcome: "no-op", refs, ...(!input.dryRun && { digests }) };
   }
   if (existing.some((image) => image !== null)) {
     fail("partial hub publication; do not rebuild or overwrite it, cut a new hub version");
@@ -172,6 +182,12 @@ export async function assertRemoteTag(tag, sha) {
   if (resolved.split(/\s/)[0] !== sha) fail(`remote tag ${tag} moved or disappeared; nothing published`);
 }
 
+export async function resolveImageDigest(ref) {
+  const manifest = JSON.parse(run("docker", ["buildx", "imagetools", "inspect", ref, "--format", "{{json .Manifest}}"]));
+  if (!/^sha256:[0-9a-f]{64}$/.test(manifest.digest)) fail(`cannot identify published index for ${ref}`);
+  return manifest.digest;
+}
+
 export async function getImage(ref) {
   const probe = spawnSync("docker", ["manifest", "inspect", ref], { encoding: "utf8", timeout: 60_000 });
   if (probe.status !== 0) {
@@ -180,7 +196,7 @@ export async function getImage(ref) {
     fail(`cannot establish whether ${ref} exists: ${probe.stderr}`);
   }
   const images = {};
-  const repository = ref.slice(0, ref.lastIndexOf(":"));
+  const repository = ref.includes("@") ? ref.slice(0, ref.indexOf("@")) : ref.slice(0, ref.lastIndexOf(":"));
   for (const [platform, digest] of Object.entries(platformDigests(JSON.parse(probe.stdout)))) {
     const child = `${repository}@${digest}`;
     run("docker", ["pull", "--platform", platform, child], { stdio: "inherit" });
@@ -239,6 +255,7 @@ function productionServices(scratch) {
     ...localServices(scratch),
     assertRemoteTag,
     getImage,
+    resolveImageDigest,
     pushImage: async (ref, id, platform) => {
       const repository = ref.slice(0, ref.lastIndexOf(":"));
       const stage = `${repository}:staging-${staging}-${platform.split("/")[1]}`;
@@ -277,9 +294,7 @@ async function main() {
     }, dryRun ? localServices(scratch) : productionServices(scratch));
     if (!dryRun && process.env.GITHUB_OUTPUT) {
       appendFileSync(process.env.GITHUB_OUTPUT, `outcome=${result.outcome}\n`);
-      if (result.outcome === "published") {
-        appendFileSync(process.env.GITHUB_OUTPUT, `hub-digest=${result.digests[0]}\nweb-digest=${result.digests[1]}\n`);
-      }
+      appendFileSync(process.env.GITHUB_OUTPUT, `hub-digest=${result.digests[0]}\nweb-digest=${result.digests[1]}\n`);
     }
   } finally {
     rmSync(scratch, { recursive: true, force: true });

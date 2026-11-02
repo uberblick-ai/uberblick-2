@@ -5,6 +5,8 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { readHubReleaseAssets } from "./hub-release-assets.mjs";
 import { assertImage, imageRefs, PLATFORMS, platformDigests,
   platformImageRef, publishHubRelease, versionForTag } from "./publish-hub-release.mjs";
 
@@ -30,7 +32,11 @@ function uploadedRef(ref, platform) {
 function indexDigest(ref) {
   return `sha256:${createHash("sha256").update(`index/${ref}`).digest("hex")}`;
 }
+function pinnedRef(ref) {
+  return `${ref.split(":")[0]}@${indexDigest(ref)}`;
+}
 function published(ref = REFS[0]) {
+  if (ref.includes("@")) ref = REFS.find((candidate) => candidate.split(":")[0] === ref.split("@")[0]);
   return Object.fromEntries(PLATFORMS.map((platform) => {
     const inspected = image(platform, ref);
     return [platform, { ...inspected, registryRef: uploadedRef(ref, platform) }];
@@ -42,6 +48,7 @@ function services(overrides = {}) {
   return { calls,
     assertRemoteTag: async () => { calls.push("tag"); },
     getImage: async (ref) => { calls.push(`read ${ref}`); return indexes.has(ref) ? published(ref) : null; },
+    resolveImageDigest: async (ref) => { calls.push(`resolve ${ref}`); return indexDigest(ref); },
     buildImages: async () => { calls.push("build"); },
     inspectLocalImage: async (ref, platform) => {
       calls.push(`inspect ${ref} ${platform}`);
@@ -111,20 +118,73 @@ test("all four platform images are checked before publishing those exact images 
 
 test("an unchanged published version scans all four platform images without rebuilding or pushing", async () => {
   const fake = services({ getImage: async (ref) => published(ref) });
-  assert.equal((await publishHubRelease(input(), fake)).outcome, "no-op");
-  assert.deepEqual(fake.calls, ["tag", ...REFS.map((ref) => `verify oci://${ref} ${TAG} ${SHA}`), ...REFS.flatMap((ref) => PLATFORMS.map((platform) =>
+  const result = await publishHubRelease(input(), fake);
+  assert.equal(result.outcome, "no-op");
+  assert.deepEqual(result.digests, REFS.map(indexDigest));
+  assert.deepEqual(fake.calls, ["tag", ...REFS.flatMap((ref) => [`resolve ${ref}`, `verify oci://${pinnedRef(ref)} ${TAG} ${SHA}`]), ...REFS.flatMap((ref) => PLATFORMS.map((platform) =>
     `scan ${image(platform, ref).Id} ${platform}`))]);
+});
+
+test("fresh publication and verified reuse generate byte-identical release downloads", async () => {
+  const fake = services();
+  const fresh = await publishHubRelease(input(), fake);
+  fake.getImage = async (ref) => published(ref);
+  const reused = await publishHubRelease(input(), fake);
+  assert.equal(fresh.outcome, "published");
+  assert.equal(reused.outcome, "no-op");
+  const root = dirname(dirname(fileURLToPath(import.meta.url)));
+  assert.deepEqual(readHubReleaseAssets(root, reused.digests), readHubReleaseAssets(root, fresh.digests));
+});
+
+test("a tag move after resolution cannot change the reused digest that is verified, inspected and returned", async () => {
+  const reads = [];
+  const resolutions = [];
+  const verified = [];
+  let moved = false;
+  const fake = services({
+    getImage: async (ref) => {
+      reads.push(ref);
+      if (moved && !ref.includes("@")) throw new Error("mutable tag was read again");
+      return published(ref);
+    },
+    resolveImageDigest: async (ref) => { resolutions.push(ref); return indexDigest(ref); },
+    verifyAttestation: async (subject) => {
+      moved = true;
+      verified.push(subject);
+    },
+  });
+  const result = await publishHubRelease(input(), fake);
+  assert.deepEqual(result.digests, REFS.map(indexDigest));
+  assert.deepEqual(resolutions, REFS);
+  assert.deepEqual(verified, REFS.map((ref) => `oci://${pinnedRef(ref)}`));
+  assert.deepEqual(reads, [...REFS, ...REFS.map(pinnedRef)]);
+  assert.deepEqual(pushes(fake), []);
 });
 
 test("a reused hub release missing either index attestation cannot succeed or rebuild", async () => {
   for (const missing of REFS) {
     const fake = services({ getImage: async (ref) => published(ref),
       verifyAttestation: async (subject) => {
-        if (subject === `oci://${missing}`) throw new Error("missing or invalid provenance");
+        if (subject === `oci://${pinnedRef(missing)}`) throw new Error("missing or invalid provenance");
       } });
     await assert.rejects(publishHubRelease(input(), fake), /provenance/);
     assert.ok(!fake.calls.includes("build"));
     assert.deepEqual(pushes(fake), []);
+  }
+});
+
+test("the verified digest must retain the tag's complete release identity", async () => {
+  for (const absent of [false, true]) {
+    const fake = services({ getImage: async (ref) => {
+      if (!ref.includes("@")) return published(ref);
+      if (absent) return null;
+      const result = published(ref);
+      result["linux/arm64"].release.sourceCommit = "b".repeat(40);
+      return result;
+    } });
+    await assert.rejects(publishHubRelease(input(), fake), /missing|disagrees/);
+    assert.deepEqual(pushes(fake), []);
+    assert.ok(!fake.calls.includes("build"));
   }
 });
 
@@ -336,8 +396,40 @@ process.stdout.write(await publishIndex(${JSON.stringify(REFS[0])},
   }
 });
 
+test("digest resolution captures the registry descriptor once and refuses invalid digests", () => {
+  const scratch = mkdtempSync(join(process.env.UB_AGENTS_SCRATCH ?? tmpdir(),
+    `hub-digest-adapter-${process.env.UB_AGENTS_RUN ?? "test"}-`));
+  try {
+    const docker = join(scratch, "docker");
+    const log = join(scratch, "docker.json");
+    writeFileSync(docker, `#!${process.execPath}
+const { writeFileSync } = require("node:fs");
+writeFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)));
+process.stdout.write(JSON.stringify({digest: process.env.INDEX_TEST_DIGEST}));
+`);
+    chmodSync(docker, 0o755);
+    for (const digest of [indexDigest(REFS[0]), "", "sha256:invalid"]) {
+      const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+import { resolveImageDigest } from ${JSON.stringify(new URL("./publish-hub-release.mjs", import.meta.url).href)};
+process.stdout.write(await resolveImageDigest(${JSON.stringify(REFS[0])}));
+`], { env: { ...process.env, PATH: scratch, INDEX_TEST_DIGEST: digest }, encoding: "utf8", timeout: 10_000 });
+      if (digest === indexDigest(REFS[0])) {
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(result.stdout, digest);
+      } else {
+        assert.equal(result.status, 1);
+        assert.match(result.stderr, /cannot identify published index/);
+      }
+      assert.deepEqual(JSON.parse(readFileSync(log, "utf8")), ["buildx", "imagetools", "inspect", REFS[0],
+        "--format", "{{json .Manifest}}"]);
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 test("the registry adapter pulls each platform digest and reads metadata without running images, cleaning up even invalid JSON", () => {
-  for (const malformedMetadata of [false, true]) {
+  for (const [ref, malformedMetadata] of [[REFS[0], false], [pinnedRef(REFS[0]), false], [pinnedRef(REFS[0]), true]]) {
     const scratch = mkdtempSync(join(process.env.UB_AGENTS_SCRATCH ?? tmpdir(),
       `hub-registry-adapter-${process.env.UB_AGENTS_RUN ?? "test"}-`));
     try {
@@ -379,7 +471,7 @@ if (args[0] === "manifest" && args[1] === "inspect") {
       chmodSync(docker, 0o755);
       const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
 import { getImage } from ${JSON.stringify(new URL("./publish-hub-release.mjs", import.meta.url).href)};
-process.stdout.write(JSON.stringify(await getImage(${JSON.stringify(REFS[0])})));
+process.stdout.write(JSON.stringify(await getImage(${JSON.stringify(ref)})));
 `], { env: { ...process.env, PATH: scratch, UB_AGENTS_SCRATCH: scratch,
         DOCKER_TEST_LOG: log, DOCKER_TEST_FIXTURE: fixturePath, DOCKER_TEST_BAD_JSON: String(malformedMetadata) },
         encoding: "utf8", timeout: 10_000 });
@@ -396,7 +488,7 @@ process.stdout.write(JSON.stringify(await getImage(${JSON.stringify(REFS[0])})))
         }
       }
       const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
-      assert.deepEqual(calls[0], ["manifest", "inspect", REFS[0]]);
+      assert.deepEqual(calls[0], ["manifest", "inspect", ref]);
       for (const [position, platform] of PLATFORMS.entries()) {
         const platformCalls = calls.slice(1 + position * 5, 6 + position * 5);
         const container = `${platform.split("/")[1]}-container`;
@@ -427,6 +519,9 @@ test("workflow has only the human hub tag push trigger and the scoped workflow t
   assert.match(body, /github.event.sender.login != 'uberblick-agent'/);
   assert.match(body, /packages: write/);
   assert.match(body, /secrets.GITHUB_TOKEN/);
+  assert.match(body, /outputs:\n {6}hub-digest: \$\{\{ steps\.publish\.outputs\.hub-digest \}\}\n {6}web-digest: \$\{\{ steps\.publish\.outputs\.web-digest \}\}/);
+  assert.match(body, /HUB_DIGEST: \$\{\{ needs\.publish\.outputs\.hub-digest \}\}/);
+  assert.match(body, /WEB_DIGEST: \$\{\{ needs\.publish\.outputs\.web-digest \}\}/);
   assert.doesNotMatch(body, /HOMEBREW_TAP_TOKEN|:latest/);
   const homebrew = readFileSync(".github/workflows/release-homebrew.yml", "utf8");
   assert.doesNotMatch(homebrew, /hub-v/);
