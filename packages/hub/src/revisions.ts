@@ -11,6 +11,7 @@ import {
   validRevisionName,
 } from "@uberblick/schema";
 import * as Y from "yjs";
+import { stderrLogger, type HubLogger } from "./log.js";
 import { getUpdateAttribution, type UpdateAuthor } from "./update-attribution.js";
 
 const STRETCH_MS = 15 * 60 * 1_000;
@@ -104,6 +105,7 @@ export class HubRevisions {
     private readonly isDeleted: (room: string) => boolean,
     private readonly onStoreFailed: (error: unknown) => void,
     private readonly now: () => number = Date.now,
+    private readonly log: HubLogger = stderrLogger,
   ) {
     db.exec(`CREATE TABLE IF NOT EXISTS document_revisions (
       id TEXT PRIMARY KEY NOT NULL,
@@ -153,23 +155,39 @@ export class HubRevisions {
     this.observed.add(document);
     let before = snapshot(document);
     let missedCapture = false;
+    const missedDeliverers = new Set<string>();
     document.on("afterTransaction", (transaction: Y.Transaction) => {
       if (transaction.changed.size === 0 || this.isDeleted(room) || getMeta(document).kind === "decision") return;
+      const attribution = getUpdateAttribution(transaction.origin);
+      let unknownRevisionId: string | undefined;
       try {
         const after = snapshot(document);
         if (transaction.origin === RESTORE_ORIGIN) {
           before = after;
           missedCapture = false;
+          missedDeliverers.clear();
           return;
         }
         if (before.checksum === after.checksum) return;
-        this.record(room, before, after, missedCapture ? null : getUpdateAttribution(transaction.origin)?.author ?? null);
+        const author = missedCapture ? null : attribution?.author ?? null;
+        const id = this.record(room, before, after, author);
+        if (author === null) unknownRevisionId = id;
         before = after;
         missedCapture = false;
       } catch (error) {
         missedCapture = true;
+        if (attribution?.deliveredBy !== undefined) missedDeliverers.add(attribution.deliveredBy.principalId);
         this.onStoreFailed(error);
         throw error;
+      }
+      const deliverers = new Set(missedDeliverers);
+      missedDeliverers.clear();
+      if (unknownRevisionId !== undefined) {
+        // known limit: buffered contributors are logged under the completing deliverer; revisit when updates retain buffered-source attribution.
+        if (attribution?.deliveredBy !== undefined) deliverers.add(attribution.deliveredBy.principalId);
+        for (const principalId of deliverers) {
+          this.log({ event: "hub.revision.unknownAuthor", room, revisionId: unknownRevisionId, principalId });
+        }
       }
     });
   }
@@ -358,7 +376,7 @@ export class HubRevisions {
     this.db.prepare("DELETE FROM document_revision_documents WHERE room = ?").run(room);
   }
 
-  private record(room: string, before: Snapshot, after: Snapshot, author: UpdateAuthor | null): void {
+  private record(room: string, before: Snapshot, after: Snapshot, author: UpdateAuthor | null): string | undefined {
     if (this.isDeleted(room)) return;
     const at = this.now();
     const identity = authorIdentity(author);
@@ -369,6 +387,7 @@ export class HubRevisions {
         this.closeHead(room, head, at);
         head = undefined;
       }
+      const id = head?.id ?? randomUUID();
       if (head === undefined) {
         const recorded = this.db.prepare("SELECT room FROM document_revision_documents WHERE room = ?").get(room);
         if (recorded === undefined) {
@@ -378,13 +397,14 @@ export class HubRevisions {
         this.db.prepare(`INSERT INTO document_revision_heads
           (room, id, author, author_key, started_at, last_edited_at, checksum, previous_checksum, data)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-          room, randomUUID(), identity.label, identity.key, at, at, after.checksum, before.checksum, after.state,
+          room, id, identity.label, identity.key, at, at, after.checksum, before.checksum, after.state,
         );
       } else {
         this.db.prepare("UPDATE document_revision_heads SET checksum = ?, data = ?, last_edited_at = ? WHERE room = ?")
           .run(after.checksum, after.checksum === head.previous_checksum ? null : after.state, at, room);
       }
       this.db.exec("COMMIT");
+      return id;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
