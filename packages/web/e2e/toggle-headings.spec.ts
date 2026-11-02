@@ -65,6 +65,76 @@ async function documentContent(page: Page): Promise<unknown> {
   return editor(page).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.toJSON());
 }
 
+test("disclosure targets leave heading text clear for pointer and touch input", { tag: "@webkit" }, async ({ browser }, info) => {
+  const session = writer();
+  const touch = info.project.use.hasTouch === true;
+  const headings: BlockInput[] = ([1, 2, 3] as const).flatMap(level => [
+    { type: "heading", level, text: `> Screen ${level}` },
+    { type: "paragraph", text: `Details ${level}` },
+    { type: "heading", level: 1, text: `Boundary ${level}` },
+  ]);
+  const created = await create(session, headings);
+  const page = await open(browser, created.uuid, touch);
+  await page.evaluate(() => document.fonts.ready);
+
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    for (const [index, level] of [1, 2, 3].entries()) {
+      const heading = block(page, created, index * 3);
+      await heading.scrollIntoViewIfNeeded();
+      const geometry = await heading.evaluate((element, label) => {
+        const button = element.querySelector("button");
+        if (!button) throw new Error("Missing disclosure button");
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        let text = walker.nextNode();
+        while (text && !text.textContent?.includes(label)) text = walker.nextNode();
+        if (!text) throw new Error("Missing heading text");
+        const start = text.textContent?.indexOf(label) ?? -1;
+        const range = document.createRange();
+        range.setStart(text, start);
+        range.setEnd(text, start + 1);
+        const first = range.getBoundingClientRect();
+        const target = button.getBoundingClientRect();
+        return {
+          width: target.width, height: target.height,
+          gap: first.left - target.right,
+          centreOffset: target.top + target.height / 2 - element.getBoundingClientRect().top
+            - Number.parseFloat(getComputedStyle(element).lineHeight) / 2,
+          textHitsButton: button.contains(document.elementFromPoint(first.left + 1, first.top + first.height / 2)),
+        };
+      }, `Screen ${level}`);
+      expect(geometry.width).toBeGreaterThanOrEqual(touch ? 44 : 24);
+      expect(geometry.height).toBeGreaterThanOrEqual(touch ? 44 : 24);
+      expect(geometry.gap).toBeGreaterThan(0);
+      expect(Math.abs(geometry.centreOffset)).toBeLessThanOrEqual(1);
+      expect(geometry.textHitsButton).toBe(false);
+    }
+  }
+
+  const firstHeading = block(page, created, 0);
+  await firstHeading.scrollIntoViewIfNeeded();
+  const point = await firstHeading.evaluate(element => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let text = walker.nextNode();
+    while (text && !text.textContent?.includes("Screen 1")) text = walker.nextNode();
+    if (!text) throw new Error("Missing first heading text");
+    const start = text.textContent?.indexOf("Screen 1") ?? -1;
+    const range = document.createRange();
+    range.setStart(text, start);
+    range.setEnd(text, start + 1);
+    const first = range.getBoundingClientRect();
+    return { x: first.left + 1, y: first.top + first.height / 2 };
+  });
+  if (touch) await page.touchscreen.tap(point.x, point.y);
+  else await page.mouse.click(point.x, point.y);
+  await expect.poll(async () => (await caret(page)).id).toBe(created.blocks[0]?.id);
+  await expect(control(page, "Screen 1")).toHaveAttribute("aria-expanded", "false");
+  await expect(block(page, created, 1)).toBeHidden();
+  await activateControl(control(page, "Screen 1"), { touch });
+  await expect(control(page, "Screen 1", true)).toHaveAttribute("aria-expanded", "true");
+  await expect(block(page, created, 1)).toBeVisible();
+});
+
 test("nested toggles fold their sections, stay local and restart collapsed", async ({ browser }) => {
   const session = writer();
   const created = await create(session, [
@@ -298,6 +368,7 @@ test("archived pages and decision records keep accessible reader toggles in both
     await expect(editor(page)).toHaveAttribute("contenteditable", "false");
     const before = await session.call<StoredDoc>("get_doc", { uuid: created.uuid });
     await expect(block(page, created, 1)).toBeHidden();
+    await page.evaluate(() => document.fonts.ready);
     for (const colorScheme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme });
       const disclosure = control(page, "Reader section");
