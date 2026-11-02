@@ -81,11 +81,17 @@ export function UpdateNotice({ client }: { client: DocumentSearchClient | null |
   if (update === null || dismissed === update.latest) return null;
   return (
     <p className="ub-update-notice" role="status">
+      <span className="ub-update-notice-badge" aria-hidden="true">New</span>
       <span>
-        <strong>Uberblick {update.latest} is available.</strong> You have {update.current}.
+        <strong>Uberblick {update.latest} is available.</strong>{" "}
+        <span className="ub-update-notice-current">You have {update.current}.</span>
+      </span>{" "}
+      <span>
         Run <code>ub update</code>, then restart <code>ub open</code>.
       </span>{" "}
-      <a href={update.notesUrl} target="_blank" rel="noreferrer">Release notes</a>
+      <a href={update.notesUrl} target="_blank" rel="noreferrer">
+        Release notes<span aria-hidden="true"> ↗</span>
+      </a>
       <Button variant="plain" size="custom" type="button" className="ub-update-notice-close"
         aria-label="Dismiss update notice" title="Dismiss"
         onClick={() => setSetting("dismissedUpdate", update.latest)}>
