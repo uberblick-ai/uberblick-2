@@ -2,16 +2,20 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { pinnedImageRefs, readHubReleaseAssets } from "./hub-release-assets.mjs";
 import { downloadAsset, productionServices, publishHubReleaseAssets } from "./publish-hub-release-assets.mjs";
 import { imageRefs, PLATFORMS } from "./publish-hub-release.mjs";
 
 const SHA = "a".repeat(40);
 const TAG = "hub-v1.2.3";
-const ASSETS = Object.fromEntries(["compose.yml", "remote.env.example", "remote.https.yml", "remote.tailscale.yml"]
-  .map((name) => [name, Buffer.from(`${name}\n`)]));
+const DIGESTS = [`sha256:${"1".repeat(64)}`, `sha256:${"2".repeat(64)}`];
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ASSETS = readHubReleaseAssets(ROOT, DIGESTS);
 
 function input(overrides = {}) {
-  return { tag: TAG, headSha: SHA, protocolVersion: 1, assets: ASSETS,
+  return { tag: TAG, headSha: SHA, protocolVersion: 1, digests: DIGESTS, assets: ASSETS,
     repository: "uberblick-ai/uberblick-2", eventName: "push", eventDeleted: false,
     actorType: "User", actorLogin: "bk-one", refType: "tag", refName: TAG,
     tagSha: SHA, workflowSha: SHA, ...overrides };
@@ -85,12 +89,19 @@ test("assets publish only for a person's matching immutable hub tag push", async
 test("both platforms of both registry images match before any release is created, including a publisher no-op", async () => {
   const fake = services();
   assert.equal((await publishHubReleaseAssets(input(), fake)).outcome, "published");
-  assert.deepEqual(fake.calls.slice(0, 4), ["tag", "image ghcr.io/uberblick-ai/hub:1.2.3",
-    "image ghcr.io/uberblick-ai/hub-web:1.2.3", "release"]);
+  assert.deepEqual(fake.calls.slice(0, 4), ["tag", ...pinnedImageRefs(DIGESTS).map((ref) => `image ${ref}`), "release"]);
   assert.deepEqual(mutations(fake), ["create", ...Object.keys(ASSETS).map((name) => `upload ${name}`), "publish", "latest"]);
   assert.ok(fake.calls.indexOf("publish") > fake.calls.indexOf("upload remote.tailscale.yml"));
   assert.ok(fake.calls.indexOf("download compose.yml") > fake.calls.indexOf("publish"));
   assert.ok(fake.calls.indexOf("latest") > fake.calls.indexOf("download remote.tailscale.yml"));
+});
+
+test("missing or invalid workflow digest outputs stop before any registry or release operation", async () => {
+  for (const digests of [undefined, [], [DIGESTS[0], ""], ["sha256:invalid", DIGESTS[1]]]) {
+    const fake = services();
+    await assert.rejects(publishHubReleaseAssets(input({ digests }), fake), /two sha256 image-index digests/);
+    assert.deepEqual(fake.calls, []);
+  }
 });
 
 test("missing, mismatching or unreadable registry images stop before any release write", async () => {
@@ -105,7 +116,7 @@ test("missing, mismatching or unreadable registry images stop before any release
 
 test("missing platforms or a single mismatching platform stop before any release write", async () => {
   for (const platform of PLATFORMS) {
-    for (const targetRef of imageRefs("1.2.3")) {
+    for (const targetRef of pinnedImageRefs(DIGESTS)) {
       for (const failure of ["missing", "labels", "metadata"]) {
         const fake = services({ getImage: async (ref) => {
           const result = published();
@@ -125,7 +136,9 @@ test("missing platforms or a single mismatching platform stop before any release
 
 test("rerunning a complete matching release reuses all bytes without uploading", async () => {
   const fake = services({ getRelease: async () => release() });
-  assert.equal((await publishHubReleaseAssets(input(), fake)).outcome, "no-op");
+  const regenerated = readHubReleaseAssets(ROOT, [...DIGESTS]);
+  assert.deepEqual(regenerated, ASSETS);
+  assert.equal((await publishHubReleaseAssets(input({ assets: regenerated }), fake)).outcome, "no-op");
   assert.deepEqual(mutations(fake), ["latest"]);
   assert.deepEqual(fake.calls.filter((call) => call.startsWith("download ")),
     Object.keys(ASSETS).map((name) => `download ${name}`));
@@ -140,7 +153,7 @@ test("stored release target metadata may name a branch when the existing tag and
 test("a draft resumes missing uploads after every existing digest is validated", async () => {
   const fake = services({ getRelease: async () => release({ draft: true, assets: [draftAsset("remote.env.example"),
     draftAsset("remote.https.yml"), draftAsset("remote.tailscale.yml")] }) });
-  assert.equal((await publishHubReleaseAssets(input(), fake)).outcome, "published");
+  assert.equal((await publishHubReleaseAssets(input({ assets: readHubReleaseAssets(ROOT, [...DIGESTS]) }), fake)).outcome, "published");
   assert.deepEqual(mutations(fake), ["upload compose.yml", "publish", "latest"]);
   assert.ok(fake.calls.indexOf("download compose.yml") > fake.calls.indexOf("publish"));
 });

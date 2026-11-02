@@ -4,8 +4,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readHubReleaseAssets } from "./hub-release-assets.mjs";
-import { assertPublishedImage, assertRemoteTag, getImage, imageRefs, run, versionForTag } from "./publish-hub-release.mjs";
+import { pinnedImageRefs, readHubReleaseAssets } from "./hub-release-assets.mjs";
+import { assertPublishedImage, assertRemoteTag, getImage, run, versionForTag } from "./publish-hub-release.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPOSITORY = "uberblick-ai/uberblick-2";
@@ -82,8 +82,9 @@ export async function publishHubReleaseAssets(input, services) {
       input.tagSha !== input.headSha || input.workflowSha !== input.headSha) {
     fail("publishing requires a person's matching GitHub Actions hub tag push at the checked-out commit");
   }
+  const refs = pinnedImageRefs(input.digests);
   await services.assertRemoteTag(input.tag, input.headSha);
-  for (const ref of imageRefs(version)) {
+  for (const ref of refs) {
     const image = await services.getImage(ref);
     if (image === null) fail(`both images must be published before release assets; ${ref} is missing`);
     assertPublishedImage(image, input);
@@ -207,8 +208,9 @@ async function main() {
   const protocol = /^export const SYNC_PROTOCOL_VERSION = ([1-9][0-9]*);$/m.exec(source);
   if (protocol === null) fail("cannot read SYNC_PROTOCOL_VERSION from the schema source");
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
+  const digests = [process.env.HUB_DIGEST, process.env.WEB_DIGEST];
   await publishHubReleaseAssets({ tag, headSha: run("git", ["rev-parse", "HEAD"]),
-    protocolVersion: Number(protocol[1]), assets: readHubReleaseAssets(ROOT),
+    protocolVersion: Number(protocol[1]), digests, assets: readHubReleaseAssets(ROOT, digests),
     repository: process.env.GITHUB_REPOSITORY, eventName: process.env.GITHUB_EVENT_NAME,
     eventDeleted: event.deleted, actorType: event.sender?.type, actorLogin: event.sender?.login,
     refType: process.env.GITHUB_REF_TYPE, refName: process.env.GITHUB_REF_NAME,

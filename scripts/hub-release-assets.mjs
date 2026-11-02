@@ -1,15 +1,25 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// The image payload stays fixed-version for installed clients. Downloaded
-// deployments use the same service model with an explicit operator version.
-export function readHubReleaseAssets(root) {
+export function pinnedImageRefs(digests) {
+	if (!Array.isArray(digests) || digests.length !== 2 ||
+		digests.some((digest) => typeof digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(digest))) {
+		throw new Error("hub-release-assets: two sha256 image-index digests are required");
+	}
+	return ["ghcr.io/uberblick-ai/hub", "ghcr.io/uberblick-ai/hub-web"]
+		.map((repository, index) => `${repository}@${digests[index]}`);
+}
+
+// Installed clients use versioned tags in the image payload. Downloads pin the
+// indexes verified by the release workflow, independently of deployment settings.
+export function readHubReleaseAssets(root, digests) {
+	const [hubImage, webImage] = pinnedImageRefs(digests);
 	const read = (name) => readFileSync(join(root, name), "utf8");
-	const version = `\${HUB_VERSION:?Set HUB_VERSION in .env to a hub release version}`;
 	const compose = read("compose.release.yml")
-		.replaceAll("__HUB_IMAGE__", `ghcr.io/uberblick-ai/hub:${version}`)
-		.replaceAll("__WEB_IMAGE__", `ghcr.io/uberblick-ai/hub-web:${version}`);
-	const header = `# Downloaded Compose deployment. Set an explicit published version, e.g. 0.4.8.
+		.replaceAll("__HUB_IMAGE__", hubImage)
+		.replaceAll("__WEB_IMAGE__", webImage);
+	const header = `# Downloaded Compose deployment. compose.yml selects the release's images.
+# Record the release here for setup-hub; this value does not select images.
 HUB_VERSION=
 
 # Select the route with this setting and the hostname/IP settings below.
