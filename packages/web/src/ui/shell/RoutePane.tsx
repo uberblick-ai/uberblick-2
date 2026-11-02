@@ -147,6 +147,7 @@ function editorProperties(props: RoutePaneProps, segment: string, connection: Ro
     author: props.author,
     account: props.account,
     catalogConnection: props.catalogConnection ?? null, archived: props.archived, updatedAt: props.updatedAt,
+    directoryConnection: props.directoryConnection ?? null,
     canCleanupTags: () => props.directoryConnection != null && connection.status.writable &&
       !isDirectoryEntryArchived(props.directoryConnection.ydoc, parseRoom(connection.room).uuid),
     docLinks: props.docLinks, actions: props.actions ?? {},

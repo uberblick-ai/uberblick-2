@@ -35,6 +35,7 @@ import {
   createGroup,
   deleteDirectoryEntry,
   directoryRoom,
+  getBlocks,
   getDirectoryMap,
   getDirectoryEntry,
   getMeta,
@@ -805,6 +806,10 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(prose(host)?.getAttribute("aria-readonly")).toBe("false");
     expect(within(host).getByPlaceholderText<HTMLTextAreaElement>("Untitled").readOnly).toBe(false);
     expect(within(host).queryByLabelText("Insert block below")).not.toBeNull();
+    const editor = binding.mock.results[0]?.value.editor;
+    if (editor == null) throw new Error("fixture document did not bind an editor");
+    act(() => editor.commands.insertContentAt(1, "Restored: "));
+    expect(getBlocks(ydoc)[0]?.text).toBe("Restored: still every byte of it");
     // Lifted on the *other* client too, which is what "reappears in listings"
     // means: the second replica lists it again without asking for it.
     expect(getDirectoryEntry(peer, UUID)?.deleted).toBeUndefined();
@@ -820,6 +825,8 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(bound?.getAttribute("contenteditable")).toBe("false");
     expect(bound?.getAttribute("aria-readonly")).toBe("true");
     expect(within(host).queryByLabelText("Insert block below")).toBeNull();
+    act(() => editor.commands.insertContentAt(1, "Refused: "));
+    expect(getBlocks(ydoc)[0]?.text).toBe("Restored: still every byte of it");
 
     // The title's *write* is guarded, not just its field. `readOnly` is a
     // statement to the browser about typing; a change event that reaches the

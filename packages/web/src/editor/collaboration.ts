@@ -19,6 +19,8 @@ import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import { AGENT_CLIENT } from "../collab/identity.js";
 import { UNSUPPORTED_BLOCK } from "./unsupported-block.js";
+import { guardUndoManager } from "./guarded-undo.js";
+import type { AcceptUndo } from "./guarded-undo.js";
 
 /**
  * Retain a departed agent cursor and title avatar for 30 seconds from departure.
@@ -256,17 +258,26 @@ interface CollaborationOptions {
   awareness: Awareness | null;
   /** Classify once per Yjs transaction; the caller owns the editor schema. */
   opaqueElements: () => Set<Y.XmlElement>;
+  /** Read live permissions before Yjs history can change the document. */
+  canEdit: () => boolean;
+  /** Validate a detached preview before applying an undo or redo. */
+  acceptUndo?: AcceptUndo;
+  /** Avoid previews when this editor has no live content-shape restriction. */
+  needsUndoCheck: () => boolean;
 }
 
 export const Collaboration = Extension.create<CollaborationOptions>({
   name: "uberblickCollaboration",
 
   addOptions() {
-    return { fragment: null, awareness: null, opaqueElements: () => new Set() };
+    return {
+      fragment: null, awareness: null, opaqueElements: () => new Set(),
+      canEdit: () => true, needsUndoCheck: () => false,
+    };
   },
 
   addProseMirrorPlugins() {
-    const { fragment, awareness, opaqueElements } = this.options;
+    const { fragment, awareness, opaqueElements, canEdit, acceptUndo, needsUndoCheck } = this.options;
     if (fragment === null) return [];
     const placeholders = new WeakMap<Y.XmlElement, ProseMirrorNode>();
     let opaque = opaqueElements();
@@ -292,6 +303,8 @@ export const Collaboration = Extension.create<CollaborationOptions>({
     plugins.push(yUndoPlugin() as unknown as Plugin);
     plugins.push(new Plugin({
       view(view) {
+        const undoState = yUndoPluginKey.getState(view.state) as { undoManager: Y.UndoManager } | undefined;
+        if (undoState !== undefined) guardUndoManager(undoState.undoManager, fragment, canEdit, acceptUndo, needsUndoCheck);
         const protectUndo = (): void => {
           const current = opaqueElements();
           if ([...current].some((element) => !opaque.has(element))) {
