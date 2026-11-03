@@ -111,8 +111,8 @@ function createTeamExtension(
       return handleGithubSignIn(signIn, request, response, config.behindReleaseProxy);
     },
     async start() {
-      if (config.mcpSocketPath !== undefined && (authorizations === undefined || credentials === undefined || hubAdmins === undefined)) {
-        throw new Error("HUB_MCP_SOCKET requires GitHub sign-in and HUB_PUBLIC_URL");
+      if (config.mcpSocketPath !== undefined && (credentials === undefined || hubAdmins === undefined)) {
+        throw new Error("HUB_MCP_SOCKET requires GitHub sign-in");
       }
       if (options.operatorSetup) {
         if (principals === undefined || memberships === undefined || hubAdmins === undefined || isEphemeralDatabase(config.databasePath ?? "")) {
@@ -122,7 +122,7 @@ function createTeamExtension(
           github: config.github, log, hasLiveDocuments,
           operator: createOperatorControls(context, config, claims, principals, hubAdmins) });
       }
-      if (config.mcpSocketPath !== undefined && authorizations !== undefined && credentials !== undefined && hubAdmins !== undefined) {
+      if (config.mcpSocketPath !== undefined && credentials !== undefined && hubAdmins !== undefined) {
         mcpChannel = await startMcpChannel({ path: config.mcpSocketPath, authorizations, credentials, admins: hubAdmins,
           grants: new AgentGrantRegistry(database) });
       }

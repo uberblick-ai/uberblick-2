@@ -6,6 +6,8 @@ services:
     environment:
       # Only Caddy reaches the hub; its final forwarded hop identifies clients.
       HUB_RELEASE_PROXY: "1"
+      HUB_PUBLIC_URL: "${HUB_PUBLIC_URL:-}"
+      HUB_MCP_SOCKET: /run/uberblick-mcp/hub.sock
       # Unset/empty uses public Uberblick Login: no app registration is needed.
       # Optionally use your own Device Flow app to control its settings/budget.
       # Remove and recreate to use the default again. GitHub names the app, not
@@ -16,11 +18,38 @@ services:
     stop_grace_period: 30s
     volumes:
       - hub-data:/data
+      - hub-mcp-socket:/run/uberblick-mcp
+
+  # known limit: every deployment runs mcp; revisit when optional hosting is authorized.
+  mcp:
+    image: __HUB_IMAGE__
+    command: ["node", "/app/mcp-host.mjs"]
+    environment:
+      HUB_PUBLIC_URL: "${HUB_PUBLIC_URL:-}"
+      HUB_MCP_SOCKET: /run/uberblick-mcp/hub.sock
+      HUB_URL: ws://hub:1234/ws
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "3001"
+      MCP_DATA_DIR: /data/mcp
+      MCP_ALLOWED_ORIGINS: "${MCP_ALLOWED_ORIGINS:-}"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "node", "/usr/local/bin/mcp-healthcheck.mjs"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      start_interval: 2s
+      retries: 3
+    volumes:
+      - hub-mcp-socket:/run/uberblick-mcp
+      - mcp-data:/data/mcp
 
   caddy:
     image: __WEB_IMAGE__
     depends_on:
       - hub
+      - mcp
     environment:
       WEB_HOST: "${WEB_HOST:-}"
       TAILSCALE_HOST: "${TAILSCALE_HOST:-}"
@@ -39,5 +68,7 @@ services:
 
 volumes:
   hub-data:
+  hub-mcp-socket:
+  mcp-data:
   caddy-data:
   caddy-config:
