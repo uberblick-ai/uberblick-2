@@ -128,6 +128,17 @@ describe("connect an agent", () => {
     expect(view.queryByText(/Approve only if you started/)).toBeNull();
   });
 
+  it.each(["cursor:", "com.example.app:"])("names the app scheme %s and warns without parsing an empty host", async redirectScheme => {
+    restore();
+    fetchMock.mockResolvedValueOnce(answer(pending({ redirectHost: "", redirectScheme })));
+    const view = render(<ConnectAgent />);
+    await flush();
+    expect(view.getByText(redirectScheme)).toBeTruthy();
+    expect(view.getByText("The browser returns to an app on this computer. Approve only if you started this from an agent on this computer."))
+      .toBeTruthy();
+    expect(view.getByRole("button", { name: "Approve" })).toBeTruthy();
+  });
+
   it("shows the signed-in non-member and lets them sign out to change accounts", async () => {
     restore();
     fetchMock.mockResolvedValueOnce(answer({ status: "not-a-member" }, 403))

@@ -241,6 +241,30 @@ describe("production metadata client lookup", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { redirectUri: "cursor://anysphere.cursor-mcp/oauth/callback", redirectScheme: "cursor:" },
+    { redirectUri: "com.example.app:/callback", redirectScheme: "com.example.app:" },
+  ])("names the app scheme rather than a web host for $redirectUri", async ({ redirectUri, redirectScheme }) => {
+    vi.spyOn(metadataFetch, "fetchMetadataDocument").mockResolvedValue({ ...metadata(), redirect_uris: [redirectUri] });
+    const r = await rig(true);
+    const query = params();
+    query.set("redirect_uri", redirectUri);
+    const response = await authorize(r, query);
+    expect(response.code).toBe(302);
+    const requestId = new URL(response.headers.location!).searchParams.get("request")!;
+    expect(await consent(r, "read", { requestId })).toEqual({ code: 200, result: {
+      status: "pending", clientName: "Document Agent", redirectHost: "", redirectScheme,
+      workspaceId: WORKSPACE, workspaceName: "Private workspace name", accessLevels: ["read-only", "read-write"],
+    } });
+    const denied = await consent(r, "submit", { requestId, decision: "deny" });
+    expect(denied.code).toBe(200);
+    const redirect = new URL(denied.result.redirectUrl as string);
+    expect(redirect.protocol).toBe(redirectScheme);
+    expect(redirect.searchParams.get("error")).toBe("access_denied");
+    expect(redirect.searchParams.get("state")).toBe(STATE);
+    expect(authorityRows(r.path)).toEqual({ grants: [], codes: [], credentials: [] });
+  });
+
   it.each(["omitted", "private_key_jwt"])('shows fixed unsupported-authentication wording for %s without state or redirect', async method => {
     const value: Record<string, unknown> = metadata();
     if (method === "omitted") delete value.token_endpoint_auth_method;

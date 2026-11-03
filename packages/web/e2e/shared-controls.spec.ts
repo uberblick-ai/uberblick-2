@@ -8,6 +8,7 @@ import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } fr
 import { build, preview } from "vite";
 import type { PreviewServer } from "vite";
 import { activateControl } from "./input-helpers.js";
+import { renderedText } from "./contrast-helpers.js";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let scratch: string | null = null;
@@ -118,6 +119,44 @@ async function expectListTarget(control: Locator, floor: number): Promise<void> 
   expect(box?.width).toBeGreaterThanOrEqual(floor);
   expect(box?.height).toBeGreaterThanOrEqual(floor);
 }
+
+test("app-scheme consent names the destination and keeps the computer warning readable @webkit", async ({ page }, info) => {
+  const session = { token: "a".repeat(43), username: "octocat", expiresAt: Date.now() + 86_400_000 };
+  await page.addInitScript(value => localStorage.setItem("uberblick.browser-session", JSON.stringify(value)), session);
+  await page.route("**/auth/browser/session", route => route.fulfill({ json: { status: "signed-in", ...session } }));
+  await page.route("**/oauth/consent/read", route => route.fulfill({ json: {
+    status: "pending", clientName: "Cursor", redirectHost: "", redirectScheme: "cursor:",
+    workspaceId: "workspace-id", workspaceName: "Shared notes", accessLevels: ["read-only", "read-write"],
+  } }));
+  await page.route("**/oauth/consent/submit", route => route.fulfill({ status: 404, json: { status: "unknown-request" } }));
+  const url = new URL(fixtureUrl);
+  url.searchParams.set("connect-agent", "");
+  url.searchParams.set("request", "agent-request");
+  await page.goto(url.href);
+  const request = page.getByRole("region", { name: "Agent request", exact: true });
+  const destination = request.locator("dl > div").filter({ has: page.getByText("Browser returns to", { exact: true }) });
+  const warning = request.getByText("The browser returns to an app on this computer. Approve only if you started this from an agent on this computer.", { exact: true });
+  await expect(destination.locator("dd")).toHaveText("cursor:");
+  await page.evaluate(() => document.fonts.ready);
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expect(warning).toBeVisible();
+    for (const text of [destination, warning]) {
+      expect(await text.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      await expect(text).toBeInViewport({ ratio: 1 });
+    }
+    for (const selector of ['[aria-label="Agent request"] dl', '[aria-label="Agent request"] > p:first-of-type']) {
+      const readings = await renderedText(page, selector);
+      expect(readings.length).toBeGreaterThan(0);
+      for (const reading of readings) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+  const deny = request.getByRole("button", { name: "Deny", exact: true });
+  if (info.project.use.hasTouch === true) await deny.tap();
+  else { await deny.focus(); await page.keyboard.press("Enter"); }
+  await expect(request).toHaveCount(0);
+  await expect(page.getByText("This request is no longer available. Start again from the agent.", { exact: true })).toBeVisible();
+});
 
 test("tag overflow recalculates when the bundled UI font loads in the list fixture @webkit", async ({ browser }) => {
   let releaseFont = (): void => {};
