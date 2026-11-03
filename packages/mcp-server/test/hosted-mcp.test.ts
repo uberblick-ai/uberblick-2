@@ -58,6 +58,13 @@ describe("hosted MCP discovery", () => {
     expect(await discoverHostedMcp(base, WORKSPACE, 1_000.5, {})).toBe(resource);
   });
 
+  it.each(["HTTPS://PUBLIC.EXAMPLE.COM", "https://public.example.com:443"])(
+    "normalizes an origin accepted by HUB_PUBLIC_URL validation: %s", async issuer => {
+      const base = await serve((_request, response) => response.end(JSON.stringify({ resource: `${issuer}/mcp/${WORKSPACE}` })));
+      expect(await discoverHostedMcp(base, WORKSPACE, 1_000, {})).toBe(RESOURCE);
+    },
+  );
+
   it.each([
     null,
     [],

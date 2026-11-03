@@ -27,10 +27,11 @@ export async function discoverHostedMcp(
       typeof metadata.resource !== "string") return null;
     const suffix = `/mcp/${uuid}`;
     if (!metadata.resource.endsWith(suffix)) return null;
-    const issuer = parseHubPublicUrl(metadata.resource.slice(0, -suffix.length));
+    const rawIssuer = metadata.resource.slice(0, -suffix.length);
+    if (rawIssuer.endsWith("/")) return null;
+    const issuer = parseHubPublicUrl(rawIssuer);
     if (issuer === undefined) return null;
-    const resource = workspaceResourceUrl(issuer, uuid);
-    return metadata.resource === resource ? resource : null;
+    return workspaceResourceUrl(issuer, uuid);
   } catch {
     return null;
   }
