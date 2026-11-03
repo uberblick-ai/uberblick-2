@@ -22,7 +22,8 @@ import {
 import type { TagCatalogEntry } from "@uberblick/schema";
 import { endpointSourceLabel } from "../../config.js";
 import type { HubEndpoint, LocalServing } from "../../config.js";
-import type { RoomConnection } from "../../collab/rooms.js";
+import { mintHubAuthMessage, type RoomConnection } from "../../collab/rooms.js";
+import { localSessionHeaders } from "../../collab/local-session.js";
 import { writeToClipboard } from "../../editor/source-chrome.js";
 import { toast } from "sonner";
 import { rawSyncState, useCalmSyncState } from "../status/calm.js";
@@ -41,6 +42,7 @@ import { workspaceLocationLabel } from "../workspace-location.js";
 import { useWorkspaceSetting } from "../workspace-setting.js";
 import { AccessSettings } from "./AccessSettings.js";
 import { LocalComputerSettings } from "./LocalComputerSettings.js";
+import { servesWorkspace } from "./hub-administration.js";
 import { CELL, ROW_ACTION, ROW_HEADER, SettingsPage, TableHead } from "./settings-kit.js";
 
 /** What a SyncPanel-style fact reads as before this client knows it. */
@@ -62,11 +64,7 @@ function Fact({ label, children, mono = false, tabular = false }: {
   );
 }
 
-/**
- * State the shell already holds, presented without another persistence or RPC
- * path. The directory room is the connection reading because it is the room
- * every workspace page has, including this one.
- */
+/** The directory room supplies the connection reading shared by workspace pages. */
 function GeneralSettings({
   workspace,
   workspaceLocation,
@@ -170,9 +168,56 @@ function GeneralSettings({
         </CollapsibleContent>
       </Collapsible>
       </>}
+      {!local && serving?.remoteHubUrl != null && servesWorkspace(serving, workspace.uuid) && (
+        <HostedMcpSettings key={`${workspace.uuid}:${serving.remoteHubUrl}`} workspace={workspace.uuid} subject={subject} />
+      )}
       <LocalComputerSettings key={workspace.uuid} workspace={workspace.uuid} serving={serving} subject={subject} local={local} />
     </SettingsPage>
   );
+}
+
+function HostedMcpSettings({ workspace, subject }: { workspace: string; subject: string }): ReactElement | null {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    setUrl(null);
+    void (async () => {
+      try {
+        const response = await fetch(`/api/hosted-mcp?workspace=${encodeURIComponent(workspace)}`, {
+          cache: "no-store",
+          redirect: "error",
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${await mintHubAuthMessage(workspace, subject)}`,
+            ...await localSessionHeaders(),
+          },
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5_000)]),
+        });
+        const result: unknown = response.ok ? await response.json() : null;
+        const hostedMcp = (result as { hostedMcp?: unknown } | null)?.hostedMcp;
+        if (!controller.signal.aborted && typeof hostedMcp === "string") setUrl(hostedMcp);
+      } catch { /* Hosted access is shown only when the hub confirms it. */ }
+    })();
+    return () => controller.abort();
+  }, [subject, workspace]);
+
+  const copy = async (): Promise<void> => {
+    if (url === null) return;
+    const copied = await writeToClipboard(url);
+    toast[copied ? "success" : "error"](
+      copied ? "Hosted MCP URL copied" : "Couldn't copy the hosted MCP URL. Try again in a browser with clipboard access.",
+      { id: "copy-hosted-mcp" },
+    );
+  };
+
+  if (url === null) return null;
+  return <section className="mt-8" aria-labelledby="ub-hosted-mcp-title">
+    <h2 id="ub-hosted-mcp-title" className="mt-0 mb-4 ub-type-h2 font-semibold">Hosted MCP</h2>
+    <div className="flex max-w-full flex-wrap items-baseline gap-2">
+      <span className="min-w-0 wrap-anywhere ub-type-ui font-(family-name:--font-mono)">{url}</span>
+      <Button type="button" variant="outline" size="sm" aria-label="Copy hosted MCP URL" onClick={() => void copy()}>Copy</Button>
+    </div>
+  </section>;
 }
 
 interface SharedSetting {

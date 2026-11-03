@@ -17,6 +17,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -209,6 +211,43 @@ describe("the versioned install payload", () => {
     }
     expect(failed.stderr).not.toMatch(/mcp\.mjs:\d+:\d+/);
     expect(failed.stderr).not.toContain(REPO_ROOT);
+  });
+
+  it("prints the hosted registration from the installed binary with only Node on PATH", async () => {
+    const hostedUrl = `https://public.example.test/mcp/${WORKSPACE}`;
+    const server = createServer((request, response) => {
+      if (request.url !== `/.well-known/oauth-protected-resource/mcp/${WORKSPACE}`) {
+        response.writeHead(404).end();
+        return;
+      }
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ resource: hostedUrl }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const box = sandbox({ projectBinding: {
+        workspaceId: WORKSPACE, hubUrl: `ws://127.0.0.1:${(server.address() as AddressInfo).port}/ws`,
+      } });
+      const child = spawn("ub", ["mcp", "install", "codex", "--remote", "--print"], {
+        cwd: box.cwd, env: runtimeEnv(box), timeout: 10_000,
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", chunk => { stdout += String(chunk); });
+      child.stderr.on("data", chunk => { stderr += String(chunk); });
+      const status = await new Promise<number | null>((resolve, reject) => {
+        child.on("error", reject);
+        child.on("close", resolve);
+      });
+      expect(status, stderr).toBe(0);
+      expect(stdout).toBe(`[mcp_servers.uberblick]\nurl = "${hostedUrl}"\n`);
+      expect(existsSync(join(box.cwd, ".codex"))).toBe(false);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close(error => error ? reject(error) : resolve());
+        server.closeAllConnections();
+      });
+    }
   });
 
   it.each([

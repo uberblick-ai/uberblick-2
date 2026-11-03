@@ -65,7 +65,7 @@ describe("ub status", () => {
       expect(run.status, run.output).toBe(0);
       const report = JSON.parse(run.stdout);
       expect(Object.keys(report)).toEqual([
-        "workspace", "hub", "version", "account", "chosenBy", "storedIn", "connection", "pending", "lastSync", "recentDevices", "problems",
+        "workspace", "hub", "hostedMcp", "version", "account", "chosenBy", "storedIn", "connection", "pending", "lastSync", "recentDevices", "problems",
       ]);
       expect(report.problems.map(({ name }: { name: string }) => name)).toEqual([problem]);
       expect(run.stderr).toMatch(stderr);
