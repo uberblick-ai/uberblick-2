@@ -145,6 +145,12 @@ test("both runtime images declare fast local health checks inherited by existing
 	assert.match(compose, /test: \["CMD", "node", "\/usr\/local\/bin\/mcp-healthcheck\.mjs"\]/);
 });
 
+test("the shared image copies node-owned mount points with an explicit private socket mode", () => {
+	const dockerfile = readFileSync(join(root, "Dockerfile.hub-release"), "utf8");
+	assert.match(dockerfile, /COPY --from=build --chown=node:node \/out\/mounts\/data \/data/);
+	assert.match(dockerfile, /COPY --from=build --chown=node:node --chmod=0700 \/out\/mounts\/socket \/run\/uberblick-mcp/);
+});
+
 test("the shared image entrypoint omits empty public URLs and preserves configured URLs", () => {
 	for (const value of [undefined, "", "https://hub.example.com", "invalid-url"]) {
 		const result = execute("hub-release-entrypoint.sh", { HUB_PUBLIC_URL: value },
