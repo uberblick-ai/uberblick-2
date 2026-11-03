@@ -179,6 +179,17 @@ test("the formula downloads the asset anonymously from the public tap", () => {
   assert.doesNotMatch(formula, /headers:|Authorization|Bearer|TOKEN/i);
 });
 
+test("the formula caveats explain retained data and the uninstall choice", () => {
+  const formula = formulaFor(TAG, VERSION, DIGEST);
+  const caveats = / {2}def caveats\n {4}<<~EOS\n([\s\S]*?) {4}EOS\n {2}end/.exec(formula)?.[1];
+
+  assert.ok(caveats, "the generated formula needs a Homebrew caveats block");
+  assert.match(caveats, /workspaces in ~\/\.local\/share\/uberblick/);
+  assert.match(caveats, /logins in ~\/\.config\/uberblick/);
+  assert.match(caveats, /brew uninstall leaves them in place/);
+  assert.match(caveats, /ub uninstall to remove Uberblick and choose whether to delete them/);
+});
+
 test("a matching published tag verifies the asset and changes nothing", async () => {
   const expected = formulaFor(TAG, VERSION, DIGEST);
   const fake = services({
