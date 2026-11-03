@@ -54,6 +54,7 @@ commands:
 
 options for install:
   --user             # Register for every project of this user, not just this project
+  --remote           # Register this workspace's hosted URL
   --print            # Print the entry to paste, and run nothing
 `;
 

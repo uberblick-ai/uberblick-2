@@ -63,7 +63,8 @@ function select(host: HTMLElement, label: string, value: string): void {
 
 it("shows the default choices and a size placeholder until the first local reading arrives", async () => {
   let finish: ((response: Response) => void) | undefined;
-  fetchImpl.mockImplementation(async () => new Promise((resolve) => { finish = resolve; }));
+  fetchImpl.mockImplementation(async (input) => String(input) === "/api/local-settings"
+    ? new Promise((resolve) => { finish = resolve; }) : Response.json({ hostedMcp: null }));
   const { container: host } = await renderSettled(page());
   const controls = within(host);
   expect(controls.getByRole("heading", { level: 1, name: "General" })).toBeTruthy();
@@ -170,9 +171,10 @@ it("shows only Size for a local workspace, without history wording or retention 
 
 it("ignores a late reading after the previous workspace's local settings unmount", async () => {
   let finish: ((response: Response) => void) | undefined;
-  fetchImpl.mockImplementationOnce(async () => new Promise((resolve) => { finish = resolve; }));
+  fetchImpl.mockImplementation(async (input) => String(input) === "/api/local-settings"
+    ? new Promise((resolve) => { finish = resolve; }) : Response.json({ hostedMcp: null }));
   const view = await renderSettled(page());
-  const signal = fetchImpl.mock.calls[0]?.[1]?.signal;
+  const signal = fetchImpl.mock.calls.find(([path]) => path === "/api/local-settings")?.[1]?.signal;
   const next: Workspace = { uuid: "53f04353-622b-4b14-8d71-366193d43c74", segment: "53f04353-622b-4b14-8d71-366193d43c74" };
   fetchImpl.mockImplementation(async () => Response.json({ retention: DEFAULT, size: { bytes: 2_000_000, usedFraction: 0.5 } }));
   await act(async () => view.rerender(page({ workspace: next, serving: { ...SERVING, workspace: next.uuid } })));
