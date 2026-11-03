@@ -232,6 +232,9 @@ describe("successful MCP output contracts", () => {
       title: "Link target", description: "The target of this fixture's links.",
     });
     const uuid = created.uuid;
+    const flow = await success("insert_block", { uuid, blocks: [{ type: "code", language: "ablauf",
+      text: 'flow v0\ncolumns main\nbox a "A"' }] });
+    await success("render_block", { uuid, block_id: flow.blocks[0].id, format: "svg" });
     const read = await success("get_doc", { uuid });
     vi.spyOn(revisionClient, "readDocumentHistory").mockResolvedValue({ revisions: [], history });
     vi.spyOn(revisionClient, "readDocumentRevision").mockImplementation(async () => {

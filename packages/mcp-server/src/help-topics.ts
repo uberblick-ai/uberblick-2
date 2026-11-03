@@ -232,7 +232,7 @@ An embed is visual content the web draws from data stored in the document: a flo
 | Chart or data table | \`chart\` fence | JSON mapping to the document's structured data; see [Structured data](uberblick://help/data) |
 | Figma | \`:::figma\` container | link, title, height and caption |
 
-Markdown and MCP keep an embed's data as text: ablauf and wireframe are code blocks with that language, a chart is its own \`chart\` block, and MCP reads and writes the source as the block's \`text\`. The web draws embeds. Chart-source writes also report what the mapping can draw from the document's current data, and ablauf and wireframe writes report the drawing's diagnostics; inspect appearance in the web editor.
+Markdown and MCP keep an embed's data as text: ablauf and wireframe are code blocks with that language, a chart is its own \`chart\` block, and MCP reads and writes the source as the block's \`text\`. The web draws embeds. Chart-source writes also report what the mapping can draw from the document's current data, and ablauf and wireframe writes report the drawing's diagnostics. After writing ablauf source, use [render_block](uberblick://help/render_block) to view its drawing and fix what you see. Inspect wireframe and chart appearance in the web editor.
 
 ### Figma
 
@@ -402,7 +402,10 @@ answers with a \`drawing\` summary for it: \`status\` \`clean\`, \`warnings\` or
 \`errors\`, and the renderer's diagnostics with their source lines, the same list
 the web editor shows below the drawing. Fix every diagnostic and write again.
 The check never refuses the write. A clean source can still cross or crowd, so
-inspect the drawing in the web editor when someone can open it.
+after writing call [render_block](uberblick://help/render_block) with the document
+UUID and block id. Inspect the returned PNG, or request SVG, and fix visible
+crossings, crowded labels and misplaced nodes before reporting back. Rendering
+never changes the document; it shows the whole flow before playback.
 
 ## Flow playback
 
@@ -738,7 +741,7 @@ const toolContracts = `# Shared tool contracts
 
 ## Arguments and results
 
-Every registered tool declares its input and output schemas. Input objects accept only declared fields; unknown or misspelled fields and mixed action shapes are refused before the handler runs. Successful results carry \`structuredContent\` and a text block containing the same JSON. Server-produced result objects are closed: an undeclared key, missing required field or wrong type yields a text-only \`internal_error\`, with mismatch detail on server stderr. Caller-stored schemas and record values are passed through without normalization, and data diagnostics remain free-form.
+Every registered tool declares its input and output schemas. Input objects accept only declared fields; unknown or misspelled fields and mixed action shapes are refused before the handler runs. Successful results carry \`structuredContent\` and a text block containing the same compact JSON. A PNG from \`render_block\` also carries one MCP image content item; the structured answer and its text copy give dimensions and drawing diagnostics without duplicating image bytes. SVG output is text in the structured answer and its JSON copy, with no image item. Server-produced result objects are closed: an undeclared key, missing required field or wrong type yields a text-only \`internal_error\`, with mismatch detail on server stderr. Caller-stored schemas and record values are passed through without normalization, and data diagnostics remain free-form.
 
 ## Failures and recovery
 

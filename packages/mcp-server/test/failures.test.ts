@@ -20,6 +20,7 @@ import {
   FAILURE_CODES,
   INTERNAL_ERROR_MESSAGE,
   PERSISTENCE_ERROR_MESSAGE,
+  ToolError,
   hydrationRecovery,
   toFailure,
 } from "../src/failures.js";
@@ -109,6 +110,10 @@ const EXPECTED: Record<
   string,
   { recoveryClass: string | null; detail: string[] }
 > = {
+  invalid_render_options: { recoveryClass: "manual", detail: ["field"] },
+  unsupported_block_type: { recoveryClass: "manual", detail: ["uuid", "block_id"] },
+  render_too_large: { recoveryClass: "manual", detail: ["uuid", "block_id", "maxPixels"] },
+  render_failed: { recoveryClass: "manual", detail: ["uuid", "block_id"] },
   server_shutting_down: { recoveryClass: "manual", detail: [] },
   data_invalid_input: { recoveryClass: "manual", detail: ["collection", "recordId"] },
   data_collection_not_found: { recoveryClass: "reread", detail: ["uuid", "collection"] },
@@ -287,6 +292,14 @@ describe("the failure contract", () => {
     const record = (payload: any): void => {
       failures.set(payload.error, payload);
     };
+    const renderDoc = await seeded(rig);
+    record((await rig.call("render_block", { uuid: renderDoc.uuid, block_id: renderDoc.blockId, width: 0 })).payload);
+    record((await rig.call("render_block", { uuid: renderDoc.uuid, block_id: renderDoc.blockId })).payload);
+    const tall = await rig.ok("insert_block", { uuid: renderDoc.uuid, blocks: [{ type: "code", language: "ablauf",
+      text: 'flow v0\ncolumns main\nbox a "A" gap=100000\nbox b "B"' }] });
+    record((await rig.call("render_block", { uuid: renderDoc.uuid, block_id: tall.blocks[0].id })).payload);
+    record(toFailure(toolNamed("render_block"), new ToolError("render_failed", "The bundled renderer failed.",
+      { uuid: renderDoc.uuid, block_id: tall.blocks[0].id })).payload);
 
     const deletionDoc = await seeded(rig);
     const comments = await rig.ok("annotate", { uuid: deletionDoc.uuid, block_id: deletionDoc.blockId, start: 0, end: 1, text: "Deletion failure cases" });

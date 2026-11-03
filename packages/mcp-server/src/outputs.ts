@@ -377,6 +377,19 @@ const revisionEntry = z.object({
 /** All registered tools use these exact objects for advertisement and checking. */
 export const outputSchemas = {
   get_help: getHelp,
+  render_block: z.object({
+    uuid,
+    block_id: z.string(),
+    format: z.enum(["png", "svg"]),
+    width: z.number().positive().describe("PNG pixel width, or SVG natural width."),
+    height: z.number().positive().describe("PNG pixel height, or SVG natural height."),
+    svg: z.string().optional().describe("Standalone SVG text; present only for format svg. PNG is one MCP image content item."),
+    drawing: drawingWriteSummary.describe("Diagnostics from the drawing shown, capped as write feedback is capped."),
+  }).strict().superRefine((value, ctx) => {
+    if ((value.format === "svg") !== (value.svg !== undefined)) {
+      ctx.addIssue({ code: "custom", message: "SVG text is required exactly for format svg", path: ["svg"] });
+    }
+  }),
   list_revisions: z.object({
     uuid,
     revisions: z.array(revisionEntry).describe("Cached catalog entries, newest first; empty only when a complete downloaded catalog records no revisions."),
