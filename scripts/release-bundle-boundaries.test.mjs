@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -34,6 +34,7 @@ test("the actual release bundles keep team code in the hub and client code in Ho
 		for (const [name, entry, homebrew] of [
 			["ub.mjs", "packages/cli/src/main.ts", true],
 			["mcp.mjs", "packages/mcp-server/src/main.ts", true],
+			["mcp-host.mjs", "packages/mcp-server/src/host-main.ts", false],
 			["hub.mjs", "packages/hub/src/main.ts", false],
 			["ub-hub.mjs", "packages/hub/src/operator-command.ts", false],
 		]) {
@@ -47,8 +48,9 @@ test("the actual release bundles keep team code in the hub and client code in Ho
 			assert.ok(inputs.includes(entry), `${name} contains its actual entry point`);
 			for (const input of inputs) {
 				const hubModule = /^packages\/hub\/src\/([^/]+)\.ts$/.exec(input)?.[1];
-				if (homebrew) {
+				if (homebrew || name === "mcp-host.mjs") {
 					assert.ok(!teamModules.has(hubModule), `${name} contains hub team module ${input}`);
+					if (!homebrew) assert.doesNotMatch(input, /^packages\/(cli|web)\//, `${name} contains an unrelated client package`);
 				} else {
 					assert.doesNotMatch(input, /^packages\/(cli|mcp-server|web)\//,
 						`${name} contains a client package`);
@@ -59,7 +61,7 @@ test("the actual release bundles keep team code in the hub and client code in Ho
 				assert.ok(inputs.includes("packages/hub/src/github-device-flow.ts"), "the release hub retains sign-in");
 				assert.ok(inputs.includes("packages/hub/src/credential-admission.ts"), "the release hub retains team admission");
 			}
-			if (!homebrew) {
+			if (!homebrew && name !== "mcp-host.mjs") {
 				for (const databasePath of [undefined, ""]) {
 					const env = { ...process.env, HOME: scratch, XDG_DATA_HOME: join(scratch, "data") };
 					delete env.HUB_DB_PATH;
@@ -97,4 +99,18 @@ test("the actual release bundles keep team code in the hub and client code in Ho
 	} finally {
 		rmSync(scratch, { recursive: true, force: true });
 	}
+});
+
+test("the release builder refuses contributing test code from any package", async () => {
+	const scratch = mkdtempSync(join(process.env.UB_AGENTS_SCRATCH ?? tmpdir(), `release-test-code-${process.env.UB_AGENTS_RUN ?? "test"}-`));
+	try {
+		for (const directory of ["packages/mcp-server/test", "packages/another/tests", "packages/example/src/__tests__"]) {
+			mkdirSync(join(scratch, directory), { recursive: true });
+			const stub = join(scratch, directory, "stub.mjs");
+			writeFileSync(stub, "export function checkToken() { return 'test-only-positive'; }\n");
+			const entry = join(scratch, "entry.mjs");
+			writeFileSync(entry, `import {checkToken} from ${JSON.stringify(stub)}; console.log(checkToken());\n`);
+			await assert.rejects(bundleHubEntry(entry, join(scratch, "mcp-host.mjs")), /release bundle contains package test code/);
+		}
+	} finally { rmSync(scratch, { recursive: true, force: true }); }
 });

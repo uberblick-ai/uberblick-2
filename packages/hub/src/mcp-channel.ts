@@ -75,7 +75,7 @@ async function clearStaleSocket(path: string): Promise<void> {
 
 export async function startMcpChannel(options: {
   path: string;
-  authorizations: OAuthAuthorizations;
+  authorizations: OAuthAuthorizations | undefined;
   grants: AgentGrantRegistry;
   admins: HubAdminRegistry;
   credentials: CredentialRegistry;
@@ -93,6 +93,15 @@ export async function startMcpChannel(options: {
   await clearStaleSocket(path);
   let stopped = false;
   const sessions = new Set<Socket>();
+  const introspect = (presentedToken: string): HubMcpTokenResult => {
+    const token = authorizations?.getAccessToken(presentedToken) ?? null;
+    const grant = token === null ? null : grants.get(token.grantId);
+    if (token === null || grant === null || !grants.isLive(grant.id) || admins.isSuspended(grant.workspaceId)) {
+      return { status: "negative" };
+    }
+    return { status: "positive", grantId: grant.id, principal: grant.principalId, workspace: grant.workspaceId,
+      scope: token.scope, expiresAt: token.expiresAt };
+  };
   const server = createServer(socket => {
     if (stopped) { socket.destroy(); return; }
     sessions.add(socket);
@@ -117,19 +126,12 @@ export async function startMcpChannel(options: {
         const message: unknown = JSON.parse(input.slice(0, newline));
         if (!object(message) || input.slice(newline + 1) !== "") throw new Error();
         if (message.action === "introspect" && fields(message, ["action", "token"]) && typeof message.token === "string") {
-          const token = authorizations.getAccessToken(message.token);
-          const grant = token === null ? null : grants.get(token.grantId);
-          if (token === null || grant === null || !grants.isLive(grant.id) || admins.isSuspended(grant.workspaceId)) {
-            finish({ status: "negative" });
-          } else {
-            finish({ status: "positive", grantId: grant.id, principal: grant.principalId, workspace: grant.workspaceId,
-              scope: token.scope, expiresAt: token.expiresAt });
-          }
+          finish(introspect(message.token));
         } else if (message.action === "issue-credential" && fields(message, ["action", "grantId", "publicKey"]) &&
           nonempty(message.grantId) && typeof message.publicKey === "string" && /^[A-Za-z0-9_-]{43}$/.test(message.publicKey)) {
           const publicKey = Buffer.from(message.publicKey, "base64url");
           if (publicKey.byteLength !== 32 || publicKey.toString("base64url") !== message.publicKey) throw new Error();
-          const issued = credentials.issueForGrant(message.grantId, publicKey);
+          const issued = authorizations === undefined ? null : credentials.issueForGrant(message.grantId, publicKey);
           finish(issued === null ? { status: "refused" } : { status: "issued", credential: issued.record });
         } else finish({ status: "invalid-request" });
       } catch { finish({ status: "failed" }); }

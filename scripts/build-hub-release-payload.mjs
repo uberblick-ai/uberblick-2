@@ -9,9 +9,19 @@ import { fileURLToPath } from "node:url";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const { build } = createRequire(join(root, "packages/cli/package.json"))("esbuild");
 
+export function assertProductionBundle(metafile) {
+	for (const output of Object.values(metafile.outputs)) {
+		for (const [input, contribution] of Object.entries(output.inputs)) {
+			if (contribution.bytesInOutput > 0 && /(?:^|\/)packages\/[^/]+\/(?:.*\/)?(?:test|tests|__tests__)\//.test(input.replaceAll("\\", "/"))) {
+				throw new Error(`release bundle contains package test code: ${input}`);
+			}
+		}
+	}
+}
+
 export async function bundleHubEntry(entry, output) {
 	const result = await build({
-		entryPoints: [join(root, entry)],
+		entryPoints: [resolve(root, entry)],
 		outfile: output,
 		bundle: true,
 		platform: "node",
@@ -21,6 +31,7 @@ export async function bundleHubEntry(entry, output) {
 		metafile: true,
 		sourcemap: false,
 	});
+	assertProductionBundle(result.metafile);
 	return result.metafile;
 }
 
@@ -49,6 +60,7 @@ async function main() {
 	await Promise.all([
 		bundleHubEntry("packages/hub/src/main.ts", join(destination, "hub.mjs")),
 		bundleHubEntry("packages/hub/src/operator-command.ts", join(destination, "ub-hub.mjs")),
+		bundleHubEntry("packages/mcp-server/src/host-main.ts", join(destination, "mcp-host.mjs")),
 	]);
 	const release = join(destination, "release");
 	mkdirSync(release);

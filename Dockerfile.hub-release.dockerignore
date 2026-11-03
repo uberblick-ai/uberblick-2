@@ -19,6 +19,7 @@
 !bin/remote-compose.sh
 !hub-release-entrypoint.sh
 !hub-healthcheck.mjs
+!mcp-healthcheck.mjs
 !web-release-entrypoint.sh
 !Caddyfile
 !REMOTE.md

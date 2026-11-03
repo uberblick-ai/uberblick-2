@@ -45,9 +45,9 @@ afterEach(async () => {
   rmSync(directory, { recursive: true, force: true });
 });
 
-function state() {
+function state(databasePath = ":memory:") {
   const clock = { now: 1000 };
-  const database = new HubDatabase(":memory:", error => { throw error; });
+  const database = new HubDatabase(databasePath, error => { throw error; });
   database.open();
   databases.push(database);
   const memberships = new MembershipRegistry(database);
@@ -284,13 +284,18 @@ describe("private MCP hub channel", () => {
     expect(await response).toEqual({ status: "unavailable" });
   });
 
-  it("wires only the configured private socket into a team hub and exposes no TCP operation", async () => {
+  it.each([undefined, "https://hub.example"])("wires the private socket with issuer %j and exposes no TCP operation", async publicUrl => {
     const config = resolveCoreHubConfig({ HUB_HOST: "127.0.0.1", HUB_AUTH_TOKEN: "local-secret", HUB_MCP_SOCKET: PATH }, ":memory:");
     expect(config.mcpSocketPath).toBe(PATH);
     expect(resolveCoreHubConfig({ HUB_HOST: "127.0.0.1", HUB_AUTH_TOKEN: "local-secret" }, ":memory:")).not.toHaveProperty("mcpSocketPath");
-    const hub = await createTeamHub({ ...config, port: 0, publicUrl: "https://hub.example", github: { clientId: "Iv23AbCdEF0123456789" }, log: () => {} });
+    const hub = await createTeamHub({ ...config, port: 0, ...(publicUrl === undefined ? {} : { publicUrl }),
+      github: { clientId: "Iv23AbCdEF0123456789" }, log: () => {} });
     stops.push(() => hub.stop());
     expect(await introspectMcpToken(PATH, "unknown-token")).toEqual({ status: "negative" });
+    expect(await requestMcpCredential(PATH, "unknown-grant", generateTestCredentialKeyPair().publicKey)).toBeNull();
+    const metadata = await fetch(`http://127.0.0.1:${hub.port}/.well-known/oauth-authorization-server`);
+    expect(metadata.status).toBe(publicUrl === undefined ? 404 : 200);
+    await metadata.text();
     const baseline = await fetch(`http://127.0.0.1:${hub.port}/unrelated-route`, { method: "POST" });
     const baselineText = await baseline.text();
     for (const path of ["/introspect", "/issue-credential", "/mcp/introspect", "/mcp/issue-credential"]) {
@@ -302,5 +307,44 @@ describe("private MCP hub channel", () => {
     }
     await hub.stop();
     expect(await introspectMcpToken(PATH, "unknown-token")).toEqual({ status: "unavailable" });
+  });
+
+  it("keeps persisted tokens and grants inaccessible while hosted sign-in is off and restores them when enabled", async () => {
+    const databasePath = join(directory, "hub.sqlite");
+    const context = state(databasePath);
+    context.clock.now = Date.now();
+    const token = issue(context);
+    const refreshed = context.authorizations.refresh({ refreshToken: token.refreshToken, clientId: "registered-agent", scope: "docs:read" });
+    if (refreshed.status !== "issued") throw new Error("refresh failed");
+    const pair = generateTestCredentialKeyPair();
+    const config = { databasePath, port: 0, authSecret: "local-secret", mcpSocketPath: PATH,
+      github: { clientId: "Iv23AbCdEF0123456789" }, log: () => {} };
+    const start = async (publicUrl?: string) => {
+      const hub = await createTeamHub({ ...config, ...(publicUrl === undefined ? {} : { publicUrl }) });
+      stops.push(() => hub.stop());
+      return hub;
+    };
+    const enabled = await start("https://hub.example");
+    expect(await introspectMcpToken(PATH, token.accessToken)).toHaveProperty("status", "positive");
+    expect(await introspectMcpToken(PATH, refreshed.accessToken)).toHaveProperty("status", "positive");
+    expect(await requestMcpCredential(PATH, token.grantId, pair.publicKey)).not.toBeNull();
+    await enabled.stop();
+    const snapshot = () => ({ tokens: context.database.connection.prepare("SELECT * FROM hub_oauth_access_tokens").all(),
+      refreshTokens: context.database.connection.prepare("SELECT * FROM hub_oauth_refresh_access_tokens").all(),
+      grants: context.database.connection.prepare("SELECT * FROM hub_agent_grants").all(),
+      credentials: context.database.connection.prepare("SELECT * FROM hub_credentials").all() });
+    const before = snapshot();
+    const disabled = await start();
+    for (const value of [token.accessToken, refreshed.accessToken, "unknown-token", "\nmalformed-token\0"]) {
+      expect(await introspectMcpToken(PATH, value)).toEqual({ status: "negative" });
+    }
+    expect(await requestMcpCredential(PATH, token.grantId, pair.publicKey)).toBeNull();
+    expect(await requestMcpCredential(PATH, token.grantId, generateTestCredentialKeyPair().publicKey)).toBeNull();
+    expect(snapshot()).toEqual(before);
+    await disabled.stop();
+    await start("https://hub.example");
+    expect(await introspectMcpToken(PATH, token.accessToken)).toHaveProperty("status", "positive");
+    expect(await introspectMcpToken(PATH, refreshed.accessToken)).toHaveProperty("status", "positive");
+    expect(await requestMcpCredential(PATH, token.grantId, pair.publicKey)).not.toBeNull();
   });
 });
