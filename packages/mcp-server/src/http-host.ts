@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -8,6 +8,8 @@ import { isUuid } from "@uberblick/schema";
 import type { CredentialProvider } from "./credential-provider.js";
 import { resolveMcpConfig } from "./config.js";
 import { hubTokenCheck, type McpHostGrant, type McpHostTokenCheck } from "./host-token-check.js";
+import { createHostCredentialManager } from "./host-credentials.js";
+import { hostGrantHash, startHostGrantCleanup } from "./host-grants.js";
 import { log } from "./log.js";
 import { handleProtectedResourceMetadata, replyMcpUnauthorized } from "./oauth-discovery.js";
 import { createMcpRuntime, type UberblickMcpRuntime, type UberblickMcpSession } from "./server.js";
@@ -48,15 +50,73 @@ function reply(response: ServerResponse, status: number): void {
   response.end();
 }
 
+function watchStream(checkToken: McpHostTokenCheck, record: HostSession, response: ServerResponse, token: string, checkedAt: number): void {
+  let stopped = false;
+  let pollTimer: ReturnType<typeof setTimeout>;
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  const stop = (): void => {
+    stopped = true;
+    clearTimeout(pollTimer);
+    clearTimeout(deadlineTimer);
+    record.streams.delete(stop);
+  };
+  const close = (): void => {
+    if (stopped || response.writableEnded || response.destroyed) return;
+    stop();
+    record.transport.closeStandaloneSSEStream();
+  };
+  const schedule = (startedAt: number): void => {
+    pollTimer = setTimeout(poll, Math.max(0, startedAt + STREAM_CHECK_INTERVAL_MS - performance.now()));
+    pollTimer.unref();
+  };
+  const poll = (): void => {
+    if (stopped) return;
+    // The SDK's request promise lasts for the stream; refused GETs finish without becoming a stream.
+    if (!response.headersSent || response.statusCode !== 200) {
+      stop();
+      return;
+    }
+    schedule(performance.now());
+    deadlineTimer = setTimeout(close, MCP_SOCKET_TIMEOUT_MS);
+    deadlineTimer.unref();
+    void Promise.resolve().then(() => checkToken(token)).then(answer => {
+      if (stopped || response.writableEnded || response.destroyed) return;
+      clearTimeout(deadlineTimer);
+      if (answer.status !== "positive" || answer.workspace !== record.workspace || answer.grantId !== record.grantId) close();
+    }, close);
+  };
+  record.streams.add(stop);
+  response.once("close", stop);
+  response.once("finish", stop);
+  schedule(checkedAt);
+}
+
 /** Compose HTTP admission with the same runtime and session tools as stdio. */
 export function createMcpHost(config: McpHostConfig, dependencies: McpHostDependencies = {}) {
   const checkToken = dependencies.checkToken ?? hubTokenCheck(config.hubMcpSocket);
+  const credentials = dependencies.credentialsForGrant === undefined && config.hubMcpSocket !== undefined
+    ? createHostCredentialManager({
+      directory: join(config.databaseDirectory, "keys"), endpoint: config.hubUrl, socketPath: config.hubMcpSocket,
+    }) : undefined;
   // known limit: no capacity limits or idle eviction; revisit when host limits land.
   const runtimes = new Map<string, Promise<UberblickMcpRuntime>>();
   const sessions = new Map<string, HostSession>();
   const allSessions = new Set<HostSession>();
   let stopping = false;
   let closing: Promise<void> | undefined;
+  const grantCleanup = credentials === undefined || config.hubMcpSocket === undefined ? undefined : startHostGrantCleanup({
+    databaseDirectory: config.databaseDirectory, socketPath: config.hubMcpSocket, credentials,
+    async retire(grantId) {
+      const opening = runtimes.get(grantId);
+      await Promise.all([...allSessions].filter(record => record.grantId === grantId).map(closeSession));
+      if (opening === undefined) return;
+      const runtime = await opening.catch(() => undefined);
+      // An ended grant cannot acknowledge more changes; drain calls, then close its log.
+      await runtime?.close(performance.now());
+      runtimes.delete(grantId);
+    },
+  });
+  const ready = grantCleanup?.ready ?? Promise.resolve();
 
   function closeSession(record: HostSession): Promise<void> {
     if (record.closing !== undefined) return record.closing;
@@ -69,62 +129,26 @@ export function createMcpHost(config: McpHostConfig, dependencies: McpHostDepend
     return record.closing;
   }
 
-  function watchStream(record: HostSession, response: ServerResponse, token: string, checkedAt: number): void {
-    let stopped = false;
-    let pollTimer: ReturnType<typeof setTimeout>;
-    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
-    const stop = (): void => {
-      stopped = true;
-      clearTimeout(pollTimer);
-      clearTimeout(deadlineTimer);
-      record.streams.delete(stop);
-    };
-    const close = (): void => {
-      if (stopped || response.writableEnded || response.destroyed) return;
-      stop();
-      record.transport.closeStandaloneSSEStream();
-    };
-    const schedule = (startedAt: number): void => {
-      pollTimer = setTimeout(poll, Math.max(0, startedAt + STREAM_CHECK_INTERVAL_MS - performance.now()));
-      pollTimer.unref();
-    };
-    const poll = (): void => {
-      if (stopped) return;
-      // The SDK's request promise lasts for the stream; refused GETs finish without becoming a stream.
-      if (!response.headersSent || response.statusCode !== 200) {
-        stop();
-        return;
-      }
-      schedule(performance.now());
-      deadlineTimer = setTimeout(close, MCP_SOCKET_TIMEOUT_MS);
-      deadlineTimer.unref();
-      void Promise.resolve().then(() => checkToken(token)).then(answer => {
-        if (stopped || response.writableEnded || response.destroyed) return;
-        clearTimeout(deadlineTimer);
-        if (answer.status !== "positive" || answer.workspace !== record.workspace || answer.grantId !== record.grantId) close();
-      }, close);
-    };
-    record.streams.add(stop);
-    response.once("close", stop);
-    response.once("finish", stop);
-    schedule(checkedAt);
-  }
-
   function runtimeFor(grant: McpHostGrant): Promise<UberblickMcpRuntime> {
     const existing = runtimes.get(grant.grantId);
     if (existing !== undefined) return existing;
     const opening = Promise.resolve().then(async () => {
-      if (stopping) throw new ServerShuttingDownError();
-      const credentials = await dependencies.credentialsForGrant?.(grant);
-      if (stopping) throw new ServerShuttingDownError();
-      if (credentials === undefined) throw new Error("Grant credentials are unavailable");
-      const grantPath = createHash("sha256").update(grant.grantId).digest("hex");
+      await ready;
+      if (stopping || grantCleanup?.hasEnded(grant.grantId)) throw new ServerShuttingDownError();
+      let runtimeCredentials = await dependencies.credentialsForGrant?.(grant);
+      if (credentials !== undefined) {
+        grantCleanup?.remember({ grantId: grant.grantId, workspace: grant.workspace });
+        runtimeCredentials = { credentialProvider: credentials.providerForGrant(grant.grantId, grant.workspace), agentName: "agent" };
+      }
+      if (stopping || grantCleanup?.hasEnded(grant.grantId)) throw new ServerShuttingDownError();
+      if (runtimeCredentials === undefined) throw new Error("Grant credentials are unavailable");
+      const grantPath = hostGrantHash(grant.grantId);
       const runtimeConfig = resolveMcpConfig({
         WORKSPACE_ID: grant.workspace,
         HUB_URL: config.hubUrl,
         UBERBLICK_DB: join(config.databaseDirectory, grantPath, `${grant.workspace}.sqlite`),
       });
-      return createMcpRuntime(runtimeConfig, credentials);
+      return createMcpRuntime(runtimeConfig, runtimeCredentials);
     });
     runtimes.set(grant.grantId, opening);
     void opening.catch(() => { if (runtimes.get(grant.grantId) === opening) runtimes.delete(grant.grantId); });
@@ -155,13 +179,14 @@ export function createMcpHost(config: McpHostConfig, dependencies: McpHostDepend
       return replyMcpUnauthorized(response, config.issuer, workspace);
     }
     if (stopping) return reply(response, 503);
+    if (grantCleanup?.hasEnded(answer.grantId)) return replyMcpUnauthorized(response, config.issuer, workspace);
     const id = request.headers["mcp-session-id"];
     if (id !== undefined) {
       const record = typeof id === "string" ? sessions.get(id) : undefined;
       if (record === undefined || record.closed || record.grantId !== answer.grantId || record.workspace !== workspace) {
         return reply(response, 404);
       }
-      if (request.method === "GET") watchStream(record, response, token, checkedAt);
+      if (request.method === "GET") watchStream(checkToken, record, response, token, checkedAt);
       await record.transport.handleRequest(request, response);
       return;
     }
@@ -170,6 +195,7 @@ export function createMcpHost(config: McpHostConfig, dependencies: McpHostDepend
   }
 
   async function initializeSession(grant: McpHostGrant, request: IncomingMessage, response: ServerResponse): Promise<void> {
+    await ready;
     const runtime = await runtimeFor(grant);
     if (stopping) return reply(response, 503);
     const session = runtime.openSession();
@@ -204,14 +230,18 @@ export function createMcpHost(config: McpHostConfig, dependencies: McpHostDepend
 
   return {
     server,
+    ready,
+    sweepGrants: () => grantCleanup?.sweep() ?? Promise.resolve(),
     close(deadline = performance.now() + SHUTDOWN_TIMEOUT_MS): Promise<void> {
       if (closing !== undefined) return closing;
       stopping = true;
+      const cleanupClosed = grantCleanup?.close();
       const drained = [...allSessions].map(closeSession);
       const listenerClosed = server.listening
         ? new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
         : Promise.resolve();
       closing = Promise.resolve().then(async () => {
+        await cleanupClosed;
         await Promise.all(drained);
         const opened = await Promise.allSettled([...runtimes.values()]);
         await Promise.all(opened.map(result => result.status === "fulfilled" ? result.value.close(deadline) : undefined));

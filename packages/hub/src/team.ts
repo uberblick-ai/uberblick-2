@@ -133,8 +133,8 @@ function createTeamExtension(
           github: config.github, log, hasLiveDocuments,
           operator: createOperatorControls(context, config, claims, principals, hubAdmins) });
       }
-      if (config.mcpSocketPath !== undefined && credentials !== undefined && hubAdmins !== undefined) {
-        mcpChannel = await startMcpChannel({ path: config.mcpSocketPath, authorizations, credentials, admins: hubAdmins,
+      if (config.mcpSocketPath !== undefined && credentials !== undefined && hubAdmins !== undefined && principals !== undefined) {
+        mcpChannel = await startMcpChannel({ path: config.mcpSocketPath, authorizations, credentials, principals, admins: hubAdmins,
           grants: new AgentGrantRegistry(database) });
       }
     },
