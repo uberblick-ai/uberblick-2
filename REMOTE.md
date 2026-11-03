@@ -1696,19 +1696,21 @@ succeed before restarting it:
 docker compose stop mcp
 docker compose exec hub ub-hub backup
 # Copy the reported hub backup path as above, then archive all MCP state:
-docker compose run --rm --no-deps -T mcp tar -cf - -C /data/mcp . > ~/uberblick-mcp-backup.tar
+(umask 077; docker compose run --rm --no-deps -T mcp tar -cf - -C /data/mcp . > ~/uberblick-mcp-backup.tar)
 chmod 600 ~/uberblick-mcp-backup.tar
 docker compose start mcp
 ```
 
-Restore a matching pair with `hub` and `mcp` stopped. Restore the hub backup
-using the next section, leaving the hub stopped until the MCP restore
-succeeds. The following replaces all current MCP keys and mirrors with the
-archive; retain a backup of the current state first. It runs as `node` and
-keeps the named volume and its ownership:
+Restore a matching pair with `hub` and `mcp` stopped. The following replaces
+the hub database and all current MCP keys and mirrors; retain a backup of the
+current state first. Read the next section's access-change warnings before
+using `--yes` to confirm the hub restore. These commands run as `node` and
+keep the named volumes and their ownership. Stop on any failure; start both
+services only after both restores succeed:
 
 ```sh
 docker compose stop hub mcp
+docker compose run --rm -T hub ub-hub restore --yes - < ~/uberblick-hub-backup.sqlite
 docker compose run --rm --no-deps -T mcp node -e 'const fs = require("node:fs"); for (const name of fs.readdirSync("/data/mcp")) fs.rmSync("/data/mcp/" + name, {recursive: true, force: true});'
 docker compose run --rm --no-deps -T mcp tar -xf - -C /data/mcp < ~/uberblick-mcp-backup.tar
 docker compose start hub mcp
