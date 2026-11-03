@@ -92,10 +92,45 @@ async function fixture() {
     workspaceId: WORKSPACE, scope: "read-write" });
   const options = { directory: join(directory, "keys"), endpoint: `ws://127.0.0.1:${address.port}`, socketPath: "private/mcp.sock" };
   const provider = () => createHostCredentialManager(options).providerForGrant(grant.id, WORKSPACE);
-  return { clock, credentials, grants, memberships, person, grant, provider, options, responses };
+  return { database, clock, credentials, grants, memberships, person, grant, provider, options, responses };
 }
 
-describe("host recovery with an outstanding first renewal", () => {
+describe("host credential renewal through the hub", () => {
+  it("publishes a usable renewed key and reuses it after a manager restart", async () => {
+    const rig = await fixture();
+    const issuance = vi.spyOn(rig.credentials, "issueForGrant");
+    const renew = vi.spyOn(rig.credentials, "renew");
+    const provider = rig.provider();
+    const initial = await provider.ensure();
+    if (initial.status !== "ready") throw new Error("initial issuance failed");
+    rig.clock.now += DEVICE_CREDENTIAL_RENEWAL_AGE_MS;
+    const renewed = await provider.ensure();
+    if (renewed.status !== "ready") throw new Error(`renewal failed: ${renewed.status}`);
+    expect(renewed.login.credential.record.id).not.toBe(initial.login.credential.record.id);
+    expect(renewed.login.credential.key).not.toBe(initial.login.credential.key);
+    const saved = JSON.parse(readFileSync(hostCredentialPath(rig.options.directory, rig.grant.id), "utf8"));
+    expect(saved.login).toEqual(renewed.login);
+    expect(saved).not.toHaveProperty("renewalPendingUntil");
+    expect(rig.credentials.get(initial.login.credential.record.id)?.replacedAt).toBe(rig.clock.now);
+    expect(rig.database.connection.prepare("SELECT id FROM hub_credentials WHERE revoked_at IS NULL AND replaced_at IS NULL").all())
+      .toEqual([{ id: renewed.login.credential.record.id }]);
+    expect(rig.grants.isLive(rig.grant.id)).toBe(true);
+    expect(rig.credentials.listDevices(rig.person.id)).toEqual([expect.objectContaining({ deviceId: rig.grant.deviceId, hosted: true })]);
+
+    const restarted = rig.provider();
+    const reloaded = await restarted.ensure();
+    if (reloaded.status !== "ready") throw new Error(`stored credential failed: ${reloaded.status}`);
+    expect(reloaded.login).toEqual(renewed.login);
+    expect(issuance).toHaveBeenCalledTimes(1);
+    expect(renew).toHaveBeenCalledTimes(1);
+    expect(rig.responses).toHaveLength(1);
+    const roomToken = await mintToken(await importCredentialKey(Buffer.from(reloaded.login.credential.key, "base64url")), {
+      typ: "room", sub: "restarted-hosted-session", workspace: WORKSPACE, scope: "read-write", kid: reloaded.login.credential.record.id,
+      iat: Math.floor(rig.clock.now / 1000), lifetimeSeconds: 60,
+    });
+    expect(await rig.credentials.verify(roomToken)).toHaveProperty("record.id", renewed.login.credential.record.id);
+  });
+
   it.each(["pending marker", "restored pre-marker backup"])("waits out the proof and reissues after a crash with %s", async storage => {
     const rig = await fixture();
     const issuance = vi.spyOn(rig.credentials, "issueForGrant");
