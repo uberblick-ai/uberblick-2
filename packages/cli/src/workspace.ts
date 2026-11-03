@@ -258,6 +258,16 @@ export function listWorkspacesCommand({ values }: CommandArgs<typeof WORKSPACE_L
     return 1;
   }
   const { entries, warnings, selectionNote } = listed;
+  entries.sort((left, right) => {
+    const leftName = left.name?.toLowerCase() ?? null;
+    const rightName = right.name?.toLowerCase() ?? null;
+    if (leftName !== rightName) {
+      if (leftName === null) return 1;
+      if (rightName === null) return -1;
+      return leftName < rightName ? -1 : 1;
+    }
+    return left.uuid < right.uuid ? -1 : left.uuid > right.uuid ? 1 : 0;
+  });
   warn(io, warnings);
   if (selectionNote !== null) io.err(`${selectionNote}\n`);
 
