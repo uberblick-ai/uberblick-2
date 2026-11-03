@@ -1688,6 +1688,14 @@ keys and workspace mirrors; losing it loses that host's stored keys and local
 mirror state. Keep its archive private alongside the hub backup. The socket
 volume needs no backup; the hub recreates the socket on startup.
 
+If `mcp-data` alone is lost or restored from an older backup, connections whose
+grants are still live recover with new credentials without another approval.
+Recovery can take about a minute while an outstanding renewal expires. Losing
+the volume loses only changes the hub had not received; acknowledged content
+downloads again. The host removes a revoked or unknown grant's key and mirror
+only when the mirror has no such changes. A revoked grant with unsynced changes
+keeps its files; the host neither recovers nor discards those changes.
+
 For a coordinated copy, stop `mcp` before taking the hub backup above, then
 archive its data with the same release image. Wait for every command to
 succeed before restarting it:
