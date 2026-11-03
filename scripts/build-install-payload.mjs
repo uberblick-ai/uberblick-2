@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { mcpRenderAssets, writeMcpRenderNotices } from "./mcp-render-assets.mjs";
 
 const REPOSITORY_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLI_ROOT = join(REPOSITORY_ROOT, "packages", "cli");
@@ -62,9 +63,11 @@ export async function bundleInstallEntry(entryPoint, outfile, sourceMap = false)
 		target: "node26",
 		minify: true,
 		metafile: true,
+		plugins: [mcpRenderAssets()],
 		sourcemap: sourceMap ? "linked" : false,
 		sourcesContent: false,
 	});
+	writeMcpRenderNotices(result.metafile, dirname(outfile));
 	if (sourceMap) {
 		const mapPath = `${outfile}.map`;
 		const map = JSON.parse(readFileSync(mapPath, "utf8"));

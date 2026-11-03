@@ -58,6 +58,22 @@ interface Recovery {
  * when the unchanged call cannot succeed after a transient condition passes.
  */
 const RECOVERIES: Record<string, Recovery> = {
+  invalid_render_options: {
+    recoveryClass: "manual",
+    guidance: "Use format png or svg and an integer width from 100 to 2000, or omit both for a 1000-pixel-wide PNG.",
+  },
+  unsupported_block_type: {
+    recoveryClass: "manual",
+    guidance: "Call get_doc and choose a code block with language ablauf; render_block supports only that block type.",
+  },
+  render_too_large: {
+    recoveryClass: "manual",
+    guidance: "Request a smaller width or format: \"svg\". PNG dimensions must be finite and positive and total at most 4,000,000 pixels.",
+  },
+  render_failed: {
+    recoveryClass: "manual",
+    guidance: "Read get_doc and the ablauf help topic, correct the drawing source, or restart the MCP server if the bundled renderer could not load.",
+  },
   unknown_help_topic: {
     recoveryClass: "manual",
     guidance: "Choose one of the valid topic ids in topics, or call get_help with no topic to discover the catalog.",

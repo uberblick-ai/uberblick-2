@@ -3,15 +3,17 @@ import type { Tool } from "./tool-table.js";
 import type { OperationRequest } from "./tools/operation.js";
 import type { ToolContext } from "./tools/context.js";
 import { toFailure } from "./failures.js";
+import { ImageResult } from "./tools/image-result.js";
 
 /**
  * Both wire answers carry the same JSON; failures stay text-only. The text copy
  * is compact because clients that show both pay for it twice.
  */
-export function toolResult(payload: object, isError = false): CallToolResult {
+export function toolResult(payload: object, isError = false, image?: ImageResult["image"]): CallToolResult {
   return {
     ...(isError ? { isError: true } : {}),
-    content: [{ type: "text", text: JSON.stringify(payload) }],
+    content: [{ type: "text", text: JSON.stringify(payload) },
+      ...(!isError && image ? [{ type: "image" as const, ...image }] : [])],
     ...(isError ? {} : { structuredContent: { ...payload } }),
   };
 }
@@ -39,16 +41,17 @@ export function guarded(
 ): (args: Record<string, unknown>, extra: Pick<OperationRequest, "signal" | "_meta">) => Promise<CallToolResult> {
   return async (args, extra) => {
     try {
-      const payload = mcpPayload(await context.work.run(() => tool.operation(context, args, {
+      const result = await context.work.run(() => tool.operation(context, args, {
         signal: extra.signal,
         ...(extra._meta === undefined ? {} : { _meta: extra._meta }),
         ...(extra._meta?.progressToken === undefined ? {} : { progressToken: extra._meta.progressToken }),
-      })));
+      }));
+      const payload = mcpPayload(result instanceof ImageResult ? result.payload : result);
       const parsed = tool.output.safeParse(payload);
       if (!parsed.success) {
         throw new Error(`Output validation failed for ${tool.name}: ${parsed.error.message}`);
       }
-      return toolResult(payload);
+      return toolResult(payload, false, result instanceof ImageResult ? result.image : undefined);
     } catch (error) {
       const failure = toFailure(tool, error);
       return toolResult(mcpPayload(failure.payload), failure.isError);

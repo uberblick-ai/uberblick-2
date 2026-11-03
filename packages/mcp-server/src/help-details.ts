@@ -50,6 +50,32 @@ export const toolHelpDetails = {
     "uberblick://help/{topic}. Help is workspace-agnostic and never opens or settles a replica; it remains " +
     "available offline and while the replica store is quarantined. Unknown topics refuse with " +
     "unknown_help_topic and list valid topic ids; choose one and retry.",
+  render_block:
+    "Read one `ablauf` code block's drawing without changing its source, block revisions or document. " +
+    "Use get_doc to find the document UUID and block id, then render after writing and fix both diagnostics " +
+    "and visible crossings, crowded labels or misplaced nodes before reporting back. This read tool " +
+    "also works on a hosted read-only connection. Wireframe, chart and other block types refuse with " +
+    "`unsupported_block_type`; only `ablauf` code blocks are supported.\n\n" +
+    "Omit `format` for one PNG image content item, 1000 pixels wide with the drawing's aspect ratio kept. " +
+    "`width` must be an integer from 100 to 2000, and applies only to PNG. `invalid_render_options` refuses " +
+    "an invalid format or width before rendering; use png or svg and a width in that range. The structured answer and its " +
+    "compact JSON text copy carry `uuid`, `block_id`, `format`, pixel `width` and `height`, and `drawing`; " +
+    "the image bytes are in the image item. `format: \"svg\"` returns `svg` text in that answer instead, " +
+    "with natural drawing dimensions and no image item. Like other structured results, the SVG is repeated " +
+    "in the compact JSON text copy.\n\n" +
+    "PNG dimensions must be finite and positive and total at most 4,000,000 pixels. The server checks " +
+    "the computed width and height before allocating a raster. `render_too_large` refuses an invalid " +
+    "or over-limit size with no image: choose a smaller `width` or `format: \"svg\"`. " +
+    "`render_failed` reports a renderer or rasterizer failure with recovery guidance; failures never " +
+    "return a blank or partial image as success.\n\n" +
+    "A source with diagnostics still returns the renderer's best-effort drawing. `drawing.status` is " +
+    "`clean`, `warnings` or `errors`; `diagnostics` carries source `line`, `severity` and `message`, " +
+    "capped at 20 entries. `diagnosticCount` gives the full count when truncated, as writing tools do. " +
+    "Flows with `play` sections show the whole drawing before playback.\n\n" +
+    "Rendering uses the editor's Ablauf renderer in its light palette, with an opaque light background " +
+    "and bundled Geist Mono for measured and drawn labels. Hues can differ slightly from the web editor's " +
+    "theme tokens; labels the web draws in its sans face use Geist Mono here, so node widths can differ " +
+    "slightly. No browser, network fetch or system font is needed.",
   create_doc:
     "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
     "search. Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
