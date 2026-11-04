@@ -533,6 +533,84 @@ describe("automatic hub revisions", () => {
     expect(getMeta(revision(db, rows[1]!.id)).title).toBe("Before revisions");
   });
 
+  it.each(["open", "closed"])("preserves uncaptured converted decision content after the page revision is %s", async state => {
+    const db = database();
+    const page = await load(db);
+    page.transact(() => appendBlock(page, { type: "paragraph", text: "Page text" }), { attribution: { author: browser } });
+    const pageRevision = db.revisions.list(ROOM)[0]!;
+    if (state === "closed") expect(db.revisions.name(ROOM, page, checksum(page), "Page state", browser).ok).toBe(true);
+    const pageBytes = db.revisions.get(ROOM, pageRevision.id);
+    const names = db.revisions.names(ROOM);
+    const existing = new Y.Doc();
+    documents.push(existing);
+    Y.applyUpdate(existing, Y.encodeStateAsUpdate(page));
+    getMetaMap(existing).set("kind", "decision");
+    getMetaMap(existing).set("status", "decided");
+    title(existing, "Decided title");
+    appendBlock(existing, { type: "paragraph", text: "Decided answer" });
+    existing.getMap("data").set("answer", { accepted: true });
+    db.connection.prepare("INSERT INTO documents (name, data) VALUES (?, ?)").run(ROOM, Y.encodeStateAsUpdate(existing));
+
+    const doc = await load(db);
+    clock = 50;
+    doc.transact(() => appendBlock(doc, { type: "paragraph", text: "Rewritten" }), { attribution: { author: browser } });
+    const rows = db.revisions.list(ROOM);
+    expect(rows).toEqual([
+      { id: expect.any(String), author: browser, startedAt: 50, endedAt: null,
+        checksum: checksum(doc), final: false, deadlineAt: 50 + 15 * MINUTE },
+      { id: expect.any(String), author: null, startedAt: null, endedAt: 50, checksum: checksum(existing), final: true },
+      { ...pageRevision, endedAt: state === "closed" ? 0 : 50, final: true, deadlineAt: undefined },
+    ]);
+    const earlier = revision(db, rows[1]!.id);
+    expect(getMeta(earlier).title).toBe("Decided title");
+    expect(getBlocks(earlier).map(block => block.text)).toEqual(["Page text", "Decided answer"]);
+    expect(getDocDataEntries(earlier)).toEqual([["answer", { accepted: true }]]);
+    expect(db.revisions.get(ROOM, pageRevision.id)).toEqual(pageBytes);
+    expect(db.revisions.names(ROOM)).toEqual(names);
+    await db.onStoreDocument({ document: doc, documentName: ROOM });
+    const reloaded = await load(db);
+    clock = 100;
+    title(reloaded, "Next edit");
+    expect(db.revisions.list(ROOM).map(row => row.id)).toEqual(rows.map(row => row.id));
+    expect(db.restoreRevision(ROOM, reloaded, checksum(reloaded), rows[1]!.id, claude).ok).toBe(true);
+    expect(checksum(reloaded)).toBe(checksum(existing));
+  });
+
+  it.each(["name", "restore"])("preserves uncaptured converted decision content when the first operation is %s", async operation => {
+    const db = database();
+    const page = await load(db);
+    title(page, "Page text");
+    const pageRevision = db.revisions.list(ROOM)[0]!;
+    const existing = new Y.Doc();
+    documents.push(existing);
+    Y.applyUpdate(existing, Y.encodeStateAsUpdate(page));
+    getMetaMap(existing).set("kind", "decision");
+    getMetaMap(existing).set("status", "open");
+    title(existing, "Uncaptured answer");
+    db.connection.prepare("INSERT INTO documents (name, data) VALUES (?, ?)").run(ROOM, Y.encodeStateAsUpdate(existing));
+    const doc = await load(db);
+    clock = 50;
+    const apply = () => operation === "name"
+      ? db.revisions.name(ROOM, doc, checksum(doc), "Answer at upgrade", browser)
+      : db.restoreRevision(ROOM, doc, checksum(doc), pageRevision.id, claude);
+    const previousRows = db.revisions.list(ROOM);
+    const previousState = Y.encodeStateAsUpdate(doc);
+    db.connection.exec(`CREATE TRIGGER fail_earlier_content BEFORE INSERT ON document_revisions WHEN NEW.author IS NULL
+      BEGIN SELECT RAISE(ABORT, 'earlier content failed'); END`);
+    expect(apply).toThrow("earlier content failed");
+    expect(db.revisions.list(ROOM)).toEqual(previousRows);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(previousState);
+    expect(db.revisions.names(ROOM).size).toBe(0);
+    db.connection.exec("DROP TRIGGER fail_earlier_content");
+    expect(apply().ok).toBe(true);
+    const rows = db.revisions.list(ROOM);
+    const earlier = rows.find(row => row.checksum === checksum(existing));
+    expect(earlier).toMatchObject({ author: null, startedAt: null, endedAt: 50, final: true });
+    expect(getMeta(revision(db, earlier!.id)).title).toBe("Uncaptured answer");
+    expect(getMeta(revision(db, pageRevision.id)).title).toBe("Page text");
+    if (operation === "name") expect(db.revisions.names(ROOM).get(earlier!.id)?.text).toBe("Answer at upgrade");
+  });
+
   it("keeps an equal stretch's start for later edits, including after reloading the room", async () => {
     const db = database();
     const doc = await load(db);
