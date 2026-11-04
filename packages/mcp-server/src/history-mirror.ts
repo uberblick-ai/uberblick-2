@@ -70,7 +70,7 @@ export interface HistoryMirrorPage {
   archived: boolean;
 }
 export interface HistoryMirrorSource {
-  /** Only regular pages with already-held rooms; never attach an archived room. */
+  /** Only documents with already-held rooms; never attach an archived room. */
   pages(): HistoryMirrorPage[];
   retention(): HistoryRetention;
   stamp(): HistoryCacheStamp | null;
