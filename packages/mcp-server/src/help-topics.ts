@@ -79,6 +79,7 @@ Create and change documents with the fewest calls. Details live in \`decisions\`
 
 - One block per paragraph, heading, list item, quote, callout, code fence or table. Lists are flat: \`indent\` 0–3.
 - Write \`---\` with a blank line above it for a divider, or use \`type: "divider"\` with empty text over MCP. Text directly above \`---\` becomes a level-2 heading.
+- \`## > Title\` is a toggle heading whose section starts collapsed; see \`markdown\` for details.
 - A block's \`text\` is plain text: \`**bold**\` stays literal. For formatting or links in prose, pass \`inline\` runs with marks when creating or inserting.
 - Tables, cards, embeds and GitHub references are in \`markdown\`.
 - Visual blocks: flow, fan-out and sequence diagrams in \`ablauf\`, UI sketches in \`wireframe\`, charts, scatter plots and data tables in \`data\`, and Figma designs in \`markdown\`.
@@ -187,6 +188,23 @@ Write \`:name:\` to show a curated icon in the web app. Available names are ${Ob
 Unknown names such as \`:rocket:\` stay literal, unchanged text, as do \`10:30:15\` and \`note:this:\`. Inline code and code, terminal and chart source never render icons; use inline code to show a known name literally. Stored text, MCP reads and writes, search, decision approval and Markdown import/export keep the literal \`:name:\` source. This is presentation only, without an icon node or mark; MCP does not validate icon names in inline prose.
 
 Write emoji as characters, such as 😃 or 🚀. MCP never converts \`:name:\` to emoji: \`:smiley:\` and \`:rocket:\` remain literal in writes, reads and Markdown import/export. The web editor's typed emoji conversion does not apply to MCP or imported Markdown.
+
+## Toggle headings
+
+A toggle heading is a heading whose text starts with \`> \` (a \`>\` and a space). For Markdown import, use an ATX heading:
+
+    ## > Title
+    > quoted text
+
+The first line is a toggle heading; the second is a quote block, not a heading. Over MCP, use a \`heading\` block whose \`text\` starts with \`> \`, such as \`{ "type": "heading", "level": 2, "text": "> Title" }\`.
+
+Its section includes every following block until the next heading with the same number of \`#\` or fewer, or the document's end. A heading with more \`#\` stays inside the section and can be a toggle heading itself.
+
+Each toggle heading starts collapsed for every reader when the page opens in the web. Its open state stays in that view and is never saved or shared. Collapsing only affects the web display: \`get_doc\` and \`export_markdown\` still return every block in the section, and \`search\` still searches its full content.
+
+The \`> \` prefix is stored heading text: \`get_doc\` and \`search\` retain it in returned heading text. Markdown import and export keep it as \`## > Title\`; other Markdown viewers show the \`>\` literally. When editing, keep the prefix to keep the toggle. Removing it makes an ordinary open heading; adding it to an existing heading folds that heading's section.
+
+Use a toggle heading for a section most readers can skip, such as alternatives considered on an RFC page. Do not use one for content a reader needs to understand or act on the page.
 
 ## Callouts
 
