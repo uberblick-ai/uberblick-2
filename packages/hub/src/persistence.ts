@@ -170,9 +170,12 @@ export class HubDatabase implements Extension {
           if (typeof row.name !== "string" || !isCanonicalRoom(row.name) || !(row.data instanceof Uint8Array)) continue;
           const isDirectory = parseRoom(row.name).isDirectory;
           if (isDirectory !== (phase === "directory")) continue;
+          if (!isDirectory && this.classifications.rooms.has(row.name)) continue;
           const document = new Y.Doc();
           try {
-            Y.applyUpdate(document, row.data);
+            // A corrupt ordinary room is refused when loaded; it must not keep
+            // healthy rooms from starting or receiving upgrade protection.
+            try { Y.applyUpdate(document, row.data); } catch { continue; }
             if (isDirectory) this.classifyDirectory(row.name, document);
             else this.classifications.observeRoom(row.name, document, phase === "metadata");
           } finally { document.destroy(); }

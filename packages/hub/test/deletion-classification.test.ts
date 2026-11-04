@@ -447,4 +447,39 @@ describe("hub-owned deletion classification", () => {
       converged(directory, uuid);
     },
   );
+
+  it("isolates a corrupt legacy room while seeding protection for a valid decision", async () => {
+    const path = tempDatabasePath();
+    const room = testRoom();
+    const uuid = parseRoom(room).uuid;
+    const topic = parseRoom(testRoom()).uuid;
+    const corruptRoom = testRoom();
+    const legacyRecord = new Document(room);
+    const legacyDirectory = new Document(directoryRoom(WORKSPACE));
+    documents.push(legacyRecord, legacyDirectory);
+    initialize(legacyRecord, uuid, topic);
+    legacyDirectory.getMap("docs").set(uuid, { title: "Valid decision with a rewritten entry", tags: [], deleted: true });
+    const legacy = new DatabaseSync(path);
+    try {
+      legacy.exec("CREATE TABLE documents (name TEXT NOT NULL UNIQUE, data BLOB NOT NULL)");
+      legacy.prepare("INSERT INTO documents (name, data) VALUES (?, ?)").run(room, Y.encodeStateAsUpdate(legacyRecord));
+      legacy.prepare("INSERT INTO documents (name, data) VALUES (?, ?)").run(corruptRoom, new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]));
+      legacy.prepare("INSERT INTO documents (name, data) VALUES (?, ?)")
+        .run(legacyDirectory.name, Y.encodeStateAsUpdate(legacyDirectory));
+    } finally { legacy.close(); }
+
+    const upgraded = open(path);
+    const directory = await load(upgraded, legacyDirectory.name);
+    const state = persisted(upgraded, room);
+    deleteDirectoryEntry(directory, uuid);
+    expect(upgraded.isDeletedRoom(room)).toBe(false);
+    expect(persisted(upgraded, room)).toEqual(state);
+    converged(directory, uuid);
+    await expect(load(upgraded, corruptRoom)).rejects.toThrow();
+    expect(persisted(upgraded, corruptRoom)).toEqual(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]));
+    expect((await load(upgraded, room)).getText("body").toString()).toBe("Retained room content");
+    const barrier = parseRoom(testRoom()).uuid;
+    upsertDirectoryEntry(directory, { uuid: barrier, title: "Directory remains writable" });
+    expect(directory.getMap("docs").has(barrier)).toBe(true);
+  });
 });
