@@ -8,10 +8,12 @@ import {
   initDoc,
   isDirectoryEntryDeleted,
   parseRoom,
+  roomForDoc,
   setKind,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
+import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { HubDatabase } from "../src/persistence.js";
@@ -238,6 +240,37 @@ describe("hub-owned deletion classification", () => {
     converged(directory, uuid);
   });
 
+  it.each([
+    { order: "successor before topic", topicUuid: "ffffffff-ffff-4fff-bfff-ffffffffffff", uuid: "00000000-0000-4000-8000-000000000001" },
+    { order: "topic before successor", topicUuid: "00000000-0000-4000-8000-000000000001", uuid: "ffffffff-ffff-4fff-bfff-ffffffffffff" },
+  ])("keeps successor membership after refusing a live topic deletion, with $order", async ({ topicUuid, uuid }) => {
+    const database = open();
+    const topic = await load(database, roomForDoc(WORKSPACE, topicUuid));
+    initialize(topic, topicUuid, topicUuid);
+    await database.onStoreDocument({ document: topic, documentName: topic.name });
+    const record = await load(database, roomForDoc(WORKSPACE, uuid));
+    initialize(record, uuid, topicUuid);
+    await database.onStoreDocument({ document: record, documentName: record.name });
+    const directory = await load(database, directoryRoom(WORKSPACE));
+    publish(directory, topic, topicUuid);
+    publish(directory, record, topicUuid);
+    const assertRetained = retained(database, record);
+
+    directory.getMap("deleted-docs").set(topicUuid, true);
+
+    assertRetained();
+    expect(database.isDeletedRoom(topic.name)).toBe(false);
+    expect(directory.getMap("deleted-docs").has(topicUuid)).toBe(false);
+    expect(directory.getMap("docs").get(uuid)).toMatchObject({ kind: "decision", topic: topicUuid });
+    converged(directory, uuid);
+    expect(directory.getMap("docs").get(uuid)).toMatchObject({ kind: "decision", topic: topicUuid });
+    const replica = new Y.Doc();
+    documents.push(replica);
+    Y.applyUpdate(replica, Y.encodeStateAsUpdate(directory));
+    enforceDeletedDirectoryEntries(replica);
+    expect(replica.getMap("docs").get(uuid)).toMatchObject({ kind: "decision", topic: topicUuid });
+  });
+
   it("deletes an archived page while keeping a decision record that initially claimed it as a topic", async () => {
     const database = open();
     const page = await create(database);
@@ -350,6 +383,177 @@ describe("hub-owned deletion classification", () => {
     expect(persisted(restarted, room)).toBeUndefined();
     expect(restarted.revisions.list(room)).toEqual([]);
   });
+
+  it.each(["legacy database", "offline replica"])(
+    "retains deleted topic evidence from a %s without rooms or entries", async source => {
+      const path = tempDatabasePath();
+      const topicRoom = testRoom();
+      const topicUuid = parseRoom(topicRoom).uuid;
+      const recordRoom = testRoom();
+      const uuid = parseRoom(recordRoom).uuid;
+      const savedDirectory = new Document(directoryRoom(WORKSPACE));
+      documents.push(savedDirectory);
+      upsertDirectoryEntry(savedDirectory, { uuid: topicUuid, title: "Deleted topic", kind: "decision", topic: topicUuid, status: "open" });
+      upsertDirectoryEntry(savedDirectory, { uuid, title: "Deleted successor", kind: "decision", topic: topicUuid, status: "open" });
+      tombstoneDirectoryEntry(savedDirectory, topicUuid);
+      deleteDecisionTopic(savedDirectory, topicUuid);
+      expect(savedDirectory.getMap("docs").size).toBe(0);
+      expect(savedDirectory.getMap("deleted-docs").get(topicUuid)).toBe(true);
+      expect(savedDirectory.getMap("deleted-docs").get(uuid)).toBe(true);
+      expect(savedDirectory.getMap("deleted-decision-topics").get(uuid)).toBe(topicUuid);
+
+      if (source === "legacy database") {
+        const legacy = new DatabaseSync(path);
+        try {
+          legacy.exec("CREATE TABLE documents (name TEXT NOT NULL UNIQUE, data BLOB NOT NULL)");
+          legacy.prepare("INSERT INTO documents (name, data) VALUES (?, ?)")
+            .run(savedDirectory.name, Y.encodeStateAsUpdate(savedDirectory));
+        } finally { legacy.close(); }
+      }
+      const first = open(path);
+      const directory = await load(first, savedDirectory.name);
+      if (source === "offline replica") Y.applyUpdate(directory, Y.encodeStateAsUpdate(savedDirectory));
+      expect(first.isDeletedRoom(topicRoom)).toBe(true);
+      expect(first.isDeletedRoom(recordRoom)).toBe(true);
+      expect(directory.getMap("deleted-docs").get(uuid)).toBe(true);
+      expect(directory.getMap("deleted-decision-topics").get(uuid)).toBe(topicUuid);
+      await first.onStoreDocument({ document: directory, documentName: directory.name });
+      first.close();
+
+      const restarted = open(path);
+      expect(restarted.isDeletedRoom(topicRoom)).toBe(true);
+      expect(restarted.isDeletedRoom(recordRoom)).toBe(true);
+      const reloadedDirectory = await load(restarted, savedDirectory.name);
+      expect(reloadedDirectory.getMap("deleted-docs").get(uuid)).toBe(true);
+      expect(reloadedDirectory.getMap("deleted-decision-topics").get(uuid)).toBe(topicUuid);
+      const stale = new Document(recordRoom);
+      documents.push(stale);
+      initialize(stale, uuid, topicUuid);
+      await expect(restarted.onLoadDocument({ document: stale, documentName: recordRoom })).rejects.toMatchObject({ reason: DOC_DELETED_REASON });
+      await restarted.onStoreDocument({ document: stale, documentName: recordRoom });
+      expect(persisted(restarted, recordRoom)).toBeUndefined();
+
+      const lateRoom = testRoom();
+      const lateUuid = parseRoom(lateRoom).uuid;
+      const late = await load(restarted, lateRoom);
+      initialize(late, lateUuid, topicUuid);
+      expect(restarted.isDeletedRoom(lateRoom)).toBe(true);
+      publish(reloadedDirectory, late, topicUuid);
+      await restarted.onStoreDocument({ document: late, documentName: lateRoom });
+      expect(reloadedDirectory.getMap("deleted-docs").get(lateUuid)).toBe(true);
+      expect(reloadedDirectory.getMap("docs").has(lateUuid)).toBe(false);
+      expect(persisted(restarted, lateRoom)).toBeUndefined();
+      expect(restarted.revisions.list(lateRoom)).toEqual([]);
+      restarted.close();
+
+      const again = open(path);
+      for (const room of [topicRoom, recordRoom, lateRoom]) {
+        expect(again.isDeletedRoom(room)).toBe(true);
+        expect(() => again.requireRoom(room)).toThrow();
+        expect(persisted(again, room)).toBeUndefined();
+      }
+    },
+  );
+
+  it("retries inferred deleted topic identity atomically when a late record arrives after a failed directory write", async () => {
+    const path = tempDatabasePath();
+    const first = open(path);
+    const directory = await load(first, directoryRoom(WORKSPACE));
+    const topicRoom = testRoom();
+    const topicUuid = parseRoom(topicRoom).uuid;
+    const recordRoom = testRoom();
+    const uuid = parseRoom(recordRoom).uuid;
+    const offline = new Y.Doc();
+    documents.push(offline);
+    upsertDirectoryEntry(offline, { uuid: topicUuid, title: "Deleted topic", kind: "decision", topic: topicUuid, status: "open" });
+    upsertDirectoryEntry(offline, { uuid, title: "Deleted successor", kind: "decision", topic: topicUuid, status: "open" });
+    tombstoneDirectoryEntry(offline, topicUuid);
+    deleteDecisionTopic(offline, topicUuid);
+    first.connection.exec("CREATE TRIGGER fail_deletion BEFORE INSERT ON documents BEGIN SELECT RAISE(ABORT, 'injected deletion failure'); END");
+
+    expect(() => Y.applyUpdate(directory, Y.encodeStateAsUpdate(offline))).toThrow("injected deletion failure");
+
+    for (const room of [topicRoom, recordRoom]) {
+      expect(first.isDeletedRoom(room)).toBe(true);
+      expect(first.connection.prepare("SELECT topic, deleted FROM document_classifications WHERE name = ?").get(room)).toBeUndefined();
+    }
+    expect(persisted(first, directory.name)).toBeUndefined();
+    first.connection.exec("DROP TRIGGER fail_deletion");
+
+    const lateRoom = testRoom();
+    const lateUuid = parseRoom(lateRoom).uuid;
+    const late = await load(first, lateRoom);
+    initialize(late, lateUuid, topicUuid);
+
+    for (const [room, topic] of [[topicRoom, topicUuid], [recordRoom, topicUuid], [lateRoom, topicUuid]] as const) {
+      expect(first.isDeletedRoom(room)).toBe(true);
+      expect(first.connection.prepare("SELECT topic, deleted FROM document_classifications WHERE name = ?").get(room))
+        .toMatchObject({ topic, deleted: 1 });
+      expect(persisted(first, room)).toBeUndefined();
+    }
+    const storedDirectory = new Y.Doc();
+    documents.push(storedDirectory);
+    Y.applyUpdate(storedDirectory, persisted(first, directory.name)!);
+    for (const deletedUuid of [topicUuid, uuid, lateUuid]) {
+      expect(storedDirectory.getMap("deleted-docs").get(deletedUuid)).toBe(true);
+    }
+    expect(storedDirectory.getMap("deleted-decision-topics").get(uuid)).toBe(topicUuid);
+    expect(storedDirectory.getMap("deleted-decision-topics").get(lateUuid)).toBe(topicUuid);
+    first.close();
+
+    const restarted = open(path);
+    for (const room of [topicRoom, recordRoom, lateRoom]) {
+      expect(restarted.isDeletedRoom(room)).toBe(true);
+      expect(() => restarted.requireRoom(room)).toThrow();
+      expect(persisted(restarted, room)).toBeUndefined();
+    }
+  });
+
+  it.each(["refused held page link", "self link"])(
+    "does not infer topic identity from a %s", async source => {
+      const path = tempDatabasePath();
+      const database = open(path);
+      const directory = await load(database, directoryRoom(WORKSPACE));
+      const unknownRoom = testRoom();
+      const unknownUuid = parseRoom(unknownRoom).uuid;
+      const page = source === "self link" ? undefined : await create(database);
+      const pageUuid = page === undefined ? undefined : parseRoom(page.name).uuid;
+      if (page !== undefined) publish(directory, page);
+      const assertRetained = page === undefined ? undefined : retained(database, page);
+
+      directory.transact(() => {
+        directory.getMap("deleted-docs").set(unknownUuid, true);
+        const claimant = pageUuid ?? unknownUuid;
+        directory.getMap("deleted-docs").set(claimant, true);
+        directory.getMap("deleted-decision-topics").set(claimant, unknownUuid);
+      });
+
+      expect(database.isDeletedRoom(unknownRoom)).toBe(true);
+      expect(database.connection.prepare("SELECT topic, deleted FROM document_classifications WHERE name = ?").get(unknownRoom))
+        .toMatchObject({ topic: null, deleted: 1 });
+      assertRetained?.();
+      if (pageUuid !== undefined) {
+        expect(directory.getMap("deleted-docs").has(pageUuid)).toBe(false);
+        expect(directory.getMap("deleted-decision-topics").has(pageUuid)).toBe(false);
+        converged(directory, pageUuid);
+      }
+
+      const late = await create(database, unknownUuid);
+      const lateUuid = parseRoom(late.name).uuid;
+      publish(directory, late, unknownUuid);
+      expect(database.isDeletedRoom(late.name)).toBe(false);
+      expect(persisted(database, late.name)).toBeDefined();
+      converged(directory, lateUuid);
+      assertRetained?.();
+      database.close();
+
+      const restarted = open(path);
+      expect(restarted.isDeletedRoom(unknownRoom)).toBe(true);
+      expect(restarted.isDeletedRoom(late.name)).toBe(false);
+      expect(persisted(restarted, late.name)).toBeDefined();
+      if (page !== undefined) expect(restarted.isDeletedRoom(page.name)).toBe(false);
+    },
+  );
 
   it("does not retain whole-topic authorization when persisting its archive and deletion failed", async () => {
     const path = tempDatabasePath();

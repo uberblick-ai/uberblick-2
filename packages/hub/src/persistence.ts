@@ -165,21 +165,28 @@ export class HubDatabase implements Extension {
     try {
       // At upgrade, prefer room metadata, then directory stubs, then other room
       // content. Seed everything before considering any persisted deletion mark.
-      for (const phase of ["metadata", "directory", "content"]) {
-        for (const row of db.prepare("SELECT name, data FROM documents").iterate()) {
-          if (typeof row.name !== "string" || !isCanonicalRoom(row.name) || !(row.data instanceof Uint8Array)) continue;
-          const isDirectory = parseRoom(row.name).isDirectory;
-          if (isDirectory !== (phase === "directory")) continue;
-          if (!isDirectory && this.classifications.rooms.has(row.name)) continue;
-          const document = new Y.Doc();
-          try {
-            // A corrupt ordinary room is refused when loaded; it must not keep
-            // healthy rooms from starting or receiving upgrade protection.
-            try { Y.applyUpdate(document, row.data); } catch { continue; }
-            if (isDirectory) this.classifyDirectory(row.name, document);
-            else this.classifications.observeRoom(row.name, document, phase === "metadata");
-          } finally { document.destroy(); }
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        for (const phase of ["metadata", "directory", "content"]) {
+          for (const row of db.prepare("SELECT name, data FROM documents").iterate()) {
+            if (typeof row.name !== "string" || !isCanonicalRoom(row.name) || !(row.data instanceof Uint8Array)) continue;
+            const isDirectory = parseRoom(row.name).isDirectory;
+            if (isDirectory !== (phase === "directory")) continue;
+            if (!isDirectory && this.classifications.rooms.has(row.name)) continue;
+            const document = new Y.Doc();
+            try {
+              // A corrupt ordinary room is refused when loaded; it must not keep
+              // healthy rooms from starting or receiving upgrade protection.
+              try { Y.applyUpdate(document, row.data); } catch { continue; }
+              if (isDirectory) this.classifyDirectory(row.name, document);
+              else this.classifications.observeRoom(row.name, document, phase === "metadata");
+            } finally { document.destroy(); }
+          }
         }
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
       }
       // Positive marks must fence admission even when nobody opens the directory.
       for (const row of db.prepare('SELECT name, data FROM documents WHERE name GLOB ?').all("*/_directory")) {
@@ -347,7 +354,8 @@ export class HubDatabase implements Extension {
     for (const [uuid, change] of changes ?? []) {
       if (canonicalDocumentUuid(uuid) !== null) this.documentClassifications.observeEntry(roomForDoc(workspaceId, uuid), change.oldValue);
     }
-    for (const [uuid, entry] of docs) {
+    const entries = transaction === undefined ? docs : [...(changes?.keys() ?? [])].map(uuid => [uuid, docs.get(uuid)] as const);
+    for (const [uuid, entry] of entries) {
       if (canonicalDocumentUuid(uuid) !== null) this.documentClassifications.observeEntry(roomForDoc(workspaceId, uuid), entry);
     }
   }
@@ -382,8 +390,8 @@ export class HubDatabase implements Extension {
     const entryChanges = transaction === undefined ? undefined : [...transaction.changedParentTypes]
       .find(([type]) => (type as unknown) === docs)?.[1].find(event => event.target === docs)?.changes.keys;
     const classifications = this.documentClassifications;
-    const referencedTopics = new Set([...classifications.rooms]
-      .filter(([name]) => parseRoom(name).workspaceId === workspaceId)
+    const workspaceClassifications = classifications.forWorkspace(workspaceId);
+    const referencedTopics = new Set([...workspaceClassifications]
       .flatMap(([, classification]) => classification.topic === null ? [] : [classification.topic]));
     const refused: Array<{ uuid: string; before: unknown }> = [];
     const archivedBeforeOrNow = (uuid: string): boolean => {
@@ -394,18 +402,26 @@ export class HubDatabase implements Extension {
       if (marks.get(topic) !== true) return false;
       const topicRoom = roomForDoc(workspaceId, topic);
       const classification = classifications.rooms.get(topicRoom);
-      return classification?.topic === topic &&
+      if (classification === undefined) return this.deletedRooms.has(topicRoom) || (!referencedTopics.has(topic) && !this.holdsRoom(topicRoom));
+      return classification.topic === topic &&
         (classification.deleted || this.deletedRooms.has(topicRoom) || archivedBeforeOrNow(topic));
     };
-    for (const [name, classification] of classifications.rooms) {
-      const parsed = parseRoom(name);
-      if (parsed.workspaceId !== workspaceId || classification.topic === null) continue;
+    for (const [uuid, classification] of workspaceClassifications) {
+      const name = roomForDoc(workspaceId, uuid);
+      if (classification.topic === null) continue;
       if (authorizedTopicMark(classification.topic)) {
         authorizedTopics.add(classification.topic);
-        purgeable.add(parsed.uuid);
+        purgeable.add(uuid);
       } else if (marks.get(classification.topic) === true && !this.deletedRooms.has(name)) {
         // An unheld topic mark must not become authority for a held record.
         purgeable.add(classification.topic);
+      }
+    }
+    // Offline deletions and pre-upgrade purges may leave only UUIDs and their
+    // saved topic links. Preserve that evidence without authorizing held records.
+    for (const [uuid, topic] of topics) {
+      if (purgeable.has(uuid) && uuid !== topic && typeof topic === "string" && canonicalDocumentUuid(topic) !== null && authorizedTopicMark(topic)) {
+        authorizedTopics.add(topic);
       }
     }
     for (const uuid of purgeable) {
@@ -429,9 +445,11 @@ export class HubDatabase implements Extension {
     }
     if (refused.length === 0) return false;
     directory.transact(() => {
-      for (const { uuid, before } of refused) {
+      for (const { uuid } of refused) {
         marks.delete(uuid);
         topics.delete(uuid);
+      }
+      for (const { uuid, before } of refused) {
         const entry = docs.get(uuid) ?? before;
         if (entry === undefined) continue;
         const classification = classifications.rooms.get(roomForDoc(workspaceId, uuid));
@@ -469,29 +487,29 @@ export class HubDatabase implements Extension {
       const marks = directory.getMap(DIRECTORY_DELETED_KEY);
       // A failed purge keeps its accepted fence. Restore it before authorization,
       // without extending it through writer-controlled topic membership.
-      for (const deletedRoom of this.deletedRooms) {
+      for (const deletedRoom of this.pendingDeletedRooms) {
         const parsed = parseRoom(deletedRoom);
         if (parsed.workspaceId === workspaceId && marks.get(parsed.uuid) !== true) marks.set(parsed.uuid, true);
       }
       // Accepted UUID evidence survives both rewritten directory state and restart.
-      for (const [name, classification] of this.documentClassifications.rooms) {
-        if (parseRoom(name).workspaceId === workspaceId && classification.deleted &&
-            marks.get(parseRoom(name).uuid) !== true) {
-          marks.set(parseRoom(name).uuid, true);
+      const workspaceClassifications = this.documentClassifications.forWorkspace(workspaceId);
+      for (const [uuid, classification] of workspaceClassifications) {
+        if (classification.deleted && marks.get(uuid) !== true) {
+          marks.set(uuid, true);
         }
       }
       const authorizedTopics = new Set<string>();
       const corrected = this.refuseUnauthorizedDeletions(room, directory, authorizedTopics, transaction);
       // A writer may have removed or reclassified a record's directory entry.
       // Whole-topic deletion still includes every record the hub classified.
-      for (const [name, classification] of this.documentClassifications.rooms) {
-        if (parseRoom(name).workspaceId === workspaceId && classification.topic !== null &&
+      for (const [uuid, classification] of workspaceClassifications) {
+        if (classification.topic !== null &&
             authorizedTopics.has(classification.topic)) {
           const marks = directory.getMap(DIRECTORY_DELETED_KEY);
-          if (marks.get(parseRoom(name).uuid) !== true) marks.set(parseRoom(name).uuid, true);
-          if (parseRoom(name).uuid !== classification.topic) {
+          if (marks.get(uuid) !== true) marks.set(uuid, true);
+          if (uuid !== classification.topic) {
             const topics = directory.getMap(DIRECTORY_DELETED_DECISION_TOPICS_KEY);
-            if (topics.get(parseRoom(name).uuid) !== classification.topic) topics.set(parseRoom(name).uuid, classification.topic);
+            if (topics.get(uuid) !== classification.topic) topics.set(uuid, classification.topic);
           }
         }
       }
@@ -510,18 +528,26 @@ export class HubDatabase implements Extension {
       // Ordinary directory writes use the debounced store. A failed mark must
       // still retry synchronously even though its room is already fenced.
       if (!deleted.some(name => this.pendingDeletedRooms.has(name))) return;
+      const inferredTopics = new Map<string, string>();
+      const topics = directory.getMap<unknown>(DIRECTORY_DELETED_DECISION_TOPICS_KEY);
+      for (const [uuid, topic] of topics) {
+        if (uuid !== topic && marks.get(uuid) === true && typeof topic === "string" && authorizedTopics.has(topic)) {
+          inferredTopics.set(roomForDoc(workspaceId, topic), topic);
+          inferredTopics.set(roomForDoc(workspaceId, uuid), topic);
+        }
+      }
       const database = this.connection;
       database.exec("BEGIN IMMEDIATE");
       try {
         this.prepared().upsert.run({ name: room, data: directoryState(directory) });
-        this.documentClassifications.persistDeleted(deleted);
+        this.documentClassifications.persistDeleted(deleted, inferredTopics);
         const remove = database.prepare('DELETE FROM documents WHERE name = ?');
         for (const name of deleted) {
           remove.run(name);
           this.revisions.purge(name);
         }
         database.exec("COMMIT");
-        this.documentClassifications.rememberDeleted(deleted);
+        this.documentClassifications.rememberDeleted(deleted, inferredTopics);
         for (const name of deleted) this.pendingDeletedRooms.delete(name);
       } catch (error) {
         database.exec("ROLLBACK");
