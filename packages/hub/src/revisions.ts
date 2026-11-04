@@ -2,7 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   DIRECTORY_DOCS_KEY,
-  getMeta,
   isDirectoryEntryArchived,
   parseRoom,
   roomForDoc,
@@ -157,7 +156,7 @@ export class HubRevisions {
     let missedCapture = false;
     const missedDeliverers = new Set<string>();
     document.on("afterTransaction", (transaction: Y.Transaction) => {
-      if (transaction.changed.size === 0 || this.isDeleted(room) || getMeta(document).kind === "decision") return;
+      if (transaction.changed.size === 0 || this.isDeleted(room)) return;
       const attribution = getUpdateAttribution(transaction.origin);
       let unknownRevisionId: string | undefined;
       try {
@@ -286,7 +285,7 @@ export class HubRevisions {
       const at = this.now();
       this.db.exec("BEGIN IMMEDIATE");
       try {
-        const head = this.head(room);
+        const head = this.preserveEarlierContent(room, current, at);
         if (head !== undefined) this.closeHead(room, head, at);
         this.insert(room, restoredId, authorIdentity(author).label, at, at, restored);
         // Room state and its closed revision commit before any peer receives the update.
@@ -311,13 +310,12 @@ export class HubRevisions {
     if (current.checksum !== checksum) return { ok: false, error: "stale-state" };
     return this.writeName(() => {
       const at = this.now();
-      const head = this.head(room);
+      const head = this.preserveEarlierContent(room, current, at);
       const last = this.db.prepare("SELECT id, checksum FROM document_revisions WHERE room = ? ORDER BY rowid DESC LIMIT 1").get(room);
       const id = head?.id ?? (last?.checksum === current.checksum ? last.id as string : randomUUID());
       const existing = this.names(room).get(id);
       if (existing !== undefined) return { ok: false, error: "already-named", name: existing };
       if (head !== undefined) {
-        if (head.checksum !== current.checksum) throw new Error("revision capture does not match current content");
         // Naming preserves even a reverted stretch, whose automatic head has no bytes.
         this.insert(room, head.id, head.author, head.started_at, headEnd(head, at),
           { ...current, state: head.data ?? current.state });
@@ -382,18 +380,14 @@ export class HubRevisions {
     const identity = authorIdentity(author);
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      let head = this.head(room);
+      let head = this.preserveEarlierContent(room, before, at);
       if (head !== undefined && (head.author_key !== identity.key || at >= headDeadline(head))) {
         this.closeHead(room, head, at);
         head = undefined;
       }
       const id = head?.id ?? randomUUID();
       if (head === undefined) {
-        const recorded = this.db.prepare("SELECT room FROM document_revision_documents WHERE room = ?").get(room);
-        if (recorded === undefined) {
-          if (!before.empty) this.insert(room, randomUUID(), null, null, at, before);
-          this.db.prepare("INSERT INTO document_revision_documents (room) VALUES (?)").run(room);
-        }
+        this.db.prepare("INSERT OR IGNORE INTO document_revision_documents (room) VALUES (?)").run(room);
         this.db.prepare(`INSERT INTO document_revision_heads
           (room, id, author, author_key, started_at, last_edited_at, checksum, previous_checksum, data)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
@@ -413,6 +407,18 @@ export class HubRevisions {
 
   private head(room: string): Head | undefined {
     return this.db.prepare("SELECT * FROM document_revision_heads WHERE room = ?").get(room) as unknown as Head | undefined;
+  }
+
+  /** Preserve content skipped by earlier capture rules before starting another revision. */
+  private preserveEarlierContent(room: string, current: Snapshot, at: number): Head | undefined {
+    const head = this.head(room);
+    if (head?.checksum === current.checksum) return head;
+    if (head !== undefined) this.closeHead(room, head, at);
+    const last = this.db.prepare("SELECT checksum FROM document_revisions WHERE room = ? ORDER BY rowid DESC LIMIT 1").get(room);
+    if (last?.checksum !== current.checksum && (last !== undefined || !current.empty)) {
+      this.insert(room, randomUUID(), null, null, at, current);
+    }
+    return undefined;
   }
 
   private close(room: string, at: number): void {

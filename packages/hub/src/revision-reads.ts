@@ -46,7 +46,7 @@ export class RevisionReads implements Extension<HubContext> {
         response = { requestId: request.requestId, ok: false, error: "deleted" };
       } else if (!("principalId" in connection.context)) {
         response = { requestId: request.requestId, ok: false, error: "forbidden" };
-      } else if (!database.revisions.enabled || parseRoom(documentName).uuid.startsWith("_") || getMeta(document).kind === "decision") {
+      } else if (!database.revisions.enabled || parseRoom(documentName).uuid.startsWith("_")) {
         response = { requestId: request.requestId, ok: false, error: "unsupported" };
       } else if (request.operation === "list") {
         const names = request.includeNames ? database.revisions.names(documentName) : undefined;

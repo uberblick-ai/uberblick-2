@@ -51,15 +51,16 @@ async function historyList(page: Page): Promise<void> {
   await closeIfOpen(page.getByRole("button", { name: "Close document list", exact: true }), show);
 }
 
-async function decisionWithoutDocumentHistory(page: Page, uuid: string, text: string, editable = false): Promise<void> {
+async function decisionWithDocumentHistory(page: Page, uuid: string, text: string, editable = false): Promise<void> {
   await expect(page.locator(`.ub-decision-timeline > li[data-record="${uuid}"] .ub-decision-record`)).toHaveAttribute("aria-current", "true");
   await expect(editor(page)).toHaveText(text);
   await expect(editor(page)).toHaveAttribute("contenteditable", String(editable));
   await expect(page.locator(".ub-decision-answer-header")).toBeVisible();
   await expect(page.getByRole("region", { name: "Decision history", exact: true })).toBeVisible();
   await expect(page.locator(".ub-decision-timeline > li")).toHaveCount(3);
-  await expect(history(page)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /^(Previous revision|Next revision|Name current revision|Rename revision)$/ })).toHaveCount(0);
+  await expect(history(page)).toBeVisible();
+  await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeEnabled();
+  await expect(history(page).getByRole("button", { name: "Name current revision", exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Revision name", exact: true })).toHaveCount(0);
   await expect(page.locator(".ub-revision-pane")).toHaveCount(0);
   await expect(page.getByRole("navigation", { name: "Revision history", exact: true })).toHaveCount(0);
@@ -68,7 +69,7 @@ async function decisionWithoutDocumentHistory(page: Page, uuid: string, text: st
   await expect(page.getByRole("button", { name: /^Copy revision /, includeHidden: true })).toHaveCount(1);
 }
 
-test("decision topics keep only their record timeline while regular pages retain document history", { tag: "@webkit" }, async ({ browser }) => {
+test("decision records and regular pages share document history while topics retain their record timeline", { tag: "@webkit-touch" }, async ({ browser }) => {
   const owner = create(docTitle("Decision history owner"), "This regular page keeps document history.");
   const topicTitle = docTitle("Decision history topic");
   const firstText = "Earlier answer remains in the record timeline.";
@@ -119,7 +120,7 @@ test("decision topics keep only their record timeline while regular pages retain
   // Follow an authored link without reloading, while the regular page's history is open.
   await activateControl(page.locator(`.ub-revision-pane a.ub-doclink[data-doc-id="${first.uuid}"]`).last());
   await expect(page).toHaveURL(new RegExp(`${topicPath}$`));
-  await decisionWithoutDocumentHistory(page, current.uuid, currentText);
+  await decisionWithDocumentHistory(page, current.uuid, currentText);
   const threadsToggle = page.locator(".ub-threads-toggle");
   if (await threadsToggle.isVisible()) await activateControl(threadsToggle);
   await expect(page.getByRole("region", { name: "Comments", exact: true })).toContainText("The current answer's conversation remains available.");
@@ -135,16 +136,28 @@ test("decision topics keep only their record timeline while regular pages retain
   await expect(history(page).getByRole("button", { name: "Name current revision", exact: true })).toBeVisible();
   await expect(page.locator(".ub-revision-pane")).toHaveCount(0);
   await activateControl(decisions.getByRole("link"));
-  await decisionWithoutDocumentHistory(page, current.uuid, currentText);
+  await decisionWithDocumentHistory(page, current.uuid, currentText);
   for (const [record, text] of [[first, firstText], [current, currentText], [pending, pendingText]] as const) {
     await activateControl(page.locator(`.ub-decision-timeline > li[data-record="${record.uuid}"] .ub-decision-record`));
     await expect(page).toHaveURL(new RegExp(`${topicPath}/record/${record.uuid}$`));
-    await decisionWithoutDocumentHistory(page, record.uuid, text, record === pending);
+    await decisionWithDocumentHistory(page, record.uuid, text, record === pending);
   }
   await expect(page.locator(".ub-decision-record-state")).toHaveText(["Under review", "In force", "Superseded"]);
 
   await page.goto(new URL(`/${harness().workspace}/${current.uuid}`, harness().appUrl).href);
-  await decisionWithoutDocumentHistory(page, current.uuid, currentText);
+  await decisionWithDocumentHistory(page, current.uuid, currentText);
+  await activateControl(history(page).getByRole("button", { name: "Name current revision", exact: true }));
+  const decidedName = history(page).getByRole("textbox", { name: "Revision name", exact: true });
+  await decidedName.fill("Reviewed settled answer");
+  await decidedName.press("Enter");
+  await expect(page.getByText("Revision named", { exact: true })).toBeVisible();
+  await activateControl(history(page).getByRole("button", { name: "Previous revision", exact: true }));
+  await expect(history(page)).toContainText("Reviewed settled answer");
+  await expect(page.locator(".ub-revision-pane .ProseMirror").last()).toContainText(currentText);
+  await expect(page.getByRole("button", { name: "Restore this version", exact: true })).toBeDisabled();
+  await expect(page.getByText("Only open decision records can be restored. Open a successor to change a settled answer.", { exact: true })).toBeVisible();
+  await activateControl(page.getByRole("button", { name: "Back to now", exact: true }).first());
+  await decisionWithDocumentHistory(page, current.uuid, currentText);
   await page.goto(new URL(ownerPath, harness().appUrl).href);
   await expect(decisions.getByRole("link")).toHaveCount(1);
   await expect(history(page).getByRole("button", { name: "Name current revision", exact: true })).toBeVisible();
@@ -152,4 +165,39 @@ test("decision topics keep only their record timeline while regular pages retain
   await expect(page.locator(".ub-revision-pane")).toBeVisible();
   await expect(history(page)).toContainText("Reviewed guidance");
   await historyList(page);
+});
+
+test("an open decision answer restores an earlier hub revision through the shared history view", { tag: "@webkit-touch" }, async ({ browser }) => {
+  const proposal = create(docTitle("Restorable decision proposal"), "The earlier proposal answer.", { status: "open" });
+  try { await harness().seedDocument(proposal.doc); }
+  finally { proposal.doc.destroy(); }
+  const page = await openApp(browser, `/${harness().workspace}/${proposal.uuid}`);
+  await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+  await waitForAcknowledged(page, { path: "upstream" });
+  const name = async (text: string): Promise<void> => {
+    await activateControl(history(page).getByRole("button", { name: "Name current revision", exact: true }));
+    const field = history(page).getByRole("textbox", { name: "Revision name", exact: true });
+    await field.fill(text);
+    await field.press("Enter");
+    await expect(page.getByText("Revision named", { exact: true })).toBeVisible();
+    await expect(field).toHaveCount(0);
+  };
+  await name("Earlier proposal");
+  await editor(page).fill("The later proposal answer.");
+  await expect(editor(page)).toHaveText("The later proposal answer.");
+  await waitForAcknowledged(page, { path: "upstream" });
+  await name("Later proposal");
+  await activateControl(history(page).getByRole("button", { name: "Previous revision", exact: true }));
+  await expect(history(page)).toContainText("Later proposal");
+  await activateControl(history(page).getByRole("button", { name: "Previous revision", exact: true }));
+  await expect(history(page)).toContainText("Earlier proposal");
+  const restore = page.getByRole("button", { name: "Restore this version", exact: true });
+  await expect(restore).toBeEnabled();
+  await activateControl(restore);
+  await expect(page.getByText("Document restored to this version", { exact: true })).toBeVisible();
+  await activateControl(page.getByRole("button", { name: "Back to now", exact: true }).first());
+  await expect(editor(page)).toHaveText("The earlier proposal answer.");
+  await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+  await waitForAcknowledged(page, { path: "upstream" });
+  await expect.poll(() => harness().hubText(`${harness().workspaceUuid}/${proposal.uuid}`)).toBe("The earlier proposal answer.");
 });
