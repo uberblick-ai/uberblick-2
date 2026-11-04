@@ -509,7 +509,7 @@ describe("hub-owned deletion classification", () => {
     }
   });
 
-  it.each(["refused held page link", "self link"])(
+  it.each(["refused held page link", "deleted page link", "self link"])(
     "does not infer topic identity from a %s", async source => {
       const path = tempDatabasePath();
       const database = open(path);
@@ -519,7 +519,11 @@ describe("hub-owned deletion classification", () => {
       const page = source === "self link" ? undefined : await create(database);
       const pageUuid = page === undefined ? undefined : parseRoom(page.name).uuid;
       if (page !== undefined) publish(directory, page);
-      const assertRetained = page === undefined ? undefined : retained(database, page);
+      if (source === "deleted page link" && pageUuid !== undefined) {
+        tombstoneDirectoryEntry(directory, pageUuid);
+        deleteDirectoryEntry(directory, pageUuid);
+      }
+      const assertRetained = page === undefined || source === "deleted page link" ? undefined : retained(database, page);
 
       directory.transact(() => {
         directory.getMap("deleted-docs").set(unknownUuid, true);
@@ -532,7 +536,7 @@ describe("hub-owned deletion classification", () => {
       expect(database.connection.prepare("SELECT topic, deleted FROM document_classifications WHERE name = ?").get(unknownRoom))
         .toMatchObject({ topic: null, deleted: 1 });
       assertRetained?.();
-      if (pageUuid !== undefined) {
+      if (pageUuid !== undefined && source !== "deleted page link") {
         expect(directory.getMap("deleted-docs").has(pageUuid)).toBe(false);
         expect(directory.getMap("deleted-decision-topics").has(pageUuid)).toBe(false);
         converged(directory, pageUuid);
@@ -551,7 +555,7 @@ describe("hub-owned deletion classification", () => {
       expect(restarted.isDeletedRoom(unknownRoom)).toBe(true);
       expect(restarted.isDeletedRoom(late.name)).toBe(false);
       expect(persisted(restarted, late.name)).toBeDefined();
-      if (page !== undefined) expect(restarted.isDeletedRoom(page.name)).toBe(false);
+      if (page !== undefined) expect(restarted.isDeletedRoom(page.name)).toBe(source === "deleted page link");
     },
   );
 

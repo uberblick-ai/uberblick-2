@@ -420,6 +420,8 @@ export class HubDatabase implements Extension {
     // Offline deletions and pre-upgrade purges may leave only UUIDs and their
     // saved topic links. Preserve that evidence without authorizing held records.
     for (const [uuid, topic] of topics) {
+      const classification = workspaceClassifications.get(uuid);
+      if (classification !== undefined && classification.topic !== topic) continue;
       if (purgeable.has(uuid) && uuid !== topic && typeof topic === "string" && canonicalDocumentUuid(topic) !== null && authorizedTopicMark(topic)) {
         authorizedTopics.add(topic);
       }
