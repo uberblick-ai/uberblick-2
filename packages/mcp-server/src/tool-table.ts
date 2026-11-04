@@ -227,8 +227,7 @@ export const tools: readonly Tool[] = [
     description:
       "List this computer's cached revision catalog newest first, including archived documents, with cache freshness. " +
       "Missing history downloads when connected; cached reads work offline. Use refresh: true to check an unknown mutation outcome. " +
-      "IDs work with get_revision/get_data/restore_revision. Empty means a complete downloaded catalog has no history. " +
-      "Listing a decision record refuses with decision_no_history.",
+      "IDs work with get_revision/get_data/restore_revision. Empty means a complete downloaded catalog has no history.",
     input: listRevisionsInput,
     operation: listRevisionsOperation,
     example: { uuid },
@@ -241,7 +240,7 @@ export const tools: readonly Tool[] = [
     description:
       "Name the current synchronized state only when a person asks. Requires team-hub write access; " +
       "closes its stretch. One name per revision; manage it in the web. " +
-      "Naming a decision record refuses with decision_no_history.",
+      "Decision records can be named in any status.",
     input: nameRevisionInput,
     operation: nameRevisionOperation,
     hints: { destructive: false, idempotent: true },
@@ -255,7 +254,7 @@ export const tools: readonly Tool[] = [
     description:
       "Restore title, blocks and data from a hub revision as a new revision. Requires synchronized write access " +
       "to a live document; history and other metadata stay. An identical state writes nothing. " +
-      "Restoring a decision record refuses with decision_no_history.",
+      "A decided decision record refuses with decision_read_only.",
     input: restoreRevisionInput,
     operation: restoreRevisionOperation,
     hints: { destructive: true, idempotent: true },
@@ -268,8 +267,7 @@ export const tools: readonly Tool[] = [
     title: "Read a document revision",
     description:
       "Read a cached revision from list_revisions: title, visible blocks without rev, data summary and cache freshness. " +
-      "Missing snapshots download when connected; downloaded history works offline. Archived documents work. Page records with get_data and the same revision. " +
-      "Reading a decision record's revision refuses with decision_no_history.",
+      "Missing snapshots download when connected; downloaded history works offline. Archived documents work. Page records with get_data and the same revision.",
     input: getRevisionInput,
     operation: getRevisionOperation,
     example: { uuid, revision: "revision-id-from-list_revisions" },
@@ -282,8 +280,7 @@ export const tools: readonly Tool[] = [
     description:
       "Read a data summary, or name collection for bounded records and diagnostics. limit: 0 reads schema; " +
       "follow next_after until complete. Optional revision reads this computer's cached snapshot using an ID from list_revisions, " +
-      "fetching it when connected if missing, including archived documents; omission reads live data. Live data and open revisions can change between calls. " +
-      "Historical decision data refuses with decision_no_history.",
+      "fetching it when connected if missing, including archived documents; omission reads live data. Live data and open revisions can change between calls.",
     input: getDataInput,
     operation: getDataOperation,
     example: { uuid, collection: "tasks", limit: 20 },

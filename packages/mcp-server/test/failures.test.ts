@@ -49,7 +49,6 @@ const REVISION_FAILURES = [
   ["sign-in-required", "revisions_sign_in_required", "manual", "ub auth login"],
   ["forbidden", "revisions_forbidden", "manual", "grant read access"],
   ["deleted", "doc_deleted", "manual", "permanently deleted"],
-  ["decision-no-history", "decision_no_history", "manual", "topic's records"],
   ["revision-not-found", "revision_not_found", "reread", "list_revisions"],
   ["unsupported", "revisions_unsupported", "manual", "update the hub"],
 ] as const;
@@ -186,7 +185,6 @@ const EXPECTED: Record<
   },
   doc_archived: { recoveryClass: "manual", detail: ["uuid", "archived"] },
   doc_deleted: { recoveryClass: "manual", detail: ["uuid"] },
-  decision_no_history: { recoveryClass: "manual", detail: [] },
   revisions_local_only: { recoveryClass: "manual", detail: [] },
   revisions_unreachable: { recoveryClass: "retry", detail: [] },
   revisions_downloading: { recoveryClass: "retry", detail: [] },

@@ -2,7 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   DIRECTORY_DOCS_KEY,
-  getMeta,
   isDirectoryEntryArchived,
   parseRoom,
   roomForDoc,
@@ -157,7 +156,7 @@ export class HubRevisions {
     let missedCapture = false;
     const missedDeliverers = new Set<string>();
     document.on("afterTransaction", (transaction: Y.Transaction) => {
-      if (transaction.changed.size === 0 || this.isDeleted(room) || getMeta(document).kind === "decision") return;
+      if (transaction.changed.size === 0 || this.isDeleted(room)) return;
       const attribution = getUpdateAttribution(transaction.origin);
       let unknownRevisionId: string | undefined;
       try {

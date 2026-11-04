@@ -3,7 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
-import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, initDoc, insertBlock, setKind, setStatus, setTitle, snapshotRevision } from "@uberblick/schema";
+import { appendBlock, applyDocData, deleteBlock, editBlock, getBlock, getBlocksFragment, getMetaMap, initDoc, insertBlock, setKind, setStatus, setTitle, snapshotRevision } from "@uberblick/schema";
 import type { RevisionEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import { activateControl, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
@@ -1367,23 +1367,75 @@ test.describe("document history through ub open", () => {
     }
   });
 
-  test("a decision topic history address opens the live topic at its plain address", async ({ browser }) => {
-    const uuid = randomUUID();
-    const document = new Y.Doc();
-    try {
-      initDoc(document, { uuid, title: docTitle("Decision without document history") });
-      appendBlock(document, { type: "paragraph", text: "The proposal remains on the live topic." });
-      setKind(document, "decision");
-      setStatus(document, "open");
-      await harness().seedDocument(document);
-    } finally { document.destroy(); }
-    const path = `/${harness().workspace}/${uuid}`;
-    const shared = await openApp(browser, `${path}/rev/${revisionId("latest")}/since/${revisionId("earlier")}`, {
-      readySelector: ".ub-decision-answer",
-    });
-    await expect(shared).toHaveURL(new URL(path, harness().appUrl).href);
-    await expect(history(shared)).toHaveCount(0);
-    await expect(shared.locator(".ub-revision-pane")).toHaveCount(0);
+  test("decision revision and comparison addresses keep the selected record through reload and Back to now", { tag: "@webkit-touch" }, async ({ browser, browserName }) => {
+    const topic = randomUUID();
+    const middle = randomUUID();
+    const current = randomUUID();
+    const title = docTitle("Decision record revisions");
+    for (const [index, uuid] of [topic, middle, current].entries()) {
+      const document = new Y.Doc();
+      try {
+        initDoc(document, { uuid, title,
+          ...(index === 0 ? {} : { topic, supersedes: index === 1 ? topic : middle }) });
+        getMetaMap(document).set("createdAt", Date.UTC(2026, 9, index + 1));
+        appendBlock(document, { type: "paragraph", text: `Live answer ${uuid}.` });
+        setKind(document, "decision");
+        setStatus(document, "decided");
+        await harness().seedDocument(document);
+      } finally { document.destroy(); }
+    }
+    for (const uuid of [topic, middle]) {
+      const path = `/${harness().workspace}/${uuid}`;
+      const address = `${path}/rev/${revisionId("latest")}/since/${revisionId("earlier")}`;
+      const requested: string[] = [];
+      const shared = await openApp(browser, address, {
+        beforeNavigate: async page => {
+          page.on("request", request => {
+            const url = new URL(request.url());
+            if (url.pathname === "/api/revisions") requested.push(url.searchParams.get("uuid") ?? "");
+          });
+          await serveHistory(page, [
+            { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+            { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+          ], {
+            latest: savedState(uuid, title, `Latest saved answer ${uuid}.`),
+            earlier: savedState(uuid, title, `Earlier saved answer ${uuid}.`),
+          });
+        },
+      });
+      await shared.emulateMedia({ colorScheme: browserName === "webkit" ? "dark" : "light" });
+      await expect(historicalEditor(shared)).toContainText(`Latest saved answer ${uuid}.`);
+      await expect(earlierSide(shared)).toContainText(`Earlier saved answer ${uuid}.`);
+      await expect(shared).toHaveURL(new URL(address, harness().appUrl).href);
+      await expect(shared.getByText("Only open decision records can be restored. Open a successor to change a settled answer.", { exact: true })).toBeVisible();
+      await expect(shared.getByRole("button", { name: "Restore this version", exact: true })).toBeDisabled();
+      await shared.reload();
+      await expect(historicalEditor(shared)).toContainText(`Latest saved answer ${uuid}.`);
+      await expect(earlierSide(shared)).toContainText(`Earlier saved answer ${uuid}.`);
+      expect(requested.length).toBeGreaterThan(0);
+      expect(requested.every(requestedUuid => requestedUuid === uuid)).toBe(true);
+      await backToNow(shared);
+      await expect(shared).toHaveURL(new URL(`/${harness().workspace}/${topic}/record/${uuid}`, harness().appUrl).href);
+      await expect(editor(shared)).toHaveText(`Live answer ${uuid}.`);
+      await expect(shared.locator(`.ub-decision-timeline > li[data-record="${uuid}"] .ub-decision-record`)).toHaveAttribute("aria-current", "true");
+      await previous(shared);
+      await expect(shared).toHaveURL(new URL(`${path}/rev/${revisionId("latest")}`, harness().appUrl).href);
+      await expect(historicalEditor(shared)).toContainText(`Latest saved answer ${uuid}.`);
+      if (uuid === middle) {
+        await backToNow(shared);
+        await activateControl(shared.getByRole("button", { name: "Document actions", exact: true }));
+        await activateControl(shared.getByRole("menuitem", { name: "Archive this record", exact: true }));
+        const confirmation = shared.getByRole("alertdialog", { name: "Archive this record?", exact: true });
+        await activateControl(confirmation.getByRole("button", { name: "Archive", exact: true }));
+        await expect(shared).toHaveURL(new URL(`/${harness().workspace}/${topic}`, harness().appUrl).href);
+        await shared.goto(new URL(address, harness().appUrl).href);
+        await expect(historicalEditor(shared)).toContainText(`Latest saved answer ${uuid}.`);
+        await expect(earlierSide(shared)).toContainText(`Earlier saved answer ${uuid}.`);
+        await expect(shared).toHaveURL(new URL(address, harness().appUrl).href);
+        await expect(shared.getByRole("button", { name: "Restore this version", exact: true })).toBeDisabled();
+        await expect(shared.getByText("This document is archived. Restore the document first, then restore a revision.", { exact: true })).toBeVisible();
+      }
+    }
   });
 
   test("names the reviewed state, compares since it, and renames or removes it inline", { tag: "@webkit" }, async ({ browser, browserName }, info) => {

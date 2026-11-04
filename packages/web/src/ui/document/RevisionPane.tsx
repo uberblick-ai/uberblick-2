@@ -403,8 +403,9 @@ function RevisionSplitLabels({ history, now, restoreButton }: {
   </>;
 }
 
-export function RevisionPane({ history, docLinks, workspaceSettings, writable = false, archived = false }: {
+export function RevisionPane({ history, docLinks, workspaceSettings, writable = false, archived = false, restoreUnavailable: readRestoreUnavailable }: {
   history: DocumentHistory; docLinks: DocLinkContext | null; workspaceSettings: Y.Doc | null; writable?: boolean; archived?: boolean;
+  restoreUnavailable?: () => string | null;
 }): ReactElement | null {
   const { selection, collapseUnchanged } = history;
   const now = useTimestampClock();
@@ -542,9 +543,11 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   const restoreLabel = comparedWith?.name == null ? "Restore this version" : `Restore “${comparedWith.name.text}”`;
   const before = editors.find((entry) => entry.side === "before")?.editor;
   const after = editors.find((entry) => entry.side === (split ? "after" : "single"))?.editor;
-  const restoreUnavailable = restoreUnavailableReason(history, writable, archived);
+  const editUnavailable = readRestoreUnavailable?.() ?? null;
+  const restoreUnavailable = archived || !writable ? restoreUnavailableReason(history, writable, archived)
+    : editUnavailable ?? restoreUnavailableReason(history, writable, archived);
   const restore = async (): Promise<void> => {
-    if (restoreUnavailable !== null || restoreTarget === undefined) return;
+    if (restoreUnavailable !== null || readRestoreUnavailable?.() != null || restoreTarget === undefined) return;
     try {
       const applied = await history.restore(restoreTarget.id);
       toast.success(applied ? "Document restored to this version" : "The document already has this version. Nothing changed.");
@@ -561,7 +564,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
           <RevisionTitle title={selection === null ? live?.title?.text ?? "" : title} index={selection?.index ?? -1} />
           {!split && restoreButton}
         </div>
-        {!local && restoreUnavailable !== null && <p id={restoreReason} className={archived || !writable ? "m-0 ub-type-small text-(--muted-foreground)" : "sr-only"}>{restoreUnavailable}</p>}
+        {!local && restoreUnavailable !== null && <p id={restoreReason} className={archived || !writable || editUnavailable !== null ? "m-0 ub-type-small text-(--muted-foreground)" : "sr-only"}>{restoreUnavailable}</p>}
         {selection === null ? <p role="status" className="ub-history-controls ub-type-small">Loading history…</p>
           : local ? <LocalComparisonStatus history={history} /> : <RevisionStatus history={history} writable={writable && !archived} now={now} />}
         {local && !split && <div className="ub-revision-side-label ub-type-small"><span>Downloaded hub revision</span><span aria-hidden="true"> → </span><span>This computer</span></div>}

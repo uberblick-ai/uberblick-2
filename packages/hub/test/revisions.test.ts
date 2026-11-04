@@ -11,6 +11,7 @@ import {
   getBlocks,
   getDocDataEntries,
   deleteDirectoryEntry,
+  deleteDecisionTopic,
   directoryRoom,
   encodeOriginUpdate,
   getMeta,
@@ -509,10 +510,14 @@ describe("automatic hub revisions", () => {
     expect(db.revisions.getSnapshot(ROOM, "missing")).toBeNull();
   });
 
-  it("preserves earlier content with unknown author and start before the first recorded edit", async () => {
+  it.each(["regular", "decision"])("preserves earlier %s content with unknown author and start before the first recorded edit", async kind => {
     const db = database();
     const existing = new Y.Doc();
     documents.push(existing);
+    if (kind === "decision") {
+      getMetaMap(existing).set("kind", "decision");
+      getMetaMap(existing).set("status", "decided");
+    }
     title(existing, "Before revisions");
     db.connection.prepare("INSERT INTO documents (name, data) VALUES (?, ?)").run(ROOM, Y.encodeStateAsUpdate(existing));
     const doc = await load(db);
@@ -625,7 +630,7 @@ describe("automatic hub revisions", () => {
     expect(db.revisions.list(ROOM).map(row => row.author)).toEqual([null, browser]);
   });
 
-  it.each(["open", "decided", "rejected", "withdrawn"] as const)("records no first content or later title, blocks or data for %s decisions", async status => {
+  it.each(["open", "decided", "rejected", "withdrawn"] as const)("records first content and later title, blocks and data for %s decisions, including while archived", async status => {
     const db = database();
     const doc = await load(db);
     doc.transact(() => {
@@ -635,22 +640,25 @@ describe("automatic hub revisions", () => {
       appendBlock(doc, { type: "paragraph", text: "First content" });
       doc.getMap("data").set("collection", { records: [1] });
     }, { attribution: { author: browser } });
-    expect(db.revisions.list(ROOM)).toEqual([]);
+    const first = db.revisions.list(ROOM)[0]!;
+    expect(first).toMatchObject({ author: browser, checksum: checksum(doc), final: false });
     const directory = await load(db, directoryRoom(WORKSPACE));
     directory.getMap("docs").set(UUID, { title: "Record", tags: [], kind: "decision", topic: UUID, status });
     for (const archived of [false, true]) {
       if (archived) tombstoneDirectoryEntry(directory, UUID);
       title(doc, `Changed title, archived: ${archived}`);
+      expect(getMeta(revision(db, db.revisions.list(ROOM)[0]!.id)).title).toBe(`Changed title, archived: ${archived}`);
       doc.transact(() => appendBlock(doc, { type: "paragraph", text: `Changed blocks, archived: ${archived}` }),
         { attribution: { author: claude } });
+      expect(getBlocks(revision(db, db.revisions.list(ROOM)[0]!.id)).at(-1)?.text).toBe(`Changed blocks, archived: ${archived}`);
       doc.transact(() => doc.getMap("data").set("collection", { archived }), { attribution: { author: browser } });
-      expect(db.revisions.list(ROOM)).toEqual([]);
-      expect(db.connection.prepare("SELECT room FROM document_revision_heads WHERE room = ?").all(ROOM)).toEqual([]);
-      expect(db.connection.prepare("SELECT room FROM document_revisions WHERE room = ?").all(ROOM)).toEqual([]);
+      const current = db.revisions.list(ROOM)[0]!;
+      expect(current).toMatchObject({ author: browser, checksum: checksum(doc), final: false });
+      expect(getDocDataEntries(revision(db, current.id))).toEqual([["collection", { archived }]]);
     }
   });
 
-  it("retains a converted page's earlier revisions and names without recording decision changes, then purges them on deletion", async () => {
+  it.each(["room metadata", "directory entry"])("keeps capturing when a page's %s changes kind, preserves earlier states and names, then purges them on deletion", async convertedFirst => {
     const db = database();
     const doc = await load(db);
     const directory = await load(db, directoryRoom(WORKSPACE));
@@ -661,29 +669,58 @@ describe("automatic hub revisions", () => {
     const rows = db.revisions.list(ROOM);
     const content = rows.map(row => db.revisions.get(ROOM, row.id));
     const names = db.revisions.names(ROOM);
-    doc.transact(() => {
+    const convertRoom = () => doc.transact(() => {
       getMetaMap(doc).set("kind", "decision");
       getMetaMap(doc).set("status", "open");
+    });
+    const convertDirectory = () => directory.getMap("docs").set(UUID, {
+      title: "Converted decision", tags: [], kind: "decision", topic: UUID, status: "open",
+    });
+    if (convertedFirst === "room metadata") convertRoom();
+    else convertDirectory();
+    title(doc, "After first kind change", claude);
+    expect(db.revisions.list(ROOM)[0]).toMatchObject({ author: claude, checksum: checksum(doc) });
+    expect(getMeta(revision(db, db.revisions.list(ROOM)[0]!.id)).title).toBe("After first kind change");
+    if (convertedFirst === "room metadata") convertDirectory();
+    else convertRoom();
+    doc.transact(() => {
       title(doc, "Converted decision");
       appendBlock(doc, { type: "paragraph", text: "Decision answer" });
       doc.getMap("data").set("collection", { records: [1] });
     }, { attribution: { author: claude } });
-    directory.getMap("docs").set(UUID, { title: "Converted decision", tags: [], kind: "decision", topic: UUID, status: "open" });
+    expect(db.revisions.list(ROOM)[0]).toMatchObject({ author: claude, checksum: checksum(doc) });
+    expect(db.revisions.name(ROOM, doc, checksum(doc), "After conversion", browser).ok).toBe(true);
     await db.onStoreDocument({ document: doc, documentName: ROOM });
     const reloaded = await load(db);
     title(reloaded, "Later decision title", claude);
-    expect(db.revisions.list(ROOM)).toEqual(rows);
+    expect(db.revisions.list(ROOM)[0]).toMatchObject({ author: claude, checksum: checksum(reloaded) });
+    expect(db.revisions.list(ROOM).slice(-rows.length).map(row => row.id)).toEqual(rows.map(row => row.id));
     expect(rows.map(row => db.revisions.get(ROOM, row.id))).toEqual(content);
-    expect(db.revisions.names(ROOM)).toEqual(names);
+    for (const [id, name] of names) expect(db.revisions.names(ROOM).get(id)).toEqual(name);
+    const successorRoom = roomForDoc(WORKSPACE, TOPIC);
+    const successor = await load(db, successorRoom);
+    successor.transact(() => {
+      getMetaMap(successor).set("kind", "decision");
+      getMetaMap(successor).set("status", "open");
+      getMetaMap(successor).set("supersedes", UUID);
+      title(successor, "Next answer");
+    }, { attribution: { author: browser } });
+    directory.getMap("docs").set(TOPIC, { title: "Next answer", tags: [], kind: "decision", topic: UUID, status: "open", supersedes: UUID });
+    expect(db.revisions.name(successorRoom, successor, checksum(successor), "Successor", browser).ok).toBe(true);
+    title(successor, "Changed successor");
+    await db.onStoreDocument({ document: successor, documentName: successorRoom });
+    expect(db.revisions.list(successorRoom)).toHaveLength(2);
     tombstoneDirectoryEntry(directory, UUID);
-    expect(db.revisions.list(ROOM).map(row => row.id)).toEqual(rows.map(row => row.id));
+    expect(db.revisions.list(ROOM)[0]).toMatchObject({ checksum: checksum(reloaded), final: true });
     expect(rows.map(row => db.revisions.get(ROOM, row.id))).toEqual(content);
-    expect(db.revisions.names(ROOM)).toEqual(names);
-    deleteDirectoryEntry(directory, UUID);
-    expect(db.revisions.list(ROOM)).toEqual([]);
-    expect(db.revisions.names(ROOM).size).toBe(0);
-    expect(db.connection.prepare("SELECT room FROM document_revision_heads WHERE room = ?").all(ROOM)).toEqual([]);
-    expect(db.connection.prepare("SELECT name FROM documents WHERE name = ?").get(ROOM)).toBeUndefined();
+    expect([...db.revisions.names(ROOM).values()].map(name => name.text)).toEqual(["Before conversion", "After conversion"]);
+    deleteDecisionTopic(directory, UUID);
+    for (const room of [ROOM, successorRoom]) {
+      expect(db.revisions.list(room)).toEqual([]);
+      expect(db.revisions.names(room).size).toBe(0);
+      expect(db.connection.prepare("SELECT room FROM document_revision_heads WHERE room = ?").all(room)).toEqual([]);
+      expect(db.connection.prepare("SELECT name FROM documents WHERE name = ?").get(room)).toBeUndefined();
+    }
   });
 
   it("closes regular-page heads for archive and restore without losing names", async () => {

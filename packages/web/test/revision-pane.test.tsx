@@ -292,6 +292,32 @@ describe("local comparison controls", () => {
 });
 
 describe("revision restore control states", () => {
+  it("shows an answer-edit refusal without disabling revision naming", async () => {
+    const history = historyAt(1);
+    const named = { ...history.entry!, name: { ...entries[3]!.name!, canManage: true } };
+    history.entry = named;
+    history.selection = { ...history.selection!, entry: named };
+    const reason = "Only open decision records can be restored. Open a successor to change a settled answer.";
+    render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable restoreUnavailable={() => reason} />);
+    const button = screen.getByRole<HTMLButtonElement>("button", { name: "Restore this version", description: reason });
+    expect(button.disabled).toBe(true);
+    expect(description(button).classList.contains("sr-only")).toBe(false);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Rename revision" }).disabled).toBe(false);
+    await act(async () => fireEvent.click(button));
+    expect(history.restore).not.toHaveBeenCalled();
+  });
+
+  it("checks current answer-edit permission again when Restore is clicked", async () => {
+    const history = historyAt(1);
+    let reason: string | null = null;
+    render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable restoreUnavailable={() => reason} />);
+    const button = screen.getByRole<HTMLButtonElement>("button", { name: "Restore this version" });
+    expect(button.disabled).toBe(false);
+    reason = "This record was decided before the click.";
+    await act(async () => fireEvent.click(button));
+    expect(history.restore).not.toHaveBeenCalled();
+  });
+
   it("disables the current After revision without a visible reason line outside since comparisons", async () => {
     const history = historyAt(0);
     render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} writable />);

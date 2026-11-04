@@ -3,6 +3,8 @@ import { SyncPanel } from "../status/SyncPanel.js";
 import { documentPaneState, RoutePane } from "./RoutePane.js";
 import type { AppShell } from "./use-app-shell.js";
 import { HistoryControls, RevisionPane } from "../document/RevisionPane.js";
+import { canEditAnswer } from "../document/EditorPane.js";
+import { getMeta } from "@uberblick/schema";
 
 function documentActions(shell: AppShell) {
   const { selected, topic, sidebarStatus, directoryStatus, doc } = shell.rooms;
@@ -37,6 +39,13 @@ export function ShellDocument({ shell }: { shell: AppShell }) {
   const { onFocusThread, threads, threadsOpen, hasReplyDrafts, onToggleThreads } = shell.threads;
   const { syncOpen, setSyncOpen } = shell.sync;
   const historyVisible = shell.history.active && !deleted;
+  const restoreUnavailable = (): string | null => {
+    if (doc === null || (topic === null && getMeta(doc.ydoc).kind !== "decision")) return null;
+    if (canEditAnswer(doc, directory, archived, true)) return null;
+    return getMeta(doc.ydoc).status !== "open"
+      ? "Only open decision records can be restored. Open a successor to change a settled answer."
+      : "This decision record is not ready to edit. Wait for synchronization and check write access.";
+  };
   const lastUpdated = !deleted && documentPaneState({
     route, connection: doc, meta, topic, selectedUuid: selected, navigate,
   }, docStatus.hasAnswered) === "shown" ? selectedDirectoryEntry?.updatedAt : undefined;
@@ -79,7 +88,7 @@ export function ShellDocument({ shell }: { shell: AppShell }) {
         historyControl={<HistoryControls history={shell.history} liveDocument={doc?.ydoc ?? null} writable={docStatus.writable && !archived} returnFocus={shell.historyBack} />}
         historyActive={historyVisible}
       />
-      {historyVisible && <RevisionPane history={shell.history} docLinks={docLinks} workspaceSettings={catalog?.ydoc ?? null} writable={docStatus.writable && !archived} archived={archived} />}
+      {historyVisible && <RevisionPane history={shell.history} docLinks={docLinks} workspaceSettings={catalog?.ydoc ?? null} writable={docStatus.writable && !archived} archived={archived} restoreUnavailable={restoreUnavailable} />}
       {!deleted && !historyVisible && (route.kind === "doc" || route.kind === "decision") && (
         <PopoverContent
           align="start"

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type * as Y from "yjs";
-import { getDirectoryEntry, getMeta, isDocId, snapshotRevision, type RevisionEntry, type RevisionRequest } from "@uberblick/schema";
+import { isDocId, snapshotRevision, type RevisionEntry, type RevisionRequest } from "@uberblick/schema";
 import type { Replicas } from "./replica.js";
 import { HistoryMirrorCache } from "./history-mirror-cache.js";
 import { HistoryReader } from "./history-reader.js";
@@ -17,7 +17,6 @@ export type RevisionClientFailure =
   | "sign-in-required"
   | "forbidden"
   | "deleted"
-  | "decision-no-history"
   | "revision-not-found"
   | "unsupported"
   | "stale-state"
@@ -35,7 +34,6 @@ const failureMessages: Record<RevisionClientFailure, string> = {
   "sign-in-required": "Sign in to read document revisions.",
   forbidden: "The hub refused access to document revisions.",
   deleted: "The document was permanently deleted.",
-  "decision-no-history": "Decision records have no history; the topic's record timeline is their history.",
   "revision-not-found": "The revision does not belong to this document or does not exist.",
   unsupported: "This hub does not serve automatic document revisions.",
   "stale-state": "The displayed document differs from the hub or has changes awaiting synchronization. Nothing was changed.",
@@ -107,14 +105,9 @@ export async function closeDocumentHistory(replicas: Replicas): Promise<void> {
   await current.reader.close();
 }
 
-/** Refuse history before hydration, writable-state checks or hub requests. */
+/** Refuse permanently deleted history before hydration, cache access or hub requests. */
 export function requireDocumentHistory(replicas: Replicas, uuid: string): void {
   if (replicas.isDeleted(uuid)) throw new RevisionClientError("deleted", { uuid });
-  const stub = getDirectoryEntry(replicas.directory().doc, uuid);
-  const meta = replicas.hydrated(uuid) ? getMeta(replicas.replica(uuid).doc) : undefined;
-  if (stub?.kind === "decision" || meta?.kind === "decision") {
-    throw new RevisionClientError("decision-no-history", { uuid, topic: meta?.topic ?? stub?.topic ?? uuid });
-  }
 }
 
 function roomGuard(replicas: Replicas, uuid: string): void {
