@@ -352,7 +352,7 @@ while [ "$SECONDS" -lt "$release_deadline" ]; do
 done
 if [ "$release_serving" != true ]; then
   printf 'Loopback smoke failed: site=%s; WebSocket headers=%s\n' "$release_site_code" "$release_ws_headers" >&2
-  sh bin/remote-compose.sh --project-name "$release_project" logs --tail=100 hub caddy
+  sh bin/remote-compose.sh --project-name "$release_project" logs --tail=100 hub mcp caddy
   exit 1
 fi
 release_cleanup
