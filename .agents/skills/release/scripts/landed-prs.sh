@@ -11,6 +11,6 @@ done | while IFS=$'\t' read -r n a m t; do
 done | sort -u -t$'\t' -k1,1
 echo "--- direct commits (no PR)"
 for c in $(git rev-list --no-merges "$prev..$cand"); do
-  [ "$(gh api "repos/$repo/commits/$c/pulls" --jq length)" = 0 ] && git log -1 --format='%h %s' "$c"
+  associations=$(gh api "repos/$repo/commits/$c/pulls" --jq length)
+  if [ "$associations" = 0 ]; then git log -1 --format='%h %s' "$c"; fi
 done
-true
