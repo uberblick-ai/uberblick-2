@@ -101,7 +101,7 @@ describe("the short status report", () => {
   it("shows a confirmed hosted URL after the hub in text and JSON", () => {
     const hostedMcp = `https://public.example.test/mcp/${WORKSPACE}`;
     const reading = report({ hostedMcp });
-    expect(renderStatus(reading)).toContain(`hub         ${ORIGIN}\nhosted mcp  ${hostedMcp}\nversion`);
+    expect(renderStatus(reading)).toContain(`hub         ${ORIGIN}\nhosted mcp  ${hostedMcp} (experimental)\nversion`);
     expect(shortStatusReport(reading).hostedMcp).toBe(hostedMcp);
     expect(shortStatusReport(reading).problems).toEqual([]);
     expect(row(renderStatus(report()), "hosted mcp")).toBe("");
@@ -455,7 +455,7 @@ describe("the real project's short report", () => {
         problems: [{ name: "hub-unreachable" }], connection: { state: "failed" } });
       const text = await runInProcess(["status"], box);
       expect(text.status, text.stderr).toBe(0);
-      expect(row(text.stdout, "hosted mcp")).toBe(`hosted mcp  ${hostedMcp}`);
+      expect(row(text.stdout, "hosted mcp")).toBe(`hosted mcp  ${hostedMcp} (experimental)`);
       expect(fetch).toHaveBeenCalledTimes(2);
       for (const [url, init] of fetch.mock.calls) {
         expect(String(url)).toBe(`http://127.0.0.1:1/.well-known/oauth-protected-resource/mcp/${WORKSPACE}`);

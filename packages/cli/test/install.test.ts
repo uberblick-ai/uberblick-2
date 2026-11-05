@@ -190,6 +190,7 @@ describe("ub mcp install --remote", () => {
         UB_WORKSPACE_ID: "invalid-ambient-workspace", UB_HUB_URL: "invalid-ambient-hub" };
       const run = await runInProcess(["mcp", "install", program, "--remote"], nested, env);
       expect(run.status, run.output).toBe(0);
+      expect(run.stderr).toContain("hosted MCP is experimental");
       expect(read(stub.record).trimEnd().split("\n")).toEqual(program === "claude"
         ? ["mcp", "add", "--transport", "http", "--scope", "project", "uberblick", HOSTED_URL]
         : ["mcp", "add", "uberblick", "--url", HOSTED_URL]);

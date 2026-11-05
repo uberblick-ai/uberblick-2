@@ -213,6 +213,7 @@ function HostedMcpSettings({ workspace, subject }: { workspace: string; subject:
   if (url === null) return null;
   return <section className="mt-8" aria-labelledby="ub-hosted-mcp-title">
     <h2 id="ub-hosted-mcp-title" className="mt-0 mb-4 ub-type-h2 font-semibold">Hosted MCP</h2>
+    <p className="mt-0 mb-3 ub-type-small">Experimental. It may not work yet and can change in any release.</p>
     <div className="flex max-w-full flex-wrap items-baseline gap-2">
       <span className="min-w-0 wrap-anywhere ub-type-ui font-(family-name:--font-mono)">{url}</span>
       <Button type="button" variant="outline" size="sm" aria-label="Copy hosted MCP URL" onClick={() => void copy()}>Copy</Button>
