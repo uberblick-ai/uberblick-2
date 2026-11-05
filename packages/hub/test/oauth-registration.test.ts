@@ -252,26 +252,29 @@ describe("OAuth dynamic client registration", () => {
 
   it("limits the whole hub even when each registration uses an address with capacity", async () => {
     const r = await rig();
-    const ids = new Set<unknown>();
-    for (let start = 0; start < MAX_REGISTRATIONS_PER_WINDOW; start += 16) {
-      const responses = await Promise.all(Array.from({ length: Math.min(16, MAX_REGISTRATIONS_PER_WINDOW - start) }, (_, offset) => {
+    expect((await register(r)).code).toBe(201);
+    // Invalid attempts spend the same budget without a durable insert for each request.
+    const invalidAttempts = MAX_REGISTRATIONS_PER_WINDOW - 2;
+    for (let start = 0; start < invalidAttempts; start += 16) {
+      const responses = await Promise.all(Array.from({ length: Math.min(16, invalidAttempts - start) }, (_, offset) => {
         const address = `198.51.100.${Math.floor((start + offset) / MAX_REGISTRATIONS_PER_ADDRESS) + 1}`;
-        return register(r, undefined, { address });
+        return register(r, undefined, { address, headers: { "Content-Type": "text/plain" } });
       }));
       for (const response of responses) {
-        expect(response.code).toBe(201);
-        ids.add(response.result.client_id);
+        expect(response.code).toBe(400);
       }
     }
-    expect(ids.size).toBe(MAX_REGISTRATIONS_PER_WINDOW);
+    expect((await register(r, undefined, { address: "192.0.2.2" })).code).toBe(201);
+    expect(registrations(r.path)).toHaveLength(2);
     for (const address of ["203.0.113.1", "203.0.113.2"]) {
       const refused = await register(r, undefined, { address });
       expect(refused.code).toBe(429);
       expect(Number(refused.headers["retry-after"])).toBeGreaterThan(0);
     }
-    expect(registrations(r.path)).toHaveLength(MAX_REGISTRATIONS_PER_WINDOW);
+    expect(registrations(r.path)).toHaveLength(2);
     r.clock.time += OAUTH_REGISTRATION_WINDOW_MS;
     expect((await register(r, undefined, { address: "203.0.113.1" })).code).toBe(201);
+    expect(registrations(r.path)).toHaveLength(3);
   });
 
   it("answers only POST and hides registration when OAuth is unconfigured", async () => {
