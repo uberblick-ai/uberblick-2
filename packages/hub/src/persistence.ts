@@ -194,6 +194,7 @@ export class HubDatabase implements Extension {
         const directory = new Y.Doc();
         try {
           Y.applyUpdate(directory, row.data);
+          this.fenceStoredDeletions(row.name, directory);
           this.reconcileDirectory(row.name, directory);
         } finally {
           directory.destroy();
@@ -344,6 +345,18 @@ export class HubDatabase implements Extension {
     this.deletedRooms.clear();
     this.pendingDeletedRooms.clear();
     this.directories.clear();
+  }
+
+  private fenceStoredDeletions(room: string, directory: Y.Doc): void {
+    const { workspaceId } = parseRoom(room);
+    // Stored UUID marks were already accepted. Fence them and retry any
+    // unfinished purge before considering writer-controlled membership.
+    for (const [uuid, value] of directory.getMap(DIRECTORY_DELETED_KEY)) {
+      if (value !== true || canonicalDocumentUuid(uuid) === null) continue;
+      const name = roomForDoc(workspaceId, uuid);
+      this.deletedRooms.add(name);
+      this.pendingDeletedRooms.add(name);
+    }
   }
 
   private classifyDirectory(room: string, directory: Y.Doc, transaction?: Y.Transaction): void {
