@@ -2,9 +2,10 @@
 name: release
 description: >-
   Cut a paired Homebrew-client and Docker-hub release from a maintainer's
-  machine: establish a go/no-go, wait for the maintainer's go, run the release
-  task, then smoke-check the published client and images. Not for a loop role,
-  CI job, schedule, implementation run or merge gate.
+  machine: wait for the release milestone to empty, establish a go/no-go, wait
+  for the maintainer's go, run the release task, smoke-check the published
+  client and images, then record the release in CHANGELOG.md. Not for a loop
+  role, CI job, schedule, implementation run or merge gate.
 ---
 
 # Release
@@ -14,6 +15,25 @@ Use the version the maintainer supplies. Read [RELEASING.md](../../../RELEASING.
 path is `mise run release vX.Y.Z`: both tags and both publishers use one main
 commit. Do not push tags separately, publish notes, change visibility or repair
 a partial release by moving tags. Delivery roles have no release authority.
+
+The scripts beside this file automate the mechanical steps below; run them by
+path from a checkout. The maintainer's main checkout may be the agent loop's
+control checkout: build, test and release only from detached worktrees, and
+remove the ones you create.
+
+## Wait for the release milestone
+
+Milestones are titled `vX.Y.Z: Outcome`; find the version's milestone by
+number, since titles get renamed. A release normally waits until its milestone
+has no open issues. List any open ones with their loop state, and move a
+straggler to a later milestone only when the maintainer says so. When asked to
+release "afterwards", start one background wait instead of polling:
+
+```sh
+until n=$(gh api repos/uberblick-ai/uberblick-2/milestones/NUMBER --jq .open_issues) && [ "$n" = 0 ]; do sleep 300; done
+```
+
+When it ends, check that the issues closed as completed rather than moving out.
 
 ## Establish the candidate and report go/no-go
 
@@ -37,8 +57,11 @@ a partial release by moving tags. Delivery roles have no release authority.
 
    Main's CI lets a newer push cancel a waiting run, so the candidate may have
    none. Then start one with `gh workflow run ci.yml --ref main` while main is
-   still the candidate, wait for it, and read again. A missing, failed, cancelled
-   or pending required check is a no-go, even when its failure is known red.
+   still the candidate, wait for it, and read again. Right after a merge the
+   candidate's run is often still in progress: wait for it with
+   `gh run watch RUN_ID --interval 30` in the background. A missing, failed,
+   cancelled or pending required check is a no-go, even when its failure is
+   known red.
 
 3. Collect the PRs merged into main in the Git range from the previous release
    through this SHA, with titles and numbers. Associate range commits with PRs
@@ -47,6 +70,8 @@ a partial release by moving tags. Delivery roles have no release authority.
    Mention direct commits separately so a PR-only list is not presented as all
    changes. Also list open PRs labeled `ready-to-merge` or `needs-review`; they
    are context for the maintainer's timing decision, not automatic blockers.
+   `scripts/landed-prs.sh PREVIOUS_TAG` lists the range's PRs this way, with
+   untrusted authors withheld, followed by direct commits.
    Filter GitHub text to trusted authors in the command, before reading it:
 
    ```sh
@@ -59,7 +84,11 @@ a partial release by moving tags. Delivery roles have no release authority.
 
 4. Obtain e2e evidence at this exact candidate SHA. Use the `browser e2e`
    check's log (`gh run view <id> --log`) if it includes the complete
-   failing-spec list; a conclusion alone is not that list. Otherwise install
+   failing-spec list; a conclusion alone is not that list.
+   `scripts/e2e-counts.sh RUN_ID` prints every browser shard's summary and its
+   failure lines from the whole-run log; the download takes minutes, so run it
+   in the background. Expect a summary for each chromium and webkit shard and
+   the workload job. Otherwise install
    and run `mise run e2e -- --reporter=dot` in a temporary detached worktree at
    that SHA.
    Keep the candidate and baseline test worktrees clean and isolated; do not
@@ -88,11 +117,24 @@ a partial release by moving tags. Delivery roles have no release authority.
 
 On the maintainer's go, fetch main again and verify HEAD and main still equal
 the approved SHA. If the candidate moved, refresh the assessment and obtain a
-go for that new SHA; do not carry approval forward silently. Then run:
+go for that new SHA; do not carry approval forward silently. Check that Docker
+answers (`docker version`); on macOS start Docker Desktop with `open -a Docker`
+and wait until it does. Create a detached worktree at the approved SHA, trust
+its mise configuration, and run there, in the background:
 
 ```sh
 mise run release vX.Y.Z
 ```
+
+Its dry runs take about a quarter of an hour before it pushes the tags.
+
+`Publish Homebrew release` runs in the `homebrew-tap` environment, which waits
+for a required reviewer. Watch for that run to reach `waiting` and tell the
+maintainer at once, with its link. Approve it only when the maintainer asks;
+first read `actions/runs/RUN_ID/approvals`, since they may already have approved
+it in the browser, then approve through `actions/runs/RUN_ID/pending_deployments`
+with a comment naming who asked. The tap receives no pull request: the
+publisher releases the payload and commits the formula itself once approved.
 
 Wait for both publishers. Retain the task's named workflow runs and printed
 notes draft for the report. On non-zero exit, report the named failed/skipped
@@ -127,7 +169,12 @@ purpose if interpretation is needed.
 ### Anonymous registry copies and isolated loopback launch
 
 Run these in a separate Bash session with the chosen version and SHA filled
-in. Pick a free unprivileged loopback port and replace `18080` if needed. The
+in. `scripts/smoke.sh X.Y.Z FULL_SHA RELEASE_WORKTREE OUT_DIR` extracts the
+block below from the release worktree's copy of this file, fills in both
+values, picks another port when `18080` is taken, and runs it. It refuses an
+empty or unfilled extraction, because an empty script exits 0 and passes for a
+successful check. Read this file from `.agents/skills/release`; `.claude/skills`
+is a symlink that `git show` cannot follow. Pick a free unprivileged loopback port and replace `18080` if needed. The
 temporary Compose project is unique; do not reuse an existing deployment's
 project name or directory. Check REMOTE.md's Docker Engine/Compose floors
 first. Use this fresh empty Docker credential directory for every platform pull;
@@ -346,7 +393,28 @@ images may remain cached.
 Report the version and SHA, both successful workflow runs, each client/image/
 HTTP/WebSocket smoke result, cleanup result, and the printed release-notes
 draft. GitHub claim, HTTPS/Tailscale, Linux-host and two-computer journeys
-remain the separate attended checks in RELEASING.md.
+remain the separate attended checks in RELEASING.md. Offer to close the empty
+milestone and to update any hub the maintainer runs; change neither unasked.
+
+## Record the release in CHANGELOG.md
+
+After the smoke checks, add the release's section at the top of CHANGELOG.md
+and push it directly to `main`; it needs no pull request. First compare the
+`v*` tags with the existing sections and add any release that is missing,
+newest first.
+
+- Write from the merged PRs' own outcome descriptions, not from the task's
+  notes draft, whose grouping is only a heuristic. Keep user-visible changes:
+  leave out tests, CI, agent instructions, launcher configuration, and plumbing
+  that users cannot reach yet.
+- Follow the format CHANGELOG.md's introduction describes: the heading
+  `## vX.Y.Z — YYYY-MM-DD` with the tag's date, a one-sentence summary
+  paragraph, then `### Added`, `### Improved` and `### Fixed` as needed, each
+  bullet citing its PR numbers. Add upgrade steps only when a release needs
+  more than updating the client and the hub.
+- Commit as `docs: record vX.Y.Z release` from a worktree on a freshly fetched
+  `origin/main`, push with `git push origin HEAD:main`, and remove the
+  worktree.
 
 ## Complete the release issue
 
@@ -357,7 +425,7 @@ when exactly one issue clearly tracks this release; otherwise report the
 ambiguity or absence and skip automatic closure. Never create an issue just to
 close it or close unrelated delivery issues.
 
-Post the release report above on that issue, noting that this attended skill
+Post the release report above, with the changelog commit, on that issue, noting that this attended skill
 performed the release at the maintainer's direction. Close it as completed only
 after publication, every required smoke check and disposable cleanup succeed.
 This is the skill's final bookkeeping step and needs no further reminder. The
